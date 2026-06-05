@@ -46,6 +46,7 @@ set(MAULAUDIO_SOURCES
     src/main.cpp
     src/DeviceManager.cpp
     src/SpectrumWidget.cpp
+    src/AudioEngine.cpp
 )
 
 # Resources (icons, qss, etc. later)
@@ -77,6 +78,8 @@ endif()
 # Include project headers
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/miniaudio
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/liquid-dsp/include   # for future DSP (PR5+)
 )
 
 # Windows specific

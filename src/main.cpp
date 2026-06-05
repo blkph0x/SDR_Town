@@ -33,6 +33,7 @@
 
 #include "DeviceManager.h"
 #include "SpectrumWidget.h"
+#include "AudioEngine.h"
 
 using json = nlohmann::json;
 
@@ -178,9 +179,116 @@ private slots:
 
     void onAudioConfig()
     {
-        QMessageBox::information(this, "Audio",
-            "Audio configuration dialog will be implemented in PR 4 (multi-device output with independent volumes for speakers + VB-Audio Cable etc.).\n\n"
-            "See DESIGN.md section on Sound Output Configuration.");
+        // Full PR4 multi-device audio config dialog (speakers + VB-Audio Cable etc.)
+        static std::unique_ptr<AudioEngine> engine; // live for the session
+        if (!engine) engine = std::make_unique<AudioEngine>();
+
+        QDialog dlg(this);
+        dlg.setWindowTitle("Configure Output Devices — MaulAudio Pro (PR 4)");
+        dlg.resize(720, 480);
+
+        auto devs = engine->enumeratePlaybackDevices();
+
+        QVBoxLayout* lay = new QVBoxLayout(&dlg);
+
+        QLabel* info = new QLabel("Select one or more outputs (e.g. your speakers + a VB-Audio Cable / virtual device). Use Test buttons to identify them. Volumes are independent. Changes apply live.");
+        info->setWordWrap(true);
+        lay->addWidget(info);
+
+        // Master volume
+        QHBoxLayout* masterLay = new QHBoxLayout();
+        masterLay->addWidget(new QLabel("Master Volume:"));
+        QSlider* masterSlider = new QSlider(Qt::Horizontal);
+        masterSlider->setRange(0, 100);
+        masterSlider->setValue(85);
+        QLabel* masterVal = new QLabel("85%");
+        masterLay->addWidget(masterSlider);
+        masterLay->addWidget(masterVal);
+        lay->addLayout(masterLay);
+
+        connect(masterSlider, &QSlider::valueChanged, [&](int v) {
+            masterVal->setText(QString("%1%").arg(v));
+            engine->setMasterVolume(v / 100.0f);
+        });
+
+        // Device list
+        QTableWidget* table = new QTableWidget(devs.size(), 5, &dlg);
+        table->setHorizontalHeaderLabels({"Use", "Device Name", "Default", "Volume", "Test"});
+        table->horizontalHeader()->setStretchLastSection(true);
+
+        std::vector<QCheckBox*> useChecks;
+        std::vector<QSlider*> volSliders;
+
+        for (size_t i = 0; i < devs.size(); ++i) {
+            int row = static_cast<int>(i);
+            const auto& d = devs[i];
+
+            QCheckBox* use = new QCheckBox();
+            // pre-select first two or default + one that looks like cable
+            bool pre = d.isDefault || (d.name.find("CABLE") != std::string::npos) || (d.name.find("VB-Audio") != std::string::npos) || (i < 2 && devs.size() > 1);
+            use->setChecked(pre && engine->isDeviceActive(i));
+            table->setCellWidget(row, 0, use);
+            useChecks.push_back(use);
+
+            table->setItem(row, 1, new QTableWidgetItem(QString::fromStdString(d.name)));
+
+            table->setItem(row, 2, new QTableWidgetItem(d.isDefault ? "Yes" : ""));
+
+            QSlider* vol = new QSlider(Qt::Horizontal);
+            vol->setRange(0, 100);
+            vol->setValue(80);
+            table->setCellWidget(row, 3, vol);
+            volSliders.push_back(vol);
+
+            QPushButton* test = new QPushButton("Test 1kHz");
+            connect(test, &QPushButton::clicked, [engine = engine.get(), i, this]() {
+                engine->playTestTone(i, 1000.0f, 0.7f);
+                statusBar()->showMessage(QString("Test tone on output #%1").arg(i), 1200);
+            });
+            table->setCellWidget(row, 4, test);
+        }
+
+        lay->addWidget(table);
+
+        // Buttons
+        QHBoxLayout* btns = new QHBoxLayout();
+        QPushButton* apply = new QPushButton("Apply (Live)");
+        QPushButton* refresh = new QPushButton("Refresh Device List");
+        QPushButton* close = new QPushButton("Close");
+        btns->addWidget(refresh);
+        btns->addStretch();
+        btns->addWidget(apply);
+        btns->addWidget(close);
+        lay->addLayout(btns);
+
+        connect(refresh, &QPushButton::clicked, [&]() { QMessageBox::information(&dlg, "Refresh", "Close and reopen the dialog to re-enumerate devices."); });
+
+        connect(apply, &QPushButton::clicked, [&]() {
+            std::vector<size_t> active;
+            for (size_t i = 0; i < useChecks.size(); ++i) {
+                if (useChecks[i]->isChecked()) active.push_back(i);
+            }
+            engine->setActiveOutputs(active);
+
+            for (size_t i = 0; i < active.size(); ++i) {
+                // find the slider for this active index
+                // simplistic: set volumes for the active ones in order
+                if (i < volSliders.size()) {
+                    engine->setOutputVolume(i, volSliders[active[i]]->value() / 100.0f);
+                }
+            }
+            engine->setMasterVolume(masterSlider->value() / 100.0f);
+
+            statusBar()->showMessage(QString("Audio outputs active: %1").arg(QString::fromStdString(engine->getActiveDeviceNames())), 4000);
+            spdlog::info("Audio outputs applied: {}", engine->getActiveDeviceNames());
+        });
+
+        connect(close, &QPushButton::clicked, &dlg, &QDialog::accept);
+
+        // initial status
+        statusBar()->showMessage(QString("Audio devices: %1 found. Configure & Apply to use multiple (e.g. speakers + VAC).").arg(devs.size()));
+
+        dlg.exec();
     }
 
     void onDevices()
