@@ -45,6 +45,7 @@ endif()
 set(MAULAUDIO_SOURCES
     src/main.cpp
     src/DeviceManager.cpp
+    src/SpectrumWidget.cpp
 )
 
 # Resources (icons, qss, etc. later)

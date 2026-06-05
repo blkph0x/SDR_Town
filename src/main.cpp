@@ -32,6 +32,7 @@
 #include <nlohmann/json.hpp>
 
 #include "DeviceManager.h"
+#include "SpectrumWidget.h"
 
 using json = nlohmann::json;
 
@@ -97,40 +98,51 @@ public:
         setWindowTitle("MaulAudio Pro");
         resize(1280, 800);
 
-        // Central placeholder (will become spectrum + receivers etc.)
+        // Real main UI area (PR2/PR3) - spectrum + receivers
         QWidget* central = new QWidget(this);
-        QVBoxLayout* layout = new QVBoxLayout(central);
+        QVBoxLayout* mainLayout = new QVBoxLayout(central);
+        mainLayout->setContentsMargins(4,4,4,4);
+        mainLayout->setSpacing(4);
 
-        QLabel* title = new QLabel("MaulAudio Pro", this);
-        title->setStyleSheet("font-size: 28px; font-weight: bold; color: #4fc3f7; margin: 20px;");
-        title->setAlignment(Qt::AlignCenter);
+        // Top info bar
+        QLabel* topBar = new QLabel("MaulAudio Pro  •  Multi-SDR  •  Smart Scan  •  Unencrypted Voice/Data  •  Advanced Analyzer");
+        topBar->setStyleSheet("font-size: 12px; color: #88ddff; padding: 2px 6px; background: #1f2228; border-radius: 2px;");
+        mainLayout->addWidget(topBar);
 
-        QLabel* subtitle = new QLabel(
-            "Professional Multi-SDR Monitor • Smart Scanner • Voice & Data • Advanced Signal Analysis",
-            this);
-        subtitle->setStyleSheet("font-size: 14px; color: #aaaaaa; margin-bottom: 30px;");
-        subtitle->setAlignment(Qt::AlignCenter);
+        // Spectrum (the star visual for now)
+        SpectrumWidget* spectrum = new SpectrumWidget(this);
+        spectrum->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        connect(spectrum, &SpectrumWidget::frequencySelected, this, [this, spectrum](double f) {
+            statusBar()->showMessage(QString("Tuned to %1 MHz (stub - full receiver in PR3/PR5)").arg(f/1e6, 0, 'f', 4), 2500);
+            // In future: create or retune a receiver at this freq
+        });
+        mainLayout->addWidget(spectrum, 3);
 
-        QLabel* statusLabel = new QLabel(
-            "PR 1 + PR 2 progress: Foundation + Device Layer (SoapySDR enumeration + config dialog with persistence).\n\n"
-            "Open Devices → Device Manager to see/enable/configure devices (real or stubs).\n"
-            "Next: PR 3 visualization, PR 4 multi-device audio (speakers + VB-Audio Cable).\n\n"
-            "See DESIGN.md (root) for the complete approved plan and roadmap.",
-            this);
-        statusLabel->setStyleSheet("font-size: 13px; color: #cccccc;");
-        statusLabel->setAlignment(Qt::AlignCenter);
-        statusLabel->setWordWrap(true);
+        // Receivers stub table (PR3/5 will be real)
+        QGroupBox* rxBox = new QGroupBox("Active Receivers (stub - full management + demod in PR5)");
+        rxBox->setStyleSheet("QGroupBox { font-size: 11px; }");
+        QVBoxLayout* rxLay = new QVBoxLayout(rxBox);
 
-        QPushButton* aboutBtn = new QPushButton("About / Legal Notice", this);
-        connect(aboutBtn, &QPushButton::clicked, this, &MainWindow::showAbout);
+        QTableWidget* rxTable = new QTableWidget(3, 6, this);
+        rxTable->setHorizontalHeaderLabels({"Freq (MHz)", "Mode", "Squelch", "Level", "Monitor", "Record"});
+        rxTable->setRowCount(3);
+        rxTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        rxTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+        rxTable->horizontalHeader()->setStretchLastSection(true);
+        // demo rows
+        rxTable->setItem(0, 0, new QTableWidgetItem("162.400")); rxTable->setItem(0, 1, new QTableWidgetItem("NFM")); rxTable->setItem(0, 2, new QTableWidgetItem("-80 dB")); rxTable->setItem(0, 3, new QTableWidgetItem("███░░ -62dB")); rxTable->setItem(0, 4, new QTableWidgetItem("●")); rxTable->setItem(0, 5, new QTableWidgetItem("REC"));
+        rxTable->setItem(1, 0, new QTableWidgetItem("137.100")); rxTable->setItem(1, 1, new QTableWidgetItem("APT")); rxTable->setItem(1, 2, new QTableWidgetItem("N/A")); rxTable->setItem(1, 3, new QTableWidgetItem("████░")); rxTable->setItem(1, 4, new QTableWidgetItem("")); rxTable->setItem(1, 5, new QTableWidgetItem("IMG"));
+        rxTable->setItem(2, 0, new QTableWidgetItem("446.006")); rxTable->setItem(2, 1, new QTableWidgetItem("DMR")); rxTable->setItem(2, 2, new QTableWidgetItem("-92 dB")); rxTable->setItem(2, 3, new QTableWidgetItem("█░░░░")); rxTable->setItem(2, 4, new QTableWidgetItem("")); rxTable->setItem(2, 5, new QTableWidgetItem(""));
+        rxLay->addWidget(rxTable);
 
-        layout->addStretch();
-        layout->addWidget(title);
-        layout->addWidget(subtitle);
-        layout->addWidget(statusLabel);
-        layout->addSpacing(30);
-        layout->addWidget(aboutBtn, 0, Qt::AlignCenter);
-        layout->addStretch();
+        QHBoxLayout* rxBtnLay = new QHBoxLayout();
+        rxBtnLay->addWidget(new QPushButton("Add Receiver"));
+        rxBtnLay->addWidget(new QPushButton("Remove"));
+        rxBtnLay->addStretch();
+        rxBtnLay->addWidget(new QPushButton("Start Smart Scan (PR6 stub)"));
+        rxLay->addLayout(rxBtnLay);
+
+        mainLayout->addWidget(rxBox, 1);
 
         setCentralWidget(central);
 
