@@ -1,0 +1,10 @@
+{
+  "name": "maulaudio-pro",
+  "version": "0.0.1",
+  "description": "Professional multi-SDR monitoring and signal analysis tool",
+  "dependencies": [
+    "spdlog",
+    "nlohmann-json"
+  ],
+  "builtin-baseline": "latest"
+}

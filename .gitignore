@@ -1,0 +1,95 @@
+# Build / CMake
+build/
+out/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+
+# vcpkg
+vcpkg_installed/
+vcpkg-manifest/
+*.log
+
+# Qt / moc / uic / rcc generated
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+*.moc
+*_plugin_import.cpp
+
+# IDE / editors
+.vs/
+.vscode/
+.idea/
+*.user
+*.pro.user
+*.pro.user.*
+*.qbs.user
+*.qbs.user.*
+*.qmlc
+*.jsc
+*.orig
+*.rej
+
+# Compiled binaries & objects
+*.exe
+*.dll
+*.so
+*.dylib
+*.lib
+*.a
+*.pdb
+*.ilk
+*.exp
+*.obj
+*.o
+*.lo
+*.la
+*.slo
+
+# Logs, temp, caches
+*.log
+*.tlog
+*.tmp
+*.temp
+*.swp
+*~
+Thumbs.db
+.DS_Store
+
+# External / submodules (we commit the .gitmodules and pointer, not the full content if large)
+external/liquid-dsp/
+external/mbelib/
+
+# Generated docs or reports (keep source only)
+docs/generated/
+
+# User data / runtime (never commit)
+*.wav
+*.png
+*.json
+!vcpkg.json
+!CMakePresets.json
+!resources/*.json
+appdata/
+recordings/
+logs/
+
+# OS / other
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Test artifacts
+Testing/
+test_*
+*_test
+*_tests
+
+# Misc
+*.bak
+*.backup
