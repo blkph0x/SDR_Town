@@ -15,12 +15,23 @@
 #include <QDir>
 #include <QStandardPaths>
 #include <QDebug>
+#include <QDialog>
+#include <QTableWidget>
+#include <QTableWidgetItem>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QDoubleSpinBox>
+#include <QHeaderView>
+#include <QGroupBox>
+#include <QFormLayout>
 
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <nlohmann/json.hpp>
+
+#include "DeviceManager.h"
 
 using json = nlohmann::json;
 
@@ -101,8 +112,10 @@ public:
         subtitle->setAlignment(Qt::AlignCenter);
 
         QLabel* statusLabel = new QLabel(
-            "PR 1 Foundation complete — ready for device layer, audio routing, and DSP.\n\n"
-            "See DESIGN.md for the full plan. This window will evolve into the professional UI.",
+            "PR 1 + PR 2 progress: Foundation + Device Layer (SoapySDR enumeration + config dialog with persistence).\n\n"
+            "Open Devices → Device Manager to see/enable/configure devices (real or stubs).\n"
+            "Next: PR 3 visualization, PR 4 multi-device audio (speakers + VB-Audio Cable).\n\n"
+            "See DESIGN.md (root) for the complete approved plan and roadmap.",
             this);
         statusLabel->setStyleSheet("font-size: 13px; color: #cccccc;");
         statusLabel->setAlignment(Qt::AlignCenter);
@@ -122,7 +135,13 @@ public:
         setCentralWidget(central);
 
         createMenus();
-        statusBar()->showMessage("MaulAudio Pro — Professional SDR Tool  |  No devices connected  |  Audio: not configured");
+
+        // Initial device enumeration (PR2) for status
+        auto& devMgr = DeviceManager::instance();
+        auto initialDevs = devMgr.enumerateDevices();
+        int enabled = 0;
+        for (const auto& d : initialDevs) if (d.enabled) ++enabled;
+        statusBar()->showMessage(QString("MaulAudio Pro — Professional SDR Tool  |  Devices: %1 total (%2 enabled)  |  Audio: not configured (PR4)").arg(initialDevs.size()).arg(enabled));
     }
 
 private slots:
@@ -154,9 +173,124 @@ private slots:
 
     void onDevices()
     {
-        QMessageBox::information(this, "Devices",
-            "Device discovery and configuration (SoapySDR, HackRF support, gains, sample rates) will be implemented in PR 2.\n\n"
-            "See DESIGN.md for the full device layer specification.");
+        showDevicesDialog();
+    }
+
+    void showDevicesDialog()
+    {
+        QDialog dlg(this);
+        dlg.setWindowTitle("Device Manager — MaulAudio Pro (PR 2)");
+        dlg.resize(900, 520);
+
+        auto& mgr = DeviceManager::instance();
+        auto devs = mgr.enumerateDevices();
+
+        QVBoxLayout* mainLay = new QVBoxLayout(&dlg);
+
+        QLabel* hint = new QLabel("Rescan to refresh. Enable devices, adjust gain/sample rate/antenna. Settings persist across runs. Real SoapySDR + HackRF recommended (stubs shown if no Soapy).");
+        hint->setWordWrap(true);
+        mainLay->addWidget(hint);
+
+        QTableWidget* table = new QTableWidget(devs.size(), 7, &dlg);
+        QStringList headers = {"Enabled", "Label / Driver", "Serial", "Antenna", "Sample Rate (MS/s)", "Gain (dB)", "Freq Range (MHz)"};
+        table->setHorizontalHeaderLabels(headers);
+        table->horizontalHeader()->setStretchLastSection(true);
+        table->setSelectionBehavior(QAbstractItemView::SelectRows);
+        table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+        std::vector<QCheckBox*> enableChecks;
+        std::vector<QComboBox*> antCombos;
+        std::vector<QDoubleSpinBox*> rateSpins;
+        std::vector<QDoubleSpinBox*> gainSpins;
+
+        for (size_t i = 0; i < devs.size(); ++i) {
+            const auto& d = devs[i];
+            int row = static_cast<int>(i);
+
+            // Enabled
+            QCheckBox* cb = new QCheckBox();
+            cb->setChecked(d.enabled);
+            table->setCellWidget(row, 0, cb);
+            enableChecks.push_back(cb);
+
+            // Label
+            table->setItem(row, 1, new QTableWidgetItem(QString("%1 (%2)").arg(QString::fromStdString(d.label)).arg(QString::fromStdString(d.driver))));
+
+            // Serial
+            table->setItem(row, 2, new QTableWidgetItem(QString::fromStdString(d.serial)));
+
+            // Antenna combo
+            QComboBox* ant = new QComboBox();
+            for (const auto& a : d.antennas) ant->addItem(QString::fromStdString(a));
+            if (!d.antenna.empty()) ant->setCurrentText(QString::fromStdString(d.antenna));
+            table->setCellWidget(row, 3, ant);
+            antCombos.push_back(ant);
+
+            // Sample rate
+            QDoubleSpinBox* rate = new QDoubleSpinBox();
+            rate->setRange(0.1, 60.0);
+            rate->setDecimals(3);
+            rate->setSingleStep(0.1);
+            rate->setSuffix(" MS/s");
+            rate->setValue(d.sampleRate / 1e6);
+            // add common rates from list if present
+            table->setCellWidget(row, 4, rate);
+            rateSpins.push_back(rate);
+
+            // Gain
+            QDoubleSpinBox* gain = new QDoubleSpinBox();
+            gain->setRange(0, 80);
+            gain->setDecimals(1);
+            gain->setSingleStep(1);
+            gain->setSuffix(" dB");
+            gain->setValue(d.gain);
+            table->setCellWidget(row, 5, gain);
+            gainSpins.push_back(gain);
+
+            // Freq range
+            QString fr = QString("%1 – %2").arg(d.minFreq/1e6, 0, 'f', 0).arg(d.maxFreq/1e6, 0, 'f', 0);
+            table->setItem(row, 6, new QTableWidgetItem(fr));
+        }
+
+        mainLay->addWidget(table);
+
+        QHBoxLayout* btnLay = new QHBoxLayout();
+        QPushButton* rescanBtn = new QPushButton("Rescan Devices");
+        QPushButton* applyBtn = new QPushButton("Apply Changes");
+        QPushButton* closeBtn = new QPushButton("Close");
+        btnLay->addWidget(rescanBtn);
+        btnLay->addStretch();
+        btnLay->addWidget(applyBtn);
+        btnLay->addWidget(closeBtn);
+        mainLay->addLayout(btnLay);
+
+        connect(rescanBtn, &QPushButton::clicked, [&]() {
+            QMessageBox::information(&dlg, "Rescan", "Rescan will re-enumerate. Close and reopen the dialog (or restart app for full refresh in this build).");
+        });
+
+        connect(applyBtn, &QPushButton::clicked, [&]() {
+            for (size_t i = 0; i < devs.size(); ++i) {
+                mgr.setEnabled(i, enableChecks[i]->isChecked());
+
+                double rateHz = rateSpins[i]->value() * 1e6;
+                double g = gainSpins[i]->value();
+                std::string ant = antCombos[i]->currentText().toStdString();
+
+                mgr.updateDeviceParams(i, rateHz, g, ant);
+            }
+            mgr.saveSettings();
+            statusBar()->showMessage(QString("Applied settings to %1 device(s)").arg(devs.size()), 3000);
+            spdlog::info("Device settings applied from dialog.");
+        });
+
+        connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
+
+        dlg.exec();
+
+        // Refresh main status
+        int enabledCount = 0;
+        for (const auto& d : mgr.getDevices()) if (d.enabled) ++enabledCount;
+        statusBar()->showMessage(QString("Devices: %1 total, %2 enabled  |  See Device Manager dialog").arg(mgr.getDevices().size()).arg(enabledCount));
     }
 
 private:

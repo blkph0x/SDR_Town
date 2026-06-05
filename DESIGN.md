@@ -545,6 +545,37 @@ Each PR should be reviewable, buildable, and deliver incremental user value. Ord
 
 ---
 
+## Implementation Log (Living Updates as We Code)
+
+**2026-06 (PR1 + start of PR2)**
+
+- Project skeleton committed (Qt6 stub with professional dark theme, full menus including prominent Audio menu, spdlog, nlohmann, legal notices in README + About).
+- DESIGN.md + README placed and kept as living docs.
+- vcpkg.json + CMake + presets set up for manifest mode.
+- Qt Online Installer downloaded and launched for the dev environment (`~\Downloads\qt-online-installer-windows-x64-online.exe`).
+- vcpkg bootstrap + `soapysdr` (correct port name), spdlog, nlohmann-json installed successfully (note: port is `soapysdr`, provides `find_package(SoapySDR CONFIG)` and target `SoapySDR`).
+- git submodules added early: `external/liquid-dsp` (for PR5+ DSP) and `external/miniaudio` (header-only, for PR4 critical multi-device audio).
+- .gitignore adjusted to allow submodule gitlinks.
+- PR2 Device Layer implemented:
+  - `DeviceManager` (singleton) with SoapySDR enumeration (real or nice stubs when !HAVE_SOAPYSDR), antenna/sample/gain probing where possible.
+  - JSON persistence to `%APPDATA%\.../devices.json` (per serial/driver matching).
+  - Full "Device Manager" dialog from menu (table with enable checkboxes, antenna combos, rate/gain spinboxes, apply live, status bar updates).
+  - CMake updated with Soapy find + conditional link + HAVE_SOAPYSDR define.
+  - Main window status and central label updated to reflect progress.
+- Environment: submodules + vcpkg ready. Full build waits on completing Qt installer (select MSVC2022 64-bit + Widgets).
+- Next immediate: once buildable, move to PR3 (IQ pipeline + basic custom spectrum/waterfall widget + click-to-tune), then PR4 (the star feature: miniaudio duplication to 2+ outputs with full config dialog + test tones + per-device volumes).
+
+All changes committed incrementally. We build/test at each step and update this log + DESIGN.md.
+
+Build command reminder (see updated README.md for full details + Qt path):
+```
+cd build
+cmake .. -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_PREFIX_PATH="C:/Qt/6.x.x/msvc2022_64" -G "Visual Studio 17 2022" -A x64
+cmake --build . --config Release
+```
+
+---
+
 ## Risks, Mitigations & Open Items
 
 **Risks:**

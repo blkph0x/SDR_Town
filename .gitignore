@@ -60,9 +60,10 @@ ui_*.h
 Thumbs.db
 .DS_Store
 
-# External / submodules (we commit the .gitmodules and pointer, not the full content if large)
-external/liquid-dsp/
-external/mbelib/
+# External / submodules (we commit the .gitmodules pointer + specific tracked files; full content is large so .gitignores help for build artifacts inside)
+# Do NOT ignore the submodule directories themselves here - we want the gitlink
+# external/liquid-dsp/   <--- commented so we can add submodule
+# external/mbelib/
 
 # Generated docs or reports (keep source only)
 docs/generated/

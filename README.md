@@ -48,28 +48,38 @@ See DESIGN.md for detailed feature descriptions and roadmap.
 
 ```powershell
 # 1. Clone / open this folder
-cd C:\Users\YourName\Desktop\maulaudio_pro
+cd "$env:USERPROFILE\Desktop\maulaudio_pro"
 
-# 2. (Optional but recommended for liquid-dsp & mbelib later)
+# 2. Submodules (liquid-dsp for DSP, miniaudio for audio routing)
 git submodule update --init --recursive
 
-# 3. Create build dir
-mkdir build
-cd build
+# 3. (If not already) run vcpkg manifest (already done in dev, but):
+C:\vcpkg\vcpkg.exe install --triplet x64-windows --x-manifest-root=.
 
-# 4. Configure (adjust Qt path!)
+# 4. Create build dir
+mkdir build; cd build
+
+# 5. Configure - IMPORTANT: point to your Qt install from the Online Installer
+# Example (change version/path to what the installer created, usually C:\Qt\6.7.x\msvc2022_64)
 cmake .. `
   -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" `
-  -DCMAKE_PREFIX_PATH="C:/Qt/6.7.0/msvc2022_64" `
+  -DCMAKE_PREFIX_PATH="C:/Qt/6.7.0/msvc2022_64;C:/Qt/6.6.3/msvc2022_64" `
   -G "Visual Studio 17 2022" -A x64
 
-# 5. Build
-cmake --build . --config Release
+# 6. Build
+cmake --build . --config Release -j
 
-# 6. Run
-.\Release\MaulAudioPro.exe
-# or the exact binary name from your CMake target
+# 7. Run the awesome app
+.\bin\MaulAudioPro.exe
 ```
+
+**Qt Installer (already downloaded for you):**
+The Qt Online Installer was downloaded to:
+`C:\Users\Blkph0x\Downloads\qt-online-installer-windows-x64-online.exe`
+
+Run it (it was launched), accept license, select a recent Qt 6.5+ (e.g. 6.7), **MSVC 2022 64-bit** component + at minimum Qt Base (Core/Gui/Widgets). It will take time and disk space.
+
+After install, re-run the cmake configure with the correct CMAKE_PREFIX_PATH.
 
 ### vcpkg.json (deps)
 

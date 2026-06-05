@@ -25,9 +25,26 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 
+# SoapySDR for device support (PR 2+). vcpkg "soapy" port or system install.
+# After vcpkg install, it should be discoverable when using the vcpkg toolchain.
+find_package(SoapySDR CONFIG QUIET)
+if (NOT SoapySDR_FOUND)
+  # Fallback: try pkg-config or manual
+  find_package(PkgConfig QUIET)
+  if (PkgConfig_FOUND)
+    pkg_check_modules(SOAPY SoapySDR)
+  endif()
+endif()
+if (SoapySDR_FOUND OR SOAPY_FOUND)
+  message(STATUS "SoapySDR found - device support enabled")
+else()
+  message(WARNING "SoapySDR not found. Device features (PR2+) will be limited until installed via vcpkg or https://github.com/pothosware/SoapySDR/wiki")
+endif()
+
 # Sources (will grow)
 set(MAULAUDIO_SOURCES
     src/main.cpp
+    src/DeviceManager.cpp
 )
 
 # Resources (icons, qss, etc. later)
@@ -45,6 +62,16 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     spdlog::spdlog
     nlohmann_json::nlohmann_json
 )
+
+# Link SoapySDR if available (for PR2 device layer)
+if (SoapySDR_FOUND)
+  target_link_libraries(${PROJECT_NAME} PRIVATE SoapySDR::SoapySDR)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_SOAPYSDR)
+elseif (SOAPY_FOUND)
+  target_include_directories(${PROJECT_NAME} PRIVATE ${SOAPY_INCLUDE_DIRS})
+  target_link_libraries(${PROJECT_NAME} PRIVATE ${SOAPY_LIBRARIES})
+  target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_SOAPYSDR)
+endif()
 
 # Include project headers
 target_include_directories(${PROJECT_NAME} PRIVATE
@@ -67,4 +94,4 @@ install(TARGETS ${PROJECT_NAME}
 # For convenience in IDEs
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})
 
-message(STATUS "MaulAudioPro configured. Qt6 + spdlog + nlohmann-json expected.")
+message(STATUS "MaulAudioPro configured. Qt6 + spdlog + nlohmann-json + (optional SoapySDR for devices) expected.")
