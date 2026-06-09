@@ -158,9 +158,33 @@ if(BUILD_TESTS)
   message(STATUS "Tests enabled. Run 'ctest' for C++ units. Use tests/run_cli_tests.ps1 for end-to-end CLI tests.")
 endif()
 
+# --- Proper deployment + self-contained installer (NSIS) ---
+# Exact sequence for a complete installer that actually contains all the DLLs and plugins:
+#   1. cmake --build build --config Release
+#   2. cd build/bin/Release
+#   3. C:/Qt/6.11.1/msvc2022_64/bin/windeployqt.exe SDR_Town.exe --no-compiler-runtime --no-system-d3d-compiler
+#   4. cd ../../..   (back to project root)
+#   5. cpack -G NSIS -C Release
+#
+# This produces a real ~30-60 MB installer with everything (Qt plugins, Soapy, rtlsdr, pthreads, etc.).
+
+# The key line that makes the NSIS package actually contain the full deployed tree:
+# CPack will take the entire contents of the windeployqt'ed Release folder and put it at the root of the installer.
+set(CPACK_INSTALLED_DIRECTORIES "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Release;.")
+
+# Fallback / extra safety: also install the directory the normal way (helps with some generators)
+if(WIN32)
+  install(DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Release/
+          DESTINATION .
+          FILES_MATCHING
+            PATTERN "*.exe" PATTERN "*.dll" PATTERN "*.qm"
+            PATTERN "platforms/*" PATTERN "imageformats/*" PATTERN "tls/*"
+            PATTERN "styles/*" PATTERN "iconengines/*" PATTERN "generic/*"
+            PATTERN "networkinformation/*" PATTERN "translations/*"
+  )
+endif()
+
 # --- Installer packaging with CPack (NSIS for Windows) ---
-# To build installer: after Release build, run "cpack -G NSIS" from build dir.
-# Requires NSIS installed on the build machine (winget install NSIS.NSIS).
 include(CPack)
 set(CPACK_PACKAGE_NAME "SDR_Town")
 set(CPACK_PACKAGE_VENDOR "SDR Town Project")
@@ -175,7 +199,7 @@ if(WIN32)
   set(CPACK_GENERATOR "NSIS")
   set(CPACK_NSIS_DISPLAY_NAME "SDR Town")
   set(CPACK_NSIS_PACKAGE_NAME "SDR Town")
-  set(CPACK_NSIS_CONTACT "https://github.com/youruser/SDR_Town")
-  # The exe will be in bin/Release after build; CPack will pick the installed files if you use install() rules.
-  # For quick start, users can also just zip the bin/Release folder (with all DLLs from windeployqt).
+  set(CPACK_NSIS_CONTACT "https://github.com/Blkph0x/SDR_Town")
+  set(CPACK_NSIS_MUI_ICON "${CMAKE_CURRENT_SOURCE_DIR}/resources/icon.ico") # optional, harmless if missing
+  set(CPACK_NSIS_MODIFY_PATH ON)
 endif()
