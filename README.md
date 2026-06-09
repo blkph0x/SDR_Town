@@ -35,43 +35,62 @@ Connect multiple HackRF (and other SoapySDR) devices in one clean GUI. Smart sca
 
 See DESIGN.md for detailed feature descriptions and roadmap.
 
-## Building (Windows 10/11, x64)
+## Building (Windows 10/11, x64) — For Developers Who Want to Build
+
+**Important:** We do **not** commit any DLLs, Qt plugins, or built binaries to the repository.  
+This is by design. All runtime dependencies are obtained automatically via:
+
+- **vcpkg** (manifest mode in `vcpkg.json`) — provides spdlog, nlohmann-json, SoapySDR, rtlsdr, Catch2 + their DLLs.
+- **Official Qt installer** + `windeployqt` (the standard Qt tool) — copies the exact Qt6 DLLs and plugin folders you need next to the .exe.
+
+This is the clean, reproducible, and recommended way. You will not have to hunt for DLLs manually.
 
 ### Prerequisites
-- Visual Studio 2022 (or Build Tools) with C++ desktop workload.
-- Qt 6.5+ installed via the official **Qt Online Installer** (https://www.qt.io/download-qt-installer). Install Qt 6.x for MSVC 2022 64-bit (Widgets, etc.). Note the installation path (commonly `C:\Qt\6.7.0\msvc2022_64`).
-- CMake 3.25 or newer.
-- Git (for submodules).
-- vcpkg (recommended): `git clone https://github.com/microsoft/vcpkg.git C:\vcpkg && C:\vcpkg\bootstrap-vcpkg.bat`.
+- Visual Studio 2022 (or Build Tools) with "Desktop development with C++".
+- Qt 6.5+ installed via the official Qt Online Installer (https://www.qt.io/download-qt-installer). Choose **MSVC 2022 64-bit** + Widgets. Remember the path (e.g. `C:\Qt\6.11.1\msvc2022_64`).
+- CMake 3.25+.
+- Git.
+- vcpkg (strongly recommended): clone and bootstrap it once.
 
-### Steps
+### Build Steps
 
 ```powershell
-# 1. Clone / open this folder
-cd "$env:USERPROFILE\Desktop\maulaudio_pro"
+# 1. Clone the repo (or open the folder)
+cd "$env:USERPROFILE\Desktop\SDR_Town"     # or wherever you cloned it
 
-# 2. Submodules (liquid-dsp for DSP, miniaudio for audio routing)
+# 2. Initialize submodules (liquid-dsp for advanced DSP, miniaudio header)
 git submodule update --init --recursive
 
-# 3. (If not already) run vcpkg manifest (already done in dev, but):
-C:\vcpkg\vcpkg.exe install --triplet x64-windows --x-manifest-root=.
-
-# 4. Create build dir
-mkdir build; cd build
-
-# 5. Configure - IMPORTANT: point to your Qt install from the Online Installer
-# Example (change version/path to what the installer created, usually C:\Qt\6.7.x\msvc2022_64)
-cmake .. `
-  -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+# 3. Configure with vcpkg toolchain + your Qt path
+# (vcpkg will automatically install everything listed in vcpkg.json on first configure)
+cmake -S . -B build `
+  -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
   -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/msvc2022_64" `
   -G "Visual Studio 17 2022" -A x64
 
-# 6. Build
-cmake --build . --config Release -j
+# 4. Build (Release recommended for size/performance)
+cmake --build build --config Release -j
 
-# 7. Run the awesome app
-.\bin\MaulAudioPro.exe
+# 5. Deploy Qt runtime files (this is the step that gives you all the Qt DLLs + plugins)
+cd build/bin/Release
+C:/Qt/6.11.1/msvc2022_64/bin/windeployqt.exe SDR_Town.exe --no-compiler-runtime --no-system-d3d-compiler
+
+# 6. The folder now contains a runnable SDR_Town.exe + all required DLLs and folders
+# (platforms/, imageformats/, tls/, SoapyRTLSDR.dll, rtlsdr.dll, libusb-1.0.dll, etc. come from vcpkg)
+.\SDR_Town.exe
 ```
+
+### What provides the DLLs?
+
+- vcpkg (via the manifest in `vcpkg.json`) builds and provides: SoapySDR, rtlsdr, libusb, spdlog, etc. Their DLLs appear in the build output or `vcpkg_installed` (you don't commit them).
+- `windeployqt` (official Qt tool) scans `SDR_Town.exe` and copies the precise Qt6Core.dll, Qt6Gui.dll, Qt6Widgets.dll + all the plugin subfolders it actually needs.
+- No manual DLL hunting required if you follow the steps above.
+
+### For End Users (not developers)
+
+Use the pre-built **installer** or **Portable.zip** from the GitHub Releases page. Those already contain every DLL and plugin bundled correctly.
+
+See the Releases tab for the latest `SDR_Town-*.exe` installer and the portable zip.
 
 **Qt Installer (already downloaded for you):**
 The Qt Online Installer was downloaded to:
@@ -92,7 +111,7 @@ See DESIGN.md "Technology Stack" and build notes for full details and troublesho
 ## Project Layout (Evolving)
 
 ```
-maulaudio_pro/
+SDR_Town/
 ├── CMakeLists.txt
 ├── vcpkg.json
 ├── .gitignore
@@ -101,9 +120,9 @@ maulaudio_pro/
 ├── src/
 │   └── main.cpp
 ├── resources/
-├── external/                 # git submodules (liquid-dsp, mbelib)
+├── external/                 # git submodules (liquid-dsp, miniaudio)
 ├── docs/
-└── build/                    # (ignored)
+└── build/                    # (ignored by git)
 ```
 
 ## Contributing / Development Process
@@ -120,23 +139,23 @@ To be determined (likely permissive open source with strong liability disclaimer
 
 ---
 
-**MaulAudio Pro** — Professional tools for serious monitoring and analysis.
+**SDR Town** — Professional multi-SDR monitoring and signal analysis.
 
-For the detailed architecture, algorithms, UI mock considerations, and exact incremental implementation plan, read [DESIGN.md](./DESIGN.md).
+For the detailed architecture, algorithms, UI considerations, and exact implementation plan, read [DESIGN.md](./DESIGN.md).
 
-Issues and feedback welcome once the repo is public.
+The GitHub repo contains only source code. All runtime DLLs and Qt plugins are obtained at build time via vcpkg + the official Qt installer + windeployqt (see Building section above). Pre-built installers and portable zips (with everything bundled) are provided in the Releases.
 
 ## RTL-SDR Specific Setup (to fix "not picking up")
 1. Plug in RTL-SDR dongle.
 2. Run **Zadig** (https://zadig.akeo.ie/) **as Administrator**.
 3. Select the RTL device (Interface 0 / RTL2832U), set driver to **WinUSB**, Install.
 4. Unplug/replug the RTL-SDR.
-5. In MaulAudioPro, open Devices ? Device Manager. It should now list with driver "rtlsdr".
-6. Enable it, set sample rate e.g. 2.048 MS/s, gain ~30-40, Apply.
-7. The app auto-starts streaming on launch for enabled devices (from persistence).
-8. If still not listed: the Soapy "rtlsdr" module is missing. Install the PothosSDR bundle (https://github.com/pothosware/PothosSDR) which includes everything, or place SoapyRTLSDR.dll appropriately.
+5. In SDR Town, open Devices → Device Manager. It should now list the device with driver "rtlsdr".
+6. Enable it, set sample rate (e.g. 2.048 MS/s), gain (try 15-25 for strong local FM stations), Apply.
+7. The app can start real streaming when you enable a device.
+8. If still not listed: make sure the Soapy "rtlsdr" module is present (the PothosSDR bundle at https://github.com/pothosware/PothosSDR is the easiest all-in-one for Windows users).
 
-Common rates for RTL: 0.25, 1.024, 2.048, 2.4 MS/s.
+Common safe rates for RTL-SDR: 0.25, 1.024, 2.048, 2.4 MS/s.
 If using multiple, or HackRF, similar driver setup (Zadig for HackRF too).
 
 After setup, "Rescan" in dialog, enable, and spectrum/audio should pick up real signals when tuned (e.g. FM radio, ADS-B, etc.).
