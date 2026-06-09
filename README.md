@@ -1,6 +1,6 @@
-# MaulAudio Pro
+# SDR Town
 
-**Professional multi-SDR monitoring, smart scanning, unencrypted voice/data playback, and advanced signal analysis for Windows.**
+**Professional multi-SDR monitoring, smart scanning, unencrypted voice/data playback, and advanced signal analysis for Windows.** (formerly MaulAudio Pro, rebranded as SDR Town)
 
 Connect multiple HackRF (and other SoapySDR) devices in one clean GUI. Smart scanning with voice activity detection. High-quality analog + digital voice (NFM/AM/WFM/SSB + P25/DMR/NXDN clear). Weather satellite downlinks (NOAA APT). Dedicated multi-device audio output (listen on speakers while simultaneously piping to VB-Audio Cable or other virtual devices). Powerful Signal Analyzer with state-of-the-art (hybrid classical + modern) automatic modulation recognition for ASK, PSK, FSK, QAM and more — with decoding tools for unencrypted signals only.
 
@@ -25,7 +25,7 @@ Connect multiple HackRF (and other SoapySDR) devices in one clean GUI. Smart sca
 ## Quick Start (Once Built)
 
 1. Install HackRF drivers (Zadig → WinUSB for the HackRF device) and SoapySDR modules as needed.
-2. Run MaulAudioPro.exe.
+2. Run SDR_Town.exe.
 3. Devices → Rescan. Enable your SDR(s), set gains/sample rate.
 4. Audio → Configure Output Devices... — check your speakers and a virtual cable (e.g. VB-Audio CABLE Input). Set volumes. Test tones.
 5. Load or edit band plans, hit "Start Smart Scan".
@@ -63,7 +63,7 @@ mkdir build; cd build
 # Example (change version/path to what the installer created, usually C:\Qt\6.7.x\msvc2022_64)
 cmake .. `
   -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" `
-  -DCMAKE_PREFIX_PATH="C:/Qt/6.7.0/msvc2022_64;C:/Qt/6.6.3/msvc2022_64" `
+  -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/msvc2022_64" `
   -G "Visual Studio 17 2022" -A x64
 
 # 6. Build
@@ -125,3 +125,58 @@ To be determined (likely permissive open source with strong liability disclaimer
 For the detailed architecture, algorithms, UI mock considerations, and exact incremental implementation plan, read [DESIGN.md](./DESIGN.md).
 
 Issues and feedback welcome once the repo is public.
+
+## RTL-SDR Specific Setup (to fix "not picking up")
+1. Plug in RTL-SDR dongle.
+2. Run **Zadig** (https://zadig.akeo.ie/) **as Administrator**.
+3. Select the RTL device (Interface 0 / RTL2832U), set driver to **WinUSB**, Install.
+4. Unplug/replug the RTL-SDR.
+5. In MaulAudioPro, open Devices ? Device Manager. It should now list with driver "rtlsdr".
+6. Enable it, set sample rate e.g. 2.048 MS/s, gain ~30-40, Apply.
+7. The app auto-starts streaming on launch for enabled devices (from persistence).
+8. If still not listed: the Soapy "rtlsdr" module is missing. Install the PothosSDR bundle (https://github.com/pothosware/PothosSDR) which includes everything, or place SoapyRTLSDR.dll appropriately.
+
+Common rates for RTL: 0.25, 1.024, 2.048, 2.4 MS/s.
+If using multiple, or HackRF, similar driver setup (Zadig for HackRF too).
+
+After setup, "Rescan" in dialog, enable, and spectrum/audio should pick up real signals when tuned (e.g. FM radio, ADS-B, etc.).
+
+## CLI Mode for Testing (new)
+Run the built exe with --cli (or -c) for a full command-line interface that exposes **all core features** without the Qt GUI. Perfect for on-the-fly testing, scripting, or when you just want to poke devices/streaming/demod/audio from the terminal.
+
+`powershell
+cd "C:\Users\Blkph0x\Desktop\maulaudio_pro\build\bin\Release"
+.\MaulAudioPro.exe --cli
+`
+
+Commands (see help inside):
+- list - devices (with driver/label/serial/enabled/rate/gain)
+- enable <idx> / disable <idx> - start/stop real Soapy streaming (RTL-SDR, HackRF, etc.)
+- tune <mhz> - set monitor freq + retune the active device (affects spectrum + demod)
+- gain <idx> <db>, rate <idx> <msps>
+- spectrum - live-ish text power summary + ASCII bar from real IQ
+- audio list / audio enable <i> [i2 ...] / audio test [idx] / audio vol <idx> <0-100>
+  - Full multi-device audio support (speakers + VB-Audio Cable etc.) even in CLI.
+- mode nfm|wfm|auto|am|usb|lsb, set bw|lpf|squelch|gain|wfmde|pilotnotch <val>
+- stats - live diagnostics: RF gain, mode/BW, IQ queue depth, last DSP us, audio ring fill %, underruns, rates/bitrate math, device CF/offset, RMS
+- status, scan (enables all), help, quit
+
+A background thread keeps demod + audio routing + spectrum updates running while you type commands.
+
+Example RTL-SDR WFM test session (per audit: start with low gain + 120-150 kHz BW for strong locals):
+`
+list
+enable 0
+tune 98.9
+mode wfm
+set bw 150
+gain 0 20
+audio list
+audio enable 0 1
+stats
+`
+(While listening: vary `gain 0 15` / `gain 0 25` / `set bw 120` and watch stats counters for queue/DSP/underruns vs audio quality. Expect clean audio with gain 15-25.)
+
+The same DeviceManager + AudioEngine + streaming/demod logic powers both GUI and CLI. All major phases (device management, real streaming, spectrum, high-quality WFM/NFM/AM/SSB with channelizer, multi-output audio, simple scan/tune) are now directly testable from the command line.
+
+See DESIGN.md for the full feature/phase list + audit response log.

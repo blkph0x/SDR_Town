@@ -85,11 +85,16 @@ Desktop.ini
 $RECYCLE.BIN/
 *.lnk
 
-# Test artifacts
+# Test artifacts (binaries / build outputs only; keep source)
 Testing/
-test_*
-*_test
-*_tests
+test_*.exe
+test_*.obj
+test_*.o
+*_test.exe
+*_tests.exe
+build/**/test_*
+build/**/*_test
+build/**/*_tests
 
 # Misc
 *.bak

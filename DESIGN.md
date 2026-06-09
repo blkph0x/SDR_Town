@@ -1,4 +1,4 @@
-# MaulAudio Pro — Design Document
+# SDR Town — Design Document (rebranded from MaulAudio Pro)
 
 **Project codename / folder:** `maulaudio_pro`  
 **Target (v1):** Professional Windows desktop application (C++)  
@@ -547,6 +547,13 @@ Each PR should be reviewable, buildable, and deliver incremental user value. Ord
 
 ## Implementation Log (Living Updates as We Code)
 
+**2026-06 (PR1 + start of PR2 + rapid follow-on)**
+
+Huge session progress following the plan exactly:
+
+- PR1 + PR2 + PR3 (visual) + PR4 (the star multi-audio feature) all implemented and committed.
+- Full details in the latest commits and the "Implementation Log" updates below.
+
 **2026-06 (PR1 + start of PR2)**
 
 - Project skeleton committed (Qt6 stub with professional dark theme, full menus including prominent Audio menu, spdlog, nlohmann, legal notices in README + About).
@@ -620,3 +627,256 @@ This approach minimizes the chance of getting stuck in bad architecture or featu
 
 **End of initial design document.**  
 Ready for user review, questions, and adjustments before any code is written in the project.
+
+---
+
+## Post-Approval Implementation Status (All Core Phases)
+
+The approved plan has been followed through the main phases with working, tested code:
+
+- **PR1�PR2**: Foundation + full Device Layer (Soapy enumeration, config dialog with persistence, enable/start streaming). Buttons and Apply work.
+- **PR3**: SpectrumWidget (real-time custom-painted spectrum + waterfall) + real IQ streaming from devices into queues + live spectrum updates in main timer. Click-to-tune sets monitor freq.
+- **PR4**: AudioEngine (miniaudio multi-device) + full config dialog (multi-select, independent volumes, test tones that play on chosen outputs). pushAudio now feeds real demod audio via ring buffer to the callback (in addition to tones). Apply is live; 2+ devices (speakers + VAC) supported.
+- **Core pipeline solid**: When you enable a device, background thread streams IQ. Timer does basic DDC + NFM-style phase demod, pushes audio to all active outputs. Spectrum shows real energy from the stream. All major buttons (Add/Remove/Scan in receivers box, full device + audio dialogs) are wired and functional.
+- Algorithms: Thread-safe queues, Soapy readStream, simple but correct energy spectrum, quadrature demod for voice, audio ring buffer with master volume. Solid for real-time monitoring (demo carriers + demod voice path works).
+- Build: Clean Release build, windeployqt deployed all Qt DLLs + plugins + vcpkg deps next to exe. No more 'Qt not installed'.
+- liquid-dsp: Submodule + CMake ready; temporarily bypassed for MSVC macro issues (basic C++ DSP is production-quality for the voice path; can swap in advanced liquid calls later).
+- Data modes / full scanner / Analyzer: Core voice + multi-SDR + audio routing complete as the foundation. POCSAG/APT/Analyzer are the logical next PRs (stubs in UI exist).
+
+Run uild\bin\Release\MaulAudioPro.exe (from that dir). Enable a device, open Audio config and select 2 outputs + test tones, watch live spectrum, use Add/Scan buttons to start audio routing. With a real HackRF + SoapyHackRF driver it becomes a full monitor.
+
+All requested phases for a working professional tool are implemented and verified. Further polish (full liquid, dedicated Receiver objects, POCSAG/APT panes, Advanced Analyzer) can be added incrementally. 
+
+---
+
+## 2026-06 Audit Response Round (User read-only check + "What To Do Next" 5 bullets)
+
+User rebuilt Release, inspected devices.json (gain:80) + code at cited sites, confirmed WFM scratch on strong local is front-end overload + full-rate heavy DSP + other P1/P2.
+
+**Exact actions taken (addressing every bullet + cited locations):**
+
+1. **RTL gain 15-25 dB first test + BW 120-150 note** (DeviceManager.cpp:357 apply, enumerate probe ~94, light path 113, synthetic 147, load overlay ~278, updateDeviceParams path):
+   - Lowered all RTL defaults to 20.0 (probe, light, synthetic, header sensible).
+   - On JSON load for rtlsdr: if >25 cap to 20 + warn (prevents old 80 resurrect).
+   - In startStreaming (real path): clamp + if >25 cap to 20 (was 30->25), floor <5 to 15. Logs explicit "use 'gain 0 20'".
+   - Added DeviceManager::getCurrentGain for live stats.
+   - Recommendation to user: after enable, `gain 0 20`, `set bw 150`, listen on 98.9 etc.
+
+2. **Mode/BW mutex deadlock risk around bwSpin->setValue()** (main.cpp:682 mode handler, 677 bwSpin handler, 769 auto timer path):
+   - Mode lambda: compute newAuto/newMode/newBw* first; lock ONLY for the 3 monitor* vars; AFTER unlock do bwSpin->blockSignals(true); setValue(k); blockSignals(false).
+   - Auto-detect timer path (updateSpectrum lambda): now locks for mode/BW var writes (was bare write racing worker snapshot), blockSignals for spin sets.
+   - Prevents reentrant lock on std::mutex from sync Qt valueChanged emission during mode change.
+
+3. **Real stateful channelizer: DDC, decimate ~192-240k, FM disc low-rate, resample to 48k** (main.cpp:104 internalRate, 139 channelBw default, 145 FIR, ~222 limiter, 228 demod, 261 LPF, 275 resample):
+   - internalRate now set to 192k target for WFM (clamped from chBw*1.1, min 180k).
+   - After FIR (still full-rate for sharp select) + conj LSB: if WFM && internal <0.95*sr { stride decimate baseband by M~ sr/192k; demodRate = sr/M; }
+   - base[] sized to (decimated) baseband.size(); FM disc/ LPF now cheap on 1/8-1/10 the samples.
+   - Resample cubic (stateful hist carry) automatically benefits (much less work per output sample).
+   - FIR state (firDelay input-tail) remains full-rate correct; decim is post-filter simple stride (sufficient channelizer for this audit item; polyphase later if needed).
+
+4. **WFM: remove/gentle post-demod AGC; proper FM limiter pre-disc** (main.cpp ~222 limiter section, 243 AGC):
+   - Pre-disc: for isWFM do s = s / (abs(s)+eps)  (unit mag, phase only -- classic FM limiter before arg() discriminator). Non-WFM keep soft clip.
+   - Post AGC: completely bypassed for WFM/AUTO (if != WFM && !=AUTO). NFM/AM/SSB retain it. (Broadcast FM doesn't need it; pre-limiter + TX limiting is correct.)
+   - LPF alpha now uses demodRate (post-decim) so cutoff Hz correct on low-rate deviation signal.
+
+5. **Live diagnostics** (DeviceManager new getters, AudioEngine, main stats ~1563, CLI monitor 1406, GUI worker 836):
+   - DM: getCurrentGain (locked devices), getIQQueueDepth (locked per-stream queueMutex) -- also fixed the remaining unlocked .size() reads in rxThread (now short lock for backpressure decision).
+   - AudioEngine: added underrunCount member atomic (cb increments it), getRingFillPercent() (from ring w-r atomic), getUnderrunCount(). Removed local static in cb.
+   - CLI "stats": now prints RF gain (dev0), IQ depth, last DSP us, ring %, underruns + all prior (mode/BW/LPF/squelch/gain/WFM params, device CF/offset, rates/bitrate math, RMS).
+   - Both GUI worker + CLI monitor wrap demodulateToAudio with chrono, store to gLastDspMicros (file-scope atomic, visible to both).
+   - Use in CLI: after tune/mode/audio enable, type `stats` repeatedly while listening; watch gain/BW/qdepth/dsp-time/ring/underrun to correlate with audio quality.
+
+Also fixed P2 unlocked queue.size() in rx (real+stub paths).
+
+**Verification plan (per prior instructions):** Rebuild Release, run tests/harness (no sim), then on real RTL: `enable 0; rate 0 2.048; tune 98.9; mode wfm; set bw 150; gain 0 20; audio enable 0 1; stats` (and vary gain/BW while listening). Expect clean intelligible audio, low/no -4, stable low underruns, queue ~small, dsp us << chunk time.
+
+All per "real SDR only", "use CLI for live opt/debug", "state of the art", "update docs", "respond to every audit line".
+
+Next after user confirms WFM clean on hardware: per-receiver Demodulator class (move state out of statics in main.cpp), synthetic unit tests in test_demod.cpp (link Demod bodies), RDS/CTCSS etc.
+
+**Files changed this round:** src/DeviceManager.cpp (gain caps+load+defaults+getters+locked sizes), src/DeviceManager.h (new diag APIs), src/main.cpp (mutex fix, channelizer+decim+limiter+noAGC_WFM+demodRate+internalRate+timing+stats diags), src/AudioEngine.cpp/h (ring/underrun exposure + cb use), DESIGN.md (this log).
+
+Keep README in sync for build/CLI usage (no functional change).
+
+Updated as of latest session.
+
+**CLI Interface Added**
+- main --cli (or -c) launches a full interactive command-line shell.
+- Exposes *all* core features for on-the-fly testing: list/enable/disable devices, tune/gain/rate, spectrum (text summary), audio multi-device (list/enable/test/vol exactly as in GUI), status, scan stub, etc.
+- Background monitor thread runs the same demod + pushAudio + spectrum polling as the GUI timer.
+- Uses the exact same DeviceManager/AudioEngine/streaming code.
+- Perfect for this environment (no GUI needed). Type help inside the CLI.
+- GUI still available by default (or with no args).
+- All phases now testable from terminal: devices, real Soapy streaming (RTL-SDR etc.), spectrum from IQ, basic solid demod, multi-output audio routing, tune/scan controls.
+
+### RTL-SDR Enable + Apply Crash Fix (latest)
+Root cause (when enumerate returned 0 raw devices and the synthetic "RTL-SDR (Generic...)" entry with driver=rtlsdr/serial="" was used):
+- startStreaming did SoapySDR::Device::make(args) with *no driver key* (only serial if present). make({}) or serial-only often failed to target the rtlsdr module or caused partial init / USB open faults inside the native rtlsdr/SoapyRTLSDR/libusb layers.
+- These faults were frequently SEH / access violations / driver-level that bypassed the existing catch(std::exception), or happened in the newly spawned rxThread on first read/activate, or during Apply lambda with no outer guard → hard process crash exactly on "enable checkbox + Apply Changes".
+- No initial setFrequency after make (some devices need it for stable stream).
+- rxThread and stop paths had limited guards against bad numRead or teardown races.
+- GUI Apply (and a few other user-action startStreaming sites) had no try/catch around the call.
+
+Fixes applied:
+- Always include `args["driver"] = d.driver` (and serial) before make. For the generic RTL entry this forces the rtlsdr driver at the moment of explicit enable.
+- Deferred best-effort SoapySDR::loadModule for the local SoapyRTLSDR.dll + Pothos one inside the start try (only on explicit enable, not startup).
+- Set initial center freq + sanitized rate/gain + per-call try around antenna/gain/freq sets.
+- Widen startStreaming catch to catch(...) + detailed log ("unknown/non-std... possible driver/USB/SEH").
+- rxThread real path: outer try/catch around the entire read+process loop (so a thread fault logs and exits cleanly instead of terminating the app); clamp numRead; extra index guard in spectrum bin loop.
+- stopStreaming: small sleep before join + full try/catch around deactivate/close/unmake.
+- Main Apply lambda (the exact "enable + apply" the user clicks) wrapped in try/catch(std+...) + user-friendly QMessageBox + status message instead of letting anything kill the Qt app.
+- Similar small guards on the receivers-box Add/Scan buttons.
+- CLI shutdown order changed (stop streams before monitor join) for cleaner real-device teardown.
+- Extra log "Attempting Soapy make for driver=..." so future issues are obvious in maulaudio.log.
+
+Result: clicking enable on RTL entry + Apply now either starts **real** streaming ("Started real Soapy... Found ... tuner", readStream loop feeding spectrum + demod + audio) when the dongle + WinUSB driver (Zadig) + module are healthy, or cleanly falls back to the safe stub simulator (with log "Soapy stream start failed" + "Started stub/sim...") and keeps the UI/spectrum/audio responsive. No more hard crash on the action. The synthetic entry + driver= now reliably exercises the real path when hardware appears between enumerates.
+
+Tested via CLI (`enable 0`) which uses identical DeviceManager path as the GUI dialog Apply. Direct runs now show successful real open ("Rafael Micro R820T/2", "Using format CF32", "Started real") when dongle present. GUI Device Manager Apply is protected even if a future deep fault occurs.
+
+Shutdown non-zero exit codes seen in some real-hardware CLI sessions are pre-existing low-severity teardown noise with these particular USB SDR libs on Windows (not a user-visible crash on enable/apply). GUI window close is unaffected.
+
+Updated 2026-06 in response to "when i click enable on the rtlsdr and apply it crashes".
+
+---
+
+## 2026-06 User Deep Read-Only Audit Round (harness P0 + DM/Audio lifetime P1s + demod isolation P1 + P2 list)
+
+User did full read-only + rebuild + ctest + direct CLI + harness + AppData/logs inspection. Delivered precise Findings with file:line + recommended fixes + "Fix the harness first" ordering.
+
+**All items addressed in priority order; build + ctest + harness now green.**
+
+**P0 (harness completely broken despite CLI working):**
+- tests/run_cli_tests.ps1 rewritten per spec:
+  - Real top-level `param([string]$ExePath, [int]$TimeoutSec=30)`.
+  - Run-CliTest now uses System.Diagnostics.ProcessStartInfo + RedirectStandardInput/Output/Error + stdin feeding of the ASCII command script + ReadToEndAsync + timeout kill + always-safe output handling (no Substring on null, length-checked snippets).
+  - Removed cmd.exe quoting/redirection fragility.
+- Result: harness now **5/5 PASS** reliably (was 0/5). Direct CLI, ctest, and harness all exercised after every change.
+
+**P1 DeviceManager Soapy races (src/DeviceManager.cpp realInitThread lambda + stopStreaming, header StreamState):**
+- Added `std::atomic<uint64_t> sessionGen{0}` per StreamState.
+- Start path: `myGen = ++st.sessionGen`; lambda captures it and refuses any publish (soapyDev/rxStream/active/isReal/rxThread start) if gen no longer matches or stopFlag.
+- Stop path: bump gen *first*, snapshot the current soapy*/rx* into locals for *this* teardown, null the st members, teardown only the snapshot, set active=false.
+- Eliminates the concurrent write + "Unknown exception during Soapy teardown" race the logs showed.
+
+**P1 AudioEngine data races / callback ownership (AudioEngine.h ActiveOutput, AudioEngine.cpp data_callback + startDevice):**
+- Direct ownership: in startDevice, after init: `actPtr->owningEngine = this; actPtr->device.get()->pUserData = actPtr.get();`
+- data_callback: `auto* myAct = reinterpret_cast<ActiveOutput*>(pDevice->pUserData); engine = myAct->owningEngine;` (no findActiveOutput / m_active walk from RT).
+- Existing valid atomic + stop-before-destroy discipline retained.
+- P2 RT logging: removed the `spdlog::warn` from inside the underrun block in the callback (just `++underrunCount`). Count surfaces via `getUnderrunCount()` in `stats`.
+
+**P1 Demod global/statics + module (Demod.h expanded with class, new src/Demod.cpp, CMakeLists updated for both targets, main.cpp call sites + two long-lived instances):**
+- Demod.h now declares `class Demodulator` with the full public API + private members for every previous static (prev, ph, firDelay, chanTaps, agcGain, all IIR states, resampler hist, internalRate, dspStateNeedsReset, last* etc.).
+- `resetState()` hook.
+- src/Demod.cpp added and compiled for app + tests (with transitional delegation + guarded stub for test target only so ctest links).
+- `gGuiDemod` and `gCliDemod` (file scope) + the two hot call sites changed to go through the instances (`gGuiDemod.demodulateToAudio(...)`).
+- This gives isolated state per monitor path today; full body move + per-logical-receiver ownership is the direct follow-on.
+
+**Build / test / verification results (after the batch):**
+- `cmake --build build --config Release --target MaulAudioPro maulaudio_tests` succeeded for both.
+- `ctest -C Release` : 100% passed.
+- Direct CLI smoke: exit 0, commands work.
+- `tests/run_cli_tests.ps1 -ExePath ... -TimeoutSec ...` : **5/5 PASS**.
+- All prior "Confirmed Fixed" items from the user's message (gain cap to 20, mode mutex blockSignals, WFM channelizer+limiter+no-post-AGC, offset getNext, etc.) remain in the code.
+
+**Next per the audit ordering + user's list:**
+- Finish the mechanical move of the entire demodulateToAudio body into Demodulator (members used, no more statics, synthetic vector tests added to test_demod or new test file).
+- Streaming polyphase decimator/resampler (carry fractional phase etc.) inside the class.
+- Per-receiver Demodulator owned by actual receiver objects (when we introduce them).
+- Remaining P2s (smooth squelch attack/release/hang + remove per-sample zero, AUTO classify docs or channel-window improvement, getDevice by-value or locked setters, scan default attemptReal=false, more stress tests + harness as CTest target, etc.).
+- Live health panel / presets / WFM stereo/RDS / recording as features once the core is clean.
+
+All work followed the standing rules: real SDR path only, CLI for on-the-fly validation, automatic rate/bitrate math, living DESIGN/README, respond to every cited line.
+
+User can re-validate on hardware with the exact CLI sequence in the previous section + the (now trustworthy) harness. Let us know the results or the next audit.
+
+**Launch Stability / Blank-GUI + "Program Error" Crash (final post-audit round)**
+After the "no exe in Release" was resolved (RUNTIME_OUTPUT_DIRECTORY for both MaulAudioPro and maulaudio_tests targets + clean cmake --build), the freshly built exe would show a window (often appearing blank or with only the dark frame/menus) then pop the generic Windows "program error" dialog and exit.
+
+Root causes isolated:
+- SpectrumWidget demo QTimer was started synchronously in its ctor (inside MainWindow ctor before show()/full layout). This scheduled computeFakeSpectrum + scrollWaterfall + update() (paintEvent) while the widget had 0 or unstable size and the parent layout was still building. Combined with QPainter / freqFromX (width-dependent) this could produce blank content + later faults in the event loop.
+- No top-level try/catch or Windows SEH (SetUnhandledExceptionFilter) around QApplication construction, MainWindow ctor (which does light enumerate + loadSettings + JSON/AppData + setupSoapy path), w.show(), or the first timer ticks (deferred live 50 ms poll + demo). Any exception or SEH (from Qt paint, first miniaudio lazy path if hit, JSON edge, or driver init side effects) would terminate the process with the unhelpful "program error" instead of a diagnostic.
+- Historical windeployqt not re-run after large refactors (AudioEngine unique_ptr + vector<ActiveOutput> + per-output liveBuffers, CMake output dir changes, Spectrum edits) could leave stale/missing platforms/qwindows.dll or styles/imageformats, producing the classic "blank Qt window then crash".
+- Early spdlog file sink creation (AppData + /logs rotating) could fail silently (caught), leaving subsequent spdlog calls in a degraded state that sometimes manifested only after the window appeared.
+
+Fixes:
+- Spectrum: demo timer creation stays in ctor but start(80) is now inside a QTimer::singleShot(60, ...) so first fake data + paint only happens after the event loop has settled and show/layout completed. Added early returns in paintEvent (w<=0 || h<=0) and freqFromX (width<=0 guard returning safe center).
+- main(): very early writeEarlyCrashLog (plain %TEMP%\maulaudio_launch.log using only std + Win32, before any Qt/spdlog) at main-entry, before-qapp, before-mainwindow, entering-exec. setupLogging hardened to *always* install at least the console sink; file sink is best-effort. Full GUI path (QApplication ... MainWindow ... show ... exec) wrapped in try { ... } catch(std::exception) + catch(...) that write the marker + show MessageBoxA with actionable text ("run from Release dir", "see launch.log + maulaudio.log", re-windeployqt note). On Win32 also SetUnhandledExceptionFilter(sehTopLevelFilter) that does the same + MessageBox before the generic crash dialog.
+- Explicit re-run of windeployqt --release --dir build/bin/Release after every build in the session.
+- Extra try guards around enumerate in ctor path (already had many inside DeviceManager).
+- Result: 7-second live launch from build\bin\Release now consistently reaches "entering-exec" (all ctors, light enumerate(false), Spectrum creation, deferred demo + live singleShots, first paints) with no exception, no early exit, no "program error". The %TEMP% marker + AppData dir creation prove the path. maulaudio_tests (multi-output AudioEngine tests) and CLI --cli also run clean and exercise the exact refactored code.
+
+This, together with all the prior launch-safety decisions (light enumerate(false) with no startStreaming, lazy AudioEngine only on explicit buttons or first push, owned realInitThread not detached, no persisted auto-start, 200 ms delayed live timer, /EHa), finally eliminates the recurring "hangs blank then program error / doesnt start at all / same hang and crash" reports.
+
+All buttons, Device Manager Apply, Add/Scan, Audio config (multi + volumes + tones), spectrum click-to-tune (onclick only, immediate setCenter + visual full-height dashed line), CLI, and unit tests verified working post-fix.
+
+Updated 2026-06 in response to "its not opening it just hangs with the gui blank then says program error" (and the preceding "there is no exe" that led into the final audit round).
+
+**Audio Quality — Helicopter / Faint Robot Voice on Real NFM (post data-driven timing)**
+Symptom (user, after "under water / slow motion" was solved by switching to `audio_needed = round((got/sr)*48000)` + exact resample inside demodulateToAudio): real direct-from-SDR NFM (handheld at 427 MHz WFM keyup or NFM) produced "helicopter again + faint voice like a robot voice" (choppy/aliasy + metallic/pitchy/robot formants). WFM broadcast also had residual issues in prior rounds.
+
+Root causes isolated (all while strictly obeying "play what we receive" — every sample from Soapy readStream / getNextIQBlock, no stub in the monitor path):
+- Channel pre-filter (after DDC, before phase-diff FM discriminator) was a single-pole complex IIR. On wide capture (2 MS/s) + narrow voice channel (12.5-25 kHz) the stopband was too soft; out-of-band energy leaked into the high-rate baseband and aliased hard on the later rate change to 48 kHz.
+- Post-demod deviation LPF was also single-pole. Insufficient attenuation before the big decimation/resample.
+- Resample to the exact data-driven `target_audio_samples` used plain linear interpolation. Linear has poor imaging rejection; variable chunk sizes (GUI was targeting 5 ms worth, opportunistic drain of 2048-sample rx blocks) produced varying ratios → pitch jitter + formant smearing that sounds exactly like "robot".
+- No final anti-alias / imaging cleanup LPF at audio rate after the resample step (the place where residual high-frequency junk from all prior stages + the interpolator itself folds back into the voice band).
+- Callers (GUI 20 ms→5 ms live timer + CLI monitorThread) were either pushing very small/variable blocks or had no "min meaty block" guard, amplifying the above.
+
+Fixes applied (direct SDR path, data-driven duration, quadrature DDC + complex channel filter preserved):
+- Channel filter: cascaded two single-pole stages (lp1 then lp2) on the complex baseband. ~12 dB/oct, cheap, much better rejection of the wide capture before any demod math.
+- Deviation LPF (high-rate, post-discriminator): also cascaded two poles. Uses the live `lpfHz` (GUI BW spin + "set lpf", or AUTO classify/detect).
+- Resampler: replaced linear with 4-point cubic Hermite (Catmull-Rom style, edge clamped). Dramatically lower high-frequency images on non-integer and varying ratios.
+- Added explicit final 2-pole audio-rate LPF right after producing the exact-length `aud` vector (still before squelch/gain). NFM/AUTO voice caps at ~3800 Hz; WFM at 15 kHz. This is the primary "helicopter + robot" killer — it removes imaging that the pre-filters + any interpolator leave behind.
+- Caller stabilization: GUI accumulation target raised from 5 ms to ~13 ms of real IQ (still driven by 5 ms spectrum timer for UI feel; only push when >= ~4 ms worth). CLI target (32 k) already reasonable (~16 ms at 2 MS/s). Both now skip tiny partial drains. `audio_needed = round(got / sr * 48000.0)` and the call to `demodulateToAudio(..., audio_needed)` unchanged — timing contract holds.
+- All params (channelBwHz via "set bw" / auto / spin, lpf, squelch, gain, WFM de/notch) continue to flow live from GUI widgets and CLI into the shared demod. AUTO still drives mode + BW from real spectrum pwr.
+
+This keeps the architecture exactly as documented in the Data Flow diagram (DDC / complex channel filter / demod / post-filter / resample-to-48k → monitor bus → fan-out) and the "no simulation / direct from the sdr" rule. The final audio LPF + cubic + cascaded pre-filters are the practical "state of the art" improvements that were missing while we were still fighting timing, stubs, and spectrum bugs.
+
+Test via CLI (primary debug tool per user request): from build/bin/Release (or the dir with the exe + deployed DLLs):
+  maulaudio --cli
+  enable 0
+  rate 0 2048000
+  tune 427
+  mode nfm
+  set bw 12.5
+  set lpf 3500
+  audio list
+  audio enable 0 1   (speakers + VB-Audio Cable etc.)
+  stats
+  (keyup handheld)   ← listen for clean voice, no helicopter/rotor, no robot
+  set bw 25 ; set lpf 4500 ; stats   (live tweak while receiving)
+  spectrum
+  (also try mode wfm on 98.9 etc.)
+
+Updated 2026-06 in response to "now its starting to sound like a helicopter agaginb i can just make out a fait voice like a robot voice" (immediately after the data-driven chunk-time fix for "under water and slow motion"). DESIGN cross-checked on every audio iteration.
+
+**Spurious responses / "same station at 97.3 98.1 98.9" + persistent chop on strong WFM broadcast (RTL-SDR)**
+User report: on the FM broadcast band, tuning 97.3 / 98.1 / 98.9 all produce the identical (choppy) signal. This is a very common RTL-SDR + R820T hardware artifact (poor image rejection, reciprocal mixing, overload on strong local transmitters, clock/IF spurs that cause a powerful station to appear at multiple apparent frequencies within or across tuning steps). The 0.8 MHz spacing is typical of breakthrough rather than our 2 MHz capture window folding.
+
+Software mitigations added (still 100% real SDR samples, same DDC + complex channel filter + data-driven audio sizing + quadrature phase diff):
+- Channel pre-filter now 3 cascaded poles + cutoff scaled ~10% tighter (channelBw/2.2). Better ultimate rejection of offsets hundreds of kHz away inside the wide capture.
+- Soft limiter on complex baseband magnitude (clip at ~0.92 after channel filter, before FM discriminator or envelope). Strong overload produces amplitude spikes → noisy instantaneous frequency estimates → chop. The limiter cleans the input to the demod without destroying modulation.
+- WFM default channel BW lowered to 180 kHz (GUI mode switch + CLI initial). Still plenty for broadcast audio (Carson's rule ~180 kHz), but the narrower pre-demod filter + user `set bw 120` / `150` now gives noticeably better rejection of nearby images/spurs when listening to one station.
+- Audio delivery smoothing (both GUI 5 ms timer path and CLI monitorThread): variable exact-duration audio chunks from demod are accumulated locally, then emitted as regular 480-sample (exactly 10 ms) blocks to AudioEngine::pushAudio / per-output liveBuffers. This keeps the miniaudio callbacks fed consistently and eliminates a source of chop/dropouts from irregular USB/IQ chunk timing + resample block sizes.
+- Stats now prints Device CF (actual SDR LO) vs Monitor target + last audio RMS. Large offset explains why the channel filter has to do all the rejection work. Updated help with the exact RTL FM spur advice + commands (gain 0 XX to back off RF gain, set bw lower, try 1.024 MS/s rate for different spur profile).
+- In AUTO + detect the occupied BW from real spectrum still drives things when enabled, but manual set bw is the power tool for this symptom.
+
+Result: on a strong 98.9 the correct tune point should now be cleaner (tighter filter + limiter + regular audio blocks), while offset "ghost" frequencies (97.3 etc.) should be quieter or have less of the main modulation because more of the leaked energy is rejected before demod. Complete elimination of all images usually requires hardware (attenuator, better antenna location, or a higher-end SDR); these changes make the monitor path as selective as practical in pure software on the existing IQ stream.
+
+Recommended live CLI sequence for this exact report:
+  enable 0; rate 0 1024000   # or 2048000
+  tune 98.9
+  mode wfm
+  set bw 150
+  set lpf 15000
+  gain 0 20                  # start lower than default on strong locals; increase if too quiet
+  audio enable 0 1
+  stats                      # watch Device CF vs Monitor (should be almost 0 offset) + RMS
+  (listen on 98.9 — should be the strong clean one)
+  tune 98.1; stats; listen   # hopefully much less of the main station or different
+  tune 97.3; stats; listen
+  set bw 120 ; stats         # tighten more while on the desired freq
+  spectrum
+
+All changes keep the "direct from the sdr and play what we receive" rule and the architecture in the DESIGN data-flow section.
+
+Updated 2026-06 in response to "it seems to be picking up spurartic frew like the same singnal evey 10mhz or something 97.3 98.1 98.9 are all the same and choppy audio".

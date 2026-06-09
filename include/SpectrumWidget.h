@@ -35,6 +35,7 @@ protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
 
@@ -59,4 +60,5 @@ private:
     // interaction
     bool m_dragging = false;
     int m_lastMouseX = 0;
+    int m_tuneX = -1;  // last clicked x for visual tune line across full display (incl waterfall)
 };

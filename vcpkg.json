@@ -5,6 +5,8 @@
   "dependencies": [
     "spdlog",
     "nlohmann-json",
-    "soapysdr"
+    "soapysdr",
+    "rtlsdr",
+    "catch2"
   ]
 }

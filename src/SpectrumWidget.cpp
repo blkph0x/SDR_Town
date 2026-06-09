@@ -5,6 +5,7 @@
 #include <QWheelEvent>
 #include <QResizeEvent>
 #include <QPaintEvent>
+#include <QDateTime>
 #include <cmath>
 #include <algorithm>
 
@@ -15,16 +16,25 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
 
+    // initial waterfall first (before any timer that might call scroll)
+    m_waterfall = QImage(512, 180, QImage::Format_RGB32);
+    m_waterfall.fill(Qt::black);
+
     // demo data timer (will be replaced by real pipeline)
+    // IMPORTANT: do NOT start() synchronously in ctor. Starting the timer (and thus
+    // computeFakeSpectrum + update + paint) during MainWindow construction / layout
+    // can lead to blank widget or crashes on first paint before the window is shown
+    // and sized. We defer the actual start until shortly after construction.
     m_demoTimer = new QTimer(this);
     connect(m_demoTimer, &QTimer::timeout, this, [this]() {
         computeFakeSpectrum();
     });
-    m_demoTimer->start(80); // ~12 fps demo
-
-    // initial waterfall
-    m_waterfall = QImage(512, 180, QImage::Format_RGB32);
-    m_waterfall.fill(Qt::black);
+    // Defer start so first fake spectrum/paint happens after event loop + show + layout.
+    QTimer::singleShot(60, this, [this]() {
+        if (m_demoTimer && !m_demoTimer->isActive()) {
+            m_demoTimer->start(80); // ~12 fps demo
+        }
+    });
 }
 
 SpectrumWidget::~SpectrumWidget() = default;
@@ -36,6 +46,14 @@ void SpectrumWidget::updateSpectrum(const std::vector<float>& powerDb, double ce
     m_centerFreq = centerFreqHz;
     m_sampleRate = sampleRateHz;
     scrollWaterfall(powerDb);
+    // Stop the demo timer once we receive real spectrum data (256 bins from device).
+    // This prevents the fake demo data from continuing to scroll/mix into the waterfall
+    // causing "two lines" or glitchy artifacts when live data is active.
+    if (powerDb.size() == 256 && m_demoTimer) {
+        m_demoTimer->stop();
+        m_demoTimer->deleteLater();
+        m_demoTimer = nullptr;
+    }
     update();
 }
 
@@ -120,7 +138,9 @@ double SpectrumWidget::freqFromX(int x) const
 {
     double bw = m_sampleRate;
     double start = m_centerFreq - bw/2;
-    return start + (x / double(width())) * bw;
+    int ww = width();
+    if (ww <= 0) return m_centerFreq; // safe during early layout/paint
+    return start + (x / double(ww)) * bw;
 }
 
 int SpectrumWidget::xFromFreq(double freq) const
@@ -138,6 +158,7 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
 
     int w = width();
     int h = height();
+    if (w <= 0 || h <= 0) return; // guard early paint during construction or 0-size layout
     int specH = h * 2 / 3;
     int wfH = h - specH;
 
@@ -148,7 +169,7 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
     p.setPen(QColor(60, 65, 70));
     p.drawRect(0, 0, w-1, specH-1);
 
-    // grid + labels
+    // grid + labels (use live members; labels are secondary and change infrequently)
     p.setPen(QColor(70, 75, 80));
     for (int i = 0; i <= 10; ++i) {
         int x = w * i / 10;
@@ -159,14 +180,33 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
         p.setPen(QColor(70, 75, 80));
     }
 
-    // draw spectrum
-    QMutexLocker lock(&m_dataMutex);
-    if (!m_powerDb.isEmpty()) {
+    // Snapshot the contended visual state under one *short* lock.
+    // Release immediately. Then paint from the local copies.
+    // This eliminates the previous second QMutexLocker on the non-recursive
+    // m_dataMutex while the first was conceptually active, and prevents
+    // holding the lock during QPainter work / drawImage / text.
+    // Directly addresses the UI-thread paint deadlock (P0) that caused
+    // "Responding: False" after entering the event loop.
+    QVector<float> powerCopy;
+    QImage wfCopy;
+    double centerSnap = m_centerFreq;
+    double srSnap = m_sampleRate;
+
+    {
+        QMutexLocker lock(&m_dataMutex);
+        powerCopy = m_powerDb;
+        wfCopy = m_waterfall;
+        centerSnap = m_centerFreq;
+        srSnap = m_sampleRate;
+    }
+
+    // draw spectrum (from snapshot, lock already released)
+    if (!powerCopy.isEmpty()) {
         QPolygonF poly;
-        int n = m_powerDb.size();
+        int n = powerCopy.size();
         for (int i = 0; i < n; ++i) {
             int x = w * i / n;
-            float db = m_powerDb[i];
+            float db = powerCopy[i];
             // map -120 .. -20 dB to specH
             float norm = std::clamp((db + 120.0f) / 100.0f, 0.0f, 1.0f);
             int y = specH - 5 - static_cast<int>(norm * (specH - 10));
@@ -192,24 +232,30 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
         p.drawText(w/2 - 60, specH/2, "No spectrum data (waiting for IQ...)");
     }
 
-    // waterfall
-    if (!m_waterfall.isNull()) {
+    // waterfall from snapshot (no second lock, no concurrent modification risk for this paint)
+    if (!wfCopy.isNull()) {
         QRect wfRect(0, specH, w, wfH);
-        p.drawImage(wfRect, m_waterfall);
+        p.drawImage(wfRect, wfCopy);
         p.setPen(QColor(80, 85, 90));
         p.drawRect(wfRect.adjusted(0,0,-1,-1));
     }
 
-    // center marker
+    // center marker (device center, top spectrum area)
     int cx = w / 2;
     p.setPen(QPen(QColor(255, 80, 80), 1, Qt::DashLine));
     p.drawLine(cx, 0, cx, specH);
 
-    // title / info
+    // last clicked tune position - full height line (works for clicks in spectrum OR waterfall area)
+    if (m_tuneX >= 0 && m_tuneX < w) {
+        p.setPen(QPen(QColor(255, 120, 120), 1, Qt::DashLine));
+        p.drawLine(m_tuneX, 0, m_tuneX, h);
+    }
+
+    // title / info (use snapshot for consistency with the curve/waterfall of this frame)
     p.setPen(Qt::white);
-    p.drawText(8, 16, QString("Center: %1 MHz   SR: %2 MS/s   (click to tune)")
-                          .arg(m_centerFreq / 1e6, 0, 'f', 3)
-                          .arg(m_sampleRate / 1e6, 0, 'f', 2));
+    p.drawText(8, 16, QString("Center: %1 MHz   SR: %2 MS/s   (click anywhere incl. waterfall to tune monitor)")
+                          .arg(centerSnap / 1e6, 0, 'f', 3)
+                          .arg(srSnap / 1e6, 0, 'f', 2));
 }
 
 void SpectrumWidget::mousePressEvent(QMouseEvent* event)
@@ -217,8 +263,12 @@ void SpectrumWidget::mousePressEvent(QMouseEvent* event)
     if (event->button() == Qt::LeftButton) {
         double f = freqFromX(event->pos().x());
         emit frequencySelected(f);
-        m_dragging = true;
+        // Single onclick set freq (as requested). Do not enter continuous drag mode
+        // that follows the mouse and "locks" it until release. This was causing the
+        // mouse to attach and not unclick.
+        // m_dragging = true;   // removed for onclick-only behavior
         m_lastMouseX = event->pos().x();
+        m_tuneX = event->pos().x();
         update();
     }
 }
@@ -226,8 +276,19 @@ void SpectrumWidget::mousePressEvent(QMouseEvent* event)
 void SpectrumWidget::mouseMoveEvent(QMouseEvent* event)
 {
     if (m_dragging) {
+        // Continuous drag tuning kept for backward compat but not entered on simple click now.
         double f = freqFromX(event->pos().x());
         emit frequencySelected(f);
+        m_tuneX = event->pos().x();
+        update();
+    }
+}
+
+void SpectrumWidget::mouseReleaseEvent(QMouseEvent* event)
+{
+    if (event->button() == Qt::LeftButton) {
+        m_dragging = false;
+        // m_tuneX is kept so the dashed tune line remains visible after the click
         update();
     }
 }
@@ -262,3 +323,6 @@ void SpectrumWidget::resizeEvent(QResizeEvent* event)
         }
     }
 }
+
+// Include generated moc file for Q_OBJECT (SpectrumWidget) when using AUTOMOC + header in include/
+#include "moc_SpectrumWidget.cpp"  // kept for build compatibility; AUTOMOC enabled in CMake (P3 hygiene note: ideally remove manual include)
