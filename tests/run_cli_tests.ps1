@@ -15,7 +15,7 @@ if (-not (Test-Path $ExePath)) {
     exit 1
 }
 
-Write-Host "=== MaulAudio Pro CLI Test Suite ===" -ForegroundColor Green
+Write-Host "=== SDR Town CLI Test Suite ===" -ForegroundColor Green
 Write-Host "Exe: $ExePath"
 Write-Host "Testing: device list/enable/stream, tune, spectrum, audio multi-device, error cases, no crashes."
 Write-Host "Timeout per test: $TimeoutSec s"
