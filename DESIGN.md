@@ -774,6 +774,62 @@ Huge session progress following the plan exactly:
 - DESIGN.md + README placed and kept as living docs.
 - vcpkg.json + CMake + presets set up for manifest mode.
 - Qt Online Installer downloaded and launched for the dev environment (`~\Downloads\qt-online-installer-windows-x64-online.exe`).
+
+---
+
+## Standing Rule (from 2026-06 onward): Full Documentation + Branded GitHub Releases for Every Successful Build + Updater Testing During Development
+
+**User directive (verbatim):** "from now on all updates and fixes need to be fully documented and each new successful build needs to be pushed to git hub with the correct branding of SDR_Town code and assets and rename updates so the new update feature will work and we can test that over the course of development."
+
+### Why this is now mandatory
+The in-app updater (UpdateManager fetching `update.json`, SHA verify, download to %LOCALAPPDATA%\SDR_Town\updates\, launch installer + quit) is a production feature. To keep it working and to test the entire flow (manifest comparison, consent dialog, download, hash check, /S launch, app exit) repeatedly during normal development, we **must** produce new versioned assets on every significant change instead of always shipping the same 0.2.0 filenames.
+
+Re-using names would make the "is this newer than QApplication::applicationVersion()" logic and the download/verify path untestable until a final release.
+
+All shipped things must carry clean "SDR_Town" branding (project name, exe, installer filename, AppData organization, logs, etc.). The local checkout folder may still be called `maulaudio_pro` on disk — that is fine as long as nothing inside or in releases uses the old name.
+
+### Exact process after any meaningful fix or feature
+1. **Document fully** (this is non-negotiable):
+   - Add a clear dated entry in the Implementation Log section of DESIGN.md.
+   - Update README.md for anything user-facing (new menu items, CLI commands, changed behavior, build steps).
+   - Write a good commit message.
+
+2. **Bump version + produce properly renamed branded artifacts**:
+   - Increment the patch (or minor) in CMakeLists.txt, all `set(CPACK_...)` version variables, `app.setApplicationVersion()`, and CLI version strings.
+   - Run the full clean release pipeline (see the big comment block at the bottom of CMakeLists.txt and the "Release Process" section in README.md):
+     - `cmake --build build --config Release --target deploy`
+     - windeployqt on the exe
+     - re-run the deploy target
+     - `cpack -G NSIS -C Release` (and optionally ZIP)
+   - This must produce files named `SDR_Town-0.2.x-win64-setup.exe` (new version every time).
+
+3. **Update the manifest so the updater actually sees and can fetch the new build**:
+   - Edit the real `update.json` in the project root (not just the .example).
+   - Fill in the new `"version"`, `"tag"`, installer `url` (must point to the new `SDR_Town-0.2.x-win64-setup.exe`), real `sha256`, and `size`.
+   - Commit the updated `update.json`.
+
+4. **Push to GitHub with correct branding**:
+   - `git add -A`
+   - `git commit -m "build: v0.2.x ... (short description). Full docs + new branded assets + updated update.json for live updater testing during dev."`
+   - `git tag -a v0.2.x -m "SDR Town 0.2.x"`
+   - `git push origin main --tags`
+   - On GitHub (or via `gh release create`), create the Release for that tag and attach:
+     - `SDR_Town-0.2.x-win64-setup.exe`
+     - `SDR_Town-0.2.x-win64-setup.exe.sha256` (or SHA256SUMS.txt)
+     - `update.json`
+     - the portable zip if you built it
+
+5. **Test the updater on this build**:
+   - Run the app (or Help → Check for Updates).
+   - It should detect the newer version from the live GitHub `update.json`, show the dialog with notes/size, let you download, verify the hash you put in the manifest, launch the (possibly silent) installer, and exit the app.
+   - This exercises the whole path on every dev cycle.
+
+### Versioning convention for development
+Use normal semver patch bumps while we are actively developing (0.2.0 → 0.2.1 → 0.2.2 ...). When you are ready for a user-visible "stable" drop you can jump to 0.3.0 (or whatever) with a proper changelog and (eventually) code-signed installer.
+
+This process was introduced right after the big "We’re closer, but I would not call this state-of-the-art yet." stabilization round that delivered the real FFT pipeline, true-resolution waterfall, live hardware gain, calibrated squelch, jthread safety, and the complete updater. The v0.2.1 tag + commit in this session is the first concrete example.
+
+From this point forward, every time you ask me to implement a fix or feature, the final step will include documentation updates + preparation of the next branded versioned release artifacts + updated `update.json` so the feature can be tested live.
 - vcpkg bootstrap + `soapysdr` (correct port name), spdlog, nlohmann-json installed successfully (note: port is `soapysdr`, provides `find_package(SoapySDR CONFIG)` and target `SoapySDR`).
 - git submodules added early: `external/liquid-dsp` (for PR5+ DSP) and `external/miniaudio` (header-only, for PR4 critical multi-device audio).
 - .gitignore adjusted to allow submodule gitlinks.

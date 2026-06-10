@@ -28,6 +28,14 @@ ui_*.h
 *.pro.user
 *.pro.user.*
 *.qbs.user
+
+# Allow the real update.json to be committed so the in-app updater can be tested during development
+# (as per the standing rule: every successful build produces new versioned assets + a matching update.json).
+# You may still ignore backup copies if desired.
+!update.json
+update.json.bak
+update.json.tmp
+*.json.bak
 *.qbs.user.*
 *.qmlc
 *.jsc
