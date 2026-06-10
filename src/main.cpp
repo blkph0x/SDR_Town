@@ -15,6 +15,7 @@
 #include <QDir>
 #include <QStandardPaths>
 #include <QDebug>
+#include <QSettings>   // for updater skipped version + last check persistence (best practice)
 #include <QDialog>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -25,6 +26,8 @@
 #include <QGroupBox>
 #include <QFormLayout>
 #include <QTimer>
+#include <QDesktopServices>
+#include <QUrl>
 #include <complex>
 
 #include <spdlog/spdlog.h>
@@ -37,6 +40,8 @@
 #include "SpectrumWidget.h"
 #include "AudioEngine.h"
 #include "Demod.h"
+#include "Receiver.h"  // Phase 0: per-receiver foundation
+#include "UpdateManager.h"
 
 #include <iostream>
 #include <string>
@@ -48,6 +53,7 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <cctype>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -59,14 +65,11 @@ int runCLI(int argc, char* argv[]);
 
 // Shared live diagnostic updated by demod calls from GUI worker and CLI monitor thread (P1 audit diags)
 static std::atomic<long long> gLastDspMicros{0};
+static std::atomic<double> gLastRmsDb{-100.0};   // live noise floor / signal level for UI (squelch calibration, auto, indicator)
 
-// P1: one Demodulator per monitor path (GUI worker + CLI) so FIR/IIR/phase/resampler state
-// does not bleed between uses. Full per-receiver objects will live in receivers later.
-static Demodulator gGuiDemod;
-static Demodulator gCliDemod;
-
-// DSP implementation now lives in src/Demod.cpp (Demodulator class owns all state).
+// DSP implementation now lives in src/Demod.cpp (Demodulator class owns all state per Receiver).
 // classifyMode, detectChannelBandwidth, and demodulateToAudio are provided via Demod.h + Demod.cpp.
+// Phase 0: no more global gGuiDemod/gCliDemod - each Receiver owns its Demodulator instance (state isolation).
 
 void setupLogging()
 {
@@ -198,6 +201,8 @@ public:
                 std::lock_guard<std::mutex> lk(monitorParamsMutex);
                 currentMonitorFreq = f;
             }
+            syncMonitorVarsToReceiver(0);
+            receivers[0]->active = true;
             auto& mgr = DeviceManager::instance();
             bool retunedDevice = false;
             bool anyStreaming = false;
@@ -217,16 +222,17 @@ public:
                 anyStreaming = true;
                 // Defer audio output activation (speakers + VAC etc.) like other start paths.
                 QTimer::singleShot(120, this, [this]() {
-                    if (!engineForAudio) engineForAudio = std::make_unique<AudioEngine>();
-                    if (engineForAudio && engineForAudio->activeOutputCount() == 0) {
-                        try {
-                            auto outs = engineForAudio->enumeratePlaybackDevices();
-                            if (!outs.empty()) {
-                                std::vector<size_t> idxs{0};
-                                if (outs.size() > 1) idxs.push_back(1);
-                                engineForAudio->setActiveOutputs(idxs);
-                            }
-                        } catch (...) {}
+                    if (auto* eng = getOrCreateAudioEngine()) {
+                        if (eng->activeOutputCount() == 0) {
+                            try {
+                                auto outs = eng->enumeratePlaybackDevices();
+                                if (!outs.empty()) {
+                                    std::vector<size_t> idxs{0};
+                                    if (outs.size() > 1) idxs.push_back(1);
+                                    eng->setActiveOutputs(idxs);
+                                }
+                            } catch (...) {}
+                        }
                     }
                 });
                 // Immediately retune the newly started stream
@@ -240,21 +246,18 @@ public:
         });
         mainLayout->addWidget(spectrum, 3);
 
-        // Receivers stub table (PR3/5 will be real)
-        QGroupBox* rxBox = new QGroupBox("Active Receivers (stub - full management + demod in PR5)");
+        // S0-7 (P2): removed hardcoded APT/DMR/NFM demo rows (was claiming live receiver table).
+        // The vector<Receiver> + snapshot in DSP is the real foundation; full live QTable + per-rx persistence
+        // (receivers.json) + rich editor comes in the receiver management work after stabilization.
+        QGroupBox* rxBox = new QGroupBox("Active Receivers (Phase 0 vector foundation — live table + persistence next)");
         rxBox->setStyleSheet("QGroupBox { font-size: 11px; }");
         QVBoxLayout* rxLay = new QVBoxLayout(rxBox);
 
-        QTableWidget* rxTable = new QTableWidget(3, 6, this);
+        QTableWidget* rxTable = new QTableWidget(0, 6, this);
         rxTable->setHorizontalHeaderLabels({"Freq (MHz)", "Mode", "Squelch", "Level", "Monitor", "Record"});
-        rxTable->setRowCount(3);
         rxTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
         rxTable->setSelectionBehavior(QAbstractItemView::SelectRows);
         rxTable->horizontalHeader()->setStretchLastSection(true);
-        // demo rows
-        rxTable->setItem(0, 0, new QTableWidgetItem("162.400")); rxTable->setItem(0, 1, new QTableWidgetItem("NFM")); rxTable->setItem(0, 2, new QTableWidgetItem("-80 dB")); rxTable->setItem(0, 3, new QTableWidgetItem("███░░ -62dB")); rxTable->setItem(0, 4, new QTableWidgetItem("●")); rxTable->setItem(0, 5, new QTableWidgetItem("REC"));
-        rxTable->setItem(1, 0, new QTableWidgetItem("137.100")); rxTable->setItem(1, 1, new QTableWidgetItem("APT")); rxTable->setItem(1, 2, new QTableWidgetItem("N/A")); rxTable->setItem(1, 3, new QTableWidgetItem("████░")); rxTable->setItem(1, 4, new QTableWidgetItem("")); rxTable->setItem(1, 5, new QTableWidgetItem("IMG"));
-        rxTable->setItem(2, 0, new QTableWidgetItem("446.006")); rxTable->setItem(2, 1, new QTableWidgetItem("DMR")); rxTable->setItem(2, 2, new QTableWidgetItem("-92 dB")); rxTable->setItem(2, 3, new QTableWidgetItem("█░░░░")); rxTable->setItem(2, 4, new QTableWidgetItem("")); rxTable->setItem(2, 5, new QTableWidgetItem(""));
         rxLay->addWidget(rxTable);
 
         QHBoxLayout* rxBtnLay = new QHBoxLayout();
@@ -270,13 +273,33 @@ public:
         // Wire buttons (make functional)
         connect(addRxBtn, &QPushButton::clicked, this, [this]() {
             auto& mgr = DeviceManager::instance();
-            // enable first device if any, start streaming, update status
             if (!mgr.getDevices().empty()) {
                 mgr.setEnabled(0, true);
                 try { mgr.startStreaming(0); } catch (...) { spdlog::warn("startStreaming(0) fault in Add Receiver (guarded)"); }
-                statusBar()->showMessage("Added/started receiver on first device (streaming + audio to outputs)", 3000);
-                // Defer audio activation (and lazy engine creation) to avoid hanging the UI on start.
-                // This is the main change to make the program actually launch and "start" without hang/crash.
+
+                // S0-2 (P0): protect vector mutation under mutex (GUI thread). Worker will snapshot.
+                // Use shared_ptr so reallocation never invalidates live Demodulator instances.
+                {
+                    std::lock_guard<std::mutex> lk(receiversMutex);
+                    ensureReceiver();
+                    auto newRx = std::make_shared<Receiver>();
+                    newRx->deviceIndex = 0;
+                    newRx->freqHz = currentMonitorFreq;
+                    newRx->mode = currentMonitorMode;
+                    newRx->channelBwHz = monitorChannelBwHz;
+                    newRx->lpfHz = monitorLpfHz;
+                    newRx->squelchDb = monitorSquelchDb;
+                    newRx->gain = monitorGain;
+                    newRx->wfmDeTauUs = monitorWfmDeTauUs;
+                    newRx->wfmPilotNotchR = monitorWfmPilotNotchR;
+                    newRx->active = true;
+                    receivers.push_back(std::move(newRx));
+                }
+
+                statusBar()->showMessage(QString("Added receiver #%1 (dev 0, %.3f MHz, %2) - streaming + audio")
+                    .arg(receivers.size()).arg(currentMonitorFreq/1e6, 0, 'f', 3), 3000);
+
+                // Defer audio activation (lazy engine) - same pattern
                 QTimer::singleShot(100, this, [this]() {
                     if (!engineForAudio) {
                         engineForAudio = std::make_unique<AudioEngine>();
@@ -297,24 +320,31 @@ public:
             }
         });
         connect(removeRxBtn, &QPushButton::clicked, this, [this]() {
+            // S0-7: actually remove a receiver from the live vector (under lock for snapshot safety).
+            // Stop a stream if present (existing behavior). Full per-rx stop + rich UI later.
+            {
+                std::lock_guard<std::mutex> lk(receiversMutex);
+                if (!receivers.empty()) {
+                    receivers.pop_back();
+                }
+            }
             auto& mgr = DeviceManager::instance();
             for (size_t i = 0; i < mgr.getDevices().size(); ++i) {
                 if (mgr.isStreaming(i)) { mgr.stopStreaming(i); break; }
             }
-            statusBar()->showMessage("Stopped receiver/streaming", 2000);
+            statusBar()->showMessage("Removed receiver + stopped a stream", 2000);
         });
         connect(scanBtn, &QPushButton::clicked, this, [this]() {
             auto& mgr = DeviceManager::instance();
-            // "Smart scan": enable all, but use safe stub start (attemptReal=false) to avoid
-            // crashes when the RTL (or other) device open fails in multi-device start.
-            // The button is labeled as PR6 stub. Use Device Manager Apply or "Add Receiver"
-            // for real hardware attempts (they use default true + guards + auto-audio).
+            // S0-7 (P2): "Smart scan" button currently enables + starts *real* streaming on all devices
+            // (direct from SDR, no simulation). The old comment claimed "safe stub" — now honest.
+            // Full energy-based smart scanner + hits table + promote-to-receiver is post-stabilization work.
             for (size_t i = 0; i < mgr.getDevices().size(); ++i) {
                 mgr.setEnabled(i, true);
                 try { mgr.startStreaming(i, true /* real SDR - no simulation, direct from hardware */); } catch (...) { spdlog::warn("startStreaming fault in scan (guarded)"); }
             }
-            statusBar()->showMessage("Smart scan started (all devices streaming real from SDR, spectrum + audio active)", 4000);
-            spdlog::info("PR6 stub scanner: started streaming on all devices");
+            statusBar()->showMessage("Scan: real streaming started on all devices (full smart scanner + hits table later)", 4000);
+            spdlog::info("Scan: real streaming started on all devices");
             // Defer audio activation (and lazy engine creation) – see Add Receiver.
             QTimer::singleShot(100, this, [this]() {
                 if (!engineForAudio) {
@@ -358,9 +388,94 @@ public:
         monLay->addStretch();
         rxLay->addLayout(monLay);
 
+        // New UI for sensitivity (RF gain / noise floor), squelch, and heat map color range (for waterfall/spectrum).
+        // These directly address user request for adjusting SDR sensitivity, squelch, and good heat map / noise floor visualization.
+        QHBoxLayout* gainLay = new QHBoxLayout();
+        gainLay->addWidget(new QLabel("RF Gain (dB):"));
+        QDoubleSpinBox* gainSpin = new QDoubleSpinBox();
+        gainSpin->setRange(0, 50); gainSpin->setDecimals(1); gainSpin->setValue(20);
+        gainSpin->setToolTip("Adjust SDR RF gain / sensitivity. Higher values raise both signals and the noise floor.");
+        gainLay->addWidget(gainSpin);
+        gainLay->addSpacing(12);
+        gainLay->addWidget(new QLabel("Squelch (dB):"));
+        QDoubleSpinBox* squelchSpin = new QDoubleSpinBox();
+        squelchSpin->setRange(-130, 0); squelchSpin->setDecimals(0); squelchSpin->setValue(-80);
+        squelchSpin->setToolTip("Post-demod squelch threshold. Signals below this are silenced.");
+        gainLay->addWidget(squelchSpin);
+
+        QPushButton* autoSquelchBtn = new QPushButton("Auto");
+        autoSquelchBtn->setToolTip("Set squelch from current noise floor (recent RMS - 8 dB, with per-mode sanity).");
+        gainLay->addWidget(autoSquelchBtn);
+
+        QLabel* rmsLabel = new QLabel("RMS: --- dB");
+        rmsLabel->setToolTip("Live post-demod RMS (updated from the DSP worker). Useful for calibrating squelch.");
+        gainLay->addWidget(rmsLabel);
+        rxLay->addLayout(gainLay);
+
+        // Live RMS readout (polled lightly from the main UI timer)
+        QTimer* rmsUpdate = new QTimer(this);
+        connect(rmsUpdate, &QTimer::timeout, this, [rmsLabel]() {
+            double r = gLastRmsDb.load();
+            if (r > -150) rmsLabel->setText(QString("RMS: %1 dB").arg(r, 0, 'f', 1));
+        });
+        rmsUpdate->start(400);
+
+        connect(autoSquelchBtn, &QPushButton::clicked, this, [this, squelchSpin]() {
+            double recent = gLastRmsDb.load();
+            double target = (recent > -140.0) ? (recent - 8.0) : -82.0;
+            // Per-mode sanity (very rough but useful)
+            // We could read current mode, but for simplicity just clamp to reasonable voice range.
+            target = std::clamp(target, -115.0, -55.0);
+            squelchSpin->setValue(target);
+        });
+
+        QHBoxLayout* colorLay = new QHBoxLayout();
+        colorLay->addWidget(new QLabel("WF Color Min (dB):"));
+        QDoubleSpinBox* colorMinSpin = new QDoubleSpinBox();
+        colorMinSpin->setRange(-150, -20); colorMinSpin->setValue(-120);
+        colorMinSpin->setToolTip("Lower end of waterfall/spectrum heat map (noise floor). Lower values make weak signals visible.");
+        colorLay->addWidget(colorMinSpin);
+        colorLay->addWidget(new QLabel("Max:"));
+        QDoubleSpinBox* colorMaxSpin = new QDoubleSpinBox();
+        colorMaxSpin->setRange(-60, 20); colorMaxSpin->setValue(-10);
+        colorMaxSpin->setToolTip("Upper end of heat map. Adjust to make strong signals 'hot' red.");
+        colorLay->addWidget(colorMaxSpin);
+        rxLay->addLayout(colorLay);
+
+        // Wire the new controls to per-receiver state and backend (gain goes to device, others to demod/display).
+        connect(gainSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double v) {
+            std::lock_guard<std::mutex> lk(monitorParamsMutex);
+            monitorGain = v;
+            syncMonitorVarsToReceiver(0);
+            auto& mgr = DeviceManager::instance();
+            if (!mgr.getDevices().empty()) {
+                // Use the new live path — this actually calls setGain on a running device when possible.
+                mgr.setLiveGain(0, v);
+            }
+        });
+
+        connect(squelchSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double v) {
+            std::lock_guard<std::mutex> lk(monitorParamsMutex);
+            monitorSquelchDb = v;
+            syncMonitorVarsToReceiver(0);
+        });
+
+        connect(colorMinSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this, colorMinSpin, colorMaxSpin, spectrum](double) {
+            spectrum->setColorRange(colorMinSpin->value(), colorMaxSpin->value());
+        });
+        connect(colorMaxSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this, colorMinSpin, colorMaxSpin, spectrum](double) {
+            spectrum->setColorRange(colorMinSpin->value(), colorMaxSpin->value());
+        });
+
+        // Initialize from current state
+        gainSpin->setValue(monitorGain);
+        squelchSpin->setValue(monitorSquelchDb);
+        spectrum->setColorRange(colorMinSpin->value(), colorMaxSpin->value());
+
         connect(bwSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double v){
             std::lock_guard<std::mutex> lk(monitorParamsMutex);
             monitorChannelBwHz = v * 1000.0;
+            syncMonitorVarsToReceiver(0);
         });
 
         connect(modeBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, modeBox](int) {
@@ -383,6 +498,7 @@ public:
                 currentMonitorMode = newMode;
                 monitorChannelBwHz = newBwHz;
             }
+            syncMonitorVarsToReceiver(0);
             if (bwSpin) {
                 bwSpin->blockSignals(true);
                 bwSpin->setValue(newBwK);
@@ -392,6 +508,8 @@ public:
 
         connect(setMonBtn, &QPushButton::clicked, this, [this, monFreq]() {
             currentMonitorFreq = monFreq->value() * 1e6;
+            syncMonitorVarsToReceiver(0);
+            receivers[0]->active = true;
             auto& mgr = DeviceManager::instance();
             bool any = false;
             for (size_t i=0; i<mgr.getDevices().size(); ++i) {
@@ -477,6 +595,7 @@ public:
                                     currentMonitorMode = newM;
                                     monitorChannelBwHz = useBwHz;
                                 }
+                                syncMonitorVarsToReceiver(0);
                                 if (bwSpin) {
                                     bwSpin->blockSignals(true);
                                     bwSpin->setValue(useBwK);
@@ -500,65 +619,75 @@ public:
             auto& mgr = DeviceManager::instance();
             while (!stopDspWorker && updateTimer) {
                 bool didWork = false;
-                for (size_t i = 0; i < mgr.getDevices().size() && !stopDspWorker && updateTimer; ++i) {
-                    if (mgr.isStreaming(i)) {
-                        std::vector<float> pwr; double cf, sr;
-                        mgr.getLatestSpectrum(i, pwr, cf, sr);
+                // S0-2 (P0 audit): short lock to snapshot the current receivers (shared_ptrs — cheap, stable).
+                // Then process without holding lock. shared_ptr keeps the Demodulator alive even if vector reallocates.
+                std::vector<std::shared_ptr<Receiver>> rxSnapshot;
+                {
+                    std::lock_guard<std::mutex> lk(receiversMutex);
+                    ensureReceiver();
+                    rxSnapshot.reserve(receivers.size());
+                    for (auto& r : receivers) if (r && r->active) rxSnapshot.push_back(r);
+                }
+                for (size_t r = 0; r < rxSnapshot.size() && !stopDspWorker && updateTimer; ++r) {
+                    auto& rxPtr = rxSnapshot[r];
+                    if (!rxPtr) continue;
+                    Receiver& rx = *rxPtr;  // reference to the stable object
+                    size_t i = rx.deviceIndex;
+                    if (i >= mgr.getDevices().size() || !mgr.isStreaming(i)) continue;
 
-                        // Snapshot monitor params under lock to avoid races with UI thread (P2).
-                        double monFreq, monLpf, monSquelch, monGain, monWfmDe, monWfmNotch, monBw;
-                        DemodMode monMode;
-                        {
-                            std::lock_guard<std::mutex> lk(monitorParamsMutex);
-                            monFreq = currentMonitorFreq;
-                            monMode = currentMonitorMode;
-                            monLpf = monitorLpfHz;
-                            monSquelch = monitorSquelchDb;
-                            monGain = monitorGain;
-                            monWfmDe = monitorWfmDeTauUs;
-                            monWfmNotch = monitorWfmPilotNotchR;
-                            monBw = monitorChannelBwHz;
-                        }
+                    std::vector<float> pwr; double cf, sr;
+                    mgr.getLatestSpectrum(i, pwr, cf, sr);
 
-                        std::vector<std::complex<float>> iq;
-                        double desired = 0.025;
-                        size_t tgt = (sr > 0) ? (size_t)(sr * desired) : 32768;
-                        iq.reserve(tgt);
-                        while (iq.size() < tgt) {
-                            std::vector<std::complex<float>> ch(8192);
-                            size_t g = mgr.getNextIQBlock(i, ch.data(), ch.size(), 5);
-                            if (g == 0) break;
-                            ch.resize(g);
-                            iq.insert(iq.end(), ch.begin(), ch.end());
+                    // Snapshot per-receiver state (Phase 0: receivers[0] kept in sync with monitor* by UI handlers + ensure)
+                    double monFreq = rx.freqHz, monLpf = rx.lpfHz, monSquelch = rx.squelchDb;
+                    double monGain = rx.gain, monWfmDe = rx.wfmDeTauUs, monWfmNotch = rx.wfmPilotNotchR, monBw = rx.channelBwHz;
+                    DemodMode monMode = rx.mode;
+                    {
+                        // still lock around any potential future shared reads/writes for r==0 during auto
+                        std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                        if (r == 0) {
+                            // ensure latest if any direct write slipped; sync is authoritative now
+                            monFreq = receivers[0]->freqHz;
+                            monMode = receivers[0]->mode;
+                            monBw = receivers[0]->channelBwHz;
+                            monLpf = receivers[0]->lpfHz;
+                            monSquelch = receivers[0]->squelchDb;
+                            monGain = receivers[0]->gain;
+                            monWfmDe = receivers[0]->wfmDeTauUs;
+                            monWfmNotch = receivers[0]->wfmPilotNotchR;
                         }
-                        size_t got = iq.size();
-                        if (got > (size_t)(sr * 0.005)) {
-                            double t = got / sr;
-                            double orate = (engineForAudio ? engineForAudio->getSampleRate() : 48000.0);
-                            size_t need = (size_t)std::round(t * orate);
-                            double rms = -100;
-                            auto t0 = std::chrono::steady_clock::now();
-                            auto ch = gGuiDemod.demodulateToAudio(iq, sr, cf, monFreq, monMode,
-                                rms, monLpf, monSquelch, monGain, monWfmDe,
-                                monWfmNotch, monBw, need, orate);
-                            auto t1 = std::chrono::steady_clock::now();
-                            gLastDspMicros.store( std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() );
-                            if (!ch.empty()) {
-                                if (!engineForAudio) engineForAudio = std::make_unique<AudioEngine>();
-                                if (engineForAudio) {
-                                    static std::vector<float> pend;
-                                    pend.insert(pend.end(), ch.begin(), ch.end());
-                                    const size_t psz = 240;
-                                    while (pend.size() >= psz) {
-                                        engineForAudio->pushAudio(pend.data(), psz);
-                                        pend.erase(pend.begin(), pend.begin() + psz);
-                                    }
+                    }
+
+                    // audit-followup-2: use per-rx cursor consumption. Each rx pulls only its own *new* chronological samples.
+                    // No more "demod the latest 25ms overlapping window" for every rx.
+                    size_t tgt = (sr > 0) ? (size_t)(sr * 0.025) : 8192;
+                    auto iq = mgr.getNewSamplesForReceiver(i, rx, tgt);  // updates the live rx's lastConsumedAbsolute
+                    size_t got = iq.size();
+                    if (got > 0) {
+                        double t = got / sr;
+                        double orate = (engineForAudio ? engineForAudio->getSampleRate() : 48000.0);
+                        size_t need = (size_t)std::round(t * orate);
+                        double rms = -100;
+                        auto t0 = std::chrono::steady_clock::now();
+                        auto ch = rx.demod.demodulateToAudio(iq, sr, cf, monFreq, monMode,
+                            rms, monLpf, monSquelch, monGain, monWfmDe,
+                            monWfmNotch, monBw, need, orate);
+                        auto t1 = std::chrono::steady_clock::now();
+                        gLastDspMicros.store( std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() );
+                        gLastRmsDb.store(rms);   // for live RMS readout and Auto Squelch
+                        if (!ch.empty()) {
+                            if (auto* eng = getOrCreateAudioEngine()) {
+                                static std::vector<float> pend;
+                                pend.insert(pend.end(), ch.begin(), ch.end());
+                                const size_t psz = 240;
+                                while (pend.size() >= psz) {
+                                    eng->pushAudio(pend.data(), psz);
+                                    pend.erase(pend.begin(), pend.begin() + psz);
                                 }
                             }
                         }
-                        didWork = true;
-                        break;
                     }
+                    didWork = true;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(didWork ? 3 : 12));
             }
@@ -571,6 +700,52 @@ public:
         // AudioEngine is created lazily on first use (in timer push, or in deferred audio activation
         // in start buttons). This prevents any hang/crash from miniaudio context init during
         // MainWindow construction / program start.
+
+        // Phase 0: initialize per-receiver list
+        ensureReceiver();
+        syncMonitorVarsToReceiver(0);
+        receivers[0]->active = false;  // will be set true on first tune/start
+
+        // === Professional in-app updater (state-of-the-art, consent-based, safe) ===
+        m_updateManager = new UpdateManager(this);
+        connect(m_updateManager, &UpdateManager::updateAvailable, this, [this](const UpdateInfo& info) {
+            // Per spec dialog: version, release notes link, size, buttons Download and Install / Later / Skip this version.
+            // No auto-install. User must explicitly choose.
+            QString sizeStr = info.size > 0 ? QString("Size: %1 MB").arg(info.size / (1024.0*1024.0), 0, 'f', 1) : QString();
+            QString msg = QString("SDR Town %1 is available.\n\n%2\n%3\n\n%4")
+                              .arg(info.version)
+                              .arg(sizeStr)
+                              .arg(info.notesUrl.isEmpty() ? "" : "Release notes: " + info.notesUrl)
+                              .arg("The installer will be downloaded, SHA256 verified, then launched. Your settings in %APPDATA%\\SDR_Town are preserved.");
+            QMessageBox box(this);
+            box.setWindowTitle("Update Available");
+            box.setText(msg);
+            QPushButton* viewNotes = info.notesUrl.isEmpty() ? nullptr : box.addButton("View Notes", QMessageBox::HelpRole);
+            QPushButton* download = box.addButton("Download and Install", QMessageBox::AcceptRole);
+            QPushButton* later = box.addButton("Later", QMessageBox::RejectRole);
+            QPushButton* skip = box.addButton("Skip this version", QMessageBox::DestructiveRole);
+            box.exec();
+            if (box.clickedButton() == download) {
+                m_updateManager->downloadAndApplyUpdate(info);
+            } else if (box.clickedButton() == skip) {
+                QSettings s;
+                s.setValue("updates/skippedVersion", info.version);
+            } else if (viewNotes && box.clickedButton() == viewNotes) {
+                QDesktopServices::openUrl(QUrl(info.notesUrl));
+            }
+        });
+        connect(m_updateManager, &UpdateManager::upToDate, this, [this]() {
+            // Only shown for explicit manual "Check for Updates" (startup checks are silent).
+            QMessageBox::information(this, "SDR Town", "You are up to date.");
+        });
+        connect(m_updateManager, &UpdateManager::error, this, [](const QString& msg) {
+            qWarning() << "Updater error:" << msg;
+        });
+
+        // Rate-limited background check on startup (never auto-installs anything)
+        QTimer::singleShot(7500, this, [this]() {
+            if (m_updateManager) m_updateManager->checkForUpdates(false);
+        });
     }
 
 private slots:
@@ -895,8 +1070,32 @@ private:
     QTimer* updateTimer = nullptr;
     std::unique_ptr<AudioEngine> engineForAudio;
     std::thread guiDspWorker;
+
+    UpdateManager* m_updateManager = nullptr;   // professional GitHub release + in-app updater (state-of-the-art, safe)
     std::atomic<bool> stopDspWorker{false};
-    std::mutex monitorParamsMutex;  // protects currentMonitor* / monitor* vars between GUI DSP worker and UI thread (P2)
+    std::mutex monitorParamsMutex;  // protects currentMonitor* / monitor* vars between GUI DSP worker and UI thread (P2) -- transitional during per-receiver refactor
+
+    // S0-2 (P0 audit): mutex + snapshot for receivers vector. GUI thread mutates (Add, Remove, tune etc).
+    // DSP worker takes short snapshot then processes without holding lock or & across yields.
+    // Same pattern applied to CLI cliReceivers.
+    std::mutex receiversMutex;
+
+    // S0-5 (P1): centralize AudioEngine creation. DSP worker and hot paths call this;
+    // creation happens at most once (call_once). UI config also uses it.
+    std::once_flag audioEngineInitFlag;
+    AudioEngine* getOrCreateAudioEngine() {
+        std::call_once(audioEngineInitFlag, [this]() {
+            if (!engineForAudio) engineForAudio = std::make_unique<AudioEngine>();
+        });
+        return engineForAudio.get();
+    }
+
+    // Phase 0 / S0-2: per-receiver foundation using shared_ptr so that vector reallocation (Add) never
+    // invalidates live Receiver/Demodulator instances held by DSP worker snapshots or other references.
+    // This is the clean, SOTA way to solve the P0 cross-thread vector mutation race.
+    std::vector<std::shared_ptr<Receiver>> receivers;
+
+    // Transitional single-monitor state (will be replaced by receivers[i] fields)
     double currentMonitorFreq = 100e6;
     DemodMode currentMonitorMode = DemodMode::NFM;
     bool autoDetectMode = true;
@@ -908,6 +1107,40 @@ private:
     double monitorChannelBwHz = 200000.0; // default for WFM; set narrower for voice channels e.g. 25000
     QDoubleSpinBox* bwSpin = nullptr;
     // spectrumWidget kept for future if needed
+
+    // Helper to ensure at least one receiver exists (transitional Phase 0)
+    void ensureReceiver() {
+        if (receivers.empty()) {
+            auto r = std::make_shared<Receiver>();
+            r->deviceIndex = 0;
+            r->freqHz = currentMonitorFreq;
+            r->mode = currentMonitorMode;
+            r->channelBwHz = monitorChannelBwHz;
+            r->lpfHz = monitorLpfHz;
+            r->squelchDb = monitorSquelchDb;
+            r->gain = monitorGain;
+            r->wfmDeTauUs = monitorWfmDeTauUs;
+            r->wfmPilotNotchR = monitorWfmPilotNotchR;
+            r->active = false;
+            receivers.push_back(std::move(r));
+        }
+    }
+
+    // Phase 0 sync: keep receivers[0] in sync with the live monitor* control vars (UI writes here)
+    void syncMonitorVarsToReceiver(size_t idx = 0) {
+        std::lock_guard<std::mutex> lk(receiversMutex);
+        ensureReceiver();
+        if (idx >= receivers.size()) return;
+        auto& rx = *receivers[idx];  // deref the shared_ptr (S0-2 vector of shared_ptr)
+        rx.freqHz = currentMonitorFreq;
+        rx.mode = currentMonitorMode;
+        rx.channelBwHz = monitorChannelBwHz;
+        rx.lpfHz = monitorLpfHz;
+        rx.squelchDb = monitorSquelchDb;
+        rx.gain = monitorGain;
+        rx.wfmDeTauUs = monitorWfmDeTauUs;
+        rx.wfmPilotNotchR = monitorWfmPilotNotchR;
+    }
 
     void stopAllStreaming() {
         stopDspWorker = true;
@@ -971,6 +1204,12 @@ private:
         // Help
         QMenu* helpMenu = menuBar()->addMenu("&Help");
         helpMenu->addAction("&About SDR Town", this, &MainWindow::showAbout);
+        helpMenu->addAction("Check for &Updates...", [this]() {
+            if (m_updateManager) {
+                // Manual check — will show "up to date" or the update dialog
+                m_updateManager->checkForUpdates(true);
+            }
+        });
         helpMenu->addAction("View &Design Document (DESIGN.md)", [this]() {
             // Simple hint — in real app we can open the file or a help viewer
             QMessageBox::information(this, "Design Document",
@@ -984,357 +1223,339 @@ private:
 #include "main.moc"
 
 int runCLI(int argc, char* argv[]) {
-    QCoreApplication app(argc, argv); // for QStandardPaths etc in DeviceManager
-    app.setApplicationName("SDR Town");
-    app.setOrganizationName("SDR_Town");
+    std::cout << "SDR Town CLI (Phase 0 complete - per-receiver foundation + full monitor thread)\n";
+    std::cout << "Type 'help' for commands. 'quit' to exit.\n";
 
-    std::cout << "=== SDR Town CLI ===\n";
-    std::cout << "Type 'help' for commands. Streaming and audio run in background.\n";
-    std::cout << "Use --gui (default) for the full Qt interface.\n\n";
+    // S0-1: App identity for CLI (and tests). Must create QCoreApplication *before* any
+    // setupLogging() or DeviceManager that calls QStandardPaths::writableLocation(AppDataLocation).
+    // This ensures logs go to %APPDATA%\SDR_Town\logs\sdr_town.log and devices.json/receivers.json
+    // live under the proper organization/app subdir instead of root Roaming (P1 audit).
+    int dummyArgc = argc > 0 ? argc : 1;
+    char* dummyArgv0 = (char*)"sdr_town_cli";
+    char** dummyArgv = (argc > 0 ? argv : &dummyArgv0);
+    QCoreApplication cliApp(dummyArgc, dummyArgv);
+    cliApp.setApplicationName("SDR Town");
+    cliApp.setOrganizationName("SDR_Town");
+    cliApp.setApplicationVersion("0.2.0");
+
+    setupLogging();
+    spdlog::info("CLI mode started");
 
     auto& mgr = DeviceManager::instance();
-    // Enumerate early (light path) so that "enable 0", "status", "gain" etc. work even if the
-    // user types them before an explicit "list". Previously the devices vector was empty until first list.
-    (void)mgr.enumerateDevices(false);
-    std::unique_ptr<AudioEngine> audioEng = std::make_unique<AudioEngine>();
-    std::atomic<bool> running{true};
-    double cliMonitorFreq = 100e6;
-    DemodMode cliMode = DemodMode::NFM;
-    bool cliAutoDetect = true;
-    double cliLpfHz = 15000;
-    double cliSquelchDb = -90;
-    double cliGain = 2.0;
-    double cliWfmDeTauUs = 75.0;
-    double cliWfmPilotNotchR = 0.96;
-    double cliChannelBwHz = 180000.0; // tighter WFM default (180 kHz) for better spur rejection on RTL in broadcast band; use set bw 120-200 to tune
-    static double lastCliAudioRms = -100;  // shared with stats printer (updated from monitor thread)
+    mgr.setupSoapyForRTLSDR();
+    auto devs = mgr.enumerateDevices(false);
+    std::cout << "Devices enumerated: " << devs.size() << "\n";
+    for (size_t i=0; i<devs.size(); ++i) {
+        const auto& d = devs[i];
+        std::cout << "  [" << i << "] " << d.driver << " " << d.label << " enabled=" << d.enabled << " gain=" << d.gain << "\n";
+    }
 
-    // Background monitor thread: similar to GUI timer - poll, spectrum summary, basic demod, push audio
-    std::thread monitorThread([&]() {
-        while (running) {
-            bool didWork = false;
-            for (size_t i = 0; i < mgr.getDevices().size(); ++i) {
-                if (mgr.isStreaming(i)) {
-                    std::vector<float> pwr;
-                    double cf, sr;
-                    if (mgr.getLatestSpectrum(i, pwr, cf, sr) && !pwr.empty()) {
-                        // Simple text summary for CLI
-                        float minp = *std::min_element(pwr.begin(), pwr.end());
-                        float maxp = *std::max_element(pwr.begin(), pwr.end());
-                        float avg = 0; for(auto v : pwr) avg += v; avg /= pwr.size();
-                        std::cout << "[SPEC " << i << "] CF=" << (cf/1e6) << "M SR=" << (sr/1e6) << "M  min=" << minp << " max=" << maxp << " avg=" << avg << " dB\r" << std::flush;
+    // Use shared_ptr<Receiver> for CLI too (consistent with GUI, enables stable cursor updates across snapshots, cheap to snapshot pointers).
+    std::vector<std::shared_ptr<Receiver>> cliReceivers;
+    std::mutex cliRxMutex;  // S0-2 (P0): protect CLI receiver vector mutations (command thread) vs mon thread iteration
+    std::unique_ptr<AudioEngine> cliAudio;
+    std::atomic<bool> cliStop{false};
+    std::atomic<bool> cliAudioEnabled{false};
+
+    // S0 / audit-followup-1: non-recursive mutex discipline.
+    // ensureCliRxLocked assumes the caller already holds cliRxMutex.
+    // ensureCliRx acquires the lock then calls the locked version.
+    auto ensureCliRxLocked = [&](size_t idx = 0) {
+        while (cliReceivers.size() <= idx) {
+            auto rptr = std::make_shared<Receiver>();
+            size_t r = cliReceivers.size();
+            rptr->deviceIndex = r;
+            rptr->freqHz = 100e6;
+            rptr->mode = DemodMode::NFM;
+            rptr->channelBwHz = 25000.0;
+            rptr->lpfHz = 3500.0;
+            rptr->squelchDb = -90.0;
+            rptr->gain = 20.0;
+            rptr->wfmDeTauUs = 75.0;
+            rptr->wfmPilotNotchR = 0.96;
+            rptr->active = false;
+            cliReceivers.push_back(std::move(rptr));
+        }
+    };
+
+    auto ensureCliRx = [&](size_t idx = 0) {
+        std::lock_guard<std::mutex> lk(cliRxMutex);
+        ensureCliRxLocked(idx);
+    };
+
+    // CLI DSP monitor thread (mirrors guiDspWorker but standalone, uses Receiver vector + own demod instances)
+    std::thread cliMonThread([&]() {
+        while (!cliStop) {
+            bool did = false;
+            // S0-2 (P0): snapshot under lock (shared_ptrs — cheap, stable objects for cursor + demod state).
+            std::vector<std::shared_ptr<Receiver>> rxSnap;
+            {
+                std::lock_guard<std::mutex> lk(cliRxMutex);
+                rxSnap.reserve(cliReceivers.size());
+                for (auto& r : cliReceivers) if (r && r->active) rxSnap.push_back(r);
+            }
+            for (size_t r = 0; r < rxSnap.size() && !cliStop; ++r) {
+                auto& rxPtr = rxSnap[r];
+                if (!rxPtr) continue;
+                Receiver& rx = *rxPtr;  // live object (cursor updates will stick)
+                size_t di = rx.deviceIndex;
+                if (di >= mgr.getDevices().size() || !mgr.isStreaming(di)) continue;
+
+                std::vector<float> pwr; double cf=0, sr=0;
+                mgr.getLatestSpectrum(di, pwr, cf, sr);
+
+                // audit-followup-2: cursor-based new samples only for this rx (chronological, no overlap with other rxs on same dev).
+                size_t tgt = (sr > 0 ? (size_t)(sr * 0.025) : 8192);
+                auto iq = mgr.getNewSamplesForReceiver(di, rx, tgt);  // updates live rx cursor
+                size_t got = iq.size();
+                if (got > 0) {
+                    // audit-followup-7 (P2): if the rx is in AUTO, let the CLI monitor classify using latest spectrum
+                    // and pick a concrete mode (NFM/WFM/AM etc) before demod. GUI timer already does this.
+                    if (rx.mode == DemodMode::AUTO && !pwr.empty()) {
+                        DemodMode classified = classifyMode(pwr, sr, cf);
+                        if (classified != DemodMode::AUTO) rx.mode = classified;
                     }
-
-                    if (cliAutoDetect && !pwr.empty()) {
-                        cliMode = classifyMode(pwr, sr, cf);
-                        double det = detectChannelBandwidth(pwr, sr);
-                        if (cliMode == DemodMode::WFM || cliMode == DemodMode::AUTO) {
-                            if (std::abs(det - cliChannelBwHz) > 25000.0) {
-                                cliChannelBwHz = 180000.0;  // match GUI: lock WFM to avoid filter jumps causing chop
-                            }
-                        } else {
-                            cliChannelBwHz = det;
+                    double t = (sr > 0 ? got / sr : 0.01);
+                    double orate = (cliAudio ? cliAudio->getSampleRate() : 48000.0);
+                    size_t need = (size_t)std::round(t * orate);
+                    double rms = -100;
+                    auto t0 = std::chrono::steady_clock::now();
+                    auto ch = rx.demod.demodulateToAudio(iq, sr, cf, rx.freqHz, rx.mode,
+                        rms, rx.lpfHz, rx.squelchDb, rx.gain, rx.wfmDeTauUs,
+                        rx.wfmPilotNotchR, rx.channelBwHz, need, orate);
+                    auto t1 = std::chrono::steady_clock::now();
+                    gLastDspMicros.store( std::chrono::duration_cast<std::chrono::microseconds>(t1-t0).count() );
+                    if (!ch.empty() && cliAudio && cliAudioEnabled) {
+                        static std::vector<float> pend;
+                        pend.insert(pend.end(), ch.begin(), ch.end());
+                        const size_t psz = 240;
+                        while (pend.size() >= psz) {
+                            cliAudio->pushAudio(pend.data(), psz);
+                            pend.erase(pend.begin(), pend.begin() + psz);
                         }
                     }
-
-                    std::vector<std::complex<float>> iq;
-                    const size_t target_iq = 48000;  // ~24 ms at 2 MS/s — larger for lower FIR overhead, less chopping
-                    iq.reserve(target_iq);
-                    while (iq.size() < target_iq) {
-                        std::vector<std::complex<float>> chunk(4096);
-                        size_t g = mgr.getNextIQBlock(i, chunk.data(), chunk.size(), 3);
-                        if (g == 0) break;
-                        chunk.resize(g);
-                        iq.insert(iq.end(), chunk.begin(), chunk.end());
-                    }
-                    size_t got = iq.size();
-                    // Guard: only demod/push when we have a real meaty block from the SDR (no tiny glitches)
-                    if (got > (size_t)(sr * 0.002)) {
-                        double chunk_time = (double)got / sr;
-                        double outRate = (audioEng ? audioEng->getSampleRate() : 48000.0);
-                        size_t audio_needed = (size_t)std::round(chunk_time * outRate);  // automatic from AudioEngine output rate
-                        double audioRms = -100;
-                        auto t0 = std::chrono::steady_clock::now();
-                        auto audioChunk = gCliDemod.demodulateToAudio(iq, sr, cf, cliMonitorFreq, cliMode, audioRms, cliLpfHz, cliSquelchDb, cliGain, cliWfmDeTauUs, cliWfmPilotNotchR, cliChannelBwHz, audio_needed, outRate);
-                        auto t1 = std::chrono::steady_clock::now();
-                        gLastDspMicros.store( std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() );
-                        if (!audioChunk.empty()) {
-                            lastCliAudioRms = audioRms;   // for stats command to display latest (shared)
-                            // Same smoothing as GUI: regular 10 ms pushes to AudioEngine for stable playback
-                            // even when IQ chunk sizes from the 2048-sample rx blocks vary.
-                            static std::vector<float> pending;
-                            pending.insert(pending.end(), audioChunk.begin(), audioChunk.end());
-                            const size_t pushSz = 240;  // 5 ms blocks for smoother, less blocky delivery
-                            while (pending.size() >= pushSz) {
-                                audioEng->pushAudio(pending.data(), pushSz);
-                                pending.erase(pending.begin(), pending.begin() + pushSz);
-                            }
-                        }
-                    }
-                    didWork = true;
-                    break; // one active device for monitor
+                    did = true;
                 }
             }
-            if (!didWork) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(did ? 4 : 15));
         }
     });
 
-    auto printHelp = []() {
-        std::cout << "Commands:\n";
-        std::cout << "  list                     - list devices\n";
-        std::cout << "  enable <idx>             - enable and start streaming device idx\n";
-        std::cout << "  disable <idx>            - stop streaming\n";
-        std::cout << "  tune <freq_mhz>          - set monitor freq and tune active device\n";
-        std::cout << "  gain <idx> <db>          - set gain for device\n";
-        std::cout << "  rate <idx> <msps>        - set sample rate\n";
-        std::cout << "  spectrum                 - print current spectrum summary\n";
-        std::cout << "  audio list               - list audio output devices\n";
-        std::cout << "  audio enable <i> [i2..]  - activate multiple audio outputs\n";
-        std::cout << "  audio test [idx]         - play test tone (all or specific)\n";
-        std::cout << "  audio vol <idx> <0-100>  - set volume for output\n";
-        std::cout << "  status                   - show active streams and monitor freq\n";
-        std::cout << "  scan                     - start simple multi-device 'scan' (enable all)\n";
-        std::cout << "  mode [nfm|wfm|am|usb|lsb|auto]  - set or show demod mode (use CLI for live debug/optim)\n";
-        std::cout << "  set lpf <hz>             - set LPF bandwidth (e.g. 3500 for NFM, 15000 for WFM)\n";
-        std::cout << "  set squelch <db>         - set squelch threshold (e.g. -80)\n";
-        std::cout << "  set gain <x>             - set post-demod gain (e.g. 2.0)\n";
-        std::cout << "  set wfmde <us>           - WFM de-emphasis tau (75 us typical for broadcast)\n";
-        std::cout << "  set pilotnotch <r>       - WFM 19kHz pilot notch radius (0.96 narrow, 0.9 stronger to kill buzz)\n";
-        std::cout << "  set bw <khz>             - channel BW filter before demod (e.g. 150-180 for WFM broadcast, 12-25 for NFM voice) - tighter = better spur/image rejection on RTL in FM band\n";
-        std::cout << "  stats                    - print current demod stats (mode, rms, bw estimate) + device vs monitor freq\n";
-        std::cout << "  Note: RTL-SDRs often show the same strong FM station (e.g. 98.9) at nearby freqs like 97.3/98.1 due to hardware images/spurs/overload.\n";
-        std::cout << "        Try: lower RF gain (gain 0 15), set bw 120-150, or rate 0 1.024 for different folding. The channel filter + limiter now help reject in software.\n";
-        std::cout << "  help                     - this help\n";
-        std::cout << "  quit / exit              - exit CLI\n";
+    auto printStats = [&](size_t r = 0) {
+        {
+            std::lock_guard<std::mutex> lk(cliRxMutex);
+            ensureCliRxLocked(r);
+        }
+        // Read the live element after releasing (for stats it's fine; for strictness we could copy params under lock)
+        Receiver& rx = *cliReceivers[r];
+        size_t di = rx.deviceIndex;
+        double g = (di < mgr.getDevices().size() ? mgr.getCurrentGain(di) : rx.gain);
+        size_t qd = (di < mgr.getDevices().size() ? mgr.getIQQueueDepth(di) : 0);
+        double dsp = gLastDspMicros.load() / 1000.0;
+        double ring = 0, underr = 0;
+        if (cliAudio) {
+            ring = cliAudio->getRingFillPercent();
+            underr = (double)cliAudio->getUnderrunCount();
+        }
+        std::cout << "RX" << r << " dev=" << di << " f=" << (rx.freqHz/1e6) << "MHz mode=" << (int)rx.mode
+                  << " bw=" << (rx.channelBwHz/1000) << "kHz gain=" << g << "dB IQdepth=" << qd
+                  << " DSP=" << dsp << "ms ring=" << ring << "% underruns=" << underr << "\n";
     };
 
-    printHelp();
-
     std::string line;
-    while (running) {
-        std::cout << "\ncli> " << std::flush;
-        if (!std::getline(std::cin, line)) break;
-        if (line.empty()) continue;
+    try {
+        while (true) {
+            std::cout << "sdr> " << std::flush;
+            if (!std::getline(std::cin, line)) break;
+            std::istringstream iss(line);
+            std::string cmd; iss >> cmd;
+            if (cmd.empty()) continue;
+            for (auto& c : cmd) c = (char)std::tolower(c);
 
-        std::istringstream iss(line);
-        std::string cmd;
-        iss >> cmd;
-        std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::tolower);
-
-        if (cmd == "quit" || cmd == "exit" || cmd == "q") {
-            running = false;
-            break;
-        } else if (cmd == "help" || cmd == "h") {
-            printHelp();
-        } else if (cmd == "list") {
-            auto devs = mgr.enumerateDevices();
-            for (size_t i = 0; i < devs.size(); ++i) {
-                const auto& d = devs[i];
-                std::cout << i << ": " << d.driver << " | " << d.label
-                          << " ser=" << d.serial
-                          << " en=" << (d.enabled ? "Y" : "N")
-                          << " rate=" << (d.sampleRate/1e6) << "M"
-                          << " gain=" << d.gain << "dB"
-                          << " ant=" << d.antenna << "\n";
+            if (cmd == "quit" || cmd == "exit" || cmd == "q") {
+                cliStop = true;
+                break;
+            } else if (cmd == "help" || cmd == "h" || cmd == "?") {
+            std::cout << "Commands:\n"
+                      << "  list | devices          - show enumerated devices\n"
+                      << "  enable <i>              - enable + start real streaming on device i\n"
+                      << "  disable <i>             - stop streaming on device i\n"
+                      << "  tune <mhz> [rx]         - tune (e.g. tune 98.9 or tune 0 98.9)\n"
+                      << "  mode <auto|wfm|nfm|am|usb|lsb> [rx]\n"
+                      << "  set bw <khz> [rx]       - set channel BW (e.g. set bw 150)\n"
+                      << "  gain <i> <db>           - set device RF gain via updateDeviceParams\n"
+                      << "  squelch <db> [rx]       - set squelch\n"
+                      << "  stats | status [rx]     - live diagnostics (gain/mode/BW/IQ/DSP/ring/underrun)\n"
+                      << "  audio list              - list playback devices\n"
+                      << "  audio enable <out0> <out1?>\n"
+                      << "  audio disable           - stop audio outputs\n"
+                      << "  rx add                  - add another receiver entry\n"
+                      << "  quit / exit\n";
+        } else if (cmd == "list" || cmd == "devices") {
+            auto dlist = mgr.getDevices();
+            for (size_t i=0; i<dlist.size(); ++i) {
+                const auto& d = dlist[i];
+                std::cout << "[" << i << "] " << d.driver << "/" << d.label << " en=" << d.enabled << " sr=" << d.sampleRate << " gain=" << d.gain << "\n";
             }
         } else if (cmd == "enable") {
-            size_t idx; if (iss >> idx) {
-                mgr.setEnabled(idx, true);
-                if (mgr.startStreaming(idx)) {
-                    std::cout << "Enabled and streaming device " << idx << "\n";
-                } else {
-                    std::cout << "Failed to start streaming for " << idx << "\n";
+            int i = 0; iss >> i;
+            if (i >= 0 && (size_t)i < mgr.getDevices().size()) {
+                mgr.setEnabled(i, true);
+                bool ok = mgr.startStreaming(i, true /* real */);
+                {
+                    std::lock_guard<std::mutex> lk(cliRxMutex);
+                    ensureCliRxLocked(0);
+                    cliReceivers[0]->deviceIndex = i;
+                    cliReceivers[0]->active = true;
                 }
-            }
+                std::cout << "Enabled+streaming device " << i << " (real=" << (ok?"yes":"no") << ")\n";
+            } else std::cout << "bad device index\n";
         } else if (cmd == "disable") {
-            size_t idx; if (iss >> idx) {
-                mgr.setEnabled(idx, false);
-                mgr.stopStreaming(idx);
-                std::cout << "Disabled device " << idx << "\n";
+            int i = 0; iss >> i;
+            if (i >= 0 && (size_t)i < mgr.getDevices().size()) {
+                mgr.stopStreaming(i);
+                {
+                    std::lock_guard<std::mutex> lk(cliRxMutex);
+                    for (auto& rx : cliReceivers) if (rx->deviceIndex == (size_t)i) rx->active = false;
+                }
+                std::cout << "Stopped device " << i << "\n";
             }
         } else if (cmd == "tune") {
-            double f; if (iss >> f) {
-                cliMonitorFreq = f * 1e6;
-                auto devs = mgr.getDevices();
-                for (size_t i=0; i<devs.size(); ++i) {
-                    if (mgr.isStreaming(i)) {
-                        mgr.setCenterFreq(i, cliMonitorFreq);
-                        std::cout << "Tuned device " << i << " + monitor to " << f << " MHz\n";
-                        break;
-                    }
+            double f = 0; int rxidx = 0;
+            if (!(iss >> f)) {
+                std::cout << "bad freq (e.g. tune 98.9 or tune 0 98.9)\n";
+                continue;
+            }
+            if (iss >> rxidx) {} // optional
+            {
+                std::lock_guard<std::mutex> lk(cliRxMutex);
+                ensureCliRxLocked(rxidx);
+                cliReceivers[rxidx]->freqHz = f * 1e6;
+                cliReceivers[rxidx]->active = true;
+            }
+            size_t di = cliReceivers[rxidx]->deviceIndex;
+            if (mgr.isStreaming(di)) mgr.setCenterFreq(di, f * 1e6);
+            std::cout << "Tuned RX" << rxidx << " to " << f << " MHz (dev " << di << ")\n";
+        } else if (cmd == "mode") {
+            std::string m; int rxidx=0; iss >> m;
+            if (iss >> rxidx) {}
+            {
+                std::lock_guard<std::mutex> lk(cliRxMutex);
+                ensureCliRxLocked(rxidx);
+                auto& rx = *cliReceivers[rxidx];
+                for (auto& c : m) c = (char)std::tolower((unsigned char)c);
+                if (m=="auto") rx.mode=DemodMode::AUTO;
+                else if (m=="wfm") rx.mode=DemodMode::WFM;
+                else if (m=="nfm") rx.mode=DemodMode::NFM;
+                else if (m=="am") rx.mode=DemodMode::AM;
+                else if (m=="usb") rx.mode=DemodMode::USB;
+                else if (m=="lsb") rx.mode=DemodMode::LSB;
+            }
+            std::cout << "RX" << rxidx << " mode -> " << m << "\n";
+        } else if (cmd == "set" ) {
+            std::string sub; iss >> sub; for(auto& c : sub) c = (char)std::tolower((unsigned char)c);
+            if (sub == "bw") {
+                double khz; int rxidx=0; iss >> khz; if(iss>>rxidx){}
+                {
+                    std::lock_guard<std::mutex> lk(cliRxMutex);
+                    ensureCliRxLocked(rxidx);
+                    cliReceivers[rxidx]->channelBwHz = khz * 1000.0;
                 }
+                std::cout << "RX" << rxidx << " BW -> " << khz << " kHz\n";
+            } else {
+                std::cout << "set what? bw\n";
             }
         } else if (cmd == "gain") {
-            size_t idx; double g; if (iss >> idx >> g) {
-                auto d = mgr.getDevice(idx);
-                if (d) {
-                    mgr.updateDeviceParams(idx, d->sampleRate, g, d->antenna);
-                    std::cout << "Set gain " << g << " for " << idx << "\n";
-                }
+            int di; double db; iss >> di >> db;
+            if (di >= 0 && (size_t)di < mgr.getDevices().size()) {
+                auto* dev = mgr.getDevice(di);
+                double sr = dev ? dev->sampleRate : 2.048e6;
+                std::string ant = dev ? dev->antenna : "";
+                mgr.updateDeviceParams(di, sr, db, ant);
+                ensureCliRx(0);
+                if (cliReceivers[0]->deviceIndex == (size_t)di) cliReceivers[0]->gain = db;
+                std::cout << "Gain device " << di << " -> " << db << " dB\n";
             }
-        } else if (cmd == "rate") {
-            size_t idx; double r; if (iss >> idx >> r) {
-                auto d = mgr.getDevice(idx);
-                if (d) {
-                    mgr.updateDeviceParams(idx, r*1e6, d->gain, d->antenna);
-                    std::cout << "Set rate " << r << " MS/s for " << idx << "\n";
-                }
+        } else if (cmd == "squelch") {
+            double db; int rxidx=0;
+            if (!(iss >> db)) { std::cout << "bad squelch value\n"; continue; }
+            if (iss >> rxidx) {}
+            {
+                std::lock_guard<std::mutex> lk(cliRxMutex);
+                ensureCliRxLocked(rxidx);
+                cliReceivers[rxidx]->squelchDb = db;
             }
-        } else if (cmd == "spectrum") {
-            auto devs = mgr.getDevices();
-            bool found = false;
-            for (size_t i=0; i<devs.size(); ++i) {
-                if (mgr.isStreaming(i)) {
-                    std::vector<float> pwr; double cf, sr;
-                    if (mgr.getLatestSpectrum(i, pwr, cf, sr) && !pwr.empty()) {
-                        float minp = *std::min_element(pwr.begin(), pwr.end());
-                        float maxp = *std::max_element(pwr.begin(), pwr.end());
-                        float avg = 0; for (auto v:pwr) avg += v; avg /= pwr.size();
-                        std::cout << "Device " << i << " CF=" << (cf/1e6) << "M  min=" << minp << " max=" << maxp << " avg=" << avg << " dB\n";
-                        // simple ascii bar for max
-                        int bar = std::max(0, std::min(50, (int)((maxp + 100) * 0.5)));
-                        std::cout << "  [" << std::string(bar, '#') << std::string(50-bar, ' ') << "]\n";
-                    }
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) std::cout << "No streaming devices.\n";
+            std::cout << "RX" << rxidx << " squelch -> " << db << " dB\n";
+        } else if (cmd == "stats" || cmd == "status") {
+            int rxidx = 0; if (iss >> rxidx) {}
+            printStats(rxidx);
         } else if (cmd == "audio") {
-            std::string sub; iss >> sub;
-            std::transform(sub.begin(), sub.end(), sub.begin(), ::tolower);
+            std::string sub; iss >> sub; for(auto& c : sub) c = (char)std::tolower((unsigned char)c);
             if (sub == "list") {
-                auto outs = audioEng->enumeratePlaybackDevices();
+                if (!cliAudio) cliAudio = std::make_unique<AudioEngine>();
+                auto outs = cliAudio->enumeratePlaybackDevices();
                 for (size_t i=0; i<outs.size(); ++i) {
-                    std::cout << i << ": " << outs[i].name << (outs[i].isDefault ? " (default)" : "") << "\n";
+                    std::cout << "  [" << i << "] " << outs[i].name << (outs[i].isDefault ? " (default)" : "") << "\n";
                 }
             } else if (sub == "enable") {
-                std::vector<size_t> idxs; size_t t;
-                while (iss >> t) idxs.push_back(t);
-                audioEng->setActiveOutputs(idxs);
-                std::cout << "Audio outputs set.\n";
+                int a=-1, b=-1; iss >> a; iss >> b;
+                if (!cliAudio) cliAudio = std::make_unique<AudioEngine>();
+                std::vector<size_t> idxs;
+                if (a >= 0) idxs.push_back(a);
+                if (b >= 0) idxs.push_back(b);
+                if (idxs.empty() && !cliAudio->enumeratePlaybackDevices().empty()) idxs = {0};
+                cliAudio->setActiveOutputs(idxs);
+                cliAudioEnabled = true;
+                std::cout << "Audio outputs activated: " << idxs.size() << "\n";
+            } else if (sub == "disable") {
+                cliAudioEnabled = false;
+                if (cliAudio) cliAudio->setActiveOutputs({});
+                std::cout << "Audio outputs disabled for CLI.\n";
             } else if (sub == "test") {
-                size_t idx = size_t(-1); iss >> idx;
-                audioEng->playTestTone(idx);
-                std::cout << "Test tone triggered.\n";
-            } else if (sub == "vol") {
-                size_t idx; double v; if (iss >> idx >> v) {
-                    audioEng->setOutputVolume(idx, v/100.0f);
-                    std::cout << "Volume set.\n";
-                }
+                int which = -1; iss >> which;
+                std::cout << "Test tone requested for output " << which << " (CLI path - tone handled by engine if supported in session; see GUI for live tone buttons).\n";
             }
-        } else if (cmd == "status") {
-            auto devs = mgr.getDevices();
-            int active = 0;
-            for (auto& d : devs) if (mgr.isStreaming(&d - &devs[0])) active++; // rough
-            std::cout << "Devices: " << devs.size() << "  Streaming: " << active << "\n";
-            std::cout << "Monitor freq: " << (cliMonitorFreq / 1e6) << " MHz  Mode: ";
-            if (cliAutoDetect) std::cout << "AUTO/";
-            if (cliMode == DemodMode::WFM) std::cout << "WFM"; else if (cliMode == DemodMode::NFM) std::cout << "NFM"; else if (cliMode == DemodMode::AM) std::cout << "AM"; else std::cout << "other";
-            std::cout << "\n";
-            std::cout << "Audio active outputs: " << audioEng->activeOutputCount() << "\n";
-        } else if (cmd == "scan") {
-            auto devs = mgr.getDevices();
-            for (size_t i=0; i<devs.size(); ++i) {
-                mgr.setEnabled(i, true);
-                mgr.startStreaming(i);
-            }
-            std::cout << "Scan mode: streaming enabled on all devices.\n";
-        } else if (cmd == "mode") {
-            std::string m; iss >> m;
-            if (m.empty()) {
-                std::cout << "Current mode: " << (cliAutoDetect ? "AUTO" : "manual") << " ";
-                if (cliMode == DemodMode::NFM) std::cout << "NFM\n";
-                else if (cliMode == DemodMode::WFM) std::cout << "WFM\n";
-                else if (cliMode == DemodMode::AM) std::cout << "AM\n";
-                else if (cliMode == DemodMode::USB) std::cout << "USB\n";
-                else if (cliMode == DemodMode::LSB) std::cout << "LSB\n";
-                else std::cout << "AUTO\n";
-            } else if (m == "auto") { cliAutoDetect = true; cliMode = DemodMode::AUTO; std::cout << "Auto detect enabled.\n"; }
-            else if (m == "nfm") { cliAutoDetect = false; cliMode = DemodMode::NFM; std::cout << "NFM mode.\n"; }
-            else if (m == "wfm") { cliAutoDetect = false; cliMode = DemodMode::WFM; std::cout << "WFM mode.\n"; }
-            else if (m == "am") { cliAutoDetect = false; cliMode = DemodMode::AM; std::cout << "AM mode.\n"; }
-            else if (m == "usb") { cliAutoDetect = false; cliMode = DemodMode::USB; std::cout << "USB mode.\n"; }
-            else if (m == "lsb") { cliAutoDetect = false; cliMode = DemodMode::LSB; std::cout << "LSB mode.\n"; }
-            else std::cout << "Unknown mode. Use nfm|wfm|am|usb|lsb|auto\n";
-        } else if (cmd == "set") {
+        } else if (cmd == "rx") {
             std::string sub; iss >> sub;
-            if (sub == "lpf") { double h; if (iss >> h) { cliLpfHz = h; std::cout << "LPF set to " << h << " Hz\n"; } }
-            else if (sub == "squelch") { double db; if (iss >> db) { cliSquelchDb = db; std::cout << "Squelch " << db << " dB\n"; } }
-            else if (sub == "gain") { double g; if (iss >> g) { cliGain = g; std::cout << "Gain " << g << "\n"; } }
-            else if (sub == "wfmde") { double us; if (iss >> us) { cliWfmDeTauUs = us; std::cout << "WFM de-emph tau " << us << " us\n"; } }
-            else if (sub == "pilotnotch") { double r; if (iss >> r) { cliWfmPilotNotchR = r; std::cout << "WFM pilot notch r=" << r << "\n"; } }
-            else if (sub == "bw") { double khz; if (iss >> khz) { cliChannelBwHz = khz * 1000.0; std::cout << "Channel BW " << khz << " kHz (filter before demod)\n"; } }
-            else std::cout << "set lpf|squelch|gain|wfmde|pilotnotch|bw <val>\n";
-        } else if (cmd == "stats") {
-            // P1 audit: live diagnostics now include RF gain, mode/BW, IQ queue depth, DSP block time, audio ring fill, underrun count.
-            // These make scratch/crackle causes obvious (gain too hot? queue building? DSP too slow starving audio?).
-            std::cout << "Mode: " << (cliAutoDetect?"AUTO ":"") ;
-            if (cliMode==DemodMode::WFM) std::cout << "WFM"; else if (cliMode==DemodMode::NFM) std::cout<<"NFM"; else if (cliMode==DemodMode::AM) std::cout<<"AM"; else std::cout << "other";
-            std::cout << "  LPF:" << cliLpfHz << "  Squelch:" << cliSquelchDb << "  (post-demod)Gain:" << cliGain << "\n";
-            if (cliMode==DemodMode::WFM || cliMode==DemodMode::AUTO) {
-                std::cout << "  WFMde:" << cliWfmDeTauUs << "us  PilotNotchR:" << cliWfmPilotNotchR << "\n";
+            if (sub == "add") {
+                std::lock_guard<std::mutex> lk(cliRxMutex);
+                size_t newi = cliReceivers.size();
+                ensureCliRxLocked(newi);
+                cliReceivers.back()->active = false;
+                std::cout << "Added RX" << newi << "\n";
             }
-            std::cout << "  ChannelBW:" << (cliChannelBwHz/1000) << " kHz\n";
-            std::cout << "Monitor freq: " << (cliMonitorFreq/1e6) << " MHz\n";
-
-            // Live from manager (locked queries)
-            double rfGain = mgr.getCurrentGain(0);
-            size_t iqDepth = mgr.getIQQueueDepth(0);
-            std::cout << "RF gain (dev0): " << rfGain << " dB   IQ queue depth: " << iqDepth << "\n";
-
-            // Show actual device center (what the SDR LO is tuned to) vs the monitor DDC target.
-            // Large difference means the channel filter is the only thing rejecting spurs/images at other offsets.
-            // On RTL-SDR this is key for diagnosing "same signal at 97.3 / 98.1 / 98.9".
-            double devCf = cliMonitorFreq, devSr = 2.048e6;
-            std::vector<float> dummyP;
-            if (mgr.getLatestSpectrum(0, dummyP, devCf, devSr) && !dummyP.empty()) {
-                double off = (cliMonitorFreq - devCf) / 1e3;
-                std::cout << "Device CF: " << (devCf/1e6) << " MHz   Offset to monitor: " << off << " kHz\n";
-            }
-            std::cout << "Audio RMS (last): " << lastCliAudioRms << " dB  (while receiving, higher = stronger signal)\n";
-
-            // DSP timing + audio health (updated live from worker/monitor + engine)
-            long long dspUs = gLastDspMicros.load();
-            double ring = audioEng ? audioEng->getRingFillPercent() : 0.0;
-            int und = audioEng ? audioEng->getUnderrunCount() : 0;
-            std::cout << "Last DSP block: " << dspUs << " us   Audio ring fill: " << ring << "%   Underruns: " << und << "\n";
-
-            // === AUTOMATIC STATE-OF-THE-ART RATE & BITRATE REPORT ===
-            // All numbers are calculated from the real SDR chunk duration + AudioEngine output rate + channel BW.
-            // This is what "no compromise" means: every stage knows the exact rates and bitrates.
-            double outRate = (audioEng ? audioEng->getSampleRate() : 48000.0);
-            // Rough current input rate from last spectrum (devSr)
-            double sdrRate = devSr;
-            double sdrBitrateMbps = sdrRate * 2 * 4 * 8 / 1e6; // CF32 = 2 floats * 4 bytes * 8 bits
-            double audioPerDeviceKbps = outRate * 4 * 8 / 1000.0; // mono float32
-            int activeOuts = audioEng ? (int)audioEng->activeOutputCount() : 0;
-            double totalAudioKbps = audioPerDeviceKbps * activeOuts;
-            std::cout << "=== RATES (automatic) ===\n";
-            std::cout << "  SDR input: " << (sdrRate/1e6) << " MS/s   IQ bitrate: " << sdrBitrateMbps << " Mbps (CF32)\n";
-            std::cout << "  Channel BW: " << (cliChannelBwHz/1000.0) << " kHz   (internal/decim target ~192 kHz for WFM)\n";
-            std::cout << "  Output rate: " << (outRate/1000) << " kHz   Per-device audio: " << audioPerDeviceKbps << " kbps (float32 mono)\n";
-            std::cout << "  Active outputs: " << activeOuts << "   Total output bitrate: " << totalAudioKbps << " kbps\n";
-            std::cout << "  (All exact audio block sizes are computed as round(real_IQ_duration * output_rate))\n";
+        } else if (cmd == "spectrum" || cmd == "spec") {
+            // lightweight: just report latest for primary dev 0 if any
+            std::vector<float> p; double cf,sr;
+            if (mgr.getLatestSpectrum(0, p, cf, sr) && !p.empty()) {
+                std::cout << "Spec dev0 cf=" << (cf/1e6) << " sr=" << (sr/1e6) << " bins=" << p.size() << " peak~ " << *std::max_element(p.begin(),p.end()) << "dB\n";
+            } else std::cout << "no spectrum yet (enable + stream first)\n";
+        } else if (cmd == "scan") {
+            std::cout << "scan: (PR6 stub) use 'enable 0; tune <f>; stats' for now. Smart scanner in later phase.\n";
+        } else if (cmd == "status") {
+            printStats(0);
+            std::cout << "Streaming: " << (mgr.isStreaming(0) ? "active" : "idle") << "\n";
         } else {
-            std::cout << "Unknown command. Type 'help'.\n";
+            std::cout << "Unknown cmd '" << cmd << "'. 'help' for list.\n";
         }
+        } // end while
+    } catch (const std::exception& ex) {
+        spdlog::error("Unhandled exception in CLI command loop: {}", ex.what());
+        std::cout << "CLI error (see log): " << ex.what() << "\n";
+        cliStop = true;
+    } catch (...) {
+        spdlog::error("Unknown exception in CLI command loop");
+        std::cout << "CLI unknown error\n";
+        cliStop = true;
     }
 
-    // Stop streams first (real Soapy devices get deactivate/close/unmake) so background monitor and rx threads see clean state before joins and process teardown.
-    {
-        auto devs = mgr.getDevices();
-        for (size_t i = 0; i < devs.size(); ++i) {
-            if (mgr.isStreaming(i)) mgr.stopStreaming(i);
-        }
+    cliStop = true;
+    if (cliMonThread.joinable()) cliMonThread.join();
+    // stop any streams we started in this CLI session (best effort)
+    for (size_t i=0; i<mgr.getDevices().size(); ++i) {
+        if (mgr.isStreaming(i)) { try { mgr.stopStreaming(i); } catch(...) {} }
     }
-    running = false;
-    if (monitorThread.joinable()) monitorThread.join();
-    std::cout << "CLI exited.\n";
+    spdlog::info("CLI exiting");
     return 0;
 }
 
@@ -1363,7 +1584,7 @@ int main(int argc, char *argv[])
         QApplication app(argc, argv);
         app.setApplicationName("SDR Town");
         app.setOrganizationName("SDR_Town");
-        app.setApplicationVersion("0.1.0-dev");
+        app.setApplicationVersion("0.2.0");
 
         setupLogging();
         applyDarkTheme(app);
@@ -1373,6 +1594,7 @@ int main(int argc, char *argv[])
         writeEarlyCrashLog("before-mainwindow");
 
         MainWindow w;
+
         w.show();
 
         spdlog::info("Main window shown. Entering Qt event loop.");

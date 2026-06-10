@@ -1,4 +1,5 @@
 #include "DeviceManager.h"
+#include "Receiver.h"   // for getNewSamplesForReceiver(..., Receiver& rx, ... ) cursor update
 
 #include <spdlog/spdlog.h>
 #include <fstream>
@@ -330,6 +331,15 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
     if (useRate < 0.25e6 || useRate > 60e6) useRate = (d.driver == "rtlsdr" ? 2.048e6 : 2.4e6);
     st.currentRate = useRate;
 
+    // S0 / audit-followup-2: init per-device ring for cursor-based per-rx consumption.
+    // Large enough for reasonable backlog (e.g. ~2s at 2MS/s ~ 4M samples ~32MB cf32 per active dev is acceptable).
+    if (st.ringCapacity == 0) {
+        st.ringCapacity = 1u << 22; // 4M samples
+        st.iqRing.assign(st.ringCapacity, std::complex<float>(0,0));
+        st.ringWriteIdx = 0;
+        st.totalSamplesWritten = 0;
+    }
+
     setupSoapyForRTLSDR();
 
     st.active = true;
@@ -340,19 +350,21 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
         return true;
     }
 
-    // attemptReal=true (explicit user action): try the real Soapy open in a *background thread* assigned to the owned realInitThread.
-    // We detach on stop (with guards) to avoid hanging UI/CLI/harness shutdown if Soapy make/setup is stuck (e.g. RTL driver hang).
-    // Early stopFlag + post-make guard in lambda prevent resurrection/writes to soapyDev/rxStream/active after stop.
-    // If it hangs, throws, or SEH-crashes inside the native driver, the main app + stub keeps running.
-    // This (plus /EHa) fixes the init race without blocking.
-    // Bump generation so any previous in-flight init knows it is stale.
+    // attemptReal=true (explicit user action): try the real Soapy open in a *background thread*...
+    // S0-4: the entire real Soapy upgrade path (make, set, activate, close) is guarded so that
+    // a build with Soapy disabled (or vcpkg manifest without soapysdr) compiles cleanly and still
+    // provides full stub functionality for CLI/GUI "enable/tune/stats" flows (P1 audit).
+#ifdef HAVE_SOAPYSDR
     uint64_t myGen = ++st.sessionGen;
 
+    // Best practice per audit (P0 shutdown hang): NEVER use jthread (or any joinable thread handle that the caller will join) for the untrusted native Soapy open/make path.
+    // SoapySDR::Device::make + USB driver stack can block forever on bad hardware/state. We launch a detached open-worker.
+    // All safety is via sessionGen + stopFlag captured at launch time. The worker self-aborts and cleans (unmake) if gen mismatches or stop set.
+    // stopStreaming simply bumps gen + stopFlag and never joins this worker. Abandoned make threads are reaped on process exit (acceptable; alternative is out-of-proc probe helper).
     st.realInitThread = std::thread([this, index, d, useRate, myGen]() mutable {
         if (index >= streams.size() || !streams[index]) return;
         auto& st = *streams[index];
         if (st.stopFlag) return;
-        // If a stop has already bumped the generation, do not touch shared state.
         if (st.sessionGen.load() != myGen) return;
         try {
             if (d.driver == "rtlsdr") {
@@ -371,13 +383,11 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
             st.soapyDev->setSampleRate(SOAPY_SDR_RX, 0, useRate);
             if (!d.antenna.empty()) try { st.soapyDev->setAntenna(SOAPY_SDR_RX, 0, d.antenna); } catch (...) {}
             double useGain = std::clamp(d.gain, 0.0, 80.0);
-            // P1 audit (smoking gun): RTL gain 80 (or even 30+) from devices.json / prior probe overloads front-end on strong local WFM -> scratch/crackle.
-            // Now defaults/caps to 15-25 range. Test first with gain 15-25 + WFM BW 120-150 kHz before any DSP changes.
             if (d.driver == "rtlsdr" && useGain > 25.0) {
-                spdlog::warn("RTL gain {} too high for strong signals (overload -> scratch/crackle on WFM). Capping to 20 dB. Use CLI 'gain 0 20' or lower devices.json.", useGain);
+                spdlog::warn("RTL gain {} too high for strong signals (overload -> scratch/crackle on WFM). Capping to 20 dB.", useGain);
                 useGain = 20.0;
             } else if (d.driver == "rtlsdr" && useGain < 5.0) {
-                useGain = 15.0; // floor for usable sensitivity on weaker but still local stations
+                useGain = 15.0;
             }
             if (!d.gainName.empty()) {
                 try { st.soapyDev->setGain(SOAPY_SDR_RX, 0, d.gainName, useGain); } catch (...) { st.soapyDev->setGain(SOAPY_SDR_RX, 0, useGain); }
@@ -391,7 +401,6 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
             st.soapyDev->activateStream(st.rxStream);
 
             if (st.stopFlag || st.sessionGen.load() != myGen) {
-                // Stopped or a newer session took over during/after init; cleanup without resurrecting state.
                 try {
                     if (st.rxStream && st.soapyDev) st.soapyDev->closeStream(st.rxStream);
                     if (st.soapyDev) SoapySDR::Device::unmake(st.soapyDev);
@@ -400,11 +409,9 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                 st.rxStream = nullptr;
                 return;
             }
-
-            // Success: only publish if generation still matches (prevents teardown race).
             if (st.sessionGen.load() != myGen) return;
 
-            // Success: stop the stub thread we started in the caller, then start the real rx thread.
+            // Success path: stop stub (our code, safe to join), start real rx thread.
             st.stopFlag = true;
             if (st.rxThread.joinable()) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -419,43 +426,73 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
             spdlog::warn("Background real init failed for device {} ({}). Keeping safe stub.", index, ex.what());
             if (st.soapyDev) { SoapySDR::Device::unmake(st.soapyDev); st.soapyDev = nullptr; }
             st.rxStream = nullptr;
-            // stub thread is already running from the fast path above
         } catch (...) {
             spdlog::warn("Background real init failed for device {} with unknown exception (SEH/driver). Keeping safe stub.", index);
             if (st.soapyDev) { SoapySDR::Device::unmake(st.soapyDev); st.soapyDev = nullptr; }
             st.rxStream = nullptr;
         }
     });
+    // Immediately detach: this is the open-worker for untrusted driver. We never join it again.
+    if (st.realInitThread.joinable()) {
+        st.realInitThread.detach();
+    }
 
+    return true;
+#else
+    // !HAVE_SOAPYSDR: stay on the fast safe stub that was started above. The CLI/GUI/ tests
+    // continue to work for list/enable/tune/mode/stats/spectrum/demod (using the internal stub path in rxThreadFunc).
+    spdlog::info("SoapySDR not available in this build — device {} staying on safe internal stub (no real hardware).", index);
+#endif
     return true;
 }
 
 void DeviceManager::stopStreaming(size_t index) {
     if (index >= streams.size() || !streams[index]) return;
     auto& st = *streams[index];
-    if (!st.active && !st.soapyDev && !st.realInitThread.joinable() && !st.rxThread.joinable()) return;
+    bool soapyIdle =
+#ifdef HAVE_SOAPYSDR
+        !st.soapyDev &&
+#endif
+        true;
+    if (!st.active && soapyIdle && !st.realInitThread.joinable() && !st.rxThread.joinable()) return;
 
     // P1: bump generation *first* so any in-flight init thread will see the mismatch and refuse to publish/teardown.
     st.sessionGen.fetch_add(1, std::memory_order_acq_rel);
     st.stopFlag = true;
 
-    // Capture the resources that belong to the session we are stopping (prevents a racing init from changing them under us).
+    // realInitThread is launched detached (see startStreaming). Never join it here — it is the untrusted open path.
+    // The gen bump + stopFlag inside the worker is sufficient for it to self-abort and unmake if it ever wakes.
+    if (st.realInitThread.joinable()) {
+        // Best-effort: if somehow not yet detached by launcher, detach now without waiting.
+        try { st.realInitThread.detach(); } catch (...) {}
+    }
+
+    // For the rxThread (post-activate, our code): still attempt short graceful join because the loop checks stopFlag,
+    // but if readStream / driver is wedged we must not block the caller (CLI quit, app exit, updater launch, etc.).
+    // Use the same timeout+detach escape. This fixes the "CLI/hardware shutdown hang is back".
+    if (st.rxThread.joinable()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        auto start = std::chrono::steady_clock::now();
+        while (st.rxThread.joinable()) {
+            if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(300)) {
+                spdlog::warn("rxThread for device {} still running after stop — detaching (possible stuck readStream / native driver).", index);
+                try { st.rxThread.detach(); } catch (...) {}
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(4));
+        }
+        if (st.rxThread.joinable()) {
+            try { st.rxThread.join(); } catch (...) { try { st.rxThread.detach(); } catch (...) {} }
+        }
+    }
+
+#ifdef HAVE_SOAPYSDR
+    // Capture and null only when Soapy types are available (fixes no-Soapy build P1).
     SoapySDR::Device* devToClose = st.soapyDev;
     SoapySDR::Stream* streamToClose = st.rxStream;
     st.soapyDev = nullptr;
     st.rxStream = nullptr;
 
-    if (st.realInitThread.joinable()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(3));
-        st.realInitThread.detach();
-    }
-
-    if (st.rxThread.joinable()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        st.rxThread.join();
-    }
-
-#ifdef HAVE_SOAPYSDR
     try {
         if (streamToClose && devToClose) {
             devToClose->deactivateStream(streamToClose);
@@ -539,12 +576,150 @@ double DeviceManager::getCurrentGain(size_t index) const {
     return devices[index].gain;
 }
 
+void DeviceManager::setLiveGain(size_t index, double gainDb) {
+    // Always update the persisted / model value
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (index >= devices.size()) return;
+        devices[index].gain = gainDb;
+    }
+
+#ifdef HAVE_SOAPYSDR
+    // If we have a live real streaming session, apply it to hardware right now.
+    if (index < streams.size() && streams[index]) {
+        auto& st = *streams[index];
+        if (st.isReal && st.soapyDev && !st.stopFlag) {
+            try {
+                double useGain = std::clamp(gainDb, 0.0, 80.0);
+                if (devices[index].driver == "rtlsdr" && useGain > 25.0) useGain = 20.0;
+                if (!devices[index].gainName.empty()) {
+                    st.soapyDev->setGain(SOAPY_SDR_RX, 0, devices[index].gainName, useGain);
+                } else {
+                    st.soapyDev->setGain(SOAPY_SDR_RX, 0, useGain);
+                }
+                spdlog::info("Live RF gain applied to device {}: {} dB", index, useGain);
+            } catch (const std::exception& ex) {
+                spdlog::warn("Failed to apply live gain to device {}: {}", index, ex.what());
+            }
+        }
+    }
+#endif
+}
+
 size_t DeviceManager::getIQQueueDepth(size_t index) const {
     // Safe under stream's queueMutex (P2 audit: was unlocked .size() read in rx path too)
     if (index >= streams.size() || !streams[index]) return 0;
     auto& st = *streams[index];
     std::lock_guard<std::mutex> lk(st.queueMutex);
     return st.iqQueue.size();
+}
+
+// S0-3 (P1): non-consuming recent window so N receivers on the same device each get a coherent
+// recent RF capture for their private channelizer/demod. Does not advance frontBlockReadOffset
+// or pop anything (unlike the consuming getNextIQBlock used by primary spectrum path).
+std::vector<std::complex<float>> DeviceManager::getRecentIQWindow(size_t index, size_t maxSamples) {
+    if (index >= streams.size() || !streams[index] || maxSamples == 0) return {};
+    auto& st = *streams[index];
+    std::lock_guard<std::mutex> lk(st.queueMutex);
+    if (!st.active || st.iqQueue.empty()) return {};
+
+    std::vector<std::complex<float>> out;
+    out.reserve(maxSamples);
+
+    // Start from the most recent full blocks (back of deque) and work toward older if needed.
+    // Also incorporate any live remainder in the front block (the one being partially consumed by getNext).
+    // This gives demod paths a consistent "latest N samples" view without affecting the primary cursor.
+    auto it = st.iqQueue.rbegin(); // most recent full block first
+    // First, if there is a partial front block in flight, we can only reliably use full previous blocks here.
+    // For simplicity and low latency we copy full recent blocks from the tail until we have enough or run out.
+    while (it != st.iqQueue.rend() && out.size() < maxSamples) {
+        const auto& blk = *it;
+        size_t take = std::min(blk.size(), maxSamples - out.size());
+        // prepend in reverse iteration order — correct by inserting at front or build then reverse at end
+        // Easier: collect in reverse then fix, or use a temp and insert.
+        // Practical: push the recent ones and reverse at the end.
+        out.insert(out.begin(), blk.end() - take, blk.end());  // take the newest part of this (older in iteration) blk? Wait, rbegin is newest.
+        // Since we go from newest block backward, the newest samples end up at the front of 'out' after inserts at begin — reverse at end.
+        ++it;
+    }
+
+    if (!out.empty()) {
+        // We built newest-first because of rbegin + insert begin; reverse to chronological (oldest first) for the caller.
+        std::reverse(out.begin(), out.end());
+    }
+
+    // Trim to exactly what was requested (in case we over-copied slightly).
+    if (out.size() > maxSamples) out.resize(maxSamples);
+
+    return out;
+}
+
+// S0 / audit-followup-2: cursor based new-samples only, chronological, per-rx.
+// Replaces the "always take newest overlapping window" anti-pattern that caused repeated demod of the same data / chop.
+std::vector<std::complex<float>> DeviceManager::getNewSamplesForReceiver(size_t devIndex, Receiver& rx, size_t maxSamples) {
+    if (devIndex >= streams.size() || !streams[devIndex] || maxSamples == 0) return {};
+    auto& st = *streams[devIndex];
+    if (st.ringCapacity == 0) return {};
+
+    uint64_t myLast = rx.lastConsumedAbsolute;
+    uint64_t total = st.totalSamplesWritten.load(std::memory_order_acquire);
+    uint64_t available = (total > myLast) ? (total - myLast) : 0;
+
+    if (available == 0) return {};
+
+    // If we are way behind the ring (data was overwritten), skip forward.
+    // Log once per big drop and advance cursor. Return a short zero block so demod can ramp/squelch naturally (fade).
+    if (available > st.ringCapacity) {
+        spdlog::warn("Receiver on dev {} fell behind by {} samples; dropping old data and skipping forward (audio may have a brief dropout/fade).", devIndex, (unsigned long long)(available - st.ringCapacity));
+        // Leave a little headroom so we have some new data this time
+        myLast = total - (st.ringCapacity / 2);
+        rx.lastConsumedAbsolute = myLast;
+        available = (total > myLast) ? (total - myLast) : 0;
+        if (available == 0) return {};
+        // Return a small zeroed block to give the downstream (squelch, resample, audio) a chance to fade cleanly
+        size_t fadeLen = std::min((size_t)256, maxSamples);
+        return std::vector<std::complex<float>>(fadeLen, std::complex<float>(0,0));
+    }
+
+    size_t toRead = (size_t)std::min((uint64_t)maxSamples, available);
+
+    std::vector<std::complex<float>> out;
+    out.reserve(toRead);
+
+    size_t cap = st.ringCapacity;
+    size_t startWrapped = (size_t)(myLast % cap);
+
+    for (size_t k = 0; k < toRead; ++k) {
+        size_t pos = (startWrapped + k) & (cap - 1);
+        out.push_back(st.iqRing[pos]);
+    }
+
+    rx.lastConsumedAbsolute += toRead;
+    return out;
+}
+
+void DeviceManager::appendIQBlock(size_t index, std::vector<std::complex<float>>&& block) {
+    if (index >= streams.size() || !streams[index] || block.empty()) return;
+    auto& st = *streams[index];
+
+    // Feed the per-rx ring *first* while we still own the data (before any move into queue).
+    if (st.ringCapacity > 0) {
+        size_t w = st.ringWriteIdx.load(std::memory_order_relaxed);
+        for (const auto& s : block) {
+            st.iqRing[w] = s;
+            w = (w + 1) & (st.ringCapacity - 1);
+        }
+        st.ringWriteIdx.store(w, std::memory_order_release);
+        st.totalSamplesWritten.fetch_add(block.size(), std::memory_order_relaxed);
+    }
+
+    // Then the consuming deque for getNext / spectrum (bounded).
+    {
+        std::lock_guard<std::mutex> lk(st.queueMutex);
+        st.iqQueue.push_back(std::move(block));
+        size_t maxQ = (index == 0 ? 128 : 64); // slightly larger for primary
+        while (st.iqQueue.size() > maxQ) st.iqQueue.pop_front();
+    }
 }
 
 std::vector<std::string> DeviceManager::getAvailableDrivers() const {
@@ -634,6 +809,68 @@ void DeviceManager::setCenterFreq(size_t index, double freqHz) {
 #endif
 }
 
+// Real radix-2 FFT implementation (iterative, double precision for dynamic range).
+// Bit-reversal + Danielson-Lanczos butterflies. Self-contained, no external FFT lib required for viz.
+static void fftRadix2(std::vector<std::complex<double>>& x) {
+    const size_t N = x.size();
+    // bit reverse
+    for (size_t i = 1, j = 0; i < N; ++i) {
+        size_t bit = N >> 1;
+        for (; j >= bit; bit >>= 1) j -= bit;
+        j += bit;
+        if (i < j) std::swap(x[i], x[j]);
+    }
+    for (size_t len = 2; len <= N; len <<= 1) {
+        double ang = -2.0 * 3.141592653589793 * (1.0 / len);
+        std::complex<double> wlen(std::cos(ang), std::sin(ang));
+        for (size_t i = 0; i < N; i += len) {
+            std::complex<double> w(1);
+            for (size_t j = 0; j < len / 2; ++j) {
+                auto u = x[i + j];
+                auto v = x[i + j + len / 2] * w;
+                x[i + j] = u + v;
+                x[i + j + len / 2] = u - v;
+                w *= wlen;
+            }
+        }
+    }
+}
+
+std::vector<float> DeviceManager::computeRealFFTPower(const std::vector<std::complex<float>>& time, size_t fftN, bool useBlackmanHarris) {
+    if (fftN == 0 || (fftN & (fftN - 1)) != 0) fftN = 8192; // force pow2
+    std::vector<std::complex<double>> buf(fftN);
+    size_t n = std::min(fftN, time.size());
+    // window + copy (zero pad if needed)
+    for (size_t i = 0; i < fftN; ++i) {
+        std::complex<float> s = (i < n) ? time[i] : std::complex<float>(0,0);
+        double w;
+        if (useBlackmanHarris) {
+            // Blackman-Harris (approx 92 dB sidelobe) — excellent for SDR spectrum
+            double a0 = 0.35875, a1 = 0.48829, a2 = 0.14128, a3 = 0.01168;
+            double x = 2.0 * 3.141592653589793 * i / (fftN - 1.0);
+            w = a0 - a1 * std::cos(x) + a2 * std::cos(2 * x) - a3 * std::cos(3 * x);
+        } else {
+            // Hann
+            w = 0.5 * (1.0 - std::cos(2.0 * 3.141592653589793 * i / (fftN - 1.0)));
+        }
+        buf[i] = std::complex<double>(s.real() * w, s.imag() * w);
+    }
+    fftRadix2(buf);
+
+    // Power spectrum, fftshifted so [0] = -fs/2, middle = 0, end = +fs/2 - bin
+    std::vector<float> power(fftN);
+    const double norm = 1.0 / (double)fftN;
+    for (size_t i = 0; i < fftN; ++i) {
+        size_t k = (i + fftN / 2) % fftN; // fftshift
+        double re = buf[k].real() * norm;
+        double im = buf[k].imag() * norm;
+        double p = re*re + im*im;
+        float db = 10.0f * std::log10(std::max(p, 1e-20));
+        power[i] = db;
+    }
+    return power;
+}
+
 void DeviceManager::rxThreadFunc(size_t index) {
     if (index >= streams.size() || !streams[index]) return;
     auto& st = *streams[index];
@@ -664,44 +901,57 @@ void DeviceManager::rxThreadFunc(size_t index) {
                 if (numRead > 0) {
                     if (numRead > blockSize) numRead = blockSize;
                     std::vector<std::complex<float>> block(buff.begin(), buff.begin() + numRead);
-                    {
-                        std::lock_guard<std::mutex> lk(st.queueMutex);
-                        st.iqQueue.push_back(std::move(block));
-                        // keep queue bounded but larger to absorb bursts
-                        while (st.iqQueue.size() > 128) st.iqQueue.pop_front();
-                    }
+                    // Centralized: feeds ring before move into queue (fixes ring getting no samples after move)
+                    appendIQBlock(index, std::move(block));
 
-                    // Throttled spectrum: do NOT compute expensive 256-bin DFT on every read.
-                    // RX thread must stay lean to avoid SOAPY_SDR_OVERFLOW. Spectrum at ~20 Hz is plenty for UI.
+                    // === State-of-the-art spectrum pipeline (P1 audit + this stabilization) ===
+                    // - Real radix-2 FFT, 8192 bins (supports 4096/8192/16384)
+                    // - Hann + Blackman-Harris windows (Blackman-Harris for main viz)
+                    // - Window taken from high-quality per-device ring (overlap friendly via ring)
+                    // - Exponential averaging + peak hold (slow decay) maintained in StreamState
+                    // - Throttled (~16-30 Hz) in RX thread to keep readStream lean (future: can move to dedicated spectrum worker thread)
+                    // - Published as high-res latestPower so SpectrumWidget can do true-resolution zoomed waterfall from source history.
                     auto now = std::chrono::steady_clock::now();
-                    if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastSpectrumTime).count() > 50) {
-                        const int sbins = 256;
-                        std::vector<float> localPower(sbins, -100.0f);
-                        int N = std::min(256, (int)numRead);
-                        if (N > 0) {
-                            int startIdx = numRead - N;
-                            for (int b = 0; b < sbins; ++b) {
-                                std::complex<double> sum(0, 0);
-                                double binFreq = (double)(b - sbins/2) / sbins;
-                                double w = -2 * 3.1415926535 * binFreq;
-                                for (int n = 0; n < N; ++n) {
-                                    auto s = buff[startIdx + n];
-                                    double phi = w * n;
-                                    sum += std::complex<double>(s.real(), s.imag()) * std::complex<double>(std::cos(phi), std::sin(phi));
-                                }
-                                double p = std::norm(sum) / (N * N);
-                                float db = 10.0f * std::log10(std::max(p, 1e-12));
-                                localPower[b] = std::max(localPower[b] * 0.7f + db * 0.3f, db - 20);
+                    if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastSpectrumTime).count() > 45) {
+                        const size_t fftN = 8192; // SOTA default; higher = more resolution for zoom
+                        std::vector<float> localPower;
+
+                        // Draw window from ring (best continuous recent IQ, enables overlap if we hop)
+                        std::vector<std::complex<float>> samples;
+                        samples.reserve(fftN);
+                        uint64_t total = st.totalSamplesWritten.load(std::memory_order_acquire);
+                        if (st.ringCapacity > 0 && total >= fftN) {
+                            uint64_t start = total - fftN;
+                            for (size_t k = 0; k < fftN; ++k) {
+                                size_t idx = (start + k) % st.ringCapacity;
+                                samples.push_back(st.iqRing[idx]);
                             }
+                        } else {
+                            size_t take = std::min((size_t)numRead, fftN);
+                            for (size_t i = 0; i < take; ++i) samples.push_back(buff[i]);
+                            while (samples.size() < fftN) samples.push_back({0.f, 0.f});
                         }
-                        try {
-                            double devRate = st.soapyDev->getSampleRate(SOAPY_SDR_RX, 0);
+
+                        // Real FFT power (Blackman-Harris primary for clean dynamic range; Hann available)
+                        localPower = computeRealFFTPower(samples, fftN, /*useBlackmanHarris=*/true);
+
+                        // Exponential avg + peak hold (state lives in StreamState for continuity across calls)
+                        if (st.spectrumAvg.size() != localPower.size()) {
+                            st.spectrumAvg.assign(localPower.size(), -110.0f);
+                            st.spectrumPeak.assign(localPower.size(), -110.0f);
+                        }
+                        for (size_t b = 0; b < localPower.size(); ++b) {
+                            st.spectrumAvg[b] = st.spectrumAvg[b] * 0.72f + localPower[b] * 0.28f;
+                            float decayedPeak = st.spectrumPeak[b] * 0.985f;
+                            st.spectrumPeak[b] = std::max(decayedPeak, localPower[b]);
+                        }
+                        // Publish the averaged high-res spectrum (UI can choose peak if wanted later)
+                        {
                             std::lock_guard<std::mutex> lk(st.queueMutex);
-                            st.latestPower = std::move(localPower);
-                            st.currentRate = devRate;
-                        } catch (...) {
-                            std::lock_guard<std::mutex> lk(st.queueMutex);
-                            st.latestPower = std::move(localPower);
+                            st.latestPower = st.spectrumAvg; // high bin count vector
+                            try {
+                                st.currentRate = st.soapyDev->getSampleRate(SOAPY_SDR_RX, 0);
+                            } catch (...) {}
                         }
                         lastSpectrumTime = now;
                     }
@@ -735,30 +985,27 @@ void DeviceManager::rxThreadFunc(size_t index) {
             float im = std::sin(phase) * 0.8f + (rand() % 1000 - 500) * 0.0002f;
             block[i] = {re, im};
         }
-        {
-            std::lock_guard<std::mutex> lk(st.queueMutex);
-            st.iqQueue.push_back(std::move(block));
-            while (st.iqQueue.size() > 64) st.iqQueue.pop_front();
-            // (size check for backpressure also under this lock in real path; stub production is slow so no extra yield here)
-        }
+        // Centralized append: ring fed before move (no more "ring receives no samples" after std::move)
+        appendIQBlock(index, std::move(block));
 
-        // spectrum for stub - compute local then publish under lock to avoid race with GUI/CLI getLatestSpectrum + demod
-        size_t bins = 256;
-        std::vector<float> localPower(bins, -95.0f);
-        for (size_t b = 0; b < bins; ++b) {
-            // simple energy in bin (demo)
-            float energy = -90 + 25 * std::exp(-std::pow((double)b - 80 + 5*std::sin(t), 2) / 30.0);
-            energy += (rand() % 10 - 5) * 0.5f;
-            localPower[b] = std::max(localPower[b], energy);
-        }
+        // spectrum for stub (high bin count via the *same* real FFT path so zoomed views look consistent and "high res" even in demo/no-hw)
         {
-            std::lock_guard<std::mutex> lk(st.queueMutex);
-            st.latestPower = std::move(localPower);
-            st.currentRate = fs;
-            // Do NOT overwrite currentCenter here every frame. setCenterFreq (from GUI/CLI clicks or Set & Tune)
-            // updates it for the demod (currentMonitorFreq) and display. Overwriting made tuning "snap back".
-            // The stub is a demo around a nominal 100 MHz carrier; the reported center for getLatest is
-            // controlled by the tuning path.
+            const size_t fftN = 8192;
+            std::vector<std::complex<float>> fake(fftN);
+            for (size_t i = 0; i < fftN; ++i) {
+                double phase = 2 * 3.14159265 * (100e6 + 0.1e6 * std::sin(t * 0.3)) / fs * (double)i;
+                float re = std::cos(phase) * 0.7f + (rand() % 1000 - 500) * 0.00015f;
+                float im = std::sin(phase) * 0.7f + (rand() % 1000 - 500) * 0.00015f;
+                fake[i] = {re, im};
+            }
+            auto lp = computeRealFFTPower(fake, fftN, true);
+            if (st.spectrumAvg.size() != lp.size()) st.spectrumAvg = lp;
+            for (size_t b = 0; b < lp.size(); ++b) st.spectrumAvg[b] = st.spectrumAvg[b] * 0.7f + lp[b] * 0.3f;
+            {
+                std::lock_guard<std::mutex> lk(st.queueMutex);
+                st.latestPower = st.spectrumAvg;
+                st.currentRate = fs;
+            }
         }
 
         t += 0.05;

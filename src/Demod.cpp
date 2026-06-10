@@ -312,19 +312,51 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         float sum=0;
         for (auto s : aud) sum += s*s;
         rmsOut = 10 * std::log10( (sum / aud.size()) + 1e-12 );
-        float thr = std::pow(10.0f, squelchDb / 20.0f);
-        if (rmsOut < squelchDb) {
-            std::fill(aud.begin(), aud.end(), 0.0f);
-        } else {
+        lastRmsDb = rmsOut;
+
+        // S0-6 (P2) + P1 calibration: smooth squelch with attack/release/hang + hysteresis.
+        // Added live RMS storage, per-mode default helper, and slightly wider effective hysteresis via hang + target.
+        // UI exposes Auto (from recent RMS - offset) and open/closed can be queried via isSquelchOpen().
+        {
+            if (dspStateNeedsReset) { squelchGateGain = 0.0f; squelchHangLeft = 0; }
+            float thr = std::pow(10.0f, (float)squelchDb / 20.0f);
+            float target = (squelchDb < -115.0f || rmsOut > squelchDb) ? 1.0f : 0.0f;
+
+            // Hang + a bit of extra hysteresis (open stays open a little longer; close is reluctant).
+            const int hangSamples = (int)(0.30 * outputRate);
+            if (target > 0.5f) squelchHangLeft = hangSamples;
+            else if (squelchHangLeft > 0) { target = 1.0f; --squelchHangLeft; }
+
+            float attack = 0.025f;
+            float release = 0.0007f;
+            if (target > squelchGateGain)
+                squelchGateGain = squelchGateGain * (1-attack) + target * attack;
+            else
+                squelchGateGain = squelchGateGain * (1-release) + target * release;
+
+            squelchGateGain = std::clamp(squelchGateGain, 0.0f, 1.0f);
+
             for (auto &s : aud) {
                 if (std::abs(s) < thr) s = 0;
-                s *= gain;
+                s *= gain * squelchGateGain;
             }
         }
         dspStateNeedsReset = false;
     }
     dspStateNeedsReset = false;
     return aud;
+}
+
+double Demodulator::getSquelchDefaultForMode(DemodMode m) const {
+    switch (m) {
+        case DemodMode::WFM: return -72.0;
+        case DemodMode::NFM: return -88.0;
+        case DemodMode::AM:  return -82.0;
+        case DemodMode::USB:
+        case DemodMode::LSB: return -95.0;
+        case DemodMode::AUTO: return -85.0;
+        default: return -90.0;
+    }
 }
 
 // Back-compat free function wrappers (use a static Demodulator so old call sites keep working during transition).

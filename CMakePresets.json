@@ -11,6 +11,7 @@
       "displayName": "Windows (vcpkg + Qt)",
       "description": "Configure for Windows with vcpkg and user-provided Qt6",
       "generator": "Visual Studio 17 2022",
+      "architecture": { "value": "x64", "strategy": "external" },
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": {

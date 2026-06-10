@@ -10,6 +10,8 @@
 #include <thread>
 #include <complex>
 
+struct Receiver;  // forward for per-rx cursor methods (full def in Receiver.h, included in .cpp)
+
 #ifdef HAVE_SOAPYSDR
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Types.hpp>
@@ -72,7 +74,20 @@ public:
 
     // Get next block of IQ samples (blocking with timeout or non-block)
     // Returns number of samples copied, or 0 if none.
+    // NOTE: this is consuming (advances per-device read cursor) — used by primary spectrum/monitor.
     size_t getNextIQBlock(size_t index, std::complex<float>* buffer, size_t maxSamples, int timeoutMs = 10);
+
+    // S0-3 (P1 audit): non-consuming recent window for per-receiver demod/channelizer.
+    // Multiple receivers on the *same* device must each see the full recent RF capture
+    // instead of fighting over one consuming queue (which caused sample drops/splits).
+    // Returns up to maxSamples of the most recent IQ (from the live end of the per-dev queue)
+    // without advancing any read offset. Short lock only.
+    std::vector<std::complex<float>> getRecentIQWindow(size_t index, size_t maxSamples);
+
+    // S0 / audit-followup-2 (P0): proper cursor-based consumption.
+    // The receiver's lastConsumedAbsolute is updated. Returns only *new* samples in chronological order.
+    // If the rx is too far behind the write cursor, log a drop, advance the cursor, and return a short zeroed/faded block.
+    std::vector<std::complex<float>> getNewSamplesForReceiver(size_t devIndex, Receiver& rx, size_t maxSamples);
 
     // For spectrum: get latest power spectrum (dB) and center/sample info
     bool getLatestSpectrum(size_t index, std::vector<float>& powerDb, double& centerFreq, double& sampleRate);
@@ -83,6 +98,11 @@ public:
     // Live diagnostics (addressing audit P1 RF gain, P2 unlocked queue size)
     double getCurrentGain(size_t index) const;   // the (possibly capped) configured gain for this dev
     size_t getIQQueueDepth(size_t index) const;  // thread-safe locked peek of current iqQueue depth
+
+    // P1: truly live hardware RF gain (separate from audioGain / displayGain).
+    // If the device is currently streaming real hardware, this calls SoapySDR::setGain immediately.
+    // Falls back to just updating the persisted setting if not streaming.
+    void setLiveGain(size_t index, double gainDb);
 
     // Diagnostics
     std::vector<std::string> getAvailableDrivers() const;
@@ -103,7 +123,15 @@ private:
         bool active = false;
         bool isReal = false;   // true only when we successfully did real Soapy make + activate (not the stub sim)
         std::thread rxThread;
-        std::thread realInitThread;  // owned bg thread for real Soapy open; on stop we detach (with guards in lambda) to avoid hanging shutdown on stuck native make, while preventing resurrection.
+        // CRITICAL (P0 audit shutdown hang + best practice for untrusted SDR drivers):
+        // realInitThread is intentionally a plain std::thread, not jthread.
+        // SoapySDR::Device::make() (and the native USB stack) can block indefinitely.
+        // We launch it, give it strong sessionGen + stopFlag guards so it never publishes stale state,
+        // then on stop we try a short join and *detach* if it is still alive. Detaching the "stuck make"
+        // thread is the only way to guarantee the rest of the application (GUI, CLI, installer, updater)
+        // does not hang. The abandoned thread will die when the process exits.
+        // This is the accepted pragmatic pattern for hardware that you do not control.
+        std::thread realInitThread;
         std::mutex queueMutex;
         std::deque<std::vector<std::complex<float>>> iqQueue;  // deque to support partial block consumption without dropping samples (P0 fix)
         size_t frontBlockReadOffset = 0;  // for consuming partials from front block without copying remainders under lock (P1)
@@ -117,6 +145,19 @@ private:
         // if the gen still matches. stopStreaming bumps the gen before teardown.
         std::atomic<uint64_t> sessionGen{0};
 
+        // S0 / audit-followup-2: per-device ring buffer with absolute sample count for per-receiver cursors.
+        // Each receiver maintains its own lastConsumedAbsolute and pulls only *new* chronological samples.
+        std::vector<std::complex<float>> iqRing;
+        std::atomic<size_t> ringWriteIdx{0};       // wrapped write position
+        std::atomic<uint64_t> totalSamplesWritten{0};
+        size_t ringCapacity = 0;                   // power of 2
+
+        // P1 SOTA spectrum pipeline state (real FFT + averaging + peak hold).
+        // Maintained here so rxThread (or future separate worker) can publish high-res power.
+        std::vector<float> spectrumAvg;   // exponential average per bin (dB)
+        std::vector<float> spectrumPeak;  // peak-hold (with slow decay)
+        size_t spectrumBins = 8192;       // 4096/8192/16384 supported by compute path
+
 #ifdef HAVE_SOAPYSDR
         SoapySDR::Device* soapyDev = nullptr;
         SoapySDR::Stream* rxStream = nullptr;
@@ -125,4 +166,12 @@ private:
     std::vector<std::unique_ptr<StreamState>> streams;
 
     void rxThreadFunc(size_t index);  // background RX loop
+
+    // Centralized append for both the consuming deque (for getNext/spectrum) and the per-rx ring.
+    // Feeds ring *before* moving into queue so ring always gets the samples. Fixes the WFM ring bug.
+    void appendIQBlock(size_t index, std::vector<std::complex<float>>&& block);
+
+    // Real FFT power spectrum (8192-bin default, Blackman-Harris + Hann, used by rx pipeline and stub).
+    // Returns fftshifted dB vector. See .cpp for radix-2 impl + windowing.
+    std::vector<float> computeRealFFTPower(const std::vector<std::complex<float>>& time, size_t fftN, bool useBlackmanHarris);
 };

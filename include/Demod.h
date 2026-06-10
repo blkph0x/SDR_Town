@@ -56,6 +56,16 @@ private:
 
     // Internal rate for the channelizer/decimator path (WFM uses ~192 kHz).
     double internalRate = 48000.0;
+
+    // S0-6 (P2) + P1 calibration: smooth squelch state + live RMS + open/closed for indicator.
+    float squelchGateGain = 0.0f;
+    int   squelchHangLeft = 0;
+    double lastRmsDb = -100.0;
+
+    // Per-mode squelch defaults and hysteresis helpers (calibration support).
+    double getSquelchDefaultForMode(DemodMode m) const;
+    bool isSquelchOpen() const { return squelchGateGain > 0.15f; }
+    double getLastRmsDb() const { return lastRmsDb; }
 };
 
 // Back-compat free functions (thin wrappers around a shared instance or the old implementation

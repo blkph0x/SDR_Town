@@ -10,8 +10,8 @@ TEST_CASE("DeviceManager basic functionality", "[devicemanager]") {
     int argc = 0;
     char* argv[] = {nullptr};
     QCoreApplication app(argc, argv);
-    app.setApplicationName("MaulAudio Pro Test");
-    app.setOrganizationName("MaulAudio");
+    app.setApplicationName("SDR Town Test");
+    app.setOrganizationName("SDR_Town");
 
     auto& mgr = DeviceManager::instance();
 

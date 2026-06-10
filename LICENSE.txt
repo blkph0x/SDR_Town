@@ -1,0 +1,12 @@
+SDR Town
+Copyright (c) 2026
+
+This software is for receiving only. You are solely responsible for compliance with all applicable laws in your jurisdiction regarding radio reception, recording, and use of data.
+
+IMPORTANT: All decoding and analysis features are intended exclusively for unencrypted / clear signals. No decryption, cryptoanalysis, or attempts to access encrypted communications are implemented or supported. If a signal is encrypted, the output will be unintelligible or random.
+
+Use responsibly and lawfully only.
+
+See the source code and DESIGN.md for architecture, legal notes, and full details.
+
+(The full text of applicable open-source licenses for bundled components such as Qt, SoapySDR, miniaudio, spdlog, nlohmann-json, Catch2, etc. are included in the deployed package or available from their respective upstream projects.)

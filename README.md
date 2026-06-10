@@ -45,6 +45,42 @@ This is by design. All runtime dependencies are obtained automatically via:
 
 This is the clean, reproducible, and recommended way. You will not have to hunt for DLLs manually.
 
+### Build Steps
+
+```powershell
+# 1. Clone the repo
+cd "$env:USERPROFILE\Desktop\SDR_Town"
+
+# 2. Submodules
+git submodule update --init --recursive
+
+# 3. Configure with vcpkg toolchain + your Qt path
+cmake -S . -B build `
+  -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+  -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/msvc2022_64" `
+  -G "Visual Studio 17 2022" -A x64
+
+# 4. Build
+cmake --build build --config Release -j
+
+# 5. Deploy Qt runtime (critical step)
+cd build/bin/Release
+C:/Qt/6.11.1/msvc2022_64/bin/windeployqt.exe SDR_Town.exe --no-compiler-runtime --no-system-d3d-compiler
+
+# 6. Run
+.\SDR_Town.exe
+```
+
+See DESIGN.md for the full current feature list and phased implementation roadmap (per-receiver architecture, recording, decoders, weather sats, number stations, sat tracking, etc.). The roadmap is designed so you can say "let's get started" on the next item tomorrow.
+
+**Important:** We do **not** commit any DLLs, Qt plugins, or built binaries to the repository.  
+This is by design. All runtime dependencies are obtained automatically via:
+
+- **vcpkg** (manifest mode in `vcpkg.json`) — provides spdlog, nlohmann-json, SoapySDR, rtlsdr, Catch2 + their DLLs.
+- **Official Qt installer** + `windeployqt` (the standard Qt tool) — copies the exact Qt6 DLLs and plugin folders you need next to the .exe.
+
+This is the clean, reproducible, and recommended way. You will not have to hunt for DLLs manually.
+
 ### Prerequisites
 - Visual Studio 2022 (or Build Tools) with "Desktop development with C++".
 - Qt 6.5+ installed via the official Qt Online Installer (https://www.qt.io/download-qt-installer). Choose **MSVC 2022 64-bit** + Widgets. Remember the path (e.g. `C:\Qt\6.11.1\msvc2022_64`).
@@ -99,6 +135,34 @@ The Qt Online Installer was downloaded to:
 Run it (it was launched), accept license, select a recent Qt 6.5+ (e.g. 6.7), **MSVC 2022 64-bit** component + at minimum Qt Base (Core/Gui/Widgets). It will take time and disk space.
 
 After install, re-run the cmake configure with the correct CMAKE_PREFIX_PATH.
+
+### Release Process + In-App Self-Update (state-of-the-art, safe)
+
+**Producing a v0.2.0 release (exact asset names for the updater):**
+
+1. `cmake --build build --config Release --target deploy`
+2. `cd build/bin/Release`
+3. `windeployqt SDR_Town.exe --no-compiler-runtime --no-system-d3d-compiler`
+4. `cd ../../.. ; cmake --build build --config Release --target deploy` (re-purges stales)
+5. `cpack -G NSIS -C Release` → produces `SDR_Town-0.2.0-win64-setup.exe`
+   (optionally `cpack -G ZIP` for the portable zip)
+6. Compute SHA256 of the setup.exe → `SDR_Town-0.2.0-win64-setup.exe.sha256`
+7. Create `update.json` (see `update.json.example` + the exact structure in the user query / DESIGN.md) with real sha256 + size.
+8. Create `SHA256SUMS.txt` (contains the .exe and .zip hashes).
+9. Tag `v0.2.0`, attach the four assets (setup.exe, .sha256, update.json, SHA256SUMS.txt).
+
+**In-app updater behavior (Help → Check for Updates or startup):**
+
+- Fetches `https://github.com/Blkph0x/SDR_Town/releases/latest/download/update.json` (or the asset).
+- Compares `QApplication::applicationVersion()` ("0.2.0").
+- Never auto-downloads or installs.
+- Consent dialog: version + size + notes link, buttons "Download and Install", "Later", "Skip this version", "View Notes".
+- Downloads to `%LOCALAPPDATA%\SDR_Town\updates\...`, verifies SHA256, launches the NSIS (interactive or /S), then quits.
+- 24 h cooldown on background checks; skipped version persisted; "You are up to date." only on manual checks.
+- No GitHub tokens ever embedded. Public releases only.
+- NSIS installer handles overwrite of exe/DLLs, recreates shortcuts, preserves your `%APPDATA%\SDR_Town` settings and receivers.json etc.
+
+See DESIGN.md "Professional Updater" section for the full rationale, safety rules, and the recommended update.json shape. Packaging hygiene (clean staging, real icon, no stales) is a hard prerequisite and is enforced by the deploy target + CMake logic.
 
 ### vcpkg.json (deps)
 

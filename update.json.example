@@ -1,0 +1,13 @@
+{
+  "channel": "stable",
+  "version": "0.2.0",
+  "tag": "v0.2.0",
+  "published": "2026-06-10",
+  "min_supported_version": "0.1.0",
+  "installer": {
+    "url": "https://github.com/Blkph0x/SDR_Town/releases/download/v0.2.0/SDR_Town-0.2.0-win64-setup.exe",
+    "sha256": "PUT_REAL_SHA256_HERE_AFTER_BUILD_AND_HASH",
+    "size": 52428800
+  },
+  "notes_url": "https://github.com/Blkph0x/SDR_Town/releases/tag/v0.2.0"
+}
