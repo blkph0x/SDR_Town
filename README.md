@@ -136,6 +136,22 @@ Run it (it was launched), accept license, select a recent Qt 6.5+ (e.g. 6.7), **
 
 After install, re-run the cmake configure with the correct CMAKE_PREFIX_PATH.
 
+### Standing Rule: Document + Push Branded Versioned Releases + Test the Updater on Every Build (from mid-2026 onward)
+
+After any significant update or fix:
+
+1. **Document everything** in DESIGN.md (Implementation Log section) + README.md if user-visible + good commit message.
+2. Bump the version (we use patch bumps during active development so the updater can be tested — e.g. 0.2.0 → 0.2.1 → 0.2.2).
+3. Produce a **full clean branded release** using the exact flow in the "Release Process + In-App Self-Update" section above. This guarantees `SDR_Town-X.Y.Z-win64-setup.exe` (never reuse old names).
+4. Update the real `update.json` in the repo root with the new version, correct sha256 + size of the new setup.exe, and new download URL.
+5. `git commit`, `git tag -a vX.Y.Z`, `git push --tags`.
+6. On GitHub create the Release and attach the four assets (setup.exe, .sha256 or SHA256SUMS, update.json, portable zip if built).
+7. Test the in-app updater (Help → Check for Updates or restart the app) — it should now offer the new version, download it, verify the hash you put in the manifest, launch the installer, and exit.
+
+This is how we will continuously exercise and harden the updater during normal development instead of only at final release time.
+
+See the full process description in DESIGN.md under "Standing Rule ... Development Release & In-App Updater Testing Workflow".
+
 ### Release Process + In-App Self-Update (state-of-the-art, safe)
 
 **Producing a v0.2.0 release (exact asset names for the updater):**
