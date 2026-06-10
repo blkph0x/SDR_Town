@@ -97,6 +97,18 @@ void SpectrumWidget::setViewBandwidth(double bwHz)
     update();
 }
 
+void SpectrumWidget::setSquelchThreshold(double db)
+{
+    m_squelchThresholdDb = db;
+    update();
+}
+
+void SpectrumWidget::setLiveRms(double rmsDb)
+{
+    m_liveRmsDb = rmsDb;
+    update();
+}
+
 void SpectrumWidget::computeFakeSpectrum()
 {
     const int bins = 512;
@@ -197,6 +209,49 @@ int SpectrumWidget::xFromFreq(double freq) const
     return static_cast<int>(rel * width());
 }
 
+// Map a power dB value (in the current color range) to widget Y in the spectrum area (top 2/3).
+// Higher dB (stronger) = higher on screen (smaller Y).
+int SpectrumWidget::yFromDb(double db, int specH) const
+{
+    double range = m_colorMaxDb - m_colorMinDb;
+    if (range < 1.0) range = 100.0;
+    double norm = std::clamp( (db - m_colorMinDb) / range , 0.0, 1.0);
+    return specH - 5 - static_cast<int>(norm * (specH - 10));
+}
+
+// Inverse: given a Y in the spectrum area, return the dB it corresponds to under current color range.
+double SpectrumWidget::dbFromY(int y, int specH) const
+{
+    double range = m_colorMaxDb - m_colorMinDb;
+    if (range < 1.0) range = 100.0;
+    // y = specH-5 - norm*(specH-10)  =>  norm = (specH-5 - y) / (specH-10)
+    double n = (specH - 5.0 - y) / (specH - 10.0);
+    n = std::clamp(n, 0.0, 1.0);
+    return m_colorMinDb + n * range;
+}
+
+// Dedicated fixed range for the interactive squelch line and live RMS marker.
+// This is mapped over the spectrum curve height so the user can always drag from
+// "always open" (bottom of curve area) to "force mute even loud signals" (top of curve area)
+// completely independently of the WF Color Min/Max used for coloring.
+static constexpr double kSquelchVizMinDb = -130.0;
+static constexpr double kSquelchVizMaxDb =  40.0;
+
+int SpectrumWidget::yFromSquelchViz(double db, int specH) const
+{
+    double range = kSquelchVizMaxDb - kSquelchVizMinDb;
+    double norm = std::clamp( (db - kSquelchVizMinDb) / range , 0.0, 1.0);
+    return specH - 5 - static_cast<int>(norm * (specH - 10));
+}
+
+double SpectrumWidget::squelchVizDbFromY(int y, int specH) const
+{
+    double range = kSquelchVizMaxDb - kSquelchVizMinDb;
+    double n = (specH - 5.0 - y) / (specH - 10.0);
+    n = std::clamp(n, 0.0, 1.0);
+    return kSquelchVizMinDb + (1.0 - n) * range;   // high on screen (low y) = high (less negative / positive) dB
+}
+
 void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
 {
     QPainter p(this);
@@ -205,24 +260,75 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
     int w = width();
     int h = height();
     if (w <= 0 || h <= 0) return; // guard early paint during construction or 0-size layout
+
+    // Reserve left margin for dynamic dB scale (power axis). This makes the "dynamic db numbers on the side"
+    // the user asked for, using the live color range so it stays in sync with what the user sees in the WF colors.
+    const int axisW = 48;   // left dB axis gutter
+    const int rightMargin = 28; // right side for squelch grab bar / handle (easy to grab)
+
     int specH = h * 2 / 3;
     int wfH = h - specH;
 
     // background
     p.fillRect(rect(), QColor(20, 22, 25));
 
-    // spectrum area
+    // spectrum area rect (shifted right for the axis)
+    QRect specRect(axisW, 0, w - axisW - rightMargin, specH);
+    QRect wfRect(axisW, specH, w - axisW - rightMargin, wfH);
+
+    // Draw left dB axis (dynamic, based on current colorMin/Max)
+    {
+        p.setPen(QColor(90, 95, 100));
+        p.drawLine(axisW-1, 0, axisW-1, h); // separator line
+
+        double cmin = m_colorMinDb;
+        double cmax = m_colorMaxDb;
+        double range = cmax - cmin;
+        if (range < 1.0) range = 100.0;
+
+        // Nice step: 10 dB major, 5 dB minor within the current visible range
+        int step = 10;
+        if (range > 80) step = 20;
+        else if (range < 30) step = 5;
+
+        p.setPen(QColor(140, 145, 150));
+        QFont smallFont = p.font(); smallFont.setPointSize(8); p.setFont(smallFont);
+
+        for (double db = std::floor(cmin / step) * step; db <= cmax + 0.1; db += step) {
+            int y = (db >= cmin && db <= cmax)
+                ? yFromDb(db, specH)   // use the spectrum-area mapping for the top part
+                : -1;
+
+            // Also draw ticks extending into the waterfall area at the equivalent relative position
+            // (simple linear extension of the same norm for the whole height is acceptable for a threshold viz)
+            double norm = std::clamp( (db - cmin) / range , 0.0, 1.0);
+            int yFull = static_cast<int>( norm * (h - 8) );
+
+            // tick on axis
+            p.drawLine(axisW - 8, yFull, axisW - 2, yFull);
+
+            // label (only major ones or when space allows)
+            QString lbl = QString::number(db, 'f', 0);
+            p.drawText(2, yFull + 3, lbl);
+        }
+        p.setFont(QFont()); // restore
+    }
+
+    // spectrum area border (inside the shifted rect)
     p.setPen(QColor(60, 65, 70));
-    p.drawRect(0, 0, w-1, specH-1);
+    p.drawRect(specRect.adjusted(0,0,-1,-1));
 
     // grid + labels (use live members; labels are secondary and change infrequently)
+    // Grid now drawn inside the plot area (after left dB axis).
     p.setPen(QColor(70, 75, 80));
+    int plotW = specRect.width();
     for (int i = 0; i <= 10; ++i) {
-        int x = w * i / 10;
-        p.drawLine(x, 0, x, specH);
-        double f = freqFromX(x);
+        int x = specRect.left() + plotW * i / 10;
+        p.drawLine(x, specRect.top(), x, specRect.bottom());
+        double f = freqFromX( (x - specRect.left()) * width() / std::max(1, plotW) );  // approx using original logic scaled
+        // Simpler: recompute using the view
         p.setPen(QColor(140, 145, 150));
-        p.drawText(x + 2, specH - 4, QString::number(f/1e6, 'f', 2) + "M");
+        p.drawText(x + 2, specRect.bottom() - 4, QString::number(f/1e6, 'f', 2) + "M");
         p.setPen(QColor(70, 75, 80));
     }
 
@@ -241,6 +347,8 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
     double viewBwSnap = (m_viewBandwidthHz > 0 ? m_viewBandwidthHz : m_sampleRate);
     double colorMinSnap = m_colorMinDb;
     double colorMaxSnap = m_colorMaxDb;
+    double squelchSnap = m_squelchThresholdDb;
+    double liveRmsSnap = m_liveRmsDb;
 
     {
         QMutexLocker lock(&m_dataMutex);
@@ -268,26 +376,30 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
         double fullBw = srSnap;
         double viewStart = centerSnap - viewBwSnap / 2;
         double viewEnd = centerSnap + viewBwSnap / 2;
+        int plotLeft = specRect.left();
+        int plotWidth = specRect.width();
 
         for (int i = 0; i < n; ++i) {
             double binFreq = fullStart + (i + 0.5) * (fullBw / n);
             if (binFreq < viewStart || binFreq > viewEnd) continue;
 
             double rel = (binFreq - viewStart) / viewBwSnap;
-            int x = static_cast<int>(rel * w);
+            int x = plotLeft + static_cast<int>(rel * plotWidth);
             float db = powerCopy[i];
             // map using the (user adjustable via UI) color range so noise floor / sensitivity is reflected
             float range = static_cast<float>(colorMaxSnap - colorMinSnap);
             if (range < 1.0f) range = 100.0f;
             float norm = std::clamp( (db - static_cast<float>(colorMinSnap)) / range , 0.0f, 1.0f);
-            int y = specH - 5 - static_cast<int>(norm * (specH - 10));
+            int y = yFromDb(db, specH);   // now consistent with the dB axis we just drew
+            // clamp y into the specRect vertically
+            y = std::clamp(y, specRect.top() + 2, specRect.bottom() - 2);
             poly << QPointF(x, y);
         }
 
         if (!poly.isEmpty()) {
-            // filled
+            // filled (bottom at the spec area bottom)
             QPolygonF fillPoly = poly;
-            fillPoly << QPointF(w, specH) << QPointF(0, specH);
+            fillPoly << QPointF(plotLeft + plotWidth, specRect.bottom()) << QPointF(plotLeft, specRect.bottom());
             p.setBrush(QColor(30, 120, 180, 60));
             p.setPen(Qt::NoPen);
             p.drawPolygon(fillPoly);
@@ -298,14 +410,14 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
         }
     } else {
         p.setPen(QColor(100, 180, 255));
-        p.drawText(w/2 - 60, specH/2, "No spectrum data (waiting for IQ...)");
+        p.drawText(specRect.center().x() - 80, specRect.center().y(), "No spectrum data (waiting for IQ...)");
     }
 
     // Waterfall: render from high-res source history when we have it (true extra resolution on zoom).
     // This is the key fix for "waterfall zoom is visual crop/stretch, not true extra resolution".
     // We map each display column's frequency to the exact bin in the high-bin FFT rows and color from source power.
     // Falls back to the (possibly lower-res) image if no high-res history yet.
-    QRect wfRect(0, specH, w, wfH);
+    // wfRect and specRect already computed with left dB axis + right margin reserved.
     double fullBw = srSnap;
     double fullStart = centerSnap - fullBw / 2.0;
     double viewStart = centerSnap - viewBwSnap / 2.0;
@@ -329,9 +441,10 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
         };
 
         size_t rows = highResSnap.size();
-        for (size_t hy = 0; hy < rows && hy < (size_t)wfH; ++hy) {
-            const auto& row = highResSnap[hy]; // oldest first in snap
-            int y = static_cast<int>(hy * (double)wfH / rows); // simple top=newest layout (matches scroll dir)
+        for (int y = 0; y < wfH; ++y) {
+            size_t ageFromNewest = std::min(rows - 1, (size_t)((double)y * rows / std::max(1, wfH)));
+            size_t rowIndex = rows - 1 - ageFromNewest; // newest at top, oldest at bottom
+            const auto& row = highResSnap[rowIndex];
             if (row.empty()) continue;
             double binsF = (double)row.size();
             for (int x = 0; x < w; ++x) {
@@ -355,8 +468,67 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
     p.setPen(QColor(80, 85, 90));
     p.drawRect(wfRect.adjusted(0, 0, -1, -1));
 
+    // === Interactive squelch threshold line + right grab bar ===
+    // Uses dedicated fixed squelch viz scale (-130..+40) mapped over the spectrum curve area.
+    // This is independent of the color range (left axis + coloring still use WF Color Min/Max).
+    // Result: user can drag the line anywhere from bottom of the blue area (very low sq = always open)
+    // to the top of the blue area (very high sq = force mute) without being limited by color settings.
+    // Also draws a live RMS reference marker (using same viz scale) so it's obvious where to place the SQ line.
+    {
+        int plotLeft = specRect.left();
+        int plotRight = specRect.right();
+
+        // SQ line position using the dedicated scale (full control range inside the curve height)
+        int sqY = yFromSquelchViz(squelchSnap, specH);
+        sqY = std::clamp(sqY, specRect.top() + 1, specRect.bottom() - 1);
+
+        // Horizontal "cut" line (dashed orange) across the plot area + into waterfall for visibility
+        p.setPen(QPen(QColor(255, 180, 60), 1.8, Qt::DashLine));
+        p.drawLine(plotLeft + 2, sqY, plotRight - 2, sqY);
+        // faint extension into waterfall
+        p.setPen(QPen(QColor(255, 180, 60, 90), 1, Qt::DashLine));
+        p.drawLine(plotLeft + 2, sqY, plotRight - 2, h - 3);
+
+        // Label for the SQ line (always visible)
+        p.setPen(QColor(255, 210, 90));
+        p.drawText(plotLeft + 6, std::max(specRect.top() + 12, sqY - 2), QString("SQ %1 dB").arg(squelchSnap, 0, 'f', 0));
+
+        // Live RMS marker (different style: solid, slightly different color) using same viz scale.
+        // This directly helps the "why is audio not cutting" case: user can see the current audio level
+        // and place the SQ line above it.
+        int rmsY = yFromSquelchViz(liveRmsSnap, specH);
+        rmsY = std::clamp(rmsY, 2, h - 3);
+        p.setPen(QPen(QColor(80, 220, 120), 1.5));  // green-ish for "current level"
+        p.drawLine(plotLeft + 2, rmsY, plotRight - 2, rmsY);
+        p.setPen(QColor(100, 230, 140));
+        p.drawText(plotRight - 70, std::min(h - 4, rmsY + 10), QString("RMS %1").arg(liveRmsSnap, 0, 'f', 1));
+
+        // === Right side grab bar + handle (easy target for mouse) ===
+        int rightBarX = w - rightMargin + 4;
+        int handleH = 13;
+        int handleY = sqY - handleH / 2;
+        QRect handleRect(w - rightMargin + 1, handleY, rightMargin - 3, handleH);
+
+        // vertical "ruler" on the far right
+        p.setPen(QPen(QColor(255, 180, 60), 3));
+        p.drawLine(rightBarX, specRect.top() + 2, rightBarX, specRect.bottom() - 2);
+
+        // the handle itself
+        p.setBrush(QColor(255, 185, 70, 200));
+        p.setPen(QPen(QColor(255, 230, 140), 1));
+        p.drawRoundedRect(handleRect, 4, 4);
+
+        // arrows for "draggable vertically"
+        p.setPen(QColor(50, 35, 10));
+        int cxh = handleRect.center().x();
+        p.drawLine(cxh-4, handleY + 4, cxh, handleY + 2);
+        p.drawLine(cxh+1, handleY + 2, cxh+5, handleY + 4);
+        p.drawLine(cxh-4, handleY + handleH - 4, cxh, handleY + handleH - 2);
+        p.drawLine(cxh+1, handleY + handleH - 2, cxh+5, handleY + handleH - 4);
+    }
+
     // center marker (device center, top spectrum area)
-    int cx = w / 2;
+    int cx = specRect.left() + specRect.width() / 2;
     p.setPen(QPen(QColor(255, 80, 80), 1, Qt::DashLine));
     p.drawLine(cx, 0, cx, specH);
 
@@ -376,25 +548,73 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
 void SpectrumWidget::mousePressEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
-        double f = freqFromX(event->pos().x());
+        int mx = event->pos().x();
+        int my = event->pos().y();
+        int ww = width();
+        int hh = height();
+        int specHlocal = hh * 2 / 3;
+
+        // Priority: right-side squelch grab bar or close to the horizontal squelch line → interactive squelch drag
+        bool nearRightBar = (mx >= ww - 35);
+        int currentSqY = yFromSquelchViz(m_squelchThresholdDb, specHlocal);
+        bool nearLine = std::abs(my - currentSqY) <= 10;
+
+        if (nearRightBar || nearLine) {
+            m_squelchDragging = true;
+            // Use the dedicated squelch viz scale (full -130..+40 range inside the spectrum curve height).
+            // This guarantees the user can always reach high positive values to force-mute strong signals
+            // even if their WF Color Max is low (e.g. -10).
+            double db = squelchVizDbFromY(my, specHlocal);
+            db = std::clamp(db, -130.0, 40.0);
+            m_squelchThresholdDb = db;
+            emit squelchThresholdChanged(db);
+            update();
+            return;  // consume as squelch adjust, do not tune
+        }
+
+        // Normal behavior: click anywhere else (spectrum or waterfall) = tune to that freq
+        double f = freqFromX(mx);
         emit frequencySelected(f);
-        // Single onclick set freq (as requested). Do not enter continuous drag mode
-        // that follows the mouse and "locks" it until release. This was causing the
-        // mouse to attach and not unclick.
-        // m_dragging = true;   // removed for onclick-only behavior
-        m_lastMouseX = event->pos().x();
-        m_tuneX = event->pos().x();
+        m_lastMouseX = mx;
+        m_tuneX = mx;
         update();
     }
 }
 
 void SpectrumWidget::mouseMoveEvent(QMouseEvent* event)
 {
+    int mx = event->pos().x();
+    int my = event->pos().y();
+    int ww = width();
+    int hh = height();
+    int specHlocal = hh * 2 / 3;
+
+    // Hover feedback: change cursor when over the right squelch bar or the line (affordance)
+    int currentSqY = yFromSquelchViz(m_squelchThresholdDb, specHlocal);
+    bool overSquelchZone = (mx >= ww - 35) || (std::abs(my - currentSqY) <= 10);
+    if (overSquelchZone) {
+        setCursor(Qt::SplitVCursor);
+    } else if (cursor().shape() != Qt::ArrowCursor) {
+        unsetCursor();
+    }
+
+    if (m_squelchDragging) {
+        // Live drag using the dedicated squelch viz scale (not the color range).
+        double db = squelchVizDbFromY(my, specHlocal);
+        db = std::clamp(db, -130.0, 40.0);
+        if (std::abs(db - m_squelchThresholdDb) > 0.05) {
+            m_squelchThresholdDb = db;
+            emit squelchThresholdChanged(db);
+            update();
+        }
+        return;
+    }
+
     if (m_dragging) {
         // Continuous drag tuning kept for backward compat but not entered on simple click now.
-        double f = freqFromX(event->pos().x());
+        double f = freqFromX(mx);
         emit frequencySelected(f);
-        m_tuneX = event->pos().x();
+        m_tuneX = mx;
         update();
     }
 }
@@ -403,6 +623,8 @@ void SpectrumWidget::mouseReleaseEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
         m_dragging = false;
+        m_squelchDragging = false;
+        unsetCursor();
         // m_tuneX is kept so the dashed tune line remains visible after the click
         update();
     }

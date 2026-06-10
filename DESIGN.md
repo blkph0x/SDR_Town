@@ -1597,3 +1597,14 @@ Updated 2026-06 directly for the user's exact report + "explain to me when it sa
 
 ## README / User Guide Updates (squelch + RMS)
 See the user-facing section added to README.md for the exact "what value to set" rule and how Auto + live RMS label work together. The main GUI Squelch (dB) control + Auto are now the live way to mute a frequency you're hearing without retuning.
+
+**Interactive Squelch Visualization (added for v0.2.5)**
+- SpectrumWidget now draws a dynamic dB power scale on the left (driven by the existing WF Color Min/Max spins for the heat map range).
+- An interactive horizontal dashed "SQ" line + right-side draggable grab bar/handle is overlaid on the spectrum curve and waterfall.
+- The line + handle use a dedicated fixed scale (-130..+40) mapped to the spectrum area height (independent of color range) so the user can always drag from "always open" (bottom) to "force-mute strong signals" (top) within the visible plot.
+- A second green "RMS" reference line (with live value) is drawn using the same scale so the relationship "drag SQ above current RMS to cut audio" is immediately obvious.
+- Bidirectional sync: dragging the line updates the main Squelch spin, propagates to all active receivers, forces immediate gate reaction (via the prior resetSquelchGate logic), and moves the visual. Changing the spin/Auto/CLI updates the line + RMS marker.
+- This directly addresses "I set the line on the spectrum but audio still plays" by making the visual threshold + current audio level explicit on the same plot while preserving the real post-demod gate math.
+- Updated in response to user testing the squelch controls + request for visual "cut line on the side of the spectrum" with dynamic dB numbers.
+
+Updated 2026-06 for the interactive squelch line/bar + dB scale feature. All prior stabilization + release rules followed.

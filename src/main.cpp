@@ -416,9 +416,10 @@ public:
 
         // Live RMS readout (polled lightly from the main UI timer)
         QTimer* rmsUpdate = new QTimer(this);
-        connect(rmsUpdate, &QTimer::timeout, this, [rmsLabel]() {
+        connect(rmsUpdate, &QTimer::timeout, this, [rmsLabel, spectrum]() {
             double r = gLastRmsDb.load();
             if (r > -150) rmsLabel->setText(QString("RMS: %1 dB").arg(r, 0, 'f', 1));
+            if (spectrum) spectrum->setLiveRms(r);   // update the reference marker on the spectrum plot
         });
         rmsUpdate->start(400);
 
@@ -456,7 +457,7 @@ public:
             }
         });
 
-        connect(squelchSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double v) {
+        connect(squelchSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this, spectrum](double v) {
             std::lock_guard<std::mutex> lk(monitorParamsMutex);
             monitorSquelchDb = v;
             syncMonitorVarsToReceiver(0);
@@ -469,6 +470,32 @@ public:
                         std::lock_guard<std::mutex> rxLock(r->stateMutex);
                         r->squelchDb = v;
                         r->resetSquelchGate();  // ensure raise of threshold bypasses hang immediately (fixes "not live until freq click")
+                    }
+                }
+            }
+            if (spectrum) spectrum->setSquelchThreshold(v);  // keep the interactive line in sync (bidirectional)
+        });
+
+        // Interactive squelch line/bar on the spectrum widget (right side + horizontal threshold line).
+        // Dragging it updates the main squelch spin + all active receivers live (visual "cut" aid linked to the real gate).
+        connect(spectrum, &SpectrumWidget::squelchThresholdChanged, this, [this, squelchSpin](double v) {
+            {
+                std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                monitorSquelchDb = v;
+            }
+            // Update spin without causing a re-entrant valueChanged (prevents feedback loop).
+            squelchSpin->blockSignals(true);
+            squelchSpin->setValue(v);
+            squelchSpin->blockSignals(false);
+
+            syncMonitorVarsToReceiver(0);
+            {
+                std::lock_guard<std::mutex> lk2(receiversMutex);
+                for (auto& r : receivers) {
+                    if (r && r->active) {
+                        std::lock_guard<std::mutex> rxLock(r->stateMutex);
+                        r->squelchDb = v;
+                        r->resetSquelchGate();
                     }
                 }
             }
@@ -485,6 +512,7 @@ public:
         gainSpin->setValue(monitorRfGainDb);
         squelchSpin->setValue(monitorSquelchDb);
         spectrum->setColorRange(colorMinSpin->value(), colorMaxSpin->value());
+        spectrum->setSquelchThreshold(monitorSquelchDb);  // initial position of the interactive sq line + dB scale context
 
         connect(bwSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double v){
             std::lock_guard<std::mutex> lk(monitorParamsMutex);

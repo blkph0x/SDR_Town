@@ -32,9 +32,20 @@ public:
     void setColorRange(double minDb, double maxDb); // e.g. -120 to -10
     void setViewBandwidth(double bwHz); // for zooming the display (independent of device SR for visual fine tuning)
 
+    // Interactive squelch threshold (dB) visual + control.
+    // The line + right grab bar use a *dedicated squelch visual scale* (-130..+40) mapped over the spectrum area height.
+    // This is independent of the WF Color Min/Max (which control only the coloring of the curve/waterfall).
+    // This lets the user always drag the SQ line from very low (open) to very high (force mute even on strong signals) within the visible plot.
+    void setSquelchThreshold(double db);
+
+    // Live post-demod RMS marker (for visual correlation with the SQ line).
+    // Called from the main RMS label timer so the plot can show "current audio level" as a reference line.
+    void setLiveRms(double rmsDb);
+
 signals:
     void frequencySelected(double freqHz);  // user clicked
     void bandwidthSelected(double bwHz);    // future drag select
+    void squelchThresholdChanged(double db); // user dragged the interactive squelch line/bar on the right side
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -50,6 +61,15 @@ private:
     void scrollWaterfall(const std::vector<float>& latestPower);
     double freqFromX(int x) const;
     int xFromFreq(double freq) const;
+
+    // Helpers for the new left dB axis + interactive squelch line positioning.
+    int yFromDb(double db, int specH) const;
+    double dbFromY(int y, int specH) const;
+
+    // Dedicated squelch/RMS visual scale (fixed -130..+40, mapped over spectrum curve height only).
+    // Independent of the color range used for waterfall/curve coloring.
+    int yFromSquelchViz(double db, int specH) const;
+    double squelchVizDbFromY(int y, int specH) const;
 
     QVector<float> m_powerDb;       // current spectrum (dB, size = fft size)
     double m_centerFreq = 100e6;
@@ -80,4 +100,11 @@ private:
     bool m_dragging = false;
     int m_lastMouseX = 0;
     int m_tuneX = -1;  // last clicked x for visual tune line across full display (incl waterfall)
+
+    // Squelch visualization + interactive control (linked to main GUI Squelch spin + receivers)
+    double m_squelchThresholdDb = -80.0;
+    bool m_squelchDragging = false;
+
+    // Live RMS (post-demod) for drawing a reference marker so user can see "drag SQ line above this to mute".
+    double m_liveRmsDb = -100.0;
 };

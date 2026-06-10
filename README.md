@@ -292,4 +292,18 @@ These are transitional "global" controls while the per-receiver live table (Phas
 
 See DESIGN.md (Implementation Log) for the exact root cause (hang + rfOrModeChanged-only reset in sync) + the Demod.cpp / main.cpp:459 lines + the resetSquelchGate() + lastApplied detection that made direct changes live.
 
+### Spectrum Visual Squelch + dB Scale (v0.2.5+)
+The main spectrum/waterfall widget (SpectrumWidget) now has:
+- Dynamic dB power scale on the left (tied to the WF Color Min/Max spins you already use to control the heat map range — makes "what color means what power" obvious).
+- Interactive horizontal dashed SQ line across the spectrum curve + waterfall, plus an easy-to-grab vertical bar + handle on the far right side.
+- Green RMS reference line (live post-demod level) drawn on the same visual scale as the SQ line.
+
+Drag the orange SQ line or the right handle: it updates the main Squelch spin live, syncs to all active receivers, forces the gate, and the visual moves. Change the spin/Auto and the lines move.
+
+The SQ line uses its own fixed scale (-130 to +40) mapped to the height of the spectrum area. This means you can always drag it high enough (to the top of the blue area) to set a threshold above any current RMS and cut the audio — independent of what Color Max you chose for display.
+
+See the two lines on the plot: put SQ above the green RMS marker and the audio mutes (normal hang still applies for speech).
+
+See DESIGN.md for implementation details and citations.
+
 See DESIGN.md for the full feature/phase list + audit response log.
