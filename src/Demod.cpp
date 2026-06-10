@@ -16,6 +16,19 @@ DemodMode classifyMode(const std::vector<float>& powerDb, double sampleRate, dou
     return DemodMode::NFM;
 }
 
+DemodMode classifyModeAround(const std::vector<float>& powerDb,
+                             double sampleRate,
+                             double centerFreq,
+                             double targetFreq)
+{
+    if (powerDb.empty()) return DemodMode::NFM;
+    if (targetFreq > 88e6 && targetFreq < 108e6) return DemodMode::WFM;
+    double bw = detectChannelBandwidthAround(powerDb, sampleRate, centerFreq, targetFreq);
+    if (bw > 80000.0) return DemodMode::WFM;
+    if (bw < 4000.0) return DemodMode::USB;
+    return DemodMode::NFM;
+}
+
 double detectChannelBandwidth(const std::vector<float>& powerDb, double sampleRate) {
     if (powerDb.empty()) return 25000.0;
     auto it = std::max_element(powerDb.begin(), powerDb.end());
@@ -30,6 +43,49 @@ double detectChannelBandwidth(const std::vector<float>& powerDb, double sampleRa
     return std::max(5000.0, bw * 1.3); // guard band for filter
 }
 
+double detectChannelBandwidthAround(const std::vector<float>& powerDb,
+                                    double sampleRate,
+                                    double centerFreq,
+                                    double targetFreq,
+                                    double maxSearchHz)
+{
+    if (powerDb.empty() || sampleRate <= 0.0 || !std::isfinite(sampleRate)) return 25000.0;
+    const int bins = static_cast<int>(powerDb.size());
+    const double binHz = sampleRate / static_cast<double>(bins);
+    const double fullStart = centerFreq - sampleRate / 2.0;
+    const double rel = (targetFreq - fullStart) / binHz;
+    if (!std::isfinite(rel)) return 25000.0;
+
+    const int centerBin = std::clamp(static_cast<int>(std::llround(rel - 0.5)), 0, bins - 1);
+    const int halfSearch = std::max(4, static_cast<int>(std::ceil(std::clamp(maxSearchHz, 5000.0, sampleRate * 0.5) / binHz)));
+    const int lo = std::max(0, centerBin - halfSearch);
+    const int hi = std::min(bins - 1, centerBin + halfSearch);
+
+    int peakIdx = centerBin;
+    float peak = powerDb[centerBin];
+    std::vector<double> local;
+    local.reserve(static_cast<size_t>(hi - lo + 1));
+    for (int i = lo; i <= hi; ++i) {
+        local.push_back(powerDb[static_cast<size_t>(i)]);
+        if (powerDb[static_cast<size_t>(i)] > peak) {
+            peak = powerDb[static_cast<size_t>(i)];
+            peakIdx = i;
+        }
+    }
+    if (local.empty()) return 25000.0;
+    std::sort(local.begin(), local.end());
+    double floorDb = local[static_cast<size_t>(std::floor((local.size() - 1) * 0.25))];
+    float thresh = static_cast<float>(std::max(floorDb + 8.0, static_cast<double>(peak) - 12.0));
+
+    int left = peakIdx;
+    while (left > lo && powerDb[static_cast<size_t>(left)] > thresh) --left;
+    int right = peakIdx;
+    while (right < hi && powerDb[static_cast<size_t>(right)] > thresh) ++right;
+
+    double bw = std::max(binHz, (right - left + 1) * binHz);
+    return std::clamp(bw * 1.25, 2500.0, std::min(sampleRate, maxSearchHz * 2.0));
+}
+
 Demodulator::Demodulator() = default;
 Demodulator::~Demodulator() = default;
 
@@ -40,7 +96,7 @@ void Demodulator::resetState() {
 std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex<float>>& iq,
     double sr, double cf, double target, DemodMode mode, double& rmsOut,
     double lpfHz, double squelchDb, double gain, double wfmDeTauUs, double wfmPilotNotchR,
-    double channelBwHz, size_t target_audio_samples, double outputRate)
+    double channelBwHz, size_t target_audio_samples, double outputRate, double externalSquelchLevelDb, bool audioLpfEnabled)
 {
     rmsOut = -100;
     if (iq.empty()) return {};
@@ -49,7 +105,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         if (mode == DemodMode::WFM || mode == DemodMode::AUTO) lpfHz = 15000.0;
         else if (mode == DemodMode::AM) lpfHz = 5000.0;
         else if (mode == DemodMode::USB || mode == DemodMode::LSB) lpfHz = 3000.0;
-        else lpfHz = 3500.0;
+        else lpfHz = 3000.0;
     }
 
     // === STATE-OF-THE-ART AUTOMATIC RATE & BITRATE CALCULATIONS (no compromise) ===
@@ -90,7 +146,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
 
     // Channel FIR (same design as before)
     if (channelBwHz <= 0) {
-        channelBwHz = (mode == DemodMode::WFM || mode == DemodMode::AUTO) ? 180000.0 : 25000.0;
+        channelBwHz = (mode == DemodMode::WFM || mode == DemodMode::AUTO) ? 180000.0 : 12500.0;
     }
     if (std::abs(channelBwHz - lastBw) > 50 || std::abs(sr - lastS) > 100) {
         double fc = channelBwHz / 2.0 / sr;
@@ -235,8 +291,8 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         }
     }
 
-    // Post-demod LPF at demodRate
-    {
+    // Optional post-demod LPF at demodRate. Can be disabled for data/decoder workflows.
+    if (audioLpfEnabled && lpfHz > 100.0) {
         if (dspStateNeedsReset) { lpA = lpB = dcv = 0; }
         float alpha = 1.0f - std::exp(-2 * 3.14159265f * (float)lpfHz / (float)demodRate);
         float dca = 0.995f;
@@ -316,7 +372,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         }
     }
 
-    // Final audio-rate processing (de-emph, notch, LPF, squelch, gain)
+    // Final audio-rate processing (de-emph, notch, optional LPF, squelch, gain)
     if (!aud.empty()) {
         if (mode == DemodMode::WFM || mode == DemodMode::AUTO) {
             if (dspStateNeedsReset) { des = 0; }
@@ -335,9 +391,9 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
                 nx2=nx1; nx1=s; ny2=ny1; ny1=no; s = no;
             }
         }
-        {
+        if (audioLpfEnabled) {
             double finalCut = lpfHz;
-            if (mode == DemodMode::NFM || (mode == DemodMode::AUTO && finalCut < 8000)) finalCut = std::min(finalCut, 3800.0);
+            if (mode == DemodMode::NFM || (mode == DemodMode::AUTO && finalCut < 8000)) finalCut = std::min(finalCut, 4500.0);
             else if (mode == DemodMode::WFM || mode == DemodMode::AUTO) finalCut = std::min(finalCut, 15000.0);
             if (finalCut > 100.0) {
                 float fa = 1.0f - std::exp(-2 * 3.14159265f * (float)finalCut / (float)outputRate);
@@ -349,7 +405,8 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         for (auto s : aud) sum += s*s;
         double audioRmsDb = 10 * std::log10( (sum / aud.size()) + 1e-12 );
         (void)audioRmsDb;
-        rmsOut = channelLevelDb;
+        const double squelchMetricDb = std::isfinite(externalSquelchLevelDb) ? externalSquelchLevelDb : channelLevelDb;
+        rmsOut = squelchMetricDb;
         lastRmsDb = rmsOut;
 
         // S0-6 (P2) + P1 calibration: smooth squelch with attack/release/hang + hysteresis.
@@ -374,7 +431,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
                 lastAppliedSquelchDb = squelchDb;
             }
 
-            float target = (squelchDb < -115.0f || channelLevelDb > squelchDb) ? 1.0f : 0.0f;
+            float target = (squelchDb < -115.0f || squelchMetricDb > squelchDb) ? 1.0f : 0.0f;
 
             // Hang is tracked in output samples and decremented by each processed block.
             // The old code decremented once per block, so "0.3s" could stick open for minutes.
@@ -417,6 +474,6 @@ double Demodulator::getSquelchDefaultForMode(DemodMode m) const {
 // Back-compat free function wrappers (use a static Demodulator so old call sites keep working during transition).
 static Demodulator s_legacyDemod;
 
-std::vector<float> demodulateToAudio(const std::vector<std::complex<float>>& iq, double sr, double cf, double target, DemodMode mode, double& rmsOut, double lpfHz, double squelchDb, double gain, double wfmDeTauUs, double wfmPilotNotchR, double channelBwHz, size_t target_audio_samples, double outputRate) {
-    return s_legacyDemod.demodulateToAudio(iq, sr, cf, target, mode, rmsOut, lpfHz, squelchDb, gain, wfmDeTauUs, wfmPilotNotchR, channelBwHz, target_audio_samples, outputRate);
+std::vector<float> demodulateToAudio(const std::vector<std::complex<float>>& iq, double sr, double cf, double target, DemodMode mode, double& rmsOut, double lpfHz, double squelchDb, double gain, double wfmDeTauUs, double wfmPilotNotchR, double channelBwHz, size_t target_audio_samples, double outputRate, double externalSquelchLevelDb, bool audioLpfEnabled) {
+    return s_legacyDemod.demodulateToAudio(iq, sr, cf, target, mode, rmsOut, lpfHz, squelchDb, gain, wfmDeTauUs, wfmPilotNotchR, channelBwHz, target_audio_samples, outputRate, externalSquelchLevelDb, audioLpfEnabled);
 }

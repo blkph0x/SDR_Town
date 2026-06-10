@@ -17,8 +17,9 @@ struct Receiver {
 
     double freqHz = 100e6;
     DemodMode mode = DemodMode::NFM;
-    double channelBwHz = 25000.0;
-    double lpfHz = 3500.0;
+    double channelBwHz = 12500.0;
+    double lpfHz = 3000.0;
+    bool audioLpfEnabled = true;
     double squelchDb = -90.0;
 
     // P1 audit: explicit separation (RF is hardware sensitivity on the SDR; audio is post-demod gain; display for viz/spectrum scaling).

@@ -280,11 +280,13 @@ The same DeviceManager + AudioEngine + streaming/demod logic powers both GUI and
 
 ## Main GUI Live Controls (RF Gain, Squelch, Level)
 
-The top "Active Receivers" area has live main-GUI spins for **RF Gain (dB)** (hardware sensitivity, calls `setLiveGain` immediately on running device), **Squelch (dB)**, and color range for the waterfall/spectrum.
+The top "Active Receivers" area has live main-GUI controls for **RF Gain (dB)** (hardware sensitivity, calls `setLiveGain` immediately on running device), **Squelch (dB)**, manual/auto **BW**, optional **LPF**, and color range for the waterfall/spectrum.
 
-- **Squelch (dB) spin + "Auto" button**: channel-level threshold. The DSP uses a smooth gate with short attack/release and a real sample-counted hang, so speech is not chopped but AM/SSB/NFM drops close promptly.
-- **To mute a frequency completely**: set SQ strictly above the displayed Level. Example: if the label says `Level: -55 dB`, set SQ to `-49 dB` or higher. Values below `-115 dB` mean squelch off / always pass audio.
-- **Auto**: computes recent Level + 6 dB (clamped sane range -130..40) and sets the spin. Good starting point for "mute when no voice, open on talk". Tweak up/down while listening.
+- **Squelch (dB) spin + "Auto" button**: RF threshold measured inside the selected receiver bandwidth around the tuned frequency. The DSP uses a smooth gate with short attack/release and a real sample-counted hang, so speech is not chopped but AM/SSB/NFM drops close promptly.
+- **To mute a frequency completely**: set SQ above the displayed `NF` line and below the wanted `SIG` line. Values below `-115 dB` mean squelch off / always pass audio.
+- **Auto**: computes local channel noise floor (`NF + 10 dB`, clamped sane range -130..40) and sets the spin. This is intentionally based on the receiver BW, not the whole spectrum view.
+- **BW + Auto BW**: manual bandwidth accepts decimals such as `12.5 kHz` for modern NFM CB/PMR spacing. Auto BW detects occupied bandwidth around the tuned frequency and snaps to sensible channel widths.
+- **LPF checkbox + cutoff**: disable the post-demod audio low-pass filter for decoder/data workflows, or set the cutoff manually instead of relying on fixed 5/15 kHz mode defaults.
 - The main squelch control now propagates live to *all active receivers* (the ones contributing to mixed audio) and forces immediate gate reaction on raise (no more "have to click a new freq to make it cut"). Freq change / retune still works and forces a DSP state reset (instant gate close). Hang is only for natural signal drops.
 - RF Gain is separate from audio gain (the latter is post-demod multiplier for the monitor path).
 
@@ -296,13 +298,13 @@ See DESIGN.md (Implementation Log) for the exact root cause (hang + rfOrModeChan
 The main spectrum/waterfall widget (SpectrumWidget) now has:
 - Dynamic dB power scale on the left (tied to the WF Color Min/Max spins you already use to control the heat map range — makes "what color means what power" obvious).
 - Interactive horizontal dashed SQ line across the spectrum curve + waterfall, plus an easy-to-grab vertical bar + handle on the far right side.
-- Green LVL reference line (live channel level used by squelch) drawn on the same visual scale as the SQ line.
+- Green NF reference line (local receiver-band noise floor) and white SIG line (receiver-band signal level) drawn on the same dB scale as the SQ line.
 
 Drag the orange SQ line or the right handle: it updates the main Squelch spin live, syncs to all active receivers, forces the gate, and the visual moves. Change the spin/Auto and the lines move.
 
-The SQ line uses its own fixed scale (-130 to +40) mapped to the height of the spectrum area. This means you can always drag it high enough (to the top of the blue area) to set a threshold above any current RMS and cut the audio — independent of what Color Max you chose for display.
+The SQ line now uses the same dB axis as the spectrum/SIG/NF markers, so the visual threshold matches the actual gate metric.
 
-See the two lines on the plot: put SQ above the green LVL marker and the audio mutes after the short speech hang.
+See the markers on the plot: put SQ a few dB above the green NF marker and below the white SIG marker for the station you want to hear.
 
 See DESIGN.md for implementation details and citations.
 

@@ -3,11 +3,21 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 
 enum class DemodMode { NFM, WFM, AM, USB, LSB, AUTO };
 
 double detectChannelBandwidth(const std::vector<float>& powerDb, double sampleRate);
+double detectChannelBandwidthAround(const std::vector<float>& powerDb,
+                                    double sampleRate,
+                                    double centerFreq,
+                                    double targetFreq,
+                                    double maxSearchHz = 250000.0);
 DemodMode classifyMode(const std::vector<float>& powerDb, double sampleRate, double centerFreq);
+DemodMode classifyModeAround(const std::vector<float>& powerDb,
+                             double sampleRate,
+                             double centerFreq,
+                             double targetFreq);
 
 // Per-receiver demodulator with its own state (P1: eliminates global/static bleed between
 // receivers/modes/retunes, enables clean synthetic unit tests, and prepares for polyphase streaming channelizer).
@@ -29,7 +39,9 @@ public:
                                          double wfmPilotNotchR = 0.96,
                                          double channelBwHz = 0,
                                          size_t target_audio_samples = 0,
-                                         double outputRate = 48000.0);
+                                         double outputRate = 48000.0,
+                                         double externalSquelchLevelDb = std::numeric_limits<double>::quiet_NaN(),
+                                         bool audioLpfEnabled = true);
 
     // Explicit reset (call on large freq jump or mode switch if you want to be sure).
     void resetState();
@@ -84,4 +96,4 @@ private:
 
 // Back-compat free functions (thin wrappers around a shared instance or the old implementation
 // during transition). New code should prefer Demodulator instances.
-std::vector<float> demodulateToAudio(const std::vector<std::complex<float>>& iq, double sr, double cf, double target, DemodMode mode, double& rmsOut, double lpfHz = 0, double squelchDb = -90, double gain = 1.0, double wfmDeTauUs = 75.0, double wfmPilotNotchR = 0.96, double channelBwHz = 0, size_t target_audio_samples = 0, double outputRate = 48000.0);
+std::vector<float> demodulateToAudio(const std::vector<std::complex<float>>& iq, double sr, double cf, double target, DemodMode mode, double& rmsOut, double lpfHz = 0, double squelchDb = -90, double gain = 1.0, double wfmDeTauUs = 75.0, double wfmPilotNotchR = 0.96, double channelBwHz = 0, size_t target_audio_samples = 0, double outputRate = 48000.0, double externalSquelchLevelDb = std::numeric_limits<double>::quiet_NaN(), bool audioLpfEnabled = true);

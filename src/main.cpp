@@ -54,6 +54,7 @@
 #include <cmath>
 #include <fstream>
 #include <cctype>
+#include <limits>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -69,7 +70,153 @@ int runCLI(int argc, char* argv[]);
 
 // Shared live diagnostic updated by demod calls from GUI worker and CLI monitor thread (P1 audit diags)
 static std::atomic<long long> gLastDspMicros{0};
-static std::atomic<double> gLastRmsDb{-100.0};   // live channel level used by squelch calibration/Auto/indicator
+static std::atomic<double> gLastRmsDb{-100.0};   // live RF signal level used by squelch calibration/Auto/indicator
+static std::atomic<double> gLastNoiseFloorDb{-120.0};
+static std::atomic<double> gLastSnrDb{0.0};
+
+struct RfSquelchMetrics {
+    double signalLevelDb = -120.0;
+    double noiseFloorDb = -120.0;
+    double snrDb = 0.0;
+    bool valid = false;
+};
+
+static double defaultBandwidthForMode(DemodMode mode)
+{
+    switch (mode) {
+        case DemodMode::WFM:
+        case DemodMode::AUTO: return 180000.0;
+        case DemodMode::AM: return 10000.0;
+        case DemodMode::USB:
+        case DemodMode::LSB: return 3000.0;
+        case DemodMode::NFM:
+        default: return 12500.0;
+    }
+}
+
+static double defaultLpfForMode(DemodMode mode)
+{
+    switch (mode) {
+        case DemodMode::WFM:
+        case DemodMode::AUTO: return 15000.0;
+        case DemodMode::AM: return 5000.0;
+        case DemodMode::USB:
+        case DemodMode::LSB: return 3000.0;
+        case DemodMode::NFM:
+        default: return 3000.0;
+    }
+}
+
+static double snapBandwidthForMode(DemodMode mode, double detectedHz, double tunedFreqHz)
+{
+    double bw = std::isfinite(detectedHz) && detectedHz > 0.0 ? detectedHz : defaultBandwidthForMode(mode);
+    switch (mode) {
+        case DemodMode::WFM:
+        case DemodMode::AUTO:
+            return std::clamp(bw, 120000.0, 220000.0);
+        case DemodMode::AM:
+            if (bw <= 8000.0) return 6000.0;
+            if (bw <= 14000.0) return 10000.0;
+            return std::clamp(bw, 6000.0, 20000.0);
+        case DemodMode::USB:
+        case DemodMode::LSB:
+            return std::clamp(bw, 2400.0, 3600.0);
+        case DemodMode::NFM:
+        default:
+            // Modern CB/PMR/LMR narrowband spacing is commonly 12.5 kHz; support 25 kHz when the signal is visibly wider.
+            (void)tunedFreqHz;
+            if (bw <= 18000.0) return 12500.0;
+            if (bw <= 36000.0) return 25000.0;
+            return std::clamp(bw, 12500.0, 50000.0);
+    }
+}
+
+static double percentileDb(std::vector<double> values, double percentile, double fallback)
+{
+    values.erase(std::remove_if(values.begin(), values.end(), [](double v) {
+        return !std::isfinite(v);
+    }), values.end());
+    if (values.empty()) return fallback;
+    std::sort(values.begin(), values.end());
+    percentile = std::clamp(percentile, 0.0, 1.0);
+    size_t idx = static_cast<size_t>(std::llround(percentile * (values.size() - 1)));
+    idx = std::min(idx, values.size() - 1);
+    return values[idx];
+}
+
+static double topLinearAverageDb(std::vector<double> values, size_t topCount, double fallback)
+{
+    values.erase(std::remove_if(values.begin(), values.end(), [](double v) {
+        return !std::isfinite(v);
+    }), values.end());
+    if (values.empty()) return fallback;
+    std::sort(values.begin(), values.end(), std::greater<double>());
+    topCount = std::clamp<size_t>(topCount, 1, values.size());
+    double linear = 0.0;
+    for (size_t i = 0; i < topCount; ++i) {
+        linear += std::pow(10.0, values[i] / 10.0);
+    }
+    linear /= static_cast<double>(topCount);
+    return 10.0 * std::log10(std::max(linear, 1e-20));
+}
+
+static RfSquelchMetrics computeRfSquelchMetrics(const std::vector<float>& powerDb,
+                                                double sampleRateHz,
+                                                double centerFreqHz,
+                                                double targetFreqHz,
+                                                double channelBwHz,
+                                                DemodMode mode)
+{
+    RfSquelchMetrics out;
+    const int bins = static_cast<int>(powerDb.size());
+    if (bins < 8 || sampleRateHz <= 0.0 || !std::isfinite(sampleRateHz)) return out;
+
+    double bw = (channelBwHz > 0.0 && std::isfinite(channelBwHz)) ? channelBwHz : defaultBandwidthForMode(mode);
+    bw = std::clamp(bw, sampleRateHz / bins, sampleRateHz);
+
+    const double binHz = sampleRateHz / static_cast<double>(bins);
+    const double fullStart = centerFreqHz - sampleRateHz / 2.0;
+    const double rel = (targetFreqHz - fullStart) / binHz;
+    if (!std::isfinite(rel) || rel < -2.0 || rel > bins + 2.0) return out;
+
+    const int centerBin = std::clamp(static_cast<int>(std::llround(rel - 0.5)), 0, bins - 1);
+    const int halfChannelBins = std::max(2, static_cast<int>(std::ceil((bw * 0.5) / binHz)));
+
+    double localHalfHz = std::max(bw * 4.0, 50000.0);
+    if (mode == DemodMode::WFM || mode == DemodMode::AUTO) localHalfHz = std::max(bw * 1.6, 260000.0);
+    if (mode == DemodMode::USB || mode == DemodMode::LSB) localHalfHz = std::max(bw * 6.0, 20000.0);
+    localHalfHz = std::min(localHalfHz, sampleRateHz * 0.5);
+    const int halfLocalBins = std::max(halfChannelBins + 2, static_cast<int>(std::ceil(localHalfHz / binHz)));
+
+    std::vector<double> local;
+    local.reserve(static_cast<size_t>(halfLocalBins * 2 + 1));
+    for (int i = std::max(0, centerBin - halfLocalBins); i <= std::min(bins - 1, centerBin + halfLocalBins); ++i) {
+        local.push_back(powerDb[static_cast<size_t>(i)]);
+    }
+    if (local.size() < 8) {
+        local.clear();
+        for (float v : powerDb) local.push_back(v);
+    }
+
+    std::vector<double> channel;
+    channel.reserve(static_cast<size_t>(halfChannelBins * 2 + 1));
+    for (int i = std::max(0, centerBin - halfChannelBins); i <= std::min(bins - 1, centerBin + halfChannelBins); ++i) {
+        channel.push_back(powerDb[static_cast<size_t>(i)]);
+    }
+    if (channel.empty()) return out;
+
+    // Lower-percentile floor is taken from the receiver channel window itself, so squelch
+    // follows the selected/auto BW around the tuned frequency rather than the whole display.
+    const auto& floorBins = channel.size() >= 8 ? channel : local;
+    out.noiseFloorDb = percentileDb(floorBins, 0.20, -120.0);
+
+    // Top-bin linear average catches AM/NFM carriers without letting one unstable bin dominate.
+    const size_t topCount = std::max<size_t>(1, std::min<size_t>(6, channel.size() / 20 + 1));
+    out.signalLevelDb = topLinearAverageDb(channel, topCount, percentileDb(channel, 0.90, out.noiseFloorDb));
+    out.snrDb = out.signalLevelDb - out.noiseFloorDb;
+    out.valid = std::isfinite(out.signalLevelDb) && std::isfinite(out.noiseFloorDb);
+    return out;
+}
 
 // DSP implementation now lives in src/Demod.cpp (Demodulator class owns all state per Receiver).
 // classifyMode, detectChannelBandwidth, and demodulateToAudio are provided via Demod.h + Demod.cpp.
@@ -292,6 +439,7 @@ public:
                     newRx->mode = currentMonitorMode;
                     newRx->channelBwHz = monitorChannelBwHz;
                     newRx->lpfHz = monitorLpfHz;
+                    newRx->audioLpfEnabled = monitorAudioLpfEnabled;
                     newRx->squelchDb = monitorSquelchDb;
                     newRx->rfGainDb = monitorRfGainDb;
                     newRx->audioGain = monitorGain;
@@ -380,13 +528,25 @@ public:
         modeBox->addItem("AUTO"); modeBox->addItem("NFM"); modeBox->addItem("WFM"); modeBox->addItem("AM"); modeBox->addItem("USB"); modeBox->addItem("LSB");
         modeBox->setCurrentText("AUTO");
         bwSpin = new QDoubleSpinBox();
-        bwSpin->setRange(1, 500); bwSpin->setValue(200); bwSpin->setSuffix(" kHz"); bwSpin->setDecimals(0);
+        bwSpin->setRange(0.5, 500); bwSpin->setValue(180.0); bwSpin->setSuffix(" kHz"); bwSpin->setDecimals(1); bwSpin->setSingleStep(0.5);
+        bwSpin->setToolTip("Receiver/channel bandwidth. NFM CB/PMR often uses 12.5 kHz; WFM broadcast uses ~180 kHz.");
+        QPushButton* autoBwBtn = new QPushButton("Auto BW");
+        autoBwBtn->setToolTip("Detect occupied bandwidth around the tuned frequency and snap to a sensible channel width.");
+        lpfEnableCheck = new QCheckBox("LPF");
+        lpfEnableCheck->setChecked(true);
+        lpfEnableCheck->setToolTip("Enable/disable the post-demod audio low-pass filter. Disable for data/decoder workflows where filtering breaks symbols.");
+        lpfSpin = new QDoubleSpinBox();
+        lpfSpin->setRange(0.1, 200.0); lpfSpin->setValue(15.0); lpfSpin->setSuffix(" kHz"); lpfSpin->setDecimals(1); lpfSpin->setSingleStep(0.5);
+        lpfSpin->setToolTip("Audio LPF cutoff. This is independent from RF/channel bandwidth and can be disabled with the LPF checkbox.");
         monLay->addWidget(monFreq);
         monLay->addWidget(setMonBtn);
         monLay->addWidget(new QLabel("Mode:"));
         monLay->addWidget(modeBox);
         monLay->addWidget(new QLabel("BW:"));
         monLay->addWidget(bwSpin);
+        monLay->addWidget(autoBwBtn);
+        monLay->addWidget(lpfEnableCheck);
+        monLay->addWidget(lpfSpin);
         monLay->addStretch();
         rxLay->addLayout(monLay);
 
@@ -402,31 +562,38 @@ public:
         gainLay->addWidget(new QLabel("Squelch (dB):"));
         QDoubleSpinBox* squelchSpin = new QDoubleSpinBox();
         squelchSpin->setRange(-130, 40); squelchSpin->setDecimals(0); squelchSpin->setValue(-80);
-        squelchSpin->setToolTip("Channel-level squelch threshold (dB). Put SQ above the current Level marker to mute; set below it to open. Values below -115 disable squelch.");
+        squelchSpin->setToolTip("RF squelch threshold in spectrum dB. Put SQ a few dB above the green noise-floor line; signals above SQ open audio. Values below -115 disable squelch.");
         gainLay->addWidget(squelchSpin);
 
         QPushButton* autoSquelchBtn = new QPushButton("Auto");
-        autoSquelchBtn->setToolTip("Set squelch from the current channel noise floor (Level + 6 dB).");
+        autoSquelchBtn->setToolTip("Set squelch from the measured local RF noise floor (NF + 10 dB).");
         gainLay->addWidget(autoSquelchBtn);
 
-        QLabel* rmsLabel = new QLabel("Level: --- dB");
-        rmsLabel->setToolTip("Live channel level used by the squelch gate, updated from the DSP worker.");
+        QLabel* rmsLabel = new QLabel("SIG: --- dB  NF: --- dB");
+        rmsLabel->setToolTip("Live RF signal, local noise floor, and SNR used by the squelch gate.");
         gainLay->addWidget(rmsLabel);
         rxLay->addLayout(gainLay);
 
         // Live channel-level readout (polled lightly from the main UI timer)
         QTimer* rmsUpdate = new QTimer(this);
         connect(rmsUpdate, &QTimer::timeout, this, [rmsLabel, spectrum]() {
-            double r = gLastRmsDb.load();
-            if (r > -150) rmsLabel->setText(QString("Level: %1 dB").arg(r, 0, 'f', 1));
-            if (spectrum) spectrum->setLiveRms(r);   // update the reference marker on the spectrum plot
+            double sig = gLastRmsDb.load();
+            double nf = gLastNoiseFloorDb.load();
+            double snr = gLastSnrDb.load();
+            if (sig > -180 && nf > -180) {
+                rmsLabel->setText(QString("SIG: %1 dB  NF: %2 dB  SNR: %3")
+                    .arg(sig, 0, 'f', 1)
+                    .arg(nf, 0, 'f', 1)
+                    .arg(snr, 0, 'f', 1));
+            }
+            if (spectrum) spectrum->setLiveLevels(sig, nf);
         });
         rmsUpdate->start(400);
 
         connect(autoSquelchBtn, &QPushButton::clicked, this, [this, squelchSpin]() {
-            double recent = gLastRmsDb.load();
-            // Set squelch threshold a bit above current channel level/noise floor.
-            double target = (recent > -140.0) ? (recent + 6.0) : -82.0;
+            double nf = gLastNoiseFloorDb.load();
+            // Set squelch threshold above the local RF floor, not above integrated channel RMS.
+            double target = (nf > -150.0) ? (nf + 10.0) : -82.0;
             target = std::clamp(target, -130.0, 40.0);
             squelchSpin->setValue(target);
         });
@@ -439,7 +606,7 @@ public:
         colorLay->addWidget(colorMinSpin);
         colorLay->addWidget(new QLabel("Max:"));
         QDoubleSpinBox* colorMaxSpin = new QDoubleSpinBox();
-        colorMaxSpin->setRange(-60, 20); colorMaxSpin->setValue(-10);
+        colorMaxSpin->setRange(-60, 40); colorMaxSpin->setValue(-10);
         colorMaxSpin->setToolTip("Upper end of heat map. Adjust to make strong signals 'hot' red.");
         colorLay->addWidget(colorMaxSpin);
         rxLay->addLayout(colorLay);
@@ -519,6 +686,67 @@ public:
             syncMonitorVarsToReceiver(0);
         });
 
+        connect(autoBwBtn, &QPushButton::clicked, this, [this]() {
+            auto& mgr = DeviceManager::instance();
+            std::vector<float> pwr;
+            double cf = 0.0, sr = 0.0;
+            bool got = false;
+            for (size_t i = 0; i < mgr.getDevices().size(); ++i) {
+                if (mgr.isStreaming(i) && mgr.getLatestSpectrum(i, pwr, cf, sr) && !pwr.empty() && sr > 0.0) {
+                    got = true;
+                    break;
+                }
+            }
+            if (!got) return;
+
+            DemodMode mode;
+            double freq;
+            {
+                std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                freq = currentMonitorFreq;
+                mode = currentMonitorMode == DemodMode::AUTO ? classifyModeAround(pwr, sr, cf, freq) : currentMonitorMode;
+            }
+            const double searchHz = (mode == DemodMode::WFM || mode == DemodMode::AUTO) ? 300000.0 : 50000.0;
+            double detected = detectChannelBandwidthAround(pwr, sr, cf, freq, searchHz);
+            double snapped = snapBandwidthForMode(mode, detected, freq);
+            double lpf = std::min(defaultLpfForMode(mode), snapped * 0.45);
+            if (mode == DemodMode::WFM || mode == DemodMode::AUTO) lpf = defaultLpfForMode(mode);
+            lpf = std::clamp(lpf, 100.0, 200000.0);
+
+            {
+                std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                monitorChannelBwHz = snapped;
+                monitorLpfHz = lpf;
+            }
+            syncMonitorVarsToReceiver(0);
+            if (bwSpin) {
+                bwSpin->blockSignals(true);
+                bwSpin->setValue(snapped / 1000.0);
+                bwSpin->blockSignals(false);
+            }
+            if (lpfSpin) {
+                lpfSpin->blockSignals(true);
+                lpfSpin->setValue(lpf / 1000.0);
+                lpfSpin->blockSignals(false);
+            }
+            statusBar()->showMessage(QString("Auto BW around tuned frequency: %1 kHz").arg(snapped / 1000.0, 0, 'f', 1), 2500);
+        });
+
+        connect(lpfEnableCheck, &QCheckBox::toggled, this, [this](bool enabled) {
+            {
+                std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                monitorAudioLpfEnabled = enabled;
+            }
+            if (lpfSpin) lpfSpin->setEnabled(enabled);
+            syncMonitorVarsToReceiver(0);
+        });
+
+        connect(lpfSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double v) {
+            std::lock_guard<std::mutex> lk(monitorParamsMutex);
+            monitorLpfHz = std::clamp(v * 1000.0, 100.0, 200000.0);
+            syncMonitorVarsToReceiver(0);
+        });
+
         connect(modeBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, modeBox](int) {
             // P1 audit: do NOT call bwSpin->setValue() while holding monitorParamsMutex.
             // setValue synchronously emits valueChanged whose handler also locks the same mutex -> deadlock/stall risk on live mode transitions.
@@ -526,24 +754,31 @@ public:
             QString m = modeBox->currentText();
             bool newAuto = false;
             DemodMode newMode = DemodMode::NFM;
-            double newBwHz = 25000.0;
-            double newBwK = 25.0;
-            if (m == "AUTO") { newAuto = true; newMode = DemodMode::AUTO; newBwHz = 180000.0; newBwK = 180.0; }
-            else if (m == "NFM") { newAuto = false; newMode = DemodMode::NFM; newBwHz = 25000.0; newBwK = 25.0; }
-            else if (m == "WFM") { newAuto = false; newMode = DemodMode::WFM; newBwHz = 180000.0; newBwK = 180.0; }  // 180 kHz default; user should try 120-150 for strong local per audit
-            else if (m == "AM") { newAuto = false; newMode = DemodMode::AM; newBwHz = 10000.0; newBwK = 10.0; }
-            else if (m == "USB" || m == "LSB") { newAuto = false; newMode = (m=="USB"?DemodMode::USB:DemodMode::LSB); newBwHz = 3000.0; newBwK = 3.0; }
+            if (m == "AUTO") { newAuto = true; newMode = DemodMode::AUTO; }
+            else if (m == "NFM") { newAuto = false; newMode = DemodMode::NFM; }
+            else if (m == "WFM") { newAuto = false; newMode = DemodMode::WFM; }
+            else if (m == "AM") { newAuto = false; newMode = DemodMode::AM; }
+            else if (m == "USB" || m == "LSB") { newAuto = false; newMode = (m=="USB"?DemodMode::USB:DemodMode::LSB); }
+            const double newBwHz = defaultBandwidthForMode(newMode);
+            const double newBwK = newBwHz / 1000.0;
+            const double newLpfHz = defaultLpfForMode(newMode);
             {
                 std::lock_guard<std::mutex> lk(monitorParamsMutex);
                 autoDetectMode = newAuto;
                 currentMonitorMode = newMode;
                 monitorChannelBwHz = newBwHz;
+                monitorLpfHz = newLpfHz;
             }
             syncMonitorVarsToReceiver(0);
             if (bwSpin) {
                 bwSpin->blockSignals(true);
                 bwSpin->setValue(newBwK);
                 bwSpin->blockSignals(false);
+            }
+            if (lpfSpin) {
+                lpfSpin->blockSignals(true);
+                lpfSpin->setValue(newLpfHz / 1000.0);
+                lpfSpin->blockSignals(false);
             }
         });
 
@@ -640,21 +875,34 @@ public:
                         if (mgr.getLatestSpectrum(i, pwr, cf, sr) && !pwr.empty()) {
                             spectrum->updateSpectrum(pwr, cf, sr);
                             if (autoDetectMode) {
-                                DemodMode newM = classifyMode(pwr, sr, cf);
-                                double detBw = detectChannelBandwidth(pwr, sr);
-                                double useBwHz = (newM == DemodMode::WFM || newM == DemodMode::AUTO) ? 180000.0 : detBw;
-                                double useBwK = (newM == DemodMode::WFM || newM == DemodMode::AUTO) ? 180.0 : (detBw / 1000.0);
+                                double monFreq = currentMonitorFreq;
+                                {
+                                    std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                                    monFreq = currentMonitorFreq;
+                                }
+                                DemodMode newM = classifyModeAround(pwr, sr, cf, monFreq);
+                                const double searchHz = (newM == DemodMode::WFM || newM == DemodMode::AUTO) ? 300000.0 : 50000.0;
+                                double detBw = detectChannelBandwidthAround(pwr, sr, cf, monFreq, searchHz);
+                                double useBwHz = snapBandwidthForMode(newM, detBw, monFreq);
+                                double useBwK = useBwHz / 1000.0;
+                                double useLpfHz = defaultLpfForMode(newM);
                                 {
                                     // P1/P2: timer (UI thread) was writing monitor* + setValue without lock, racing worker snapshot + bwSpin handler.
                                     std::lock_guard<std::mutex> lk(monitorParamsMutex);
                                     currentMonitorMode = newM;
                                     monitorChannelBwHz = useBwHz;
+                                    monitorLpfHz = useLpfHz;
                                 }
                                 syncMonitorVarsToReceiver(0);
                                 if (bwSpin) {
                                     bwSpin->blockSignals(true);
                                     bwSpin->setValue(useBwK);
                                     bwSpin->blockSignals(false);
+                                }
+                                if (lpfSpin) {
+                                    lpfSpin->blockSignals(true);
+                                    lpfSpin->setValue(useLpfHz / 1000.0);
+                                    lpfSpin->blockSignals(false);
                                 }
                             }
                         }
@@ -702,10 +950,12 @@ public:
                     std::vector<float> ch;
                     double rms = -100;
                     long long dspMicros = 0;
+                    RfSquelchMetrics rfMetrics;
                     {
                         double monFreq = 100e6, monLpf = 15000.0, monSquelch = -80.0;
                         double monGain = 1.0, monWfmDe = 75.0, monWfmNotch = 0.96, monBw = 180000.0;
                         DemodMode monMode = DemodMode::AUTO;
+                        bool monAudioLpfEnabled = true;
 
                         std::lock_guard<std::mutex> rxLock(rx.stateMutex);
                         if (!rx.active || rx.deviceIndex != i) continue;
@@ -713,10 +963,15 @@ public:
                         monMode = rx.mode;
                         monBw = rx.channelBwHz;
                         monLpf = rx.lpfHz;
+                        monAudioLpfEnabled = rx.audioLpfEnabled;
                         monSquelch = rx.squelchDb;
                         monGain = rx.audioGain;
                         monWfmDe = rx.wfmDeTauUs;
                         monWfmNotch = rx.wfmPilotNotchR;
+                        rfMetrics = computeRfSquelchMetrics(pwr, sr, cf, monFreq, monBw, monMode);
+                        const double rfSquelchLevel = rfMetrics.valid
+                            ? rfMetrics.signalLevelDb
+                            : std::numeric_limits<double>::quiet_NaN();
 
                         // audit-followup-2: use per-rx cursor consumption. Each rx pulls only its own *new* chronological samples.
                         // No more "demod the latest 25ms overlapping window" for every rx.
@@ -731,13 +986,19 @@ public:
                         auto t0 = std::chrono::steady_clock::now();
                         ch = rx.demod.demodulateToAudio(iq, sr, cf, monFreq, monMode,
                             rms, monLpf, monSquelch, monGain, monWfmDe,
-                            monWfmNotch, monBw, need, orate);
+                            monWfmNotch, monBw, need, orate, rfSquelchLevel, monAudioLpfEnabled);
                         auto t1 = std::chrono::steady_clock::now();
                         dspMicros = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
                     }
 
                     gLastDspMicros.store(dspMicros);
-                    gLastRmsDb.store(rms);   // for live channel-level readout and Auto Squelch
+                    if (rfMetrics.valid) {
+                        gLastRmsDb.store(rfMetrics.signalLevelDb);
+                        gLastNoiseFloorDb.store(rfMetrics.noiseFloorDb);
+                        gLastSnrDb.store(rfMetrics.snrDb);
+                    } else {
+                        gLastRmsDb.store(rms);
+                    }
                     if (!ch.empty()) {
                         if (auto* eng = getOrCreateAudioEngine()) {
                             static std::vector<float> pend;
@@ -1170,13 +1431,16 @@ private:
     DemodMode currentMonitorMode = DemodMode::AUTO;
     bool autoDetectMode = true;
     double monitorLpfHz = 15000;
+    bool monitorAudioLpfEnabled = true;
     double monitorSquelchDb = -80;
     double monitorRfGainDb = 20.0;
     double monitorGain = 1.0; // audio gain, not RF gain
     double monitorWfmDeTauUs = 75.0;
     double monitorWfmPilotNotchR = 0.96;
-    double monitorChannelBwHz = 200000.0; // default for WFM; set narrower for voice channels e.g. 25000
+    double monitorChannelBwHz = 180000.0; // AUTO/WFM default; NFM snaps to 12.5 kHz for modern CB/PMR
     QDoubleSpinBox* bwSpin = nullptr;
+    QDoubleSpinBox* lpfSpin = nullptr;
+    QCheckBox* lpfEnableCheck = nullptr;
     // spectrumWidget kept for future if needed
 
     // Helper to ensure at least one receiver exists (transitional Phase 0)
@@ -1188,6 +1452,7 @@ private:
             r->mode = currentMonitorMode;
             r->channelBwHz = monitorChannelBwHz;
             r->lpfHz = monitorLpfHz;
+            r->audioLpfEnabled = monitorAudioLpfEnabled;
             r->squelchDb = monitorSquelchDb;
             r->rfGainDb = monitorRfGainDb;
             r->audioGain = monitorGain;
@@ -1219,6 +1484,7 @@ private:
         rx.mode = currentMonitorMode;
         rx.channelBwHz = monitorChannelBwHz;
         rx.lpfHz = monitorLpfHz;
+        rx.audioLpfEnabled = monitorAudioLpfEnabled;
         rx.squelchDb = monitorSquelchDb;
         rx.rfGainDb = monitorRfGainDb;
         rx.audioGain = monitorGain;
@@ -1365,8 +1631,9 @@ int runCLI(int argc, char* argv[]) {
             rptr->deviceIndex = r;
             rptr->freqHz = 100e6;
             rptr->mode = DemodMode::NFM;
-            rptr->channelBwHz = 25000.0;
-            rptr->lpfHz = 3500.0;
+            rptr->channelBwHz = defaultBandwidthForMode(DemodMode::NFM);
+            rptr->lpfHz = defaultLpfForMode(DemodMode::NFM);
+            rptr->audioLpfEnabled = true;
             rptr->squelchDb = -90.0;
             rptr->rfGainDb = 20.0;
             rptr->audioGain = 1.0;
@@ -1412,10 +1679,12 @@ int runCLI(int argc, char* argv[]) {
                 std::vector<float> ch;
                 double rms = -100;
                 long long dspMicros = 0;
+                RfSquelchMetrics rfMetrics;
                 {
                     double rxFreq = 100e6, rxLpf = 3500.0, rxSquelch = -90.0;
                     double rxAudioGain = 1.0, rxWfmDe = 75.0, rxWfmNotch = 0.96, rxBw = 25000.0;
                     DemodMode rxMode = DemodMode::NFM;
+                    bool rxAudioLpfEnabled = true;
 
                     std::lock_guard<std::mutex> rxLock(rx.stateMutex);
                     if (!rx.active || rx.deviceIndex != di) continue;
@@ -1423,6 +1692,7 @@ int runCLI(int argc, char* argv[]) {
                     rxMode = rx.mode;
                     rxBw = rx.channelBwHz;
                     rxLpf = rx.lpfHz;
+                    rxAudioLpfEnabled = rx.audioLpfEnabled;
                     rxSquelch = rx.squelchDb;
                     rxAudioGain = rx.audioGain;
                     rxWfmDe = rx.wfmDeTauUs;
@@ -1437,30 +1707,41 @@ int runCLI(int argc, char* argv[]) {
                     // audit-followup-7 (P2): if the rx is in AUTO, let the CLI monitor classify using latest spectrum
                     // and pick a concrete mode (NFM/WFM/AM etc) before demod. GUI timer already does this.
                     if (rxMode == DemodMode::AUTO && !pwr.empty()) {
-                        DemodMode classified = classifyMode(pwr, sr, cf);
+                        DemodMode classified = classifyModeAround(pwr, sr, cf, rxFreq);
                         if (classified != DemodMode::AUTO) {
                             rxMode = classified;
                             rx.mode = classified;
-                            if (classified == DemodMode::WFM && rx.channelBwHz < 100000.0) {
-                                rx.channelBwHz = 180000.0;
-                                rx.lpfHz = 15000.0;
-                                rxBw = rx.channelBwHz;
-                                rxLpf = rx.lpfHz;
-                            }
+                            const double searchHz = (classified == DemodMode::WFM) ? 300000.0 : 50000.0;
+                            const double detected = detectChannelBandwidthAround(pwr, sr, cf, rxFreq, searchHz);
+                            rx.channelBwHz = snapBandwidthForMode(classified, detected, rxFreq);
+                            rx.lpfHz = defaultLpfForMode(classified);
+                            rxBw = rx.channelBwHz;
+                            rxLpf = rx.lpfHz;
                         }
                     }
+                    rfMetrics = computeRfSquelchMetrics(pwr, sr, cf, rxFreq, rxBw, rxMode);
+                    const double rfSquelchLevel = rfMetrics.valid
+                        ? rfMetrics.signalLevelDb
+                        : std::numeric_limits<double>::quiet_NaN();
                     double t = got / sr;
                     double orate = (cliAudio ? cliAudio->getSampleRate() : 48000.0);
                     size_t need = (size_t)std::round(t * orate);
                     auto t0 = std::chrono::steady_clock::now();
                     ch = rx.demod.demodulateToAudio(iq, sr, cf, rxFreq, rxMode,
                         rms, rxLpf, rxSquelch, rxAudioGain, rxWfmDe,
-                        rxWfmNotch, rxBw, need, orate);
+                        rxWfmNotch, rxBw, need, orate, rfSquelchLevel, rxAudioLpfEnabled);
                     auto t1 = std::chrono::steady_clock::now();
                     dspMicros = std::chrono::duration_cast<std::chrono::microseconds>(t1-t0).count();
                 }
 
                 gLastDspMicros.store(dspMicros);
+                if (rfMetrics.valid) {
+                    gLastRmsDb.store(rfMetrics.signalLevelDb);
+                    gLastNoiseFloorDb.store(rfMetrics.noiseFloorDb);
+                    gLastSnrDb.store(rfMetrics.snrDb);
+                } else {
+                    gLastRmsDb.store(rms);
+                }
                 if (!ch.empty() && cliAudio && cliAudioEnabled) {
                     static std::vector<float> pend;
                     pend.insert(pend.end(), ch.begin(), ch.end());
@@ -1479,7 +1760,9 @@ int runCLI(int argc, char* argv[]) {
     auto printStats = [&](size_t r = 0) {
         size_t di = 0;
         double freqHz = 100e6;
-        double bwHz = 25000.0;
+        double bwHz = 12500.0;
+        double lpfHz = 3000.0;
+        bool lpfOn = true;
         DemodMode mode = DemodMode::NFM;
         {
             std::lock_guard<std::mutex> lk(cliRxMutex);
@@ -1489,6 +1772,8 @@ int runCLI(int argc, char* argv[]) {
             di = rx.deviceIndex;
             freqHz = rx.freqHz;
             bwHz = rx.channelBwHz;
+            lpfHz = rx.lpfHz;
+            lpfOn = rx.audioLpfEnabled;
             mode = rx.mode;
         }
         double g = (di < mgr.getDevices().size() ? mgr.getCurrentGain(di) : 0.0);
@@ -1502,6 +1787,7 @@ int runCLI(int argc, char* argv[]) {
         }
         std::cout << "RX" << r << " dev=" << di << " f=" << (freqHz/1e6) << "MHz mode=" << (int)mode
                   << " bw=" << (bwHz/1000) << "kHz gain=" << g << "dB IQdepth=" << qd
+                  << " lpf=" << (lpfOn ? std::to_string(lpfHz/1000.0) + "kHz" : std::string("off"))
                   << " level=" << level << "dB DSP=" << dsp << "ms ring=" << ring << "% underruns=" << underr << "\n";
     };
 
@@ -1525,7 +1811,8 @@ int runCLI(int argc, char* argv[]) {
                       << "  disable <i>             - stop streaming on device i\n"
                       << "  tune <mhz> [rx]         - tune (e.g. tune 98.9 or tune 0 98.9)\n"
                       << "  mode <auto|wfm|nfm|am|usb|lsb> [rx]\n"
-                      << "  set bw <khz> [rx]       - set channel BW (e.g. set bw 150)\n"
+                      << "  set bw <khz|auto> [rx]  - set/detect channel BW (e.g. set bw 12.5)\n"
+                      << "  set lpf <khz|on|off> [rx] - set or disable audio LPF\n"
                       << "  gain <i> <db>           - set live device RF gain\n"
                       << "  squelch <db> [rx]       - set squelch\n"
                       << "  stats | status [rx]     - live diagnostics (gain/mode/BW/IQ/DSP/ring/underrun)\n"
@@ -1604,12 +1891,14 @@ int runCLI(int argc, char* argv[]) {
                 DemodMode newMode = rx.mode;
                 double newBw = rx.channelBwHz;
                 double newLpf = rx.lpfHz;
-                if (m=="auto") { newMode=DemodMode::AUTO; newBw=180000.0; newLpf=15000.0; }
-                else if (m=="wfm") { newMode=DemodMode::WFM; newBw=180000.0; newLpf=15000.0; }
-                else if (m=="nfm") { newMode=DemodMode::NFM; newBw=25000.0; newLpf=3500.0; }
-                else if (m=="am") { newMode=DemodMode::AM; newBw=10000.0; newLpf=5000.0; }
-                else if (m=="usb") { newMode=DemodMode::USB; newBw=3000.0; newLpf=3000.0; }
-                else if (m=="lsb") { newMode=DemodMode::LSB; newBw=3000.0; newLpf=3000.0; }
+                if (m=="auto") newMode=DemodMode::AUTO;
+                else if (m=="wfm") newMode=DemodMode::WFM;
+                else if (m=="nfm") newMode=DemodMode::NFM;
+                else if (m=="am") newMode=DemodMode::AM;
+                else if (m=="usb") newMode=DemodMode::USB;
+                else if (m=="lsb") newMode=DemodMode::LSB;
+                newBw = defaultBandwidthForMode(newMode);
+                newLpf = defaultLpfForMode(newMode);
                 if (newMode != rx.mode || std::abs(newBw - rx.channelBwHz) > 1.0) {
                     rx.resetDemodState();
                     rx.mode = newMode;
@@ -1621,21 +1910,70 @@ int runCLI(int argc, char* argv[]) {
         } else if (cmd == "set" ) {
             std::string sub; iss >> sub; for(auto& c : sub) c = (char)std::tolower((unsigned char)c);
             if (sub == "bw") {
-                double khz; int rxidx=0; iss >> khz; if(iss>>rxidx){}
+                std::string val; int rxidx=0; iss >> val; if(iss>>rxidx){}
+                for (auto& c : val) c = (char)std::tolower((unsigned char)c);
+                double khz = 0.0;
+                if (val == "auto") {
+                    size_t devIndex = 0;
+                    {
+                        std::lock_guard<std::mutex> lk(cliRxMutex);
+                        ensureCliRxLocked(rxidx);
+                        Receiver& rx = *cliReceivers[rxidx];
+                        std::lock_guard<std::mutex> rxLock(rx.stateMutex);
+                        devIndex = rx.deviceIndex;
+                    }
+                    std::vector<float> p; double cf=0, sr=0;
+                    if (!mgr.getLatestSpectrum(devIndex, p, cf, sr) || p.empty()) {
+                        std::cout << "no spectrum yet for auto BW\n";
+                        continue;
+                    }
+                    {
+                        std::lock_guard<std::mutex> lk(cliRxMutex);
+                        ensureCliRxLocked(rxidx);
+                        Receiver& rx = *cliReceivers[rxidx];
+                        std::lock_guard<std::mutex> rxLock(rx.stateMutex);
+                        double detected = detectChannelBandwidthAround(p, sr, cf, rx.freqHz, rx.mode == DemodMode::WFM ? 300000.0 : 50000.0);
+                        double newBw = snapBandwidthForMode(rx.mode, detected, rx.freqHz);
+                        rx.resetDemodState();
+                        rx.channelBwHz = newBw;
+                        khz = newBw / 1000.0;
+                    }
+                } else {
+                    khz = std::stod(val);
+                    {
+                        std::lock_guard<std::mutex> lk(cliRxMutex);
+                        ensureCliRxLocked(rxidx);
+                        Receiver& rx = *cliReceivers[rxidx];
+                        std::lock_guard<std::mutex> rxLock(rx.stateMutex);
+                        const double newBw = khz * 1000.0;
+                        if (std::abs(rx.channelBwHz - newBw) > 1.0) {
+                            rx.resetDemodState();
+                            rx.channelBwHz = newBw;
+                        }
+                    }
+                }
+                std::cout << "RX" << rxidx << " BW -> " << khz << " kHz\n";
+            } else if (sub == "lpf") {
+                std::string val; int rxidx=0; iss >> val; if(iss>>rxidx){}
+                for (auto& c : val) c = (char)std::tolower((unsigned char)c);
                 {
                     std::lock_guard<std::mutex> lk(cliRxMutex);
                     ensureCliRxLocked(rxidx);
                     Receiver& rx = *cliReceivers[rxidx];
                     std::lock_guard<std::mutex> rxLock(rx.stateMutex);
-                    const double newBw = khz * 1000.0;
-                    if (std::abs(rx.channelBwHz - newBw) > 1.0) {
-                        rx.resetDemodState();
-                        rx.channelBwHz = newBw;
+                    if (val == "off" || val == "0") {
+                        rx.audioLpfEnabled = false;
+                    } else if (val == "on") {
+                        rx.audioLpfEnabled = true;
+                    } else {
+                        rx.lpfHz = std::clamp(std::stod(val) * 1000.0, 100.0, 200000.0);
+                        rx.audioLpfEnabled = true;
                     }
+                    rx.resetDemodState();
+                    std::cout << "RX" << rxidx << " LPF -> " << (rx.audioLpfEnabled ? std::to_string(rx.lpfHz/1000.0) + " kHz" : std::string("off")) << "\n";
                 }
-                std::cout << "RX" << rxidx << " BW -> " << khz << " kHz\n";
             } else {
-                std::cout << "set what? bw\n";
+                std::cout << "set what? bw, lpf\n";
             }
         } else if (cmd == "gain") {
             int di; double db; iss >> di >> db;

@@ -6,6 +6,7 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include <limits>
 
 // Helper: generate IQ for a tone at baseband offset (for FM phase ramp or AM).
 std::vector<std::complex<float>> genTone(double sr, double dur, double freqOffset, double amp = 0.8) {
@@ -98,6 +99,44 @@ TEST_CASE("Demodulator AM squelch closes quickly after carrier drops") {
 
     REQUIRE(rms < -120.0);
     REQUIRE(maxAbs(last) < 0.01f);
+}
+
+TEST_CASE("Demodulator squelch can use calibrated external RF level") {
+    Demodulator d;
+    auto signal = genAM(48000, 0.08, 1000.0);
+    double rms = -100;
+
+    auto closed = d.demodulateToAudio(signal, 48000, 100e6, 100e6, DemodMode::AM,
+        rms, 5000, -80, 1.0, 0, 0, 10000, 0, 48000, -95.0);
+    REQUIRE(closed.size() > 50);
+    REQUIRE(rms == Catch::Approx(-95.0).margin(0.01));
+    REQUIRE(maxAbs(closed) < 0.01f);
+
+    d.resetState();
+    auto open = d.demodulateToAudio(signal, 48000, 100e6, 100e6, DemodMode::AM,
+        rms, 5000, -80, 1.0, 0, 0, 10000, 0, 48000, -60.0);
+    REQUIRE(open.size() > 50);
+    REQUIRE(rms == Catch::Approx(-60.0).margin(0.01));
+    REQUIRE(maxAbs(open) > 0.02f);
+}
+
+TEST_CASE("Demodulator can bypass audio LPF for decoder workflows") {
+    auto signal = genAM(48000, 0.08, 8000.0, 0.7, 0.5);
+    double rms = -100;
+
+    Demodulator filteredDemod;
+    auto filtered = filteredDemod.demodulateToAudio(signal, 48000, 100e6, 100e6, DemodMode::AM,
+        rms, 2000, -120, 1.0, 0, 0, 20000, 0, 48000,
+        std::numeric_limits<double>::quiet_NaN(), true);
+
+    Demodulator bypassDemod;
+    auto bypassed = bypassDemod.demodulateToAudio(signal, 48000, 100e6, 100e6, DemodMode::AM,
+        rms, 2000, -120, 1.0, 0, 0, 20000, 0, 48000,
+        std::numeric_limits<double>::quiet_NaN(), false);
+
+    REQUIRE(filtered.size() > 50);
+    REQUIRE(bypassed.size() > 50);
+    REQUIRE(maxAbs(bypassed) > maxAbs(filtered) * 1.5f);
 }
 
 TEST_CASE("Demodulator state carry across chunks (no boundary click for FM)") {

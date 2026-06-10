@@ -3,7 +3,7 @@
 # Run from project root after a successful build/fix session.
 
 param(
-    [string]$Version = "0.2.6",
+    [string]$Version = "0.2.7",
     [switch]$SkipPush,
     [switch]$SkipAssets
 )

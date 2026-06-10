@@ -33,14 +33,13 @@ public:
     void setViewBandwidth(double bwHz); // for zooming the display (independent of device SR for visual fine tuning)
 
     // Interactive squelch threshold (dB) visual + control.
-    // The line + right grab bar use a *dedicated squelch visual scale* (-130..+40) mapped over the spectrum area height.
-    // This is independent of the WF Color Min/Max (which control only the coloring of the curve/waterfall).
-    // This lets the user always drag the SQ line from very low (open) to very high (force mute even on strong signals) within the visible plot.
+    // The line + right grab bar use the same dB axis as the spectrum so SQ, signal, and noise floor align visually.
     void setSquelchThreshold(double db);
 
-    // Live channel-level marker (for visual correlation with the SQ line).
-    // Called from the main level timer so the plot can show the current squelch metric as a reference line.
+    // Live RF signal/noise markers in the same dB units as the spectrum and squelch line.
+    // Called from the main level timer so the plot can show the current squelch metric and floor.
     void setLiveRms(double rmsDb);
+    void setLiveLevels(double signalDb, double noiseFloorDb);
 
 signals:
     void frequencySelected(double freqHz);  // user clicked
@@ -66,8 +65,7 @@ private:
     int yFromDb(double db, int specH) const;
     double dbFromY(int y, int specH) const;
 
-    // Dedicated squelch/level visual scale (fixed -130..+40, mapped over spectrum curve height only).
-    // Independent of the color range used for waterfall/curve coloring.
+    // Legacy fixed scale helpers kept for compatibility with older call sites/tests.
     int yFromSquelchViz(double db, int specH) const;
     double squelchVizDbFromY(int y, int specH) const;
 
@@ -105,6 +103,7 @@ private:
     double m_squelchThresholdDb = -80.0;
     bool m_squelchDragging = false;
 
-    // Live channel level for drawing a reference marker so user can see "drag SQ line above this to mute".
-    double m_liveRmsDb = -100.0;
+    // Live RF markers for drawing "signal" and "noise floor" reference lines.
+    double m_liveSignalDb = -100.0;
+    double m_liveNoiseFloorDb = -120.0;
 };
