@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.1 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.4 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -50,6 +50,7 @@ set(SDR_TOWN_SOURCES
     src/Demod.cpp
     src/Receiver.cpp
     src/UpdateManager.cpp   # professional GitHub release + safe in-app updater
+    include/UpdateManager.h
 )
 
 # Resources (icons, qss, etc. later)
@@ -72,6 +73,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     spdlog::spdlog
     nlohmann_json::nlohmann_json
 )
+target_compile_definitions(${PROJECT_NAME} PRIVATE SDR_TOWN_VERSION=\"${PROJECT_VERSION}\")
 
 # Link SoapySDR if available (for PR2 device layer)
 # Note: vcpkg soapysdr port provides target named "SoapySDR" (not namespaced :: )
@@ -172,12 +174,12 @@ endif()
 #    (optionally) cpack -G ZIP -C Release   # for the portable zip
 #
 # Produces (in build/):
-#   SDR_Town-0.2.0-win64-setup.exe
-#   SDR_Town-0.2.0-win64.zip (portable)
+#   SDR_Town-${PROJECT_VERSION}-win64-setup.exe
+#   SDR_Town-${PROJECT_VERSION}-win64.zip (portable)
 #
-# GitHub Release v0.2.0 assets (exact names for update.json + downloader):
-#   SDR_Town-0.2.0-win64-setup.exe
-#   SDR_Town-0.2.0-win64-setup.exe.sha256
+# GitHub Release v${PROJECT_VERSION} assets (exact names for update.json + downloader):
+#   SDR_Town-${PROJECT_VERSION}-win64-setup.exe
+#   SDR_Town-${PROJECT_VERSION}-win64-setup.exe.sha256
 #   update.json   (see recommended structure in user query + DESIGN.md)
 #   SHA256SUMS.txt
 #
@@ -191,6 +193,18 @@ endif()
 # This eliminates all stale MaulAudioPro.exe, maulaudio_tests.exe, sdr_town_tests.exe etc.
 
 set(DEPLOY_STAGING "${CMAKE_BINARY_DIR}/deploy_staging")
+set(DEPLOY_CLEAN_SCRIPT "${CMAKE_BINARY_DIR}/CleanDeployStaging.cmake")
+file(WRITE "${DEPLOY_CLEAN_SCRIPT}" "
+file(GLOB_RECURSE STALE_DEPLOY_BINARIES
+     \"${DEPLOY_STAGING}/Maul*.exe\"
+     \"${DEPLOY_STAGING}/*Maul*.exe\"
+     \"${DEPLOY_STAGING}/*test*.exe\"
+     \"${DEPLOY_STAGING}/sdr_town_tests.exe\"
+     \"${DEPLOY_STAGING}/maulaudio_tests.exe\")
+if(STALE_DEPLOY_BINARIES)
+  file(REMOVE \${STALE_DEPLOY_BINARIES})
+endif()
+")
 
 # Helper target: "deploy" — creates a pristine staging folder the user (and CI) can package from.
 add_custom_target(deploy
@@ -205,6 +219,7 @@ add_custom_target(deploy
             "${DEPLOY_STAGING}/sdr_town_tests.exe"
             "${DEPLOY_STAGING}/Maul*.exe"
             "${DEPLOY_STAGING}/*test*.exe"
+    COMMAND ${CMAKE_COMMAND} -P "${DEPLOY_CLEAN_SCRIPT}"
     COMMAND ${CMAKE_COMMAND} -E echo "Clean deploy staging ready at: ${DEPLOY_STAGING}"
     DEPENDS SDR_Town
     COMMENT "Creating clean, release-ready deploy staging (no stale binaries)"
@@ -250,11 +265,11 @@ endif()
 set(CPACK_PACKAGE_NAME "SDR_Town")
 set(CPACK_PACKAGE_VENDOR "SDR Town Project")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "SDR Town - Professional multi-SDR monitoring, scanning, and analysis tool")
-set(CPACK_PACKAGE_VERSION_MAJOR 0)
-set(CPACK_PACKAGE_VERSION_MINOR 2)
-set(CPACK_PACKAGE_VERSION_PATCH 1)
+set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
+set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
+set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "SDR Town")
-set(CPACK_PACKAGE_FILE_NAME "SDR_Town-0.2.1-win64-setup")
+set(CPACK_PACKAGE_FILE_NAME "SDR_Town-${PROJECT_VERSION}-win64-setup")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
 
 if(WIN32)
@@ -279,8 +294,11 @@ if(WIN32)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/update.json")
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/update.json" DESTINATION .)
   endif()
-  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/SDR_Town-0.2.0-win64-setup.exe.sha256")
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/SDR_Town-0.2.0-win64-setup.exe.sha256" DESTINATION .)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/SDR_Town-${PROJECT_VERSION}-win64-setup.exe.sha256")
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/SDR_Town-${PROJECT_VERSION}-win64-setup.exe.sha256" DESTINATION .)
+  endif()
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/SHA256SUMS.txt")
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/SHA256SUMS.txt" DESTINATION .)
   endif()
 endif()
 

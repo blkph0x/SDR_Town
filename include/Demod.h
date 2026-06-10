@@ -34,6 +34,10 @@ public:
     // Explicit reset (call on large freq jump or mode switch if you want to be sure).
     void resetState();
 
+    // Public: force immediate squelch gate reset (bypass 0.3s hang) when user explicitly raises the sq threshold.
+    // Called from Receiver helper, main GUI squelchSpin valueChanged propagation, and CLI "squelch" command.
+    void resetSquelchGate() { squelchGateNeedsReset = true; }
+
 private:
     // All previous global/static DSP state moved here (one set per Demodulator instance).
     std::complex<float> prev{1,0};
@@ -49,6 +53,9 @@ private:
     float flp1=0, flp2=0;
     float histYm2 = 0, histYm1 = 0, histY0 = 0;
     bool haveHist = false;
+    double resampPhase = 0.0;
+    double lastResampInputRate = -1.0;
+    double lastResampOutputRate = -1.0;
 
     bool dspStateNeedsReset = false;
     double lastResetTarget = -1e12;
@@ -61,6 +68,11 @@ private:
     float squelchGateGain = 0.0f;
     int   squelchHangLeft = 0;
     double lastRmsDb = -100.0;
+
+    // Support for live squelch threshold changes (main GUI spin/Auto, per-rx, CLI) feeling immediate.
+    // Without this, raising sq only affected after hang expired; freq-click forced reset which made it "cut".
+    bool squelchGateNeedsReset = false;
+    double lastAppliedSquelchDb = -90.0;
 
     // Per-mode squelch defaults and hysteresis helpers (calibration support).
     double getSquelchDefaultForMode(DemodMode m) const;

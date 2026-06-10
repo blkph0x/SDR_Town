@@ -8,9 +8,21 @@
 
 ---
 
+## Latest Stabilization Pass - 2026-06-10
+
+- Fixed the WFM scratch/clipping path by separating RF gain from demod audio gain in GUI and CLI. RF gain now uses `DeviceManager::setLiveGain`; audio gain remains a unity post-demod multiplier unless a future audio-gain control changes it.
+- Hardened streaming shutdown and real-hardware upgrade: RX threads now use an explicit running flag, session generation checks, local Soapy open/publish handoff, and avoid freeing native handles underneath detached stuck driver calls.
+- Protected the IQ ring used by per-receiver demod and FFT snapshots, fixed the old reversed `getRecentIQWindow` helper, and kept the 8192-bin FFT/waterfall source history path.
+- Improved demod smoothness with streaming resampler phase carry, DDC phase wrapping, and removal of the old per-sample squelch hard-zeroing that could cause crackle.
+- Made live audio output reconfiguration safer by centralizing `AudioEngine` creation, locking active-output mutations, and making callback-shared volume/sample-rate fields atomic.
+- Hardened the updater with CMake-driven app versioning, semver comparison, HTTPS-only download validation, redirect handling, SHA normalization, installer launch failure reporting, and corrected release packaging metadata.
+- Verification: Release build passed, CTest unit suite passed, CLI harness passed 5/5, and no-Soapy fallback build passed.
+
+---
+
 ## Executive Summary
 
-MaulAudio Pro is a professional-grade, easy-to-use Windows C++ GUI application for connecting to **multiple SDRs** (HackRF and other SoapySDR-supported devices) simultaneously. It provides **smart scanning** for voice and data signals, high-quality playback of **unencrypted audio**, and dedicated support for data modes including **weather satellite downlinks** (NOAA APT and similar).
+SDR Town is a professional-grade, easy-to-use Windows C++ GUI application for connecting to **multiple SDRs** (HackRF and other SoapySDR-supported devices) simultaneously. It provides **smart scanning** for voice and data signals, high-quality playback of **unencrypted audio**, and dedicated support for data modes including **weather satellite downlinks** (NOAA APT and similar).
 
 Core differentiators:
 - Clean, modern professional UI with powerful yet approachable configuration.
@@ -1551,3 +1563,37 @@ Recommended live CLI sequence for this exact report:
 All changes keep the "direct from the sdr and play what we receive" rule and the architecture in the DESIGN data-flow section.
 
 Updated 2026-06 in response to "it seems to be picking up spurartic frew like the same singnal evey 10mhz or something 97.3 98.1 98.9 are all the same and choppy audio".
+
+**Squelch not live on main GUI spin/Auto; only "cuts" after freq click / retune (user: "its working intermitant when i set it higher and chnage freq auto cuts but if i cnage it its not live anbd i have to click a new freq why?") + RMS calibration question**
+Root cause (pure inspection of handlers + demod gate + worker + sync paths, no assumption):
+- Main GUI squelchSpin (and Auto which does setValue) updated `monitorSquelchDb`, called `syncMonitorVarsToReceiver(0)` (which unconditionally wrote `rx.squelchDb = monitor...` for [0] + propagation loop that forced every active r->squelchDb = v under receiversMutex + per-rx stateMutex), then the DSP worker snapshot + `rxLock` read of `rx.squelchDb` and pass-by-value into `rx.demod.demodulateToAudio(..., monSquelch, ...)` should have picked it up on next tick.
+- The gate inside Demod.cpp:339 (pre-fix): `float target = (squelchDb < -115.0f || rmsOut > squelchDb) ? 1.0f : 0.0f;` then hang (0.3s at outputRate), then attack/release smoothing of `squelchGateGain`, then `s *= ... * squelchGateGain`.
+- `dspStateNeedsReset` (set by sync only on rf/mode/bw diff via the `rfOrModeChanged` check at main.cpp:1165, and by setActive on inactive->active, and by frequencySelected paths) caused `if (dspStateNeedsReset) { squelchGateGain=0; hangLeft=0; }` on next block (plus full FIR/ph etc reset).
+- Freq click (frequencySelected ~203) or Set & Tune: set currentMonitorFreq, sync(0) [which saw freq diff → resetDemodState() → gate slammed to 0 on next demod], setActive(true). So "change freq" always forced an instant gate zero + copied the (at-click-time) monitorSquelchDb. Hence "set higher + click freq → auto cuts".
+- Pure spin change: sync(0) ran but `rfOrModeChanged` was false (freq/mode/bw same) → no reset, gateGain/hang state carried over. If signal was recently above old threshold, hangLeft was still hot → target forced 1 for ~0.3 s even with new high sq; then slow release (0.0007). Result: "not live", user had to click a freq to force the reset that made the raised threshold take effect immediately. Intermittent because hang state + whether a recent voice peak had set hang, and which rx in the active snapshot was feeding the audible mix.
+- RMS label (gLastRmsDb) is the pre-gate `rmsOut = 10*log10( mean(aud^2) )` from the last processed block (any active rx, last in snapshot order). It can be negative (typical noise/voice) or positive (high post-demod gain or strong WFM). The special `< -115` means "squelch disabled / always open".
+
+Fix (minimal, targeted, best-practice):
+- Added `bool squelchGateNeedsReset=false; double lastAppliedSquelchDb=-90;` (Demod.h private members).
+- Public `void resetSquelchGate() { squelchGateNeedsReset = true; }` on Demodulator (declared in public: section).
+- Forwarder on Receiver: `void resetSquelchGate() { demod.resetSquelchGate(); }` (header).
+- In Demod.cpp gate block (now ~338 area): if (dsp || squelchGateNeeds..) zero gate+hang and clear flag; plus `if (abs(squelchDb - lastApplied) > 0.01) { if (squelchDb > last+0.1) { zero gate+hang; } lastApplied = squelchDb; }`. This makes *any* upward jump in the passed squelchDb (main spin, Auto, future live table edit on a rx, CLI "squelch N") immediately force close without waiting hang. Lowering lets fast attack open. No change to FIR/IIR states (no audio glitch on tweak).
+- In main.cpp squelchSpin valueChanged propagation loop (and the Auto-triggered path via setValue): after `r->squelchDb = v;` also `r->resetSquelchGate();`.
+- Same in CLI "squelch" command setter (under cliRxMutex + rxLock).
+- Updated tooltips on squelchSpin + Auto btn (example now covers negative RMS like user -15; documents the hang intentionally, and that freq change forced reset).
+- Also bumped CMake project VERSION to 0.2.4 (embeds in exe + CPACK + QApplication::applicationVersion for updater).
+
+Result: raising the main GUI "Squelch (dB)" or hitting Auto now immediately affects the gate for all active receivers (no freq click required). The smooth hang still protects normal signal-fade closes; only explicit user threshold raise (or the detection) bypasses. Freq click still works as before (and forces via the old reset path too). All prior greens (ctest 100%, harness 5/5, live gain etc.) preserved.
+
+Citations (pre-fix): Demod.cpp:339 (target calc + if dsp reset gate), main.cpp:459 (valueChanged), 1165 (rfOrModeChanged only), 1178 (copy sq), 668 (worker rxLock + pass monSquelch), 208 and 522 (freq paths that did sync+setActive), frequencySelected:208, guiDspWorker:674 and 690 (the read+demod call), Receiver.h:22 (squelchDb), Demod.h:66 (gate members + isSquelchOpen).
+
+Also updated the RMS explanation in code comments and will surface in README.
+
+**Standing rule followed**: after this + green rebuild/harness, versioned branded assets + real update.json + gh release push (see release steps below + scripts/release.ps1). No "edit" on user catch-up rebuilds.
+
+Updated 2026-06 directly for the user's exact report + "explain to me when it says RMS: -15 what should i set the sq to to mute that freq im on?".
+
+---
+
+## README / User Guide Updates (squelch + RMS)
+See the user-facing section added to README.md for the exact "what value to set" rule and how Auto + live RMS label work together. The main GUI Squelch (dB) control + Auto are now the live way to mute a frequency you're hearing without retuning.

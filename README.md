@@ -141,7 +141,7 @@ After install, re-run the cmake configure with the correct CMAKE_PREFIX_PATH.
 After any significant update or fix:
 
 1. **Document everything** in DESIGN.md (Implementation Log section) + README.md if user-visible + good commit message.
-2. Bump the version (we use patch bumps during active development so the updater can be tested — e.g. 0.2.0 → 0.2.1 → 0.2.2).
+2. Bump the version (we use patch bumps during active development so the updater can be tested, for example `0.2.3` to `0.2.4`).
 3. Produce a **full clean branded release** using the exact flow in the "Release Process + In-App Self-Update" section above. This guarantees `SDR_Town-X.Y.Z-win64-setup.exe` (never reuse old names).
 4. Update the real `update.json` in the repo root with the new version, correct sha256 + size of the new setup.exe, and new download URL.
 5. `git commit`, `git tag -a vX.Y.Z`, `git push --tags`.
@@ -154,23 +154,23 @@ See the full process description in DESIGN.md under "Standing Rule ... Developme
 
 ### Release Process + In-App Self-Update (state-of-the-art, safe)
 
-**Producing a v0.2.0 release (exact asset names for the updater):**
+**Producing a vX.Y.Z release (exact asset names for the updater):**
 
 1. `cmake --build build --config Release --target deploy`
 2. `cd build/bin/Release`
 3. `windeployqt SDR_Town.exe --no-compiler-runtime --no-system-d3d-compiler`
 4. `cd ../../.. ; cmake --build build --config Release --target deploy` (re-purges stales)
-5. `cpack -G NSIS -C Release` → produces `SDR_Town-0.2.0-win64-setup.exe`
+5. `cpack -G NSIS -C Release` produces `SDR_Town-X.Y.Z-win64-setup.exe`
    (optionally `cpack -G ZIP` for the portable zip)
-6. Compute SHA256 of the setup.exe → `SDR_Town-0.2.0-win64-setup.exe.sha256`
+6. Compute SHA256 of the setup.exe as `SDR_Town-X.Y.Z-win64-setup.exe.sha256`
 7. Create `update.json` (see `update.json.example` + the exact structure in the user query / DESIGN.md) with real sha256 + size.
 8. Create `SHA256SUMS.txt` (contains the .exe and .zip hashes).
-9. Tag `v0.2.0`, attach the four assets (setup.exe, .sha256, update.json, SHA256SUMS.txt).
+9. Tag `vX.Y.Z`, attach the four assets (setup.exe, .sha256, update.json, SHA256SUMS.txt).
 
 **In-app updater behavior (Help → Check for Updates or startup):**
 
 - Fetches `https://github.com/Blkph0x/SDR_Town/releases/latest/download/update.json` (or the asset).
-- Compares `QApplication::applicationVersion()` ("0.2.0").
+- Compares `QApplication::applicationVersion()` from the CMake project version.
 - Never auto-downloads or installs.
 - Consent dialog: version + size + notes link, buttons "Download and Install", "Later", "Skip this version", "View Notes".
 - Downloads to `%LOCALAPPDATA%\SDR_Town\updates\...`, verifies SHA256, launches the NSIS (interactive or /S), then quits.
@@ -245,14 +245,14 @@ Run the built exe with --cli (or -c) for a full command-line interface that expo
 
 `powershell
 cd "C:\Users\Blkph0x\Desktop\maulaudio_pro\build\bin\Release"
-.\MaulAudioPro.exe --cli
+.\SDR_Town.exe --cli
 `
 
 Commands (see help inside):
 - list - devices (with driver/label/serial/enabled/rate/gain)
 - enable <idx> / disable <idx> - start/stop real Soapy streaming (RTL-SDR, HackRF, etc.)
 - tune <mhz> - set monitor freq + retune the active device (affects spectrum + demod)
-- gain <idx> <db>, rate <idx> <msps>
+- gain <idx> <db>, set bw <khz>, squelch <db>
 - spectrum - live-ish text power summary + ASCII bar from real IQ
 - audio list / audio enable <i> [i2 ...] / audio test [idx] / audio vol <idx> <0-100>
   - Full multi-device audio support (speakers + VB-Audio Cable etc.) even in CLI.
@@ -277,5 +277,19 @@ stats
 (While listening: vary `gain 0 15` / `gain 0 25` / `set bw 120` and watch stats counters for queue/DSP/underruns vs audio quality. Expect clean audio with gain 15-25.)
 
 The same DeviceManager + AudioEngine + streaming/demod logic powers both GUI and CLI. All major phases (device management, real streaming, spectrum, high-quality WFM/NFM/AM/SSB with channelizer, multi-output audio, simple scan/tune) are now directly testable from the command line.
+
+## Main GUI Live Controls (RF Gain, Squelch, RMS)
+
+The top "Active Receivers" area has live main-GUI spins for **RF Gain (dB)** (hardware sensitivity, calls `setLiveGain` immediately on running device), **Squelch (dB)**, and color range for the waterfall/spectrum.
+
+- **Squelch (dB) spin + "Auto" button**: Post-demod threshold. The DSP uses a smooth gate (attack/release + 0.3 s hang on close to protect speech syllables). The RMS label (updated ~every 400 ms from the worker) shows live pre-gate level: `10 * log10(mean(samples^2))` after all filtering but before the squelch* gain multiply.
+- **To mute a frequency completely** (even if signal present): set the sq value **strictly above** the displayed RMS. Example: if label says "RMS: -15" set sq to -10, 0, 5, or 10 (anything > -15). If RMS ever reads +12 (high gain), set 15+. The special low value (below -115) means "squelch off / always pass audio".
+- **Auto**: computes recent RMS + 6 dB (clamped sane range -130..40) and sets the spin. Good starting point for "mute when no voice, open on talk". Tweak up/down while listening.
+- The main squelch control now propagates live to *all active receivers* (the ones contributing to mixed audio) and forces immediate gate reaction on raise (no more "have to click a new freq to make it cut"). Freq change / retune still works and forces a DSP state reset (instant gate close). Hang is only for natural signal drops.
+- RF Gain is separate from audio gain (the latter is post-demod multiplier for the monitor path).
+
+These are transitional "global" controls while the per-receiver live table (Phase 1) is completed. CLI `squelch <db> [rx]` and `gain <dev> <db>` remain the fast debug path.
+
+See DESIGN.md (Implementation Log) for the exact root cause (hang + rfOrModeChanged-only reset in sync) + the Demod.cpp / main.cpp:459 lines + the resetSquelchGate() + lastApplied detection that made direct changes live.
 
 See DESIGN.md for the full feature/phase list + audit response log.

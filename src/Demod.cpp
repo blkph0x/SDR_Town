@@ -81,6 +81,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
     for (size_t k=0; k<iq.size(); ++k) {
         baseband[k] = iq[k] * std::polar(1.0f, (float)-ph);
         ph += phaseInc;
+        if (ph > 1e6 || ph < -1e6) ph = std::fmod(ph, 2 * M_PI);
     }
 
     // Channel FIR (same design as before)
@@ -228,19 +229,27 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         }
     }
 
-    // Resample (cubic with history carried in members)
+    // Resample (streaming cubic with fractional phase carried between chunks)
     std::vector<float> aud;
     if (exactAudioNeeded > 0 && !base.empty()) {
-        if (dspStateNeedsReset) { haveHist = false; histYm2 = histYm1 = histY0 = 0; }
+        if (dspStateNeedsReset ||
+            std::abs(lastResampInputRate - demodRate) > 1.0 ||
+            std::abs(lastResampOutputRate - outputRate) > 1.0) {
+            haveHist = false;
+            histYm2 = histYm1 = histY0 = 0;
+            resampPhase = 0.0;
+            lastResampInputRate = demodRate;
+            lastResampOutputRate = outputRate;
+        }
         aud.resize(exactAudioNeeded);
+        const double step = (outputRate > 0.0) ? (demodRate / outputRate) : 1.0;
         for (size_t a = 0; a < exactAudioNeeded; ++a) {
-            double pos = (double)a / exactAudioNeeded * (base.size() - 1);
-            size_t idx = (size_t)std::floor(pos);
+            double pos = resampPhase + (double)a * step;
+            long idx = (long)std::floor(pos);
             double frac = pos - idx;
-            if (idx >= base.size()-1) { aud[a] = base.back(); continue; }
             auto getY = [&](long i) -> float {
                 if (i < 0) {
-                    if (!haveHist) return (i >= -3 ? histY0 : 0.0f);
+                    if (!haveHist) return 0.0f;
                     if (i == -1) return histY0;
                     if (i == -2) return histYm1;
                     if (i == -3) return histYm2;
@@ -249,16 +258,24 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
                 if ((size_t)i >= base.size()) return base.back();
                 return base[i];
             };
-            float ym1 = getY( (long)idx -1 );
-            float y0  = getY( (long)idx );
-            float y1  = getY( (long)idx +1 );
-            float y2  = getY( (long)idx +2 );
+            float ym1 = getY(idx - 1);
+            float y0  = getY(idx);
+            float y1  = getY(idx + 1);
+            float y2  = getY(idx + 2);
             float t = (float)frac, t2=t*t, t3=t2*t;
             float c0 = y0;
             float c1 = 0.5f*(y1-ym1);
             float c2 = ym1 - 2.5f*y0 + 2.0f*y1 - 0.5f*y2;
             float c3 = 0.5f*(y2-ym1) + 1.5f*(y0-y1);
             aud[a] = c0 + c1*t + c2*t2 + c3*t3;
+        }
+        resampPhase += (double)exactAudioNeeded * step;
+        resampPhase -= (double)base.size();
+        if (resampPhase < -3.0 || resampPhase > (double)base.size()) resampPhase = 0.0;
+        if (resampPhase < 0.0 && resampPhase > -3.0) {
+            // Keep a tiny negative carry; the cubic history above provides those samples.
+        } else if (resampPhase < 0.0) {
+            resampPhase = 0.0;
         }
         if (base.size() >= 3) {
             histYm2 = base[base.size()-3];
@@ -316,10 +333,26 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
 
         // S0-6 (P2) + P1 calibration: smooth squelch with attack/release/hang + hysteresis.
         // Added live RMS storage, per-mode default helper, and slightly wider effective hysteresis via hang + target.
-        // UI exposes Auto (from recent RMS - offset) and open/closed can be queried via isSquelchOpen().
+        // UI exposes Auto (from recent RMS + offset) and open/closed can be queried via isSquelchOpen().
         {
-            if (dspStateNeedsReset) { squelchGateGain = 0.0f; squelchHangLeft = 0; }
-            float thr = std::pow(10.0f, (float)squelchDb / 20.0f);
+            if (dspStateNeedsReset || squelchGateNeedsReset) {
+                squelchGateGain = 0.0f;
+                squelchHangLeft = 0;
+                squelchGateNeedsReset = false;
+            }
+
+            // Live reaction to squelchDb changes (from main GUI spin, Auto, future table, or CLI "squelch" cmd).
+            // If the threshold is raised (sq > previous), force immediate close (bypass hang) so muting feels live.
+            // Lowering sq lets the normal fast attack open the gate promptly. Freq-click previously "fixed" it only
+            // because sync+setActive forced a full resetDemodState() which zeroed the gate.
+            if (std::abs(squelchDb - lastAppliedSquelchDb) > 0.01) {
+                if (squelchDb > lastAppliedSquelchDb + 0.1) {
+                    squelchGateGain = 0.0f;
+                    squelchHangLeft = 0;
+                }
+                lastAppliedSquelchDb = squelchDb;
+            }
+
             float target = (squelchDb < -115.0f || rmsOut > squelchDb) ? 1.0f : 0.0f;
 
             // Hang + a bit of extra hysteresis (open stays open a little longer; close is reluctant).
@@ -337,7 +370,6 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
             squelchGateGain = std::clamp(squelchGateGain, 0.0f, 1.0f);
 
             for (auto &s : aud) {
-                if (std::abs(s) < thr) s = 0;
                 s *= gain * squelchGateGain;
             }
         }

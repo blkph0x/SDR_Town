@@ -3,12 +3,15 @@
 #include "Demod.h"
 #include <vector>
 #include <cstddef>
+#include <mutex>
 
 // Basic per-receiver state holder.
 // Goal: each SDR/monitor path gets its own demod, audio targets, recorder stub, etc.
 // This eliminates global monitor* state and enables true multi-device independence.
 
 struct Receiver {
+    mutable std::mutex stateMutex;
+
     size_t deviceIndex = 0;           // which DeviceManager device this receiver uses
     Demodulator demod;                // own demod instance (already per-state)
 
@@ -46,6 +49,10 @@ struct Receiver {
 
     // Simple reset helper (calls into Demodulator)
     void resetDemodState() { demod.resetState(); lastConsumedAbsolute = 0; }
+
+    // Force immediate squelch gate close (bypass hang) when user raises threshold via main controls or CLI.
+    // Makes "set sq higher" live without requiring a freq retune/click (which previously forced a full reset).
+    void resetSquelchGate() { demod.resetSquelchGate(); }
 };
 
 // Placeholder for future per-receiver audio push (currently falls back to global engine)
