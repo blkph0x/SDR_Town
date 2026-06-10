@@ -829,7 +829,22 @@ Use normal semver patch bumps while we are actively developing (0.2.0 → 0.2.1 
 
 This process was introduced right after the big "We’re closer, but I would not call this state-of-the-art yet." stabilization round that delivered the real FFT pipeline, true-resolution waterfall, live hardware gain, calibrated squelch, jthread safety, and the complete updater. The v0.2.1 tag + commit in this session is the first concrete example.
 
-From this point forward, every time you ask me to implement a fix or feature, the final step will include documentation updates + preparation of the next branded versioned release artifacts + updated `update.json` so the feature can be tested live.
+**Fast one-command version of the process (added for speed):**
+
+We now have `.\release.ps1` (root) + `scripts/release.ps1`.
+
+Just run (in a fresh shell):
+
+```powershell
+.\release.ps1          # current dev version
+.\release.ps1 0.2.2    # next one
+```
+
+It handles packaging, hash updates to `update.json` + `SHA256SUMS.txt`, commit, tag, push, and `gh release` asset upload with `--clobber`.
+
+See the script comments for details and the "First time only" `gh auth login` step.
+
+From this point forward, after any fix/feature, the final step will use this helper so we can move fast while keeping the "documented + properly versioned branded assets + updater testable" rule.
 - vcpkg bootstrap + `soapysdr` (correct port name), spdlog, nlohmann-json installed successfully (note: port is `soapysdr`, provides `find_package(SoapySDR CONFIG)` and target `SoapySDR`).
 - git submodules added early: `external/liquid-dsp` (for PR5+ DSP) and `external/miniaudio` (header-only, for PR4 critical multi-device audio).
 - .gitignore adjusted to allow submodule gitlinks.
