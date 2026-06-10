@@ -28,7 +28,7 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* /*pInpu
         // Per-output test tone using countdown (no detached thread).
         float freq = myAct->testFreq.load();
         float phase = myAct->testPhase.load();
-        float delta = 2.0f * 3.14159265f * freq / engine->m_sampleRate;
+        float delta = 2.0f * 3.14159265f * freq / engine->getSampleRate();
 
         for (ma_uint32 i = 0; i < frameCount; ++i) {
             out[i] = 0.6f * std::sin(phase);
@@ -51,7 +51,7 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* /*pInpu
         // Real audio path - lock-free ring buffer read (no mutex, no erase, no alloc in RT callback).
         // This prevents the crackles/stalls caused by locking + vector erase from the realtime thread.
         // Defensive check for races during setActiveOutputs (m_active clear while callback runs).
-        if (myAct && myAct->device && myAct->valid.load(std::memory_order_acquire)) {
+        if (myAct && myAct->valid.load(std::memory_order_acquire)) {
             auto& rb = myAct->ring;
             float master = engine->getMasterVolume();
             float v = master * myAct->volume.load();
@@ -149,6 +149,7 @@ void AudioEngine::setActiveOutputs(const std::vector<size_t>& indicesFromLastEnu
         spdlog::warn("Audio context not valid, cannot set active outputs");
         return;
     }
+    std::lock_guard<std::mutex> lk(audioMutex);
     // stop all current (ma_stop first to quiesce callbacks, then clear vector of shared_ptrs)
     for (size_t i = 0; i < m_active.size(); ++i) stopDevice(i);
     m_active.clear();
@@ -158,7 +159,7 @@ void AudioEngine::setActiveOutputs(const std::vector<size_t>& indicesFromLastEnu
             startDevice(idx);
         }
     }
-    spdlog::info("Active audio outputs set: {}", activeOutputCount());
+    spdlog::info("Active audio outputs set: {}", m_active.size());
 }
 
 void AudioEngine::setActiveOutputsByName(const std::vector<std::string>& nameSubstrings)
@@ -195,7 +196,7 @@ void AudioEngine::startDevice(size_t enumIndex)
     }
 
     float actualRate = (float)cfg.sampleRate;
-    m_sampleRate = actualRate;
+    m_sampleRate.store(actualRate, std::memory_order_relaxed);
 
     // Add to m_active and init ring *before* starting the device.
     auto actPtr = std::make_shared<ActiveOutput>();
@@ -242,11 +243,12 @@ void AudioEngine::stopDevice(size_t activeIdx)
 
 void AudioEngine::setMasterVolume(float vol)
 {
-    m_masterVolume = std::clamp(vol, 0.0f, 1.0f);
+    m_masterVolume.store(std::clamp(vol, 0.0f, 1.0f), std::memory_order_relaxed);
 }
 
 void AudioEngine::setOutputVolume(size_t activeIndex, float vol)
 {
+    std::lock_guard<std::mutex> lk(audioMutex);
     if (activeIndex < m_active.size() && m_active[activeIndex]) {
         m_active[activeIndex]->volume = std::clamp(vol, 0.0f, 1.0f);
     }
@@ -260,15 +262,39 @@ std::shared_ptr<AudioEngine::ActiveOutput> AudioEngine::findActiveOutput(ma_devi
     return nullptr;
 }
 
+void AudioEngine::clearBuffers()
+{
+    std::lock_guard<std::mutex> lk(audioMutex);
+    for (auto& actPtr : m_active) {
+        if (!actPtr || !actPtr->valid.load(std::memory_order_acquire)) continue;
+        auto& rb = actPtr->ring;
+        if (rb.capacity == 0) continue;
+        const size_t w = rb.writePos.load(std::memory_order_acquire);
+        rb.readPos.store(w, std::memory_order_release);
+    }
+    audioBuffer.clear();
+}
+
 void AudioEngine::pushAudio(const float* samples, size_t count)
 {
-    if (count == 0) return;
+    if (!samples || count == 0) return;
     std::lock_guard<std::mutex> lk(audioMutex);
 
     for (auto& actPtr : m_active) {
-        if (!actPtr) continue;
+        if (!actPtr || !actPtr->valid.load(std::memory_order_acquire)) continue;
         auto& rb = actPtr->ring;
+        if (rb.capacity == 0) continue;
+
+        const size_t maxQueuedFrames = std::max<size_t>(256, (size_t)(getSampleRate() * 0.25f));
         size_t w = rb.writePos.load(std::memory_order_relaxed);
+        size_t r = rb.readPos.load(std::memory_order_acquire);
+        size_t queued = (w - r) & (rb.capacity - 1);
+        if (queued + count > maxQueuedFrames) {
+            const size_t keep = (maxQueuedFrames > count) ? (maxQueuedFrames - count) : 0;
+            const size_t newRead = (w + rb.capacity - keep) & (rb.capacity - 1);
+            rb.readPos.store(newRead, std::memory_order_release);
+        }
+
         for (size_t i = 0; i < count; ++i) {
             size_t next = (w + 1) & (rb.capacity - 1);
             if (next == rb.readPos.load(std::memory_order_acquire)) {
@@ -283,7 +309,7 @@ void AudioEngine::pushAudio(const float* samples, size_t count)
 
     // legacy shared buffer kept for compatibility / tests
     audioBuffer.insert(audioBuffer.end(), samples, samples + count);
-    size_t bound = (size_t)(m_sampleRate * 2);
+    size_t bound = (size_t)(getSampleRate() * 2);
     if (audioBuffer.size() > bound) {
         audioBuffer.erase(audioBuffer.begin(), audioBuffer.begin() + (audioBuffer.size() - bound));
     }
@@ -299,7 +325,7 @@ void AudioEngine::playTestTone(size_t activeIndex, float freq, float durationSec
         act.testPhase.store(0.0f);
         // Use sample-accurate countdown in the realtime callback instead of a
         // detached sleep thread that could outlive *this and cause UAF on audioMutex / m_active.
-        int frames = (int)(durationSec * m_sampleRate + 0.5f);
+        int frames = (int)(durationSec * getSampleRate() + 0.5f);
         act.testToneFramesLeft.store(frames > 0 ? frames : 1);
     };
 
@@ -314,16 +340,21 @@ void AudioEngine::playTestTone(size_t activeIndex, float freq, float durationSec
     }
 }
 
-size_t AudioEngine::activeOutputCount() const { return m_active.size(); }
+size_t AudioEngine::activeOutputCount() const {
+    std::lock_guard<std::mutex> lk(audioMutex);
+    return m_active.size();
+}
 
 bool AudioEngine::isDeviceActive(size_t enumIndex) const
 {
+    std::lock_guard<std::mutex> lk(audioMutex);
     for (const auto& aPtr : m_active) if (aPtr && aPtr->enumIndex == enumIndex) return true;
     return false;
 }
 
 std::string AudioEngine::getActiveDeviceNames() const
 {
+    std::lock_guard<std::mutex> lk(audioMutex);
     std::string s;
     for (size_t i = 0; i < m_active.size(); ++i) {
         if (m_active[i] && m_active[i]->enumIndex < m_devices.size()) {
@@ -335,6 +366,7 @@ std::string AudioEngine::getActiveDeviceNames() const
 }
 
 double AudioEngine::getRingFillPercent() const {
+    std::lock_guard<std::mutex> lk(audioMutex);
     // Approx for first valid active (used in live stats). 0 if none.
     for (auto& act : m_active) {
         if (act && act->valid.load(std::memory_order_acquire)) {

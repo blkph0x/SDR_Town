@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.5 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.6 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -289,17 +289,9 @@ if(WIN32)
     endif()
   endif()
 
-  # Include release manifest assets if present (update.json + .sha256 for the GitHub release + in-app updater).
-  # These live at project root for the release engineer; they get picked into the installer root for convenience.
-  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/update.json")
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/update.json" DESTINATION .)
-  endif()
-  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/SDR_Town-${PROJECT_VERSION}-win64-setup.exe.sha256")
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/SDR_Town-${PROJECT_VERSION}-win64-setup.exe.sha256" DESTINATION .)
-  endif()
-  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/SHA256SUMS.txt")
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/SHA256SUMS.txt" DESTINATION .)
-  endif()
+  # Release metadata is published beside the installer on GitHub. It is generated
+  # after packaging so it can hash the final installer bytes, and must not be
+  # embedded into the installer itself.
 endif()
 
 include(CPack)

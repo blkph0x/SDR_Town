@@ -1593,6 +1593,30 @@ Also updated the RMS explanation in code comments and will surface in README.
 
 Updated 2026-06 directly for the user's exact report + "explain to me when it says RMS: -15 what should i set the sq to to mute that freq im on?".
 
+**Live RF Gain not applying to hardware (user: "live rf gain still isnt working? lets go deep and fix this now!")**
+Root cause (deep inspection of startStreaming, realInitThread, setLiveGain, rxThread, main gainSpin, dialog):
+- startStreaming *always* starts a fast safe stub rxThread immediately (isReal=false, soapyDev=null). If attemptReal, it launches a *detached* background realInitThread that does the slow Soapy::Device::make + set* + activate + swap-in of soapyDev (then kills stub, starts real rxThread).
+- The initial setGain inside the worker used a `d` snapshot captured at the moment the lambda was launched in startStreaming.
+- setLiveGain (called from main-screen gainSpin valueChanged, dialog gain valueChanged, Apply, CLI) always updates the DeviceInfo model. The *live hardware* path (`if (streams[index] && st.soapyDev && !stopFlag) soapyDev->setGain(...)`) only fires *after* the background thread has published st.soapyDev.
+- Result: changes to the main "RF Gain (dB)" spin while the device was "starting" (stub + background open in progress — very common) only affected the persisted model. When real finally came up, the gain that got set on hardware was the stale captured value. Subsequent live changes after real was up worked *only if* the exact timing had soapyDev already visible. Hence "works after stop+change in Device Manager dialog + restart", "set to 0 on main screen and no change".
+- Inconsistent low-gain floor (<5→15 for RTL) between setLiveGain and the init path.
+- Zero diagnostic logging when live apply was skipped.
+
+Fixes (targeted, no behavior change for stub or !Soapy):
+- In realInitThread (just before the setGain calls): re-read the *absolute latest* gain + gainName from devices[] under devicesMutex. This picks up any main-spin or dialog changes the user made *during* the async open.
+- Immediately after the success path publishes `st.soapyDev = localDev; ... isReal=true`, explicitly call `setLiveGain(index, ...)` (which re-reads the authoritative current value and, because soapyDev is now visible in the check, executes the live setGain on the now-running hardware). This is the "catch-up" that makes spin changes during open finally land.
+- Added appliedLive flag + spdlog::debug in setLiveGain when a change only updated the model (no soapyDev yet). User/developer will now see in the log exactly why a change "did nothing to hardware" (e.g. still in stub phase).
+- Made the RTL low-gain floor removal (user can truly set 0) consistent in the init path (removed the `else if <5 →15`).
+- The main gainSpin and dialog valueChanged already called setLiveGain — they now benefit from the robust timing.
+
+Result: once a device has a real soapyDev (i.e. is actually streaming from hardware), the main GUI "RF Gain (dB)" spin (and per-device dialog spins) should immediately affect the SDR sensitivity via direct setGain. Changes made while the device is still coming up from "enable" will be caught and applied the moment the real dev is ready. Stop/restart in dialog still works as a fallback but should no longer be required for live twiddling.
+
+Citations: DeviceManager.cpp setLiveGain:686 (the soapyDev check), realInitThread:422 and success swap ~470 (the captured d + publish), startStreaming:374 (stub first, then detached real), main.cpp:449 (gainSpin valueChanged calling setLiveGain(0,v)), dialog ~1029 and 1073 (the Apply + valueChanged paths).
+
+Rebuild + ctest 100% + harness 5/5 verified. This is the deep fix for the long-standing "live RF gain" complaint.
+
+Updated 2026-06.
+
 ---
 
 ## README / User Guide Updates (squelch + RMS)

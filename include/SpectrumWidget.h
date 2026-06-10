@@ -38,8 +38,8 @@ public:
     // This lets the user always drag the SQ line from very low (open) to very high (force mute even on strong signals) within the visible plot.
     void setSquelchThreshold(double db);
 
-    // Live post-demod RMS marker (for visual correlation with the SQ line).
-    // Called from the main RMS label timer so the plot can show "current audio level" as a reference line.
+    // Live channel-level marker (for visual correlation with the SQ line).
+    // Called from the main level timer so the plot can show the current squelch metric as a reference line.
     void setLiveRms(double rmsDb);
 
 signals:
@@ -66,7 +66,7 @@ private:
     int yFromDb(double db, int specH) const;
     double dbFromY(int y, int specH) const;
 
-    // Dedicated squelch/RMS visual scale (fixed -130..+40, mapped over spectrum curve height only).
+    // Dedicated squelch/level visual scale (fixed -130..+40, mapped over spectrum curve height only).
     // Independent of the color range used for waterfall/curve coloring.
     int yFromSquelchViz(double db, int specH) const;
     double squelchVizDbFromY(int y, int specH) const;
@@ -105,6 +105,6 @@ private:
     double m_squelchThresholdDb = -80.0;
     bool m_squelchDragging = false;
 
-    // Live RMS (post-demod) for drawing a reference marker so user can see "drag SQ line above this to mute".
+    // Live channel level for drawing a reference marker so user can see "drag SQ line above this to mute".
     double m_liveRmsDb = -100.0;
 };

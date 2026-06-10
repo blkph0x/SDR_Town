@@ -230,7 +230,7 @@ double SpectrumWidget::dbFromY(int y, int specH) const
     return m_colorMinDb + n * range;
 }
 
-// Dedicated fixed range for the interactive squelch line and live RMS marker.
+// Dedicated fixed range for the interactive squelch line and live level marker.
 // This is mapped over the spectrum curve height so the user can always drag from
 // "always open" (bottom of curve area) to "force mute even loud signals" (top of curve area)
 // completely independently of the WF Color Min/Max used for coloring.
@@ -473,7 +473,7 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
     // This is independent of the color range (left axis + coloring still use WF Color Min/Max).
     // Result: user can drag the line anywhere from bottom of the blue area (very low sq = always open)
     // to the top of the blue area (very high sq = force mute) without being limited by color settings.
-    // Also draws a live RMS reference marker (using same viz scale) so it's obvious where to place the SQ line.
+    // Also draws a live level reference marker (using same viz scale) so it's obvious where to place the SQ line.
     {
         int plotLeft = specRect.left();
         int plotRight = specRect.right();
@@ -493,15 +493,15 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
         p.setPen(QColor(255, 210, 90));
         p.drawText(plotLeft + 6, std::max(specRect.top() + 12, sqY - 2), QString("SQ %1 dB").arg(squelchSnap, 0, 'f', 0));
 
-        // Live RMS marker (different style: solid, slightly different color) using same viz scale.
-        // This directly helps the "why is audio not cutting" case: user can see the current audio level
+        // Live channel-level marker (different style: solid, slightly different color) using same viz scale.
+        // This directly helps the "why is audio not cutting" case: user can see the current gate level
         // and place the SQ line above it.
         int rmsY = yFromSquelchViz(liveRmsSnap, specH);
         rmsY = std::clamp(rmsY, 2, h - 3);
         p.setPen(QPen(QColor(80, 220, 120), 1.5));  // green-ish for "current level"
         p.drawLine(plotLeft + 2, rmsY, plotRight - 2, rmsY);
         p.setPen(QColor(100, 230, 140));
-        p.drawText(plotRight - 70, std::min(h - 4, rmsY + 10), QString("RMS %1").arg(liveRmsSnap, 0, 'f', 1));
+        p.drawText(plotRight - 70, std::min(h - 4, rmsY + 10), QString("LVL %1").arg(liveRmsSnap, 0, 'f', 1));
 
         // === Right side grab bar + handle (easy target for mouse) ===
         int rightBarX = w - rightMargin + 4;

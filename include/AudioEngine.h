@@ -38,6 +38,7 @@ public:
     // Push a block of mono float samples (will be duplicated + gained to all active devices)
     // Call from your demod/resample thread at ~10-50ms blocks for low latency.
     void pushAudio(const float* samples, size_t count);
+    void clearBuffers();
 
     // Test tone on a specific active output (or all)
     void playTestTone(size_t activeIndex = size_t(-1), float freq = 1000.0f, float durationSec = 0.6f);
@@ -58,10 +59,10 @@ public:
     std::atomic<float> m_testFreq{1000.0f};
 
     // Real audio buffer (accessible from static callback)
-    std::mutex audioMutex;
+    mutable std::mutex audioMutex;
     std::vector<float> audioBuffer;
 
-    float getMasterVolume() const { return m_masterVolume; }
+    float getMasterVolume() const { return m_masterVolume.load(std::memory_order_relaxed); }
 
     // Diagnostics counters (incremented from RT callback; read lock-free from stats)
     std::atomic<int> underrunCount{0};
@@ -166,10 +167,10 @@ public:
     // Helper for the free data_callback (nested ActiveOutput type is now visible)
     std::shared_ptr<ActiveOutput> findActiveOutput(ma_device* pDev);
 
-    float m_masterVolume = 0.85f;
+    std::atomic<float> m_masterVolume{0.85f};
 
-    float m_sampleRate = 48000.0f;  // actual (or configured) output rate; used for automatic exact audio block sizing and bitrate reporting across SDR -> DSP -> speakers/VAC
-    float getSampleRate() const { return m_sampleRate; }
+    std::atomic<float> m_sampleRate{48000.0f};  // actual output rate; used for exact audio block sizing and bitrate reporting
+    float getSampleRate() const { return m_sampleRate.load(std::memory_order_relaxed); }
 
     // For test tone generation (phase kept here)
     std::atomic<float> m_testPhase{0.0f};

@@ -51,6 +51,8 @@ private:
     float des = 0;
     float nx1=0, nx2=0, ny1=0, ny2=0;
     float flp1=0, flp2=0;
+    float amCarrier = 1.0f;
+    bool amCarrierValid = false;
     float histYm2 = 0, histYm1 = 0, histY0 = 0;
     bool haveHist = false;
     double resampPhase = 0.0;

@@ -3,17 +3,23 @@
 # Run from project root after a successful build/fix session.
 
 param(
-    [string]$Version = "0.2.1",
+    [string]$Version = "0.2.6",
     [switch]$SkipPush,
     [switch]$SkipAssets
 )
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "=== SDR Town Fast Dev Release v$Version ===" -ForegroundColor Cyan
+Write-Host "=== SDR Town Stable Release v$Version ===" -ForegroundColor Cyan
 
 $root = $PSScriptRoot | Split-Path -Parent
 Set-Location $root
+
+$cmakeText = Get-Content CMakeLists.txt -Raw
+$escapedVersion = [regex]::Escape($Version)
+if ($cmakeText -notmatch "project\(SDR_Town VERSION\s+$escapedVersion\s+LANGUAGES CXX\)") {
+    throw "CMakeLists.txt project version must be $Version before packaging this release."
+}
 
 # 1. Ensure clean branded build
 Write-Host "`n[1/6] Running clean deploy + windeployqt + cpack..." -ForegroundColor Yellow
@@ -31,10 +37,16 @@ if (Test-Path $qtWindeploy) {
 cmake --build build --config Release --target deploy | Out-Null
 cpack -G NSIS -C Release --config build/CPackConfig.cmake | Out-Null
 
-$setup = "build\SDR_Town-$Version-win64-setup.exe"
-if (-not (Test-Path $setup)) {
-    # fallback if cpack put it in build root
-    $setup = Get-ChildItem build -Recurse -Filter "*$Version*setup*.exe" | Select-Object -First 1 -Expand FullName
+$setupName = "SDR_Town-$Version-win64-setup.exe"
+$setup = @(
+    $setupName,
+    "build\$setupName"
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if (-not $setup) {
+    $setup = Get-ChildItem . -Recurse -Filter $setupName -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notmatch '\\_CPack_Packages\\' } |
+        Select-Object -First 1 -ExpandProperty FullName
 }
 
 if (-not $setup -or -not (Test-Path $setup)) {
@@ -50,6 +62,8 @@ if (Test-Path $portable) {
 Write-Host "`n[2/6] Computing SHA256 and updating manifests..." -ForegroundColor Yellow
 $setupHash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
 $setupSize = (Get-Item $setup).Length
+$setupShaFile = "SDR_Town-$Version-win64-setup.exe.sha256"
+"$setupHash  $setupName" | Set-Content $setupShaFile -Encoding ascii
 
 $portableZip = "SDR_Town-$Version-win64-portable.zip"
 $portableHash = if (Test-Path $portableZip) { (Get-FileHash $portableZip -Algorithm SHA256).Hash.ToLower() } else { "" }
@@ -58,6 +72,7 @@ $portableHash = if (Test-Path $portableZip) { (Get-FileHash $portableZip -Algori
 $manifest = Get-Content update.json | ConvertFrom-Json
 $manifest.version = $Version
 $manifest.tag = "v$Version"
+$manifest.notes_url = "https://github.com/Blkph0x/SDR_Town/releases/tag/v$Version"
 $manifest.published = (Get-Date -Format "yyyy-MM-dd")
 $manifest.installer.url = "https://github.com/Blkph0x/SDR_Town/releases/download/v$Version/SDR_Town-$Version-win64-setup.exe"
 $manifest.installer.sha256 = $setupHash
@@ -78,8 +93,12 @@ git commit -m "release: v$Version dev build - updated manifests + SHA256SUMS" --
 
 if (-not $SkipPush) {
     Write-Host "`n[3/6] Pushing code + tag..." -ForegroundColor Yellow
-    git tag -f -a "v$Version" -m "SDR Town $Version (dev release for updater testing)"
-    git push origin master --tags
+    if (git tag --list "v$Version") {
+        throw "Tag v$Version already exists. Pick a new version instead of overwriting a published release."
+    }
+    git tag -a "v$Version" -m "SDR Town $Version"
+    git push origin master
+    git push origin "v$Version"
 }
 
 if (-not $SkipAssets) {
@@ -89,7 +108,9 @@ if (-not $SkipAssets) {
         $gh = (Get-Command gh -ErrorAction SilentlyContinue).Source
     }
     if ($gh -and (Test-Path $gh)) {
-        & $gh release create "v$Version" --title "SDR Town $Version" --prerelease --notes "Dev build. See DESIGN.md for changes. Fresh assets for in-app updater testing." --repo Blkph0x/SDR_Town $setup $portableZip update.json SHA256SUMS.txt --clobber 2>&1 | Out-Null
+        $assets = @($setup, $setupShaFile, $portableZip, "update.json", "SHA256SUMS.txt") | Where-Object { Test-Path $_ }
+        $ghArgs = @("release", "create", "v$Version") + $assets + @("--title", "SDR Town $Version", "--notes", "Stable build. Fresh installer, portable ZIP, manifest, and hashes for the in-app updater.", "--repo", "Blkph0x/SDR_Town", "--verify-tag", "--latest")
+        & $gh @ghArgs | Out-Null
         Write-Host "  Assets uploaded via gh."
     } else {
         Write-Host "  gh CLI not found in expected locations. Please run the manual upload or install gh."

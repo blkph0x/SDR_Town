@@ -20,6 +20,23 @@ std::vector<std::complex<float>> genTone(double sr, double dur, double freqOffse
     return iq;
 }
 
+std::vector<std::complex<float>> genAM(double sr, double dur, double audioHz, double carrierAmp = 0.7, double depth = 0.6) {
+    size_t n = static_cast<size_t>(sr * dur);
+    std::vector<std::complex<float>> iq(n);
+    for (size_t i = 0; i < n; ++i) {
+        double t = (double)i / sr;
+        double env = carrierAmp * (1.0 + depth * std::sin(2 * M_PI * audioHz * t));
+        iq[i] = std::complex<float>((float)env, 0.0f);
+    }
+    return iq;
+}
+
+float maxAbs(const std::vector<float>& audio) {
+    float m = 0.0f;
+    for (float v : audio) m = std::max(m, std::abs(v));
+    return m;
+}
+
 // Very rough dominant frequency estimator on real audio (zero-cross count).
 double estimateFreq(const std::vector<float>& audio, double sr) {
     if (audio.size() < 4) return 0;
@@ -56,15 +73,31 @@ TEST_CASE("Demodulator WFM produces audio with de-emphasis effect and continuity
 
 TEST_CASE("Demodulator AM produces positive envelope with energy") {
     Demodulator d;
-    auto iq = genTone(48000, 0.03, 0, 0.7); // carrier at 0 offset
+    auto iq = genAM(48000, 0.08, 1000.0);
     double rms = -100;
     auto audio = d.demodulateToAudio(iq, 48000, 100e6, 100e6, DemodMode::AM, rms, 5000, -90, 1.0, 0, 0, 10000, 0, 48000);
     REQUIRE(audio.size() > 50);
-    float maxv = *std::max_element(audio.begin(), audio.end());
-    // Relaxed threshold post S0-6 smooth squelch gate (synthetic test tone envelope can be modest
-    // depending on exact rms vs configured squelch during the first chunk). Still proves non-silent energy.
-    REQUIRE(maxv > 0.01f);
+    REQUIRE(maxAbs(audio) > 0.05f);
     REQUIRE(rms > -50);
+}
+
+TEST_CASE("Demodulator AM squelch closes quickly after carrier drops") {
+    Demodulator d;
+    auto signal = genAM(48000, 0.04, 900.0);
+    std::vector<std::complex<float>> quiet(1920, {0.0f, 0.0f});
+    double rms = -100;
+
+    auto openAudio = d.demodulateToAudio(signal, 48000, 100e6, 100e6, DemodMode::AM, rms, 5000, -40, 1.0, 0, 0, 10000, 0, 48000);
+    REQUIRE(maxAbs(openAudio) > 0.02f);
+    REQUIRE(rms > -20.0);
+
+    std::vector<float> last;
+    for (int i = 0; i < 8; ++i) {
+        last = d.demodulateToAudio(quiet, 48000, 100e6, 100e6, DemodMode::AM, rms, 5000, -40, 1.0, 0, 0, 10000, 0, 48000);
+    }
+
+    REQUIRE(rms < -120.0);
+    REQUIRE(maxAbs(last) < 0.01f);
 }
 
 TEST_CASE("Demodulator state carry across chunks (no boundary click for FM)") {

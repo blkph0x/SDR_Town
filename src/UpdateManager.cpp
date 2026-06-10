@@ -16,9 +16,38 @@
 #include <QDesktopServices>
 #include <QUrl>
 #include <QDebug>
+#include <QStringList>
+#include <QVector>
+#include <algorithm>
 
 static const QString MANIFEST_URL = "https://github.com/Blkph0x/SDR_Town/releases/latest/download/update.json";
 static const int CHECK_INTERVAL_HOURS = 24;
+
+static QVector<int> parseVersionParts(QString v)
+{
+    if (v.startsWith('v', Qt::CaseInsensitive)) v.remove(0, 1);
+    QVector<int> out;
+    for (const QString& p : v.split('.', Qt::SkipEmptyParts)) {
+        bool ok = false;
+        int n = p.toInt(&ok);
+        out.push_back(ok ? n : 0);
+    }
+    while (out.size() < 3) out.push_back(0);
+    return out;
+}
+
+static int compareVersions(const QString& a, const QString& b)
+{
+    QVector<int> av = parseVersionParts(a);
+    QVector<int> bv = parseVersionParts(b);
+    int n = std::max(av.size(), bv.size());
+    for (int i = 0; i < n; ++i) {
+        int ai = i < av.size() ? av[i] : 0;
+        int bi = i < bv.size() ? bv[i] : 0;
+        if (ai != bi) return ai < bi ? -1 : 1;
+    }
+    return 0;
+}
 
 UpdateManager::UpdateManager(QObject* parent)
     : QObject(parent)
@@ -79,7 +108,7 @@ void UpdateManager::onManifestReply(QNetworkReply* reply)
     }
 
     QString current = QCoreApplication::applicationVersion();
-    if (info.version == current || info.version == m_skippedVersion) {
+    if (compareVersions(info.version, current) <= 0 || info.version == m_skippedVersion) {
         if (m_lastCheckWasManual) {
             emit upToDate(); // "You are up to date" ONLY for explicit Help -> Check
         }
@@ -103,10 +132,15 @@ bool UpdateManager::parseUpdateJson(const QByteArray& data, UpdateInfo& out)
 
     QJsonObject inst = o.value("installer").toObject();
     out.installerUrl = inst.value("url").toString();
-    out.sha256       = inst.value("sha256").toString();
+    out.sha256       = inst.value("sha256").toString().simplified();
+    out.sha256.remove(' ');
     out.size         = inst.value("size").toInteger(0);
 
-    return !out.version.isEmpty() && !out.installerUrl.isEmpty() && !out.sha256.isEmpty();
+    QUrl installer(out.installerUrl);
+    return !out.version.isEmpty() &&
+           installer.isValid() &&
+           installer.scheme().compare("https", Qt::CaseInsensitive) == 0 &&
+           !out.sha256.isEmpty();
 }
 
 void UpdateManager::downloadAndApplyUpdate(const UpdateInfo& info)
@@ -121,7 +155,14 @@ void UpdateManager::downloadAndApplyUpdate(const UpdateInfo& info)
 
 void UpdateManager::doDownload(const QString& url, const QString& expectedSha256)
 {
-    QNetworkRequest req(url);
+    QUrl updateUrl(url);
+    if (!updateUrl.isValid() || updateUrl.scheme().compare("https", Qt::CaseInsensitive) != 0) {
+        emit error("Update download URL must be valid HTTPS.");
+        return;
+    }
+
+    QNetworkRequest req(updateUrl);
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
     QNetworkReply* reply = m_nam->get(req);
 
     connect(reply, &QNetworkReply::downloadProgress, this, &UpdateManager::downloadProgress);
@@ -184,6 +225,9 @@ void UpdateManager::launchInstaller(const QString& path, bool silent)
     // NSIS /S is silent install (no prompts, auto "next" through pages, preserves APPDATA\SDR_Town settings).
     QStringList args;
     if (silent) args << "/S";
-    QProcess::startDetached(path, args);
+    if (!QProcess::startDetached(path, args)) {
+        emit error("Could not launch the verified update installer.");
+        return;
+    }
     QCoreApplication::quit();
 }

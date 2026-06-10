@@ -44,8 +44,12 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
 {
     rmsOut = -100;
     if (iq.empty()) return {};
+    if (sr <= 0.0 || !std::isfinite(sr)) return {};
     if (lpfHz <= 0) {
-        lpfHz = (mode == DemodMode::WFM || mode == DemodMode::AUTO) ? 15000.0 : 3500.0;
+        if (mode == DemodMode::WFM || mode == DemodMode::AUTO) lpfHz = 15000.0;
+        else if (mode == DemodMode::AM) lpfHz = 5000.0;
+        else if (mode == DemodMode::USB || mode == DemodMode::LSB) lpfHz = 3000.0;
+        else lpfHz = 3500.0;
     }
 
     // === STATE-OF-THE-ART AUTOMATIC RATE & BITRATE CALCULATIONS (no compromise) ===
@@ -157,6 +161,10 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         for (auto &s : baseband) s = std::conj(s);
     }
 
+    double channelPower = 0.0;
+    for (const auto& s : baseband) channelPower += std::norm(s);
+    double channelLevelDb = 10.0 * std::log10(channelPower / std::max<size_t>(1, baseband.size()) + 1e-20);
+
     // WFM channelizer decimation (still scalar for now; polyphase upgrade planned)
     double demodRate = sr;
     bool isWFM = (mode == DemodMode::WFM || mode == DemodMode::AUTO);
@@ -173,22 +181,32 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         }
     }
 
-    // Pre-disc FM limiter for WFM
+    // Pre-disc FM limiter for FM modes only. Do not limit AM/SSB: their amplitude carries information.
     if (isWFM) {
         for (auto &s : baseband) {
             float mag = std::abs(s) + 1e-9f;
             s = s / mag;
         }
-    } else {
+    } else if (mode == DemodMode::NFM) {
         for (auto &s : baseband) {
-            float mag = std::abs(s);
-            if (mag > 0.92f) s *= (0.92f / mag);
+            float mag = std::abs(s) + 1e-9f;
+            s = s / mag;
         }
     }
 
     std::vector<float> base(baseband.size());
     if (mode == DemodMode::AM) {
-        for (size_t k=0; k<baseband.size(); ++k) base[k] = std::abs(baseband[k]);
+        if (dspStateNeedsReset) { amCarrierValid = false; amCarrier = 1.0f; }
+        float carrierAlpha = 1.0f - std::exp(-2.0f * 3.14159265f * 20.0f / (float)std::max(1000.0, demodRate));
+        for (size_t k=0; k<baseband.size(); ++k) {
+            float env = std::abs(baseband[k]);
+            if (!amCarrierValid) {
+                amCarrier = std::max(env, 1e-4f);
+                amCarrierValid = true;
+            }
+            amCarrier = amCarrier * (1.0f - carrierAlpha) + env * carrierAlpha;
+            base[k] = (env - amCarrier) / std::max(amCarrier, 1e-4f);
+        }
     } else if (mode == DemodMode::USB || mode == DemodMode::LSB) {
         for (size_t k=0; k<baseband.size(); ++k) base[k] = std::real(baseband[k]);
     } else {
@@ -200,8 +218,9 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         }
     }
 
-    // AGC only for non-WFM
-    if (mode != DemodMode::WFM && mode != DemodMode::AUTO) {
+    // Voice AGC only for SSB. FM levels are set by deviation; AM is carrier-normalized above.
+    // Running AGC before squelch on AM/NFM lifts noise and makes the squelch meter misleading.
+    if (mode == DemodMode::USB || mode == DemodMode::LSB) {
         if (dspStateNeedsReset) { agcGain = 1.0f; }
         float attack = 0.05f;
         float decay = 0.0005f;
@@ -328,7 +347,9 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         }
         float sum=0;
         for (auto s : aud) sum += s*s;
-        rmsOut = 10 * std::log10( (sum / aud.size()) + 1e-12 );
+        double audioRmsDb = 10 * std::log10( (sum / aud.size()) + 1e-12 );
+        (void)audioRmsDb;
+        rmsOut = channelLevelDb;
         lastRmsDb = rmsOut;
 
         // S0-6 (P2) + P1 calibration: smooth squelch with attack/release/hang + hysteresis.
@@ -353,23 +374,25 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
                 lastAppliedSquelchDb = squelchDb;
             }
 
-            float target = (squelchDb < -115.0f || rmsOut > squelchDb) ? 1.0f : 0.0f;
+            float target = (squelchDb < -115.0f || channelLevelDb > squelchDb) ? 1.0f : 0.0f;
 
-            // Hang + a bit of extra hysteresis (open stays open a little longer; close is reluctant).
-            const int hangSamples = (int)(0.30 * outputRate);
+            // Hang is tracked in output samples and decremented by each processed block.
+            // The old code decremented once per block, so "0.3s" could stick open for minutes.
+            const int hangSamples = (int)((mode == DemodMode::AM || mode == DemodMode::USB || mode == DemodMode::LSB) ? 0.10 * outputRate : 0.18 * outputRate);
             if (target > 0.5f) squelchHangLeft = hangSamples;
-            else if (squelchHangLeft > 0) { target = 1.0f; --squelchHangLeft; }
+            else if (squelchHangLeft > 0) {
+                target = 1.0f;
+                squelchHangLeft = std::max(0, squelchHangLeft - (int)aud.size());
+            }
 
-            float attack = 0.025f;
-            float release = 0.0007f;
-            if (target > squelchGateGain)
-                squelchGateGain = squelchGateGain * (1-attack) + target * attack;
-            else
-                squelchGateGain = squelchGateGain * (1-release) + target * release;
-
-            squelchGateGain = std::clamp(squelchGateGain, 0.0f, 1.0f);
-
+            const float attack = 1.0f - std::exp(-1.0f / (0.006f * (float)outputRate));
+            const float release = 1.0f - std::exp(-1.0f / (0.025f * (float)outputRate));
             for (auto &s : aud) {
+                if (target > squelchGateGain)
+                    squelchGateGain = squelchGateGain * (1-attack) + target * attack;
+                else
+                    squelchGateGain = squelchGateGain * (1-release) + target * release;
+                squelchGateGain = std::clamp(squelchGateGain, 0.0f, 1.0f);
                 s *= gain * squelchGateGain;
             }
         }

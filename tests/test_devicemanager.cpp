@@ -60,6 +60,25 @@ TEST_CASE("DeviceManager basic functionality", "[devicemanager]") {
                 REQUIRE(reloaded[idx].antenna == "RX");
             }
         }
+
+        SECTION("RTL live gain preserves full user range") {
+            auto devs = mgr.enumerateDevices(false);
+            size_t rtlIdx = devs.size();
+            for (size_t i = 0; i < devs.size(); ++i) {
+                if (devs[i].driver == "rtlsdr") {
+                    rtlIdx = i;
+                    break;
+                }
+            }
+
+            if (rtlIdx < devs.size()) {
+                mgr.setLiveGain(rtlIdx, 0.0);
+                REQUIRE(mgr.getCurrentGain(rtlIdx) == 0.0);
+
+                mgr.setLiveGain(rtlIdx, 50.0);
+                REQUIRE(mgr.getCurrentGain(rtlIdx) >= 49.0);
+            }
+        }
     } catch (const std::exception& ex) {
         WARN("DeviceManager test hit environment limitation (headless/Soapy init): " << ex.what() << " - treated as non-fatal for CI");
         // Do not SUCCEED blindly; let specific tests fail if core paths broken. Real WFM exercised in manual/CLI runs.

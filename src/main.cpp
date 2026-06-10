@@ -69,7 +69,7 @@ int runCLI(int argc, char* argv[]);
 
 // Shared live diagnostic updated by demod calls from GUI worker and CLI monitor thread (P1 audit diags)
 static std::atomic<long long> gLastDspMicros{0};
-static std::atomic<double> gLastRmsDb{-100.0};   // live noise floor / signal level for UI (squelch calibration, auto, indicator)
+static std::atomic<double> gLastRmsDb{-100.0};   // live channel level used by squelch calibration/Auto/indicator
 
 // DSP implementation now lives in src/Demod.cpp (Demodulator class owns all state per Receiver).
 // classifyMode, detectChannelBandwidth, and demodulateToAudio are provided via Demod.h + Demod.cpp.
@@ -396,37 +396,36 @@ public:
         gainLay->addWidget(new QLabel("RF Gain (dB):"));
         QDoubleSpinBox* gainSpin = new QDoubleSpinBox();
         gainSpin->setRange(0, 50); gainSpin->setDecimals(1); gainSpin->setValue(20);
-        gainSpin->setToolTip("Adjust SDR RF gain / sensitivity. 0 = minimum gain (lowest sensitivity). For RTL, values >25 are capped internally to avoid overload; very low values may reduce weak signals.");
+        gainSpin->setToolTip("Manual SDR RF gain / sensitivity. 0 = minimum gain; higher values increase sensitivity and overload risk. This writes directly to the SDR hardware when a real device is active.");
         gainLay->addWidget(gainSpin);
         gainLay->addSpacing(12);
         gainLay->addWidget(new QLabel("Squelch (dB):"));
         QDoubleSpinBox* squelchSpin = new QDoubleSpinBox();
         squelchSpin->setRange(-130, 40); squelchSpin->setDecimals(0); squelchSpin->setValue(-80);
-        squelchSpin->setToolTip("Post-demod squelch threshold (in dB). Set it *above* the current RMS (shown in label) to mute the freq. E.g. if RMS: -15 set sq to -10 or 0+; if RMS +15 set to 20+. Use Auto or manual. The gate has ~0.3s hang on close to avoid chopping speech (freq change forces instant cut via reset).");
+        squelchSpin->setToolTip("Channel-level squelch threshold (dB). Put SQ above the current Level marker to mute; set below it to open. Values below -115 disable squelch.");
         gainLay->addWidget(squelchSpin);
 
         QPushButton* autoSquelchBtn = new QPushButton("Auto");
-        autoSquelchBtn->setToolTip("Set squelch from current noise floor (recent RMS + 6 dB). Set sq > RMS to mute the freq completely. Auto updates live.");
+        autoSquelchBtn->setToolTip("Set squelch from the current channel noise floor (Level + 6 dB).");
         gainLay->addWidget(autoSquelchBtn);
 
-        QLabel* rmsLabel = new QLabel("RMS: --- dB");
-        rmsLabel->setToolTip("Live post-demod RMS (updated from the DSP worker). Useful for calibrating squelch.");
+        QLabel* rmsLabel = new QLabel("Level: --- dB");
+        rmsLabel->setToolTip("Live channel level used by the squelch gate, updated from the DSP worker.");
         gainLay->addWidget(rmsLabel);
         rxLay->addLayout(gainLay);
 
-        // Live RMS readout (polled lightly from the main UI timer)
+        // Live channel-level readout (polled lightly from the main UI timer)
         QTimer* rmsUpdate = new QTimer(this);
         connect(rmsUpdate, &QTimer::timeout, this, [rmsLabel, spectrum]() {
             double r = gLastRmsDb.load();
-            if (r > -150) rmsLabel->setText(QString("RMS: %1 dB").arg(r, 0, 'f', 1));
+            if (r > -150) rmsLabel->setText(QString("Level: %1 dB").arg(r, 0, 'f', 1));
             if (spectrum) spectrum->setLiveRms(r);   // update the reference marker on the spectrum plot
         });
         rmsUpdate->start(400);
 
         connect(autoSquelchBtn, &QPushButton::clicked, this, [this, squelchSpin]() {
             double recent = gLastRmsDb.load();
-            // Set squelch threshold a bit above current RMS so it mutes when below the noise floor.
-            // Supports positive RMS (high levels from gain/processing) and negative. +6 gives headroom for voice.
+            // Set squelch threshold a bit above current channel level/noise floor.
             double target = (recent > -140.0) ? (recent + 6.0) : -82.0;
             target = std::clamp(target, -130.0, 40.0);
             squelchSpin->setValue(target);
@@ -596,6 +595,20 @@ public:
         // entry + persisted enabled flags via loadSettings (which runs inside enumerate).
         auto& devMgr = DeviceManager::instance();
         auto initialDevs = devMgr.enumerateDevices(false /* no hardware probe on launch */);
+        if (!initialDevs.empty()) {
+            const auto& d0 = initialDevs.front();
+            const double gMin = d0.gainMax > d0.gainMin ? d0.gainMin : 0.0;
+            const double gMax = d0.gainMax > d0.gainMin ? d0.gainMax : 80.0;
+            gainSpin->blockSignals(true);
+            gainSpin->setRange(gMin, gMax);
+            gainSpin->setValue(std::clamp(d0.gain, gMin, gMax));
+            gainSpin->setToolTip(QString("Manual SDR RF gain / sensitivity for %1. Range: %2 to %3 dB. 0/min = least sensitive; high values can overload strong local signals.")
+                .arg(QString::fromStdString(d0.label))
+                .arg(gMin, 0, 'f', 1)
+                .arg(gMax, 0, 'f', 1));
+            gainSpin->blockSignals(false);
+            monitorRfGainDb = gainSpin->value();
+        }
         int enabled = 0;
         for (const auto& d : initialDevs) if (d.enabled) ++enabled;
         statusBar()->showMessage(QString("SDR Town — Professional SDR Tool  |  Devices: %1 total (%2 enabled)  |  Audio: not configured").arg(initialDevs.size()).arg(enabled));
@@ -724,7 +737,7 @@ public:
                     }
 
                     gLastDspMicros.store(dspMicros);
-                    gLastRmsDb.store(rms);   // for live RMS readout and Auto Squelch
+                    gLastRmsDb.store(rms);   // for live channel-level readout and Auto Squelch
                     if (!ch.empty()) {
                         if (auto* eng = getOrCreateAudioEngine()) {
                             static std::vector<float> pend;
@@ -1014,11 +1027,13 @@ private slots:
 
             // Gain
             QDoubleSpinBox* gain = new QDoubleSpinBox();
-            gain->setRange(0, 80);
+            double gainMin = d.gainMax > d.gainMin ? d.gainMin : 0.0;
+            double gainMax = d.gainMax > d.gainMin ? d.gainMax : 80.0;
+            gain->setRange(gainMin, gainMax);
             gain->setDecimals(1);
             gain->setSingleStep(1);
             gain->setSuffix(" dB");
-            gain->setValue(d.gain);
+            gain->setValue(std::clamp(d.gain, gainMin, gainMax));
             table->setCellWidget(row, 5, gain);
             gainSpins.push_back(gain);
 
@@ -1479,6 +1494,7 @@ int runCLI(int argc, char* argv[]) {
         double g = (di < mgr.getDevices().size() ? mgr.getCurrentGain(di) : 0.0);
         size_t qd = (di < mgr.getDevices().size() ? mgr.getIQQueueDepth(di) : 0);
         double dsp = gLastDspMicros.load() / 1000.0;
+        double level = gLastRmsDb.load();
         double ring = 0, underr = 0;
         if (cliAudio) {
             ring = cliAudio->getRingFillPercent();
@@ -1486,7 +1502,7 @@ int runCLI(int argc, char* argv[]) {
         }
         std::cout << "RX" << r << " dev=" << di << " f=" << (freqHz/1e6) << "MHz mode=" << (int)mode
                   << " bw=" << (bwHz/1000) << "kHz gain=" << g << "dB IQdepth=" << qd
-                  << " DSP=" << dsp << "ms ring=" << ring << "% underruns=" << underr << "\n";
+                  << " level=" << level << "dB DSP=" << dsp << "ms ring=" << ring << "% underruns=" << underr << "\n";
     };
 
     std::string line;

@@ -26,6 +26,16 @@ DeviceManager& DeviceManager::instance() {
     return mgr;
 }
 
+static double clampGainForDevice(const DeviceInfo& d, double gainDb) {
+    double minGain = d.gainMin;
+    double maxGain = d.gainMax;
+    if (!std::isfinite(minGain) || !std::isfinite(maxGain) || maxGain <= minGain) {
+        minGain = 0.0;
+        maxGain = (d.driver == "rtlsdr") ? 50.0 : 80.0;
+    }
+    return std::clamp(gainDb, minGain, maxGain);
+}
+
 std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
     std::lock_guard<std::mutex> lk(devicesMutex);
     devices.clear();
@@ -92,6 +102,8 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
                         if (!gains.empty()) {
                             di.gainName = gains[0];
                             auto gr = dev->getGainRange(SOAPY_SDR_RX, 0, di.gainName);
+                            di.gainMin = gr.minimum();
+                            di.gainMax = gr.maximum();
                             if (di.driver == "rtlsdr") {
                                 di.gain = 20.0; // P1 audit smoking gun: 80 or 0.6*max overloads strong local WFM; 15-25 dB first test + BW 120-150 kHz
                             } else {
@@ -99,7 +111,11 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
                             }
                         } else {
                             di.gainName = "TUNER"; // common for RTL-SDR
-                            if (di.driver == "rtlsdr") di.gain = 20.0;
+                            if (di.driver == "rtlsdr") {
+                                di.gain = 20.0;
+                                di.gainMin = 0.0;
+                                di.gainMax = 50.0;
+                            }
                         }
 
                         SoapySDR::Device::unmake(dev);
@@ -117,6 +133,8 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
                     di.minFreq = 24e6;
                     di.maxFreq = 1766e6;
                     di.gain = 20.0;  // P1 audit: strong local WFM overloads RTL at high gain (was 30/80); 15-25 safe for broadcast FM. BW 120-150kHz also recommended.
+                    di.gainMin = 0.0;
+                    di.gainMax = 50.0;
                     di.gainName = "TUNER";
                 } else {
                     di.antennas = {"TX/RX"};
@@ -126,6 +144,8 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
                     di.minFreq = 1e6;
                     di.maxFreq = 6e9;
                     di.gain = 40.0;
+                    di.gainMin = 0.0;
+                    di.gainMax = 80.0;
                 }
             }
 
@@ -151,6 +171,8 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
             di.minFreq = 24e6;
             di.maxFreq = 1766e6;
             di.gain = 20.0;  // P1: default safe for strong local WFM (avoid 80 persisted overload at front-end)
+            di.gainMin = 0.0;
+            di.gainMax = 50.0;
             di.gainName = "TUNER";
             devices.push_back(di);
             spdlog::info("  Added RTL-SDR entry (will attempt real when enabled if hardware present)");
@@ -170,6 +192,8 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
     fake1.sampleRates = {2.4e6, 5e6, 10e6, 20e6};
     fake1.sampleRate = 2.4e6;
     fake1.gain = 40.0;
+    fake1.gainMin = 0.0;
+    fake1.gainMax = 80.0;
     fake1.minFreq = 1e6;
     fake1.maxFreq = 6e9;
     devices.push_back(fake1);
@@ -182,7 +206,9 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
     fake2.antenna = "RX";
     fake2.sampleRates = {1.024e6, 2.048e6, 2.4e6};
     fake2.sampleRate = 2.048e6;
-    fake2.gain = 30.0;
+    fake2.gain = 20.0;
+    fake2.gainMin = 0.0;
+    fake2.gainMax = 50.0;
     fake2.minFreq = 24e6;
     fake2.maxFreq = 1766e6;
     devices.push_back(fake2);
@@ -215,10 +241,10 @@ void DeviceManager::updateDeviceParams(size_t index, double sampleRate, double g
     if (index >= devices.size()) return;
     auto& d = devices[index];
     d.sampleRate = sampleRate;
-    d.gain = gain;
+    d.gain = clampGainForDevice(d, gain);
     d.antenna = antenna;
     saveSettings();
-    spdlog::debug("Updated params for {}: rate={}, gain={}, ant={}", d.label, sampleRate, gain, antenna);
+    spdlog::debug("Updated params for {}: rate={}, gain={}, ant={}", d.label, sampleRate, d.gain, antenna);
 }
 
 void DeviceManager::loadSettings() {
@@ -281,17 +307,32 @@ void DeviceManager::fromJson(const nlohmann::json& j) {
                 saved.contains("serial") && saved["serial"] == d.serial) {
                 if (saved.contains("enabled")) d.enabled = saved["enabled"];
                 if (saved.contains("sampleRate")) d.sampleRate = saved["sampleRate"];
-                if (saved.contains("gain")) d.gain = saved["gain"];
+                if (saved.contains("gain")) d.gain = clampGainForDevice(d, saved["gain"].get<double>());
                 if (saved.contains("antenna")) d.antenna = saved["antenna"];
-                // P1 audit: persisted "gain":80 from old run is the #1 cause of scratch on strong WFM.
-                // Force sane RTL default on load; user can still "gain 0 15" or edit json, but prevent auto-overload.
-                if (d.driver == "rtlsdr" && d.gain > 25.0) {
-                    spdlog::warn("Loaded high RTL gain {} from devices.json; capping to 20 dB for strong local FM (edit json or use CLI 'gain 0 XX' to persist lower).", d.gain);
-                    d.gain = 20.0;
-                }
                 break;
             }
         }
+    }
+}
+
+void DeviceManager::resetStreamBuffers(StreamState& st) {
+    {
+        std::lock_guard<std::mutex> lk(st.queueMutex);
+        st.iqQueue.clear();
+        st.frontBlockReadOffset = 0;
+        st.latestPower.clear();
+        st.spectrumAvg.clear();
+        st.spectrumPeak.clear();
+    }
+
+    {
+        std::lock_guard<std::mutex> ringLock(st.ringMutex);
+        if (st.ringCapacity == 0) {
+            st.ringCapacity = 1u << 22; // 4M samples
+            st.iqRing.assign(st.ringCapacity, std::complex<float>(0, 0));
+        }
+        st.ringWriteIdx.store(0, std::memory_order_release);
+        st.totalSamplesWritten.store(0, std::memory_order_release);
     }
 }
 
@@ -309,8 +350,15 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
 
     auto& st = *streams[index];
 
-    if (st.active) {
-        if (attemptReal && !st.isReal) {
+    bool wasActive = false;
+    bool wasReal = false;
+    {
+        std::lock_guard<std::mutex> lk(st.stateMutex);
+        wasActive = st.active;
+        wasReal = st.isReal;
+    }
+    if (wasActive) {
+        if (attemptReal && !wasReal) {
             // User explicitly wants real hardware (e.g. Apply in dialog), but we currently have
             // a safe stub running (from launch auto-start or previous failure). Stop the stub
             // cleanly then fall through to attempt the real open. This avoids "double use".
@@ -325,25 +373,24 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
     // Apply, Scan, CLI) return instantly with working spectrum + basic demod + audio routing.
     // No blocking on Soapy make / USB / driver init, which is the source of "hangs then crashes"
     // when the RTL dongle or audio devices are in a bad state.
+    const uint64_t streamGen = st.sessionGen.fetch_add(1, std::memory_order_acq_rel) + 1;
     st.stopFlag = false;
     st.currentCenter = 100e6;
     double useRate = d.sampleRate;
     if (useRate < 0.25e6 || useRate > 60e6) useRate = (d.driver == "rtlsdr" ? 2.048e6 : 2.4e6);
     st.currentRate = useRate;
 
-    // S0 / audit-followup-2: init per-device ring for cursor-based per-rx consumption.
-    // Large enough for reasonable backlog (e.g. ~2s at 2MS/s ~ 4M samples ~32MB cf32 per active dev is acceptable).
-    if (st.ringCapacity == 0) {
-        st.ringCapacity = 1u << 22; // 4M samples
-        st.iqRing.assign(st.ringCapacity, std::complex<float>(0,0));
-        st.ringWriteIdx = 0;
-        st.totalSamplesWritten = 0;
-    }
+    // S0 / audit-followup-2: reset per-device IQ buffers for every session so a new
+    // tune/enable cannot consume stale IQ from a previous station, stub, or failed real handoff.
+    resetStreamBuffers(st);
 
     setupSoapyForRTLSDR();
 
-    st.active = true;
-    st.isReal = false;
+    {
+        std::lock_guard<std::mutex> lk(st.stateMutex);
+        st.active = true;
+        st.isReal = false;
+    }
     st.rxThread = std::thread(&DeviceManager::rxThreadFunc, this, index);
     if (!attemptReal) {
         spdlog::info("Started stub/sim streaming for device {} (safe mode)", index);
@@ -355,7 +402,7 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
     // a build with Soapy disabled (or vcpkg manifest without soapysdr) compiles cleanly and still
     // provides full stub functionality for CLI/GUI "enable/tune/stats" flows (P1 audit).
 #ifdef HAVE_SOAPYSDR
-    uint64_t myGen = ++st.sessionGen;
+    uint64_t myGen = streamGen;
 
     // Best practice per audit (P0 shutdown hang): NEVER use jthread (or any joinable thread handle that the caller will join) for the untrusted native Soapy open/make path.
     // SoapySDR::Device::make + USB driver stack can block forever on bad hardware/state. We launch a detached open-worker.
@@ -366,6 +413,16 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
         auto& st = *streams[index];
         if (st.stopFlag) return;
         if (st.sessionGen.load() != myGen) return;
+        SoapySDR::Device* localDev = nullptr;
+        SoapySDR::Stream* localStream = nullptr;
+        auto cleanupLocal = [&]() {
+            try {
+                if (localStream && localDev) localDev->closeStream(localStream);
+                if (localDev) SoapySDR::Device::unmake(localDev);
+            } catch (...) {}
+            localDev = nullptr;
+            localStream = nullptr;
+        };
         try {
             if (d.driver == "rtlsdr") {
                 std::string appDir = QCoreApplication::applicationDirPath().toStdString();
@@ -377,59 +434,107 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
             if (!d.driver.empty()) args["driver"] = d.driver;
             if (!d.serial.empty()) args["serial"] = d.serial;
             spdlog::info("Background: Attempting Soapy make for device {}", index);
-            st.soapyDev = SoapySDR::Device::make(args);
-            if (!st.soapyDev) throw std::runtime_error("make returned null");
+            localDev = SoapySDR::Device::make(args);
+            if (!localDev) throw std::runtime_error("make returned null");
 
-            st.soapyDev->setSampleRate(SOAPY_SDR_RX, 0, useRate);
-            if (!d.antenna.empty()) try { st.soapyDev->setAntenna(SOAPY_SDR_RX, 0, d.antenna); } catch (...) {}
-            double useGain = std::clamp(d.gain, 0.0, 80.0);
-            if (d.driver == "rtlsdr" && useGain > 25.0) {
-                spdlog::warn("RTL gain {} too high for strong signals (overload -> scratch/crackle on WFM). Capping to 20 dB.", useGain);
-                useGain = 20.0;
-            } else if (d.driver == "rtlsdr" && useGain < 5.0) {
-                useGain = 15.0;
+            localDev->setSampleRate(SOAPY_SDR_RX, 0, useRate);
+            if (!d.antenna.empty()) try { localDev->setAntenna(SOAPY_SDR_RX, 0, d.antenna); } catch (...) {}
+
+            // Re-read the *latest* desired gain right before applying (user may have changed the main GUI
+            // RF Gain spin or the Device Manager dialog *while* this background Soapy open/make/activate
+            // was running in the detached thread). This is a key part of making "live" gain reliable.
+            double useGain;
+            std::string useGainName;
+            {
+                std::lock_guard<std::mutex> lk(devicesMutex);
+                if (index < devices.size()) {
+                    useGain = clampGainForDevice(devices[index], devices[index].gain);
+                    useGainName = devices[index].gainName;
+                } else {
+                    useGain = clampGainForDevice(d, d.gain);
+                    useGainName = d.gainName;
+                }
             }
-            if (!d.gainName.empty()) {
-                try { st.soapyDev->setGain(SOAPY_SDR_RX, 0, d.gainName, useGain); } catch (...) { st.soapyDev->setGain(SOAPY_SDR_RX, 0, useGain); }
+
+            try { localDev->setGainMode(SOAPY_SDR_RX, 0, false); } catch (...) {}
+            if (!useGainName.empty()) {
+                try { localDev->setGain(SOAPY_SDR_RX, 0, useGainName, useGain); } catch (...) { localDev->setGain(SOAPY_SDR_RX, 0, useGain); }
             } else {
-                try { st.soapyDev->setGain(SOAPY_SDR_RX, 0, useGain); } catch (...) {}
+                try { localDev->setGain(SOAPY_SDR_RX, 0, useGain); } catch (...) {}
             }
-            try { st.soapyDev->setFrequency(SOAPY_SDR_RX, 0, st.currentCenter); } catch (...) {}
+            double center = 100e6;
+            {
+                std::lock_guard<std::mutex> lk(st.queueMutex);
+                center = st.currentCenter;
+            }
+            try { localDev->setFrequency(SOAPY_SDR_RX, 0, center); } catch (...) {}
 
-            st.rxStream = st.soapyDev->setupStream(SOAPY_SDR_RX, "CF32");
-            if (!st.rxStream) throw std::runtime_error("setupStream null");
-            st.soapyDev->activateStream(st.rxStream);
+            localStream = localDev->setupStream(SOAPY_SDR_RX, "CF32");
+            if (!localStream) throw std::runtime_error("setupStream null");
+            localDev->activateStream(localStream);
 
             if (st.stopFlag || st.sessionGen.load() != myGen) {
-                try {
-                    if (st.rxStream && st.soapyDev) st.soapyDev->closeStream(st.rxStream);
-                    if (st.soapyDev) SoapySDR::Device::unmake(st.soapyDev);
-                } catch (...) {}
-                st.soapyDev = nullptr;
-                st.rxStream = nullptr;
+                cleanupLocal();
                 return;
             }
-            if (st.sessionGen.load() != myGen) return;
+            if (st.sessionGen.load() != myGen) {
+                cleanupLocal();
+                return;
+            }
 
             // Success path: stop stub (our code, safe to join), start real rx thread.
             st.stopFlag = true;
             if (st.rxThread.joinable()) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                auto start = std::chrono::steady_clock::now();
+                while (st.rxThreadRunning.load(std::memory_order_acquire) &&
+                       std::chrono::steady_clock::now() - start < std::chrono::milliseconds(500)) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                }
                 st.rxThread.join();
             }
-            st.active = true;
-            st.isReal = true;
+            if (st.sessionGen.load(std::memory_order_acquire) != myGen) {
+                cleanupLocal();
+                return;
+            }
+            {
+                std::lock_guard<std::mutex> lk(st.stateMutex);
+                st.soapyDev = localDev;
+                st.rxStream = localStream;
+                st.active = true;
+                st.isReal = true;
+                localDev = nullptr;
+                localStream = nullptr;
+            }
+            resetStreamBuffers(st);
             st.stopFlag = false;
             st.rxThread = std::thread(&DeviceManager::rxThreadFunc, this, index);
             spdlog::info("Background upgrade: Started real Soapy streaming for device {}", index);
+
+            // Catch-up: re-apply the current desired RF gain now that the real soapyDev is published and active.
+            // This fixes the case where the user changed the main-screen "RF Gain (dB)" spin (or dialog gain)
+            // *during* the time the detached realInitThread was doing the slow USB/Soapy make + activate.
+            // setLiveGain will see the freshly assigned soapyDev and push the (latest) value to hardware.
+            double latestGain = useGain;
+            {
+                std::lock_guard<std::mutex> lk(devicesMutex);
+                if (index < devices.size()) {
+                    latestGain = devices[index].gain;
+                    // Call setLiveGain — it will re-update the model (harmless) and because soapyDev is now visible
+                    // it will execute the live setGain path. This makes "live RF gain" work reliably even for
+                    // changes made while the async hardware open was in flight.
+                    // We do this *outside* the previous devices lock to avoid nested lock order issues.
+                    // (setLiveGain will take its own brief devicesMutex.)
+                    // Unlock first by ending the scope.
+                }
+            }
+            // Now safe to call (no devicesMutex held).
+            setLiveGain(index, latestGain);
         } catch (const std::exception& ex) {
             spdlog::warn("Background real init failed for device {} ({}). Keeping safe stub.", index, ex.what());
-            if (st.soapyDev) { SoapySDR::Device::unmake(st.soapyDev); st.soapyDev = nullptr; }
-            st.rxStream = nullptr;
+            cleanupLocal();
         } catch (...) {
             spdlog::warn("Background real init failed for device {} with unknown exception (SEH/driver). Keeping safe stub.", index);
-            if (st.soapyDev) { SoapySDR::Device::unmake(st.soapyDev); st.soapyDev = nullptr; }
-            st.rxStream = nullptr;
+            cleanupLocal();
         }
     });
     // Immediately detach: this is the open-worker for untrusted driver. We never join it again.
@@ -449,12 +554,20 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
 void DeviceManager::stopStreaming(size_t index) {
     if (index >= streams.size() || !streams[index]) return;
     auto& st = *streams[index];
+    bool activeNow = false;
     bool soapyIdle =
 #ifdef HAVE_SOAPYSDR
-        !st.soapyDev &&
+        true &&
 #endif
         true;
-    if (!st.active && soapyIdle && !st.realInitThread.joinable() && !st.rxThread.joinable()) return;
+    {
+        std::lock_guard<std::mutex> lk(st.stateMutex);
+        activeNow = st.active;
+#ifdef HAVE_SOAPYSDR
+        soapyIdle = !st.soapyDev;
+#endif
+    }
+    if (!activeNow && soapyIdle && !st.realInitThread.joinable() && !st.rxThread.joinable()) return;
 
     // P1: bump generation *first* so any in-flight init thread will see the mismatch and refuse to publish/teardown.
     st.sessionGen.fetch_add(1, std::memory_order_acq_rel);
@@ -470,35 +583,46 @@ void DeviceManager::stopStreaming(size_t index) {
     // For the rxThread (post-activate, our code): still attempt short graceful join because the loop checks stopFlag,
     // but if readStream / driver is wedged we must not block the caller (CLI quit, app exit, updater launch, etc.).
     // Use the same timeout+detach escape. This fixes the "CLI/hardware shutdown hang is back".
+    bool rxDetached = false;
     if (st.rxThread.joinable()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
         auto start = std::chrono::steady_clock::now();
-        while (st.rxThread.joinable()) {
+        while (st.rxThreadRunning.load(std::memory_order_acquire)) {
             if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(300)) {
                 spdlog::warn("rxThread for device {} still running after stop — detaching (possible stuck readStream / native driver).", index);
                 try { st.rxThread.detach(); } catch (...) {}
+                rxDetached = true;
                 break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(4));
         }
-        if (st.rxThread.joinable()) {
-            try { st.rxThread.join(); } catch (...) { try { st.rxThread.detach(); } catch (...) {} }
+        if (!rxDetached && st.rxThread.joinable()) {
+            try { st.rxThread.join(); } catch (...) { try { st.rxThread.detach(); rxDetached = true; } catch (...) {} }
         }
     }
 
 #ifdef HAVE_SOAPYSDR
     // Capture and null only when Soapy types are available (fixes no-Soapy build P1).
-    SoapySDR::Device* devToClose = st.soapyDev;
-    SoapySDR::Stream* streamToClose = st.rxStream;
-    st.soapyDev = nullptr;
-    st.rxStream = nullptr;
+    SoapySDR::Device* devToClose = nullptr;
+    SoapySDR::Stream* streamToClose = nullptr;
+    {
+        std::lock_guard<std::mutex> lk(st.stateMutex);
+        devToClose = st.soapyDev;
+        streamToClose = st.rxStream;
+        st.soapyDev = nullptr;
+        st.rxStream = nullptr;
+    }
 
     try {
-        if (streamToClose && devToClose) {
+        if (rxDetached && devToClose) {
+            // Closing/unmaking while a detached native readStream may still be using the device
+            // is a use-after-free risk. Leak this stuck handle until process exit instead.
+            spdlog::warn("Leaving Soapy device {} open because its rxThread was detached while stuck in native code.", index);
+        } else if (streamToClose && devToClose) {
             devToClose->deactivateStream(streamToClose);
             devToClose->closeStream(streamToClose);
-        }
-        if (devToClose) {
+            SoapySDR::Device::unmake(devToClose);
+        } else if (devToClose) {
             SoapySDR::Device::unmake(devToClose);
         }
     } catch (const std::exception& ex) {
@@ -508,24 +632,29 @@ void DeviceManager::stopStreaming(size_t index) {
     }
 #endif
 
-    st.active = false;
-    st.isReal = false;
-    // clear queue
-    std::lock_guard<std::mutex> lk(st.queueMutex);
-    while (!st.iqQueue.empty()) st.iqQueue.pop_front();
-    st.frontBlockReadOffset = 0;
+    {
+        std::lock_guard<std::mutex> lk(st.stateMutex);
+        st.active = false;
+        st.isReal = false;
+    }
+    resetStreamBuffers(st);
     spdlog::info("Stopped streaming for device {}", index);
 }
 
 bool DeviceManager::isStreaming(size_t index) const {
     if (index >= streams.size() || !streams[index]) return false;
-    return streams[index]->active;
+    auto& st = *streams[index];
+    std::lock_guard<std::mutex> lk(st.stateMutex);
+    return st.active;
 }
 
 size_t DeviceManager::getNextIQBlock(size_t index, std::complex<float>* buffer, size_t maxSamples, int timeoutMs) {
     if (index >= streams.size() || !streams[index]) return 0;
     auto& st = *streams[index];
-    if (!st.active) return 0;
+    {
+        std::lock_guard<std::mutex> stateLock(st.stateMutex);
+        if (!st.active) return 0;
+    }
 
     std::unique_lock<std::mutex> lk(st.queueMutex);
     if (timeoutMs > 0) {
@@ -561,9 +690,13 @@ size_t DeviceManager::getNextIQBlock(size_t index, std::complex<float>* buffer, 
 bool DeviceManager::getLatestSpectrum(size_t index, std::vector<float>& powerDb, double& centerFreq, double& sampleRate) {
     if (index >= streams.size() || !streams[index]) return false;
     auto& st = *streams[index];
-    std::lock_guard<std::mutex> lk(st.queueMutex);
-    if (!st.active || st.latestPower.empty()) return false;
+    {
+        std::lock_guard<std::mutex> stateLock(st.stateMutex);
+        if (!st.active) return false;
+    }
 
+    std::lock_guard<std::mutex> lk(st.queueMutex);
+    if (st.latestPower.empty()) return false;
     powerDb = st.latestPower;
     centerFreq = st.currentCenter;
     sampleRate = st.currentRate;
@@ -577,31 +710,45 @@ double DeviceManager::getCurrentGain(size_t index) const {
 }
 
 void DeviceManager::setLiveGain(size_t index, double gainDb) {
-    // Always update the persisted / model value
+    DeviceInfo d;
+    double useGain = gainDb;
+
+    // Always update the persisted / model value with the effective RF gain.
     {
         std::lock_guard<std::mutex> lk(devicesMutex);
         if (index >= devices.size()) return;
-        devices[index].gain = gainDb;
+        useGain = clampGainForDevice(devices[index], gainDb);
+        devices[index].gain = useGain;
+        d = devices[index];
+        saveSettings();
     }
 
 #ifdef HAVE_SOAPYSDR
-    // If we have a live real streaming session, apply it to hardware right now.
+    // Apply live to hardware whenever we have an open Soapy device for this index and the stream is not stopped.
+    // We no longer require the "isReal" flag (which is set late in the background upgrade path).
+    // This makes GUI RF gain changes (main window spin and per-device dialog) take effect immediately on a running device.
+    // The background real-init path still does its own initial setGain from the DeviceInfo snapshot at launch time.
+    bool appliedLive = false;
     if (index < streams.size() && streams[index]) {
         auto& st = *streams[index];
-        if (st.isReal && st.soapyDev && !st.stopFlag) {
+        std::lock_guard<std::mutex> stateLock(st.stateMutex);
+        if (st.soapyDev && !st.stopFlag) {
             try {
-                double useGain = std::clamp(gainDb, 0.0, 80.0);
-                if (devices[index].driver == "rtlsdr" && useGain > 25.0) useGain = 20.0;
-                if (!devices[index].gainName.empty()) {
-                    st.soapyDev->setGain(SOAPY_SDR_RX, 0, devices[index].gainName, useGain);
+                try { st.soapyDev->setGainMode(SOAPY_SDR_RX, 0, false); } catch (...) {}
+                if (!d.gainName.empty()) {
+                    st.soapyDev->setGain(SOAPY_SDR_RX, 0, d.gainName, useGain);
                 } else {
                     st.soapyDev->setGain(SOAPY_SDR_RX, 0, useGain);
                 }
-                spdlog::info("Live RF gain applied to device {}: {} dB", index, useGain);
+                spdlog::info("Live RF gain applied to device {}: {} dB (gainName='{}')", index, useGain, d.gainName);
+                appliedLive = true;
             } catch (const std::exception& ex) {
                 spdlog::warn("Failed to apply live gain to device {}: {}", index, ex.what());
             }
         }
+    }
+    if (!appliedLive) {
+        spdlog::debug("Live RF gain for device {} recorded as {} dB (model updated). No active soapyDev yet (stub, real upgrade still in progress, or device not started). Hardware will see it on next real start or via catch-up after upgrade.", index, useGain);
     }
 #endif
 }
@@ -620,8 +767,13 @@ size_t DeviceManager::getIQQueueDepth(size_t index) const {
 std::vector<std::complex<float>> DeviceManager::getRecentIQWindow(size_t index, size_t maxSamples) {
     if (index >= streams.size() || !streams[index] || maxSamples == 0) return {};
     auto& st = *streams[index];
+    {
+        std::lock_guard<std::mutex> stateLock(st.stateMutex);
+        if (!st.active) return {};
+    }
+
     std::lock_guard<std::mutex> lk(st.queueMutex);
-    if (!st.active || st.iqQueue.empty()) return {};
+    if (st.iqQueue.empty()) return {};
 
     std::vector<std::complex<float>> out;
     out.reserve(maxSamples);
@@ -643,11 +795,6 @@ std::vector<std::complex<float>> DeviceManager::getRecentIQWindow(size_t index, 
         ++it;
     }
 
-    if (!out.empty()) {
-        // We built newest-first because of rbegin + insert begin; reverse to chronological (oldest first) for the caller.
-        std::reverse(out.begin(), out.end());
-    }
-
     // Trim to exactly what was requested (in case we over-copied slightly).
     if (out.size() > maxSamples) out.resize(maxSamples);
 
@@ -661,9 +808,24 @@ std::vector<std::complex<float>> DeviceManager::getNewSamplesForReceiver(size_t 
     auto& st = *streams[devIndex];
     if (st.ringCapacity == 0) return {};
 
+    std::lock_guard<std::mutex> ringLock(st.ringMutex);
     uint64_t myLast = rx.lastConsumedAbsolute;
     uint64_t total = st.totalSamplesWritten.load(std::memory_order_acquire);
     uint64_t available = (total > myLast) ? (total - myLast) : 0;
+
+    if (myLast > total) {
+        myLast = (total > (uint64_t)maxSamples) ? (total - (uint64_t)maxSamples) : 0;
+        rx.lastConsumedAbsolute = myLast;
+        available = (total > myLast) ? (total - myLast) : 0;
+    }
+
+    // New/reactivated/retuned receivers should monitor the live edge, not drain old IQ
+    // left in the shared ring from a previous station or mode.
+    if (myLast == 0 && total > (uint64_t)maxSamples) {
+        myLast = total - (uint64_t)maxSamples;
+        rx.lastConsumedAbsolute = myLast;
+        available = total - myLast;
+    }
 
     if (available == 0) return {};
 
@@ -704,13 +866,14 @@ void DeviceManager::appendIQBlock(size_t index, std::vector<std::complex<float>>
 
     // Feed the per-rx ring *first* while we still own the data (before any move into queue).
     if (st.ringCapacity > 0) {
+        std::lock_guard<std::mutex> ringLock(st.ringMutex);
         size_t w = st.ringWriteIdx.load(std::memory_order_relaxed);
         for (const auto& s : block) {
             st.iqRing[w] = s;
             w = (w + 1) & (st.ringCapacity - 1);
         }
         st.ringWriteIdx.store(w, std::memory_order_release);
-        st.totalSamplesWritten.fetch_add(block.size(), std::memory_order_relaxed);
+        st.totalSamplesWritten.fetch_add(block.size(), std::memory_order_release);
     }
 
     // Then the consuming deque for getNext / spectrum (bounded).
@@ -790,7 +953,16 @@ void DeviceManager::setupSoapyForRTLSDR() {
 void DeviceManager::setCenterFreq(size_t index, double freqHz) {
     if (index >= streams.size() || !streams[index]) return;
     auto& st = *streams[index];
-    if (!st.active) return;
+#ifdef HAVE_SOAPYSDR
+    SoapySDR::Device* dev = nullptr;
+#endif
+    {
+        std::lock_guard<std::mutex> lk(st.stateMutex);
+        if (!st.active) return;
+#ifdef HAVE_SOAPYSDR
+        dev = st.soapyDev;
+#endif
+    }
 
     {
         std::lock_guard<std::mutex> lk(st.queueMutex);
@@ -798,9 +970,9 @@ void DeviceManager::setCenterFreq(size_t index, double freqHz) {
     }
 
 #ifdef HAVE_SOAPYSDR
-    if (st.soapyDev) {
+    if (dev) {
         try {
-            st.soapyDev->setFrequency(SOAPY_SDR_RX, 0, freqHz);
+            dev->setFrequency(SOAPY_SDR_RX, 0, freqHz);
             spdlog::debug("Set center freq {} for device {}", freqHz, index);
         } catch (const std::exception& ex) {
             spdlog::warn("setFrequency failed: {}", ex.what());
@@ -874,19 +1046,33 @@ std::vector<float> DeviceManager::computeRealFFTPower(const std::vector<std::com
 void DeviceManager::rxThreadFunc(size_t index) {
     if (index >= streams.size() || !streams[index]) return;
     auto& st = *streams[index];
+    st.rxThreadRunning.store(true, std::memory_order_release);
+    struct RunningGuard {
+        StreamState& st;
+        ~RunningGuard() { st.rxThreadRunning.store(false, std::memory_order_release); }
+    } runningGuard{st};
+    const uint64_t myGen = st.sessionGen.load(std::memory_order_acquire);
     const size_t blockSize = 32768; // much larger blocks to sustain 2MS/s+ without overflow. 2048 was only ~1ms of RF at 2.048MS/s.
 
 #ifdef HAVE_SOAPYSDR
-    if (st.soapyDev && st.rxStream) {
+    SoapySDR::Device* dev = nullptr;
+    SoapySDR::Stream* stream = nullptr;
+    {
+        std::lock_guard<std::mutex> lk(st.stateMutex);
+        dev = st.soapyDev;
+        stream = st.rxStream;
+    }
+    if (dev && stream) {
         std::vector<std::complex<float>> buff(blockSize);
+        bool realReadFaulted = false;
         // Broad guard: native readStream / USB / driver faults in the background thread must never terminate the process.
         try {
             auto lastSpectrumTime = std::chrono::steady_clock::now();
-            while (!st.stopFlag) {
+            while (!st.stopFlag && st.sessionGen.load(std::memory_order_acquire) == myGen) {
                 int flags = 0;
                 long long timeNs = 0;
                 void* buffs[] = { buff.data() };
-                int numElems = st.soapyDev->readStream(st.rxStream, buffs, blockSize, flags, timeNs, 100000);
+                int numElems = dev->readStream(stream, buffs, blockSize, flags, timeNs, 100000);
                 if (numElems < 0) {
                     spdlog::warn("readStream error code: {}", numElems);
                     if (numElems == -4) { // SOAPY_SDR_OVERFLOW - samples were dropped before we read
@@ -919,14 +1105,18 @@ void DeviceManager::rxThreadFunc(size_t index) {
                         // Draw window from ring (best continuous recent IQ, enables overlap if we hop)
                         std::vector<std::complex<float>> samples;
                         samples.reserve(fftN);
-                        uint64_t total = st.totalSamplesWritten.load(std::memory_order_acquire);
-                        if (st.ringCapacity > 0 && total >= fftN) {
-                            uint64_t start = total - fftN;
-                            for (size_t k = 0; k < fftN; ++k) {
-                                size_t idx = (start + k) % st.ringCapacity;
-                                samples.push_back(st.iqRing[idx]);
+                        {
+                            std::lock_guard<std::mutex> ringLock(st.ringMutex);
+                            uint64_t total = st.totalSamplesWritten.load(std::memory_order_acquire);
+                            if (st.ringCapacity > 0 && total >= fftN) {
+                                uint64_t start = total - fftN;
+                                for (size_t k = 0; k < fftN; ++k) {
+                                    size_t idx = (start + k) % st.ringCapacity;
+                                    samples.push_back(st.iqRing[idx]);
+                                }
                             }
-                        } else {
+                        }
+                        if (samples.empty()) {
                             size_t take = std::min((size_t)numRead, fftN);
                             for (size_t i = 0; i < take; ++i) samples.push_back(buff[i]);
                             while (samples.size() < fftN) samples.push_back({0.f, 0.f});
@@ -935,23 +1125,26 @@ void DeviceManager::rxThreadFunc(size_t index) {
                         // Real FFT power (Blackman-Harris primary for clean dynamic range; Hann available)
                         localPower = computeRealFFTPower(samples, fftN, /*useBlackmanHarris=*/true);
 
-                        // Exponential avg + peak hold (state lives in StreamState for continuity across calls)
-                        if (st.spectrumAvg.size() != localPower.size()) {
-                            st.spectrumAvg.assign(localPower.size(), -110.0f);
-                            st.spectrumPeak.assign(localPower.size(), -110.0f);
-                        }
-                        for (size_t b = 0; b < localPower.size(); ++b) {
-                            st.spectrumAvg[b] = st.spectrumAvg[b] * 0.72f + localPower[b] * 0.28f;
-                            float decayedPeak = st.spectrumPeak[b] * 0.985f;
-                            st.spectrumPeak[b] = std::max(decayedPeak, localPower[b]);
-                        }
+                        double publishedRate = 0.0;
+                        try {
+                            publishedRate = dev->getSampleRate(SOAPY_SDR_RX, 0);
+                        } catch (...) {}
+
                         // Publish the averaged high-res spectrum (UI can choose peak if wanted later)
                         {
                             std::lock_guard<std::mutex> lk(st.queueMutex);
+                            // Exponential avg + peak hold (state lives in StreamState for continuity across calls)
+                            if (st.spectrumAvg.size() != localPower.size()) {
+                                st.spectrumAvg.assign(localPower.size(), -110.0f);
+                                st.spectrumPeak.assign(localPower.size(), -110.0f);
+                            }
+                            for (size_t b = 0; b < localPower.size(); ++b) {
+                                st.spectrumAvg[b] = st.spectrumAvg[b] * 0.72f + localPower[b] * 0.28f;
+                                float decayedPeak = st.spectrumPeak[b] * 0.985f;
+                                st.spectrumPeak[b] = std::max(decayedPeak, localPower[b]);
+                            }
                             st.latestPower = st.spectrumAvg; // high bin count vector
-                            try {
-                                st.currentRate = st.soapyDev->getSampleRate(SOAPY_SDR_RX, 0);
-                            } catch (...) {}
+                            if (publishedRate > 0.0 && std::isfinite(publishedRate)) st.currentRate = publishedRate;
                         }
                         lastSpectrumTime = now;
                     }
@@ -966,18 +1159,45 @@ void DeviceManager::rxThreadFunc(size_t index) {
                 }
             }
         } catch (const std::exception& ex) {
-            spdlog::error("Exception in real rxThread for device {}: {} (thread exiting cleanly to stub-safe state)", index, ex.what());
+            spdlog::error("Exception in real rxThread for device {}: {}.", index, ex.what());
+            realReadFaulted = true;
         } catch (...) {
-            spdlog::error("Unknown exception in real rxThread for device {} (possible USB/driver fault). Thread exiting cleanly.", index);
+            spdlog::error("Unknown exception in real rxThread for device {} (possible USB/driver fault).", index);
+            realReadFaulted = true;
         }
-        return;
+        if (!realReadFaulted || st.stopFlag || st.sessionGen.load(std::memory_order_acquire) != myGen) {
+            return;
+        }
+
+        spdlog::warn("Real RX thread for device {} faulted; falling back to safe stub streaming for this session.", index);
+        {
+            std::lock_guard<std::mutex> lk(st.stateMutex);
+            if (st.soapyDev == dev) st.soapyDev = nullptr;
+            if (st.rxStream == stream) st.rxStream = nullptr;
+            st.isReal = false;
+            st.active = true;
+        }
+        try {
+            if (stream && dev) {
+                dev->deactivateStream(stream);
+                dev->closeStream(stream);
+            }
+            if (dev) SoapySDR::Device::unmake(dev);
+        } catch (const std::exception& ex) {
+            spdlog::warn("Exception while cleaning faulted Soapy device {}: {}", index, ex.what());
+        } catch (...) {
+            spdlog::warn("Unknown exception while cleaning faulted Soapy device {}", index);
+        }
+        resetStreamBuffers(st);
     }
 #endif
 
     // Stub simulation: generate IQ with a few carriers + noise, update spectrum
     double t = 0.0;
     const double fs = 2.4e6;
-    while (!st.stopFlag) {
+    auto nextStubBlockTime = std::chrono::steady_clock::now();
+    const auto stubBlockPeriod = std::chrono::duration<double>((double)blockSize / fs);
+    while (!st.stopFlag && st.sessionGen.load(std::memory_order_acquire) == myGen) {
         std::vector<std::complex<float>> block(blockSize);
         for (size_t i = 0; i < blockSize; ++i) {
             double phase = 2 * 3.14159265 * (100e6 + 0.1e6 * std::sin(t * 0.3)) / fs * i; // drifting carrier example
@@ -999,16 +1219,22 @@ void DeviceManager::rxThreadFunc(size_t index) {
                 fake[i] = {re, im};
             }
             auto lp = computeRealFFTPower(fake, fftN, true);
-            if (st.spectrumAvg.size() != lp.size()) st.spectrumAvg = lp;
-            for (size_t b = 0; b < lp.size(); ++b) st.spectrumAvg[b] = st.spectrumAvg[b] * 0.7f + lp[b] * 0.3f;
             {
                 std::lock_guard<std::mutex> lk(st.queueMutex);
+                if (st.spectrumAvg.size() != lp.size()) st.spectrumAvg = lp;
+                for (size_t b = 0; b < lp.size(); ++b) st.spectrumAvg[b] = st.spectrumAvg[b] * 0.7f + lp[b] * 0.3f;
                 st.latestPower = st.spectrumAvg;
                 st.currentRate = fs;
             }
         }
 
         t += 0.05;
-        std::this_thread::sleep_for(std::chrono::milliseconds(2)); // faster production for real-time-ish audio rate in stub demo (was 40ms causing data starvation for 48kHz audio)
+        nextStubBlockTime += std::chrono::duration_cast<std::chrono::steady_clock::duration>(stubBlockPeriod);
+        auto now = std::chrono::steady_clock::now();
+        if (nextStubBlockTime > now) {
+            std::this_thread::sleep_until(nextStubBlockTime);
+        } else if (now - nextStubBlockTime > std::chrono::milliseconds(100)) {
+            nextStubBlockTime = now;
+        }
     }
 }

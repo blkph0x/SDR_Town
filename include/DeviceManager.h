@@ -31,6 +31,8 @@ struct DeviceInfo {
     bool enabled = false;
     double sampleRate = 2.4e6;
     double gain = 30.0;           // simplified master gain for now
+    double gainMin = 0.0;
+    double gainMax = 80.0;
     std::string antenna;
     std::string gainName;         // for setGain with specific element (e.g. "TUNER" for RTL)
     // more per-device settings can be added
@@ -96,7 +98,7 @@ public:
     void setCenterFreq(size_t index, double freqHz);
 
     // Live diagnostics (addressing audit P1 RF gain, P2 unlocked queue size)
-    double getCurrentGain(size_t index) const;   // the (possibly capped) configured gain for this dev
+    double getCurrentGain(size_t index) const;   // configured gain after clamping to the device's advertised range
     size_t getIQQueueDepth(size_t index) const;  // thread-safe locked peek of current iqQueue depth
 
     // P1: truly live hardware RF gain (separate from audioGain / displayGain).
@@ -123,6 +125,7 @@ private:
         bool active = false;
         bool isReal = false;   // true only when we successfully did real Soapy make + activate (not the stub sim)
         std::thread rxThread;
+        std::atomic<bool> rxThreadRunning{false};
         // CRITICAL (P0 audit shutdown hang + best practice for untrusted SDR drivers):
         // realInitThread is intentionally a plain std::thread, not jthread.
         // SoapySDR::Device::make() (and the native USB stack) can block indefinitely.
@@ -133,6 +136,8 @@ private:
         // This is the accepted pragmatic pattern for hardware that you do not control.
         std::thread realInitThread;
         std::mutex queueMutex;
+        mutable std::mutex stateMutex;  // protects Soapy pointers + real/stub state handoff
+        std::mutex ringMutex;           // protects iqRing against concurrent RX/write + DSP/spectrum reads
         std::deque<std::vector<std::complex<float>>> iqQueue;  // deque to support partial block consumption without dropping samples (P0 fix)
         size_t frontBlockReadOffset = 0;  // for consuming partials from front block without copying remainders under lock (P1)
         std::vector<float> latestPower;
@@ -166,6 +171,7 @@ private:
     std::vector<std::unique_ptr<StreamState>> streams;
 
     void rxThreadFunc(size_t index);  // background RX loop
+    void resetStreamBuffers(StreamState& st);
 
     // Centralized append for both the consuming deque (for getNext/spectrum) and the per-rx ring.
     // Feeds ring *before* moving into queue so ring always gets the samples. Fixes the WFM ring bug.

@@ -257,7 +257,7 @@ Commands (see help inside):
 - audio list / audio enable <i> [i2 ...] / audio test [idx] / audio vol <idx> <0-100>
   - Full multi-device audio support (speakers + VB-Audio Cable etc.) even in CLI.
 - mode nfm|wfm|auto|am|usb|lsb, set bw|lpf|squelch|gain|wfmde|pilotnotch <val>
-- stats - live diagnostics: RF gain, mode/BW, IQ queue depth, last DSP us, audio ring fill %, underruns, rates/bitrate math, device CF/offset, RMS
+- stats - live diagnostics: RF gain, mode/BW, IQ queue depth, squelch level, last DSP us, audio ring fill %, underruns
 - status, scan (enables all), help, quit
 
 A background thread keeps demod + audio routing + spectrum updates running while you type commands.
@@ -278,13 +278,13 @@ stats
 
 The same DeviceManager + AudioEngine + streaming/demod logic powers both GUI and CLI. All major phases (device management, real streaming, spectrum, high-quality WFM/NFM/AM/SSB with channelizer, multi-output audio, simple scan/tune) are now directly testable from the command line.
 
-## Main GUI Live Controls (RF Gain, Squelch, RMS)
+## Main GUI Live Controls (RF Gain, Squelch, Level)
 
 The top "Active Receivers" area has live main-GUI spins for **RF Gain (dB)** (hardware sensitivity, calls `setLiveGain` immediately on running device), **Squelch (dB)**, and color range for the waterfall/spectrum.
 
-- **Squelch (dB) spin + "Auto" button**: Post-demod threshold. The DSP uses a smooth gate (attack/release + 0.3 s hang on close to protect speech syllables). The RMS label (updated ~every 400 ms from the worker) shows live pre-gate level: `10 * log10(mean(samples^2))` after all filtering but before the squelch* gain multiply.
-- **To mute a frequency completely** (even if signal present): set the sq value **strictly above** the displayed RMS. Example: if label says "RMS: -15" set sq to -10, 0, 5, or 10 (anything > -15). If RMS ever reads +12 (high gain), set 15+. The special low value (below -115) means "squelch off / always pass audio".
-- **Auto**: computes recent RMS + 6 dB (clamped sane range -130..40) and sets the spin. Good starting point for "mute when no voice, open on talk". Tweak up/down while listening.
+- **Squelch (dB) spin + "Auto" button**: channel-level threshold. The DSP uses a smooth gate with short attack/release and a real sample-counted hang, so speech is not chopped but AM/SSB/NFM drops close promptly.
+- **To mute a frequency completely**: set SQ strictly above the displayed Level. Example: if the label says `Level: -55 dB`, set SQ to `-49 dB` or higher. Values below `-115 dB` mean squelch off / always pass audio.
+- **Auto**: computes recent Level + 6 dB (clamped sane range -130..40) and sets the spin. Good starting point for "mute when no voice, open on talk". Tweak up/down while listening.
 - The main squelch control now propagates live to *all active receivers* (the ones contributing to mixed audio) and forces immediate gate reaction on raise (no more "have to click a new freq to make it cut"). Freq change / retune still works and forces a DSP state reset (instant gate close). Hang is only for natural signal drops.
 - RF Gain is separate from audio gain (the latter is post-demod multiplier for the monitor path).
 
@@ -296,13 +296,13 @@ See DESIGN.md (Implementation Log) for the exact root cause (hang + rfOrModeChan
 The main spectrum/waterfall widget (SpectrumWidget) now has:
 - Dynamic dB power scale on the left (tied to the WF Color Min/Max spins you already use to control the heat map range — makes "what color means what power" obvious).
 - Interactive horizontal dashed SQ line across the spectrum curve + waterfall, plus an easy-to-grab vertical bar + handle on the far right side.
-- Green RMS reference line (live post-demod level) drawn on the same visual scale as the SQ line.
+- Green LVL reference line (live channel level used by squelch) drawn on the same visual scale as the SQ line.
 
 Drag the orange SQ line or the right handle: it updates the main Squelch spin live, syncs to all active receivers, forces the gate, and the visual moves. Change the spin/Auto and the lines move.
 
 The SQ line uses its own fixed scale (-130 to +40) mapped to the height of the spectrum area. This means you can always drag it high enough (to the top of the blue area) to set a threshold above any current RMS and cut the audio — independent of what Color Max you chose for display.
 
-See the two lines on the plot: put SQ above the green RMS marker and the audio mutes (normal hang still applies for speech).
+See the two lines on the plot: put SQ above the green LVL marker and the audio mutes after the short speech hang.
 
 See DESIGN.md for implementation details and citations.
 

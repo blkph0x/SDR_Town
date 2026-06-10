@@ -1,9 +1,9 @@
 # Quick launcher for SDR Town dev releases
 # Usage (in a fresh PowerShell):
-#   .\release.ps1          # uses 0.2.1 (or edit default)
-#   .\release.ps1 0.2.2    # for next dev build
+#   .\release.ps1          # uses 0.2.6 (or edit default)
+#   .\release.ps1 0.2.7    # for next dev build
 
-param([string]$Version = "0.2.1")
+param([string]$Version = "0.2.6")
 
 & "$PSScriptRoot\scripts\release.ps1" -Version $Version
 
