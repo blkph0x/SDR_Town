@@ -1,2 +1,2 @@
-61c7298bfe22c599255a9ecc37e70d5e1eeee71fd662677c62e54de583cb973a  SDR_Town-0.2.4-win64-setup.exe
-129ed512a342f939b74ac813ccbfd9f3d5af7c457ac30a177a174841c0aa04fa  SDR_Town-0.2.4-win64-portable.zip
+61d0e899b901d3a7b05a700e02e4b2feb0f6866ea522e6538ecbf59a4b6f9dc8  SDR_Town-0.2.5-win64-setup.exe
+c0134af2eb69364a8773e2187e55adf2833c2f83e4284a5b87814bdaed3b98c3  SDR_Town-0.2.5-win64-portable.zip
