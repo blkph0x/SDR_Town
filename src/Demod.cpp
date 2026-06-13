@@ -1,19 +1,214 @@
 #define _USE_MATH_DEFINES
 #include "Demod.h"
+#include "SignalClassifier.h"
 #include <algorithm>
 #include <cmath>
 #include <complex>
 #include <vector>
 #include <cstddef>
 
+static double localPercentile(std::vector<double> values, double percentile, double fallback)
+{
+    values.erase(std::remove_if(values.begin(), values.end(), [](double v) {
+        return !std::isfinite(v);
+    }), values.end());
+    if (values.empty()) return fallback;
+    std::sort(values.begin(), values.end());
+    percentile = std::clamp(percentile, 0.0, 1.0);
+    size_t idx = static_cast<size_t>(std::llround(percentile * (values.size() - 1)));
+    idx = std::min(idx, values.size() - 1);
+    return values[idx];
+}
+
+SignalOffsetEstimate estimateSignalOffsetFromSpectrum(const std::vector<float>& powerDb,
+                                                       double sampleRateHz,
+                                                       double centerFreqHz,
+                                                       double targetFreqHz,
+                                                       double searchHz,
+                                                       double maxSignalBandwidthHz)
+{
+    SignalOffsetEstimate out;
+    const int bins = static_cast<int>(powerDb.size());
+    if (bins < 64 || sampleRateHz <= 0.0 || !std::isfinite(sampleRateHz)) return out;
+
+    const double binHz = sampleRateHz / static_cast<double>(bins);
+    const double fullStart = centerFreqHz - sampleRateHz * 0.5;
+    const double rel = (targetFreqHz - fullStart) / binHz;
+    if (!std::isfinite(rel) || rel < 0.0 || rel >= static_cast<double>(bins)) return out;
+
+    searchHz = std::clamp(searchHz, binHz * 4.0, sampleRateHz * 0.5);
+    maxSignalBandwidthHz = std::clamp(maxSignalBandwidthHz, binHz * 4.0, searchHz * 2.0);
+
+    const int targetBin = std::clamp(static_cast<int>(std::llround(rel - 0.5)), 0, bins - 1);
+    const int halfSearch = std::max(4, static_cast<int>(std::ceil(searchHz / binHz)));
+    const int lo = std::max(0, targetBin - halfSearch);
+    const int hi = std::min(bins - 1, targetBin + halfSearch);
+    if (hi <= lo) return out;
+
+    std::vector<double> local;
+    local.reserve(static_cast<size_t>(hi - lo + 1));
+    int peakIdx = targetBin;
+    double peakDb = -180.0;
+    for (int i = lo; i <= hi; ++i) {
+        const double v = powerDb[static_cast<size_t>(i)];
+        local.push_back(v);
+        if (v > peakDb) {
+            peakDb = v;
+            peakIdx = i;
+        }
+    }
+
+    const double floorDb = localPercentile(local, 0.25, -120.0);
+    const double snrDb = peakDb - floorDb;
+    out.peakDb = peakDb;
+    out.snrDb = snrDb;
+    if (snrDb < 5.0) return out;
+
+    const double thresholdDb = floorDb + std::clamp(snrDb * 0.35, 3.0, 10.0);
+    const int quietRunNeeded = std::max(1, static_cast<int>(std::ceil(1400.0 / binHz)));
+    const int maxSignalBins = std::max(4, static_cast<int>(std::ceil(maxSignalBandwidthHz / binHz)));
+
+    int left = peakIdx;
+    int quiet = 0;
+    while (left > lo && peakIdx - left < maxSignalBins) {
+        --left;
+        if (powerDb[static_cast<size_t>(left)] >= thresholdDb) quiet = 0;
+        else if (++quiet >= quietRunNeeded) {
+            left += quietRunNeeded;
+            break;
+        }
+    }
+
+    int right = peakIdx;
+    quiet = 0;
+    while (right < hi && right - left < maxSignalBins) {
+        ++right;
+        if (powerDb[static_cast<size_t>(right)] >= thresholdDb) quiet = 0;
+        else if (++quiet >= quietRunNeeded) {
+            right -= quietRunNeeded;
+            break;
+        }
+    }
+
+    left = std::clamp(left, lo, hi);
+    right = std::clamp(right, lo, hi);
+    if (left > right) std::swap(left, right);
+
+    double weighted = 0.0;
+    double weightSum = 0.0;
+    for (int i = left; i <= right; ++i) {
+        const double aboveFloor = static_cast<double>(powerDb[static_cast<size_t>(i)]) - floorDb;
+        if (aboveFloor < 1.5) continue;
+        const double w = std::max(0.0, std::pow(10.0, std::clamp(aboveFloor, 0.0, 80.0) / 10.0) - 1.0);
+        weighted += (static_cast<double>(i) + 0.5) * w;
+        weightSum += w;
+    }
+    if (weightSum <= 0.0) return out;
+
+    const double centerBin = weighted / weightSum;
+    const double signalFreqHz = fullStart + centerBin * binHz;
+    const double offsetHz = signalFreqHz - targetFreqHz;
+    if (!std::isfinite(offsetHz) || std::abs(offsetHz) > searchHz + binHz) return out;
+
+    const bool nearSearchEdge = (peakIdx - lo) < 2 || (hi - peakIdx) < 2;
+    double confidence = std::clamp((snrDb - 5.0) / 18.0, 0.0, 1.0);
+    if (nearSearchEdge) confidence *= 0.5;
+
+    out.valid = confidence >= 0.20;
+    out.offsetHz = offsetHz;
+    out.signalFreqHz = signalFreqHz;
+    out.confidence = confidence;
+    return out;
+}
+
+std::vector<P25ControlCandidate> detectP25ControlCandidates(const std::vector<float>& powerDb,
+                                                            double sampleRateHz,
+                                                            double centerFreqHz,
+                                                            size_t maxResults)
+{
+    std::vector<P25ControlCandidate> hits;
+    const int bins = static_cast<int>(powerDb.size());
+    if (bins < 64 || sampleRateHz <= 0.0 || !std::isfinite(sampleRateHz)) return hits;
+
+    std::vector<double> all;
+    all.reserve(powerDb.size());
+    for (float v : powerDb) all.push_back(v);
+
+    const double floorDb = localPercentile(all, 0.35, -120.0);
+    const double binHz = sampleRateHz / static_cast<double>(bins);
+    const double thresholdDb = floorDb + 5.0;
+    const int maxGapBins = std::max(1, static_cast<int>(std::ceil(1800.0 / binHz)));
+    const double minBwHz = 5500.0;
+    const double maxBwHz = 21000.0;
+    const double fullStart = centerFreqHz - sampleRateHz / 2.0;
+
+    int regionStart = -1;
+    int regionEnd = -1;
+    int quietRun = 0;
+    double regionPeakDb = -180.0;
+
+    auto flushRegion = [&]() {
+        if (regionStart < 0 || regionEnd < regionStart) return;
+        const double bwHz = std::max(binHz, (regionEnd - regionStart + 1) * binHz);
+        const double snrDb = regionPeakDb - floorDb;
+        if (bwHz >= minBwHz && bwHz <= maxBwHz && snrDb >= 6.0) {
+            double weighted = 0.0;
+            double weightSum = 0.0;
+            for (int i = regionStart; i <= regionEnd; ++i) {
+                double w = std::max(0.0, std::pow(10.0, (powerDb[static_cast<size_t>(i)] - floorDb) / 10.0) - 1.0);
+                weighted += (i + 0.5) * w;
+                weightSum += w;
+            }
+            double centerBin = (weightSum > 0.0)
+                ? weighted / weightSum
+                : (regionStart + regionEnd + 1) * 0.5;
+            P25ControlCandidate c;
+            c.freqHz = fullStart + centerBin * binHz;
+            c.bandwidthHz = bwHz;
+            c.peakDb = regionPeakDb;
+            c.snrDb = snrDb;
+            hits.push_back(c);
+        }
+    };
+
+    for (int i = 0; i < bins; ++i) {
+        const double p = powerDb[static_cast<size_t>(i)];
+        if (p >= thresholdDb) {
+            if (regionStart < 0) {
+                regionStart = i;
+                regionPeakDb = p;
+            }
+            regionEnd = i;
+            quietRun = 0;
+            regionPeakDb = std::max(regionPeakDb, p);
+        } else if (regionStart >= 0) {
+            if (++quietRun > maxGapBins) {
+                regionEnd = std::max(regionStart, i - quietRun);
+                flushRegion();
+                regionStart = -1;
+                regionEnd = -1;
+                quietRun = 0;
+                regionPeakDb = -180.0;
+            }
+        }
+    }
+    if (regionStart >= 0) {
+        regionEnd = std::max(regionStart, bins - quietRun - 1);
+        flushRegion();
+    }
+
+    std::sort(hits.begin(), hits.end(), [](const P25ControlCandidate& a, const P25ControlCandidate& b) {
+        return a.snrDb > b.snrDb;
+    });
+    if (hits.size() > maxResults) hits.resize(maxResults);
+    return hits;
+}
+
 // classifyMode and detectChannelBandwidth moved here from main.cpp (stateless, but now single source in Demod module).
 DemodMode classifyMode(const std::vector<float>& powerDb, double sampleRate, double centerFreq) {
-    if (powerDb.empty()) return DemodMode::NFM;
-    if (centerFreq > 88e6 && centerFreq < 108e6) return DemodMode::WFM;
-    double bw = detectChannelBandwidth(powerDb, sampleRate);
-    if (bw > 80e3) return DemodMode::WFM;
-    if (bw < 4e3) return DemodMode::USB;
-    return DemodMode::NFM;
+    return AdvancedSignalClassifier::instance()
+        .classifySpectrum(powerDb, sampleRate, centerFreq, centerFreq)
+        .demodMode;
 }
 
 DemodMode classifyModeAround(const std::vector<float>& powerDb,
@@ -21,12 +216,9 @@ DemodMode classifyModeAround(const std::vector<float>& powerDb,
                              double centerFreq,
                              double targetFreq)
 {
-    if (powerDb.empty()) return DemodMode::NFM;
-    if (targetFreq > 88e6 && targetFreq < 108e6) return DemodMode::WFM;
-    double bw = detectChannelBandwidthAround(powerDb, sampleRate, centerFreq, targetFreq);
-    if (bw > 80000.0) return DemodMode::WFM;
-    if (bw < 4000.0) return DemodMode::USB;
-    return DemodMode::NFM;
+    return AdvancedSignalClassifier::instance()
+        .classifySpectrum(powerDb, sampleRate, centerFreq, targetFreq)
+        .demodMode;
 }
 
 double detectChannelBandwidth(const std::vector<float>& powerDb, double sampleRate) {
@@ -56,6 +248,8 @@ double detectChannelBandwidthAround(const std::vector<float>& powerDb,
     const double rel = (targetFreq - fullStart) / binHz;
     if (!std::isfinite(rel)) return 25000.0;
 
+    if (rel < 0.0 || rel >= static_cast<double>(bins)) return 25000.0;
+
     const int centerBin = std::clamp(static_cast<int>(std::llround(rel - 0.5)), 0, bins - 1);
     const int halfSearch = std::max(4, static_cast<int>(std::ceil(std::clamp(maxSearchHz, 5000.0, sampleRate * 0.5) / binHz)));
     const int lo = std::max(0, centerBin - halfSearch);
@@ -75,12 +269,38 @@ double detectChannelBandwidthAround(const std::vector<float>& powerDb,
     if (local.empty()) return 25000.0;
     std::sort(local.begin(), local.end());
     double floorDb = local[static_cast<size_t>(std::floor((local.size() - 1) * 0.25))];
-    float thresh = static_cast<float>(std::max(floorDb + 8.0, static_cast<double>(peak) - 12.0));
+    const double snrDb = std::max(0.0, static_cast<double>(peak) - floorDb);
+    if (snrDb < 3.0) return 2500.0;
 
+    // Use a floor-relative threshold, capped by a peak-relative threshold, so
+    // strong AM carriers do not hide lower sideband energy and flat digital
+    // plateaus (P25/DMR/etc.) are not collapsed to one bright bin.
+    const double floorLift = std::clamp(snrDb * 0.40, 3.0, 8.0);
+    float thresh = static_cast<float>(std::max(floorDb + 3.0, std::min(floorDb + floorLift, static_cast<double>(peak) - 18.0)));
+
+    const int quietRunNeeded = std::max(1, static_cast<int>(std::ceil(1500.0 / binHz)));
     int left = peakIdx;
-    while (left > lo && powerDb[static_cast<size_t>(left)] > thresh) --left;
+    int quiet = 0;
+    while (left > lo) {
+        --left;
+        if (powerDb[static_cast<size_t>(left)] > thresh) {
+            quiet = 0;
+        } else if (++quiet >= quietRunNeeded) {
+            left += quietRunNeeded;
+            break;
+        }
+    }
+    quiet = 0;
     int right = peakIdx;
-    while (right < hi && powerDb[static_cast<size_t>(right)] > thresh) ++right;
+    while (right < hi) {
+        ++right;
+        if (powerDb[static_cast<size_t>(right)] > thresh) {
+            quiet = 0;
+        } else if (++quiet >= quietRunNeeded) {
+            right -= quietRunNeeded;
+            break;
+        }
+    }
 
     double bw = std::max(binHz, (right - left + 1) * binHz);
     return std::clamp(bw * 1.25, 2500.0, std::min(sampleRate, maxSearchHz * 2.0));
@@ -103,7 +323,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
     if (sr <= 0.0 || !std::isfinite(sr)) return {};
     if (lpfHz <= 0) {
         if (mode == DemodMode::WFM || mode == DemodMode::AUTO) lpfHz = 15000.0;
-        else if (mode == DemodMode::AM) lpfHz = 5000.0;
+        else if (mode == DemodMode::AM) lpfHz = 9000.0;
         else if (mode == DemodMode::USB || mode == DemodMode::LSB) lpfHz = 3000.0;
         else lpfHz = 3000.0;
     }
@@ -146,7 +366,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
 
     // Channel FIR (same design as before)
     if (channelBwHz <= 0) {
-        channelBwHz = (mode == DemodMode::WFM || mode == DemodMode::AUTO) ? 180000.0 : 12500.0;
+        channelBwHz = (mode == DemodMode::WFM || mode == DemodMode::AUTO) ? 180000.0 : (mode == DemodMode::AM ? 20000.0 : 12500.0);
     }
     if (std::abs(channelBwHz - lastBw) > 50 || std::abs(sr - lastS) > 100) {
         double fc = channelBwHz / 2.0 / sr;
@@ -266,11 +486,15 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
     } else if (mode == DemodMode::USB || mode == DemodMode::LSB) {
         for (size_t k=0; k<baseband.size(); ++k) base[k] = std::real(baseband[k]);
     } else {
+        const double deviationNormHz = (mode == DemodMode::NFM)
+            ? std::clamp(channelBwHz * 0.20, 1800.0, 5000.0)
+            : 75000.0;
+        const float fmScale = static_cast<float>(demodRate / (2.0 * M_PI * deviationNormHz));
         for (size_t k=0; k<baseband.size(); ++k) {
             auto s = baseband[k];
             float d = std::arg(s * std::conj(prev));
             prev = s;
-            base[k] = d;
+            base[k] = d * fmScale;
         }
     }
 
@@ -295,7 +519,10 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
     if (audioLpfEnabled && lpfHz > 100.0) {
         if (dspStateNeedsReset) { lpA = lpB = dcv = 0; }
         float alpha = 1.0f - std::exp(-2 * 3.14159265f * (float)lpfHz / (float)demodRate);
-        float dca = 0.995f;
+        // Rate-normalized DC removal. A fixed 0.995 coefficient becomes a ~1.9 kHz
+        // high-pass at 2.4 MS/s, which removes much of NFM voice before resampling.
+        float dca = std::exp(-2.0f * 3.14159265f * 20.0f / (float)std::max(1000.0, demodRate));
+        dca = std::clamp(dca, 0.0f, 0.9999999f);
         for (auto &b : base) {
             lpA = lpA * (1-alpha) + b * alpha;
             lpB = lpB * (1-alpha) + lpA * alpha;
@@ -374,9 +601,10 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
 
     // Final audio-rate processing (de-emph, notch, optional LPF, squelch, gain)
     if (!aud.empty()) {
-        if (mode == DemodMode::WFM || mode == DemodMode::AUTO) {
+        if (mode == DemodMode::WFM || mode == DemodMode::AUTO || (mode == DemodMode::NFM && audioLpfEnabled)) {
             if (dspStateNeedsReset) { des = 0; }
-            float tau = wfmDeTauUs * 1e-6f;
+            const double tauUs = (mode == DemodMode::NFM) ? 750.0 : wfmDeTauUs;
+            float tau = (float)std::max(1e-6, tauUs * 1e-6);
             float dp = std::exp(-1.0f / (tau * (float)outputRate));
             for (auto &s : aud) { des = des * dp + s * (1.0f - dp); s = des; }
         }
@@ -462,12 +690,12 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
 double Demodulator::getSquelchDefaultForMode(DemodMode m) const {
     switch (m) {
         case DemodMode::WFM: return -72.0;
-        case DemodMode::NFM: return -88.0;
-        case DemodMode::AM:  return -82.0;
+        case DemodMode::NFM: return -105.0;
+        case DemodMode::AM:  return -100.0;
         case DemodMode::USB:
-        case DemodMode::LSB: return -95.0;
-        case DemodMode::AUTO: return -85.0;
-        default: return -90.0;
+        case DemodMode::LSB: return -105.0;
+        case DemodMode::AUTO: return -105.0;
+        default: return -105.0;
     }
 }
 

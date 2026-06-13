@@ -48,7 +48,7 @@ TEST_CASE("DeviceManager basic functionality", "[devicemanager]") {
             if (!devs.empty()) {
                 size_t idx = 0;
                 mgr.setEnabled(idx, true);
-                mgr.updateDeviceParams(idx, 2.048e6, 18.0, "RX");  // use safe <=25 value so RTL load cap (P1 safety for WFM) does not alter roundtrip
+                mgr.updateDeviceParams(idx, 2.048e6, 18.0, "RX", 1.25);  // use safe <=25 value so RTL load cap (P1 safety for WFM) does not alter roundtrip
                 mgr.saveSettings();
 
                 // Reload in new instance simulation (same singleton but re-load)
@@ -58,6 +58,7 @@ TEST_CASE("DeviceManager basic functionality", "[devicemanager]") {
                 REQUIRE(reloaded[idx].sampleRate == 2.048e6);
                 REQUIRE(reloaded[idx].gain == 18.0);
                 REQUIRE(reloaded[idx].antenna == "RX");
+                REQUIRE(reloaded[idx].frequencyCorrectionPpm == 1.25);
             }
         }
 

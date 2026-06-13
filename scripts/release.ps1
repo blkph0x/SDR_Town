@@ -3,14 +3,16 @@
 # Run from project root after a successful build/fix session.
 
 param(
-    [string]$Version = "0.2.7",
+    [string]$Version = "0.2.8",
+    [ValidateSet("stable", "experimental")]
+    [string]$Channel = "stable",
     [switch]$SkipPush,
     [switch]$SkipAssets
 )
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "=== SDR Town Stable Release v$Version ===" -ForegroundColor Cyan
+Write-Host "=== SDR Town $Channel Release v$Version ===" -ForegroundColor Cyan
 
 $root = $PSScriptRoot | Split-Path -Parent
 Set-Location $root
@@ -73,6 +75,7 @@ $manifest = Get-Content update.json | ConvertFrom-Json
 $manifest.version = $Version
 $manifest.tag = "v$Version"
 $manifest.notes_url = "https://github.com/Blkph0x/SDR_Town/releases/tag/v$Version"
+$manifest.channel = $Channel
 $manifest.published = (Get-Date -Format "yyyy-MM-dd")
 $manifest.installer.url = "https://github.com/Blkph0x/SDR_Town/releases/download/v$Version/SDR_Town-$Version-win64-setup.exe"
 $manifest.installer.sha256 = $setupHash
@@ -109,7 +112,8 @@ if (-not $SkipAssets) {
     }
     if ($gh -and (Test-Path $gh)) {
         $assets = @($setup, $setupShaFile, $portableZip, "update.json", "SHA256SUMS.txt") | Where-Object { Test-Path $_ }
-        $ghArgs = @("release", "create", "v$Version") + $assets + @("--title", "SDR Town $Version", "--notes", "Stable build. Fresh installer, portable ZIP, manifest, and hashes for the in-app updater.", "--repo", "Blkph0x/SDR_Town", "--verify-tag", "--latest")
+        $notes = if ($Channel -eq "experimental") { "Experimental tester build. Fresh installer, portable ZIP, manifest, and hashes for the in-app updater." } else { "Stable build. Fresh installer, portable ZIP, manifest, and hashes for the in-app updater." }
+        $ghArgs = @("release", "create", "v$Version") + $assets + @("--title", "SDR Town $Version ($Channel)", "--notes", $notes, "--repo", "Blkph0x/SDR_Town", "--verify-tag", "--latest")
         & $gh @ghArgs | Out-Null
         Write-Host "  Assets uploaded via gh."
     } else {

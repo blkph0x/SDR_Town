@@ -100,6 +100,8 @@ AudioEngine::~AudioEngine()
 {
     for (auto& act : m_active) {
         if (act && act->device && act->device->pContext) {
+            act->valid.store(false, std::memory_order_release);
+            ma_device_stop(act->device.get());
             ma_device_uninit(act->device.get());
         }
     }
@@ -218,6 +220,9 @@ void AudioEngine::startDevice(size_t enumIndex)
     if (res != MA_SUCCESS) {
         spdlog::error("Failed to start playback device {}", m_devices[enumIndex].name);
         actPtr->valid.store(false);
+        if (actPtr->device && actPtr->device->pContext) {
+            ma_device_uninit(actPtr->device.get());
+        }
         // remove the bad entry
         m_active.pop_back();
         return;
@@ -337,6 +342,23 @@ void AudioEngine::playTestTone(size_t activeIndex, float freq, float durationSec
         spdlog::info("Test tone requested on output {} @ {} Hz for {}s", activeIndex, freq, durationSec);
     } else {
         return;
+    }
+}
+
+void AudioEngine::playTestToneForDevice(size_t enumIndex, float freq, float durationSec)
+{
+    size_t activeIndex = size_t(-1);
+    {
+        std::lock_guard<std::mutex> lk(audioMutex);
+        for (size_t i = 0; i < m_active.size(); ++i) {
+            if (m_active[i] && m_active[i]->enumIndex == enumIndex) {
+                activeIndex = i;
+                break;
+            }
+        }
+    }
+    if (activeIndex != size_t(-1)) {
+        playTestTone(activeIndex, freq, durationSec);
     }
 }
 

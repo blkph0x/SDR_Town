@@ -31,9 +31,22 @@ static double clampGainForDevice(const DeviceInfo& d, double gainDb) {
     double maxGain = d.gainMax;
     if (!std::isfinite(minGain) || !std::isfinite(maxGain) || maxGain <= minGain) {
         minGain = 0.0;
-        maxGain = (d.driver == "rtlsdr") ? 50.0 : 80.0;
+        maxGain = (d.driver == "rtlsdr") ? 49.6 : 80.0;
     }
     return std::clamp(gainDb, minGain, maxGain);
+}
+
+static double clampFrequencyCorrectionPpm(double ppm) {
+    if (!std::isfinite(ppm)) return 0.0;
+    return std::clamp(ppm, -200.0, 200.0);
+}
+
+static double correctedTuneFrequencyHz(double logicalHz, double ppm) {
+    if (!std::isfinite(logicalHz) || logicalHz <= 0.0) return logicalHz;
+    ppm = clampFrequencyCorrectionPpm(ppm);
+    const double scale = 1.0 + ppm * 1e-6;
+    if (std::abs(scale) < 1e-9) return logicalHz;
+    return logicalHz / scale;
 }
 
 std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
@@ -114,7 +127,7 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
                             if (di.driver == "rtlsdr") {
                                 di.gain = 20.0;
                                 di.gainMin = 0.0;
-                                di.gainMax = 50.0;
+                                di.gainMax = 49.6;
                             }
                         }
 
@@ -134,7 +147,7 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
                     di.maxFreq = 1766e6;
                     di.gain = 20.0;  // P1 audit: strong local WFM overloads RTL at high gain (was 30/80); 15-25 safe for broadcast FM. BW 120-150kHz also recommended.
                     di.gainMin = 0.0;
-                    di.gainMax = 50.0;
+                    di.gainMax = 49.6;
                     di.gainName = "TUNER";
                 } else {
                     di.antennas = {"TX/RX"};
@@ -172,7 +185,7 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
             di.maxFreq = 1766e6;
             di.gain = 20.0;  // P1: default safe for strong local WFM (avoid 80 persisted overload at front-end)
             di.gainMin = 0.0;
-            di.gainMax = 50.0;
+            di.gainMax = 49.6;
             di.gainName = "TUNER";
             devices.push_back(di);
             spdlog::info("  Added RTL-SDR entry (will attempt real when enabled if hardware present)");
@@ -208,7 +221,7 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
     fake2.sampleRate = 2.048e6;
     fake2.gain = 20.0;
     fake2.gainMin = 0.0;
-    fake2.gainMax = 50.0;
+    fake2.gainMax = 49.6;
     fake2.minFreq = 24e6;
     fake2.maxFreq = 1766e6;
     devices.push_back(fake2);
@@ -236,15 +249,16 @@ DeviceInfo* DeviceManager::getDevice(size_t index) {
     return &devices[index];
 }
 
-void DeviceManager::updateDeviceParams(size_t index, double sampleRate, double gain, const std::string& antenna) {
+void DeviceManager::updateDeviceParams(size_t index, double sampleRate, double gain, const std::string& antenna, double frequencyCorrectionPpm) {
     std::lock_guard<std::mutex> lk(devicesMutex);
     if (index >= devices.size()) return;
     auto& d = devices[index];
     d.sampleRate = sampleRate;
     d.gain = clampGainForDevice(d, gain);
     d.antenna = antenna;
+    d.frequencyCorrectionPpm = clampFrequencyCorrectionPpm(frequencyCorrectionPpm);
     saveSettings();
-    spdlog::debug("Updated params for {}: rate={}, gain={}, ant={}", d.label, sampleRate, d.gain, antenna);
+    spdlog::debug("Updated params for {}: rate={}, gain={}, ant={}, ppm={}", d.label, sampleRate, d.gain, antenna, d.frequencyCorrectionPpm);
 }
 
 void DeviceManager::loadSettings() {
@@ -293,6 +307,7 @@ nlohmann::json DeviceManager::toJson() const {
         j["enabled"] = d.enabled;
         j["sampleRate"] = d.sampleRate;
         j["gain"] = d.gain;
+        j["frequencyCorrectionPpm"] = d.frequencyCorrectionPpm;
         j["antenna"] = d.antenna;
         arr.push_back(j);
     }
@@ -308,6 +323,8 @@ void DeviceManager::fromJson(const nlohmann::json& j) {
                 if (saved.contains("enabled")) d.enabled = saved["enabled"];
                 if (saved.contains("sampleRate")) d.sampleRate = saved["sampleRate"];
                 if (saved.contains("gain")) d.gain = clampGainForDevice(d, saved["gain"].get<double>());
+                if (saved.contains("frequencyCorrectionPpm")) d.frequencyCorrectionPpm = clampFrequencyCorrectionPpm(saved["frequencyCorrectionPpm"].get<double>());
+                else if (saved.contains("ppm")) d.frequencyCorrectionPpm = clampFrequencyCorrectionPpm(saved["ppm"].get<double>());
                 if (saved.contains("antenna")) d.antenna = saved["antenna"];
                 break;
             }
@@ -379,6 +396,8 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
     double useRate = d.sampleRate;
     if (useRate < 0.25e6 || useRate > 60e6) useRate = (d.driver == "rtlsdr" ? 2.048e6 : 2.4e6);
     st.currentRate = useRate;
+    st.frequencyCorrectionPpm = clampFrequencyCorrectionPpm(d.frequencyCorrectionPpm);
+    st.nativeFrequencyCorrectionActive = false;
 
     // S0 / audit-followup-2: reset per-device IQ buffers for every session so a new
     // tune/enable cannot consume stale IQ from a previous station, stub, or failed real handoff.
@@ -445,14 +464,17 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
             // was running in the detached thread). This is a key part of making "live" gain reliable.
             double useGain;
             std::string useGainName;
+            double usePpm = d.frequencyCorrectionPpm;
             {
                 std::lock_guard<std::mutex> lk(devicesMutex);
                 if (index < devices.size()) {
                     useGain = clampGainForDevice(devices[index], devices[index].gain);
                     useGainName = devices[index].gainName;
+                    usePpm = clampFrequencyCorrectionPpm(devices[index].frequencyCorrectionPpm);
                 } else {
                     useGain = clampGainForDevice(d, d.gain);
                     useGainName = d.gainName;
+                    usePpm = clampFrequencyCorrectionPpm(d.frequencyCorrectionPpm);
                 }
             }
 
@@ -467,7 +489,21 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                 std::lock_guard<std::mutex> lk(st.queueMutex);
                 center = st.currentCenter;
             }
-            try { localDev->setFrequency(SOAPY_SDR_RX, 0, center); } catch (...) {}
+            bool nativePpm = false;
+            try {
+                if (localDev->hasFrequencyCorrection(SOAPY_SDR_RX, 0)) {
+                    localDev->setFrequencyCorrection(SOAPY_SDR_RX, 0, usePpm);
+                    nativePpm = true;
+                    spdlog::info("Applied native frequency correction to device {}: {} ppm", index, usePpm);
+                }
+            } catch (const std::exception& ex) {
+                spdlog::warn("Native frequency correction unavailable for device {}: {}", index, ex.what());
+                nativePpm = false;
+            } catch (...) {
+                nativePpm = false;
+            }
+            const double tuneCenter = nativePpm ? center : correctedTuneFrequencyHz(center, usePpm);
+            try { localDev->setFrequency(SOAPY_SDR_RX, 0, tuneCenter); } catch (...) {}
 
             localStream = localDev->setupStream(SOAPY_SDR_RX, "CF32");
             if (!localStream) throw std::runtime_error("setupStream null");
@@ -502,6 +538,8 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                 st.rxStream = localStream;
                 st.active = true;
                 st.isReal = true;
+                st.frequencyCorrectionPpm = usePpm;
+                st.nativeFrequencyCorrectionActive = nativePpm;
                 localDev = nullptr;
                 localStream = nullptr;
             }
@@ -529,6 +567,12 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
             }
             // Now safe to call (no devicesMutex held).
             setLiveGain(index, latestGain);
+            double latestPpm = usePpm;
+            {
+                std::lock_guard<std::mutex> lk(devicesMutex);
+                if (index < devices.size()) latestPpm = devices[index].frequencyCorrectionPpm;
+            }
+            setFrequencyCorrection(index, latestPpm);
         } catch (const std::exception& ex) {
             spdlog::warn("Background real init failed for device {} ({}). Keeping safe stub.", index, ex.what());
             cleanupLocal();
@@ -636,6 +680,7 @@ void DeviceManager::stopStreaming(size_t index) {
         std::lock_guard<std::mutex> lk(st.stateMutex);
         st.active = false;
         st.isReal = false;
+        st.nativeFrequencyCorrectionActive = false;
     }
     resetStreamBuffers(st);
     spdlog::info("Stopped streaming for device {}", index);
@@ -749,6 +794,68 @@ void DeviceManager::setLiveGain(size_t index, double gainDb) {
     }
     if (!appliedLive) {
         spdlog::debug("Live RF gain for device {} recorded as {} dB (model updated). No active soapyDev yet (stub, real upgrade still in progress, or device not started). Hardware will see it on next real start or via catch-up after upgrade.", index, useGain);
+    }
+#endif
+}
+
+void DeviceManager::setFrequencyCorrection(size_t index, double ppm) {
+    const double usePpm = clampFrequencyCorrectionPpm(ppm);
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (index >= devices.size()) return;
+        devices[index].frequencyCorrectionPpm = usePpm;
+        saveSettings();
+    }
+
+    if (index >= streams.size() || !streams[index]) return;
+    auto& st = *streams[index];
+
+    double logicalCenter = 0.0;
+    {
+        std::lock_guard<std::mutex> lk(st.queueMutex);
+        logicalCenter = st.currentCenter;
+    }
+
+#ifdef HAVE_SOAPYSDR
+    bool appliedNative = false;
+    {
+        std::lock_guard<std::mutex> stateLock(st.stateMutex);
+        st.frequencyCorrectionPpm = usePpm;
+        st.nativeFrequencyCorrectionActive = false;
+        if (st.soapyDev && !st.stopFlag) {
+            try {
+                if (st.soapyDev->hasFrequencyCorrection(SOAPY_SDR_RX, 0)) {
+                    st.soapyDev->setFrequencyCorrection(SOAPY_SDR_RX, 0, usePpm);
+                    st.nativeFrequencyCorrectionActive = true;
+                    appliedNative = true;
+                }
+            } catch (const std::exception& ex) {
+                spdlog::warn("Failed native PPM correction on device {}: {}", index, ex.what());
+                st.nativeFrequencyCorrectionActive = false;
+            } catch (...) {
+                st.nativeFrequencyCorrectionActive = false;
+            }
+
+            const double tuneHz = st.nativeFrequencyCorrectionActive
+                ? logicalCenter
+                : correctedTuneFrequencyHz(logicalCenter, usePpm);
+            try {
+                st.soapyDev->setFrequency(SOAPY_SDR_RX, 0, tuneHz);
+            } catch (const std::exception& ex) {
+                spdlog::warn("Retune after PPM correction failed for device {}: {}", index, ex.what());
+            } catch (...) {}
+        }
+    }
+    if (appliedNative) {
+        spdlog::info("Live frequency correction applied to device {}: {} ppm (native)", index, usePpm);
+    } else {
+        spdlog::debug("Frequency correction for device {} recorded as {} ppm; using corrected tune fallback when needed.", index, usePpm);
+    }
+#else
+    {
+        std::lock_guard<std::mutex> stateLock(st.stateMutex);
+        st.frequencyCorrectionPpm = usePpm;
+        st.nativeFrequencyCorrectionActive = false;
     }
 #endif
 }
@@ -953,12 +1060,16 @@ void DeviceManager::setupSoapyForRTLSDR() {
 void DeviceManager::setCenterFreq(size_t index, double freqHz) {
     if (index >= streams.size() || !streams[index]) return;
     auto& st = *streams[index];
+    double ppm = 0.0;
+    bool nativePpm = false;
 #ifdef HAVE_SOAPYSDR
     SoapySDR::Device* dev = nullptr;
 #endif
     {
         std::lock_guard<std::mutex> lk(st.stateMutex);
         if (!st.active) return;
+        ppm = st.frequencyCorrectionPpm;
+        nativePpm = st.nativeFrequencyCorrectionActive;
 #ifdef HAVE_SOAPYSDR
         dev = st.soapyDev;
 #endif
@@ -972,8 +1083,9 @@ void DeviceManager::setCenterFreq(size_t index, double freqHz) {
 #ifdef HAVE_SOAPYSDR
     if (dev) {
         try {
-            dev->setFrequency(SOAPY_SDR_RX, 0, freqHz);
-            spdlog::debug("Set center freq {} for device {}", freqHz, index);
+            const double tuneHz = nativePpm ? freqHz : correctedTuneFrequencyHz(freqHz, ppm);
+            dev->setFrequency(SOAPY_SDR_RX, 0, tuneHz);
+            spdlog::debug("Set center freq {} for device {} (hardware tune {}, ppm {})", freqHz, index, tuneHz, ppm);
         } catch (const std::exception& ex) {
             spdlog::warn("setFrequency failed: {}", ex.what());
         }
@@ -1138,12 +1250,14 @@ void DeviceManager::rxThreadFunc(size_t index) {
                                 st.spectrumAvg.assign(localPower.size(), -110.0f);
                                 st.spectrumPeak.assign(localPower.size(), -110.0f);
                             }
+                            std::vector<float> published(localPower.size(), -120.0f);
                             for (size_t b = 0; b < localPower.size(); ++b) {
                                 st.spectrumAvg[b] = st.spectrumAvg[b] * 0.72f + localPower[b] * 0.28f;
-                                float decayedPeak = st.spectrumPeak[b] * 0.985f;
+                                float decayedPeak = std::max(-180.0f, st.spectrumPeak[b] - 0.8f);
                                 st.spectrumPeak[b] = std::max(decayedPeak, localPower[b]);
+                                published[b] = std::max(st.spectrumAvg[b], st.spectrumPeak[b] - 4.0f);
                             }
-                            st.latestPower = st.spectrumAvg; // high bin count vector
+                            st.latestPower = std::move(published); // high bin count vector, avg + fast peak visibility
                             if (publishedRate > 0.0 && std::isfinite(publishedRate)) st.currentRate = publishedRate;
                         }
                         lastSpectrumTime = now;
@@ -1221,9 +1335,18 @@ void DeviceManager::rxThreadFunc(size_t index) {
             auto lp = computeRealFFTPower(fake, fftN, true);
             {
                 std::lock_guard<std::mutex> lk(st.queueMutex);
-                if (st.spectrumAvg.size() != lp.size()) st.spectrumAvg = lp;
-                for (size_t b = 0; b < lp.size(); ++b) st.spectrumAvg[b] = st.spectrumAvg[b] * 0.7f + lp[b] * 0.3f;
-                st.latestPower = st.spectrumAvg;
+                if (st.spectrumAvg.size() != lp.size()) {
+                    st.spectrumAvg = lp;
+                    st.spectrumPeak = lp;
+                }
+                std::vector<float> published(lp.size(), -120.0f);
+                for (size_t b = 0; b < lp.size(); ++b) {
+                    st.spectrumAvg[b] = st.spectrumAvg[b] * 0.7f + lp[b] * 0.3f;
+                    float decayedPeak = std::max(-180.0f, st.spectrumPeak[b] - 0.8f);
+                    st.spectrumPeak[b] = std::max(decayedPeak, lp[b]);
+                    published[b] = std::max(st.spectrumAvg[b], st.spectrumPeak[b] - 4.0f);
+                }
+                st.latestPower = std::move(published);
                 st.currentRate = fs;
             }
         }

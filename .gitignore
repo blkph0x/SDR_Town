@@ -64,6 +64,8 @@ update.json.tmp
 *.tmp
 *.temp
 *.swp
+__pycache__/
+*.pyc
 *~
 Thumbs.db
 .DS_Store
@@ -86,6 +88,11 @@ docs/generated/
 appdata/
 recordings/
 logs/
+
+# Local release artifacts are uploaded to GitHub releases, not committed.
+SDR_Town-*-win64-portable.zip
+SDR_Town-*-win64-setup.exe.sha256
+_CPack_Packages/
 
 # OS / other
 ehthumbs.db

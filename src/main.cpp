@@ -8,6 +8,7 @@
 #include <QWidget>
 #include <QPushButton>
 #include <QTextEdit>
+#include <QTextCursor>
 #include <QPalette>
 #include <QStyleFactory>
 #include <QMessageBox>
@@ -22,12 +23,18 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QSlider>
 #include <QHeaderView>
 #include <QGroupBox>
 #include <QFormLayout>
 #include <QTimer>
 #include <QDesktopServices>
 #include <QUrl>
+#include <QInputDialog>
+#include <QLineEdit>
+#include <QDateTime>
+#include <QFileInfo>
+#include <QStringList>
 #include <complex>
 
 #include <spdlog/spdlog.h>
@@ -40,6 +47,10 @@
 #include "SpectrumWidget.h"
 #include "AudioEngine.h"
 #include "Demod.h"
+#include "P25Control.h"
+#include "P25LiveDecoder.h"
+#include "SignalClassifier.h"
+#include "ClassifierModelBackend.h"
 #include "Receiver.h"  // Phase 0: per-receiver foundation
 #include "UpdateManager.h"
 
@@ -55,6 +66,9 @@
 #include <fstream>
 #include <cctype>
 #include <limits>
+#include <map>
+#include <optional>
+#include <iterator>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -73,6 +87,7 @@ static std::atomic<long long> gLastDspMicros{0};
 static std::atomic<double> gLastRmsDb{-100.0};   // live RF signal level used by squelch calibration/Auto/indicator
 static std::atomic<double> gLastNoiseFloorDb{-120.0};
 static std::atomic<double> gLastSnrDb{0.0};
+static std::atomic<double> gLastAfcOffsetHz{0.0};
 
 struct RfSquelchMetrics {
     double signalLevelDb = -120.0;
@@ -81,14 +96,643 @@ struct RfSquelchMetrics {
     bool valid = false;
 };
 
+static std::string trimCopy(const std::string& s)
+{
+    const auto first = s.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return {};
+    const auto last = s.find_last_not_of(" \t\r\n");
+    return s.substr(first, last - first + 1);
+}
+
+static std::string modeToString(DemodMode mode)
+{
+    switch (mode) {
+        case DemodMode::WFM: return "WFM";
+        case DemodMode::AM: return "AM";
+        case DemodMode::USB: return "USB";
+        case DemodMode::LSB: return "LSB";
+        case DemodMode::AUTO: return "AUTO";
+        case DemodMode::NFM:
+        default: return "NFM";
+    }
+}
+
+static QString modeToQString(DemodMode mode)
+{
+    return QString::fromStdString(modeToString(mode));
+}
+
+static DemodMode modeFromString(std::string text)
+{
+    for (auto& c : text) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (text == "wfm") return DemodMode::WFM;
+    if (text == "am") return DemodMode::AM;
+    if (text == "usb") return DemodMode::USB;
+    if (text == "lsb") return DemodMode::LSB;
+    if (text == "auto") return DemodMode::AUTO;
+    return DemodMode::NFM;
+}
+
+struct BandPlanEntry {
+    std::string name;
+    double startHz = 0.0;
+    double endHz = 0.0;
+    DemodMode mode = DemodMode::NFM;
+    double bandwidthHz = 12500.0;
+    double lpfHz = 3000.0;
+    double stepHz = 12500.0;
+};
+
+static const std::vector<BandPlanEntry>& builtInBandPlans()
+{
+    static const std::vector<BandPlanEntry> plans = {
+        {"FM Broadcast", 87.5e6, 108.0e6, DemodMode::WFM, 180000.0, 15000.0, 100000.0},
+        {"Airband AM", 108.0e6, 137.0e6, DemodMode::AM, 20000.0, 9000.0, 8333.333},
+        {"NOAA / Weather Sat", 137.0e6, 138.0e6, DemodMode::WFM, 34000.0, 15000.0, 5000.0},
+        {"2m Amateur", 144.0e6, 148.0e6, DemodMode::NFM, 12500.0, 3000.0, 12500.0},
+        {"Marine VHF", 156.0e6, 162.025e6, DemodMode::NFM, 25000.0, 4500.0, 25000.0},
+        {"70cm Amateur", 430.0e6, 450.0e6, DemodMode::NFM, 12500.0, 3000.0, 12500.0},
+        {"AU UHF CB", 476.4125e6, 477.4125e6, DemodMode::NFM, 12500.0, 3000.0, 12500.0},
+    };
+    return plans;
+}
+
+static const BandPlanEntry* findBandPlanForFrequency(double freqHz)
+{
+    if (!std::isfinite(freqHz)) return nullptr;
+    for (const auto& p : builtInBandPlans()) {
+        if (freqHz >= p.startHz && freqHz <= p.endHz) return &p;
+    }
+    return nullptr;
+}
+
+struct SavedFrequency {
+    std::string name;
+    double freqHz = 100e6;
+    DemodMode mode = DemodMode::AUTO;
+    double bandwidthHz = 180000.0;
+    double lpfHz = 15000.0;
+    bool lpfEnabled = true;
+    double squelchDb = -105.0;
+    std::string tags;
+};
+
+static QString savedFrequenciesPath()
+{
+    const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(appData);
+    return appData + "/saved_frequencies.json";
+}
+
+static std::vector<SavedFrequency> loadSavedFrequencies()
+{
+    std::vector<SavedFrequency> out;
+    std::ifstream f(savedFrequenciesPath().toStdString());
+    if (!f.is_open()) return out;
+    try {
+        json arr;
+        f >> arr;
+        if (!arr.is_array()) return out;
+        for (const auto& item : arr) {
+            SavedFrequency sf;
+            sf.name = item.value("name", std::string("Saved Frequency"));
+            sf.freqHz = item.value("freqHz", 100e6);
+            sf.mode = modeFromString(item.value("mode", std::string("AUTO")));
+            sf.bandwidthHz = item.value("bandwidthHz", 180000.0);
+            sf.lpfHz = item.value("lpfHz", 15000.0);
+            sf.lpfEnabled = item.value("lpfEnabled", true);
+            sf.squelchDb = item.value("squelchDb", -105.0);
+            sf.tags = item.value("tags", std::string());
+            if (std::isfinite(sf.freqHz) && sf.freqHz > 0.0) out.push_back(sf);
+        }
+    } catch (const std::exception& ex) {
+        spdlog::warn("Failed to load saved_frequencies.json: {}", ex.what());
+    }
+    return out;
+}
+
+static void saveSavedFrequencies(const std::vector<SavedFrequency>& freqs)
+{
+    json arr = json::array();
+    for (const auto& sf : freqs) {
+        arr.push_back({
+            {"name", sf.name},
+            {"freqHz", sf.freqHz},
+            {"mode", modeToString(sf.mode)},
+            {"bandwidthHz", sf.bandwidthHz},
+            {"lpfHz", sf.lpfHz},
+            {"lpfEnabled", sf.lpfEnabled},
+            {"squelchDb", sf.squelchDb},
+            {"tags", sf.tags},
+        });
+    }
+    try {
+        std::ofstream f(savedFrequenciesPath().toStdString());
+        if (f.is_open()) f << arr.dump(2);
+    } catch (const std::exception& ex) {
+        spdlog::warn("Failed to save saved_frequencies.json: {}", ex.what());
+    }
+}
+
+static void populateSavedFrequencyTable(QTableWidget* table, const std::vector<SavedFrequency>& freqs)
+{
+    if (!table) return;
+    table->setRowCount(static_cast<int>(freqs.size()));
+    for (int row = 0; row < static_cast<int>(freqs.size()); ++row) {
+        const auto& sf = freqs[static_cast<size_t>(row)];
+        table->setItem(row, 0, new QTableWidgetItem(QString::fromStdString(sf.name)));
+        table->setItem(row, 1, new QTableWidgetItem(QString::number(sf.freqHz / 1e6, 'f', 5)));
+        table->setItem(row, 2, new QTableWidgetItem(modeToQString(sf.mode)));
+        table->setItem(row, 3, new QTableWidgetItem(QString::number(sf.bandwidthHz / 1000.0, 'f', 1)));
+        table->setItem(row, 4, new QTableWidgetItem(QString::fromStdString(sf.tags)));
+    }
+}
+
+struct P25TalkgroupEntry {
+    double controlFreqHz = 0.0;
+    uint32_t talkgroupId = 0;
+    std::string alphaTag;
+    uint32_t lastSourceId = 0;
+    uint16_t lastChannel = 0;
+    double lastVoiceFreqHz = 0.0;
+    int hitCount = 0;
+    bool encryptionKnown = false;
+    bool encrypted = false;
+    bool verified = false;
+    bool scannerEnabled = false;
+    qint64 firstSeenMs = 0;
+    qint64 lastSeenMs = 0;
+};
+
+struct P25KnownControlChannel {
+    double freqHz = 0.0;
+    std::string label;
+    qint64 createdMs = 0;
+    qint64 lastUsedMs = 0;
+};
+
+static QString p25TalkgroupsPath()
+{
+    const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(appData);
+    return appData + "/p25_talkgroups.json";
+}
+
+static QString p25KnownControlChannelsPath()
+{
+    const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(appData);
+    return appData + "/p25_control_channels.json";
+}
+
+static std::vector<P25KnownControlChannel> loadP25KnownControlChannels()
+{
+    std::vector<P25KnownControlChannel> out;
+    std::ifstream f(p25KnownControlChannelsPath().toStdString());
+    if (!f.is_open()) return out;
+    try {
+        json arr;
+        f >> arr;
+        if (!arr.is_array()) return out;
+        for (const auto& item : arr) {
+            P25KnownControlChannel cc;
+            cc.freqHz = item.value("freqHz", 0.0);
+            cc.label = item.value("label", std::string());
+            cc.createdMs = item.value("createdMs", static_cast<qint64>(0));
+            cc.lastUsedMs = item.value("lastUsedMs", static_cast<qint64>(0));
+            if (std::isfinite(cc.freqHz) && cc.freqHz > 0.0) out.push_back(cc);
+        }
+    } catch (const std::exception& ex) {
+        spdlog::warn("Failed to load p25_control_channels.json: {}", ex.what());
+    }
+    std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
+        return a.freqHz < b.freqHz;
+    });
+    return out;
+}
+
+static void saveP25KnownControlChannels(const std::vector<P25KnownControlChannel>& channels)
+{
+    json arr = json::array();
+    for (const auto& cc : channels) {
+        arr.push_back({
+            {"freqHz", cc.freqHz},
+            {"label", cc.label},
+            {"createdMs", cc.createdMs},
+            {"lastUsedMs", cc.lastUsedMs},
+        });
+    }
+    try {
+        std::ofstream f(p25KnownControlChannelsPath().toStdString());
+        if (f.is_open()) f << arr.dump(2);
+    } catch (const std::exception& ex) {
+        spdlog::warn("Failed to save p25_control_channels.json: {}", ex.what());
+    }
+}
+
+static bool upsertP25KnownControlChannel(double freqHz, std::string label)
+{
+    if (!std::isfinite(freqHz) || freqHz <= 0.0) return false;
+    auto channels = loadP25KnownControlChannels();
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    auto it = std::find_if(channels.begin(), channels.end(), [&](const P25KnownControlChannel& cc) {
+        return std::abs(cc.freqHz - freqHz) <= 50.0;
+    });
+    if (it == channels.end()) {
+        P25KnownControlChannel cc;
+        cc.freqHz = freqHz;
+        cc.label = trimCopy(label);
+        cc.createdMs = nowMs;
+        cc.lastUsedMs = nowMs;
+        channels.push_back(cc);
+    } else {
+        it->freqHz = freqHz;
+        if (!trimCopy(label).empty()) it->label = trimCopy(label);
+        it->lastUsedMs = nowMs;
+    }
+    std::sort(channels.begin(), channels.end(), [](const auto& a, const auto& b) {
+        return a.freqHz < b.freqHz;
+    });
+    saveP25KnownControlChannels(channels);
+    return true;
+}
+
+static std::vector<P25TalkgroupEntry> loadP25Talkgroups()
+{
+    std::vector<P25TalkgroupEntry> out;
+    std::ifstream f(p25TalkgroupsPath().toStdString());
+    if (!f.is_open()) return out;
+    try {
+        json arr;
+        f >> arr;
+        if (!arr.is_array()) return out;
+        for (const auto& item : arr) {
+            P25TalkgroupEntry tg;
+            tg.controlFreqHz = item.value("controlFreqHz", 0.0);
+            tg.talkgroupId = item.value("talkgroupId", 0u);
+            tg.alphaTag = item.value("alphaTag", std::string());
+            tg.lastSourceId = item.value("lastSourceId", 0u);
+            tg.lastChannel = item.value("lastChannel", 0u);
+            tg.lastVoiceFreqHz = item.value("lastVoiceFreqHz", 0.0);
+            tg.hitCount = item.value("hitCount", 0);
+            tg.encryptionKnown = item.value("encryptionKnown", false);
+            tg.encrypted = item.value("encrypted", false);
+            tg.verified = item.value("verified", false);
+            tg.scannerEnabled = item.value("scannerEnabled", false);
+            tg.firstSeenMs = item.value("firstSeenMs", static_cast<qint64>(0));
+            tg.lastSeenMs = item.value("lastSeenMs", static_cast<qint64>(0));
+            if (tg.talkgroupId > 0 && std::isfinite(tg.controlFreqHz) && tg.controlFreqHz > 0.0) {
+                out.push_back(tg);
+            }
+        }
+    } catch (const std::exception& ex) {
+        spdlog::warn("Failed to load p25_talkgroups.json: {}", ex.what());
+    }
+    return out;
+}
+
+static void saveP25Talkgroups(const std::vector<P25TalkgroupEntry>& talkgroups)
+{
+    json arr = json::array();
+    for (const auto& tg : talkgroups) {
+        arr.push_back({
+            {"controlFreqHz", tg.controlFreqHz},
+            {"talkgroupId", tg.talkgroupId},
+            {"alphaTag", tg.alphaTag},
+            {"lastSourceId", tg.lastSourceId},
+            {"lastChannel", tg.lastChannel},
+            {"lastVoiceFreqHz", tg.lastVoiceFreqHz},
+            {"hitCount", tg.hitCount},
+            {"encryptionKnown", tg.encryptionKnown},
+            {"encrypted", tg.encrypted},
+            {"verified", tg.verified},
+            {"scannerEnabled", tg.scannerEnabled},
+            {"firstSeenMs", tg.firstSeenMs},
+            {"lastSeenMs", tg.lastSeenMs},
+        });
+    }
+    try {
+        std::ofstream f(p25TalkgroupsPath().toStdString());
+        if (f.is_open()) f << arr.dump(2);
+    } catch (const std::exception& ex) {
+        spdlog::warn("Failed to save p25_talkgroups.json: {}", ex.what());
+    }
+}
+
+static QString p25TimeText(qint64 ms)
+{
+    if (ms <= 0) return "-";
+    return QDateTime::fromMSecsSinceEpoch(ms).toString("yyyy-MM-dd HH:mm:ss");
+}
+
+static QString p25HexId(uint32_t value, int width)
+{
+    return QString("0x%1").arg(value, width, 16, QLatin1Char('0')).toUpper();
+}
+
+static QString p25BytesToHex(const std::vector<uint8_t>& bytes)
+{
+    QStringList parts;
+    for (uint8_t byte : bytes) {
+        parts << QString("%1").arg(byte, 2, 16, QLatin1Char('0')).toUpper();
+    }
+    return parts.join(' ');
+}
+
+static QString p25ChannelText(uint16_t channel)
+{
+    return QString("0x%1").arg(channel, 4, 16, QLatin1Char('0')).toUpper();
+}
+
+static QString p25EventLogText(const P25ControlEvent& ev)
+{
+    QStringList parts;
+    parts << QString::fromStdString(p25ControlEventTypeToString(ev.type));
+    parts << QString("op=0x%1").arg(ev.opcode, 2, 16, QLatin1Char('0')).toUpper();
+    parts << QString("mfid=0x%1").arg(ev.mfid, 2, 16, QLatin1Char('0')).toUpper();
+    if (!ev.label.empty()) parts << QString::fromStdString(ev.label);
+    if (ev.talkgroupId) parts << QString("tg=%1").arg(ev.talkgroupId);
+    if (ev.sourceId) parts << QString("src=%1").arg(p25HexId(ev.sourceId, 6));
+    if (ev.channel) parts << QString("ch=%1").arg(p25ChannelText(ev.channel));
+    if (ev.channelB) parts << QString("chB=%1").arg(p25ChannelText(ev.channelB));
+    if (ev.voiceFrequencyHz > 0.0) parts << QString("voice=%1MHz").arg(ev.voiceFrequencyHz / 1e6, 0, 'f', 5);
+    if (ev.voiceFrequencyHzB > 0.0) parts << QString("voiceB=%1MHz").arg(ev.voiceFrequencyHzB / 1e6, 0, 'f', 5);
+    if (ev.encryptionKnown) parts << (ev.encrypted ? "encrypted" : "clear");
+    if (ev.voiceProtocol != P25VoiceProtocol::Unknown) {
+        parts << QString::fromStdString(p25VoiceProtocolToString(ev.voiceProtocol));
+    }
+    if (ev.tdmaSlotKnown) parts << QString("slot=%1").arg(ev.tdmaSlot);
+    if (ev.phase2Candidate) parts << "phase2-candidate";
+    return parts.join(" | ");
+}
+
+static void populateP25TalkgroupTable(QTableWidget* table, const std::vector<P25TalkgroupEntry>& talkgroups)
+{
+    if (!table) return;
+    table->setRowCount(static_cast<int>(talkgroups.size()));
+    for (int row = 0; row < static_cast<int>(talkgroups.size()); ++row) {
+        const auto& tg = talkgroups[static_cast<size_t>(row)];
+        const QString status = tg.scannerEnabled ? "Scanner"
+                             : tg.verified ? "Verified"
+                             : "Discovered";
+        table->setItem(row, 0, new QTableWidgetItem(QString::number(tg.controlFreqHz / 1e6, 'f', 5)));
+        table->setItem(row, 1, new QTableWidgetItem(QString::number(tg.talkgroupId)));
+        table->setItem(row, 2, new QTableWidgetItem(QString::fromStdString(tg.alphaTag)));
+        table->setItem(row, 3, new QTableWidgetItem(tg.lastVoiceFreqHz > 0.0 ? QString::number(tg.lastVoiceFreqHz / 1e6, 'f', 5) : "-"));
+        table->setItem(row, 4, new QTableWidgetItem(tg.lastSourceId ? p25HexId(tg.lastSourceId, 6) : "-"));
+        table->setItem(row, 5, new QTableWidgetItem(QString::number(tg.hitCount)));
+        table->setItem(row, 6, new QTableWidgetItem(tg.encryptionKnown ? (tg.encrypted ? "Yes" : "No") : "Unknown"));
+        table->setItem(row, 7, new QTableWidgetItem(status));
+        table->setItem(row, 8, new QTableWidgetItem(p25TimeText(tg.lastSeenMs)));
+    }
+}
+
+static bool sameP25Talkgroup(const P25TalkgroupEntry& tg, double controlFreqHz, uint32_t talkgroupId)
+{
+    return tg.talkgroupId == talkgroupId && std::abs(tg.controlFreqHz - controlFreqHz) <= 50.0;
+}
+
+static bool mergeP25TalkgroupEvent(std::vector<P25TalkgroupEntry>& talkgroups,
+                                   double controlFreqHz,
+                                   const P25ControlEvent& event,
+                                   qint64 nowMs)
+{
+    if (event.talkgroupId == 0 || !std::isfinite(controlFreqHz) || controlFreqHz <= 0.0) return false;
+    auto it = std::find_if(talkgroups.begin(), talkgroups.end(), [&](const P25TalkgroupEntry& tg) {
+        return sameP25Talkgroup(tg, controlFreqHz, event.talkgroupId);
+    });
+    if (it == talkgroups.end()) {
+        P25TalkgroupEntry tg;
+        tg.controlFreqHz = controlFreqHz;
+        tg.talkgroupId = event.talkgroupId;
+        tg.firstSeenMs = nowMs;
+        tg.lastSeenMs = nowMs;
+        talkgroups.push_back(tg);
+        it = std::prev(talkgroups.end());
+    }
+
+    it->lastSeenMs = nowMs;
+    it->hitCount = std::max(0, it->hitCount) + 1;
+    if (event.sourceId != 0) it->lastSourceId = event.sourceId;
+    if (event.channel != 0) it->lastChannel = event.channel;
+    if (event.voiceFrequencyHz > 0.0) it->lastVoiceFreqHz = event.voiceFrequencyHz;
+    if (event.encryptionKnown) {
+        it->encryptionKnown = true;
+        it->encrypted = event.encrypted;
+    }
+    return true;
+}
+
+struct TrainingCaptureRequest {
+    std::string label;
+    size_t deviceIndex = 0;
+    double tunedFreqHz = 100e6;
+    DemodMode mode = DemodMode::AUTO;
+    double channelBwHz = 12500.0;
+    double lpfHz = 3000.0;
+    bool audioLpfEnabled = true;
+    double squelchDb = -105.0;
+    std::vector<std::complex<float>> iq;
+    std::vector<float> spectrumDb;
+    double centerFreqHz = 100e6;
+    double sampleRateHz = 2.048e6;
+    SignalRecommendation recommendation;
+    ClassifierTile tile;
+    DeviceInfo device;
+};
+
+struct TrainingCaptureResult {
+    bool ok = false;
+    QString directory;
+    QString message;
+};
+
+static QString trainingCapturesRoot()
+{
+    const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(appData + "/training_captures");
+    return appData + "/training_captures";
+}
+
+static std::string sanitizeFileToken(std::string s)
+{
+    if (s.empty()) s = "unknown";
+    for (char& c : s) {
+        const unsigned char uc = static_cast<unsigned char>(c);
+        if (!std::isalnum(uc) && c != '-' && c != '_') c = '_';
+    }
+    while (s.find("__") != std::string::npos) {
+        s.replace(s.find("__"), 2, "_");
+    }
+    if (s.size() > 48) s.resize(48);
+    return trimCopy(s);
+}
+
+static bool writeClassifierTilePreview(const ClassifierTile& tile, const std::string& pgmPath, const std::string& f32Path)
+{
+    if (!tile.valid()) return false;
+
+    std::ofstream pgm(pgmPath, std::ios::binary);
+    if (!pgm.is_open()) return false;
+    pgm << "P5\n" << tile.width << " " << tile.height << "\n255\n";
+    std::vector<unsigned char> bytes(tile.pixels.size());
+    for (size_t i = 0; i < tile.pixels.size(); ++i) {
+        bytes[i] = static_cast<unsigned char>(std::clamp(tile.pixels[i], 0.0f, 1.0f) * 255.0f);
+    }
+    pgm.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+
+    std::ofstream f32(f32Path, std::ios::binary);
+    if (!f32.is_open()) return false;
+    f32.write(reinterpret_cast<const char*>(tile.pixels.data()), static_cast<std::streamsize>(tile.pixels.size() * sizeof(float)));
+    return true;
+}
+
+static TrainingCaptureResult saveTrainingCapture(const TrainingCaptureRequest& req)
+{
+    TrainingCaptureResult out;
+    if (req.iq.empty()) {
+        out.message = "No IQ samples available yet. Start/tune a device and wait for spectrum/audio first.";
+        return out;
+    }
+    if (req.sampleRateHz <= 0.0 || !std::isfinite(req.sampleRateHz)) {
+        out.message = "Invalid sample rate for training capture.";
+        return out;
+    }
+
+    const QString root = trainingCapturesRoot();
+    const QString stamp = QDateTime::currentDateTimeUtc().toString("yyyyMMdd_HHmmss_zzz");
+    const std::string labelToken = sanitizeFileToken(req.label);
+    const QString baseName = QString("%1_%2_%3MHz")
+        .arg(stamp)
+        .arg(QString::fromStdString(labelToken))
+        .arg(req.tunedFreqHz / 1e6, 0, 'f', 5);
+    const QString dir = root + "/" + baseName;
+    if (!QDir().mkpath(dir)) {
+        out.message = "Could not create training capture directory.";
+        return out;
+    }
+
+    const std::string base = (dir + "/" + baseName).toStdString();
+    const std::string dataPath = base + ".sigmf-data";
+    const std::string metaPath = base + ".sigmf-meta";
+    const std::string tilePgmPath = base + "_tile.pgm";
+    const std::string tileF32Path = base + "_tile.f32";
+
+    {
+        std::ofstream data(dataPath, std::ios::binary);
+        if (!data.is_open()) {
+            out.message = "Could not write SigMF data file.";
+            return out;
+        }
+        for (const auto& s : req.iq) {
+            const float re = s.real();
+            const float im = s.imag();
+            data.write(reinterpret_cast<const char*>(&re), sizeof(float));
+            data.write(reinterpret_cast<const char*>(&im), sizeof(float));
+        }
+    }
+
+    if (req.tile.valid()) {
+        writeClassifierTilePreview(req.tile, tilePgmPath, tileF32Path);
+    }
+
+    json meta;
+    meta["global"] = {
+        {"core:datatype", "cf32_le"},
+        {"core:sample_rate", req.sampleRateHz},
+        {"core:version", "1.2.0"},
+        {"core:description", "SDR Town classifier training capture"},
+        {"core:recorder", "SDR Town"},
+        {"sdrtown:label", req.label},
+        {"sdrtown:mode", modeToString(req.mode)},
+        {"sdrtown:channel_bandwidth_hz", req.channelBwHz},
+        {"sdrtown:audio_lpf_hz", req.lpfHz},
+        {"sdrtown:audio_lpf_enabled", req.audioLpfEnabled},
+        {"sdrtown:squelch_db", req.squelchDb},
+        {"sdrtown:device_index", req.deviceIndex},
+        {"sdrtown:device_driver", req.device.driver},
+        {"sdrtown:device_label", req.device.label},
+        {"sdrtown:device_serial", req.device.serial},
+        {"sdrtown:rf_gain_db", req.device.gain},
+        {"sdrtown:frequency_correction_ppm", req.device.frequencyCorrectionPpm},
+        {"sdrtown:classifier_label", req.recommendation.label},
+        {"sdrtown:classifier_confidence", req.recommendation.confidence},
+        {"sdrtown:classifier_reason", req.recommendation.reason},
+        {"sdrtown:classifier_filter", classifierFilterKindToString(req.recommendation.filterKind)},
+        {"sdrtown:classifier_standard_bandwidth_hz", req.recommendation.standardBandwidthHz}
+    };
+    meta["captures"] = json::array({
+        {
+            {"core:sample_start", 0},
+            {"core:frequency", req.centerFreqHz},
+            {"core:datetime", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs).toStdString()}
+        }
+    });
+    meta["annotations"] = json::array({
+        {
+            {"core:sample_start", 0},
+            {"core:sample_count", req.iq.size()},
+            {"core:freq_lower_edge", req.tunedFreqHz - req.channelBwHz * 0.5},
+            {"core:freq_upper_edge", req.tunedFreqHz + req.channelBwHz * 0.5},
+            {"core:label", req.label},
+            {"sdrtown:classifier_label", req.recommendation.label},
+            {"sdrtown:estimated_bandwidth_hz", req.recommendation.estimatedBandwidthHz},
+            {"sdrtown:standard_bandwidth_hz", req.recommendation.standardBandwidthHz},
+            {"sdrtown:snr_db", req.recommendation.features.snrDb}
+        }
+    });
+    meta["sdrtown:artifacts"] = {
+        {"tile_preview_pgm", QFileInfo(QString::fromStdString(tilePgmPath)).fileName().toStdString()},
+        {"tile_f32", QFileInfo(QString::fromStdString(tileF32Path)).fileName().toStdString()},
+        {"tile_width", req.tile.width},
+        {"tile_height", req.tile.height},
+        {"tile_min_db", req.tile.minDb},
+        {"tile_max_db", req.tile.maxDb}
+    };
+
+    try {
+        std::ofstream metaOut(metaPath);
+        if (!metaOut.is_open()) {
+            out.message = "Could not write SigMF metadata file.";
+            return out;
+        }
+        metaOut << meta.dump(2);
+
+        std::ofstream manifest((root + "/manifest.jsonl").toStdString(), std::ios::app);
+        if (manifest.is_open()) {
+            json row = {
+                {"created_utc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs).toStdString()},
+                {"label", req.label},
+                {"freq_hz", req.tunedFreqHz},
+                {"sample_rate_hz", req.sampleRateHz},
+                {"sample_count", req.iq.size()},
+                {"meta", QFileInfo(QString::fromStdString(metaPath)).fileName().toStdString()},
+                {"data", QFileInfo(QString::fromStdString(dataPath)).fileName().toStdString()},
+                {"directory", dir.toStdString()},
+                {"classifier_label", req.recommendation.label},
+                {"classifier_confidence", req.recommendation.confidence}
+            };
+            manifest << row.dump() << "\n";
+        }
+    } catch (const std::exception& ex) {
+        out.message = QString("Training capture write failed: %1").arg(ex.what());
+        return out;
+    }
+
+    out.ok = true;
+    out.directory = dir;
+    out.message = QString("Saved training capture: %1 samples").arg(req.iq.size());
+    return out;
+}
+
 static double defaultBandwidthForMode(DemodMode mode)
 {
     switch (mode) {
         case DemodMode::WFM:
         case DemodMode::AUTO: return 180000.0;
-        case DemodMode::AM: return 10000.0;
+        case DemodMode::AM: return 20000.0;
         case DemodMode::USB:
-        case DemodMode::LSB: return 3000.0;
+        case DemodMode::LSB: return 6000.0;
         case DemodMode::NFM:
         default: return 12500.0;
     }
@@ -99,11 +743,32 @@ static double defaultLpfForMode(DemodMode mode)
     switch (mode) {
         case DemodMode::WFM:
         case DemodMode::AUTO: return 15000.0;
-        case DemodMode::AM: return 5000.0;
+        case DemodMode::AM: return 9000.0;
         case DemodMode::USB:
         case DemodMode::LSB: return 3000.0;
         case DemodMode::NFM:
         default: return 3000.0;
+    }
+}
+
+static double lpfForModeAndBandwidth(DemodMode mode, double bandwidthHz)
+{
+    const double bw = (std::isfinite(bandwidthHz) && bandwidthHz > 0.0)
+        ? bandwidthHz
+        : defaultBandwidthForMode(mode);
+
+    switch (mode) {
+        case DemodMode::WFM:
+        case DemodMode::AUTO:
+            return 15000.0;
+        case DemodMode::AM:
+            return std::clamp(std::min(9000.0, bw * 0.45), 2500.0, 10000.0);
+        case DemodMode::USB:
+        case DemodMode::LSB:
+            return std::clamp(std::min(3000.0, bw * 0.95), 1800.0, 3600.0);
+        case DemodMode::NFM:
+        default:
+            return std::clamp(std::min(4500.0, bw * 0.35), 2500.0, 5000.0);
     }
 }
 
@@ -117,10 +782,12 @@ static double snapBandwidthForMode(DemodMode mode, double detectedHz, double tun
         case DemodMode::AM:
             if (bw <= 8000.0) return 6000.0;
             if (bw <= 14000.0) return 10000.0;
-            return std::clamp(bw, 6000.0, 20000.0);
+            if (bw <= 18000.0) return 15000.0;
+            if (bw <= 26000.0) return 20000.0;
+            return std::clamp(bw, 6000.0, 30000.0);
         case DemodMode::USB:
         case DemodMode::LSB:
-            return std::clamp(bw, 2400.0, 3600.0);
+            return 6000.0;
         case DemodMode::NFM:
         default:
             // Modern CB/PMR/LMR narrowband spacing is commonly 12.5 kHz; support 25 kHz when the signal is visibly wider.
@@ -129,6 +796,61 @@ static double snapBandwidthForMode(DemodMode mode, double detectedHz, double tun
             if (bw <= 36000.0) return 25000.0;
             return std::clamp(bw, 12500.0, 50000.0);
     }
+}
+
+struct SmartModeSelection {
+    DemodMode mode = DemodMode::NFM;
+    double bandwidthHz = 12500.0;
+    double lpfHz = 3000.0;
+    std::string source;
+    SignalRecommendation classifier;
+};
+
+static SmartModeSelection chooseSmartModeAndBandwidth(const std::vector<float>& powerDb,
+                                                      double sampleRateHz,
+                                                      double centerFreqHz,
+                                                      double tunedFreqHz,
+                                                      DemodMode requestedMode,
+                                                      const SignalRecommendation* preferredRecommendation = nullptr)
+{
+    SmartModeSelection out;
+    out.classifier = preferredRecommendation
+        ? *preferredRecommendation
+        : AdvancedSignalClassifier::instance().classifySpectrum(powerDb, sampleRateHz, centerFreqHz, tunedFreqHz);
+
+    if (requestedMode == DemodMode::AUTO && out.classifier.confidence >= 0.70) {
+        out.mode = out.classifier.demodMode;
+        out.bandwidthHz = out.classifier.standardBandwidthHz;
+        out.lpfHz = out.classifier.audioLowPassHz;
+        out.source = out.classifier.label + " classifier";
+        return out;
+    }
+
+    if (const auto* plan = findBandPlanForFrequency(tunedFreqHz)) {
+        if (requestedMode == DemodMode::AUTO || requestedMode == plan->mode) {
+            out.mode = plan->mode;
+            out.bandwidthHz = plan->bandwidthHz;
+            out.lpfHz = plan->lpfHz;
+            out.source = plan->name + (out.classifier.confidence > 0.0 ? " plan" : "");
+            return out;
+        }
+    }
+
+    out.mode = requestedMode == DemodMode::AUTO ? out.classifier.demodMode : requestedMode;
+    if (out.mode == DemodMode::AUTO) out.mode = DemodMode::NFM;
+
+    if (out.classifier.confidence >= 0.45 && out.classifier.demodMode == out.mode) {
+        out.bandwidthHz = out.classifier.standardBandwidthHz;
+        out.lpfHz = out.classifier.audioLowPassHz;
+        out.source = out.classifier.label + " classifier";
+    } else {
+        const double searchHz = (out.mode == DemodMode::WFM) ? 300000.0 : 50000.0;
+        const double detected = detectChannelBandwidthAround(powerDb, sampleRateHz, centerFreqHz, tunedFreqHz, searchHz);
+        out.bandwidthHz = snapBandwidthForMode(out.mode, detected, tunedFreqHz);
+        out.lpfHz = lpfForModeAndBandwidth(out.mode, out.bandwidthHz);
+        out.source = "signal fallback";
+    }
+    return out;
 }
 
 static double percentileDb(std::vector<double> values, double percentile, double fallback)
@@ -216,6 +938,177 @@ static RfSquelchMetrics computeRfSquelchMetrics(const std::vector<float>& powerD
     out.snrDb = out.signalLevelDb - out.noiseFloorDb;
     out.valid = std::isfinite(out.signalLevelDb) && std::isfinite(out.noiseFloorDb);
     return out;
+}
+
+static double applyNfmAfcFromSpectrum(Receiver& rx,
+                                      const std::vector<float>& powerDb,
+                                      double sampleRateHz,
+                                      double centerFreqHz,
+                                      double nominalFreqHz,
+                                      double channelBwHz,
+                                      DemodMode mode)
+{
+    const bool narrowFm = (mode == DemodMode::NFM) || (mode == DemodMode::AUTO && channelBwHz <= 50000.0);
+    if (!rx.afcEnabled || !narrowFm || channelBwHz <= 0.0 || channelBwHz > 60000.0 || powerDb.empty()) {
+        rx.afcLocked = false;
+        rx.afcOffsetHz = 0.0;
+        return nominalFreqHz;
+    }
+
+    const double searchHz = std::clamp(std::max(18000.0, channelBwHz * 1.6), 8000.0, 45000.0);
+    const double maxSignalBw = std::clamp(channelBwHz * 1.35, 8000.0, 60000.0);
+    const auto estimate = estimateSignalOffsetFromSpectrum(powerDb, sampleRateHz, centerFreqHz,
+                                                           nominalFreqHz, searchHz, maxSignalBw);
+    if (estimate.valid) {
+        const double alpha = rx.afcLocked ? 0.25 : 1.0;
+        rx.afcOffsetHz = rx.afcOffsetHz * (1.0 - alpha) + estimate.offsetHz * alpha;
+        rx.afcOffsetHz = std::clamp(rx.afcOffsetHz, -searchHz, searchHz);
+        rx.afcLocked = true;
+    } else if (rx.afcLocked) {
+        rx.afcOffsetHz *= 0.92;
+        if (std::abs(rx.afcOffsetHz) < 25.0) {
+            rx.afcOffsetHz = 0.0;
+            rx.afcLocked = false;
+        }
+    }
+
+    return nominalFreqHz + rx.afcOffsetHz;
+}
+
+struct P25VoiceAudioBlock {
+    std::vector<float> audio;
+    size_t imbeFrames = 0;
+    size_t decodedFrames = 0;
+    bool skippedEncrypted = false;
+    bool waitingForClearGrant = false;
+    bool backendAvailable = false;
+};
+
+static std::vector<float> resampleDecodedP25Pcm(const std::vector<float>& pcm,
+                                                double inputRate,
+                                                double outputRate)
+{
+    if (pcm.empty() || !std::isfinite(inputRate) || !std::isfinite(outputRate) ||
+        inputRate <= 0.0 || outputRate <= 0.0) {
+        return {};
+    }
+
+    double peak = 0.0;
+    for (float sample : pcm) {
+        if (std::isfinite(sample)) peak = std::max(peak, std::abs(static_cast<double>(sample)));
+    }
+    const double gain = peak > 1.0 ? (0.90 / peak) : 0.90;
+    const size_t outCount = std::max<size_t>(1, static_cast<size_t>(
+        std::llround((static_cast<double>(pcm.size()) / inputRate) * outputRate)));
+
+    std::vector<float> out;
+    out.reserve(outCount);
+    for (size_t i = 0; i < outCount; ++i) {
+        const double src = static_cast<double>(i) * inputRate / outputRate;
+        const size_t lo = std::min(static_cast<size_t>(std::floor(src)), pcm.size() - 1);
+        const size_t hi = std::min(lo + 1, pcm.size() - 1);
+        const double frac = src - static_cast<double>(lo);
+        const double a = std::isfinite(pcm[lo]) ? static_cast<double>(pcm[lo]) : 0.0;
+        const double b = std::isfinite(pcm[hi]) ? static_cast<double>(pcm[hi]) : 0.0;
+        const double v = (a * (1.0 - frac) + b * frac) * gain;
+        out.push_back(static_cast<float>(std::clamp(v, -0.98, 0.98)));
+    }
+    return out;
+}
+
+static P25VoiceAudioBlock decodeP25VoiceAudioBlock(Receiver& rx,
+                                                   const std::vector<std::complex<float>>& iq,
+                                                   double sampleRateHz,
+                                                   double centerFreqHz,
+                                                   double targetFreqHz,
+                                                   double outputRateHz)
+{
+    P25VoiceAudioBlock out;
+    out.backendAvailable = rx.p25ImbeVoiceDecoder.backendAvailable();
+    if (!rx.p25VoiceDecodeEnabled || iq.empty()) return out;
+    if (rx.p25VoiceEncrypted) {
+        out.skippedEncrypted = true;
+        return out;
+    }
+    if (!rx.p25VoiceClearKnown) {
+        out.waitingForClearGrant = true;
+        return out;
+    }
+    if (!out.backendAvailable) return out;
+
+    const auto live = rx.p25VoiceLiveDecoder.processIq(iq, sampleRateHz, centerFreqHz, targetFreqHz);
+    out.imbeFrames = live.imbeFrames.size();
+    for (const auto& frame : live.imbeFrames) {
+        if (!frame.valid) continue;
+        const auto decoded = rx.p25ImbeVoiceDecoder.decodeImbe4400Frame(frame.imbe88);
+        if (decoded.status != P25VoiceDecodeStatus::Decoded || decoded.pcm.empty()) continue;
+        auto block = resampleDecodedP25Pcm(decoded.pcm, decoded.sampleRate, outputRateHz);
+        out.audio.insert(out.audio.end(), block.begin(), block.end());
+        ++out.decodedFrames;
+    }
+    return out;
+}
+
+static void populateP25Table(QTableWidget* table,
+                             const std::vector<P25ControlCandidate>& hits,
+                             const std::vector<P25KnownControlChannel>& knownChannels = loadP25KnownControlChannels())
+{
+    if (!table) return;
+    struct Row {
+        double freqHz = 0.0;
+        QString snr = "-";
+        QString bw = "12.5";
+        QString peak = "-";
+        QString nac = "-";
+        QString note = "Known";
+    };
+
+    std::vector<Row> rows;
+    rows.reserve(hits.size() + knownChannels.size());
+    for (const auto& h : hits) {
+        Row row;
+        row.freqHz = h.freqHz;
+        row.snr = QString::number(h.snrDb, 'f', 1);
+        row.bw = QString::number(h.bandwidthHz / 1000.0, 'f', 1);
+        row.peak = QString::number(h.peakDb, 'f', 1);
+        row.note = "Scan";
+        rows.push_back(std::move(row));
+    }
+
+    for (const auto& cc : knownChannels) {
+        if (!std::isfinite(cc.freqHz) || cc.freqHz <= 0.0) continue;
+        const QString label = cc.label.empty()
+            ? QString("Known")
+            : QString("Known: %1").arg(QString::fromStdString(cc.label));
+        auto it = std::find_if(rows.begin(), rows.end(), [&](const Row& row) {
+            return std::abs(row.freqHz - cc.freqHz) <= 50.0;
+        });
+        if (it == rows.end()) {
+            Row row;
+            row.freqHz = cc.freqHz;
+            row.note = label;
+            rows.push_back(std::move(row));
+        } else if (!it->note.contains("Known")) {
+            it->note += " + " + label;
+        }
+    }
+
+    std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
+        return a.freqHz < b.freqHz;
+    });
+
+    table->setRowCount(static_cast<int>(rows.size()));
+    for (int row = 0; row < static_cast<int>(rows.size()); ++row) {
+        const auto& h = rows[static_cast<size_t>(row)];
+        auto* freq = new QTableWidgetItem(QString::number(h.freqHz / 1e6, 'f', 5));
+        freq->setData(Qt::UserRole, h.freqHz);
+        table->setItem(row, 0, freq);
+        table->setItem(row, 1, new QTableWidgetItem(h.snr));
+        table->setItem(row, 2, new QTableWidgetItem(h.bw));
+        table->setItem(row, 3, new QTableWidgetItem(h.peak));
+        table->setItem(row, 4, new QTableWidgetItem(h.nac));
+        table->setItem(row, 5, new QTableWidgetItem(h.note));
+    }
 }
 
 // DSP implementation now lives in src/Demod.cpp (Demodulator class owns all state per Receiver).
@@ -348,9 +1241,26 @@ public:
         SpectrumWidget* spectrum = new SpectrumWidget(this);
         spectrum->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         connect(spectrum, &SpectrumWidget::frequencySelected, this, [this, spectrum](double f) {
+            classifierRoiBuilder.clear();
+            const BandPlanEntry* plan = autoDetectMode ? findBandPlanForFrequency(f) : nullptr;
             {
                 std::lock_guard<std::mutex> lk(monitorParamsMutex);
                 currentMonitorFreq = f;
+                if (plan) {
+                    currentMonitorMode = plan->mode;
+                    monitorChannelBwHz = plan->bandwidthHz;
+                    monitorLpfHz = plan->lpfHz;
+                }
+            }
+            if (plan && bwSpin) {
+                bwSpin->blockSignals(true);
+                bwSpin->setValue(plan->bandwidthHz / 1000.0);
+                bwSpin->blockSignals(false);
+            }
+            if (plan && lpfSpin) {
+                lpfSpin->blockSignals(true);
+                lpfSpin->setValue(plan->lpfHz / 1000.0);
+                lpfSpin->blockSignals(false);
             }
             syncMonitorVarsToReceiver(0);
             setReceiverActive(0, true);
@@ -520,9 +1430,9 @@ public:
         monLay->addWidget(new QLabel("Monitor Freq (MHz):"));
         QDoubleSpinBox* monFreq = new QDoubleSpinBox();
         monFreq->setRange(24, 1766); // RTL range example
-        monFreq->setDecimals(3);
+        monFreq->setDecimals(5);
         monFreq->setValue(100.0);
-        monFreq->setSingleStep(0.1);
+        monFreq->setSingleStep(0.0125);
         QPushButton* setMonBtn = new QPushButton("Set & Tune Device");
         QComboBox* modeBox = new QComboBox();
         modeBox->addItem("AUTO"); modeBox->addItem("NFM"); modeBox->addItem("WFM"); modeBox->addItem("AM"); modeBox->addItem("USB"); modeBox->addItem("LSB");
@@ -561,18 +1471,64 @@ public:
         gainLay->addSpacing(12);
         gainLay->addWidget(new QLabel("Squelch (dB):"));
         QDoubleSpinBox* squelchSpin = new QDoubleSpinBox();
-        squelchSpin->setRange(-130, 40); squelchSpin->setDecimals(0); squelchSpin->setValue(-80);
+        squelchSpin->setRange(-130, 40); squelchSpin->setDecimals(0); squelchSpin->setValue(-105);
         squelchSpin->setToolTip("RF squelch threshold in spectrum dB. Put SQ a few dB above the green noise-floor line; signals above SQ open audio. Values below -115 disable squelch.");
         gainLay->addWidget(squelchSpin);
 
         QPushButton* autoSquelchBtn = new QPushButton("Auto");
-        autoSquelchBtn->setToolTip("Set squelch from the measured local RF noise floor (NF + 10 dB).");
+        autoSquelchBtn->setToolTip("Set squelch from the measured local RF noise floor. NFM uses a lighter offset so readable repeaters are not muted.");
         gainLay->addWidget(autoSquelchBtn);
 
         QLabel* rmsLabel = new QLabel("SIG: --- dB  NF: --- dB");
         rmsLabel->setToolTip("Live RF signal, local noise floor, and SNR used by the squelch gate.");
         gainLay->addWidget(rmsLabel);
+        QLabel* classifierStatus = new QLabel("Classifier: ---");
+        classifierStatus->setToolTip("Advanced ROI classifier: predicted signal family, confidence, standard BW, and filter recommendation.");
+        gainLay->addWidget(classifierStatus);
         rxLay->addLayout(gainLay);
+
+        QHBoxLayout* audioLay = new QHBoxLayout();
+        audioLay->addWidget(new QLabel("Volume:"));
+        QSlider* masterVolSlider = new QSlider(Qt::Horizontal);
+        masterVolSlider->setRange(0, 100);
+        masterVolSlider->setFixedWidth(160);
+        masterVolSlider->setValue(static_cast<int>(std::lround(monitorMasterVolume * 100.0)));
+        QLabel* masterVolValue = new QLabel(QString("%1%").arg(masterVolSlider->value()));
+        QPushButton* outputsBtn = new QPushButton("Outputs...");
+        QLabel* outputsLabel = new QLabel("Outputs: not configured");
+        outputsLabel->setMinimumWidth(220);
+        audioLay->addWidget(masterVolSlider);
+        audioLay->addWidget(masterVolValue);
+        audioLay->addWidget(outputsBtn);
+        audioLay->addWidget(outputsLabel);
+        audioLay->addStretch();
+        rxLay->addLayout(audioLay);
+
+        connect(masterVolSlider, &QSlider::valueChanged, this, [this, masterVolValue](int v) {
+            monitorMasterVolume = std::clamp(v / 100.0, 0.0, 1.0);
+            masterVolValue->setText(QString("%1%").arg(v));
+            if (auto* eng = getOrCreateAudioEngine()) {
+                eng->setMasterVolume(static_cast<float>(monitorMasterVolume));
+            }
+        });
+        connect(outputsBtn, &QPushButton::clicked, this, &MainWindow::onAudioConfig);
+
+        QTimer* audioStatusUpdate = new QTimer(this);
+        connect(audioStatusUpdate, &QTimer::timeout, this, [this, outputsLabel, masterVolSlider, masterVolValue]() {
+            if (!engineForAudio) {
+                outputsLabel->setText("Outputs: not configured");
+                return;
+            }
+            const int volPct = static_cast<int>(std::lround(engineForAudio->getMasterVolume() * 100.0f));
+            monitorMasterVolume = std::clamp(volPct / 100.0, 0.0, 1.0);
+            masterVolSlider->blockSignals(true);
+            masterVolSlider->setValue(volPct);
+            masterVolSlider->blockSignals(false);
+            masterVolValue->setText(QString("%1%").arg(volPct));
+            outputsLabel->setText(QString("Outputs: %1")
+                .arg(QString::fromStdString(engineForAudio->getActiveDeviceNames())));
+        });
+        audioStatusUpdate->start(1200);
 
         // Live channel-level readout (polled lightly from the main UI timer)
         QTimer* rmsUpdate = new QTimer(this);
@@ -580,11 +1536,13 @@ public:
             double sig = gLastRmsDb.load();
             double nf = gLastNoiseFloorDb.load();
             double snr = gLastSnrDb.load();
+            double afc = gLastAfcOffsetHz.load();
             if (sig > -180 && nf > -180) {
-                rmsLabel->setText(QString("SIG: %1 dB  NF: %2 dB  SNR: %3")
+                rmsLabel->setText(QString("SIG: %1 dB  NF: %2 dB  SNR: %3  AFC: %4 kHz")
                     .arg(sig, 0, 'f', 1)
                     .arg(nf, 0, 'f', 1)
-                    .arg(snr, 0, 'f', 1));
+                    .arg(snr, 0, 'f', 1)
+                    .arg(afc / 1000.0, 0, 'f', 2));
             }
             if (spectrum) spectrum->setLiveLevels(sig, nf);
         });
@@ -592,8 +1550,16 @@ public:
 
         connect(autoSquelchBtn, &QPushButton::clicked, this, [this, squelchSpin]() {
             double nf = gLastNoiseFloorDb.load();
+            DemodMode mode = DemodMode::NFM;
+            {
+                std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                mode = currentMonitorMode;
+            }
+            const double offsetDb = (mode == DemodMode::NFM) ? 6.0
+                                  : (mode == DemodMode::AM || mode == DemodMode::USB || mode == DemodMode::LSB) ? 8.0
+                                  : 10.0;
             // Set squelch threshold above the local RF floor, not above integrated channel RMS.
-            double target = (nf > -150.0) ? (nf + 10.0) : -82.0;
+            double target = (nf > -150.0) ? (nf + offsetDb) : -105.0;
             target = std::clamp(target, -130.0, 40.0);
             squelchSpin->setValue(target);
         });
@@ -610,6 +1576,537 @@ public:
         colorMaxSpin->setToolTip("Upper end of heat map. Adjust to make strong signals 'hot' red.");
         colorLay->addWidget(colorMaxSpin);
         rxLay->addLayout(colorLay);
+
+        QHBoxLayout* trainingLay = new QHBoxLayout();
+        QPushButton* captureTrainingBtn = new QPushButton("Capture Training Sample");
+        QLabel* trainingStatus = new QLabel("Training: idle");
+        trainingStatus->setMinimumWidth(220);
+        captureTrainingBtn->setToolTip("Save a SigMF IQ capture plus normalized waterfall ROI tile for classifier training.");
+        trainingLay->addWidget(captureTrainingBtn);
+        trainingLay->addWidget(trainingStatus);
+        trainingLay->addStretch();
+        rxLay->addLayout(trainingLay);
+
+        QGroupBox* savedBox = new QGroupBox("Saved Frequencies");
+        QVBoxLayout* savedLay = new QVBoxLayout(savedBox);
+        savedLay->setContentsMargins(6, 8, 6, 6);
+        savedLay->setSpacing(4);
+        QHBoxLayout* savedBtnLay = new QHBoxLayout();
+        QPushButton* savedAddBtn = new QPushButton("Add Current");
+        QPushButton* savedTuneBtn = new QPushButton("Tune");
+        QPushButton* savedDeleteBtn = new QPushButton("Delete");
+        QPushButton* savedRefreshBtn = new QPushButton("Refresh");
+        savedBtnLay->addWidget(savedAddBtn);
+        savedBtnLay->addWidget(savedTuneBtn);
+        savedBtnLay->addWidget(savedDeleteBtn);
+        savedBtnLay->addWidget(savedRefreshBtn);
+        savedBtnLay->addStretch();
+        savedLay->addLayout(savedBtnLay);
+        QTableWidget* savedTable = new QTableWidget(0, 5, this);
+        savedTable->setHorizontalHeaderLabels({"Name", "Freq (MHz)", "Mode", "BW kHz", "Tags"});
+        savedTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        savedTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+        savedTable->verticalHeader()->setVisible(false);
+        savedTable->setMaximumHeight(130);
+        savedTable->horizontalHeader()->setStretchLastSection(true);
+        savedLay->addWidget(savedTable);
+        rxLay->addWidget(savedBox);
+
+        auto refreshSavedTable = [savedTable]() {
+            populateSavedFrequencyTable(savedTable, loadSavedFrequencies());
+        };
+        refreshSavedTable();
+
+        connect(savedRefreshBtn, &QPushButton::clicked, this, [refreshSavedTable]() { refreshSavedTable(); });
+        connect(savedAddBtn, &QPushButton::clicked, this, [this, savedTable]() {
+            SavedFrequency sf;
+            {
+                std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                sf.freqHz = currentMonitorFreq;
+                sf.mode = currentMonitorMode;
+                sf.bandwidthHz = monitorChannelBwHz;
+                sf.lpfHz = monitorLpfHz;
+                sf.lpfEnabled = monitorAudioLpfEnabled;
+                sf.squelchDb = monitorSquelchDb;
+            }
+            const QString defaultName = QString("%1 %2 MHz")
+                .arg(modeToQString(sf.mode))
+                .arg(sf.freqHz / 1e6, 0, 'f', 5);
+            bool ok = false;
+            const QString name = QInputDialog::getText(this, "Save Frequency", "Name:", QLineEdit::Normal, defaultName, &ok);
+            if (!ok) return;
+            sf.name = trimCopy(name.toStdString());
+            if (sf.name.empty()) sf.name = defaultName.toStdString();
+            if (const auto* plan = findBandPlanForFrequency(sf.freqHz)) sf.tags = plan->name;
+            auto freqs = loadSavedFrequencies();
+            freqs.push_back(sf);
+            saveSavedFrequencies(freqs);
+            populateSavedFrequencyTable(savedTable, freqs);
+            statusBar()->showMessage(QString("Saved %1 at %2 MHz").arg(QString::fromStdString(sf.name)).arg(sf.freqHz / 1e6, 0, 'f', 5), 2500);
+        });
+        connect(savedTuneBtn, &QPushButton::clicked, this, [this, savedTable, monFreq, modeBox, squelchSpin, setMonBtn, spectrum]() {
+            int row = savedTable->currentRow();
+            auto freqs = loadSavedFrequencies();
+            if (row < 0 || row >= static_cast<int>(freqs.size())) return;
+            const auto sf = freqs[static_cast<size_t>(row)];
+
+            monFreq->setValue(sf.freqHz / 1e6);
+            modeBox->blockSignals(true);
+            modeBox->setCurrentText(modeToQString(sf.mode));
+            modeBox->blockSignals(false);
+            if (bwSpin) {
+                bwSpin->blockSignals(true);
+                bwSpin->setValue(sf.bandwidthHz / 1000.0);
+                bwSpin->blockSignals(false);
+            }
+            if (lpfSpin) {
+                lpfSpin->blockSignals(true);
+                lpfSpin->setValue(sf.lpfHz / 1000.0);
+                lpfSpin->blockSignals(false);
+            }
+            if (lpfEnableCheck) {
+                lpfEnableCheck->blockSignals(true);
+                lpfEnableCheck->setChecked(sf.lpfEnabled);
+                lpfEnableCheck->blockSignals(false);
+                if (lpfSpin) lpfSpin->setEnabled(sf.lpfEnabled);
+            }
+            squelchSpin->blockSignals(true);
+            squelchSpin->setValue(sf.squelchDb);
+            squelchSpin->blockSignals(false);
+            if (spectrum) spectrum->setSquelchThreshold(sf.squelchDb);
+
+            {
+                std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                currentMonitorFreq = sf.freqHz;
+                currentMonitorMode = sf.mode;
+                autoDetectMode = (sf.mode == DemodMode::AUTO);
+                monitorChannelBwHz = sf.bandwidthHz;
+                monitorLpfHz = sf.lpfHz;
+                monitorAudioLpfEnabled = sf.lpfEnabled;
+                monitorSquelchDb = sf.squelchDb;
+            }
+            syncMonitorVarsToReceiver(0);
+            setMonBtn->click();
+        });
+        connect(savedDeleteBtn, &QPushButton::clicked, this, [this, savedTable]() {
+            int row = savedTable->currentRow();
+            auto freqs = loadSavedFrequencies();
+            if (row < 0 || row >= static_cast<int>(freqs.size())) return;
+            const auto removed = freqs[static_cast<size_t>(row)];
+            freqs.erase(freqs.begin() + row);
+            saveSavedFrequencies(freqs);
+            populateSavedFrequencyTable(savedTable, freqs);
+            statusBar()->showMessage(QString("Deleted saved frequency %1").arg(QString::fromStdString(removed.name)), 2000);
+        });
+        connect(savedTable, &QTableWidget::cellDoubleClicked, this, [savedTuneBtn](int, int) {
+            savedTuneBtn->click();
+        });
+
+        QGroupBox* p25Box = new QGroupBox("P25 Control Channels");
+        QVBoxLayout* p25Lay = new QVBoxLayout(p25Box);
+        p25Lay->setContentsMargins(6, 8, 6, 6);
+        p25Lay->setSpacing(4);
+        QHBoxLayout* p25BtnLay = new QHBoxLayout();
+        QPushButton* p25ScanBtn = new QPushButton("Scan P25 CC");
+        p25ScanBtn->setCheckable(true);
+        QPushButton* p25MonitorBtn = new QPushButton("Monitor CC");
+        QPushButton* p25RefreshBtn = new QPushButton("Refresh");
+        QPushButton* p25KnownBtn = new QPushButton("Add CC...");
+        QPushButton* p25LogBtn = new QPushButton("P25 Log");
+        QLabel* p25Status = new QLabel("Idle");
+        p25BtnLay->addWidget(p25ScanBtn);
+        p25BtnLay->addWidget(p25MonitorBtn);
+        p25BtnLay->addWidget(p25RefreshBtn);
+        p25BtnLay->addWidget(p25KnownBtn);
+        p25BtnLay->addWidget(p25LogBtn);
+        p25BtnLay->addWidget(p25Status);
+        p25BtnLay->addStretch();
+        p25Lay->addLayout(p25BtnLay);
+        QTableWidget* p25Table = new QTableWidget(0, 6, this);
+        p25Table->setHorizontalHeaderLabels({"Freq (MHz)", "SNR", "BW kHz", "Peak", "NAC", "Source / Notes"});
+        p25Table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        p25Table->setSelectionBehavior(QAbstractItemView::SelectRows);
+        p25Table->verticalHeader()->setVisible(false);
+        p25Table->setMaximumHeight(130);
+        p25Table->horizontalHeader()->setStretchLastSection(true);
+        p25Lay->addWidget(p25Table);
+        populateP25Table(p25Table, {}, loadP25KnownControlChannels());
+
+        QHBoxLayout* p25TgBtnLay = new QHBoxLayout();
+        QPushButton* p25TgManualBtn = new QPushButton("Add TG...");
+        QPushButton* p25TgVerifyBtn = new QPushButton("Verify");
+        QPushButton* p25TgScannerBtn = new QPushButton("Add to Scanner");
+        QPushButton* p25TgFollowBtn = new QPushButton("Follow TG");
+        p25TgFollowBtn->setCheckable(true);
+        QPushButton* p25TgRefreshBtn = new QPushButton("Refresh TGs");
+        p25TgBtnLay->addWidget(new QLabel("Talkgroups:"));
+        p25TgBtnLay->addWidget(p25TgManualBtn);
+        p25TgBtnLay->addWidget(p25TgVerifyBtn);
+        p25TgBtnLay->addWidget(p25TgScannerBtn);
+        p25TgBtnLay->addWidget(p25TgFollowBtn);
+        p25TgBtnLay->addWidget(p25TgRefreshBtn);
+        p25TgBtnLay->addStretch();
+        p25Lay->addLayout(p25TgBtnLay);
+
+        QTableWidget* p25TgTable = new QTableWidget(0, 9, this);
+        p25TgTable->setHorizontalHeaderLabels({"CC MHz", "TGID", "Alpha Tag", "Voice MHz", "Src", "Hits", "Enc", "Status", "Last Seen"});
+        p25TgTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        p25TgTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+        p25TgTable->verticalHeader()->setVisible(false);
+        p25TgTable->setMaximumHeight(150);
+        p25TgTable->horizontalHeader()->setStretchLastSection(true);
+        p25Lay->addWidget(p25TgTable);
+        rxLay->addWidget(p25Box);
+
+        auto refreshP25Talkgroups = [p25TgTable]() {
+            populateP25TalkgroupTable(p25TgTable, loadP25Talkgroups());
+        };
+        refreshP25Talkgroups();
+
+        auto selectedP25ControlHz = [this, p25Table]() -> double {
+            const int row = p25Table ? p25Table->currentRow() : -1;
+            if (row >= 0 && p25Table && p25Table->item(row, 0)) {
+                const QVariant storedHz = p25Table->item(row, 0)->data(Qt::UserRole);
+                if (storedHz.isValid() && storedHz.toDouble() > 0.0) return storedHz.toDouble();
+                bool ok = false;
+                const double mhz = p25Table->item(row, 0)->text().toDouble(&ok);
+                if (ok && mhz > 0.0) return mhz * 1e6;
+            }
+            std::lock_guard<std::mutex> lk(monitorParamsMutex);
+            return currentMonitorFreq;
+        };
+
+        auto tuneP25Path = [this, monFreq, modeBox, spectrum](double hz) {
+            if (!std::isfinite(hz) || hz <= 0.0) return false;
+            monFreq->setValue(hz / 1e6);
+            modeBox->blockSignals(true);
+            modeBox->setCurrentText("NFM");
+            modeBox->blockSignals(false);
+            if (bwSpin) {
+                bwSpin->blockSignals(true);
+                bwSpin->setValue(12.5);
+                bwSpin->blockSignals(false);
+            }
+            if (lpfSpin) {
+                lpfSpin->blockSignals(true);
+                lpfSpin->setValue(3.0);
+                lpfSpin->blockSignals(false);
+            }
+            if (lpfEnableCheck) {
+                lpfEnableCheck->blockSignals(true);
+                lpfEnableCheck->setChecked(false);
+                lpfEnableCheck->blockSignals(false);
+                if (lpfSpin) lpfSpin->setEnabled(false);
+            }
+            {
+                std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                currentMonitorFreq = hz;
+                currentMonitorMode = DemodMode::NFM;
+                autoDetectMode = false;
+                monitorChannelBwHz = 12500.0;
+                monitorLpfHz = 3000.0;
+                monitorAudioLpfEnabled = false;
+            }
+            syncMonitorVarsToReceiver(0);
+            setReceiverActive(0, true);
+
+            auto& mgr = DeviceManager::instance();
+            if (!mgr.getDevices().empty()) {
+                if (!mgr.isStreaming(0)) {
+                    mgr.setEnabled(0, true);
+                    try { mgr.startStreaming(0, true); } catch (...) {}
+                }
+                if (mgr.isStreaming(0)) mgr.setCenterFreq(0, hz);
+            }
+            if (spectrum) spectrum->setCenterFreq(hz);
+            return true;
+        };
+
+        auto clearP25VoiceFollowState = [this]() {
+            std::lock_guard<std::mutex> lk(receiversMutex);
+            ensureReceiver();
+            if (receivers.empty() || !receivers[0]) return;
+            auto& rx = *receivers[0];
+            std::lock_guard<std::mutex> rxLock(rx.stateMutex);
+            rx.p25VoiceDecodeEnabled = false;
+            rx.p25VoiceClearKnown = false;
+            rx.p25VoiceEncrypted = false;
+            rx.p25VoiceTalkgroupId = 0;
+            rx.resetP25VoiceState();
+        };
+
+        auto armP25VoiceFollowState = [this](const P25TalkgroupEntry& tg) {
+            std::lock_guard<std::mutex> lk(receiversMutex);
+            ensureReceiver();
+            if (receivers.empty() || !receivers[0]) return;
+            auto& rx = *receivers[0];
+            std::lock_guard<std::mutex> rxLock(rx.stateMutex);
+            rx.p25VoiceDecodeEnabled = true;
+            rx.p25VoiceClearKnown = tg.encryptionKnown;
+            rx.p25VoiceEncrypted = tg.encrypted;
+            rx.p25VoiceTalkgroupId = tg.talkgroupId;
+            rx.resetDemodState();
+            rx.resetP25VoiceState();
+        };
+
+        auto refreshP25 = [this, p25Table, p25Status, refreshP25Talkgroups]() {
+            auto& mgr = DeviceManager::instance();
+            std::vector<float> pwr;
+            double cf = 0.0, sr = 0.0;
+            bool got = false;
+            for (size_t i = 0; i < mgr.getDevices().size(); ++i) {
+                if (mgr.isStreaming(i) && mgr.getLatestSpectrum(i, pwr, cf, sr) && !pwr.empty() && sr > 0.0) {
+                    got = true;
+                    break;
+                }
+            }
+            if (!got) {
+                const auto known = loadP25KnownControlChannels();
+                populateP25Table(p25Table, {}, known);
+                p25Status->setText("No live spectrum");
+                refreshP25Talkgroups();
+                appendP25LogLine(QString("P25 scan refresh: no live spectrum available; showing %1 known CC%2.")
+                    .arg(known.size())
+                    .arg(known.size() == 1 ? "" : "s"));
+                return;
+            }
+            auto hits = detectP25ControlCandidates(pwr, sr, cf);
+            const auto known = loadP25KnownControlChannels();
+            populateP25Table(p25Table, hits, known);
+            refreshP25Talkgroups();
+            p25Status->setText(QString("%1 candidate%2")
+                .arg(hits.size())
+                .arg(hits.size() == 1 ? "" : "s"));
+            appendP25LogLine(QString("P25 scan refresh: cf=%1MHz sr=%2MHz candidates=%3 known=%4")
+                .arg(cf / 1e6, 0, 'f', 5)
+                .arg(sr / 1e6, 0, 'f', 3)
+                .arg(hits.size())
+                .arg(known.size()));
+        };
+
+        connect(p25RefreshBtn, &QPushButton::clicked, this, refreshP25);
+        connect(p25KnownBtn, &QPushButton::clicked, this, [this, p25Table, p25Status, refreshP25]() {
+            double defaultMhz = 0.0;
+            {
+                std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                defaultMhz = currentMonitorFreq / 1e6;
+            }
+            if (p25Table && p25Table->currentRow() >= 0 && p25Table->item(p25Table->currentRow(), 0)) {
+                bool okRow = false;
+                const double rowMhz = p25Table->item(p25Table->currentRow(), 0)->text().toDouble(&okRow);
+                if (okRow && rowMhz > 0.0) defaultMhz = rowMhz;
+            }
+
+            bool ok = false;
+            const double mhz = QInputDialog::getDouble(this, "Add P25 Control Channel",
+                "Control channel frequency (MHz):", defaultMhz, 20.0, 6000.0, 5, &ok);
+            if (!ok || mhz <= 0.0) return;
+            const QString defaultLabel = QString("CC %1 MHz").arg(mhz, 0, 'f', 5);
+            const QString label = QInputDialog::getText(this, "P25 Control Channel Label",
+                "Label:", QLineEdit::Normal, defaultLabel, &ok);
+            if (!ok) return;
+
+            if (upsertP25KnownControlChannel(mhz * 1e6, label.toStdString())) {
+                refreshP25();
+                const int rows = p25Table ? p25Table->rowCount() : 0;
+                for (int row = 0; row < rows; ++row) {
+                    auto* item = p25Table->item(row, 0);
+                    if (!item) continue;
+                    const double rowHz = item->data(Qt::UserRole).toDouble();
+                    if (std::abs(rowHz - mhz * 1e6) <= 50.0) {
+                        p25Table->selectRow(row);
+                        break;
+                    }
+                }
+                if (p25Status) p25Status->setText(QString("Known CC %1 MHz added").arg(mhz, 0, 'f', 5));
+                appendP25LogLine(QString("Known P25 control channel saved: %1MHz label=\"%2\"")
+                    .arg(mhz, 0, 'f', 5)
+                    .arg(label));
+            }
+        });
+        connect(p25LogBtn, &QPushButton::clicked, this, [this]() { showP25LogWindow(); });
+        connect(p25TgRefreshBtn, &QPushButton::clicked, this, refreshP25Talkgroups);
+        connect(p25ScanBtn, &QPushButton::toggled, this, [this, p25Status](bool on) {
+            p25Status->setText(on ? "Scanning" : "Idle");
+            appendP25LogLine(on ? "P25 candidate scan enabled." : "P25 candidate scan disabled.");
+        });
+        connect(p25MonitorBtn, &QPushButton::clicked, this, [this, p25Status, selectedP25ControlHz, tuneP25Path, clearP25VoiceFollowState]() {
+            const double ccHz = selectedP25ControlHz();
+            if (!tuneP25Path(ccHz)) return;
+            p25MonitoredControlFreqHz = ccHz;
+            p25FollowEnabled = false;
+            p25FollowTalkgroupId = 0;
+            p25LiveDecoder.reset();
+            p25LiveControlAnalyzer.reset();
+            p25LastDiagSignature.clear();
+            clearP25VoiceFollowState();
+            appendP25LogLine(QString("Monitoring P25 control channel target=%1MHz.").arg(ccHz / 1e6, 0, 'f', 5));
+            p25Status->setText(QString("Monitoring CC %1 MHz").arg(ccHz / 1e6, 0, 'f', 5));
+            statusBar()->showMessage(QString("Monitoring P25 control channel %1 MHz").arg(ccHz / 1e6, 0, 'f', 5), 2500);
+        });
+        connect(p25Table, &QTableWidget::cellDoubleClicked, this, [monFreq, setMonBtn, p25Table](int row, int) {
+            auto* item = p25Table->item(row, 0);
+            if (!item) return;
+            bool ok = false;
+            double mhz = item->text().toDouble(&ok);
+            if (!ok) return;
+            monFreq->setValue(mhz);
+            setMonBtn->click();
+        });
+        connect(p25TgManualBtn, &QPushButton::clicked, this, [this, p25Table, p25TgTable, refreshP25Talkgroups]() {
+            double controlHz = 0.0;
+            const int ccRow = p25Table ? p25Table->currentRow() : -1;
+            if (ccRow >= 0 && p25Table && p25Table->item(ccRow, 0)) {
+                bool okFreq = false;
+                const double mhz = p25Table->item(ccRow, 0)->text().toDouble(&okFreq);
+                if (okFreq) controlHz = mhz * 1e6;
+            }
+            if (controlHz <= 0.0) {
+                std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                controlHz = currentMonitorFreq;
+            }
+
+            bool ok = false;
+            const int tgid = QInputDialog::getInt(this, "Add P25 Talkgroup", "Talkgroup ID:", 1, 1, 16777215, 1, &ok);
+            if (!ok) return;
+            const QString defaultTag = QString("TG %1").arg(tgid);
+            const QString tag = QInputDialog::getText(this, "Talkgroup Alpha Tag", "Alpha tag:", QLineEdit::Normal, defaultTag, &ok);
+            if (!ok) return;
+
+            auto talkgroups = loadP25Talkgroups();
+            const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+            auto it = std::find_if(talkgroups.begin(), talkgroups.end(), [&](const P25TalkgroupEntry& tg) {
+                return sameP25Talkgroup(tg, controlHz, static_cast<uint32_t>(tgid));
+            });
+            if (it == talkgroups.end()) {
+                P25TalkgroupEntry entry;
+                entry.controlFreqHz = controlHz;
+                entry.talkgroupId = static_cast<uint32_t>(tgid);
+                entry.alphaTag = trimCopy(tag.toStdString());
+                entry.verified = true;
+                entry.firstSeenMs = nowMs;
+                entry.lastSeenMs = nowMs;
+                talkgroups.push_back(entry);
+            } else {
+                it->alphaTag = trimCopy(tag.toStdString());
+                it->verified = true;
+                it->lastSeenMs = nowMs;
+            }
+            saveP25Talkgroups(talkgroups);
+            refreshP25Talkgroups();
+            if (p25TgTable) p25TgTable->selectRow(static_cast<int>(talkgroups.size()) - 1);
+            statusBar()->showMessage(QString("P25 TG %1 saved for CC %2 MHz").arg(tgid).arg(controlHz / 1e6, 0, 'f', 5), 2500);
+        });
+        connect(p25TgVerifyBtn, &QPushButton::clicked, this, [this, p25TgTable, refreshP25Talkgroups]() {
+            const int row = p25TgTable ? p25TgTable->currentRow() : -1;
+            auto talkgroups = loadP25Talkgroups();
+            if (row < 0 || row >= static_cast<int>(talkgroups.size())) return;
+            talkgroups[static_cast<size_t>(row)].verified = true;
+            talkgroups[static_cast<size_t>(row)].lastSeenMs = QDateTime::currentMSecsSinceEpoch();
+            saveP25Talkgroups(talkgroups);
+            refreshP25Talkgroups();
+            if (p25TgTable) p25TgTable->selectRow(row);
+            statusBar()->showMessage(QString("Verified P25 TG %1").arg(talkgroups[static_cast<size_t>(row)].talkgroupId), 2000);
+        });
+        connect(p25TgScannerBtn, &QPushButton::clicked, this, [this, p25TgTable, savedTable, refreshP25Talkgroups]() {
+            const int row = p25TgTable ? p25TgTable->currentRow() : -1;
+            auto talkgroups = loadP25Talkgroups();
+            if (row < 0 || row >= static_cast<int>(talkgroups.size())) return;
+            auto& tg = talkgroups[static_cast<size_t>(row)];
+            if (tg.encrypted) {
+                statusBar()->showMessage(QString("P25 TG %1 is encrypted; not adding to scanner").arg(tg.talkgroupId), 3500);
+                return;
+            }
+            tg.verified = true;
+            tg.scannerEnabled = true;
+            tg.lastSeenMs = QDateTime::currentMSecsSinceEpoch();
+            saveP25Talkgroups(talkgroups);
+
+            // If a voice frequency was decoded, also expose it in the existing saved-frequency list.
+            // The real trunking scanner uses TGID+CC; this saved row is a useful quick-tune fallback.
+            if (tg.lastVoiceFreqHz > 0.0) {
+                auto freqs = loadSavedFrequencies();
+                const bool exists = std::any_of(freqs.begin(), freqs.end(), [&](const SavedFrequency& sf) {
+                    return std::abs(sf.freqHz - tg.lastVoiceFreqHz) <= 50.0 && sf.tags.find("p25") != std::string::npos;
+                });
+                if (!exists) {
+                    SavedFrequency sf;
+                    sf.name = tg.alphaTag.empty()
+                        ? ("P25 TG " + std::to_string(tg.talkgroupId))
+                        : tg.alphaTag;
+                    sf.freqHz = tg.lastVoiceFreqHz;
+                    sf.mode = DemodMode::NFM;
+                    sf.bandwidthHz = 12500.0;
+                    sf.lpfHz = 3000.0;
+                    sf.lpfEnabled = false;
+                    sf.squelchDb = -105.0;
+                    sf.tags = "p25,talkgroup,scanner";
+                    freqs.push_back(sf);
+                    saveSavedFrequencies(freqs);
+                    populateSavedFrequencyTable(savedTable, freqs);
+                }
+            }
+
+            refreshP25Talkgroups();
+            if (p25TgTable) p25TgTable->selectRow(row);
+            statusBar()->showMessage(QString("Added P25 TG %1 to scanner list").arg(tg.talkgroupId), 2500);
+        });
+        connect(p25TgFollowBtn, &QPushButton::clicked, this, [this, p25TgFollowBtn, p25TgTable, p25Status, tuneP25Path, clearP25VoiceFollowState, armP25VoiceFollowState]() {
+            if (!p25TgFollowBtn->isChecked()) {
+                p25FollowEnabled = false;
+                p25FollowTalkgroupId = 0;
+                clearP25VoiceFollowState();
+                appendP25LogLine("P25 talkgroup follow disabled.");
+                p25Status->setText("Follow off");
+                return;
+            }
+
+            const int row = p25TgTable ? p25TgTable->currentRow() : -1;
+            auto talkgroups = loadP25Talkgroups();
+            if (row < 0 || row >= static_cast<int>(talkgroups.size())) {
+                p25TgFollowBtn->setChecked(false);
+                p25Status->setText("Select a TG first");
+                return;
+            }
+
+            const auto& tg = talkgroups[static_cast<size_t>(row)];
+            if (!tg.encryptionKnown) {
+                p25TgFollowBtn->setChecked(false);
+                p25Status->setText(QString("TG %1 clear state unknown").arg(tg.talkgroupId));
+                statusBar()->showMessage("Waiting for a clear P25 voice grant before decoding audio for this talkgroup.", 4500);
+                return;
+            }
+            if (tg.encrypted) {
+                p25TgFollowBtn->setChecked(false);
+                p25Status->setText(QString("TG %1 encrypted").arg(tg.talkgroupId));
+                statusBar()->showMessage(QString("Skipping encrypted P25 TG %1").arg(tg.talkgroupId), 3500);
+                return;
+            }
+            if (tg.lastVoiceFreqHz <= 0.0) {
+                p25TgFollowBtn->setChecked(false);
+                p25Status->setText(QString("TG %1 waiting for voice grant").arg(tg.talkgroupId));
+                statusBar()->showMessage("No active voice frequency for this talkgroup yet. Keep decoding the control channel until a grant appears.", 4500);
+                return;
+            }
+
+            if (!tuneP25Path(tg.lastVoiceFreqHz)) {
+                p25TgFollowBtn->setChecked(false);
+                return;
+            }
+
+            p25FollowEnabled = true;
+            p25FollowTalkgroupId = tg.talkgroupId;
+            p25MonitoredControlFreqHz = tg.controlFreqHz;
+            armP25VoiceFollowState(tg);
+            appendP25LogLine(QString("Following clear P25 TG %1 voice=%2MHz control=%3MHz.")
+                .arg(tg.talkgroupId)
+                .arg(tg.lastVoiceFreqHz / 1e6, 0, 'f', 5)
+                .arg(tg.controlFreqHz / 1e6, 0, 'f', 5));
+            p25Status->setText(QString("Following TG %1").arg(tg.talkgroupId));
+            statusBar()->showMessage(QString("Following clear P25 TG %1 at %2 MHz with live IMBE voice decode.")
+                .arg(tg.talkgroupId)
+                .arg(tg.lastVoiceFreqHz / 1e6, 0, 'f', 5), 6500);
+        });
 
         // Wire the new controls to per-receiver state and backend (gain goes to device, others to demod/display).
         connect(gainSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double v) {
@@ -674,6 +2171,32 @@ public:
             spectrum->setColorRange(colorMinSpin->value(), colorMaxSpin->value());
         });
 
+        connect(captureTrainingBtn, &QPushButton::clicked, this, [this, trainingStatus]() {
+            double freqHz = 100e6;
+            DemodMode mode = DemodMode::AUTO;
+            {
+                std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                freqHz = currentMonitorFreq;
+                mode = currentMonitorMode;
+            }
+            const QString defaultLabel = QString("%1_%2MHz")
+                .arg(modeToQString(mode))
+                .arg(freqHz / 1e6, 0, 'f', 5);
+            bool ok = false;
+            const QString label = QInputDialog::getText(this, "Capture Training Sample", "Label:", QLineEdit::Normal, defaultLabel, &ok);
+            if (!ok) return;
+            trainingStatus->setText("Training: saving...");
+            const auto result = captureTrainingSample(label.toStdString());
+            trainingStatus->setText(result.ok ? QString("Training: saved") : QString("Training: failed"));
+            if (result.ok) {
+                statusBar()->showMessage(result.message + "  " + result.directory, 6000);
+                QMessageBox::information(this, "Training Capture Saved", result.message + "\n\n" + result.directory);
+            } else {
+                statusBar()->showMessage(result.message, 6000);
+                QMessageBox::warning(this, "Training Capture Failed", result.message);
+            }
+        });
+
         // Initialize from current state
         gainSpin->setValue(monitorRfGainDb);
         squelchSpin->setValue(monitorSquelchDb);
@@ -704,17 +2227,15 @@ public:
             {
                 std::lock_guard<std::mutex> lk(monitorParamsMutex);
                 freq = currentMonitorFreq;
-                mode = currentMonitorMode == DemodMode::AUTO ? classifyModeAround(pwr, sr, cf, freq) : currentMonitorMode;
+                mode = currentMonitorMode;
             }
-            const double searchHz = (mode == DemodMode::WFM || mode == DemodMode::AUTO) ? 300000.0 : 50000.0;
-            double detected = detectChannelBandwidthAround(pwr, sr, cf, freq, searchHz);
-            double snapped = snapBandwidthForMode(mode, detected, freq);
-            double lpf = std::min(defaultLpfForMode(mode), snapped * 0.45);
-            if (mode == DemodMode::WFM || mode == DemodMode::AUTO) lpf = defaultLpfForMode(mode);
-            lpf = std::clamp(lpf, 100.0, 200000.0);
+            auto smart = chooseSmartModeAndBandwidth(pwr, sr, cf, freq, mode);
+            double snapped = smart.bandwidthHz;
+            double lpf = std::clamp(smart.lpfHz, 100.0, 200000.0);
 
             {
                 std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                if (mode == DemodMode::AUTO) currentMonitorMode = smart.mode;
                 monitorChannelBwHz = snapped;
                 monitorLpfHz = lpf;
             }
@@ -729,7 +2250,11 @@ public:
                 lpfSpin->setValue(lpf / 1000.0);
                 lpfSpin->blockSignals(false);
             }
-            statusBar()->showMessage(QString("Auto BW around tuned frequency: %1 kHz").arg(snapped / 1000.0, 0, 'f', 1), 2500);
+            statusBar()->showMessage(QString("Auto BW: %1 kHz (%2, %3%, %4)")
+                .arg(snapped / 1000.0, 0, 'f', 1)
+                .arg(QString::fromStdString(smart.source))
+                .arg(smart.classifier.confidence * 100.0, 0, 'f', 0)
+                .arg(QString::fromStdString(classifierFilterKindToString(smart.classifier.filterKind))), 3000);
         });
 
         connect(lpfEnableCheck, &QCheckBox::toggled, this, [this](bool enabled) {
@@ -759,9 +2284,19 @@ public:
             else if (m == "WFM") { newAuto = false; newMode = DemodMode::WFM; }
             else if (m == "AM") { newAuto = false; newMode = DemodMode::AM; }
             else if (m == "USB" || m == "LSB") { newAuto = false; newMode = (m=="USB"?DemodMode::USB:DemodMode::LSB); }
-            const double newBwHz = defaultBandwidthForMode(newMode);
+            double tunedHz = currentMonitorFreq;
+            {
+                std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                tunedHz = currentMonitorFreq;
+            }
+            const auto* plan = findBandPlanForFrequency(tunedHz);
+            const double newBwHz = (plan && (newMode == DemodMode::AUTO || newMode == plan->mode))
+                ? plan->bandwidthHz
+                : defaultBandwidthForMode(newMode);
             const double newBwK = newBwHz / 1000.0;
-            const double newLpfHz = defaultLpfForMode(newMode);
+            const double newLpfHz = (plan && (newMode == DemodMode::AUTO || newMode == plan->mode))
+                ? plan->lpfHz
+                : lpfForModeAndBandwidth(newMode, newBwHz);
             {
                 std::lock_guard<std::mutex> lk(monitorParamsMutex);
                 autoDetectMode = newAuto;
@@ -783,15 +2318,36 @@ public:
         });
 
         connect(setMonBtn, &QPushButton::clicked, this, [this, monFreq]() {
-            currentMonitorFreq = monFreq->value() * 1e6;
+            classifierRoiBuilder.clear();
+            const double tunedHz = monFreq->value() * 1e6;
+            const BandPlanEntry* plan = autoDetectMode ? findBandPlanForFrequency(tunedHz) : nullptr;
+            {
+                std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                currentMonitorFreq = tunedHz;
+                if (plan) {
+                    currentMonitorMode = plan->mode;
+                    monitorChannelBwHz = plan->bandwidthHz;
+                    monitorLpfHz = plan->lpfHz;
+                }
+            }
+            if (plan && bwSpin) {
+                bwSpin->blockSignals(true);
+                bwSpin->setValue(plan->bandwidthHz / 1000.0);
+                bwSpin->blockSignals(false);
+            }
+            if (plan && lpfSpin) {
+                lpfSpin->blockSignals(true);
+                lpfSpin->setValue(plan->lpfHz / 1000.0);
+                lpfSpin->blockSignals(false);
+            }
             syncMonitorVarsToReceiver(0);
             setReceiverActive(0, true);
             auto& mgr = DeviceManager::instance();
             bool any = false;
             for (size_t i=0; i<mgr.getDevices().size(); ++i) {
                 if (mgr.isStreaming(i)) {
-                    mgr.setCenterFreq(i, currentMonitorFreq);
-                    statusBar()->showMessage(QString("Monitor tuned to %1 MHz").arg(currentMonitorFreq/1e6,0,'f',3), 2000);
+                    mgr.setCenterFreq(i, tunedHz);
+                    statusBar()->showMessage(QString("Monitor tuned to %1 MHz").arg(tunedHz/1e6,0,'f',3), 2000);
                     any = true;
                     break;
                 }
@@ -800,8 +2356,8 @@ public:
                 // Auto-start on explicit tune request so user gets audio without separate "Add" click.
                 mgr.setEnabled(0, true);
                 mgr.startStreaming(0, true /* real from SDR */);
-                mgr.setCenterFreq(0, currentMonitorFreq);
-                statusBar()->showMessage(QString("Started monitor + tuned to %1 MHz").arg(currentMonitorFreq/1e6,0,'f',3), 2500);
+                mgr.setCenterFreq(0, tunedHz);
+                statusBar()->showMessage(QString("Started monitor + tuned to %1 MHz").arg(tunedHz/1e6,0,'f',3), 2500);
                 // defer audio outputs
                 QTimer::singleShot(120, this, [this]() {
                     AudioEngine* eng = getOrCreateAudioEngine();
@@ -865,7 +2421,7 @@ public:
         // All heavy realtime work (IQ + demod + push) is now in a background worker thread below.
         currentMonitorFreq = 100e6;
         updateTimer = new QTimer(this);
-        connect(updateTimer, &QTimer::timeout, this, [this, spectrum]() {
+        connect(updateTimer, &QTimer::timeout, this, [this, spectrum, p25ScanBtn, p25Table, p25Status, classifierStatus, refreshP25Talkgroups]() {
             try {
                 auto& mgr = DeviceManager::instance();
                 for (size_t i = 0; i < mgr.getDevices().size(); ++i) {
@@ -874,18 +2430,41 @@ public:
                         double cf = 100e6, sr = 2.048e6;
                         if (mgr.getLatestSpectrum(i, pwr, cf, sr) && !pwr.empty()) {
                             spectrum->updateSpectrum(pwr, cf, sr);
+                            double monFreqForClassifier = currentMonitorFreq;
+                            double monBwForClassifier = monitorChannelBwHz;
+                            {
+                                std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                                monFreqForClassifier = currentMonitorFreq;
+                                monBwForClassifier = monitorChannelBwHz;
+                            }
+                            classifierRoiBuilder.pushSpectrum(pwr);
+                            const double roiHz = std::clamp(
+                                std::max(monBwForClassifier * 4.0, monBwForClassifier >= 100000.0 ? 350000.0 : 50000.0),
+                                20000.0,
+                                sr);
+                            auto tile = classifierRoiBuilder.buildTile(sr, cf, monFreqForClassifier, roiHz, 256, 256);
+                            auto modelRec = tile.valid()
+                                ? ClassifierModelBackend::instance().classifyTile(tile, sr, cf, monFreqForClassifier, roiHz)
+                                : std::optional<SignalRecommendation>{};
+                            auto liveRec = modelRec.has_value()
+                                ? *modelRec
+                                : (tile.valid()
+                                    ? AdvancedSignalClassifier::instance().classifyWaterfallTile(tile, sr, cf, monFreqForClassifier, roiHz)
+                                    : AdvancedSignalClassifier::instance().classifySpectrum(pwr, sr, cf, monFreqForClassifier));
+                            if (classifierStatus) {
+                                classifierStatus->setText(QString("Classifier: %1 %2%  BW %3 kHz  %4")
+                                    .arg(QString::fromStdString(liveRec.label))
+                                    .arg(liveRec.confidence * 100.0, 0, 'f', 0)
+                                    .arg(liveRec.standardBandwidthHz / 1000.0, 0, 'f', 1)
+                                    .arg(QString::fromStdString(classifierFilterKindToString(liveRec.filterKind))));
+                            }
                             if (autoDetectMode) {
-                                double monFreq = currentMonitorFreq;
-                                {
-                                    std::lock_guard<std::mutex> lk(monitorParamsMutex);
-                                    monFreq = currentMonitorFreq;
-                                }
-                                DemodMode newM = classifyModeAround(pwr, sr, cf, monFreq);
-                                const double searchHz = (newM == DemodMode::WFM || newM == DemodMode::AUTO) ? 300000.0 : 50000.0;
-                                double detBw = detectChannelBandwidthAround(pwr, sr, cf, monFreq, searchHz);
-                                double useBwHz = snapBandwidthForMode(newM, detBw, monFreq);
+                                double monFreq = monFreqForClassifier;
+                                auto smart = chooseSmartModeAndBandwidth(pwr, sr, cf, monFreq, DemodMode::AUTO, &liveRec);
+                                DemodMode newM = smart.mode;
+                                double useBwHz = smart.bandwidthHz;
                                 double useBwK = useBwHz / 1000.0;
-                                double useLpfHz = defaultLpfForMode(newM);
+                                double useLpfHz = smart.lpfHz;
                                 {
                                     // P1/P2: timer (UI thread) was writing monitor* + setValue without lock, racing worker snapshot + bwSpin handler.
                                     std::lock_guard<std::mutex> lk(monitorParamsMutex);
@@ -903,6 +2482,151 @@ public:
                                     lpfSpin->blockSignals(true);
                                     lpfSpin->setValue(useLpfHz / 1000.0);
                                     lpfSpin->blockSignals(false);
+                                }
+                            }
+                            if (p25ScanBtn && p25ScanBtn->isChecked()) {
+                                static auto lastP25Ui = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+                                auto now = std::chrono::steady_clock::now();
+                                if (now - lastP25Ui > std::chrono::milliseconds(700)) {
+                                    auto hits = detectP25ControlCandidates(pwr, sr, cf);
+                                    const auto known = loadP25KnownControlChannels();
+                                    populateP25Table(p25Table, hits, known);
+                                    refreshP25Talkgroups();
+                                    if (p25Status) {
+                                        p25Status->setText(QString("%1 candidate%2, %3 known")
+                                            .arg(hits.size())
+                                            .arg(hits.size() == 1 ? "" : "s")
+                                            .arg(known.size()));
+                                    }
+                                    lastP25Ui = now;
+                                }
+                            }
+                            if (p25MonitoredControlFreqHz > 0.0 && !p25FollowEnabled) {
+                                static auto lastP25LiveDecode = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+                                const auto now = std::chrono::steady_clock::now();
+                                if (now - lastP25LiveDecode > std::chrono::milliseconds(600)) {
+                                    const size_t requestedSamples = static_cast<size_t>(std::clamp(sr * 0.18, 24000.0, 524288.0));
+                                    auto iq = mgr.getRecentIQWindow(i, requestedSamples);
+                                    auto live = p25LiveDecoder.processIq(iq, sr, cf, p25MonitoredControlFreqHz);
+                                    bool registryChanged = false;
+                                    size_t trustedTsbk = 0;
+                                    if (!live.rawTsbkBlocks.empty()) {
+                                        auto talkgroups = loadP25Talkgroups();
+                                        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+                                        for (const auto& block : live.rawTsbkBlocks) {
+                                            if (!block.fecDecoded || !block.crcValid) continue;
+                                            ++trustedTsbk;
+                                            const QString rawHex = p25BytesToHex(block.bytes);
+                                            appendP25LogLineKeyed(QString("tsbk:%1").arg(rawHex),
+                                                QString("Trusted TSBK raw=%1 corrected_dibits=%2").arg(rawHex).arg(block.correctedDibitErrors),
+                                                5000);
+                                            const auto events = p25LiveControlAnalyzer.ingestTsbk(block.bytes);
+                                            for (const auto& ev : events) {
+                                                const QString evText = p25EventLogText(ev);
+                                                const QString key = QString("event:%1:%2:%3:%4:%5")
+                                                    .arg(ev.opcode)
+                                                    .arg(ev.mfid)
+                                                    .arg(ev.talkgroupId)
+                                                    .arg(ev.channel)
+                                                    .arg(ev.channelB);
+                                                appendP25LogLineKeyed(key, "Instruction: " + evText, 2500);
+                                                if (ev.type == P25ControlEventType::Unknown) {
+                                                    appendP25LogLineKeyed(QString("phase2-unknown-op:%1").arg(key),
+                                                        QString("Unsupported TSBK opcode seen; preserved raw block for Phase 2/MBT parser work: %1").arg(rawHex),
+                                                        6000);
+                                                } else if (ev.phase2Candidate) {
+                                                    appendP25LogLineKeyed(QString("phase2-grant:%1").arg(key),
+                                                        "Phase 2 TDMA candidate grant: " + evText,
+                                                        2500);
+                                                }
+                                                registryChanged = mergeP25TalkgroupEvent(talkgroups, p25MonitoredControlFreqHz, ev, nowMs) || registryChanged;
+                                            }
+                                        }
+                                        if (registryChanged) {
+                                            saveP25Talkgroups(talkgroups);
+                                            refreshP25Talkgroups();
+                                        }
+                                    }
+                                    QString nidState = "none";
+                                    if (!live.nids.empty()) {
+                                        const auto& nid = live.nids.front();
+                                        nidState = nid.fecValidated
+                                            ? QString("NAC=0x%1 %2 corr=%3")
+                                                .arg(nid.nac, 3, 16, QLatin1Char('0')).toUpper()
+                                                .arg(QString::fromStdString(P25LiveDecoder::dataUnitIdToString(nid.duid)))
+                                                .arg(nid.correctedBitErrors)
+                                            : "BCH-fail";
+                                    }
+                                    const double offsetKHz = (p25MonitoredControlFreqHz - cf) / 1000.0;
+                                    const QString bestNidDist = live.stats.bestNidBchDistance >= 0
+                                        ? QString::number(live.stats.bestNidBchDistance)
+                                        : QString("-");
+                                    const QString diag = QString("P25 stage dev=%1 path=%2 cf=%3MHz target=%4MHz offset=%5kHz sr=%6MHz iq=%7 sym=%8 conf=%9 sync=%10 bestErr=%11 aligned=%12 bestNidDist=%13 nid=%14 tsbk=%15 trusted=%16")
+                                        .arg(i)
+                                        .arg(QString::fromStdString(live.stats.demodPath.empty() ? std::string("unknown") : live.stats.demodPath))
+                                        .arg(cf / 1e6, 0, 'f', 5)
+                                        .arg(p25MonitoredControlFreqHz / 1e6, 0, 'f', 5)
+                                        .arg(offsetKHz, 0, 'f', 1)
+                                        .arg(sr / 1e6, 0, 'f', 3)
+                                        .arg(iq.size())
+                                        .arg(live.stats.symbols)
+                                        .arg(live.stats.symbolConfidence, 0, 'f', 2)
+                                        .arg(live.syncs.size())
+                                        .arg(live.stats.bestFrameSyncBitErrors)
+                                        .arg(live.stats.bestFrameSyncBitAligned ? "yes" : "no")
+                                        .arg(bestNidDist)
+                                        .arg(nidState)
+                                        .arg(live.rawTsbkBlocks.size())
+                                        .arg(trustedTsbk);
+                                    const QString diagSig = QString("dev%1:sync%2:best%3:nid%4:dist%5:trusted%6")
+                                        .arg(i)
+                                        .arg(live.syncs.empty() ? 0 : 1)
+                                        .arg(live.stats.bestFrameSyncBitErrors)
+                                        .arg(live.nids.empty() ? "none" : (live.nids.front().fecValidated ? "ok" : "fail"))
+                                        .arg(bestNidDist)
+                                        .arg(trustedTsbk > 0 ? 1 : 0);
+                                    appendP25LogLineThrottled(diagSig, diag, live.syncs.empty() ? 1500 : 900);
+                                    if (std::abs(p25MonitoredControlFreqHz - cf) > sr * 0.48) {
+                                        appendP25LogLineKeyed("p25-target-outside-passband",
+                                            "P25 target is near/outside the sampled passband; retune center or widen sample-rate before sync can lock.",
+                                            5000);
+                                    }
+                                    for (const auto& sync : live.syncs) {
+                                        appendP25LogLineKeyed(QString("sync:%1:%2:%3").arg(sync.bitOffset).arg(sync.inverted).arg(sync.bitErrors),
+                                            QString("Frame sync bit=%1 inverted=%2 errors=%3 confidence=%4")
+                                                .arg(sync.bitOffset)
+                                                .arg(sync.inverted ? "yes" : "no")
+                                                .arg(sync.bitErrors)
+                                                .arg(sync.confidence, 0, 'f', 2),
+                                            3500);
+                                    }
+                                    for (const auto& warning : live.warnings) {
+                                        appendP25LogLineKeyed(QString("warn:%1").arg(QString::fromStdString(warning)),
+                                            "Decoder warning: " + QString::fromStdString(warning),
+                                            5000);
+                                    }
+                                    if (p25Status) {
+                                        if (!live.nids.empty()) {
+                                            const auto& nid = live.nids.front();
+                                            if (nid.fecValidated) {
+                                                p25Status->setText(QString("CC %1 MHz NAC %2 %3 sync")
+                                                    .arg(p25MonitoredControlFreqHz / 1e6, 0, 'f', 5)
+                                                    .arg(nid.nac, 3, 16, QChar('0')).toUpper()
+                                                    .arg(QString::fromStdString(P25LiveDecoder::dataUnitIdToString(nid.duid))));
+                                            } else {
+                                                p25Status->setText(QString("CC %1 MHz sync, NID BCH fail")
+                                                    .arg(p25MonitoredControlFreqHz / 1e6, 0, 'f', 5));
+                                            }
+                                        } else if (!live.syncs.empty()) {
+                                            p25Status->setText(QString("CC %1 MHz sync, waiting NID")
+                                                .arg(p25MonitoredControlFreqHz / 1e6, 0, 'f', 5));
+                                        } else {
+                                            p25Status->setText(QString("CC %1 MHz no P25 sync, best err %2")
+                                                .arg(p25MonitoredControlFreqHz / 1e6, 0, 'f', 5)
+                                                .arg(live.stats.bestFrameSyncBitErrors));
+                                        }
+                                    }
+                                    lastP25LiveDecode = now;
                                 }
                             }
                         }
@@ -950,6 +2674,7 @@ public:
                     std::vector<float> ch;
                     double rms = -100;
                     long long dspMicros = 0;
+                    double afcOffsetHz = 0.0;
                     RfSquelchMetrics rfMetrics;
                     {
                         double monFreq = 100e6, monLpf = 15000.0, monSquelch = -80.0;
@@ -968,7 +2693,10 @@ public:
                         monGain = rx.audioGain;
                         monWfmDe = rx.wfmDeTauUs;
                         monWfmNotch = rx.wfmPilotNotchR;
-                        rfMetrics = computeRfSquelchMetrics(pwr, sr, cf, monFreq, monBw, monMode);
+                        const double demodFreq = applyNfmAfcFromSpectrum(rx, pwr, sr, cf, monFreq, monBw, monMode);
+                        afcOffsetHz = demodFreq - monFreq;
+
+                        rfMetrics = computeRfSquelchMetrics(pwr, sr, cf, demodFreq, monBw, monMode);
                         const double rfSquelchLevel = rfMetrics.valid
                             ? rfMetrics.signalLevelDb
                             : std::numeric_limits<double>::quiet_NaN();
@@ -984,14 +2712,26 @@ public:
                         double orate = (engineForAudio ? engineForAudio->getSampleRate() : 48000.0);
                         size_t need = (size_t)std::round(t * orate);
                         auto t0 = std::chrono::steady_clock::now();
-                        ch = rx.demod.demodulateToAudio(iq, sr, cf, monFreq, monMode,
-                            rms, monLpf, monSquelch, monGain, monWfmDe,
-                            monWfmNotch, monBw, need, orate, rfSquelchLevel, monAudioLpfEnabled);
+                        if (rx.p25VoiceDecodeEnabled) {
+                            const auto p25Audio = decodeP25VoiceAudioBlock(rx, iq, sr, cf, demodFreq, orate);
+                            ch = p25Audio.audio;
+                            if (!ch.empty()) {
+                                double sum = 0.0;
+                                for (float sample : ch) sum += static_cast<double>(sample) * sample;
+                                rms = 20.0 * std::log10(std::sqrt(sum / static_cast<double>(ch.size())) + 1e-12);
+                            }
+                            (void)need;
+                        } else {
+                            ch = rx.demod.demodulateToAudio(iq, sr, cf, demodFreq, monMode,
+                                rms, monLpf, monSquelch, monGain, monWfmDe,
+                                monWfmNotch, monBw, need, orate, rfSquelchLevel, monAudioLpfEnabled);
+                        }
                         auto t1 = std::chrono::steady_clock::now();
                         dspMicros = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
                     }
 
                     gLastDspMicros.store(dspMicros);
+                    gLastAfcOffsetHz.store(afcOffsetHz);
                     if (rfMetrics.valid) {
                         gLastRmsDb.store(rfMetrics.signalLevelDb);
                         gLastNoiseFloorDb.store(rfMetrics.noiseFloorDb);
@@ -1116,14 +2856,15 @@ private slots:
         masterLay->addWidget(new QLabel("Master Volume:"));
         QSlider* masterSlider = new QSlider(Qt::Horizontal);
         masterSlider->setRange(0, 100);
-        masterSlider->setValue(85);
-        QLabel* masterVal = new QLabel("85%");
+        masterSlider->setValue(static_cast<int>(std::lround(engine->getMasterVolume() * 100.0f)));
+        QLabel* masterVal = new QLabel(QString("%1%").arg(masterSlider->value()));
         masterLay->addWidget(masterSlider);
         masterLay->addWidget(masterVal);
         lay->addLayout(masterLay);
 
         connect(masterSlider, &QSlider::valueChanged, [&](int v) {
             masterVal->setText(QString("%1%").arg(v));
+            monitorMasterVolume = std::clamp(v / 100.0, 0.0, 1.0);
             engine->setMasterVolume(v / 100.0f);
         });
 
@@ -1134,6 +2875,21 @@ private slots:
 
         std::vector<QCheckBox*> useChecks;
         std::vector<QSlider*> volSliders;
+        auto applyAudioSelection = [&]() {
+            std::vector<size_t> active;
+            for (size_t i = 0; i < useChecks.size(); ++i) {
+                if (useChecks[i]->isChecked()) active.push_back(i);
+            }
+            engine->setActiveOutputs(active);
+            for (size_t i = 0; i < active.size(); ++i) {
+                if (active[i] < volSliders.size()) {
+                    engine->setOutputVolume(i, volSliders[active[i]]->value() / 100.0f);
+                }
+            }
+            monitorMasterVolume = std::clamp(masterSlider->value() / 100.0, 0.0, 1.0);
+            engine->setMasterVolume(static_cast<float>(monitorMasterVolume));
+            return active;
+        };
 
         for (size_t i = 0; i < devs.size(); ++i) {
             int row = static_cast<int>(i);
@@ -1157,8 +2913,10 @@ private slots:
             volSliders.push_back(vol);
 
             QPushButton* test = new QPushButton("Test 1kHz");
-            connect(test, &QPushButton::clicked, [engine, i, this]() {
-                engine->playTestTone(i, 1000.0f, 0.7f);
+            connect(test, &QPushButton::clicked, [engine, i, this, &useChecks, &applyAudioSelection]() {
+                if (i < useChecks.size()) useChecks[i]->setChecked(true);
+                applyAudioSelection();
+                engine->playTestToneForDevice(i, 1000.0f, 0.7f);
                 statusBar()->showMessage(QString("Test tone on output #%1").arg(i), 1200);
             });
             table->setCellWidget(row, 4, test);
@@ -1180,20 +2938,7 @@ private slots:
         connect(refresh, &QPushButton::clicked, [&]() { QMessageBox::information(&dlg, "Refresh", "Close and reopen the dialog to re-enumerate devices."); });
 
         connect(apply, &QPushButton::clicked, [&]() {
-            std::vector<size_t> active;
-            for (size_t i = 0; i < useChecks.size(); ++i) {
-                if (useChecks[i]->isChecked()) active.push_back(i);
-            }
-            engine->setActiveOutputs(active);
-
-            for (size_t i = 0; i < active.size(); ++i) {
-                // find the slider for this active index
-                // simplistic: set volumes for the active ones in order
-                if (i < volSliders.size()) {
-                    engine->setOutputVolume(i, volSliders[active[i]]->value() / 100.0f);
-                }
-            }
-            engine->setMasterVolume(masterSlider->value() / 100.0f);
+            applyAudioSelection();
 
             statusBar()->showMessage(QString("Audio outputs active: %1").arg(QString::fromStdString(engine->getActiveDeviceNames())), 4000);
             spdlog::info("Audio outputs applied: {}", engine->getActiveDeviceNames());
@@ -1226,7 +2971,7 @@ private slots:
 
         QVBoxLayout* mainLay = new QVBoxLayout(&dlg);
 
-        QLabel* hint = new QLabel("Rescan to refresh. Enable devices, adjust gain/sample rate/antenna. Settings persist across runs. Real SoapySDR + HackRF recommended (stubs shown if no Soapy).");
+        QLabel* hint = new QLabel("Rescan to refresh. Enable devices, adjust gain/sample rate/antenna/PPM correction. Settings persist across runs. Real SoapySDR + HackRF recommended (stubs shown if no Soapy).");
         hint->setWordWrap(true);
         mainLay->addWidget(hint);
 
@@ -1240,8 +2985,8 @@ private slots:
         drvLabel->setStyleSheet("color: #ffcc00; font-size: 10px;");
         mainLay->addWidget(drvLabel);
 
-        QTableWidget* table = new QTableWidget(devs.size(), 7, &dlg);
-        QStringList headers = {"Enabled", "Label / Driver", "Serial", "Antenna", "Sample Rate (MS/s)", "Gain (dB)", "Freq Range (MHz)"};
+        QTableWidget* table = new QTableWidget(devs.size(), 8, &dlg);
+        QStringList headers = {"Enabled", "Label / Driver", "Serial", "Antenna", "Sample Rate (MS/s)", "Gain (dB)", "PPM", "Freq Range (MHz)"};
         table->setHorizontalHeaderLabels(headers);
         table->horizontalHeader()->setStretchLastSection(true);
         table->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -1251,6 +2996,7 @@ private slots:
         std::vector<QComboBox*> antCombos;
         std::vector<QDoubleSpinBox*> rateSpins;
         std::vector<QDoubleSpinBox*> gainSpins;
+        std::vector<QDoubleSpinBox*> ppmSpins;
 
         for (size_t i = 0; i < devs.size(); ++i) {
             const auto& d = devs[i];
@@ -1298,6 +3044,19 @@ private slots:
             table->setCellWidget(row, 5, gain);
             gainSpins.push_back(gain);
 
+            QDoubleSpinBox* ppm = new QDoubleSpinBox();
+            ppm->setRange(-200.0, 200.0);
+            ppm->setDecimals(2);
+            ppm->setSingleStep(0.5);
+            ppm->setSuffix(" ppm");
+            ppm->setValue(d.frequencyCorrectionPpm);
+            ppm->setToolTip("Oscillator correction. Positive values compensate receivers that read high; applied live when supported.");
+            table->setCellWidget(row, 6, ppm);
+            ppmSpins.push_back(ppm);
+            connect(ppm, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [i](double ppmVal) {
+                DeviceManager::instance().setFrequencyCorrection(i, ppmVal);
+            });
+
             // Make per-device gain changes in the dialog live while the device is running.
             // Previously only took effect on "Apply" + restart for many users.
             connect(gain, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [i](double gval) {
@@ -1307,7 +3066,7 @@ private slots:
 
             // Freq range
             QString fr = QString("%1 – %2").arg(d.minFreq/1e6, 0, 'f', 0).arg(d.maxFreq/1e6, 0, 'f', 0);
-            table->setItem(row, 6, new QTableWidgetItem(fr));
+            table->setItem(row, 7, new QTableWidgetItem(fr));
         }
 
         mainLay->addWidget(table);
@@ -1338,15 +3097,17 @@ private slots:
 
                     double rateHz = rateSpins[i]->value() * 1e6;
                     double g = gainSpins[i]->value();
+                    double ppm = ppmSpins[i]->value();
                     std::string ant = antCombos[i]->currentText().toStdString();
 
-                    mgr.updateDeviceParams(i, rateHz, g, ant);
+                    mgr.updateDeviceParams(i, rateHz, g, ant, ppm);
 
                     // Start/stop real streaming on enable. startStreaming itself is hardened (try/catch + stub fallback + thread guards)
                     // so this should not propagate, but outer try is defense-in-depth for any future native/USB fault on Apply.
                     if (en) {
                         mgr.startStreaming(i);
                         mgr.setLiveGain(i, g);
+                        mgr.setFrequencyCorrection(i, ppm);
                     } else {
                         mgr.stopStreaming(i);
                     }
@@ -1416,7 +3177,10 @@ private:
     std::once_flag audioEngineInitFlag;
     AudioEngine* getOrCreateAudioEngine() {
         std::call_once(audioEngineInitFlag, [this]() {
-            if (!engineForAudio) engineForAudio = std::make_unique<AudioEngine>();
+            if (!engineForAudio) {
+                engineForAudio = std::make_unique<AudioEngine>();
+                engineForAudio->setMasterVolume(static_cast<float>(monitorMasterVolume));
+            }
         });
         return engineForAudio.get();
     }
@@ -1432,16 +3196,111 @@ private:
     bool autoDetectMode = true;
     double monitorLpfHz = 15000;
     bool monitorAudioLpfEnabled = true;
-    double monitorSquelchDb = -80;
+    double monitorSquelchDb = -105;
     double monitorRfGainDb = 20.0;
+    double monitorMasterVolume = 0.85;
     double monitorGain = 1.0; // audio gain, not RF gain
     double monitorWfmDeTauUs = 75.0;
     double monitorWfmPilotNotchR = 0.96;
     double monitorChannelBwHz = 180000.0; // AUTO/WFM default; NFM snaps to 12.5 kHz for modern CB/PMR
+    double p25MonitoredControlFreqHz = 0.0;
+    bool p25FollowEnabled = false;
+    uint32_t p25FollowTalkgroupId = 0;
+    P25LiveDecoder p25LiveDecoder;
+    P25ControlChannelAnalyzer p25LiveControlAnalyzer;
+    QDialog* p25LogDialog = nullptr;
+    QTextEdit* p25LogText = nullptr;
+    QStringList p25LogLines;
+    QString p25LastDiagSignature;
+    qint64 p25LastDiagLogMs = 0;
+    std::map<std::string, qint64> p25LogThrottleByKey;
     QDoubleSpinBox* bwSpin = nullptr;
     QDoubleSpinBox* lpfSpin = nullptr;
     QCheckBox* lpfEnableCheck = nullptr;
+    WaterfallRoiBuilder classifierRoiBuilder{128};
     // spectrumWidget kept for future if needed
+
+    void appendP25LogLine(const QString& text) {
+        const QString line = QString("[%1] %2")
+            .arg(QDateTime::currentDateTime().toString("HH:mm:ss.zzz"))
+            .arg(text);
+        p25LogLines << line;
+        while (p25LogLines.size() > 1200) p25LogLines.removeFirst();
+        if (p25LogText) {
+            p25LogText->append(line.toHtmlEscaped());
+            auto cursor = p25LogText->textCursor();
+            cursor.movePosition(QTextCursor::End);
+            p25LogText->setTextCursor(cursor);
+        }
+    }
+
+    void appendP25LogLineThrottled(const QString& signature, const QString& text, qint64 minIntervalMs = 1200) {
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (signature == p25LastDiagSignature && now - p25LastDiagLogMs < minIntervalMs) return;
+        p25LastDiagSignature = signature;
+        p25LastDiagLogMs = now;
+        appendP25LogLine(text);
+    }
+
+    void appendP25LogLineKeyed(const QString& key, const QString& text, qint64 minIntervalMs = 3000) {
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        const std::string mapKey = key.toStdString();
+        auto it = p25LogThrottleByKey.find(mapKey);
+        if (it != p25LogThrottleByKey.end() && now - it->second < minIntervalMs) return;
+        p25LogThrottleByKey[mapKey] = now;
+        while (p25LogThrottleByKey.size() > 300) {
+            auto oldest = std::min_element(p25LogThrottleByKey.begin(), p25LogThrottleByKey.end(),
+                [](const auto& a, const auto& b) { return a.second < b.second; });
+            if (oldest == p25LogThrottleByKey.end()) break;
+            p25LogThrottleByKey.erase(oldest);
+        }
+        appendP25LogLine(text);
+    }
+
+    void showP25LogWindow() {
+        if (p25LogDialog) {
+            p25LogDialog->show();
+            p25LogDialog->raise();
+            p25LogDialog->activateWindow();
+            return;
+        }
+
+        p25LogDialog = new QDialog(this);
+        p25LogDialog->setWindowTitle("P25 Decoder Log");
+        p25LogDialog->setAttribute(Qt::WA_DeleteOnClose);
+        p25LogDialog->resize(900, 520);
+
+        QVBoxLayout* lay = new QVBoxLayout(p25LogDialog);
+        lay->setContentsMargins(8, 8, 8, 8);
+        lay->setSpacing(6);
+
+        p25LogText = new QTextEdit(p25LogDialog);
+        p25LogText->setReadOnly(true);
+        p25LogText->setLineWrapMode(QTextEdit::NoWrap);
+        p25LogText->setFontFamily("Consolas");
+        p25LogText->setPlainText(p25LogLines.join('\n'));
+        lay->addWidget(p25LogText);
+
+        QHBoxLayout* btns = new QHBoxLayout();
+        QPushButton* clearBtn = new QPushButton("Clear", p25LogDialog);
+        QPushButton* closeBtn = new QPushButton("Close", p25LogDialog);
+        btns->addStretch();
+        btns->addWidget(clearBtn);
+        btns->addWidget(closeBtn);
+        lay->addLayout(btns);
+
+        connect(clearBtn, &QPushButton::clicked, this, [this]() {
+            p25LogLines.clear();
+            p25LogThrottleByKey.clear();
+            if (p25LogText) p25LogText->clear();
+        });
+        connect(closeBtn, &QPushButton::clicked, p25LogDialog, &QDialog::close);
+        connect(p25LogDialog, &QObject::destroyed, this, [this]() {
+            p25LogDialog = nullptr;
+            p25LogText = nullptr;
+        });
+        p25LogDialog->show();
+    }
 
     // Helper to ensure at least one receiver exists (transitional Phase 0)
     void ensureReceiver() {
@@ -1478,6 +3337,13 @@ private:
 
         if (rfOrModeChanged) {
             rx.resetDemodState();
+            rx.p25VoiceDecodeEnabled = false;
+            rx.p25VoiceClearKnown = false;
+            rx.p25VoiceEncrypted = false;
+            rx.p25VoiceTalkgroupId = 0;
+            rx.resetP25VoiceState();
+            p25FollowEnabled = false;
+            p25FollowTalkgroupId = 0;
         }
 
         rx.freqHz = currentMonitorFreq;
@@ -1504,6 +3370,64 @@ private:
             }
             rx.active = active;
         }
+    }
+
+    TrainingCaptureResult captureTrainingSample(const std::string& label) {
+        TrainingCaptureRequest req;
+        req.label = trimCopy(label);
+        if (req.label.empty()) req.label = "unknown";
+
+        {
+            std::lock_guard<std::mutex> lk(monitorParamsMutex);
+            req.tunedFreqHz = currentMonitorFreq;
+            req.mode = currentMonitorMode;
+            req.channelBwHz = monitorChannelBwHz;
+            req.lpfHz = monitorLpfHz;
+            req.audioLpfEnabled = monitorAudioLpfEnabled;
+            req.squelchDb = monitorSquelchDb;
+        }
+
+        auto& mgr = DeviceManager::instance();
+        std::vector<float> pwr;
+        bool gotSpectrum = false;
+        for (size_t i = 0; i < mgr.getDevices().size(); ++i) {
+            if (mgr.isStreaming(i) && mgr.getLatestSpectrum(i, pwr, req.centerFreqHz, req.sampleRateHz) && !pwr.empty() && req.sampleRateHz > 0.0) {
+                req.deviceIndex = i;
+                req.spectrumDb = pwr;
+                gotSpectrum = true;
+                break;
+            }
+        }
+        if (!gotSpectrum) {
+            return {false, {}, "No live spectrum yet. Enable/tune a device and wait for the waterfall first."};
+        }
+
+        const auto devices = mgr.getDevices();
+        if (req.deviceIndex < devices.size()) req.device = devices[req.deviceIndex];
+
+        const size_t requestedSamples = static_cast<size_t>(std::clamp(req.sampleRateHz * 1.0, 16384.0, 2400000.0));
+        req.iq = mgr.getRecentIQWindow(req.deviceIndex, requestedSamples);
+
+        const double roiHz = std::clamp(
+            std::max(req.channelBwHz * 4.0, req.channelBwHz >= 100000.0 ? 350000.0 : 50000.0),
+            20000.0,
+            req.sampleRateHz);
+        req.tile = classifierRoiBuilder.buildTile(req.sampleRateHz, req.centerFreqHz, req.tunedFreqHz, roiHz, 256, 256);
+        if (!req.tile.valid()) {
+            WaterfallRoiBuilder oneFrame(1);
+            oneFrame.pushSpectrum(req.spectrumDb);
+            req.tile = oneFrame.buildTile(req.sampleRateHz, req.centerFreqHz, req.tunedFreqHz, roiHz, 256, 256);
+        }
+        auto modelRec = req.tile.valid()
+            ? ClassifierModelBackend::instance().classifyTile(req.tile, req.sampleRateHz, req.centerFreqHz, req.tunedFreqHz, roiHz)
+            : std::optional<SignalRecommendation>{};
+        req.recommendation = modelRec.has_value()
+            ? *modelRec
+            : (req.tile.valid()
+                ? AdvancedSignalClassifier::instance().classifyWaterfallTile(req.tile, req.sampleRateHz, req.centerFreqHz, req.tunedFreqHz, roiHz)
+                : AdvancedSignalClassifier::instance().classifySpectrum(req.spectrumDb, req.sampleRateHz, req.centerFreqHz, req.tunedFreqHz));
+
+        return saveTrainingCapture(req);
     }
 
     void stopAllStreaming() {
@@ -1611,7 +3535,10 @@ int runCLI(int argc, char* argv[]) {
     std::cout << "Devices enumerated: " << devs.size() << "\n";
     for (size_t i=0; i<devs.size(); ++i) {
         const auto& d = devs[i];
-        std::cout << "  [" << i << "] " << d.driver << " " << d.label << " enabled=" << d.enabled << " gain=" << d.gain << "\n";
+        std::cout << "  [" << i << "] " << d.driver << " " << d.label
+                  << " enabled=" << d.enabled
+                  << " gain=" << d.gain
+                  << " ppm=" << d.frequencyCorrectionPpm << "\n";
     }
 
     // Use shared_ptr<Receiver> for CLI too (consistent with GUI, enables stable cursor updates across snapshots, cheap to snapshot pointers).
@@ -1620,6 +3547,8 @@ int runCLI(int argc, char* argv[]) {
     std::unique_ptr<AudioEngine> cliAudio;
     std::atomic<bool> cliStop{false};
     std::atomic<bool> cliAudioEnabled{false};
+    std::map<long long, P25ControlChannelAnalyzer> cliP25Analyzers;
+    std::map<size_t, P25LiveDecoder> cliP25LiveDecoders;
 
     // S0 / audit-followup-1: non-recursive mutex discipline.
     // ensureCliRxLocked assumes the caller already holds cliRxMutex.
@@ -1634,7 +3563,7 @@ int runCLI(int argc, char* argv[]) {
             rptr->channelBwHz = defaultBandwidthForMode(DemodMode::NFM);
             rptr->lpfHz = defaultLpfForMode(DemodMode::NFM);
             rptr->audioLpfEnabled = true;
-            rptr->squelchDb = -90.0;
+            rptr->squelchDb = -105.0;
             rptr->rfGainDb = 20.0;
             rptr->audioGain = 1.0;
             rptr->gain = 1.0;
@@ -1648,6 +3577,14 @@ int runCLI(int argc, char* argv[]) {
     auto ensureCliRx = [&](size_t idx = 0) {
         std::lock_guard<std::mutex> lk(cliRxMutex);
         ensureCliRxLocked(idx);
+    };
+
+    auto clearCliP25VoiceFollow = [](Receiver& rx) {
+        rx.p25VoiceDecodeEnabled = false;
+        rx.p25VoiceClearKnown = false;
+        rx.p25VoiceEncrypted = false;
+        rx.p25VoiceTalkgroupId = 0;
+        rx.resetP25VoiceState();
     };
 
     // CLI DSP monitor thread (mirrors guiDspWorker but standalone, uses Receiver vector + own demod instances)
@@ -1679,6 +3616,7 @@ int runCLI(int argc, char* argv[]) {
                 std::vector<float> ch;
                 double rms = -100;
                 long long dspMicros = 0;
+                double afcOffsetHz = 0.0;
                 RfSquelchMetrics rfMetrics;
                 {
                     double rxFreq = 100e6, rxLpf = 3500.0, rxSquelch = -90.0;
@@ -1707,19 +3645,17 @@ int runCLI(int argc, char* argv[]) {
                     // audit-followup-7 (P2): if the rx is in AUTO, let the CLI monitor classify using latest spectrum
                     // and pick a concrete mode (NFM/WFM/AM etc) before demod. GUI timer already does this.
                     if (rxMode == DemodMode::AUTO && !pwr.empty()) {
-                        DemodMode classified = classifyModeAround(pwr, sr, cf, rxFreq);
-                        if (classified != DemodMode::AUTO) {
-                            rxMode = classified;
-                            rx.mode = classified;
-                            const double searchHz = (classified == DemodMode::WFM) ? 300000.0 : 50000.0;
-                            const double detected = detectChannelBandwidthAround(pwr, sr, cf, rxFreq, searchHz);
-                            rx.channelBwHz = snapBandwidthForMode(classified, detected, rxFreq);
-                            rx.lpfHz = defaultLpfForMode(classified);
-                            rxBw = rx.channelBwHz;
-                            rxLpf = rx.lpfHz;
-                        }
+                        auto smart = chooseSmartModeAndBandwidth(pwr, sr, cf, rxFreq, DemodMode::AUTO);
+                        rxMode = smart.mode;
+                        rx.mode = smart.mode;
+                        rx.channelBwHz = smart.bandwidthHz;
+                        rx.lpfHz = smart.lpfHz;
+                        rxBw = rx.channelBwHz;
+                        rxLpf = rx.lpfHz;
                     }
-                    rfMetrics = computeRfSquelchMetrics(pwr, sr, cf, rxFreq, rxBw, rxMode);
+                    const double demodFreq = applyNfmAfcFromSpectrum(rx, pwr, sr, cf, rxFreq, rxBw, rxMode);
+                    afcOffsetHz = demodFreq - rxFreq;
+                    rfMetrics = computeRfSquelchMetrics(pwr, sr, cf, demodFreq, rxBw, rxMode);
                     const double rfSquelchLevel = rfMetrics.valid
                         ? rfMetrics.signalLevelDb
                         : std::numeric_limits<double>::quiet_NaN();
@@ -1727,14 +3663,26 @@ int runCLI(int argc, char* argv[]) {
                     double orate = (cliAudio ? cliAudio->getSampleRate() : 48000.0);
                     size_t need = (size_t)std::round(t * orate);
                     auto t0 = std::chrono::steady_clock::now();
-                    ch = rx.demod.demodulateToAudio(iq, sr, cf, rxFreq, rxMode,
-                        rms, rxLpf, rxSquelch, rxAudioGain, rxWfmDe,
-                        rxWfmNotch, rxBw, need, orate, rfSquelchLevel, rxAudioLpfEnabled);
+                    if (rx.p25VoiceDecodeEnabled) {
+                        const auto p25Audio = decodeP25VoiceAudioBlock(rx, iq, sr, cf, demodFreq, orate);
+                        ch = p25Audio.audio;
+                        if (!ch.empty()) {
+                            double sum = 0.0;
+                            for (float sample : ch) sum += static_cast<double>(sample) * sample;
+                            rms = 20.0 * std::log10(std::sqrt(sum / static_cast<double>(ch.size())) + 1e-12);
+                        }
+                        (void)need;
+                    } else {
+                        ch = rx.demod.demodulateToAudio(iq, sr, cf, demodFreq, rxMode,
+                            rms, rxLpf, rxSquelch, rxAudioGain, rxWfmDe,
+                            rxWfmNotch, rxBw, need, orate, rfSquelchLevel, rxAudioLpfEnabled);
+                    }
                     auto t1 = std::chrono::steady_clock::now();
                     dspMicros = std::chrono::duration_cast<std::chrono::microseconds>(t1-t0).count();
                 }
 
                 gLastDspMicros.store(dspMicros);
+                gLastAfcOffsetHz.store(afcOffsetHz);
                 if (rfMetrics.valid) {
                     gLastRmsDb.store(rfMetrics.signalLevelDb);
                     gLastNoiseFloorDb.store(rfMetrics.noiseFloorDb);
@@ -1777,9 +3725,15 @@ int runCLI(int argc, char* argv[]) {
             mode = rx.mode;
         }
         double g = (di < mgr.getDevices().size() ? mgr.getCurrentGain(di) : 0.0);
+        double ppm = 0.0;
+        {
+            auto dlist = mgr.getDevices();
+            if (di < dlist.size()) ppm = dlist[di].frequencyCorrectionPpm;
+        }
         size_t qd = (di < mgr.getDevices().size() ? mgr.getIQQueueDepth(di) : 0);
         double dsp = gLastDspMicros.load() / 1000.0;
         double level = gLastRmsDb.load();
+        double afcHz = gLastAfcOffsetHz.load();
         double ring = 0, underr = 0;
         if (cliAudio) {
             ring = cliAudio->getRingFillPercent();
@@ -1787,8 +3741,10 @@ int runCLI(int argc, char* argv[]) {
         }
         std::cout << "RX" << r << " dev=" << di << " f=" << (freqHz/1e6) << "MHz mode=" << (int)mode
                   << " bw=" << (bwHz/1000) << "kHz gain=" << g << "dB IQdepth=" << qd
+                  << " ppm=" << ppm
                   << " lpf=" << (lpfOn ? std::to_string(lpfHz/1000.0) + "kHz" : std::string("off"))
-                  << " level=" << level << "dB DSP=" << dsp << "ms ring=" << ring << "% underruns=" << underr << "\n";
+                  << " level=" << level << "dB AFC=" << (afcHz / 1000.0) << "kHz"
+                  << " DSP=" << dsp << "ms ring=" << ring << "% underruns=" << underr << "\n";
     };
 
     std::string line;
@@ -1796,6 +3752,12 @@ int runCLI(int argc, char* argv[]) {
         while (true) {
             std::cout << "sdr> " << std::flush;
             if (!std::getline(std::cin, line)) break;
+            if (line.size() >= 3 &&
+                static_cast<unsigned char>(line[0]) == 0xef &&
+                static_cast<unsigned char>(line[1]) == 0xbb &&
+                static_cast<unsigned char>(line[2]) == 0xbf) {
+                line.erase(0, 3);
+            }
             std::istringstream iss(line);
             std::string cmd; iss >> cmd;
             if (cmd.empty()) continue;
@@ -1814,8 +3776,21 @@ int runCLI(int argc, char* argv[]) {
                       << "  set bw <khz|auto> [rx]  - set/detect channel BW (e.g. set bw 12.5)\n"
                       << "  set lpf <khz|on|off> [rx] - set or disable audio LPF\n"
                       << "  gain <i> <db>           - set live device RF gain\n"
+                      << "  ppm <i> <ppm>           - set live frequency correction\n"
                       << "  squelch <db> [rx]       - set squelch\n"
                       << "  stats | status [rx]     - live diagnostics (gain/mode/BW/IQ/DSP/ring/underrun)\n"
+                      << "  fav list|add|tune|del   - saved frequencies\n"
+                      << "  plans                   - show built-in band auto-mode plans\n"
+                      << "  classify [dev] [rx]     - advanced mode/BW/filter classifier\n"
+                      << "  capture <label> [rx]    - save SigMF + classifier tile training sample\n"
+                      << "  model status|load|unload - optional classifier model backend\n"
+                      << "  p25 [dev]               - list likely P25 control-channel candidates\n"
+                      << "  p25 tgs                 - list discovered/verified P25 talkgroups\n"
+                      << "  p25 addtg <cc_mhz> <tgid> [tag] - manually verify a TG\n"
+                      << "  p25 follow <index> [rx] - tune to unencrypted active TG voice freq\n"
+                      << "  p25 tsbk <cc_mhz> <hex> - ingest decoded P25 TSBK bytes\n"
+                      << "  p25 sync [dev] [target_mhz] [ms] - live C4FM/CQPSK frame-sync/NID check\n"
+                      << "  p25 voice               - show P25 IMBE backend status\n"
                       << "  audio list              - list playback devices\n"
                       << "  audio enable <out0> <out1?>\n"
                       << "  audio disable           - stop audio outputs\n"
@@ -1825,7 +3800,11 @@ int runCLI(int argc, char* argv[]) {
             auto dlist = mgr.getDevices();
             for (size_t i=0; i<dlist.size(); ++i) {
                 const auto& d = dlist[i];
-                std::cout << "[" << i << "] " << d.driver << "/" << d.label << " en=" << d.enabled << " sr=" << d.sampleRate << " gain=" << d.gain << "\n";
+                std::cout << "[" << i << "] " << d.driver << "/" << d.label
+                          << " en=" << d.enabled
+                          << " sr=" << d.sampleRate
+                          << " gain=" << d.gain
+                          << " ppm=" << d.frequencyCorrectionPpm << "\n";
             }
         } else if (cmd == "enable") {
             int i = 0; iss >> i;
@@ -1872,6 +3851,7 @@ int runCLI(int argc, char* argv[]) {
                 std::lock_guard<std::mutex> rxLock(rx.stateMutex);
                 if (std::abs(rx.freqHz - (f * 1e6)) > 1.0 || !rx.active) {
                     rx.resetDemodState();
+                    clearCliP25VoiceFollow(rx);
                 }
                 rx.freqHz = f * 1e6;
                 rx.active = true;
@@ -1897,10 +3877,16 @@ int runCLI(int argc, char* argv[]) {
                 else if (m=="am") newMode=DemodMode::AM;
                 else if (m=="usb") newMode=DemodMode::USB;
                 else if (m=="lsb") newMode=DemodMode::LSB;
-                newBw = defaultBandwidthForMode(newMode);
-                newLpf = defaultLpfForMode(newMode);
+                if (const auto* plan = findBandPlanForFrequency(rx.freqHz); plan && (newMode == DemodMode::AUTO || newMode == plan->mode)) {
+                    newBw = plan->bandwidthHz;
+                    newLpf = plan->lpfHz;
+                } else {
+                    newBw = defaultBandwidthForMode(newMode);
+                    newLpf = lpfForModeAndBandwidth(newMode, newBw);
+                }
                 if (newMode != rx.mode || std::abs(newBw - rx.channelBwHz) > 1.0) {
                     rx.resetDemodState();
+                    clearCliP25VoiceFollow(rx);
                     rx.mode = newMode;
                     rx.channelBwHz = newBw;
                     rx.lpfHz = newLpf;
@@ -1932,10 +3918,13 @@ int runCLI(int argc, char* argv[]) {
                         ensureCliRxLocked(rxidx);
                         Receiver& rx = *cliReceivers[rxidx];
                         std::lock_guard<std::mutex> rxLock(rx.stateMutex);
-                        double detected = detectChannelBandwidthAround(p, sr, cf, rx.freqHz, rx.mode == DemodMode::WFM ? 300000.0 : 50000.0);
-                        double newBw = snapBandwidthForMode(rx.mode, detected, rx.freqHz);
+                        auto smart = chooseSmartModeAndBandwidth(p, sr, cf, rx.freqHz, rx.mode);
+                        double newBw = smart.bandwidthHz;
                         rx.resetDemodState();
+                        clearCliP25VoiceFollow(rx);
+                        if (rx.mode == DemodMode::AUTO) rx.mode = smart.mode;
                         rx.channelBwHz = newBw;
+                        rx.lpfHz = smart.lpfHz;
                         khz = newBw / 1000.0;
                     }
                 } else {
@@ -1948,6 +3937,7 @@ int runCLI(int argc, char* argv[]) {
                         const double newBw = khz * 1000.0;
                         if (std::abs(rx.channelBwHz - newBw) > 1.0) {
                             rx.resetDemodState();
+                            clearCliP25VoiceFollow(rx);
                             rx.channelBwHz = newBw;
                         }
                     }
@@ -1988,6 +3978,19 @@ int runCLI(int argc, char* argv[]) {
                 }
                 std::cout << "Gain device " << di << " -> " << db << " dB\n";
             }
+        } else if (cmd == "ppm") {
+            int di = 0;
+            double ppm = 0.0;
+            if (!(iss >> di >> ppm)) {
+                std::cout << "usage: ppm <device> <ppm>\n";
+                continue;
+            }
+            if (di >= 0 && static_cast<size_t>(di) < mgr.getDevices().size()) {
+                mgr.setFrequencyCorrection(static_cast<size_t>(di), ppm);
+                std::cout << "Frequency correction device " << di << " -> " << ppm << " ppm\n";
+            } else {
+                std::cout << "bad device index\n";
+            }
         } else if (cmd == "squelch") {
             double db; int rxidx=0;
             if (!(iss >> db)) { std::cout << "bad squelch value\n"; continue; }
@@ -2004,6 +4007,107 @@ int runCLI(int argc, char* argv[]) {
         } else if (cmd == "stats" || cmd == "status") {
             int rxidx = 0; if (iss >> rxidx) {}
             printStats(rxidx);
+        } else if (cmd == "fav" || cmd == "favorite" || cmd == "favorites") {
+            std::string sub;
+            iss >> sub;
+            for (auto& c : sub) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (sub == "list" || sub.empty()) {
+                auto freqs = loadSavedFrequencies();
+                if (freqs.empty()) {
+                    std::cout << "No saved frequencies yet.\n";
+                } else {
+                    for (size_t i = 0; i < freqs.size(); ++i) {
+                        const auto& sf = freqs[i];
+                        std::cout << "[" << i << "] " << sf.name
+                                  << " " << (sf.freqHz / 1e6) << " MHz"
+                                  << " " << modeToString(sf.mode)
+                                  << " bw=" << (sf.bandwidthHz / 1000.0) << "kHz"
+                                  << (sf.tags.empty() ? "" : (" tags=" + sf.tags)) << "\n";
+                    }
+                }
+            } else if (sub == "add") {
+                std::string name;
+                std::getline(iss, name);
+                name = trimCopy(name);
+                SavedFrequency sf;
+                {
+                    std::lock_guard<std::mutex> lk(cliRxMutex);
+                    ensureCliRxLocked(0);
+                    Receiver& rx = *cliReceivers[0];
+                    std::lock_guard<std::mutex> rxLock(rx.stateMutex);
+                    sf.freqHz = rx.freqHz;
+                    sf.mode = rx.mode;
+                    sf.bandwidthHz = rx.channelBwHz;
+                    sf.lpfHz = rx.lpfHz;
+                    sf.lpfEnabled = rx.audioLpfEnabled;
+                    sf.squelchDb = rx.squelchDb;
+                }
+                if (name.empty()) {
+                    std::ostringstream os;
+                    os << modeToString(sf.mode) << " " << (sf.freqHz / 1e6) << " MHz";
+                    name = os.str();
+                }
+                sf.name = name;
+                if (const auto* plan = findBandPlanForFrequency(sf.freqHz)) sf.tags = plan->name;
+                auto freqs = loadSavedFrequencies();
+                freqs.push_back(sf);
+                saveSavedFrequencies(freqs);
+                std::cout << "Saved [" << (freqs.size() - 1) << "] " << sf.name << "\n";
+            } else if (sub == "tune") {
+                int idx = -1;
+                int rxidx = 0;
+                if (!(iss >> idx)) {
+                    std::cout << "usage: fav tune <index> [rx]\n";
+                    continue;
+                }
+                if (iss >> rxidx) {}
+                auto freqs = loadSavedFrequencies();
+                if (idx < 0 || static_cast<size_t>(idx) >= freqs.size()) {
+                    std::cout << "bad favorite index\n";
+                    continue;
+                }
+                const auto sf = freqs[static_cast<size_t>(idx)];
+                size_t devIndex = 0;
+                {
+                    std::lock_guard<std::mutex> lk(cliRxMutex);
+                    ensureCliRxLocked(static_cast<size_t>(std::max(0, rxidx)));
+                    Receiver& rx = *cliReceivers[static_cast<size_t>(std::max(0, rxidx))];
+                    std::lock_guard<std::mutex> rxLock(rx.stateMutex);
+                    devIndex = rx.deviceIndex;
+                    rx.resetDemodState();
+                    clearCliP25VoiceFollow(rx);
+                    rx.freqHz = sf.freqHz;
+                    rx.mode = sf.mode;
+                    rx.channelBwHz = sf.bandwidthHz;
+                    rx.lpfHz = sf.lpfHz;
+                    rx.audioLpfEnabled = sf.lpfEnabled;
+                    rx.squelchDb = sf.squelchDb;
+                    rx.active = true;
+                }
+                if (!mgr.isStreaming(devIndex) && devIndex < mgr.getDevices().size()) {
+                    mgr.setEnabled(devIndex, true);
+                    mgr.startStreaming(devIndex, true);
+                }
+                if (mgr.isStreaming(devIndex)) mgr.setCenterFreq(devIndex, sf.freqHz);
+                std::cout << "Tuned RX" << rxidx << " to favorite [" << idx << "] " << sf.name << "\n";
+            } else if (sub == "del" || sub == "delete" || sub == "rm") {
+                int idx = -1;
+                if (!(iss >> idx)) {
+                    std::cout << "usage: fav del <index>\n";
+                    continue;
+                }
+                auto freqs = loadSavedFrequencies();
+                if (idx < 0 || static_cast<size_t>(idx) >= freqs.size()) {
+                    std::cout << "bad favorite index\n";
+                    continue;
+                }
+                auto removed = freqs[static_cast<size_t>(idx)];
+                freqs.erase(freqs.begin() + idx);
+                saveSavedFrequencies(freqs);
+                std::cout << "Deleted favorite [" << idx << "] " << removed.name << "\n";
+            } else {
+                std::cout << "fav list | fav add <name> | fav tune <index> [rx] | fav del <index>\n";
+            }
         } else if (cmd == "audio") {
             std::string sub; iss >> sub; for(auto& c : sub) c = (char)std::tolower((unsigned char)c);
             if (sub == "list") {
@@ -2039,12 +4143,392 @@ int runCLI(int argc, char* argv[]) {
                 cliReceivers.back()->active = false;
                 std::cout << "Added RX" << newi << "\n";
             }
+        } else if (cmd == "plans" || cmd == "bandplans") {
+            for (const auto& p : builtInBandPlans()) {
+                std::cout << p.name
+                          << " " << (p.startHz / 1e6) << "-" << (p.endHz / 1e6) << " MHz"
+                          << " mode=" << modeToString(p.mode)
+                          << " bw=" << (p.bandwidthHz / 1000.0) << "kHz"
+                          << " lpf=" << (p.lpfHz / 1000.0) << "kHz"
+                          << " step=" << (p.stepHz / 1000.0) << "kHz\n";
+            }
+        } else if (cmd == "classify" || cmd == "classifier") {
+            int devIndex = 0;
+            int rxidx = 0;
+            if (iss >> devIndex) {
+                if (iss >> rxidx) {}
+            }
+            double rxFreq = 100e6;
+            {
+                std::lock_guard<std::mutex> lk(cliRxMutex);
+                ensureCliRxLocked(static_cast<size_t>(std::max(0, rxidx)));
+                Receiver& rx = *cliReceivers[static_cast<size_t>(std::max(0, rxidx))];
+                std::lock_guard<std::mutex> rxLock(rx.stateMutex);
+                rxFreq = rx.freqHz;
+            }
+            std::vector<float> p; double cf=0, sr=0;
+            if (devIndex < 0 || !mgr.getLatestSpectrum(static_cast<size_t>(devIndex), p, cf, sr) || p.empty()) {
+                std::cout << "no spectrum yet for classifier (enable/tune first)\n";
+                continue;
+            }
+            auto rec = AdvancedSignalClassifier::instance().classifySpectrum(p, sr, cf, rxFreq);
+            std::cout << "Classifier dev=" << devIndex
+                      << " rx=" << rxidx
+                      << " freq=" << (rxFreq / 1e6) << " MHz"
+                      << " class=" << rec.label
+                      << " confidence=" << (rec.confidence * 100.0) << "%"
+                      << " demod=" << modeToString(rec.demodMode)
+                      << " estBW=" << (rec.estimatedBandwidthHz / 1000.0) << "kHz"
+                      << " stdBW=" << (rec.standardBandwidthHz / 1000.0) << "kHz"
+                      << " audioLPF=" << (rec.audioLowPassHz / 1000.0) << "kHz"
+                      << " filter=" << classifierFilterKindToString(rec.filterKind)
+                      << " snr=" << rec.features.snrDb << "dB"
+                      << " reason=\"" << rec.reason << "\"\n";
+        } else if (cmd == "capture") {
+            std::string label;
+            std::getline(iss, label);
+            label = trimCopy(label);
+            int rxidx = 0;
+            const auto lastSpace = label.find_last_of(' ');
+            if (lastSpace != std::string::npos) {
+                std::string tail = label.substr(lastSpace + 1);
+                if (!tail.empty() && std::all_of(tail.begin(), tail.end(), [](unsigned char c) { return std::isdigit(c); })) {
+                    rxidx = std::stoi(tail);
+                    label = trimCopy(label.substr(0, lastSpace));
+                }
+            }
+            if (label.empty()) label = "unknown";
+
+            TrainingCaptureRequest req;
+            req.label = label;
+            {
+                std::lock_guard<std::mutex> lk(cliRxMutex);
+                ensureCliRxLocked(static_cast<size_t>(std::max(0, rxidx)));
+                Receiver& rx = *cliReceivers[static_cast<size_t>(std::max(0, rxidx))];
+                std::lock_guard<std::mutex> rxLock(rx.stateMutex);
+                req.deviceIndex = rx.deviceIndex;
+                req.tunedFreqHz = rx.freqHz;
+                req.mode = rx.mode;
+                req.channelBwHz = rx.channelBwHz;
+                req.lpfHz = rx.lpfHz;
+                req.audioLpfEnabled = rx.audioLpfEnabled;
+                req.squelchDb = rx.squelchDb;
+            }
+            if (req.deviceIndex >= mgr.getDevices().size() || !mgr.isStreaming(req.deviceIndex)) {
+                std::cout << "capture needs a streaming device (enable/tune first)\n";
+                continue;
+            }
+            if (!mgr.getLatestSpectrum(req.deviceIndex, req.spectrumDb, req.centerFreqHz, req.sampleRateHz) || req.spectrumDb.empty()) {
+                std::cout << "no spectrum yet for capture\n";
+                continue;
+            }
+            const auto dlist = mgr.getDevices();
+            if (req.deviceIndex < dlist.size()) req.device = dlist[req.deviceIndex];
+            const size_t requestedSamples = static_cast<size_t>(std::clamp(req.sampleRateHz * 1.0, 16384.0, 2400000.0));
+            req.iq = mgr.getRecentIQWindow(req.deviceIndex, requestedSamples);
+
+            const double roiHz = std::clamp(
+                std::max(req.channelBwHz * 4.0, req.channelBwHz >= 100000.0 ? 350000.0 : 50000.0),
+                20000.0,
+                req.sampleRateHz);
+            WaterfallRoiBuilder cliTileBuilder(1);
+            cliTileBuilder.pushSpectrum(req.spectrumDb);
+            req.tile = cliTileBuilder.buildTile(req.sampleRateHz, req.centerFreqHz, req.tunedFreqHz, roiHz, 256, 256);
+            auto modelRec = req.tile.valid()
+                ? ClassifierModelBackend::instance().classifyTile(req.tile, req.sampleRateHz, req.centerFreqHz, req.tunedFreqHz, roiHz)
+                : std::optional<SignalRecommendation>{};
+            req.recommendation = modelRec.has_value()
+                ? *modelRec
+                : (req.tile.valid()
+                    ? AdvancedSignalClassifier::instance().classifyWaterfallTile(req.tile, req.sampleRateHz, req.centerFreqHz, req.tunedFreqHz, roiHz)
+                    : AdvancedSignalClassifier::instance().classifySpectrum(req.spectrumDb, req.sampleRateHz, req.centerFreqHz, req.tunedFreqHz));
+
+            auto result = saveTrainingCapture(req);
+            if (result.ok) {
+                std::cout << result.message.toStdString() << "\n" << result.directory.toStdString() << "\n";
+            } else {
+                std::cout << "capture failed: " << result.message.toStdString() << "\n";
+            }
+        } else if (cmd == "model") {
+            std::string sub;
+            iss >> sub;
+            for (auto& c : sub) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (sub == "load") {
+                std::string path;
+                std::getline(iss, path);
+                path = trimCopy(path);
+                if (path.empty()) {
+                    std::cout << "usage: model load <path-to-model.onnx>\n";
+                    continue;
+                }
+                const bool ok = ClassifierModelBackend::instance().loadModel(path);
+                auto st = ClassifierModelBackend::instance().status();
+                std::cout << (ok ? "model loaded: " : "model not loaded: ") << st.message << "\n";
+            } else if (sub == "unload") {
+                ClassifierModelBackend::instance().unloadModel();
+                std::cout << "model unloaded; deterministic classifier active\n";
+            } else {
+                auto st = ClassifierModelBackend::instance().status();
+                std::cout << "Model backend: " << st.backendName
+                          << " enabled=" << (st.enabled ? "yes" : "no")
+                          << " loaded=" << (st.loaded ? "yes" : "no")
+                          << " path=\"" << st.modelPath << "\""
+                          << " message=\"" << st.message << "\"\n";
+            }
         } else if (cmd == "spectrum" || cmd == "spec") {
             // lightweight: just report latest for primary dev 0 if any
             std::vector<float> p; double cf,sr;
             if (mgr.getLatestSpectrum(0, p, cf, sr) && !p.empty()) {
                 std::cout << "Spec dev0 cf=" << (cf/1e6) << " sr=" << (sr/1e6) << " bins=" << p.size() << " peak~ " << *std::max_element(p.begin(),p.end()) << "dB\n";
             } else std::cout << "no spectrum yet (enable + stream first)\n";
+        } else if (cmd == "p25") {
+            std::string sub;
+            iss >> sub;
+            for (auto& c : sub) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+            if (sub == "sync" || sub == "decode") {
+                int devIndex = 0;
+                double targetMhz = 0.0;
+                double ms = 250.0;
+                if (iss >> devIndex) {
+                    if (iss >> targetMhz) {
+                        if (iss >> ms) {}
+                    }
+                }
+                std::vector<float> p;
+                double cf = 0.0, sr = 0.0;
+                if (devIndex < 0 || !mgr.getLatestSpectrum(static_cast<size_t>(devIndex), p, cf, sr) || sr <= 0.0) {
+                    std::cout << "no spectrum/sample-rate yet for live P25 sync (enable/tune first)\n";
+                    continue;
+                }
+                double targetHz = targetMhz > 0.0 ? targetMhz * 1e6 : 0.0;
+                if (targetHz <= 0.0) {
+                    std::lock_guard<std::mutex> lk(cliRxMutex);
+                    for (const auto& rxPtr : cliReceivers) {
+                        if (!rxPtr) continue;
+                        std::lock_guard<std::mutex> rxLock(rxPtr->stateMutex);
+                        if (rxPtr->active && rxPtr->deviceIndex == static_cast<size_t>(devIndex)) {
+                            targetHz = rxPtr->freqHz;
+                            break;
+                        }
+                    }
+                }
+                if (targetHz <= 0.0) targetHz = cf;
+                ms = std::clamp(ms, 50.0, 1000.0);
+                const size_t requestedSamples = static_cast<size_t>(std::clamp(sr * (ms / 1000.0), 24000.0, 1048576.0));
+                auto iq = mgr.getRecentIQWindow(static_cast<size_t>(devIndex), requestedSamples);
+                auto& decoder = cliP25LiveDecoders[static_cast<size_t>(devIndex)];
+                auto result = decoder.processIq(iq, sr, cf, targetHz);
+                std::cout << "P25 live sync dev=" << devIndex
+                          << " target=" << (targetHz / 1e6) << " MHz"
+                          << " path=" << (result.stats.demodPath.empty() ? "unknown" : result.stats.demodPath)
+                          << " iq=" << iq.size()
+                          << " symbols=" << result.stats.symbols
+                          << " syncs=" << result.syncs.size()
+                          << " bestSyncErr=" << result.stats.bestFrameSyncBitErrors
+                          << " bestBit=" << result.stats.bestFrameSyncBitOffset
+                          << " bestAligned=" << (result.stats.bestFrameSyncBitAligned ? "yes" : "no")
+                          << " bestInv=" << (result.stats.bestFrameSyncInverted ? "yes" : "no");
+                if (result.stats.bestNidBchDistance >= 0) {
+                    std::cout << " bestNidDist=" << result.stats.bestNidBchDistance
+                              << " bestNAC=0x" << std::hex << result.stats.bestNidNac << std::dec
+                              << " bestDUID=0x" << std::hex << static_cast<int>(result.stats.bestNidRawDuid) << std::dec
+                              << " bestNid=" << (result.stats.bestNidValid ? "valid" : "fail");
+                }
+                std::cout << " voiceBackend=" << (result.stats.voiceBackendAvailable ? "yes" : "no") << "\n";
+                for (const auto& nid : result.nids) {
+                    std::cout << "  NID bit=" << nid.bitOffset
+                              << " NAC=0x" << std::hex << nid.nac << std::dec
+                              << " DUID=" << P25LiveDecoder::dataUnitIdToString(nid.duid)
+                              << " fec=" << (nid.fecValidated ? "validated" : "fail")
+                              << " corrected=" << nid.correctedBitErrors << "\n";
+                }
+                if (!result.rawTsbkBlocks.empty()) {
+                    size_t trusted = 0;
+                    for (const auto& block : result.rawTsbkBlocks) if (block.fecDecoded && block.crcValid) ++trusted;
+                    std::cout << "  raw TSDU block candidates=" << result.rawTsbkBlocks.size()
+                              << " trusted=" << trusted
+                              << " (trusted means trellis-decoded and CRC-valid)\n";
+                }
+                if (!result.imbeFrames.empty()) {
+                    size_t valid = 0;
+                    for (const auto& frame : result.imbeFrames) if (frame.valid) ++valid;
+                    std::cout << "  IMBE voice frames=" << result.imbeFrames.size()
+                              << " valid=" << valid
+                              << " (mbelib backend=" << (result.stats.voiceBackendAvailable ? "available" : "missing") << ")\n";
+                }
+                for (const auto& warning : result.warnings) {
+                    std::cout << "  note: " << warning << "\n";
+                }
+            } else if (sub == "voice") {
+                P25ImbeVoiceDecoder voice;
+                std::cout << "P25 IMBE backend: " << (voice.backendAvailable() ? "available" : "not available")
+                          << (voice.backendAvailable()
+                              ? " (clear Phase 1 IMBE frame decode can run after LDU voice extraction)"
+                              : " (build with SDR_TOWN_ENABLE_MBELIB=ON and mbelib installed)") << "\n";
+            } else if (sub == "tg" || sub == "tgs" || sub == "talkgroups") {
+                auto talkgroups = loadP25Talkgroups();
+                if (talkgroups.empty()) {
+                    std::cout << "No P25 talkgroups saved yet.\n";
+                } else {
+                    for (size_t i = 0; i < talkgroups.size(); ++i) {
+                        const auto& tg = talkgroups[i];
+                        std::cout << "[" << i << "] CC " << (tg.controlFreqHz / 1e6) << " MHz"
+                                  << " TG " << tg.talkgroupId
+                                  << (tg.alphaTag.empty() ? "" : (" \"" + tg.alphaTag + "\""))
+                                  << " voice=" << (tg.lastVoiceFreqHz > 0.0 ? std::to_string(tg.lastVoiceFreqHz / 1e6) + " MHz" : std::string("-"))
+                                  << " hits=" << tg.hitCount
+                                  << " verified=" << (tg.verified ? "yes" : "no")
+                                  << " scanner=" << (tg.scannerEnabled ? "yes" : "no")
+                                  << " enc=" << (tg.encryptionKnown ? (tg.encrypted ? "yes" : "no") : "unknown") << "\n";
+                    }
+                }
+            } else if (sub == "addtg") {
+                double ccMhz = 0.0;
+                uint32_t tgid = 0;
+                if (!(iss >> ccMhz >> tgid) || ccMhz <= 0.0 || tgid == 0) {
+                    std::cout << "usage: p25 addtg <cc_mhz> <tgid> [alpha tag]\n";
+                    continue;
+                }
+                std::string tag;
+                std::getline(iss, tag);
+                tag = trimCopy(tag);
+                const double ccHz = ccMhz * 1e6;
+                auto talkgroups = loadP25Talkgroups();
+                auto it = std::find_if(talkgroups.begin(), talkgroups.end(), [&](const P25TalkgroupEntry& tg) {
+                    return sameP25Talkgroup(tg, ccHz, tgid);
+                });
+                const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+                if (it == talkgroups.end()) {
+                    P25TalkgroupEntry tg;
+                    tg.controlFreqHz = ccHz;
+                    tg.talkgroupId = tgid;
+                    tg.alphaTag = tag.empty() ? ("TG " + std::to_string(tgid)) : tag;
+                    tg.verified = true;
+                    tg.firstSeenMs = nowMs;
+                    tg.lastSeenMs = nowMs;
+                    talkgroups.push_back(tg);
+                } else {
+                    if (!tag.empty()) it->alphaTag = tag;
+                    it->verified = true;
+                    it->lastSeenMs = nowMs;
+                }
+                saveP25Talkgroups(talkgroups);
+                std::cout << "Saved verified P25 TG " << tgid << " for CC " << ccMhz << " MHz\n";
+            } else if (sub == "follow") {
+                int idx = -1;
+                int rxidx = 0;
+                if (!(iss >> idx)) {
+                    std::cout << "usage: p25 follow <talkgroup-index> [rx]\n";
+                    continue;
+                }
+                if (iss >> rxidx) {}
+                auto talkgroups = loadP25Talkgroups();
+                if (idx < 0 || static_cast<size_t>(idx) >= talkgroups.size()) {
+                    std::cout << "bad talkgroup index\n";
+                    continue;
+                }
+                const auto tg = talkgroups[static_cast<size_t>(idx)];
+                if (!tg.encryptionKnown) {
+                    std::cout << "TG " << tg.talkgroupId << " has unknown encryption state; wait for a clear grant before following\n";
+                    continue;
+                }
+                if (tg.encrypted) {
+                    std::cout << "Refusing encrypted P25 TG " << tg.talkgroupId << "\n";
+                    continue;
+                }
+                if (tg.lastVoiceFreqHz <= 0.0) {
+                    std::cout << "TG " << tg.talkgroupId << " has no active voice grant/frequency yet\n";
+                    continue;
+                }
+                size_t devIndex = 0;
+                {
+                    std::lock_guard<std::mutex> lk(cliRxMutex);
+                    ensureCliRxLocked(static_cast<size_t>(std::max(0, rxidx)));
+                    Receiver& rx = *cliReceivers[static_cast<size_t>(std::max(0, rxidx))];
+                    std::lock_guard<std::mutex> rxLock(rx.stateMutex);
+                    devIndex = rx.deviceIndex;
+                    rx.resetDemodState();
+                    rx.freqHz = tg.lastVoiceFreqHz;
+                    rx.mode = DemodMode::NFM;
+                    rx.channelBwHz = 12500.0;
+                    rx.lpfHz = 3000.0;
+                    rx.audioLpfEnabled = false;
+                    rx.squelchDb = -105.0;
+                    rx.p25VoiceDecodeEnabled = true;
+                    rx.p25VoiceClearKnown = tg.encryptionKnown;
+                    rx.p25VoiceEncrypted = tg.encrypted;
+                    rx.p25VoiceTalkgroupId = tg.talkgroupId;
+                    rx.resetP25VoiceState();
+                    rx.active = true;
+                }
+                if (!mgr.isStreaming(devIndex) && devIndex < mgr.getDevices().size()) {
+                    mgr.setEnabled(devIndex, true);
+                    mgr.startStreaming(devIndex, true);
+                }
+                if (mgr.isStreaming(devIndex)) mgr.setCenterFreq(devIndex, tg.lastVoiceFreqHz);
+                std::cout << "Following P25 TG " << tg.talkgroupId
+                          << " at " << (tg.lastVoiceFreqHz / 1e6) << " MHz on RX" << rxidx
+                          << " with live clear IMBE voice decode\n";
+            } else if (sub == "tsbk") {
+                double ccMhz = 0.0;
+                if (!(iss >> ccMhz) || ccMhz <= 0.0) {
+                    std::cout << "usage: p25 tsbk <cc_mhz> <10-or-12-byte hex block>\n";
+                    continue;
+                }
+                std::string hex;
+                std::getline(iss, hex);
+                hex = trimCopy(hex);
+                auto bytes = p25ParseHexBytes(hex);
+                if (bytes.size() != 10 && bytes.size() != 12) {
+                    std::cout << "TSBK hex must decode to 10 or 12 bytes; got " << bytes.size() << "\n";
+                    continue;
+                }
+                const double ccHz = ccMhz * 1e6;
+                auto& analyzer = cliP25Analyzers[static_cast<long long>(std::llround(ccHz))];
+                auto events = analyzer.ingestTsbk(bytes);
+                auto talkgroups = loadP25Talkgroups();
+                bool changed = false;
+                const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+                for (const auto& ev : events) {
+                    std::cout << p25ControlEventTypeToString(ev.type)
+                              << " op=0x" << std::hex << static_cast<int>(ev.opcode) << std::dec;
+                    if (ev.talkgroupId) std::cout << " tg=" << ev.talkgroupId;
+                    if (ev.sourceId) std::cout << " src=" << p25HexId(ev.sourceId, 6).toStdString();
+                    if (ev.channel) std::cout << " ch=0x" << std::hex << ev.channel << std::dec;
+                    if (ev.voiceFrequencyHz > 0.0) std::cout << " voice=" << (ev.voiceFrequencyHz / 1e6) << " MHz";
+                    if (ev.encryptionKnown) std::cout << (ev.encrypted ? " encrypted" : " clear");
+                    std::cout << "\n";
+                    changed = mergeP25TalkgroupEvent(talkgroups, ccHz, ev, nowMs) || changed;
+                }
+                if (changed) {
+                    saveP25Talkgroups(talkgroups);
+                    std::cout << "Talkgroup registry updated.\n";
+                }
+            } else {
+                int devIndex = 0;
+                if (!sub.empty()) {
+                    try { devIndex = std::stoi(sub); } catch (...) { devIndex = 0; }
+                }
+                std::vector<float> p; double cf=0, sr=0;
+                if (devIndex < 0 || !mgr.getLatestSpectrum(static_cast<size_t>(devIndex), p, cf, sr) || p.empty()) {
+                    std::cout << "no spectrum yet for P25 scan\n";
+                    continue;
+                }
+                auto hits = detectP25ControlCandidates(p, sr, cf);
+                if (hits.empty()) {
+                    std::cout << "No P25-width spectral candidates in current view.\n";
+                } else {
+                    std::cout << "P25-width spectral candidates (unverified, run 'p25 sync <dev> <mhz>') dev "
+                              << devIndex << ":\n";
+                    for (const auto& h : hits) {
+                        std::cout << "  " << (h.freqHz / 1e6) << " MHz"
+                                  << "  snr=" << h.snrDb << " dB"
+                                  << "  bw=" << (h.bandwidthHz / 1000.0) << " kHz"
+                                  << "  peak=" << h.peakDb << " dB\n";
+                    }
+                }
+            }
         } else if (cmd == "scan") {
             std::cout << "scan: (PR6 stub) use 'enable 0; tune <f>; stats' for now. Smart scanner in later phase.\n";
         } else if (cmd == "status") {

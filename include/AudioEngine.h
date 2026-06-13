@@ -42,6 +42,7 @@ public:
 
     // Test tone on a specific active output (or all)
     void playTestTone(size_t activeIndex = size_t(-1), float freq = 1000.0f, float durationSec = 0.6f);
+    void playTestToneForDevice(size_t enumIndex, float freq = 1000.0f, float durationSec = 0.6f);
 
     // State
     size_t activeOutputCount() const;

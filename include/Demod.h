@@ -7,12 +7,38 @@
 
 enum class DemodMode { NFM, WFM, AM, USB, LSB, AUTO };
 
+struct P25ControlCandidate {
+    double freqHz = 0.0;
+    double bandwidthHz = 0.0;
+    double peakDb = -120.0;
+    double snrDb = 0.0;
+};
+
+struct SignalOffsetEstimate {
+    bool valid = false;
+    double offsetHz = 0.0;
+    double signalFreqHz = 0.0;
+    double peakDb = -120.0;
+    double snrDb = 0.0;
+    double confidence = 0.0;
+};
+
 double detectChannelBandwidth(const std::vector<float>& powerDb, double sampleRate);
 double detectChannelBandwidthAround(const std::vector<float>& powerDb,
                                     double sampleRate,
                                     double centerFreq,
                                     double targetFreq,
                                     double maxSearchHz = 250000.0);
+std::vector<P25ControlCandidate> detectP25ControlCandidates(const std::vector<float>& powerDb,
+                                                            double sampleRateHz,
+                                                            double centerFreqHz,
+                                                            size_t maxResults = 12);
+SignalOffsetEstimate estimateSignalOffsetFromSpectrum(const std::vector<float>& powerDb,
+                                                       double sampleRateHz,
+                                                       double centerFreqHz,
+                                                       double targetFreqHz,
+                                                       double searchHz,
+                                                       double maxSignalBandwidthHz);
 DemodMode classifyMode(const std::vector<float>& powerDb, double sampleRate, double centerFreq);
 DemodMode classifyModeAround(const std::vector<float>& powerDb,
                              double sampleRate,
@@ -33,7 +59,7 @@ public:
                                          DemodMode mode,
                                          double& rmsOut,
                                          double lpfHz = 0,
-                                         double squelchDb = -90,
+                                         double squelchDb = -105,
                                          double gain = 1.0,
                                          double wfmDeTauUs = 75.0,
                                          double wfmPilotNotchR = 0.96,
@@ -96,4 +122,4 @@ private:
 
 // Back-compat free functions (thin wrappers around a shared instance or the old implementation
 // during transition). New code should prefer Demodulator instances.
-std::vector<float> demodulateToAudio(const std::vector<std::complex<float>>& iq, double sr, double cf, double target, DemodMode mode, double& rmsOut, double lpfHz = 0, double squelchDb = -90, double gain = 1.0, double wfmDeTauUs = 75.0, double wfmPilotNotchR = 0.96, double channelBwHz = 0, size_t target_audio_samples = 0, double outputRate = 48000.0, double externalSquelchLevelDb = std::numeric_limits<double>::quiet_NaN(), bool audioLpfEnabled = true);
+std::vector<float> demodulateToAudio(const std::vector<std::complex<float>>& iq, double sr, double cf, double target, DemodMode mode, double& rmsOut, double lpfHz = 0, double squelchDb = -105, double gain = 1.0, double wfmDeTauUs = 75.0, double wfmPilotNotchR = 0.96, double channelBwHz = 0, size_t target_audio_samples = 0, double outputRate = 48000.0, double externalSquelchLevelDb = std::numeric_limits<double>::quiet_NaN(), bool audioLpfEnabled = true);

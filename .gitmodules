@@ -1,3 +1,6 @@
 [submodule "external/miniaudio"]
 	path = external/miniaudio
 	url = https://github.com/mackron/miniaudio.git
+[submodule "external/mbelib"]
+	path = external/mbelib
+	url = https://github.com/szechyjs/mbelib.git

@@ -9,9 +9,13 @@ Connect multiple HackRF (and other SoapySDR) devices in one clean GUI. Smart sca
 ## Key Features (Target)
 
 - Multiple SDRs (HackRF focus, any SoapySDR device) with per-device configuration.
+- Device calibration: persisted RF gain, sample rate, antenna, and live PPM frequency correction.
 - Professional Qt6 GUI: spectrum/waterfall, active receivers table, hits, decoder panes.
-- **Audio menu**: Configure and route to 2+ output devices simultaneously with independent volumes and test tones (perfect for speakers + VAC).
-- Smart scanner: band plans, energy detection, classification hints, VAD gating, priority/history-aware scanning.
+- **Audio controls**: Main-page master volume plus quick output-device access; route to 2+ output devices simultaneously with independent volumes and test tones (perfect for speakers + VAC).
+- Smart scanner foundation: built-in band plans, band-aware auto mode/BW defaults, energy detection, classification hints, VAD gating, priority/history-aware scanning.
+- **Advanced signal classifier**: ROI-based spectrum/waterfall feature extraction with exact mode/BW/filter recommendations and a future-ready model interface. See `docs/signal_classifier.md` and `docs/classifier_training_data_plan.md`.
+- Classifier training tools: GUI/CLI SigMF capture, synthetic bootstrap generation, manifest splitting, optional PyTorch-to-ONNX training, and optional model-backend hooks.
+- Saved frequencies: one-click GUI recall plus CLI favorites for repeaters, broadcast stations, control channels, and test frequencies.
 - Excellent analog voice with CTCSS/DCS, squelch, AGC, recording.
 - Data: POCSAG pager decoding, basic AX.25.
 - Weather sats: live NOAA APT image decoding and save.
@@ -280,13 +284,15 @@ The same DeviceManager + AudioEngine + streaming/demod logic powers both GUI and
 
 ## Main GUI Live Controls (RF Gain, Squelch, Level)
 
-The top "Active Receivers" area has live main-GUI controls for **RF Gain (dB)** (hardware sensitivity, calls `setLiveGain` immediately on running device), **Squelch (dB)**, manual/auto **BW**, optional **LPF**, and color range for the waterfall/spectrum.
+The top "Active Receivers" area has live main-GUI controls for **RF Gain (dB)** (hardware sensitivity, calls `setLiveGain` immediately on running device), **Squelch (dB)**, manual/auto **BW**, optional **LPF**, main **Volume**, output routing, P25 control-channel candidates, and color range for the waterfall/spectrum.
 
 - **Squelch (dB) spin + "Auto" button**: RF threshold measured inside the selected receiver bandwidth around the tuned frequency. The DSP uses a smooth gate with short attack/release and a real sample-counted hang, so speech is not chopped but AM/SSB/NFM drops close promptly.
 - **To mute a frequency completely**: set SQ above the displayed `NF` line and below the wanted `SIG` line. Values below `-115 dB` mean squelch off / always pass audio.
 - **Auto**: computes local channel noise floor (`NF + 10 dB`, clamped sane range -130..40) and sets the spin. This is intentionally based on the receiver BW, not the whole spectrum view.
-- **BW + Auto BW**: manual bandwidth accepts decimals such as `12.5 kHz` for modern NFM CB/PMR spacing. Auto BW detects occupied bandwidth around the tuned frequency and snaps to sensible channel widths.
-- **LPF checkbox + cutoff**: disable the post-demod audio low-pass filter for decoder/data workflows, or set the cutoff manually instead of relying on fixed 5/15 kHz mode defaults.
+- **BW + Auto BW**: manual bandwidth accepts decimals such as `12.5 kHz` for modern NFM CB/PMR spacing. Auto BW detects occupied bandwidth around the tuned frequency and snaps to sensible channel widths; AM now defaults/snaps around wider `20 kHz` channels when the signal supports it.
+- **LPF checkbox + cutoff**: disable the post-demod audio low-pass filter for decoder/data workflows, or set the cutoff manually. Auto LPF now follows the selected/detected channel bandwidth instead of relying on fixed 5/15 kHz mode defaults.
+- **Volume + Outputs**: the main page has a live master-volume slider and an Outputs button for the multi-device audio mixer.
+- **P25 CC**: the P25 control-channel section lists likely 12.5 kHz-ish candidates from the live FFT; double-click a candidate to tune it. NAC/talkgroup decode is the next trunking step.
 - The main squelch control now propagates live to *all active receivers* (the ones contributing to mixed audio) and forces immediate gate reaction on raise (no more "have to click a new freq to make it cut"). Freq change / retune still works and forces a DSP state reset (instant gate close). Hang is only for natural signal drops.
 - RF Gain is separate from audio gain (the latter is post-demod multiplier for the monitor path).
 
@@ -308,4 +314,4 @@ See the markers on the plot: put SQ a few dB above the green NF marker and below
 
 See DESIGN.md for implementation details and citations.
 
-See DESIGN.md for the full feature/phase list + audit response log.
+See DESIGN.md for the full feature/phase list + audit response log. See [docs/feature_alignment_next.md](./docs/feature_alignment_next.md) for the current checklist alignment and the next recommended build pack.

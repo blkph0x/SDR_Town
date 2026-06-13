@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.7 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.8 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -48,6 +48,10 @@ set(SDR_TOWN_SOURCES
     src/SpectrumWidget.cpp
     src/AudioEngine.cpp
     src/Demod.cpp
+    src/P25Control.cpp
+    src/P25LiveDecoder.cpp
+    src/SignalClassifier.cpp
+    src/ClassifierModelBackend.cpp
     src/Receiver.cpp
     src/UpdateManager.cpp   # professional GitHub release + safe in-app updater
     include/UpdateManager.h
@@ -124,6 +128,42 @@ message(STATUS "SDR_Town configured. Qt6 + spdlog + nlohmann-json + (optional So
 
 # --- Testing support (Catch2 for unit tests + CLI harness) ---
 option(BUILD_TESTS "Build unit tests with Catch2" ON)
+option(SDR_TOWN_ENABLE_ONNX "Enable optional ONNX Runtime classifier backend hook" OFF)
+option(SDR_TOWN_ENABLE_MBELIB "Enable optional mbelib backend for clear P25 Phase 1 IMBE voice frames" ON)
+
+if(SDR_TOWN_ENABLE_ONNX)
+  find_package(onnxruntime CONFIG QUIET)
+  if(onnxruntime_FOUND)
+    message(STATUS "ONNX Runtime found - classifier backend hook enabled")
+    target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_ONNXRUNTIME)
+  else()
+    message(WARNING "SDR_TOWN_ENABLE_ONNX is ON, but onnxruntime was not found. Deterministic classifier remains active.")
+  endif()
+endif()
+
+if(SDR_TOWN_ENABLE_MBELIB)
+  set(SDR_TOWN_BUNDLED_MBELIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/mbelib")
+  if(EXISTS "${SDR_TOWN_BUNDLED_MBELIB_DIR}/mbelib.h" AND EXISTS "${SDR_TOWN_BUNDLED_MBELIB_DIR}/CMakeLists.txt")
+    set(DISABLE_TEST ON CACHE BOOL "Disable bundled mbelib test framework" FORCE)
+    add_subdirectory("${SDR_TOWN_BUNDLED_MBELIB_DIR}" "${CMAKE_BINARY_DIR}/external/mbelib" EXCLUDE_FROM_ALL)
+    message(STATUS "Bundled mbelib found - P25 IMBE voice backend enabled")
+    target_include_directories(${PROJECT_NAME} PRIVATE "${SDR_TOWN_BUNDLED_MBELIB_DIR}")
+    target_link_libraries(${PROJECT_NAME} PRIVATE mbe-static)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_MBELIB)
+  else()
+    find_path(MBELIB_INCLUDE_DIR NAMES mbelib.h)
+    find_library(MBELIB_LIBRARY NAMES mbe mbelib libmbe)
+    if(MBELIB_INCLUDE_DIR AND MBELIB_LIBRARY)
+      message(STATUS "System mbelib found - P25 IMBE voice backend enabled")
+      target_include_directories(${PROJECT_NAME} PRIVATE ${MBELIB_INCLUDE_DIR})
+      target_link_libraries(${PROJECT_NAME} PRIVATE ${MBELIB_LIBRARY})
+      target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_MBELIB)
+    else()
+      message(WARNING "SDR_TOWN_ENABLE_MBELIB is ON, but mbelib was not found. P25 IMBE voice backend remains unavailable.")
+    endif()
+  endif()
+endif()
+
 if(BUILD_TESTS)
   find_package(Catch2 CONFIG REQUIRED)
   enable_testing()
@@ -134,9 +174,15 @@ if(BUILD_TESTS)
     tests/test_devicemanager.cpp
     tests/test_audioengine.cpp
     tests/test_demod.cpp
+    tests/test_p25control.cpp
+    tests/test_p25live.cpp
     src/DeviceManager.cpp
     src/AudioEngine.cpp
     src/Demod.cpp
+    src/P25Control.cpp
+    src/P25LiveDecoder.cpp
+    src/SignalClassifier.cpp
+    src/ClassifierModelBackend.cpp
     src/Receiver.cpp
   )
   # Real Demodulator (full body, member state) is now always linked.
@@ -150,6 +196,15 @@ if(BUILD_TESTS)
   if(SoapySDR_FOUND)
     target_link_libraries(sdr_town_tests PRIVATE SoapySDR)
     target_compile_definitions(sdr_town_tests PRIVATE HAVE_SOAPYSDR)
+  endif()
+  if(SDR_TOWN_ENABLE_MBELIB AND TARGET mbe-static)
+    target_include_directories(sdr_town_tests PRIVATE "${SDR_TOWN_BUNDLED_MBELIB_DIR}")
+    target_link_libraries(sdr_town_tests PRIVATE mbe-static)
+    target_compile_definitions(sdr_town_tests PRIVATE HAVE_MBELIB)
+  elseif(SDR_TOWN_ENABLE_MBELIB AND MBELIB_INCLUDE_DIR AND MBELIB_LIBRARY)
+    target_include_directories(sdr_town_tests PRIVATE ${MBELIB_INCLUDE_DIR})
+    target_link_libraries(sdr_town_tests PRIVATE ${MBELIB_LIBRARY})
+    target_compile_definitions(sdr_town_tests PRIVATE HAVE_MBELIB)
   endif()
   target_include_directories(sdr_town_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include

@@ -33,6 +33,7 @@ struct DeviceInfo {
     double gain = 30.0;           // simplified master gain for now
     double gainMin = 0.0;
     double gainMax = 80.0;
+    double frequencyCorrectionPpm = 0.0; // oscillator correction; persisted and applied live when supported
     std::string antenna;
     std::string gainName;         // for setGain with specific element (e.g. "TUNER" for RTL)
     // more per-device settings can be added
@@ -62,8 +63,8 @@ public:
     void loadSettings();
     void saveSettings() const;
 
-    // Update a device's runtime params (gain, rate, antenna)
-    void updateDeviceParams(size_t index, double sampleRate, double gain, const std::string& antenna);
+    // Update a device's runtime params (gain, rate, antenna, oscillator correction)
+    void updateDeviceParams(size_t index, double sampleRate, double gain, const std::string& antenna, double frequencyCorrectionPpm = 0.0);
 
     // Real streaming (PR3+)
     // attemptReal=true (default) tries the real Soapy Device::make + stream for hardware.
@@ -106,6 +107,10 @@ public:
     // Falls back to just updating the persisted setting if not streaming.
     void setLiveGain(size_t index, double gainDb);
 
+    // Live oscillator correction. Uses native SoapySDR frequency correction when available,
+    // otherwise tunes the hardware LO to a corrected frequency while keeping UI/logical center intact.
+    void setFrequencyCorrection(size_t index, double ppm);
+
     // Diagnostics
     std::vector<std::string> getAvailableDrivers() const;
 
@@ -143,6 +148,8 @@ private:
         std::vector<float> latestPower;
         double currentCenter = 0;
         double currentRate = 0;
+        double frequencyCorrectionPpm = 0.0;
+        bool nativeFrequencyCorrectionActive = false;
         std::atomic<bool> stopFlag{false};
 
         // P1 audit: session generation to make init thread publishing and stop teardown safe.

@@ -8,6 +8,38 @@
 #include <QDateTime>
 #include <cmath>
 #include <algorithm>
+#include <limits>
+
+namespace {
+
+template <typename Row>
+float peakDbInBinSpan(const Row& row, double binStart, double binEnd, float fallback)
+{
+    const int n = static_cast<int>(row.size());
+    if (n <= 0 || !std::isfinite(binStart) || !std::isfinite(binEnd)) return fallback;
+    if (binEnd < binStart) std::swap(binStart, binEnd);
+    if (binEnd <= 0.0 || binStart >= static_cast<double>(n)) return fallback;
+
+    int lo = static_cast<int>(std::floor(binStart));
+    int hi = static_cast<int>(std::ceil(binEnd)) - 1;
+    if (hi < lo) {
+        const int nearest = std::clamp(static_cast<int>(std::llround((binStart + binEnd) * 0.5)), 0, n - 1);
+        const float v = static_cast<float>(row[nearest]);
+        return std::isfinite(v) ? v : fallback;
+    }
+
+    lo = std::clamp(lo, 0, n - 1);
+    hi = std::clamp(hi, 0, n - 1);
+
+    float peak = -std::numeric_limits<float>::infinity();
+    for (int i = lo; i <= hi; ++i) {
+        const float v = static_cast<float>(row[i]);
+        if (std::isfinite(v)) peak = std::max(peak, v);
+    }
+    return std::isfinite(peak) ? peak : fallback;
+}
+
+} // namespace
 
 SpectrumWidget::SpectrumWidget(QWidget* parent)
     : QWidget(parent)
@@ -188,11 +220,16 @@ void SpectrumWidget::scrollWaterfall(const std::vector<float>& latestPower)
         memcpy(m_waterfall.scanLine(y), m_waterfall.scanLine(y-1), w * 4);
     }
 
-    // draw newest line at y=0 (scaled to width)
+    // Draw newest line at y=0. Each display column represents a range of FFT bins,
+    // so use peak aggregation instead of single-bin sampling; otherwise narrow or
+    // flat digital channels (P25/DMR) can visually disappear during downsampling.
     int bins = static_cast<int>(latestPower.size());
+    const double binsPerPixel = (w > 0) ? static_cast<double>(bins) / static_cast<double>(w) : 0.0;
     for (int x = 0; x < w; ++x) {
-        int src = bins * x / w;
-        float db = (src < bins) ? latestPower[src] : m_colorMinDb;
+        const float db = peakDbInBinSpan(latestPower,
+                                         x * binsPerPixel,
+                                         (x + 1) * binsPerPixel,
+                                         static_cast<float>(m_colorMinDb));
         m_waterfall.setPixel(x, 0, dbToColor(db));
     }
 
@@ -378,30 +415,26 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
     // When zoomed (narrow viewBw), we only use the power bins inside the view and map them across the full width.
     // This gives visibly higher resolution / finer detail on the top spectrum when zoomed in (matching the zoomed waterfall).
     if (!powerCopy.isEmpty()) {
-        QPolygonF poly;
         int n = powerCopy.size();
         double fullStart = centerSnap - srSnap/2;
         double fullBw = srSnap;
         double viewStart = centerSnap - viewBwSnap / 2;
-        double viewEnd = centerSnap + viewBwSnap / 2;
         int plotLeft = specRect.left();
         int plotWidth = specRect.width();
+        QPolygonF poly;
 
-        for (int i = 0; i < n; ++i) {
-            double binFreq = fullStart + (i + 0.5) * (fullBw / n);
-            if (binFreq < viewStart || binFreq > viewEnd) continue;
-
-            double rel = (binFreq - viewStart) / viewBwSnap;
-            int x = plotLeft + static_cast<int>(rel * plotWidth);
-            float db = powerCopy[i];
-            // map using the (user adjustable via UI) color range so noise floor / sensitivity is reflected
-            float range = static_cast<float>(colorMaxSnap - colorMinSnap);
-            if (range < 1.0f) range = 100.0f;
-            float norm = std::clamp( (db - static_cast<float>(colorMinSnap)) / range , 0.0f, 1.0f);
-            int y = yFromDb(db, specH);   // now consistent with the dB axis we just drew
-            // clamp y into the specRect vertically
-            y = std::clamp(y, specRect.top() + 2, specRect.bottom() - 2);
-            poly << QPointF(x, y);
+        if (n > 0 && plotWidth > 0 && fullBw > 0.0 && viewBwSnap > 0.0) {
+            const double binHz = fullBw / static_cast<double>(n);
+            for (int x = 0; x < plotWidth; ++x) {
+                const double f0 = viewStart + (static_cast<double>(x) / plotWidth) * viewBwSnap;
+                const double f1 = viewStart + (static_cast<double>(x + 1) / plotWidth) * viewBwSnap;
+                const double b0 = (f0 - fullStart) / binHz;
+                const double b1 = (f1 - fullStart) / binHz;
+                const float db = peakDbInBinSpan(powerCopy, b0, b1, static_cast<float>(colorMinSnap));
+                int y = yFromDb(db, specH);
+                y = std::clamp(y, specRect.top() + 2, specRect.bottom() - 2);
+                poly << QPointF(plotLeft + x, y);
+            }
         }
 
         if (!poly.isEmpty()) {
@@ -433,7 +466,8 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
 
     if (!highResSnap.empty()) {
         // Build a temp image for the wf area from the *source* high-res bins (correct zoomed detail).
-        QImage wfSrc(w, wfH, QImage::Format_RGB32);
+        const int renderW = std::max(1, wfRect.width());
+        QImage wfSrc(renderW, wfH, QImage::Format_RGB32);
         wfSrc.fill(Qt::black);
 
         auto dbToColor = [&](float db) -> QRgb {
@@ -454,12 +488,15 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
             size_t rowIndex = rows - 1 - ageFromNewest; // newest at top, oldest at bottom
             const auto& row = highResSnap[rowIndex];
             if (row.empty()) continue;
-            double binsF = (double)row.size();
-            for (int x = 0; x < w; ++x) {
-                double f = viewStart + (x / (double)w) * viewBwSnap;
-                double binF = (f - fullStart) / (fullBw / binsF);
-                int b = std::clamp((int)std::lround(binF), 0, (int)row.size() - 1);
-                wfSrc.setPixel(x, y, dbToColor(row[b]));
+            if (fullBw <= 0.0 || viewBwSnap <= 0.0) continue;
+            const double binHz = fullBw / static_cast<double>(row.size());
+            for (int x = 0; x < renderW; ++x) {
+                const double f0 = viewStart + (static_cast<double>(x) / renderW) * viewBwSnap;
+                const double f1 = viewStart + (static_cast<double>(x + 1) / renderW) * viewBwSnap;
+                const double b0 = (f0 - fullStart) / binHz;
+                const double b1 = (f1 - fullStart) / binHz;
+                const float db = peakDbInBinSpan(row, b0, b1, static_cast<float>(colorMinSnap));
+                wfSrc.setPixel(x, y, dbToColor(db));
             }
         }
         p.drawImage(wfRect, wfSrc);
