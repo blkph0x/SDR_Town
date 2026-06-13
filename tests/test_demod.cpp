@@ -214,6 +214,20 @@ TEST_CASE("Advanced classifier maps flat 12.5 kHz digital ROI to P25/C4FM standa
     REQUIRE(rec.digital);
 }
 
+TEST_CASE("Advanced classifier maps narrow HF carrier to CW workflow") {
+    const double sr = 48000.0;
+    const double cf = 14.025e6;
+    const double target = 14.025e6;
+    auto pwr = makePowerSpectrum(4096, -118.0f);
+    paintPowerRange(pwr, sr, cf, target, -180.0, 180.0, -58.0f);
+
+    auto rec = AdvancedSignalClassifier::instance().classifySpectrum(pwr, sr, cf, target, 5000.0);
+    REQUIRE(rec.signalClass == SignalClass::CW);
+    REQUIRE(rec.demodMode == DemodMode::CW);
+    REQUIRE(rec.standardBandwidthHz == Catch::Approx(1000.0));
+    REQUIRE(rec.audioLowPassHz == Catch::Approx(900.0));
+}
+
 TEST_CASE("Advanced classifier recognizes WFM broadcast width and applies broadcast defaults") {
     const double sr = 2.4e6;
     const double cf = 100.0e6;
@@ -356,6 +370,20 @@ TEST_CASE("Demodulator SSB keeps upper speech with 6 kHz RF bandwidth and 3 kHz 
     REQUIRE(lsbAudio.size() > 1000);
     REQUIRE(tailRms(usbAudio) > 0.05);
     REQUIRE(tailRms(lsbAudio) > 0.05);
+}
+
+TEST_CASE("Demodulator CW produces audible BFO tone for tuned carrier") {
+    const double sr = 48000.0;
+    const double freq = 14.025e6;
+    Demodulator d;
+    double rms = -100.0;
+    auto iq = genTone(sr, 0.08, 0.0, 0.45);
+    auto audio = d.demodulateToAudio(iq, sr, freq, freq, DemodMode::CW,
+        rms, 900.0, -120.0, 1.0, 75.0, 0.96, 1000.0, 0, 48000.0);
+
+    REQUIRE(audio.size() > 1000);
+    REQUIRE(tailRms(audio) > 0.03);
+    REQUIRE(estimateFreq(audio, 48000.0) == Catch::Approx(700.0).margin(80.0));
 }
 
 TEST_CASE("Demodulator WFM produces audio with de-emphasis effect and continuity") {

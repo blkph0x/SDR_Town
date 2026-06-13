@@ -25,6 +25,17 @@ enum class P25VoiceDecodeStatus {
     InvalidFrame,
 };
 
+enum class P25Phase2BurstKind {
+    Unknown,
+    Voice4,
+    Voice2,
+    SacchScrambled,
+    FacchScrambled,
+    SacchClear,
+    FacchClear,
+    LcchClear,
+};
+
 struct P25LiveDecoderConfig {
     double symbolRate = 4800.0;
     double workSampleRate = 48000.0;
@@ -80,6 +91,10 @@ struct P25LiveDecoderStats {
     double symbolRate = 4800.0;
     double symbolConfidence = 0.0;
     bool voiceBackendAvailable = false;
+    size_t phase2Bursts = 0;
+    size_t phase2VoiceCodewords = 0;
+    int bestPhase2SyncErrors = -1;
+    size_t bestPhase2SyncDibitOffset = 0;
     std::string demodPath;
 };
 
@@ -91,6 +106,24 @@ struct P25ImbeFrame {
     std::string message;
 };
 
+struct P25Phase2VoiceCodeword {
+    size_t dibitOffset = 0;
+    uint8_t voiceIndex = 0;
+    std::array<uint8_t, 72> bits{};
+};
+
+struct P25Phase2Burst {
+    bool valid = false;
+    size_t dibitOffset = 0;
+    int syncErrors = -1;
+    uint8_t rawDuidCodeword = 0;
+    int duid = -1;
+    int duidErrors = -1;
+    P25Phase2BurstKind kind = P25Phase2BurstKind::Unknown;
+    bool xorMaskApplied = false;
+    std::vector<P25Phase2VoiceCodeword> voiceCodewords;
+};
+
 struct P25LiveDecodeResult {
     std::vector<int> dibits;
     std::vector<uint8_t> bits;
@@ -98,6 +131,7 @@ struct P25LiveDecodeResult {
     std::vector<P25Nid> nids;
     std::vector<P25TsbkBlock> rawTsbkBlocks;
     std::vector<P25ImbeFrame> imbeFrames;
+    std::vector<P25Phase2Burst> phase2Bursts;
     P25LiveDecoderStats stats;
     std::vector<std::string> warnings;
 };
@@ -110,6 +144,7 @@ struct P25VoiceDecodeResult {
 };
 
 P25ImbeFrame p25DecodeImbeFrameFromVoiceDibits(const std::vector<int>& voiceFrameDibits);
+std::array<uint8_t, 96> p25Phase2VoiceCodewordToAmbe3600x2450Frame(const P25Phase2VoiceCodeword& codeword);
 uint64_t p25EncodeNidBch(uint16_t nac, P25DataUnitId duid);
 
 class P25LiveDecoder {
@@ -117,6 +152,10 @@ public:
     static constexpr uint64_t FrameSyncWord = 0x5575F5FF77FFull;
     static constexpr size_t FrameSyncBits = 48;
     static constexpr size_t NidBits = 64;
+    static constexpr uint64_t Phase2FrameSyncWord = 0x575D57F7FFull;
+    static constexpr size_t Phase2FrameSyncBits = 40;
+    static constexpr size_t Phase2FrameSyncDibits = Phase2FrameSyncBits / 2;
+    static constexpr size_t Phase2BurstDibits = 180;
     static constexpr double SymbolRate = 4800.0;
 
     explicit P25LiveDecoder(P25LiveDecoderConfig config = {});
@@ -131,12 +170,15 @@ public:
                                                 double sampleRate);
     P25LiveDecodeResult processHardDibits(const std::vector<int>& dibits);
     P25LiveDecodeResult processHardBits(const std::vector<uint8_t>& bits);
+    std::vector<P25Phase2Burst> processPhase2HardDibits(const std::vector<int>& dibits) const;
 
     static std::array<uint8_t, FrameSyncBits> frameSyncBits();
+    static std::array<int, Phase2FrameSyncDibits> phase2FrameSyncDibits();
     static int dibitFromBits(uint8_t first, uint8_t second);
     static std::array<uint8_t, 2> bitsFromDibit(int dibit);
     static double nominalC4fmLevelForDibit(int dibit);
     static std::string dataUnitIdToString(P25DataUnitId duid);
+    static std::string phase2BurstKindToString(P25Phase2BurstKind kind);
 
 private:
     P25LiveDecoderConfig m_config;
@@ -154,6 +196,25 @@ public:
 
     bool backendAvailable() const;
     P25VoiceDecodeResult decodeImbe4400Frame(const std::array<uint8_t, 11>& imbe88);
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> m_impl;
+};
+
+class P25AmbeVoiceDecoder {
+public:
+    P25AmbeVoiceDecoder();
+    ~P25AmbeVoiceDecoder();
+
+    P25AmbeVoiceDecoder(const P25AmbeVoiceDecoder&) = delete;
+    P25AmbeVoiceDecoder& operator=(const P25AmbeVoiceDecoder&) = delete;
+    P25AmbeVoiceDecoder(P25AmbeVoiceDecoder&&) noexcept;
+    P25AmbeVoiceDecoder& operator=(P25AmbeVoiceDecoder&&) noexcept;
+
+    bool backendAvailable() const;
+    P25VoiceDecodeResult decodeAmbe2450Data(const std::array<uint8_t, 49>& ambe49);
+    P25VoiceDecodeResult decodeAmbe3600x2450Frame(const std::array<uint8_t, 96>& ambe96);
 
 private:
     struct Impl;

@@ -324,6 +324,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
     if (lpfHz <= 0) {
         if (mode == DemodMode::WFM || mode == DemodMode::AUTO) lpfHz = 15000.0;
         else if (mode == DemodMode::AM) lpfHz = 9000.0;
+        else if (mode == DemodMode::CW) lpfHz = 900.0;
         else if (mode == DemodMode::USB || mode == DemodMode::LSB) lpfHz = 3000.0;
         else lpfHz = 3000.0;
     }
@@ -348,6 +349,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         if (std::abs(target - lastResetTarget) > 5000.0 || mode != lastResetMode) {
             prev = {1,0};
             ph = 0;
+            cwBfoPhase = 0.0;
             firDelay.assign(firDelay.size(), std::complex<float>(0,0));
             dspStateNeedsReset = true;
             lastResetTarget = target;
@@ -356,17 +358,21 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
     }
 
     // DDC
-    double phaseInc = 2 * 3.141592653589793 * (target - cf) / sr;
+    const double twoPi = 2.0 * 3.14159265358979323846;
+    double phaseInc = twoPi * (target - cf) / sr;
     std::vector<std::complex<float>> baseband(iq.size());
     for (size_t k=0; k<iq.size(); ++k) {
         baseband[k] = iq[k] * std::polar(1.0f, (float)-ph);
         ph += phaseInc;
-        if (ph > 1e6 || ph < -1e6) ph = std::fmod(ph, 2 * M_PI);
+        if (ph > 3.14159265358979323846 || ph < -3.14159265358979323846) {
+            ph = std::remainder(ph, twoPi);
+        }
     }
 
     // Channel FIR (same design as before)
     if (channelBwHz <= 0) {
-        channelBwHz = (mode == DemodMode::WFM || mode == DemodMode::AUTO) ? 180000.0 : (mode == DemodMode::AM ? 20000.0 : 12500.0);
+        channelBwHz = (mode == DemodMode::WFM || mode == DemodMode::AUTO) ? 180000.0
+            : (mode == DemodMode::AM ? 20000.0 : (mode == DemodMode::CW ? 1000.0 : 12500.0));
     }
     if (std::abs(channelBwHz - lastBw) > 50 || std::abs(sr - lastS) > 100) {
         double fc = channelBwHz / 2.0 / sr;
@@ -387,7 +393,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
                 double x = beta * std::sqrt(1.0 - arg*arg);
                 w = std::cyl_bessel_i(0, x) / std::cyl_bessel_i(0, beta);
             }
-            double sinc = (m == 0) ? 1.0 : std::sin(2*M_PI*fc*m) / (M_PI * m);
+            double sinc = (m == 0) ? (2.0 * fc) : std::sin(2*M_PI*fc*m) / (M_PI * m);
             chanTaps[i] = (float)(w * sinc);
             sum += chanTaps[i];
         }
@@ -483,6 +489,18 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
             amCarrier = amCarrier * (1.0f - carrierAlpha) + env * carrierAlpha;
             base[k] = (env - amCarrier) / std::max(amCarrier, 1e-4f);
         }
+    } else if (mode == DemodMode::CW) {
+        constexpr double cwPitchHz = 700.0;
+        const double step = 2.0 * M_PI * cwPitchHz / std::max(1000.0, demodRate);
+        if (dspStateNeedsReset) cwBfoPhase = 0.0;
+        for (size_t k=0; k<baseband.size(); ++k) {
+            const std::complex<float> bfo(std::cos(cwBfoPhase), std::sin(cwBfoPhase));
+            base[k] = std::real(baseband[k] * bfo);
+            cwBfoPhase += step;
+            if (cwBfoPhase > M_PI || cwBfoPhase < -M_PI) {
+                cwBfoPhase = std::remainder(cwBfoPhase, 2.0 * M_PI);
+            }
+        }
     } else if (mode == DemodMode::USB || mode == DemodMode::LSB) {
         for (size_t k=0; k<baseband.size(); ++k) base[k] = std::real(baseband[k]);
     } else {
@@ -500,7 +518,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
 
     // Voice AGC only for SSB. FM levels are set by deviation; AM is carrier-normalized above.
     // Running AGC before squelch on AM/NFM lifts noise and makes the squelch meter misleading.
-    if (mode == DemodMode::USB || mode == DemodMode::LSB) {
+    if (mode == DemodMode::USB || mode == DemodMode::LSB || mode == DemodMode::CW) {
         if (dspStateNeedsReset) { agcGain = 1.0f; }
         float attack = 0.05f;
         float decay = 0.0005f;
@@ -663,7 +681,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
 
             // Hang is tracked in output samples and decremented by each processed block.
             // The old code decremented once per block, so "0.3s" could stick open for minutes.
-            const int hangSamples = (int)((mode == DemodMode::AM || mode == DemodMode::USB || mode == DemodMode::LSB) ? 0.10 * outputRate : 0.18 * outputRate);
+            const int hangSamples = (int)((mode == DemodMode::AM || mode == DemodMode::USB || mode == DemodMode::LSB || mode == DemodMode::CW) ? 0.10 * outputRate : 0.18 * outputRate);
             if (target > 0.5f) squelchHangLeft = hangSamples;
             else if (squelchHangLeft > 0) {
                 target = 1.0f;
@@ -693,7 +711,8 @@ double Demodulator::getSquelchDefaultForMode(DemodMode m) const {
         case DemodMode::NFM: return -105.0;
         case DemodMode::AM:  return -100.0;
         case DemodMode::USB:
-        case DemodMode::LSB: return -105.0;
+        case DemodMode::LSB:
+        case DemodMode::CW: return -105.0;
         case DemodMode::AUTO: return -105.0;
         default: return -105.0;
     }

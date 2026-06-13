@@ -94,6 +94,51 @@ std::vector<int> bytesToDibits(const std::vector<uint8_t>& bytes)
     return dibits;
 }
 
+uint8_t encodePhase2DuidForTest(int duid)
+{
+    static constexpr uint8_t g[4][8] = {
+        {1, 0, 0, 0, 1, 1, 0, 1},
+        {0, 1, 0, 0, 1, 0, 1, 1},
+        {0, 0, 1, 0, 1, 1, 1, 0},
+        {0, 0, 0, 1, 0, 1, 1, 1},
+    };
+    const uint8_t d[4] = {
+        static_cast<uint8_t>((duid >> 3) & 1),
+        static_cast<uint8_t>((duid >> 2) & 1),
+        static_cast<uint8_t>((duid >> 1) & 1),
+        static_cast<uint8_t>(duid & 1),
+    };
+    uint8_t out = 0;
+    for (int col = 0; col < 8; ++col) {
+        uint8_t bit = 0;
+        for (int row = 0; row < 4; ++row) bit ^= static_cast<uint8_t>(d[row] & g[row][col]);
+        out = static_cast<uint8_t>((out << 1) | bit);
+    }
+    return out;
+}
+
+std::vector<int> makeSyntheticPhase2Burst(int duid, bool flipDuidBit = false)
+{
+    std::vector<int> dibits(P25LiveDecoder::Phase2BurstDibits, 0);
+    const auto sync = P25LiveDecoder::phase2FrameSyncDibits();
+    std::copy(sync.begin(), sync.end(), dibits.begin());
+
+    uint8_t raw = encodePhase2DuidForTest(duid);
+    if (flipDuidBit) raw ^= 0x01u;
+    const size_t payload = 10;
+    dibits[payload + 10] = (raw >> 6) & 0x03;
+    dibits[payload + 47] = (raw >> 4) & 0x03;
+    dibits[payload + 132] = (raw >> 2) & 0x03;
+    dibits[payload + 169] = raw & 0x03;
+
+    for (const size_t start : {size_t{11}, size_t{48}, size_t{96}, size_t{133}}) {
+        for (size_t i = 0; i < 36 && payload + start + i < dibits.size(); ++i) {
+            dibits[payload + start + i] = static_cast<int>((i + start) & 0x03);
+        }
+    }
+    return dibits;
+}
+
 std::array<int, 2> p25TrellisPair(int cur, int next)
 {
     static constexpr int pairIndexes[4][4] = {
@@ -601,6 +646,58 @@ TEST_CASE("P25 live decoder corrects BCH-protected NID bit errors")
     REQUIRE(result.rawTsbkBlocks.size() == 1);
 }
 
+TEST_CASE("P25 live decoder extracts Phase 2 4V burst voice codewords")
+{
+    P25LiveDecoder decoder;
+    const auto dibits = makeSyntheticPhase2Burst(0x0);
+
+    const auto bursts = decoder.processPhase2HardDibits(dibits);
+    REQUIRE(bursts.size() == 1);
+    const auto& burst = bursts.front();
+    REQUIRE(burst.valid);
+    REQUIRE(burst.syncErrors == 0);
+    REQUIRE(burst.duid == 0x0);
+    REQUIRE(burst.duidErrors == 0);
+    REQUIRE(burst.kind == P25Phase2BurstKind::Voice4);
+    REQUIRE(burst.voiceCodewords.size() == 4);
+    REQUIRE(burst.voiceCodewords.front().dibitOffset == 21);
+
+    const auto result = decoder.processHardDibits(dibits);
+    REQUIRE(result.stats.phase2Bursts == 1);
+    REQUIRE(result.stats.phase2VoiceCodewords == 4);
+    REQUIRE(result.stats.bestPhase2SyncErrors == 0);
+}
+
+TEST_CASE("P25 live decoder corrects Phase 2 DUID and extracts 2V bursts")
+{
+    P25LiveDecoder decoder;
+    const auto dibits = makeSyntheticPhase2Burst(0x6, true);
+
+    const auto bursts = decoder.processPhase2HardDibits(dibits);
+    REQUIRE(bursts.size() == 1);
+    const auto& burst = bursts.front();
+    REQUIRE(burst.duid == 0x6);
+    REQUIRE(burst.duidErrors == 1);
+    REQUIRE(burst.kind == P25Phase2BurstKind::Voice2);
+    REQUIRE(burst.voiceCodewords.size() == 2);
+}
+
+TEST_CASE("P25 Phase 2 voice codewords map into AMBE frame layout")
+{
+    P25Phase2VoiceCodeword codeword;
+    codeword.bits[0] = 1;
+    codeword.bits[1] = 1;
+    codeword.bits[2] = 1;
+    codeword.bits[3] = 1;
+
+    const auto ambe = p25Phase2VoiceCodewordToAmbe3600x2450Frame(codeword);
+    REQUIRE(ambe[23] == 1);
+    REQUIRE(ambe[5] == 1);
+    REQUIRE(ambe[24 + 10] == 1);
+    REQUIRE(ambe[48 + 3] == 1);
+    REQUIRE(std::count(ambe.begin(), ambe.end(), static_cast<uint8_t>(1)) == 4);
+}
+
 TEST_CASE("P25 live decoder extracts valid IMBE frames from synthetic LDU")
 {
     const auto bits = makeSyntheticLduFrameBits(0x293, P25DataUnitId::LDU1);
@@ -632,6 +729,21 @@ TEST_CASE("P25 IMBE voice decoder reports backend availability explicitly")
         REQUIRE(result.status == P25VoiceDecodeStatus::Decoded);
         REQUIRE(result.sampleRate == Catch::Approx(8000.0));
         REQUIRE_FALSE(result.pcm.empty());
+    } else {
+        REQUIRE(result.status == P25VoiceDecodeStatus::BackendUnavailable);
+        REQUIRE(result.pcm.empty());
+    }
+}
+
+TEST_CASE("P25 AMBE Phase 2 voice decoder reports backend availability explicitly")
+{
+    P25AmbeVoiceDecoder voice;
+    std::array<uint8_t, 96> emptyFrame{};
+    const auto result = voice.decodeAmbe3600x2450Frame(emptyFrame);
+    if (voice.backendAvailable()) {
+        REQUIRE(result.status == P25VoiceDecodeStatus::Decoded);
+        REQUIRE(result.sampleRate == Catch::Approx(8000.0));
+        REQUIRE(result.pcm.size() == 160);
     } else {
         REQUIRE(result.status == P25VoiceDecodeStatus::BackendUnavailable);
         REQUIRE(result.pcm.empty());

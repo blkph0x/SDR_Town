@@ -104,15 +104,12 @@ std::vector<std::complex<float>> applyFirSame(const std::vector<std::complex<flo
     const int half = static_cast<int>(taps.size() / 2);
     for (size_t n = 0; n < x.size(); ++n) {
         std::complex<double> acc(0.0, 0.0);
-        double wsum = 0.0;
         for (size_t k = 0; k < taps.size(); ++k) {
             const int idx = static_cast<int>(n) + static_cast<int>(k) - half;
             if (idx < 0 || idx >= static_cast<int>(x.size())) continue;
             const double w = taps[k];
             acc += std::complex<double>(x[static_cast<size_t>(idx)].real(), x[static_cast<size_t>(idx)].imag()) * w;
-            wsum += w;
         }
-        if (std::abs(wsum) > 1e-9) acc /= wsum;
         out[n] = {static_cast<float>(acc.real()), static_cast<float>(acc.imag())};
     }
     return out;
@@ -125,23 +122,20 @@ std::vector<float> applyFirSame(const std::vector<float>& x, const std::vector<d
     const int half = static_cast<int>(taps.size() / 2);
     for (size_t n = 0; n < x.size(); ++n) {
         double acc = 0.0;
-        double wsum = 0.0;
         for (size_t k = 0; k < taps.size(); ++k) {
             const int idx = static_cast<int>(n) + static_cast<int>(k) - half;
             if (idx < 0 || idx >= static_cast<int>(x.size())) continue;
             const double w = taps[k];
             acc += static_cast<double>(x[static_cast<size_t>(idx)]) * w;
-            wsum += w;
         }
-        if (std::abs(wsum) > 1e-9) acc /= wsum;
         out[n] = static_cast<float>(acc);
     }
     return out;
 }
 
-std::vector<std::complex<float>> resampleLinear(const std::vector<std::complex<float>>& x,
-                                                double inputRate,
-                                                double outputRate)
+std::vector<std::complex<float>> resampleWindowedSinc(const std::vector<std::complex<float>>& x,
+                                                      double inputRate,
+                                                      double outputRate)
 {
     if (x.size() < 2 || !std::isfinite(inputRate) || !std::isfinite(outputRate) ||
         inputRate <= 0.0 || outputRate <= 0.0) {
@@ -152,10 +146,30 @@ std::vector<std::complex<float>> resampleLinear(const std::vector<std::complex<f
     std::vector<std::complex<float>> out;
     out.reserve(outCount);
     const double step = inputRate / outputRate;
+    const int radius = 10;
+    const double cutoff = std::min(0.46, 0.46 * outputRate / inputRate);
     for (size_t i = 0; i < outCount; ++i) {
         const double pos = static_cast<double>(i) * step;
         if (pos > static_cast<double>(x.size() - 1)) break;
-        out.push_back(sampleLinearComplex(x, pos));
+        const long center = static_cast<long>(std::floor(pos));
+        std::complex<double> acc(0.0, 0.0);
+        double wsum = 0.0;
+        for (int n = -radius; n <= radius; ++n) {
+            const long idx = center + n;
+            if (idx < 0 || idx >= static_cast<long>(x.size())) continue;
+            const double d = pos - static_cast<double>(idx);
+            const double sincArg = 2.0 * cutoff * d;
+            const double sinc = std::abs(sincArg) < 1e-12
+                ? 1.0
+                : std::sin(kPi * sincArg) / (kPi * sincArg);
+            const double winX = static_cast<double>(n + radius) / static_cast<double>(2 * radius);
+            const double window = 0.42 - 0.5 * std::cos(2.0 * kPi * winX) + 0.08 * std::cos(4.0 * kPi * winX);
+            const double w = 2.0 * cutoff * sinc * window;
+            acc += std::complex<double>(x[static_cast<size_t>(idx)].real(), x[static_cast<size_t>(idx)].imag()) * w;
+            wsum += w;
+        }
+        if (std::abs(wsum) > 1e-9) acc /= wsum;
+        out.push_back({static_cast<float>(acc.real()), static_cast<float>(acc.imag())});
     }
     return out;
 }
@@ -222,12 +236,10 @@ ChannelizedIqBlock channelizeP25Iq(const std::vector<std::complex<float>>& iq,
         : 1;
     const double intermediateRate = sampleRate / static_cast<double>(decim);
 
-    std::vector<std::complex<float>> channel;
-    channel.reserve(iq.size() / static_cast<size_t>(decim) + 1);
+    std::vector<std::complex<float>> mixed;
+    mixed.reserve(iq.size());
     const double phaseStep = -2.0 * kPi * offsetHz / sampleRate;
     double phase = 0.0;
-    std::complex<double> acc(0.0, 0.0);
-    int accCount = 0;
     for (size_t i = 0; i < iq.size(); ++i) {
         if (i != 0) {
             phase += phaseStep;
@@ -236,19 +248,26 @@ ChannelizedIqBlock channelizeP25Iq(const std::vector<std::complex<float>>& iq,
             }
         }
         const std::complex<double> osc(std::cos(phase), std::sin(phase));
-        const std::complex<double> mixed(static_cast<double>(iq[i].real()), static_cast<double>(iq[i].imag()));
-        acc += mixed * osc;
-        ++accCount;
-        if (accCount >= decim) {
-            const auto avg = acc / static_cast<double>(accCount);
-            channel.emplace_back(static_cast<float>(avg.real()), static_cast<float>(avg.imag()));
-            acc = {};
-            accCount = 0;
-        }
+        const std::complex<double> rawSample(static_cast<double>(iq[i].real()), static_cast<double>(iq[i].imag()));
+        const auto bb = rawSample * osc;
+        mixed.emplace_back(static_cast<float>(bb.real()), static_cast<float>(bb.imag()));
     }
-    if (accCount > 0) {
-        const auto avg = acc / static_cast<double>(accCount);
-        channel.emplace_back(static_cast<float>(avg.real()), static_cast<float>(avg.imag()));
+
+    if (mixed.size() < 2) return out;
+    if (decim > 1) {
+        const double antiAliasCutoffHz = std::clamp(intermediateRate * 0.42,
+                                                    config.channelBandwidthHz * 2.5,
+                                                    sampleRate * 0.45);
+        const double antiAliasTransitionHz = std::clamp(intermediateRate * 0.18,
+                                                        config.channelBandwidthHz,
+                                                        sampleRate * 0.20);
+        mixed = applyFirSame(mixed, designLowpassTaps(sampleRate, antiAliasCutoffHz, antiAliasTransitionHz, 241));
+    }
+
+    std::vector<std::complex<float>> channel;
+    channel.reserve(mixed.size() / static_cast<size_t>(decim) + 1);
+    for (size_t i = 0; i < mixed.size(); i += static_cast<size_t>(decim)) {
+        channel.push_back(mixed[i]);
     }
 
     if (channel.size() < 2) return out;
@@ -259,7 +278,7 @@ ChannelizedIqBlock channelizeP25Iq(const std::vector<std::complex<float>>& iq,
     channel = applyFirSame(channel, channelTaps);
 
     if (std::abs(intermediateRate - outputRate) > outputRate * 0.002) {
-        channel = resampleLinear(channel, intermediateRate, outputRate);
+        channel = resampleWindowedSinc(channel, intermediateRate, outputRate);
     }
     out.sampleRate = outputRate;
     if (channel.size() < 2) return out;
@@ -512,13 +531,16 @@ int reverseDibitBitOrder(int dibit)
 std::vector<int> symbolsToDibits(const std::vector<double>& symbolsHz,
                                   const P25LiveDecoderConfig& config,
                                   bool invertDeviation,
-                                  bool reverseBitOrder)
+                                  bool reverseBitOrder,
+                                  double scaleMultiplier = 1.0,
+                                  double scaleOverrideHz = 0.0)
 {
     std::vector<double> absVals;
     absVals.reserve(symbolsHz.size());
     for (double v : symbolsHz) absVals.push_back(std::abs(v));
     double high = percentile(absVals, 0.95);
-    double scale = high > 1e-6 ? high / 3.0 : config.c4fmInnerDeviationHz;
+    double scale = scaleOverrideHz > 1e-6 ? scaleOverrideHz : (high > 1e-6 ? high / 3.0 : config.c4fmInnerDeviationHz);
+    scale *= std::clamp(scaleMultiplier, 0.45, 1.8);
     scale = std::max(scale, config.c4fmInnerDeviationHz * 0.15);
 
     std::vector<int> dibits;
@@ -602,6 +624,15 @@ bool betterLiveResult(const P25LiveDecodeResult& a, const P25LiveDecodeResult& b
     const auto aValidNids = validNids(a);
     const auto bValidNids = validNids(b);
     if (aValidNids != bValidNids) return aValidNids > bValidNids;
+    const auto phase2VoiceCodewords = [](const P25LiveDecodeResult& r) {
+        size_t out = 0;
+        for (const auto& burst : r.phase2Bursts) out += burst.voiceCodewords.size();
+        return out;
+    };
+    const auto aPhase2Voice = phase2VoiceCodewords(a);
+    const auto bPhase2Voice = phase2VoiceCodewords(b);
+    if (aPhase2Voice != bPhase2Voice) return aPhase2Voice > bPhase2Voice;
+    if (a.phase2Bursts.size() != b.phase2Bursts.size()) return a.phase2Bursts.size() > b.phase2Bursts.size();
     if (a.nids.size() != b.nids.size()) return a.nids.size() > b.nids.size();
     if (a.syncs.size() != b.syncs.size()) return a.syncs.size() > b.syncs.size();
     if (a.stats.bestFrameSyncBitErrors >= 0 && b.stats.bestFrameSyncBitErrors >= 0 &&
@@ -625,6 +656,13 @@ bool hasTrustedPayload(const P25LiveDecodeResult& r)
     return std::any_of(r.imbeFrames.begin(), r.imbeFrames.end(), [](const P25ImbeFrame& frame) {
         return frame.valid;
     });
+}
+
+size_t phase2VoiceCodewordCount(const P25LiveDecodeResult& r)
+{
+    size_t out = 0;
+    for (const auto& burst : r.phase2Bursts) out += burst.voiceCodewords.size();
+    return out;
 }
 
 bool compiledVoiceBackendAvailable()
@@ -784,6 +822,89 @@ int syncErrorsAt(const std::vector<uint8_t>& bits,
         if ((bits[bitOffset + i] ? 1u : 0u) != expected) ++errors;
     }
     return errors;
+}
+
+std::array<int, P25LiveDecoder::Phase2FrameSyncDibits> phase2DibitsFromWord(uint64_t word)
+{
+    std::array<int, P25LiveDecoder::Phase2FrameSyncDibits> out{};
+    for (size_t i = 0; i < out.size(); ++i) {
+        const size_t shift = (out.size() - 1 - i) * 2;
+        out[i] = static_cast<int>((word >> shift) & 0x3ull);
+    }
+    return out;
+}
+
+int phase2SyncErrorsAt(const std::vector<int>& dibits,
+                       const std::array<int, P25LiveDecoder::Phase2FrameSyncDibits>& sync,
+                       size_t dibitOffset)
+{
+    int errors = 0;
+    for (size_t i = 0; i < sync.size(); ++i) {
+        if ((dibits[dibitOffset + i] & 0x03) != sync[i]) ++errors;
+    }
+    return errors;
+}
+
+uint8_t encodePhase2DuidCodeword(int duid)
+{
+    static constexpr uint8_t g[4][8] = {
+        {1, 0, 0, 0, 1, 1, 0, 1},
+        {0, 1, 0, 0, 1, 0, 1, 1},
+        {0, 0, 1, 0, 1, 1, 1, 0},
+        {0, 0, 0, 1, 0, 1, 1, 1},
+    };
+    const uint8_t d[4] = {
+        static_cast<uint8_t>((duid >> 3) & 1),
+        static_cast<uint8_t>((duid >> 2) & 1),
+        static_cast<uint8_t>((duid >> 1) & 1),
+        static_cast<uint8_t>(duid & 1),
+    };
+    uint8_t out = 0;
+    for (int col = 0; col < 8; ++col) {
+        uint8_t bit = 0;
+        for (int row = 0; row < 4; ++row) bit ^= static_cast<uint8_t>(d[row] & g[row][col]);
+        out = static_cast<uint8_t>((out << 1) | (bit & 1u));
+    }
+    return out;
+}
+
+struct Phase2DuidDecode {
+    int duid = -1;
+    int errors = 9;
+};
+
+Phase2DuidDecode decodePhase2Duid(uint8_t codeword)
+{
+    Phase2DuidDecode out;
+    for (int duid = 0; duid < 16; ++duid) {
+        const uint8_t expected = encodePhase2DuidCodeword(duid);
+        const int distance = std::popcount(static_cast<unsigned>(codeword ^ expected));
+        if (distance < out.errors) {
+            out.errors = distance;
+            out.duid = duid;
+        }
+    }
+    if (out.errors > 2) out.duid = -1;
+    return out;
+}
+
+P25Phase2BurstKind phase2BurstKindFromDuid(int duid)
+{
+    switch (duid) {
+        case 0x0: return P25Phase2BurstKind::Voice4;
+        case 0x3: return P25Phase2BurstKind::SacchScrambled;
+        case 0x6: return P25Phase2BurstKind::Voice2;
+        case 0x9: return P25Phase2BurstKind::FacchScrambled;
+        case 0xC: return P25Phase2BurstKind::SacchClear;
+        case 0xD: return P25Phase2BurstKind::LcchClear;
+        case 0xF: return P25Phase2BurstKind::FacchClear;
+        default: return P25Phase2BurstKind::Unknown;
+    }
+}
+
+bool phase2BurstKindHasVoice(P25Phase2BurstKind kind)
+{
+    return kind == P25Phase2BurstKind::Voice4 || kind == P25Phase2BurstKind::Voice2;
 }
 
 void appendBitsFromDibits(std::vector<uint8_t>& bits, const std::vector<int>& dibits)
@@ -1161,6 +1282,47 @@ P25ImbeFrame p25DecodeImbeFrameFromVoiceDibits(const std::vector<int>& voiceFram
 #endif
 }
 
+std::array<uint8_t, 96> p25Phase2VoiceCodewordToAmbe3600x2450Frame(const P25Phase2VoiceCodeword& codeword)
+{
+    static constexpr std::array<int, 72> kRows = {
+        0,0,1,2,0,0,1,2,0,0,1,2,0,0,1,2,
+        0,0,1,3,0,0,1,3,0,1,1,3,0,1,1,3,
+        0,1,1,3,0,1,1,3,0,1,1,3,0,1,2,3,
+        0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3,
+        0,1,2,3,0,1,2,3,
+    };
+    static constexpr std::array<int, 24> kCols0 = {
+        23,5,22,4,21,3,20,2,19,1,18,0,
+        17,16,15,14,13,12,11,10,9,8,7,6,
+    };
+    static constexpr std::array<int, 23> kCols1 = {
+        10,9,8,7,6,5,22,4,21,3,20,2,
+        19,1,18,0,17,16,15,14,13,12,11,
+    };
+    static constexpr std::array<int, 11> kCols2 = {
+        3,2,1,0,10,9,8,7,6,5,4,
+    };
+    static constexpr std::array<int, 14> kCols3 = {
+        13,12,11,10,9,8,7,6,5,4,3,2,1,0,
+    };
+
+    std::array<uint8_t, 96> out{};
+    std::array<size_t, 4> nextCol{};
+    for (size_t i = 0; i < codeword.bits.size(); ++i) {
+        const int row = kRows[i];
+        int col = 0;
+        switch (row) {
+            case 0: col = kCols0[nextCol[0]++]; break;
+            case 1: col = kCols1[nextCol[1]++]; break;
+            case 2: col = kCols2[nextCol[2]++]; break;
+            case 3: col = kCols3[nextCol[3]++]; break;
+            default: continue;
+        }
+        out[static_cast<size_t>(row) * 24u + static_cast<size_t>(col)] = codeword.bits[i] ? 1u : 0u;
+    }
+    return out;
+}
+
 P25LiveDecoder::P25LiveDecoder(P25LiveDecoderConfig config)
     : m_config(config)
 {
@@ -1207,9 +1369,6 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
     c4fm.stats.inputSamples = iq.size();
     c4fm.stats.demodPath = "C4FM";
     best = std::move(c4fm);
-    if (hasTrustedPayload(best)) {
-        return best;
-    }
 
     const double sps = channel.sampleRate / m_config.symbolRate;
     const int phaseSteps = static_cast<int>(std::clamp(std::ceil(sps * 0.5), 4.0, 6.0));
@@ -1259,10 +1418,21 @@ P25LiveDecodeResult P25LiveDecoder::processFmDiscriminator(const std::vector<flo
     bool haveCandidate = false;
     for (bool invertDeviation : {false, true}) {
         for (bool reverseBitOrder : {false, true}) {
-            auto candidate = processHardDibits(symbolsToDibits(symbols.symbolsHz, m_config, invertDeviation, reverseBitOrder));
-            if (!haveCandidate || betterLiveResult(candidate, best)) {
-                best = std::move(candidate);
-                haveCandidate = true;
+            for (double scaleMultiplier : {1.0, 0.85, 1.15, 0.70, 1.30}) {
+                auto candidate = processHardDibits(symbolsToDibits(
+                    symbols.symbolsHz, m_config, invertDeviation, reverseBitOrder, scaleMultiplier));
+                if (!haveCandidate || betterLiveResult(candidate, best)) {
+                    best = std::move(candidate);
+                    haveCandidate = true;
+                }
+            }
+            for (double fixedScale : {m_config.c4fmInnerDeviationHz, m_config.c4fmInnerDeviationHz * 0.80, m_config.c4fmInnerDeviationHz * 1.20}) {
+                auto candidate = processHardDibits(symbolsToDibits(
+                    symbols.symbolsHz, m_config, invertDeviation, reverseBitOrder, 1.0, fixedScale));
+                if (!haveCandidate || betterLiveResult(candidate, best)) {
+                    best = std::move(candidate);
+                    haveCandidate = true;
+                }
             }
         }
     }
@@ -1282,7 +1452,78 @@ P25LiveDecodeResult P25LiveDecoder::processHardDibits(const std::vector<int>& di
     result = processHardBits(result.bits);
     result.dibits = dibits;
     result.stats.symbols = dibits.size();
+    result.phase2Bursts = processPhase2HardDibits(dibits);
+    result.stats.phase2Bursts = result.phase2Bursts.size();
+    result.stats.phase2VoiceCodewords = phase2VoiceCodewordCount(result);
+    for (const auto& burst : result.phase2Bursts) {
+        if (result.stats.bestPhase2SyncErrors < 0 || burst.syncErrors < result.stats.bestPhase2SyncErrors) {
+            result.stats.bestPhase2SyncErrors = burst.syncErrors;
+            result.stats.bestPhase2SyncDibitOffset = burst.dibitOffset;
+        }
+    }
     return result;
+}
+
+std::vector<P25Phase2Burst> P25LiveDecoder::processPhase2HardDibits(const std::vector<int>& dibits) const
+{
+    std::vector<P25Phase2Burst> bursts;
+    if (dibits.size() < Phase2BurstDibits) return bursts;
+
+    static constexpr std::array<uint64_t, 5> kSyncWords = {
+        Phase2FrameSyncWord,
+        Phase2FrameSyncWord ^ 0xAAAAAAAAAAull,
+        0x0104015155ull,
+        0xA8A2A8D800ull,
+        0xFEFBFEAEAAull,
+    };
+    std::array<std::array<int, Phase2FrameSyncDibits>, kSyncWords.size()> syncs{};
+    for (size_t i = 0; i < kSyncWords.size(); ++i) syncs[i] = phase2DibitsFromWord(kSyncWords[i]);
+
+    for (size_t pos = 0; pos + Phase2BurstDibits <= dibits.size(); ++pos) {
+        int bestErrors = static_cast<int>(Phase2FrameSyncDibits) + 1;
+        for (const auto& sync : syncs) {
+            bestErrors = std::min(bestErrors, phase2SyncErrorsAt(dibits, sync, pos));
+        }
+        if (bestErrors > 2) continue;
+
+        P25Phase2Burst burst;
+        burst.valid = true;
+        burst.dibitOffset = pos;
+        burst.syncErrors = bestErrors;
+
+        const size_t payload = pos + 10; // P25 Phase 2 DUID/voice payload starts after the first ten dibits.
+        if (payload + 170 <= dibits.size()) {
+            burst.rawDuidCodeword = static_cast<uint8_t>(((dibits[payload + 10] & 0x03) << 6) |
+                                                         ((dibits[payload + 47] & 0x03) << 4) |
+                                                         ((dibits[payload + 132] & 0x03) << 2) |
+                                                         (dibits[payload + 169] & 0x03));
+            const auto duid = decodePhase2Duid(burst.rawDuidCodeword);
+            burst.duid = duid.duid;
+            burst.duidErrors = duid.errors;
+            burst.kind = phase2BurstKindFromDuid(duid.duid);
+
+            if (phase2BurstKindHasVoice(burst.kind)) {
+                const std::array<size_t, 4> starts{11, 48, 96, 133};
+                const size_t count = burst.kind == P25Phase2BurstKind::Voice4 ? 4u : 2u;
+                for (size_t i = 0; i < count; ++i) {
+                    const size_t start = payload + starts[i];
+                    if (start + 36 > dibits.size()) continue;
+                    P25Phase2VoiceCodeword cw;
+                    cw.dibitOffset = start;
+                    cw.voiceIndex = static_cast<uint8_t>(i);
+                    for (size_t d = 0; d < 36; ++d) {
+                        const auto bits = bitsFromDibit(dibits[start + d] & 0x03);
+                        cw.bits[d * 2] = bits[0];
+                        cw.bits[d * 2 + 1] = bits[1];
+                    }
+                    burst.voiceCodewords.push_back(cw);
+                }
+            }
+        }
+        bursts.push_back(std::move(burst));
+        pos += Phase2BurstDibits - 1;
+    }
+    return bursts;
 }
 
 P25LiveDecodeResult P25LiveDecoder::processHardBits(const std::vector<uint8_t>& inputBits)
@@ -1453,6 +1694,11 @@ std::array<uint8_t, P25LiveDecoder::FrameSyncBits> P25LiveDecoder::frameSyncBits
     return out;
 }
 
+std::array<int, P25LiveDecoder::Phase2FrameSyncDibits> P25LiveDecoder::phase2FrameSyncDibits()
+{
+    return phase2DibitsFromWord(Phase2FrameSyncWord);
+}
+
 int P25LiveDecoder::dibitFromBits(uint8_t first, uint8_t second)
 {
     return ((first ? 1 : 0) << 1) | (second ? 1 : 0);
@@ -1486,6 +1732,21 @@ std::string P25LiveDecoder::dataUnitIdToString(P25DataUnitId duid)
         case P25DataUnitId::PDU: return "PDU";
         case P25DataUnitId::TDULC: return "TDULC";
         case P25DataUnitId::Unknown:
+        default: return "Unknown";
+    }
+}
+
+std::string P25LiveDecoder::phase2BurstKindToString(P25Phase2BurstKind kind)
+{
+    switch (kind) {
+        case P25Phase2BurstKind::Voice4: return "4V";
+        case P25Phase2BurstKind::Voice2: return "2V";
+        case P25Phase2BurstKind::SacchScrambled: return "SACCH scrambled";
+        case P25Phase2BurstKind::FacchScrambled: return "FACCH scrambled";
+        case P25Phase2BurstKind::SacchClear: return "SACCH clear";
+        case P25Phase2BurstKind::FacchClear: return "FACCH clear";
+        case P25Phase2BurstKind::LcchClear: return "LCCH clear";
+        case P25Phase2BurstKind::Unknown:
         default: return "Unknown";
     }
 }
@@ -1555,6 +1816,108 @@ P25VoiceDecodeResult P25ImbeVoiceDecoder::decodeImbe4400Frame(const std::array<u
     (void)imbe88;
     result.status = P25VoiceDecodeStatus::BackendUnavailable;
     result.message = "Clear P25 Phase 1 IMBE voice requires an mbelib-compatible backend built with SDR_TOWN_ENABLE_MBELIB=ON.";
+    return result;
+#endif
+}
+
+struct P25AmbeVoiceDecoder::Impl {
+#ifdef HAVE_MBELIB
+    mbe_parms current{};
+    mbe_parms previous{};
+    mbe_parms enhanced{};
+
+    Impl()
+    {
+        mbe_initMbeParms(&current, &previous, &enhanced);
+    }
+#endif
+};
+
+P25AmbeVoiceDecoder::P25AmbeVoiceDecoder()
+{
+#ifdef HAVE_MBELIB
+    m_impl = std::make_unique<Impl>();
+#endif
+}
+
+P25AmbeVoiceDecoder::~P25AmbeVoiceDecoder() = default;
+P25AmbeVoiceDecoder::P25AmbeVoiceDecoder(P25AmbeVoiceDecoder&&) noexcept = default;
+P25AmbeVoiceDecoder& P25AmbeVoiceDecoder::operator=(P25AmbeVoiceDecoder&&) noexcept = default;
+
+bool P25AmbeVoiceDecoder::backendAvailable() const
+{
+#ifdef HAVE_MBELIB
+    return static_cast<bool>(m_impl);
+#else
+    return false;
+#endif
+}
+
+P25VoiceDecodeResult P25AmbeVoiceDecoder::decodeAmbe2450Data(const std::array<uint8_t, 49>& ambe49)
+{
+    P25VoiceDecodeResult result;
+    result.sampleRate = 8000.0;
+#ifdef HAVE_MBELIB
+    if (!m_impl) {
+        result.status = P25VoiceDecodeStatus::BackendUnavailable;
+        result.message = "mbelib AMBE backend is not initialized.";
+        return result;
+    }
+
+    char ambeBits[49]{};
+    for (size_t i = 0; i < ambe49.size(); ++i) {
+        ambeBits[i] = static_cast<char>(ambe49[i] ? 1 : 0);
+    }
+
+    float audio[160]{};
+    int errs = 0;
+    int errs2 = 0;
+    char errText[64]{};
+    mbe_processAmbe2450Dataf(audio, &errs, &errs2, errText, ambeBits,
+                             &m_impl->current, &m_impl->previous, &m_impl->enhanced, 3);
+    result.status = P25VoiceDecodeStatus::Decoded;
+    result.pcm.assign(std::begin(audio), std::end(audio));
+    result.message = errText[0] ? errText : "decoded";
+    return result;
+#else
+    (void)ambe49;
+    result.status = P25VoiceDecodeStatus::BackendUnavailable;
+    result.message = "Clear P25 Phase 2 AMBE voice requires an mbelib-compatible backend built with SDR_TOWN_ENABLE_MBELIB=ON.";
+    return result;
+#endif
+}
+
+P25VoiceDecodeResult P25AmbeVoiceDecoder::decodeAmbe3600x2450Frame(const std::array<uint8_t, 96>& ambe96)
+{
+    P25VoiceDecodeResult result;
+    result.sampleRate = 8000.0;
+#ifdef HAVE_MBELIB
+    if (!m_impl) {
+        result.status = P25VoiceDecodeStatus::BackendUnavailable;
+        result.message = "mbelib AMBE backend is not initialized.";
+        return result;
+    }
+
+    char ambeFrame[4][24]{};
+    for (size_t i = 0; i < ambe96.size(); ++i) {
+        ambeFrame[i / 24][i % 24] = static_cast<char>(ambe96[i] ? 1 : 0);
+    }
+
+    char ambeData[49]{};
+    float audio[160]{};
+    int errs = 0;
+    int errs2 = 0;
+    char errText[64]{};
+    mbe_processAmbe3600x2450Framef(audio, &errs, &errs2, errText, ambeFrame, ambeData,
+                                   &m_impl->current, &m_impl->previous, &m_impl->enhanced, 3);
+    result.status = P25VoiceDecodeStatus::Decoded;
+    result.pcm.assign(std::begin(audio), std::end(audio));
+    result.message = errText[0] ? errText : "decoded";
+    return result;
+#else
+    (void)ambe96;
+    result.status = P25VoiceDecodeStatus::BackendUnavailable;
+    result.message = "Clear P25 Phase 2 AMBE voice requires an mbelib-compatible backend built with SDR_TOWN_ENABLE_MBELIB=ON.";
     return result;
 #endif
 }

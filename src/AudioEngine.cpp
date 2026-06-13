@@ -98,12 +98,16 @@ AudioEngine::AudioEngine()
 
 AudioEngine::~AudioEngine()
 {
-    for (auto& act : m_active) {
-        if (act && act->device && act->device->pContext) {
-            act->valid.store(false, std::memory_order_release);
-            ma_device_stop(act->device.get());
-            ma_device_uninit(act->device.get());
+    {
+        std::lock_guard<std::mutex> lk(audioMutex);
+        for (auto& act : m_active) {
+            if (act && act->device && act->device->pContext) {
+                act->valid.store(false, std::memory_order_release);
+                ma_device_stop(act->device.get());
+                ma_device_uninit(act->device.get());
+            }
         }
+        m_active.clear();
     }
     if (m_contextValid) {
         ma_context_uninit(&m_context);
@@ -277,7 +281,6 @@ void AudioEngine::clearBuffers()
         const size_t w = rb.writePos.load(std::memory_order_acquire);
         rb.readPos.store(w, std::memory_order_release);
     }
-    audioBuffer.clear();
 }
 
 void AudioEngine::pushAudio(const float* samples, size_t count)
@@ -310,13 +313,6 @@ void AudioEngine::pushAudio(const float* samples, size_t count)
             w = next;
         }
         rb.writePos.store(w, std::memory_order_release);
-    }
-
-    // legacy shared buffer kept for compatibility / tests
-    audioBuffer.insert(audioBuffer.end(), samples, samples + count);
-    size_t bound = (size_t)(getSampleRate() * 2);
-    if (audioBuffer.size() > bound) {
-        audioBuffer.erase(audioBuffer.begin(), audioBuffer.begin() + (audioBuffer.size() - bound));
     }
 }
 

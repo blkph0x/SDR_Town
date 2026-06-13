@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <limits>
 
-enum class DemodMode { NFM, WFM, AM, USB, LSB, AUTO };
+enum class DemodMode { NFM, WFM, AM, USB, LSB, CW, AUTO };
 
 struct P25ControlCandidate {
     double freqHz = 0.0;
@@ -91,6 +91,7 @@ private:
     float flp1=0, flp2=0;
     float amCarrier = 1.0f;
     bool amCarrierValid = false;
+    double cwBfoPhase = 0.0;
     float histYm2 = 0, histYm1 = 0, histY0 = 0;
     bool haveHist = false;
     double resampPhase = 0.0;

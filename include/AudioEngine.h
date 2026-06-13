@@ -59,9 +59,8 @@ public:
     std::atomic<int>   m_testTarget{-1};
     std::atomic<float> m_testFreq{1000.0f};
 
-    // Real audio buffer (accessible from static callback)
+    // Guards active output rings and device lifecycle.
     mutable std::mutex audioMutex;
-    std::vector<float> audioBuffer;
 
     float getMasterVolume() const { return m_masterVolume.load(std::memory_order_relaxed); }
 

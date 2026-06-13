@@ -13,9 +13,12 @@
 #include <chrono>
 #include <cmath>
 #include <algorithm>
+#include <array>
 #include <QCoreApplication>
-#include <cstdlib> // for _putenv_s
+#include <cstdlib>
+#ifdef _WIN32
 #include <windows.h> // for GetFileAttributesA
+#endif
 
 #ifdef HAVE_SOAPYSDR
 #include <SoapySDR/Logger.hpp>
@@ -47,6 +50,28 @@ static double correctedTuneFrequencyHz(double logicalHz, double ppm) {
     const double scale = 1.0 + ppm * 1e-6;
     if (std::abs(scale) < 1e-9) return logicalHz;
     return logicalHz / scale;
+}
+
+static double chooseDefaultSampleRate(const DeviceInfo& d) {
+    if (d.sampleRates.empty()) return d.driver == "rtlsdr" ? 2.048e6 : 2.4e6;
+    const std::array<double, 2> preferred = d.driver == "rtlsdr"
+        ? std::array<double, 2>{2.048e6, 2.4e6}
+        : std::array<double, 2>{2.4e6, 2.048e6};
+
+    for (double target : preferred) {
+        for (double rate : d.sampleRates) {
+            if (std::isfinite(rate) && std::abs(rate - target) <= std::max(1.0, target * 0.002)) {
+                return rate;
+            }
+        }
+    }
+
+    const double target = preferred.front();
+    return *std::min_element(d.sampleRates.begin(), d.sampleRates.end(), [target](double a, double b) {
+        if (!std::isfinite(a)) return false;
+        if (!std::isfinite(b)) return true;
+        return std::abs(a - target) < std::abs(b - target);
+    });
 }
 
 std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
@@ -101,7 +126,7 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
                                 di.sampleRates = {1e6, 2e6, 2.4e6, 5e6, 10e6};
                             }
                         }
-                        if (!di.sampleRates.empty()) di.sampleRate = di.sampleRates[0];
+                        if (!di.sampleRates.empty()) di.sampleRate = chooseDefaultSampleRate(di);
 
                         // freq range rough
                         auto ranges = dev->getFrequencyRange(SOAPY_SDR_RX, 0);
@@ -518,15 +543,32 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                 return;
             }
 
-            // Success path: stop stub (our code, safe to join), start real rx thread.
+            // Success path: stop stub (our code, normally safe to join), start real rx thread.
+            // Keep this bounded anyway: a wedged thread must never block the async upgrade path.
             st.stopFlag = true;
+            bool stubDetached = false;
             if (st.rxThread.joinable()) {
                 auto start = std::chrono::steady_clock::now();
                 while (st.rxThreadRunning.load(std::memory_order_acquire) &&
                        std::chrono::steady_clock::now() - start < std::chrono::milliseconds(500)) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(2));
                 }
-                st.rxThread.join();
+                if (st.rxThreadRunning.load(std::memory_order_acquire)) {
+                    spdlog::warn("Stub rxThread for device {} did not stop during real upgrade; detaching and aborting upgrade.", index);
+                    try { st.rxThread.detach(); } catch (...) {}
+                    stubDetached = true;
+                } else {
+                    try { st.rxThread.join(); } catch (...) { try { st.rxThread.detach(); stubDetached = true; } catch (...) {} }
+                }
+            }
+            if (stubDetached) {
+                cleanupLocal();
+                {
+                    std::lock_guard<std::mutex> lk(st.stateMutex);
+                    st.active = false;
+                    st.isReal = false;
+                }
+                return;
             }
             if (st.sessionGen.load(std::memory_order_acquire) != myGen) {
                 cleanupLocal();
@@ -869,8 +911,8 @@ size_t DeviceManager::getIQQueueDepth(size_t index) const {
 }
 
 // S0-3 (P1): non-consuming recent window so N receivers on the same device each get a coherent
-// recent RF capture for their private channelizer/demod. Does not advance frontBlockReadOffset
-// or pop anything (unlike the consuming getNextIQBlock used by primary spectrum path).
+// recent RF capture for their private channelizer/demod. Read from the absolute-sample ring
+// instead of the consuming iqQueue so monitor/CLI P25 sync cannot starve or disturb spectrum.
 std::vector<std::complex<float>> DeviceManager::getRecentIQWindow(size_t index, size_t maxSamples) {
     if (index >= streams.size() || !streams[index] || maxSamples == 0) return {};
     auto& st = *streams[index];
@@ -879,33 +921,28 @@ std::vector<std::complex<float>> DeviceManager::getRecentIQWindow(size_t index, 
         if (!st.active) return {};
     }
 
-    std::lock_guard<std::mutex> lk(st.queueMutex);
-    if (st.iqQueue.empty()) return {};
+    std::lock_guard<std::mutex> ringLock(st.ringMutex);
+    const size_t cap = st.ringCapacity;
+    const uint64_t total = st.totalSamplesWritten.load(std::memory_order_acquire);
+    if (cap == 0 || st.iqRing.empty() || total == 0) return {};
 
+    const uint64_t available = std::min<uint64_t>(total, static_cast<uint64_t>(cap));
+    const size_t toRead = static_cast<size_t>(std::min<uint64_t>(available, static_cast<uint64_t>(maxSamples)));
     std::vector<std::complex<float>> out;
-    out.reserve(maxSamples);
+    out.reserve(toRead);
 
-    // Start from the most recent full blocks (back of deque) and work toward older if needed.
-    // Also incorporate any live remainder in the front block (the one being partially consumed by getNext).
-    // This gives demod paths a consistent "latest N samples" view without affecting the primary cursor.
-    auto it = st.iqQueue.rbegin(); // most recent full block first
-    // First, if there is a partial front block in flight, we can only reliably use full previous blocks here.
-    // For simplicity and low latency we copy full recent blocks from the tail until we have enough or run out.
-    while (it != st.iqQueue.rend() && out.size() < maxSamples) {
-        const auto& blk = *it;
-        size_t take = std::min(blk.size(), maxSamples - out.size());
-        // prepend in reverse iteration order — correct by inserting at front or build then reverse at end
-        // Easier: collect in reverse then fix, or use a temp and insert.
-        // Practical: push the recent ones and reverse at the end.
-        out.insert(out.begin(), blk.end() - take, blk.end());  // take the newest part of this (older in iteration) blk? Wait, rbegin is newest.
-        // Since we go from newest block backward, the newest samples end up at the front of 'out' after inserts at begin — reverse at end.
-        ++it;
+    // Return the newest contiguous ring window in chronological order.
+    const uint64_t start = total - static_cast<uint64_t>(toRead);
+    const bool powerOfTwoCap = (cap & (cap - 1)) == 0;
+    for (size_t k = 0; k < toRead; ++k) {
+        const uint64_t absolute = start + static_cast<uint64_t>(k);
+        const size_t idx = powerOfTwoCap
+            ? static_cast<size_t>(absolute) & (cap - 1)
+            : static_cast<size_t>(absolute % static_cast<uint64_t>(cap));
+        out.push_back(st.iqRing[idx]);
     }
-
-    // Trim to exactly what was requested (in case we over-copied slightly).
-    if (out.size() > maxSamples) out.resize(maxSamples);
-
     return out;
+
 }
 
 // S0 / audit-followup-2: cursor based new-samples only, chronological, per-rx.
@@ -1012,6 +1049,7 @@ std::vector<std::string> DeviceManager::getAvailableDrivers() const {
 }
 
 void DeviceManager::setupSoapyForRTLSDR() {
+#ifdef _WIN32
     // Help Soapy find RTL-SDR module from common bundles like PothosSDR
     // This registers the "rtlsdr" driver if the module is present there.
     const char* commonRoots[] = {
@@ -1048,6 +1086,7 @@ void DeviceManager::setupSoapyForRTLSDR() {
         }
         pathSetupDone = true;
     }
+#endif
 
 #ifdef HAVE_SOAPYSDR
     // Note: Removed explicit loadModule here to avoid early hardware probe/crash on startup.

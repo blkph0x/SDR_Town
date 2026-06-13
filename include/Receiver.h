@@ -33,14 +33,22 @@ struct Receiver {
     double wfmDeTauUs = 75.0;
     double wfmPilotNotchR = 0.96;
 
-    // P25 Phase 1 voice follow state. When enabled, the DSP worker bypasses the
-    // analog NFM demodulator and routes valid LDU IMBE frames through mbelib.
+    // P25 clear voice follow state. When enabled, the DSP worker bypasses the
+    // analog NFM demodulator and routes valid IMBE/AMBE voice frames through mbelib.
     bool p25VoiceDecodeEnabled = false;
     bool p25VoiceClearKnown = false;
     bool p25VoiceEncrypted = false;
     uint32_t p25VoiceTalkgroupId = 0;
+    bool p25VoicePhase2 = false;
+    bool p25VoiceTdmaSlotKnown = false;
+    uint8_t p25VoiceTdmaSlot = 0;
+    bool p25VoiceMaskParamsKnown = false;
+    uint16_t p25VoiceNac = 0;
+    uint32_t p25VoiceWacn = 0;
+    uint16_t p25VoiceSystemId = 0;
     P25LiveDecoder p25VoiceLiveDecoder;
     P25ImbeVoiceDecoder p25ImbeVoiceDecoder;
+    P25AmbeVoiceDecoder p25AmbeVoiceDecoder;
 
     // Narrow-FM AFC: keeps the user tuned to the nominal channel while DSP
     // recenters the demodulator when SDR PPM/tuning error moves the carrier.
@@ -66,7 +74,12 @@ struct Receiver {
 
     // Simple reset helper (calls into Demodulator)
     void resetDemodState() { demod.resetState(); lastConsumedAbsolute = 0; afcLocked = false; afcOffsetHz = 0.0; }
-    void resetP25VoiceState() { p25VoiceLiveDecoder.reset(); p25ImbeVoiceDecoder = P25ImbeVoiceDecoder(); }
+    void resetP25VoiceState()
+    {
+        p25VoiceLiveDecoder.reset();
+        p25ImbeVoiceDecoder = P25ImbeVoiceDecoder();
+        p25AmbeVoiceDecoder = P25AmbeVoiceDecoder();
+    }
 
     // Force immediate squelch gate close (bypass hang) when user raises threshold via main controls or CLI.
     // Makes "set sq higher" live without requiring a freq retune/click (which previously forced a full reset).

@@ -87,6 +87,220 @@ TEST_CASE("P25 control analyzer extracts talkgroups from group voice grants")
     REQUIRE(ev.voiceFrequencyHz == Catch::Approx(450125000.0).margin(1.0));
 }
 
+TEST_CASE("P25 control analyzer does not treat Motorola regroup add as voice grant")
+{
+    P25ControlChannelAnalyzer analyzer;
+    const auto bytes = p25ParseHexBytes("00 90 27 88 27 88 27 88 27 88 31 4A");
+
+    const auto events = analyzer.ingestTsbk(bytes);
+    REQUIRE(events.size() == 1);
+    const auto& ev = events.front();
+    REQUIRE(ev.type == P25ControlEventType::VendorCommand);
+    REQUIRE(ev.opcode == 0x00);
+    REQUIRE(ev.mfid == 0x90);
+    REQUIRE(ev.talkgroupId == 0);
+    REQUIRE(ev.channel == 0);
+    REQUIRE(ev.voiceFrequencyHz == Catch::Approx(0.0));
+    REQUIRE(ev.voiceProtocol == P25VoiceProtocol::Unknown);
+    REQUIRE_FALSE(ev.tdmaSlotKnown);
+}
+
+TEST_CASE("P25 control analyzer maps TDMA identifiers to slot-aware channel frequencies")
+{
+    P25ControlChannelAnalyzer analyzer;
+    auto iden = makeTsbk(0x33);
+
+    const uint8_t id = 4;
+    const uint8_t channelType = 3; // common two-slot Phase 2 traffic profile
+    const uint32_t baseUnits = static_cast<uint32_t>(450000000.0 / 5.0);
+    const uint32_t spacingUnits = static_cast<uint32_t>(12500.0 / 125.0);
+
+    writeBitsMsb(iden, 16, 4, id);
+    writeBitsMsb(iden, 20, 4, channelType);
+    writeBitsMsb(iden, 24, 14, 0x2000u); // positive zero offset
+    writeBitsMsb(iden, 38, 10, spacingUnits);
+    writeBitsMsb(iden, 48, 32, baseUnits);
+
+    auto events = analyzer.ingestTsbk(iden);
+    REQUIRE(events.size() == 1);
+    const auto& ev = events.front();
+    REQUIRE(ev.type == P25ControlEventType::IdentifierUpdate);
+    REQUIRE(ev.identifierKnown);
+    REQUIRE(ev.identifier == id);
+    REQUIRE(ev.channelType == channelType);
+    REQUIRE(ev.slotsPerCarrier == 2);
+    REQUIRE(ev.phase2Candidate);
+    REQUIRE(ev.baseFrequencyHz == Catch::Approx(450000000.0).margin(1.0));
+    REQUIRE(ev.channelSpacingHz == Catch::Approx(12500.0).margin(1.0));
+
+    auto slot0Freq = analyzer.channelToFrequencyHz(static_cast<uint16_t>((id << 12) | 0));
+    auto slot1Freq = analyzer.channelToFrequencyHz(static_cast<uint16_t>((id << 12) | 1));
+    auto nextSlot0Freq = analyzer.channelToFrequencyHz(static_cast<uint16_t>((id << 12) | 2));
+    REQUIRE(slot0Freq.has_value());
+    REQUIRE(slot1Freq.has_value());
+    REQUIRE(nextSlot0Freq.has_value());
+    REQUIRE(*slot0Freq == Catch::Approx(450000000.0).margin(1.0));
+    REQUIRE(*slot1Freq == Catch::Approx(450000000.0).margin(1.0));
+    REQUIRE(*nextSlot0Freq == Catch::Approx(450012500.0).margin(1.0));
+}
+
+TEST_CASE("P25 control analyzer marks TDMA voice grants with protocol and slot")
+{
+    P25ControlChannelAnalyzer analyzer;
+    auto iden = makeTsbk(0x33);
+    writeBitsMsb(iden, 16, 4, 4);
+    writeBitsMsb(iden, 20, 4, 3);
+    writeBitsMsb(iden, 24, 14, 0x2000u);
+    writeBitsMsb(iden, 38, 10, 100);
+    writeBitsMsb(iden, 48, 32, static_cast<uint32_t>(450000000.0 / 5.0));
+    analyzer.ingestTsbk(iden);
+
+    auto grant = makeTsbk(0x00);
+    writeBitsMsb(grant, 16, 8, 0x00);
+    writeBitsMsb(grant, 24, 16, 0x4003);
+    writeBitsMsb(grant, 40, 16, 77);
+    writeBitsMsb(grant, 56, 24, 0x010203);
+
+    auto events = analyzer.ingestTsbk(grant);
+    REQUIRE(events.size() == 1);
+    const auto& ev = events.front();
+    REQUIRE(ev.type == P25ControlEventType::GroupVoiceGrant);
+    REQUIRE(ev.talkgroupId == 77);
+    REQUIRE(ev.voiceProtocol == P25VoiceProtocol::Phase2TDMA);
+    REQUIRE(ev.phase2Candidate);
+    REQUIRE(ev.tdmaSlotKnown);
+    REQUIRE(ev.tdmaSlot == 1);
+    REQUIRE(ev.voiceFrequencyHz == Catch::Approx(450012500.0).margin(1.0));
+}
+
+TEST_CASE("P25 control analyzer parses Motorola regroup channel grant as slot-aware voice")
+{
+    P25ControlChannelAnalyzer analyzer;
+    auto iden = makeTsbk(0x33);
+    writeBitsMsb(iden, 16, 4, 6);
+    writeBitsMsb(iden, 20, 4, 3);
+    writeBitsMsb(iden, 24, 14, 0x2000u);
+    writeBitsMsb(iden, 38, 10, 100);
+    writeBitsMsb(iden, 48, 32, static_cast<uint32_t>(412475000.0 / 5.0));
+    analyzer.ingestTsbk(iden);
+
+    auto grant = makeTsbk(0x02, 0x90);
+    writeBitsMsb(grant, 24, 16, 0x637d);
+    writeBitsMsb(grant, 40, 16, 11178);
+    writeBitsMsb(grant, 56, 24, 0x102030);
+
+    const auto events = analyzer.ingestTsbk(grant);
+    REQUIRE(events.size() == 1);
+    const auto& ev = events.front();
+    REQUIRE(ev.type == P25ControlEventType::GroupVoiceUpdate);
+    REQUIRE(ev.mfid == 0x90);
+    REQUIRE(ev.talkgroupId == 11178);
+    REQUIRE(ev.sourceId == 0x102030);
+    REQUIRE(ev.channel == 0x637d);
+    REQUIRE(ev.voiceProtocol == P25VoiceProtocol::Phase2TDMA);
+    REQUIRE(ev.tdmaSlotKnown);
+    REQUIRE(ev.tdmaSlot == 1);
+    REQUIRE(ev.voiceFrequencyHz == Catch::Approx(418050000.0).margin(1.0));
+}
+
+TEST_CASE("P25 control analyzer propagates NAC WACN and SYSID to later grants")
+{
+    P25ControlChannelAnalyzer analyzer;
+    analyzer.setNac(0x2d2);
+
+    auto iden = makeTsbk(0x33);
+    writeBitsMsb(iden, 16, 4, 6);
+    writeBitsMsb(iden, 20, 4, 3);
+    writeBitsMsb(iden, 24, 14, 0x2000u);
+    writeBitsMsb(iden, 38, 10, 100);
+    writeBitsMsb(iden, 48, 32, static_cast<uint32_t>(412475000.0 / 5.0));
+    analyzer.ingestTsbk(iden);
+
+    auto net = makeTsbk(0x3b);
+    writeBitsMsb(net, 16, 8, 0x00);
+    writeBitsMsb(net, 24, 20, 0xbee00);
+    writeBitsMsb(net, 44, 12, 0x2d1);
+    writeBitsMsb(net, 56, 16, 0x5038);
+    analyzer.ingestTsbk(net);
+
+    auto grant = makeTsbk(0x02);
+    writeBitsMsb(grant, 16, 16, 0x637d);
+    writeBitsMsb(grant, 32, 16, 11178);
+
+    const auto events = analyzer.ingestTsbk(grant);
+    REQUIRE(events.size() >= 1);
+    const auto& ev = events.front();
+    REQUIRE(ev.type == P25ControlEventType::GroupVoiceUpdate);
+    REQUIRE(ev.voiceProtocol == P25VoiceProtocol::Phase2TDMA);
+    REQUIRE(ev.nacKnown);
+    REQUIRE(ev.nac == 0x2d2);
+    REQUIRE(ev.networkStatusKnown);
+    REQUIRE(ev.wacn == 0xbee00);
+    REQUIRE(ev.systemId == 0x2d1);
+}
+
+TEST_CASE("P25 control analyzer extracts network status mask metadata")
+{
+    P25ControlChannelAnalyzer analyzer;
+    auto iden = makeTsbk(0x33);
+    writeBitsMsb(iden, 16, 4, 4);
+    writeBitsMsb(iden, 20, 4, 3);
+    writeBitsMsb(iden, 24, 14, 0x2000u);
+    writeBitsMsb(iden, 38, 10, 100);
+    writeBitsMsb(iden, 48, 32, static_cast<uint32_t>(419000000.0 / 5.0));
+    analyzer.ingestTsbk(iden);
+
+    auto net = makeTsbk(0x3b);
+    writeBitsMsb(net, 16, 8, 0x2a);
+    writeBitsMsb(net, 24, 20, 0xabcde);
+    writeBitsMsb(net, 44, 12, 0x321);
+    writeBitsMsb(net, 56, 16, 0x4002);
+
+    auto events = analyzer.ingestTsbk(net);
+    REQUIRE(events.size() == 1);
+    const auto& ev = events.front();
+    REQUIRE(ev.type == P25ControlEventType::NetworkStatus);
+    REQUIRE(ev.networkStatusKnown);
+    REQUIRE(ev.lra == 0x2a);
+    REQUIRE(ev.wacn == 0xabcde);
+    REQUIRE(ev.systemId == 0x321);
+    REQUIRE(ev.controlChannel == 0x4002);
+    REQUIRE(ev.controlChannelFrequencyHz == Catch::Approx(419012500.0).margin(1.0));
+}
+
+TEST_CASE("P25 control analyzer extracts RFSS status site metadata")
+{
+    P25ControlChannelAnalyzer analyzer;
+    auto iden = makeTsbk(0x3d);
+    writeBitsMsb(iden, 16, 4, 3);
+    writeBitsMsb(iden, 29, 9, 0x100u);
+    writeBitsMsb(iden, 38, 10, 100);
+    writeBitsMsb(iden, 48, 32, static_cast<uint32_t>(416000000.0 / 5.0));
+    analyzer.ingestTsbk(iden);
+
+    auto rfss = makeTsbk(0x3a);
+    writeBitsMsb(rfss, 16, 8, 0x14);
+    writeBitsMsb(rfss, 27, 1, 1);
+    writeBitsMsb(rfss, 28, 12, 0x654);
+    writeBitsMsb(rfss, 40, 8, 7);
+    writeBitsMsb(rfss, 48, 8, 12);
+    writeBitsMsb(rfss, 56, 16, 0x3004);
+
+    auto events = analyzer.ingestTsbk(rfss);
+    REQUIRE(events.size() == 1);
+    const auto& ev = events.front();
+    REQUIRE(ev.type == P25ControlEventType::RfssStatus);
+    REQUIRE(ev.rfssStatusKnown);
+    REQUIRE(ev.lra == 0x14);
+    REQUIRE(ev.rfssNetworkActiveKnown);
+    REQUIRE(ev.rfssNetworkActive);
+    REQUIRE(ev.systemId == 0x654);
+    REQUIRE(ev.rfssId == 7);
+    REQUIRE(ev.siteId == 12);
+    REQUIRE(ev.controlChannel == 0x3004);
+    REQUIRE(ev.controlChannelFrequencyHz == Catch::Approx(416050000.0).margin(1.0));
+}
+
 TEST_CASE("P25 control analyzer extracts both entries from grant update blocks")
 {
     P25ControlChannelAnalyzer analyzer;

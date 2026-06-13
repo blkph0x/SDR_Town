@@ -19,7 +19,7 @@ Connect multiple HackRF (and other SoapySDR) devices in one clean GUI. Smart sca
 - Excellent analog voice with CTCSS/DCS, squelch, AGC, recording.
 - Data: POCSAG pager decoding, basic AX.25.
 - Weather sats: live NOAA APT image decoding and save.
-- Digital voice: P25 Phase 1 (clear), DMR clear, NXDN (phased delivery).
+- Digital voice: P25 Phase 1 (clear IMBE), P25 Phase 2 TDMA control/grant tracking, DMR clear, NXDN (phased delivery).
 - **Advanced Signal Analyzer**: pick freq + bandwidth → automatic modulation classification (ASK/OOK, PSK variants, QAM, FSK etc.), constellation, eye diagram, parameter estimation, generic + protocol-aware decoding of *unencrypted* signals. No decryption ever.
 - Robust error handling (device removal, buffer health, etc.).
 - JSON config, session restore, dark modern professional theme, keyboard-driven.
@@ -289,10 +289,10 @@ The top "Active Receivers" area has live main-GUI controls for **RF Gain (dB)** 
 - **Squelch (dB) spin + "Auto" button**: RF threshold measured inside the selected receiver bandwidth around the tuned frequency. The DSP uses a smooth gate with short attack/release and a real sample-counted hang, so speech is not chopped but AM/SSB/NFM drops close promptly.
 - **To mute a frequency completely**: set SQ above the displayed `NF` line and below the wanted `SIG` line. Values below `-115 dB` mean squelch off / always pass audio.
 - **Auto**: computes local channel noise floor (`NF + 10 dB`, clamped sane range -130..40) and sets the spin. This is intentionally based on the receiver BW, not the whole spectrum view.
-- **BW + Auto BW**: manual bandwidth accepts decimals such as `12.5 kHz` for modern NFM CB/PMR spacing. Auto BW detects occupied bandwidth around the tuned frequency and snaps to sensible channel widths; AM now defaults/snaps around wider `20 kHz` channels when the signal supports it.
+- **BW + Auto BW**: manual bandwidth accepts decimals such as `12.5 kHz` for modern NFM CB/PMR spacing. Auto BW detects occupied bandwidth around the tuned frequency and snaps to sensible channel widths; HF/DX auto-mode now includes LF/MF CW, ham CW/SSB, medium-wave AM, and shortwave AM priors, with a dedicated CW demodulator/BFO path.
 - **LPF checkbox + cutoff**: disable the post-demod audio low-pass filter for decoder/data workflows, or set the cutoff manually. Auto LPF now follows the selected/detected channel bandwidth instead of relying on fixed 5/15 kHz mode defaults.
 - **Volume + Outputs**: the main page has a live master-volume slider and an Outputs button for the multi-device audio mixer.
-- **P25 CC**: the P25 control-channel section lists likely 12.5 kHz-ish candidates from the live FFT; double-click a candidate to tune it. NAC/talkgroup decode is the next trunking step.
+- **P25 CC**: the P25 control-channel section lists likely 12.5 kHz-ish candidates from the live FFT; double-click a candidate to tune it. The **Auto Follow Grants** checkbox watches the monitored control channel, follows clear talkgroup voice grants, and returns to the control channel when the call drops. Phase 1 clear IMBE voice follow is gated by clear grants and reports live sync/NID/LDU/backend diagnostics. Phase 2 TDMA control/grant, slot metadata, NAC/WACN/SYSID tracking, burst detection, and AMBE audio plumbing are tracked; clear Phase 2 audio stays muted until valid de-whitened TDMA voice bursts are available.
 - The main squelch control now propagates live to *all active receivers* (the ones contributing to mixed audio) and forces immediate gate reaction on raise (no more "have to click a new freq to make it cut"). Freq change / retune still works and forces a DSP state reset (instant gate close). Hang is only for natural signal drops.
 - RF Gain is separate from audio gain (the latter is post-demod multiplier for the monitor path).
 

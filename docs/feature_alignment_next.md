@@ -1,6 +1,6 @@
 # Feature Alignment And Next Build Step
 
-Updated: 2026-06-11
+Updated: 2026-06-13
 
 This maps the requested target feature set against the current codebase and turns the gaps into a concrete next implementation step.
 
@@ -26,7 +26,7 @@ This maps the requested target feature set against the current codebase and turn
 | Audio DSP | Notch filter | Partial | WFM pilot notch exists internally. No user notch with frequency/depth. |
 | Audio DSP | 5-band EQ 80 Hz-12 kHz | Gap | No EQ stage or controls. |
 | Modes | WFM, NFM, AM, USB, LSB | Yes | Core modes exist in GUI, CLI, and demod pipeline. |
-| Modes | CW | Gap | SSB can be used manually, but there is no dedicated CW mode, BFO pitch, narrow filters, or tone display. |
+| Modes | CW | Yes | Dedicated CW mode now exists with BFO-style tone handling and narrow auto-band defaults. |
 | Modes | DRM digital radio | Gap | No DRM demod/decode path. |
 | Modes | Auto BW selection | Yes | Manual and Auto BW are implemented around the tuned frequency. |
 | Modes | Band auto-mode | Mostly | Built-in plans cover FM broadcast, airband AM, NOAA/weather sat starter, 2m/70cm amateur, marine VHF, and AU UHF CB. Needs user-editable plan database and hysteresis. |
@@ -66,7 +66,7 @@ Still to do from Pack A:
 
 ## Best Next Build Step
 
-The next build should be **Feature Pack B: Display Engine**. The radio workflow is now corrected, recallable, and band-aware enough to support the next visible leap: higher FFT resolution, professional palettes, display presets, and explicit waterfall controls.
+The next non-P25 build should be **Feature Pack B: Display Engine**. The radio workflow is now corrected, recallable, and band-aware enough to support the next visible leap: higher FFT resolution, professional palettes, display presets, and explicit waterfall controls. The active P25 track should keep hardening Phase 2 TDMA follow, especially ISCH/superframe timing and de-whitened AMBE voice validation.
 
 ## Following Packs
 
@@ -85,7 +85,7 @@ The next build should be **Feature Pack B: Display Engine**. The radio workflow 
 
 **Feature Pack D: Modes**
 
-- CW mode with BFO pitch, narrow filters, and tone readout.
+- CW polish: editable BFO pitch, tone readout, and saved per-band CW defaults.
 - DRM investigation and integration plan. DRM is much larger than adding another analog demod mode.
 
 **Feature Pack E: Solar/Propagation Panel**

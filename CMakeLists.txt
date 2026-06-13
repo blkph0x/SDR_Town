@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.8 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.9 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -46,6 +46,7 @@ set(SDR_TOWN_SOURCES
     src/main.cpp
     src/DeviceManager.cpp
     src/SpectrumWidget.cpp
+    include/SpectrumWidget.h
     src/AudioEngine.cpp
     src/Demod.cpp
     src/P25Control.cpp
@@ -129,7 +130,7 @@ message(STATUS "SDR_Town configured. Qt6 + spdlog + nlohmann-json + (optional So
 # --- Testing support (Catch2 for unit tests + CLI harness) ---
 option(BUILD_TESTS "Build unit tests with Catch2" ON)
 option(SDR_TOWN_ENABLE_ONNX "Enable optional ONNX Runtime classifier backend hook" OFF)
-option(SDR_TOWN_ENABLE_MBELIB "Enable optional mbelib backend for clear P25 Phase 1 IMBE voice frames" ON)
+option(SDR_TOWN_ENABLE_MBELIB "Enable optional mbelib backend for clear P25 Phase 1 IMBE and Phase 2 AMBE voice frames" ON)
 
 if(SDR_TOWN_ENABLE_ONNX)
   find_package(onnxruntime CONFIG QUIET)
@@ -146,7 +147,7 @@ if(SDR_TOWN_ENABLE_MBELIB)
   if(EXISTS "${SDR_TOWN_BUNDLED_MBELIB_DIR}/mbelib.h" AND EXISTS "${SDR_TOWN_BUNDLED_MBELIB_DIR}/CMakeLists.txt")
     set(DISABLE_TEST ON CACHE BOOL "Disable bundled mbelib test framework" FORCE)
     add_subdirectory("${SDR_TOWN_BUNDLED_MBELIB_DIR}" "${CMAKE_BINARY_DIR}/external/mbelib" EXCLUDE_FROM_ALL)
-    message(STATUS "Bundled mbelib found - P25 IMBE voice backend enabled")
+    message(STATUS "Bundled mbelib found - P25 IMBE/AMBE voice backend enabled")
     target_include_directories(${PROJECT_NAME} PRIVATE "${SDR_TOWN_BUNDLED_MBELIB_DIR}")
     target_link_libraries(${PROJECT_NAME} PRIVATE mbe-static)
     target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_MBELIB)
@@ -154,12 +155,12 @@ if(SDR_TOWN_ENABLE_MBELIB)
     find_path(MBELIB_INCLUDE_DIR NAMES mbelib.h)
     find_library(MBELIB_LIBRARY NAMES mbe mbelib libmbe)
     if(MBELIB_INCLUDE_DIR AND MBELIB_LIBRARY)
-      message(STATUS "System mbelib found - P25 IMBE voice backend enabled")
+      message(STATUS "System mbelib found - P25 IMBE/AMBE voice backend enabled")
       target_include_directories(${PROJECT_NAME} PRIVATE ${MBELIB_INCLUDE_DIR})
       target_link_libraries(${PROJECT_NAME} PRIVATE ${MBELIB_LIBRARY})
       target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_MBELIB)
     else()
-      message(WARNING "SDR_TOWN_ENABLE_MBELIB is ON, but mbelib was not found. P25 IMBE voice backend remains unavailable.")
+      message(WARNING "SDR_TOWN_ENABLE_MBELIB is ON, but mbelib was not found. P25 voice backend remains unavailable.")
     endif()
   endif()
 endif()

@@ -96,14 +96,14 @@ SignalRecommendation makeStandard(SignalClass c, const SignalFeatures& f, double
             break;
         case SignalClass::CW:
             r.label = "CW";
-            r.demodMode = DemodMode::USB;
-            r.standardBandwidthHz = 2000.0;
+            r.demodMode = DemodMode::CW;
+            r.standardBandwidthHz = 1000.0;
             r.audioLowPassHz = 900.0;
-            r.rfFilterCutoffHz = 1000.0;
+            r.rfFilterCutoffHz = 500.0;
             r.filterKind = ClassifierFilterKind::BandPass;
             break;
         case SignalClass::P25Phase1:
-            r.label = "P25 Phase 1 / C4FM";
+            r.label = "P25 C4FM / Control";
             r.demodMode = DemodMode::NFM;
             r.standardBandwidthHz = 12500.0;
             r.audioLowPassHz = 6000.0;
@@ -474,7 +474,7 @@ std::string signalClassToString(SignalClass c)
         case SignalClass::USB: return "USB";
         case SignalClass::LSB: return "LSB";
         case SignalClass::CW: return "CW";
-        case SignalClass::P25Phase1: return "P25 Phase 1";
+        case SignalClass::P25Phase1: return "P25 C4FM";
         case SignalClass::DigitalFSK: return "Digital FSK";
         case SignalClass::Unknown:
         default: return "Unknown";

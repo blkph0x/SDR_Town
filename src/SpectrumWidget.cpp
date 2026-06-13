@@ -739,6 +739,3 @@ void SpectrumWidget::keyPressEvent(QKeyEvent* event)
         QWidget::keyPressEvent(event);
     }
 }
-
-// Include generated moc file for Q_OBJECT (SpectrumWidget) when using AUTOMOC + header in include/
-#include "moc_SpectrumWidget.cpp"  // kept for build compatibility; AUTOMOC enabled in CMake (P3 hygiene note: ideally remove manual include)

@@ -1,6 +1,6 @@
 # Signal Classifier Workflow
 
-Updated: 2026-06-11
+Updated: 2026-06-13
 
 SDR Town now uses a hybrid classifier workflow:
 
@@ -16,16 +16,19 @@ SDR Town now uses a hybrid classifier workflow:
 
 3. **Post-processing lookup**
    - The classifier never asks a neural net to invent exact radio settings.
-   - If the signal is classified as P25 Phase 1/C4FM, SDR Town maps it to exact 12.5 kHz RF bandwidth, NFM/C4FM handling, and a Root-Raised-Cosine style filter recommendation.
+   - If the signal is classified as P25 C4FM/control-like, SDR Town maps it to exact 12.5 kHz RF bandwidth, NFM/C4FM handling, and a Root-Raised-Cosine style filter recommendation. Trunking control decode then decides whether a voice grant is Phase 1 FDMA or Phase 2 TDMA.
    - AM maps to 20 kHz RF bandwidth and 9 kHz audio LPF.
+   - CW maps to the dedicated CW demodulator, 500 Hz to 1 kHz RF bandwidth, and a 700 Hz BFO audio tone.
    - WFM broadcast maps to 180 kHz RF bandwidth and 15 kHz audio LPF with WFM de-emphasis.
    - Unknown/weak signals fall back to the estimated occupied bandwidth with conservative low-pass filtering.
 
 4. **Application integration**
    - Legacy `classifyMode()` and `classifyModeAround()` now call the advanced classifier.
-   - GUI Auto BW/Auto mode uses the advanced classifier first, then band-plan defaults, then raw bandwidth fallback.
+   - GUI Auto BW/Auto mode combines the classifier with deterministic band-plan priors. HF/DX ranges below 30 MHz prefer known LF/MF/HF CW, SSB, medium-wave AM, and shortwave AM defaults unless the signal evidence is strong enough to override them.
    - The main window shows a live classifier status line with class, confidence, bandwidth, and filter recommendation.
    - CLI command `classify [dev] [rx]` prints the same decision and feature summary.
+   - P25 voice follow reports the live decoder stage (`no voice sync`, `NID not validated`, `waiting voice frames`, `voice backend missing`, `Phase 2 metadata missing`, `Phase 2 TDMA mask missing`, or `decoding clear voice`) in the GUI and CLI diagnostics.
+   - GUI P25 monitoring includes an `Auto Follow Grants` checkbox that follows clear talkgroup grants from the monitored control channel and retunes back to the control channel after voice activity falls away.
 
 ## Why This Shape
 
@@ -44,7 +47,7 @@ This is the production path that scales to a true trained model later:
 
 ## Next Classifier Work
 
-1. Add per-band priors and hysteresis so AUTO changes only after stable evidence.
+1. Add hysteresis so AUTO changes only after stable evidence.
 2. Add an optional ONNX Runtime backend:
    - Input: normalized `256 x 256` waterfall ROI.
    - Outputs: mode logits, bandwidth regression, signal-present confidence, optional digital-family logits.
@@ -55,3 +58,4 @@ This is the production path that scales to a true trained model later:
    - P25 control/voice split.
    - DMR/NXDN/POCSAG/AX.25 candidate classes.
 5. Persist classifier decisions with saved frequencies and scan hits for later review.
+6. Finish live Phase 2 TDMA voice: derive/apply the NAC/SYSID/WACN XOR mask with correct superframe/ISCH timing, decode TDMA MAC/encryption state, deinterleave and FEC-correct voice codewords, then feed exact AMBE frames to the existing mbelib-backed synthesis path.
