@@ -46,6 +46,48 @@ struct P25LiveDecoderConfig {
     size_t maxRawTsbkBlocksPerFrame = 8;
 };
 
+struct P25Phase2MaskParameters {
+    bool valid = false;
+    uint16_t nac = 0;
+    uint32_t wacn = 0;
+    uint16_t systemId = 0;
+};
+
+struct P25Phase2EssState {
+    bool known = false;
+    bool encrypted = false;
+    uint8_t algId = 0x80;
+    uint16_t keyId = 0;
+    std::array<uint8_t, 9> messageIndicator{};
+    bool fecValidated = false;
+    int correctedSymbols = 0;
+};
+
+struct P25Phase2MacPdu {
+    bool valid = false;
+    size_t dibitOffset = 0;
+    P25Phase2BurstKind source = P25Phase2BurstKind::Unknown;
+    uint8_t opcode = 0;
+    uint8_t offset = 0;
+    bool fecDecoded = false;
+    bool crcValid = false;
+    int correctedSymbols = 0;
+    std::vector<uint8_t> bytes;
+    bool essPresent = false;
+    P25Phase2EssState ess;
+};
+
+struct P25Phase2IschState {
+    bool valid = false;
+    bool sync = false;
+    size_t dibitOffset = 0;
+    int errors = -1;
+    uint8_t channel = 0;
+    uint8_t location = 0;
+    bool freeAccess = false;
+    uint8_t ultraframeCounter = 0;
+};
+
 struct P25FrameSyncEvent {
     size_t bitOffset = 0;
     bool inverted = false;
@@ -93,6 +135,14 @@ struct P25LiveDecoderStats {
     bool voiceBackendAvailable = false;
     size_t phase2Bursts = 0;
     size_t phase2VoiceCodewords = 0;
+    size_t phase2SuperframeBursts = 0;
+    size_t phase2MaskedBursts = 0;
+    size_t phase2MacPdus = 0;
+    size_t phase2MacCrcValid = 0;
+    bool phase2EssKnown = false;
+    bool phase2EssEncrypted = false;
+    size_t phase2IschDecoded = 0;
+    size_t phase2IschSync = 0;
     int bestPhase2SyncErrors = -1;
     size_t bestPhase2SyncDibitOffset = 0;
     std::string demodPath;
@@ -116,11 +166,20 @@ struct P25Phase2Burst {
     bool valid = false;
     size_t dibitOffset = 0;
     int syncErrors = -1;
+    bool superframeLocked = false;
+    size_t superframeDibitOffset = 0;
+    bool tdmaSlotKnown = false;
+    uint8_t tdmaSlotId = 0;
+    P25Phase2IschState isch;
     uint8_t rawDuidCodeword = 0;
     int duid = -1;
     int duidErrors = -1;
     P25Phase2BurstKind kind = P25Phase2BurstKind::Unknown;
     bool xorMaskApplied = false;
+    bool macFecDecoded = false;
+    bool macCrcValid = false;
+    bool essKnown = false;
+    bool encrypted = false;
     std::vector<P25Phase2VoiceCodeword> voiceCodewords;
 };
 
@@ -132,8 +191,16 @@ struct P25LiveDecodeResult {
     std::vector<P25TsbkBlock> rawTsbkBlocks;
     std::vector<P25ImbeFrame> imbeFrames;
     std::vector<P25Phase2Burst> phase2Bursts;
+    std::vector<P25Phase2MacPdu> phase2MacPdus;
+    P25Phase2EssState phase2Ess;
     P25LiveDecoderStats stats;
     std::vector<std::string> warnings;
+};
+
+struct P25Phase2DecodeResult {
+    std::vector<P25Phase2Burst> bursts;
+    std::vector<P25Phase2MacPdu> macPdus;
+    P25Phase2EssState ess;
 };
 
 struct P25VoiceDecodeResult {
@@ -172,10 +239,17 @@ public:
                                                 double sampleRate);
     P25LiveDecodeResult processHardDibits(const std::vector<int>& dibits);
     P25LiveDecodeResult processHardBits(const std::vector<uint8_t>& bits);
-    std::vector<P25Phase2Burst> processPhase2HardDibits(const std::vector<int>& dibits) const;
+    std::vector<P25Phase2Burst> processPhase2HardDibits(const std::vector<int>& dibits);
+    P25Phase2DecodeResult processPhase2HardDibitsDetailed(const std::vector<int>& dibits);
+
+    void setPhase2MaskParameters(uint16_t nac, uint32_t wacn, uint16_t systemId);
+    void clearPhase2MaskParameters();
 
     static std::array<uint8_t, FrameSyncBits> frameSyncBits();
     static std::array<int, Phase2FrameSyncDibits> phase2FrameSyncDibits();
+    static std::array<int, Phase2BurstDibits * 12> phase2XorMaskDibits(uint16_t nac,
+                                                                       uint32_t wacn,
+                                                                       uint16_t systemId);
     static int dibitFromBits(uint8_t first, uint8_t second);
     static std::array<uint8_t, 2> bitsFromDibit(int dibit);
     static double nominalC4fmLevelForDibit(int dibit);
@@ -184,6 +258,11 @@ public:
 
 private:
     P25LiveDecoderConfig m_config;
+    P25Phase2MaskParameters m_phase2MaskParams;
+    std::array<int, Phase2BurstDibits * 12> m_phase2XorMask{};
+    P25Phase2EssState m_phase2Ess;
+    std::array<uint8_t, 16> m_phase2EssB{};
+    std::array<bool, 4> m_phase2EssBSeen{};
 };
 
 class P25ImbeVoiceDecoder {

@@ -27,9 +27,9 @@ SDR Town now uses a hybrid classifier workflow:
    - GUI Auto BW/Auto mode combines the classifier with deterministic band-plan priors. HF/DX ranges below 30 MHz prefer known LF/MF/HF CW, SSB, medium-wave AM, and shortwave AM defaults unless the signal evidence is strong enough to override them.
    - The main window shows a live classifier status line with class, confidence, bandwidth, and filter recommendation.
    - CLI command `classify [dev] [rx]` prints the same decision and feature summary.
-   - P25 voice follow reports the live decoder stage (`no voice sync`, `NID not validated`, `waiting voice frames`, `voice backend missing`, `Phase 2 metadata missing`, `Phase 2 TDMA mask missing`, or `decoding clear voice`) in the GUI and CLI diagnostics.
+   - P25 voice follow reports the live decoder stage (`no voice sync`, `NID not validated`, `waiting voice frames`, `voice backend missing`, `Phase 2 metadata missing`, `Phase 2 TDMA framing/mask incomplete`, or `decoding clear voice`) in the GUI and CLI diagnostics.
    - GUI/CLI P25 monitoring mutes raw control-channel audio, includes an `Auto Follow Grants` checkbox in the GUI, and retunes back to the muted control channel after voice activity falls away.
-   - Clear Phase 2 follow attempts direct AMBE synthesis only for FEC-clean frames; bad, scrambled, encrypted, or non-FEC-clean frames remain muted.
+   - Clear Phase 2 follow is gated until TDMA superframe timing, mask application, and MAC/ESS state are complete; burst detections remain diagnostic until that chain is validated on real captures.
 
 ## Why This Shape
 

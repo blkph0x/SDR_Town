@@ -113,6 +113,12 @@ static std::atomic<long long> gLastP25VoiceDecodedFrames{0};
 static std::atomic<long long> gLastP25VoiceAudioSamples{0};
 static std::atomic<long long> gLastP25VoicePhase2Bursts{0};
 static std::atomic<long long> gLastP25VoicePhase2VoiceCodewords{0};
+static std::atomic<long long> gLastP25VoicePhase2SuperframeBursts{0};
+static std::atomic<long long> gLastP25VoicePhase2MaskedBursts{0};
+static std::atomic<long long> gLastP25VoicePhase2MacPdus{0};
+static std::atomic<long long> gLastP25VoicePhase2MacCrcValid{0};
+static std::atomic<bool> gLastP25VoicePhase2EssKnown{false};
+static std::atomic<bool> gLastP25VoicePhase2EssEncrypted{false};
 static std::atomic<bool> gLastP25VoiceBackendAvailable{false};
 static std::atomic<bool> gLastP25VoiceNidLock{false};
 
@@ -126,7 +132,7 @@ static const char* p25VoiceDiagLabel(P25VoiceDiagCode code)
         case P25VoiceDiagCode::BackendMissing: return "voice backend missing";
         case P25VoiceDiagCode::Phase2Unsupported: return "Phase 2 protocol mismatch";
         case P25VoiceDiagCode::Phase2MetadataMissing: return "Phase 2 metadata missing";
-        case P25VoiceDiagCode::Phase2MaskMissing: return "Phase 2 TDMA mask missing";
+        case P25VoiceDiagCode::Phase2MaskMissing: return "Phase 2 TDMA framing/mask incomplete";
         case P25VoiceDiagCode::NoLduVoice: return "waiting voice frames";
         case P25VoiceDiagCode::NoDecodedAudio: return "no decoded audio";
         case P25VoiceDiagCode::Decoding: return "decoding clear voice";
@@ -1223,6 +1229,12 @@ struct P25VoiceAudioBlock {
     size_t nids = 0;
     size_t phase2Bursts = 0;
     size_t phase2VoiceCodewords = 0;
+    size_t phase2SuperframeBursts = 0;
+    size_t phase2MaskedBursts = 0;
+    size_t phase2MacPdus = 0;
+    size_t phase2MacCrcValid = 0;
+    bool phase2EssKnown = false;
+    bool phase2EssEncrypted = false;
     bool nidLock = false;
     bool skippedEncrypted = false;
     bool waitingForClearGrant = false;
@@ -1269,6 +1281,12 @@ static void publishP25VoiceDiagnostics(const P25VoiceAudioBlock& out)
     gLastP25VoiceAudioSamples.store(static_cast<long long>(out.audio.size()), std::memory_order_relaxed);
     gLastP25VoicePhase2Bursts.store(static_cast<long long>(out.phase2Bursts), std::memory_order_relaxed);
     gLastP25VoicePhase2VoiceCodewords.store(static_cast<long long>(out.phase2VoiceCodewords), std::memory_order_relaxed);
+    gLastP25VoicePhase2SuperframeBursts.store(static_cast<long long>(out.phase2SuperframeBursts), std::memory_order_relaxed);
+    gLastP25VoicePhase2MaskedBursts.store(static_cast<long long>(out.phase2MaskedBursts), std::memory_order_relaxed);
+    gLastP25VoicePhase2MacPdus.store(static_cast<long long>(out.phase2MacPdus), std::memory_order_relaxed);
+    gLastP25VoicePhase2MacCrcValid.store(static_cast<long long>(out.phase2MacCrcValid), std::memory_order_relaxed);
+    gLastP25VoicePhase2EssKnown.store(out.phase2EssKnown, std::memory_order_relaxed);
+    gLastP25VoicePhase2EssEncrypted.store(out.phase2EssEncrypted, std::memory_order_relaxed);
     gLastP25VoiceBackendAvailable.store(out.backendAvailable, std::memory_order_relaxed);
     gLastP25VoiceNidLock.store(out.nidLock, std::memory_order_relaxed);
 }
@@ -1324,9 +1342,9 @@ static bool p25AmbeDecodeFrameLooksUsable(const P25VoiceDecodeResult& decoded)
     }
     if (peak <= 1e-7 || sumSquares <= 1e-10) return false;
 
-    // mbelib's AMBE path exposes hard-decision FEC correction counts. Direct
-    // Phase 2 audio is only released when the frame is plausibly correct; random
-    // scrambled/misaligned bursts tend to land far above this range and stay muted.
+    // mbelib's AMBE path exposes hard-decision FEC correction counts. Phase 2
+    // audio still requires the upstream TDMA superframe/mask gate before this
+    // plausibility check is allowed to release samples.
     return decoded.totalErrors <= 18;
 }
 
@@ -1364,6 +1382,12 @@ static P25VoiceAudioBlock decodeP25VoiceAudioBlock(Receiver& rx,
     out.nidLock = p25HasValidatedNid(live);
     out.phase2Bursts = live.stats.phase2Bursts;
     out.phase2VoiceCodewords = live.stats.phase2VoiceCodewords;
+    out.phase2SuperframeBursts = live.stats.phase2SuperframeBursts;
+    out.phase2MaskedBursts = live.stats.phase2MaskedBursts;
+    out.phase2MacPdus = live.stats.phase2MacPdus;
+    out.phase2MacCrcValid = live.stats.phase2MacCrcValid;
+    out.phase2EssKnown = live.stats.phase2EssKnown;
+    out.phase2EssEncrypted = live.stats.phase2EssEncrypted;
     out.demodPath = live.stats.demodPath;
     out.imbeFrames = live.imbeFrames.size();
     if (!out.backendAvailable) {
@@ -1372,11 +1396,30 @@ static P25VoiceAudioBlock decodeP25VoiceAudioBlock(Receiver& rx,
     }
 
     if (rx.p25VoicePhase2) {
+        if (out.phase2EssKnown && out.phase2EssEncrypted) {
+            out.skippedEncrypted = true;
+            out.diag = P25VoiceDiagCode::SkippedEncrypted;
+            return out;
+        }
         bool sawVoice = false;
         bool acceptedVoice = false;
         for (const auto& burst : live.phase2Bursts) {
             if (burst.voiceCodewords.empty()) continue;
             sawVoice = true;
+            if (!burst.xorMaskApplied) {
+                out.phase2RejectedVoiceCodewords += burst.voiceCodewords.size();
+                continue;
+            }
+            if (!burst.essKnown) {
+                out.phase2RejectedVoiceCodewords += burst.voiceCodewords.size();
+                out.phase2MetadataMissing = true;
+                continue;
+            }
+            if (burst.encrypted) {
+                out.phase2RejectedVoiceCodewords += burst.voiceCodewords.size();
+                out.skippedEncrypted = true;
+                continue;
+            }
             for (const auto& codeword : burst.voiceCodewords) {
                 const auto ambeFrame = p25Phase2VoiceCodewordToAmbe3600x2450Frame(codeword);
                 const auto decoded = rx.p25AmbeVoiceDecoder.decodeAmbe3600x2450Frame(ambeFrame);
@@ -1391,7 +1434,12 @@ static P25VoiceAudioBlock decodeP25VoiceAudioBlock(Receiver& rx,
             }
         }
         if (sawVoice && !acceptedVoice) {
-            if (rx.p25VoiceMaskParamsKnown) out.phase2MaskMissing = true;
+            if (out.skippedEncrypted) {
+                out.diag = P25VoiceDiagCode::SkippedEncrypted;
+                return out;
+            }
+            if (!out.phase2EssKnown && rx.p25VoiceMaskParamsKnown && out.phase2MaskedBursts > 0) out.phase2MetadataMissing = true;
+            else if (rx.p25VoiceMaskParamsKnown) out.phase2MaskMissing = true;
             else out.phase2MetadataMissing = true;
             out.phase2VoiceUnsupported = true;
         }
@@ -2275,6 +2323,11 @@ public:
             rx.p25ControlChannelMute = false;
             rx.resetDemodState();
             rx.resetP25VoiceState();
+            if (rx.p25VoicePhase2 && rx.p25VoiceMaskParamsKnown) {
+                rx.p25VoiceLiveDecoder.setPhase2MaskParameters(rx.p25VoiceNac, rx.p25VoiceWacn, rx.p25VoiceSystemId);
+            } else {
+                rx.p25VoiceLiveDecoder.clearPhase2MaskParameters();
+            }
         };
 
         auto autoFollowP25Grant = [this, p25Status, p25TgFollowBtn, tuneP25Path, armP25VoiceFollowState]
@@ -2607,7 +2660,7 @@ public:
                 return;
             }
             if (p25TalkgroupIsPhase2(tg)) {
-                appendP25LogLine(QString("Following clear Phase 2 TDMA TG %1 at %2MHz slot=%3; AMBE audio is enabled for FEC-clean voice frames; bad/scrambled frames remain muted.")
+                appendP25LogLine(QString("Following clear Phase 2 TDMA TG %1 at %2MHz slot=%3; control/grant tracking is active, but clear AMBE audio is gated until TDMA mask, MAC/ESS clear state, and AMBE validation all pass.")
                     .arg(tg.talkgroupId)
                     .arg(tg.lastVoiceFreqHz > 0.0 ? tg.lastVoiceFreqHz / 1e6 : 0.0, 0, 'f', 5)
                     .arg(tg.tdmaSlotKnown ? QString::number(static_cast<int>(tg.tdmaSlot)) : QString("unknown")));
@@ -3142,9 +3195,16 @@ public:
                                         .arg(nidState)
                                         .arg(live.rawTsbkBlocks.size())
                                         .arg(trustedTsbk);
-                                    const QString phase2Diag = QString(" p2bursts=%1 p2vcw=%2 p2best=%3")
+                                    const QString phase2Diag = QString(" p2bursts=%1 p2vcw=%2 p2sf=%3 p2mask=%4 p2mac=%5/%6 p2ess=%7 p2isch=%8/%9 p2best=%10")
                                         .arg(live.stats.phase2Bursts)
                                         .arg(live.stats.phase2VoiceCodewords)
+                                        .arg(live.stats.phase2SuperframeBursts)
+                                        .arg(live.stats.phase2MaskedBursts)
+                                        .arg(live.stats.phase2MacCrcValid)
+                                        .arg(live.stats.phase2MacPdus)
+                                        .arg(live.stats.phase2EssKnown ? (live.stats.phase2EssEncrypted ? "enc" : "clear") : "unknown")
+                                        .arg(live.stats.phase2IschDecoded)
+                                        .arg(live.stats.phase2IschSync)
                                         .arg(live.stats.bestPhase2SyncErrors >= 0 ? QString::number(live.stats.bestPhase2SyncErrors) : QString("-"));
                                     const QString diagSig = QString("dev%1:sync%2:best%3:nid%4:dist%5:trusted%6")
                                         .arg(i)
@@ -3169,18 +3229,33 @@ public:
                                             3500);
                                     }
                                     for (const auto& burst : live.phase2Bursts) {
+                                        const QString ischText = !burst.isch.valid
+                                            ? QString("-")
+                                            : (burst.isch.sync
+                                                ? QString("sync err=%1").arg(burst.isch.errors)
+                                                : QString("ch=%1 loc=%2 fa=%3 cnt=%4 err=%5")
+                                                    .arg(static_cast<int>(burst.isch.channel))
+                                                    .arg(static_cast<int>(burst.isch.location))
+                                                    .arg(burst.isch.freeAccess ? "yes" : "no")
+                                                    .arg(static_cast<int>(burst.isch.ultraframeCounter))
+                                                    .arg(burst.isch.errors));
                                         appendP25LogLineKeyed(QString("p2burst:%1:%2:%3")
                                                 .arg(burst.dibitOffset)
                                                 .arg(static_cast<int>(burst.rawDuidCodeword))
                                                 .arg(burst.syncErrors),
-                                            QString("Phase 2 burst dibit=%1 kind=%2 duid=0x%3 duidErr=%4 syncErr=%5 vcw=%6 xorMask=%7")
+                                            QString("Phase 2 burst dibit=%1 kind=%2 duid=0x%3 duidErr=%4 syncErr=%5 vcw=%6 sf=%7 slot=%8 xorMask=%9 mac=%10 ess=%11 isch=%12")
                                                 .arg(burst.dibitOffset)
                                                 .arg(QString::fromStdString(P25LiveDecoder::phase2BurstKindToString(burst.kind)))
                                                 .arg(burst.duid, 1, 16, QLatin1Char('0')).toUpper()
                                                 .arg(burst.duidErrors)
                                                 .arg(burst.syncErrors)
                                                 .arg(burst.voiceCodewords.size())
-                                                .arg(burst.xorMaskApplied ? "yes" : "not-yet"),
+                                                .arg(burst.superframeLocked ? "locked" : "no")
+                                                .arg(burst.tdmaSlotKnown ? QString::number(static_cast<int>(burst.tdmaSlotId)) : QString("-"))
+                                                .arg(burst.xorMaskApplied ? "yes" : "not-yet")
+                                                .arg(burst.macCrcValid ? "crc-ok" : (burst.macFecDecoded ? "fec-only" : "-"))
+                                                .arg(burst.essKnown ? (burst.encrypted ? "encrypted" : "clear") : "unknown")
+                                                .arg(ischText),
                                             1800);
                                     }
                                     for (const auto& warning : live.warnings) {
@@ -3221,6 +3296,13 @@ public:
                                 const long long decoded = gLastP25VoiceDecodedFrames.load(std::memory_order_relaxed);
                                 const long long p2bursts = gLastP25VoicePhase2Bursts.load(std::memory_order_relaxed);
                                 const long long p2vcw = gLastP25VoicePhase2VoiceCodewords.load(std::memory_order_relaxed);
+                                const long long p2sf = gLastP25VoicePhase2SuperframeBursts.load(std::memory_order_relaxed);
+                                const long long p2mask = gLastP25VoicePhase2MaskedBursts.load(std::memory_order_relaxed);
+                                const long long p2mac = gLastP25VoicePhase2MacPdus.load(std::memory_order_relaxed);
+                                const long long p2crc = gLastP25VoicePhase2MacCrcValid.load(std::memory_order_relaxed);
+                                const QString p2ess = gLastP25VoicePhase2EssKnown.load(std::memory_order_relaxed)
+                                    ? (gLastP25VoicePhase2EssEncrypted.load(std::memory_order_relaxed) ? "enc" : "clear")
+                                    : "unknown";
                                 if (p25FollowAutoActive) {
                                     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
                                     const bool voiceStillLooksActive = syncs > 0 || nids > 0 || imbe > 0 || decoded > 0 || p2bursts > 0 || p2vcw > 0;
@@ -3238,7 +3320,7 @@ public:
                                         return;
                                     }
                                 }
-                                p25Status->setText(QString("TG %1 %2 sync=%3 nid=%4 imbe=%5 dec=%6 p2=%7/%8")
+                                p25Status->setText(QString("TG %1 %2 sync=%3 nid=%4 imbe=%5 dec=%6 p2=%7/%8 sf=%9 mask=%10 mac=%11/%12 ess=%13")
                                     .arg(tg > 0 ? tg : static_cast<long long>(p25FollowTalkgroupId))
                                     .arg(p25VoiceDiagLabel(code))
                                     .arg(syncs)
@@ -3246,14 +3328,19 @@ public:
                                     .arg(imbe)
                                     .arg(decoded)
                                     .arg(p2bursts)
-                                    .arg(p2vcw));
+                                    .arg(p2vcw)
+                                    .arg(p2sf)
+                                    .arg(p2mask)
+                                    .arg(p2crc)
+                                    .arg(p2mac)
+                                    .arg(p2ess));
 
                                 static int lastVoiceDiag = -1;
                                 static long long lastVoiceTalkgroup = -1;
                                 const int diagInt = static_cast<int>(code);
                                 const long long statusTg = tg > 0 ? tg : static_cast<long long>(p25FollowTalkgroupId);
                                 if (diagInt != lastVoiceDiag || statusTg != lastVoiceTalkgroup) {
-                                    appendP25LogLine(QString("P25 voice follow: TG %1 %2 sync=%3 nid=%4 imbe=%5 decoded=%6 p2bursts=%7 p2vcw=%8 backend=%9 nidLock=%10.")
+                                    appendP25LogLine(QString("P25 voice follow: TG %1 %2 sync=%3 nid=%4 imbe=%5 decoded=%6 p2bursts=%7 p2vcw=%8 p2sf=%9 p2mask=%10 p2mac=%11/%12 p2ess=%13 backend=%14 nidLock=%15.")
                                         .arg(statusTg)
                                         .arg(p25VoiceDiagLabel(code))
                                         .arg(syncs)
@@ -3262,6 +3349,11 @@ public:
                                         .arg(decoded)
                                         .arg(p2bursts)
                                         .arg(p2vcw)
+                                        .arg(p2sf)
+                                        .arg(p2mask)
+                                        .arg(p2crc)
+                                        .arg(p2mac)
+                                        .arg(p2ess)
                                         .arg(gLastP25VoiceBackendAvailable.load(std::memory_order_relaxed) ? "yes" : "no")
                                         .arg(gLastP25VoiceNidLock.load(std::memory_order_relaxed) ? "yes" : "no"));
                                     lastVoiceDiag = diagInt;
@@ -3301,6 +3393,7 @@ public:
         stopDspWorker.store(false, std::memory_order_release);
         guiDspWorker = std::thread([this]() {
             auto& mgr = DeviceManager::instance();
+            std::map<Receiver*, std::chrono::steady_clock::time_point> lastPhase2DecodeByRx;
             while (!stopDspWorker.load(std::memory_order_acquire)) {
                 bool didWork = false;
                 // S0-2 (P0 audit): short lock to snapshot the current receivers (shared_ptrs — cheap, stable).
@@ -3339,6 +3432,8 @@ public:
                         DemodMode monMode = DemodMode::AUTO;
                         bool monAudioLpfEnabled = true;
                         bool monP25ControlMute = false;
+                        bool monP25VoiceDecode = false;
+                        bool monP25VoicePhase2 = false;
 
                         std::lock_guard<std::mutex> rxLock(rx.stateMutex);
                         if (!rx.active || rx.deviceIndex != i) continue;
@@ -3352,6 +3447,8 @@ public:
                         monWfmDe = rx.wfmDeTauUs;
                         monWfmNotch = rx.wfmPilotNotchR;
                         monP25ControlMute = rx.p25ControlChannelMute;
+                        monP25VoiceDecode = rx.p25VoiceDecodeEnabled;
+                        monP25VoicePhase2 = rx.p25VoicePhase2;
                         const double demodFreq = applyNfmAfcFromSpectrum(rx, pwr, sr, cf, monFreq, monBw, monMode);
                         afcOffsetHz = demodFreq - monFreq;
 
@@ -3362,8 +3459,23 @@ public:
 
                         // audit-followup-2: use per-rx cursor consumption. Each rx pulls only its own *new* chronological samples.
                         // No more "demod the latest 25ms overlapping window" for every rx.
-                        size_t tgt = (sr > 0) ? (size_t)(sr * 0.025) : 8192;
-                        auto iq = mgr.getNewSamplesForReceiver(i, rx, tgt);  // updates the live rx's lastConsumedAbsolute
+                        const bool phase2BufferedDecode = monP25VoiceDecode && monP25VoicePhase2;
+                        if (phase2BufferedDecode) {
+                            const auto now = std::chrono::steady_clock::now();
+                            auto& last = lastPhase2DecodeByRx[&rx];
+                            if (last.time_since_epoch().count() != 0 &&
+                                now - last < std::chrono::milliseconds(140)) {
+                                didWork = true;
+                                continue;
+                            }
+                            last = now;
+                        }
+                        size_t tgt = (sr > 0)
+                            ? static_cast<size_t>(sr * (phase2BufferedDecode ? 0.75 : 0.025))
+                            : 8192;
+                        auto iq = phase2BufferedDecode
+                            ? mgr.getRecentIQWindow(i, tgt)
+                            : mgr.getNewSamplesForReceiver(i, rx, tgt);  // updates the live rx's lastConsumedAbsolute
                         size_t got = iq.size();
                         if (got == 0) continue;
 
@@ -4282,6 +4394,7 @@ int runCLI(int argc, char* argv[]) {
 
     // CLI DSP monitor thread (mirrors guiDspWorker but standalone, uses Receiver vector + own demod instances)
     std::thread cliMonThread([&]() {
+        std::map<Receiver*, std::chrono::steady_clock::time_point> lastPhase2DecodeByRx;
         while (!cliStop) {
             bool did = false;
             // S0-2 (P0): snapshot under lock (shared_ptrs — cheap, stable objects for cursor + demod state).
@@ -4317,6 +4430,8 @@ int runCLI(int argc, char* argv[]) {
                     DemodMode rxMode = DemodMode::NFM;
                     bool rxAudioLpfEnabled = true;
                     bool rxP25ControlMute = false;
+                    bool rxP25VoiceDecode = false;
+                    bool rxP25VoicePhase2 = false;
 
                     std::lock_guard<std::mutex> rxLock(rx.stateMutex);
                     if (!rx.active || rx.deviceIndex != di) continue;
@@ -4330,10 +4445,27 @@ int runCLI(int argc, char* argv[]) {
                     rxWfmDe = rx.wfmDeTauUs;
                     rxWfmNotch = rx.wfmPilotNotchR;
                     rxP25ControlMute = rx.p25ControlChannelMute;
+                    rxP25VoiceDecode = rx.p25VoiceDecodeEnabled;
+                    rxP25VoicePhase2 = rx.p25VoicePhase2;
 
                     // audit-followup-2: cursor-based new samples only for this rx (chronological, no overlap with other rxs on same dev).
-                    size_t tgt = (sr > 0 ? (size_t)(sr * 0.025) : 8192);
-                    auto iq = mgr.getNewSamplesForReceiver(di, rx, tgt);  // updates live rx cursor
+                    const bool phase2BufferedDecode = rxP25VoiceDecode && rxP25VoicePhase2;
+                    if (phase2BufferedDecode) {
+                        const auto now = std::chrono::steady_clock::now();
+                        auto& last = lastPhase2DecodeByRx[&rx];
+                        if (last.time_since_epoch().count() != 0 &&
+                            now - last < std::chrono::milliseconds(140)) {
+                            did = true;
+                            continue;
+                        }
+                        last = now;
+                    }
+                    size_t tgt = (sr > 0)
+                        ? static_cast<size_t>(sr * (phase2BufferedDecode ? 0.75 : 0.025))
+                        : 8192;
+                    auto iq = phase2BufferedDecode
+                        ? mgr.getRecentIQWindow(di, tgt)
+                        : mgr.getNewSamplesForReceiver(di, rx, tgt);  // updates live rx cursor
                     size_t got = iq.size();
                     if (got == 0) continue;
 
@@ -4460,6 +4592,8 @@ int runCLI(int argc, char* argv[]) {
                       << " audio=" << gLastP25VoiceAudioSamples.load(std::memory_order_relaxed)
                       << " p2bursts=" << gLastP25VoicePhase2Bursts.load(std::memory_order_relaxed)
                       << " p2vcw=" << gLastP25VoicePhase2VoiceCodewords.load(std::memory_order_relaxed)
+                      << " p2sf=" << gLastP25VoicePhase2SuperframeBursts.load(std::memory_order_relaxed)
+                      << " p2mask=" << gLastP25VoicePhase2MaskedBursts.load(std::memory_order_relaxed)
                       << " backend=" << (gLastP25VoiceBackendAvailable.load(std::memory_order_relaxed) ? "yes" : "no")
                       << "\n";
         }
@@ -5089,7 +5223,12 @@ int runCLI(int argc, char* argv[]) {
                           << " bestInv=" << (result.stats.bestFrameSyncInverted ? "yes" : "no")
                           << " nidLock=" << (nidLock ? "yes" : "no")
                           << " p2bursts=" << result.stats.phase2Bursts
-                          << " p2vcw=" << result.stats.phase2VoiceCodewords;
+                          << " p2vcw=" << result.stats.phase2VoiceCodewords
+                          << " p2sf=" << result.stats.phase2SuperframeBursts
+                          << " p2mask=" << result.stats.phase2MaskedBursts
+                          << " p2mac=" << result.stats.phase2MacCrcValid << "/" << result.stats.phase2MacPdus
+                          << " p2ess=" << (result.stats.phase2EssKnown ? (result.stats.phase2EssEncrypted ? "enc" : "clear") : "unknown")
+                          << " p2isch=" << result.stats.phase2IschDecoded << "/" << result.stats.phase2IschSync;
                 if (result.stats.bestPhase2SyncErrors >= 0) {
                     std::cout << " p2bestErr=" << result.stats.bestPhase2SyncErrors
                               << " p2bestDibit=" << result.stats.bestPhase2SyncDibitOffset;
@@ -5124,15 +5263,32 @@ int runCLI(int argc, char* argv[]) {
                 }
                 if (!result.phase2Bursts.empty()) {
                     for (const auto& burst : result.phase2Bursts) {
+                        std::ostringstream isch;
+                        if (!burst.isch.valid) {
+                            isch << "-";
+                        } else if (burst.isch.sync) {
+                            isch << "sync(err=" << burst.isch.errors << ")";
+                        } else {
+                            isch << "ch=" << static_cast<int>(burst.isch.channel)
+                                 << ",loc=" << static_cast<int>(burst.isch.location)
+                                 << ",fa=" << (burst.isch.freeAccess ? "yes" : "no")
+                                 << ",cnt=" << static_cast<int>(burst.isch.ultraframeCounter)
+                                 << ",err=" << burst.isch.errors;
+                        }
                         std::cout << "  P25P2 burst dibit=" << burst.dibitOffset
                                   << " kind=" << P25LiveDecoder::phase2BurstKindToString(burst.kind)
                                   << " duid=0x" << std::hex << burst.duid << std::dec
                                   << " duidErr=" << burst.duidErrors
                                   << " syncErr=" << burst.syncErrors
                                   << " vcw=" << burst.voiceCodewords.size()
-                                  << " xorMask=" << (burst.xorMaskApplied ? "yes" : "not-yet") << "\n";
+                                  << " sf=" << (burst.superframeLocked ? "locked" : "no")
+                                  << " slot=" << (burst.tdmaSlotKnown ? std::to_string(burst.tdmaSlotId) : std::string("-"))
+                                  << " xorMask=" << (burst.xorMaskApplied ? "yes" : "not-yet")
+                                  << " mac=" << (burst.macCrcValid ? "crc-ok" : (burst.macFecDecoded ? "fec-only" : "-"))
+                                  << " ess=" << (burst.essKnown ? (burst.encrypted ? "encrypted" : "clear") : "unknown")
+                                  << " isch=" << isch.str() << "\n";
                     }
-                    std::cout << "  note: live follow now attempts FEC-gated clear Phase 2 AMBE decode; if no clean AMBE frames appear, TDMA mask/timing is still missing and audio remains muted.\n";
+                    std::cout << "  note: clear Phase 2 AMBE audio is gated until TDMA mask, MAC/ESS clear state, and AMBE validation all pass.\n";
                 }
                 for (const auto& warning : result.warnings) {
                     std::cout << "  note: " << warning << "\n";
@@ -5146,9 +5302,9 @@ int runCLI(int argc, char* argv[]) {
                               : " (build with SDR_TOWN_ENABLE_MBELIB=ON and mbelib installed)") << "\n"
                           << "P25 AMBE backend: " << (ambe.backendAvailable() ? "available" : "not available")
                           << (ambe.backendAvailable()
-                              ? " (clear Phase 2 AMBE synthesis path is available with FEC-gated frame validation)"
+                              ? " (clear Phase 2 AMBE synthesis backend is available after TDMA mask, MAC/ESS clear state, and AMBE validation all pass)"
                               : " (build with SDR_TOWN_ENABLE_MBELIB=ON and mbelib installed)") << "\n"
-                          << "P25 Phase 2 status: TDMA sync/DUID/2V/4V burst detection and direct AMBE synthesis are enabled. Bad, scrambled, encrypted, or non-FEC-clean frames stay muted.\n";
+                          << "P25 Phase 2 status: TDMA sync/DUID/2V/4V burst detection is enabled. Clear AMBE audio remains muted until superframe timing, mask application, and MAC/ESS state are complete.\n";
             } else if (sub == "tg" || sub == "tgs" || sub == "talkgroups") {
                 auto talkgroups = loadP25Talkgroups();
                 if (talkgroups.empty()) {
@@ -5254,7 +5410,7 @@ int runCLI(int argc, char* argv[]) {
                     std::cout << "TG " << tg.talkgroupId
                               << " is Phase 2 TDMA"
                               << (tg.tdmaSlotKnown ? (" slot " + std::to_string(tg.tdmaSlot)) : std::string())
-                              << "; following with live AMBE path and TDMA mask diagnostics\n";
+                              << "; following with TDMA burst diagnostics; audio is gated until TDMA mask, MAC/ESS clear state, and AMBE validation all pass\n";
                 }
                 if (tg.lastVoiceFreqHz <= 0.0) {
                     std::cout << "TG " << tg.talkgroupId << " has no active voice grant/frequency yet\n";
@@ -5287,6 +5443,11 @@ int runCLI(int argc, char* argv[]) {
                     rx.p25VoiceSystemId = tg.systemId;
                     rx.p25ControlChannelMute = false;
                     rx.resetP25VoiceState();
+                    if (rx.p25VoicePhase2 && rx.p25VoiceMaskParamsKnown) {
+                        rx.p25VoiceLiveDecoder.setPhase2MaskParameters(rx.p25VoiceNac, rx.p25VoiceWacn, rx.p25VoiceSystemId);
+                    } else {
+                        rx.p25VoiceLiveDecoder.clearPhase2MaskParameters();
+                    }
                     rx.active = true;
                 }
                 if (!mgr.isStreaming(devIndex) && devIndex < mgr.getDevices().size()) {
@@ -5296,8 +5457,9 @@ int runCLI(int argc, char* argv[]) {
                 if (mgr.isStreaming(devIndex)) mgr.setCenterFreq(devIndex, tg.lastVoiceFreqHz);
                 std::cout << "Following P25 TG " << tg.talkgroupId
                           << " at " << (tg.lastVoiceFreqHz / 1e6) << " MHz on RX" << rxidx
-                          << " with live clear " << (p25TalkgroupIsPhase2(tg) ? "AMBE Phase 2" : "IMBE Phase 1")
-                          << " voice decode\n";
+                          << (p25TalkgroupIsPhase2(tg)
+                              ? " with TDMA diagnostics; Phase 2 audio is gated until TDMA mask, MAC/ESS clear state, and AMBE validation all pass\n"
+                              : " with live clear IMBE Phase 1 voice decode\n");
             } else if (sub == "tsbk") {
                 double ccMhz = 0.0;
                 if (!(iss >> ccMhz) || ccMhz <= 0.0) {

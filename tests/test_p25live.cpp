@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <complex>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -135,6 +136,78 @@ std::vector<int> makeSyntheticPhase2Burst(int duid, bool flipDuidBit = false)
         for (size_t i = 0; i < 36 && payload + start + i < dibits.size(); ++i) {
             dibits[payload + start + i] = static_cast<int>((i + start) & 0x03);
         }
+    }
+    return dibits;
+}
+
+std::vector<int> makeSyntheticPhase2Superframe()
+{
+    std::vector<int> dibits(P25LiveDecoder::Phase2BurstDibits * 12, 0);
+    const auto sync = P25LiveDecoder::phase2FrameSyncDibits();
+    constexpr std::array<size_t, 6> syncSlots{2, 3, 6, 7, 10, 11};
+    for (size_t slot = 0; slot < 12; ++slot) {
+        const size_t base = slot * P25LiveDecoder::Phase2BurstDibits;
+        if (std::find(syncSlots.begin(), syncSlots.end(), slot) != syncSlots.end()) {
+            std::copy(sync.begin(), sync.end(), dibits.begin() + static_cast<std::ptrdiff_t>(base));
+        }
+
+        const uint8_t raw = encodePhase2DuidForTest(0x0);
+        const size_t payload = base + 10;
+        dibits[payload + 10] = (raw >> 6) & 0x03;
+        dibits[payload + 47] = (raw >> 4) & 0x03;
+        dibits[payload + 132] = (raw >> 2) & 0x03;
+        dibits[payload + 169] = raw & 0x03;
+
+        for (const size_t start : {size_t{11}, size_t{48}, size_t{96}, size_t{133}}) {
+            for (size_t i = 0; i < 36 && payload + start + i < dibits.size(); ++i) {
+                dibits[payload + start + i] = static_cast<int>((slot + i + start) & 0x03);
+            }
+        }
+    }
+    return dibits;
+}
+
+std::vector<int> makeSyntheticMaskedPhase2Superframe(uint16_t nac, uint32_t wacn, uint16_t systemId)
+{
+    auto dibits = makeSyntheticPhase2Superframe();
+    const auto mask = P25LiveDecoder::phase2XorMaskDibits(nac, wacn, systemId);
+    constexpr std::array<size_t, 4> duidDibits{10, 47, 132, 169};
+    for (size_t slot = 0; slot < 12; ++slot) {
+        const size_t base = slot * P25LiveDecoder::Phase2BurstDibits;
+        for (size_t i = 0; i < 170; ++i) {
+            if (i < 10) continue; // The local burst model overlaps these dibits with the sync pattern.
+            if (std::find(duidDibits.begin(), duidDibits.end(), i) != duidDibits.end()) continue;
+            dibits[base + 10 + i] ^= mask[slot * P25LiveDecoder::Phase2BurstDibits + i] & 0x03;
+        }
+    }
+    return dibits;
+}
+
+std::array<int, P25LiveDecoder::Phase2FrameSyncDibits> makeSyntheticPhase2Isch(uint8_t channel,
+                                                                               uint8_t location,
+                                                                               bool freeAccess,
+                                                                               uint8_t ultraframeCounter)
+{
+    static constexpr uint64_t kOffset = 0x184229d461ull;
+    static constexpr std::array<uint64_t, 9> kRows{
+        0x8816ce36d7ull, 0x201dfd4f64ull, 0x100f4b1758ull,
+        0x0c00ded18eull, 0x020807f7ffull, 0x09048d9b72ull,
+        0x009da3a171ull, 0x0058cbaa4eull, 0x00343d8597ull,
+    };
+
+    const uint8_t info = static_cast<uint8_t>(((channel & 0x03u) << 5) |
+                                              ((location & 0x03u) << 3) |
+                                              ((freeAccess ? 1u : 0u) << 2) |
+                                              (ultraframeCounter & 0x03u));
+    uint64_t word = kOffset;
+    for (size_t row = 0; row < kRows.size(); ++row) {
+        if ((info >> (8 - row)) & 1u) word ^= kRows[row];
+    }
+
+    std::array<int, P25LiveDecoder::Phase2FrameSyncDibits> dibits{};
+    for (size_t i = 0; i < dibits.size(); ++i) {
+        const size_t shift = (dibits.size() - 1 - i) * 2;
+        dibits[i] = static_cast<int>((word >> shift) & 0x03ull);
     }
     return dibits;
 }
@@ -665,6 +738,7 @@ TEST_CASE("P25 live decoder extracts Phase 2 4V burst voice codewords")
     const auto result = decoder.processHardDibits(dibits);
     REQUIRE(result.stats.phase2Bursts == 1);
     REQUIRE(result.stats.phase2VoiceCodewords == 4);
+    REQUIRE(result.stats.phase2SuperframeBursts == 0);
     REQUIRE(result.stats.bestPhase2SyncErrors == 0);
 }
 
@@ -680,6 +754,96 @@ TEST_CASE("P25 live decoder corrects Phase 2 DUID and extracts 2V bursts")
     REQUIRE(burst.duidErrors == 1);
     REQUIRE(burst.kind == P25Phase2BurstKind::Voice2);
     REQUIRE(burst.voiceCodewords.size() == 2);
+}
+
+TEST_CASE("P25 live decoder locks Phase 2 superframes and annotates all TDMA bursts")
+{
+    P25LiveDecoder decoder;
+    const auto dibits = makeSyntheticPhase2Superframe();
+
+    const auto bursts = decoder.processPhase2HardDibits(dibits);
+    REQUIRE(bursts.size() == 12);
+    for (size_t slot = 0; slot < bursts.size(); ++slot) {
+        const auto& burst = bursts[slot];
+        REQUIRE(burst.valid);
+        REQUIRE(burst.superframeLocked);
+        REQUIRE(burst.superframeDibitOffset == 0);
+        REQUIRE(burst.tdmaSlotKnown);
+        REQUIRE(burst.tdmaSlotId == slot);
+        REQUIRE(burst.duid == 0x0);
+        REQUIRE(burst.kind == P25Phase2BurstKind::Voice4);
+        REQUIRE(burst.voiceCodewords.size() == 4);
+    }
+    REQUIRE(bursts[0].syncErrors == -1);
+    REQUIRE(bursts[2].syncErrors == 0);
+
+    const auto result = decoder.processHardDibits(dibits);
+    REQUIRE(result.stats.phase2Bursts == 12);
+    REQUIRE(result.stats.phase2SuperframeBursts == 12);
+    REQUIRE(result.stats.phase2VoiceCodewords == 48);
+    REQUIRE(result.stats.phase2MaskedBursts == 0);
+    REQUIRE(result.stats.phase2IschSync == 6);
+}
+
+TEST_CASE("P25 Phase 2 XOR mask generation matches known local-system vector")
+{
+    const auto mask = P25LiveDecoder::phase2XorMaskDibits(0x2d2, 0xbee00, 0x2d1);
+    REQUIRE(mask.size() == P25LiveDecoder::Phase2BurstDibits * 12);
+    const std::array<int, 24> expected{
+        2, 3, 3, 2, 3, 2, 0, 0, 0, 0, 0, 2,
+        3, 1, 0, 1, 0, 2, 3, 1, 0, 2, 2, 0,
+    };
+    for (size_t i = 0; i < expected.size(); ++i) REQUIRE(mask[i] == expected[i]);
+}
+
+TEST_CASE("P25 live decoder applies Phase 2 XOR mask before extracting voice codewords")
+{
+    constexpr uint16_t nac = 0x2d2;
+    constexpr uint32_t wacn = 0xbee00;
+    constexpr uint16_t systemId = 0x2d1;
+    const auto clear = makeSyntheticPhase2Superframe();
+    const auto masked = makeSyntheticMaskedPhase2Superframe(nac, wacn, systemId);
+
+    P25LiveDecoder clearDecoder;
+    const auto clearBursts = clearDecoder.processPhase2HardDibits(clear);
+    REQUIRE(clearBursts.size() == 12);
+
+    P25LiveDecoder maskedDecoder;
+    maskedDecoder.setPhase2MaskParameters(nac, wacn, systemId);
+    const auto maskedResult = maskedDecoder.processHardDibits(masked);
+    REQUIRE(maskedResult.phase2Bursts.size() == 12);
+    REQUIRE(maskedResult.stats.phase2MaskedBursts == 12);
+    REQUIRE(maskedResult.stats.phase2VoiceCodewords == 48);
+    REQUIRE_FALSE(maskedResult.stats.phase2EssKnown);
+    for (size_t slot = 0; slot < maskedResult.phase2Bursts.size(); ++slot) {
+        const auto& burst = maskedResult.phase2Bursts[slot];
+        REQUIRE(burst.xorMaskApplied);
+        REQUIRE(burst.voiceCodewords.size() == clearBursts[slot].voiceCodewords.size());
+        REQUIRE(burst.voiceCodewords.front().bits == clearBursts[slot].voiceCodewords.front().bits);
+    }
+}
+
+TEST_CASE("P25 live decoder decodes informational Phase 2 ISCH fields")
+{
+    auto dibits = makeSyntheticPhase2Superframe();
+    const auto isch = makeSyntheticPhase2Isch(2, 1, true, 3);
+    std::copy(isch.begin(), isch.end(), dibits.begin());
+
+    P25LiveDecoder decoder;
+    const auto result = decoder.processHardDibits(dibits);
+
+    REQUIRE(result.stats.phase2Bursts == 12);
+    REQUIRE(result.stats.phase2IschDecoded >= 7);
+    REQUIRE(result.stats.phase2IschSync == 6);
+    REQUIRE_FALSE(result.phase2Bursts.empty());
+    const auto& burst = result.phase2Bursts.front();
+    REQUIRE(burst.isch.valid);
+    REQUIRE_FALSE(burst.isch.sync);
+    REQUIRE(burst.isch.errors == 0);
+    REQUIRE(burst.isch.channel == 2);
+    REQUIRE(burst.isch.location == 1);
+    REQUIRE(burst.isch.freeAccess);
+    REQUIRE(burst.isch.ultraframeCounter == 3);
 }
 
 TEST_CASE("P25 Phase 2 voice codewords map into AMBE frame layout")
