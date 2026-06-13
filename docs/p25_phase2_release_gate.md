@@ -15,6 +15,7 @@ The current P25 Phase 2 path can:
 - Decode candidate SACCH/FACCH/LCCH MAC PDUs through the Phase 2 RS/CRC path and expose `p2mac=valid/total` diagnostics.
 - Track ESS clear/encrypted state from MAC PTT/ACTIVE state and voice-burst ESS reconstruction.
 - Feed Phase 2 voice-follow diagnostics with a 0.75 second recent-IQ window instead of 25 ms fragments, so a full superframe can be observed.
+- Write rate-limited Phase 2 validation JSONL while following Phase 2 voice. The CLI `p25 voice` command prints the exact `p25_phase2_validation.jsonl` path; the file includes mask params, MAC/ESS, ISCH, raw/post-mask payload dibits, AMBE frame bits, mbelib error counters, and accepted/rejected PCM decisions.
 - Keep control-channel audio muted while monitoring and while returning from auto-follow.
 
 The current P25 Phase 2 path must not be released as complete clear voice yet. Clear AMBE audio is hard-gated unless a burst has passed TDMA superframe timing, real mask application (`xorMaskApplied=true`), MAC/ESS clear-state validation, and AMBE plausibility checks. The code path is implemented, but it still needs real clear Phase 2 IQ validation before we publish a GitHub release asset claiming audible Phase 2 voice.
@@ -43,6 +44,7 @@ The current P25 Phase 2 path must not be released as complete clear voice yet. C
 
 5. Real capture validation
    - Test with real clear Phase 2 IQ captures from at least one known-good local system.
+   - Collect the validation JSONL and normal app log for each test call.
    - Verify no audio is emitted on control channels, encrypted calls, wrong slots, or failed mask/MAC/ESS validation.
    - Verify clear calls produce stable 8 kHz PCM that resamples cleanly into the audio engine.
 

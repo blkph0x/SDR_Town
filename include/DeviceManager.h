@@ -94,6 +94,8 @@ public:
 
     // For spectrum: get latest power spectrum (dB) and center/sample info
     bool getLatestSpectrum(size_t index, std::vector<float>& powerDb, double& centerFreq, double& sampleRate);
+    void setSpectrumFftBins(size_t index, size_t bins);
+    size_t getSpectrumFftBins(size_t index) const;
 
     // Tune / scanner support
     void setCenterFreq(size_t index, double freqHz);
@@ -101,6 +103,7 @@ public:
     // Live diagnostics (addressing audit P1 RF gain, P2 unlocked queue size)
     double getCurrentGain(size_t index) const;   // configured gain after clamping to the device's advertised range
     size_t getIQQueueDepth(size_t index) const;  // thread-safe locked peek of current iqQueue depth
+    std::string getRuntimeStateLabel(size_t index) const;
 
     // P1: truly live hardware RF gain (separate from audioGain / displayGain).
     // If the device is currently streaming real hardware, this calls SoapySDR::setGain immediately.
@@ -129,6 +132,7 @@ private:
     struct StreamState {
         bool active = false;
         bool isReal = false;   // true only when we successfully did real Soapy make + activate (not the stub sim)
+        std::string runtimeState = "stopped";
         std::thread rxThread;
         std::atomic<bool> rxThreadRunning{false};
         // CRITICAL (P0 audit shutdown hang + best practice for untrusted SDR drivers):
@@ -168,7 +172,7 @@ private:
         // Maintained here so rxThread (or future separate worker) can publish high-res power.
         std::vector<float> spectrumAvg;   // exponential average per bin (dB)
         std::vector<float> spectrumPeak;  // peak-hold (with slow decay)
-        size_t spectrumBins = 8192;       // 4096/8192/16384 supported by compute path
+        size_t spectrumBins = 8192;       // 4096/8192/16384/65536 precision presets
 
 #ifdef HAVE_SOAPYSDR
         SoapySDR::Device* soapyDev = nullptr;

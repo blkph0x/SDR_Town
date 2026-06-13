@@ -39,6 +39,70 @@ float peakDbInBinSpan(const Row& row, double binStart, double binEnd, float fall
     return std::isfinite(peak) ? peak : fallback;
 }
 
+size_t nextPowerOfTwo(size_t v)
+{
+    if (v <= 1) return 1;
+    --v;
+    for (size_t shift = 1; shift < sizeof(size_t) * 8; shift <<= 1) v |= v >> shift;
+    return v + 1;
+}
+
+void fftRadix2(std::vector<std::complex<double>>& x)
+{
+    const size_t n = x.size();
+    if (n <= 1) return;
+    size_t j = 0;
+    for (size_t i = 1; i < n; ++i) {
+        size_t bit = n >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) std::swap(x[i], x[j]);
+    }
+
+    constexpr double pi = 3.14159265358979323846;
+    for (size_t len = 2; len <= n; len <<= 1) {
+        const double ang = -2.0 * pi / static_cast<double>(len);
+        const std::complex<double> wlen(std::cos(ang), std::sin(ang));
+        for (size_t i = 0; i < n; i += len) {
+            std::complex<double> w(1.0, 0.0);
+            for (size_t k = 0; k < len / 2; ++k) {
+                const auto u = x[i + k];
+                const auto v = x[i + k + len / 2] * w;
+                x[i + k] = u + v;
+                x[i + k + len / 2] = u - v;
+                w *= wlen;
+            }
+        }
+    }
+}
+
+std::vector<float> computeIqFftPower(const std::vector<std::complex<float>>& iq)
+{
+    if (iq.empty()) return {};
+    size_t fftN = nextPowerOfTwo(std::min<size_t>(iq.size(), 8192));
+    fftN = std::clamp<size_t>(fftN, 1024, 8192);
+
+    std::vector<std::complex<double>> buf(fftN);
+    const size_t n = std::min(fftN, iq.size());
+    for (size_t i = 0; i < fftN; ++i) {
+        const double w = (fftN > 1)
+            ? 0.5 * (1.0 - std::cos(2.0 * 3.14159265358979323846 * static_cast<double>(i) / static_cast<double>(fftN - 1)))
+            : 1.0;
+        if (i < n) buf[i] = std::complex<double>(iq[i].real(), iq[i].imag()) * w;
+        else buf[i] = {};
+    }
+
+    fftRadix2(buf);
+    std::vector<float> power(fftN);
+    const double norm = 1.0 / static_cast<double>(fftN);
+    for (size_t i = 0; i < fftN; ++i) {
+        const size_t k = (i + fftN / 2) % fftN;
+        const double mag2 = std::norm(buf[k]) * norm * norm;
+        power[i] = static_cast<float>(10.0 * std::log10(std::max(mag2, 1e-20)));
+    }
+    return power;
+}
+
 } // namespace
 
 SpectrumWidget::SpectrumWidget(QWidget* parent)
@@ -96,14 +160,7 @@ void SpectrumWidget::updateSpectrum(const std::vector<float>& powerDb, double ce
 
 void SpectrumWidget::updateIQ(const std::vector<std::complex<float>>& iq, double centerFreqHz, double sampleRateHz)
 {
-    // TODO PR3: real FFT here (use liquid-dsp fft or fftw/kiss once wired)
-    // For now convert to fake power
-    std::vector<float> pwr(iq.size());
-    for (size_t i = 0; i < iq.size(); ++i) {
-        float mag = std::abs(iq[i]);
-        pwr[i] = 20.0f * std::log10(std::max(mag, 1e-6f));
-    }
-    updateSpectrum(pwr, centerFreqHz, sampleRateHz);
+    updateSpectrum(computeIqFftPower(iq), centerFreqHz, sampleRateHz);
 }
 
 void SpectrumWidget::setCenterFreq(double hz) { m_centerFreq = hz; update(); }

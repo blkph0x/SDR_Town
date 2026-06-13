@@ -1491,7 +1491,7 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
                                    int syncErrors,
                                    bool superframeLocked,
                                    size_t superframeOffset,
-                                   size_t tdmaSlotId,
+                                   size_t superframeBurstIndex,
                                    const std::array<int, P25LiveDecoder::Phase2BurstDibits * 12>* xorMask,
                                    Phase2SessionState* session,
                                    std::vector<P25Phase2MacPdu>* macPdus)
@@ -1504,8 +1504,12 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
     burst.syncErrors = syncErrors;
     burst.superframeLocked = superframeLocked;
     burst.superframeDibitOffset = superframeOffset;
-    burst.tdmaSlotKnown = superframeLocked;
-    burst.tdmaSlotId = static_cast<uint8_t>(tdmaSlotId & 0x0fu);
+    burst.superframeBurstIndexKnown = superframeLocked;
+    burst.superframeBurstIndex = static_cast<uint8_t>(superframeBurstIndex & 0x0fu);
+    burst.grantSlotKnown = superframeLocked;
+    burst.grantSlot = static_cast<uint8_t>(superframeBurstIndex & 0x01u);
+    burst.tdmaSlotKnown = burst.superframeBurstIndexKnown;
+    burst.tdmaSlotId = burst.superframeBurstIndex;
     burst.isch = decodePhase2IschAt(dibits, pos);
 
     const size_t payload = pos + 10; // DUID/voice payload starts after the first ten dibits.
@@ -1521,11 +1525,15 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
     burst.kind = phase2BurstKindFromDuid(duid.duid);
 
     std::vector<int> payloadDibits(170, 0);
-    const bool canApplyMask = xorMask && superframeLocked && tdmaSlotId < 12;
+    const bool canApplyMask = xorMask && superframeLocked && superframeBurstIndex < 12;
+    burst.rawPayloadDibits.reserve(payloadDibits.size());
+    burst.maskedPayloadDibits.reserve(payloadDibits.size());
     for (size_t i = 0; i < payloadDibits.size(); ++i) {
         int d = dibits[payload + i] & 0x03;
-        if (canApplyMask) d ^= ((*xorMask)[tdmaSlotId * P25LiveDecoder::Phase2BurstDibits + i] & 0x03);
+        burst.rawPayloadDibits.push_back(d & 0x03);
+        if (canApplyMask) d ^= ((*xorMask)[superframeBurstIndex * P25LiveDecoder::Phase2BurstDibits + i] & 0x03);
         payloadDibits[i] = d & 0x03;
+        burst.maskedPayloadDibits.push_back(payloadDibits[i]);
     }
     burst.xorMaskApplied = canApplyMask;
 
@@ -1536,7 +1544,7 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
             if (pdu->crcValid && session) {
                 if (pdu->opcode == 1) {
                     session->ess = pdu->ess;
-                    session->first4vSlot = static_cast<int>(((tdmaSlotId >> 1) + pdu->offset + 1) % 5);
+                    session->first4vSlot = static_cast<int>(((superframeBurstIndex >> 1) + pdu->offset + 1) % 5);
                     session->essB = {};
                     session->essBSeen = {};
                 } else if (pdu->opcode == 2) {
@@ -1554,7 +1562,7 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
 
     if (phase2BurstKindHasVoice(burst.kind)) {
         if (session && burst.xorMaskApplied && session->first4vSlot >= 0 && superframeLocked) {
-            int currentSlot = static_cast<int>(tdmaSlotId >> 1);
+            int currentSlot = static_cast<int>(superframeBurstIndex >> 1);
             if (currentSlot < session->first4vSlot) currentSlot += 5;
             const int burstId = currentSlot - session->first4vSlot;
             if (auto ess = decodePhase2VoiceEss(payloadDibits, burstId, *session)) {

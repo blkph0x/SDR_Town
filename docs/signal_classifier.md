@@ -44,14 +44,15 @@ This is the production path that scales to a true trained model later:
 - Synthetic bootstrap samples can be generated with `scripts/generate_synthetic_classifier_data.py`.
 - Train/validation/test manifests can be built with `scripts/build_classifier_manifest.py`.
 - A compact optional PyTorch-to-ONNX training bridge is available at `scripts/train_classifier.py`.
-- Optional model lifecycle is exposed in CLI with `model status`, `model load <path>`, and `model unload`.
+- Optional model lifecycle is exposed in CLI with `model status`, `model load <path>`, and `model unload`; it is fail-closed until a real ONNX session binding and validated model contract are finished.
 
 ## Next Classifier Work
 
 1. Add hysteresis so AUTO changes only after stable evidence.
-2. Add an optional ONNX Runtime backend:
+2. Finish the optional ONNX Runtime backend:
    - Input: normalized `256 x 256` waterfall ROI.
    - Outputs: mode logits, bandwidth regression, signal-present confidence, optional digital-family logits.
+   - Keep deterministic fallback active unless the model loads, matches the metadata contract, and clears confidence calibration.
 3. Add captured-IQ training/export tooling:
    - Save ROI tiles and metadata from real signals.
    - Label P25, DMR, NFM voice, WFM broadcast, AM, USB/LSB, CW, and unknown.
@@ -59,4 +60,4 @@ This is the production path that scales to a true trained model later:
    - P25 control/voice split.
    - DMR/NXDN/POCSAG/AX.25 candidate classes.
 5. Persist classifier decisions with saved frequencies and scan hits for later review.
-6. Keep hardening Phase 2 TDMA voice: derive/apply any required NAC/SYSID/WACN XOR mask with correct superframe/ISCH timing, decode TDMA MAC/encryption state earlier, and expand corpus-driven validation of AMBE frame mapping on real clear systems.
+6. Keep hardening Phase 2 TDMA voice: use the automatic `p25_phase2_validation.jsonl` recorder during follow tests (`p25 voice` prints the exact path), then compare mask phase, MAC/ESS, AMBE frame mapping, mbelib error counts, and accepted PCM on real clear systems.

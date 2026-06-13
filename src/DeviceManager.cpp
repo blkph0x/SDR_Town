@@ -52,6 +52,13 @@ static double correctedTuneFrequencyHz(double logicalHz, double ppm) {
     return logicalHz / scale;
 }
 
+static size_t normalizeSpectrumFftBins(size_t bins) {
+    if (bins <= 4096) return 4096;
+    if (bins <= 8192) return 8192;
+    if (bins <= 16384) return 16384;
+    return 65536;
+}
+
 static double chooseDefaultSampleRate(const DeviceInfo& d) {
     if (d.sampleRates.empty()) return d.driver == "rtlsdr" ? 2.048e6 : 2.4e6;
     const std::array<double, 2> preferred = d.driver == "rtlsdr"
@@ -434,6 +441,7 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
         std::lock_guard<std::mutex> lk(st.stateMutex);
         st.active = true;
         st.isReal = false;
+        st.runtimeState = attemptReal ? "opening hardware (stub active)" : "simulated/stub";
     }
     st.rxThread = std::thread(&DeviceManager::rxThreadFunc, this, index);
     if (!attemptReal) {
@@ -567,6 +575,7 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                     std::lock_guard<std::mutex> lk(st.stateMutex);
                     st.active = false;
                     st.isReal = false;
+                    st.runtimeState = "driver stuck, restart recommended";
                 }
                 return;
             }
@@ -580,6 +589,7 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                 st.rxStream = localStream;
                 st.active = true;
                 st.isReal = true;
+                st.runtimeState = "live hardware";
                 st.frequencyCorrectionPpm = usePpm;
                 st.nativeFrequencyCorrectionActive = nativePpm;
                 localDev = nullptr;
@@ -618,9 +628,17 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
         } catch (const std::exception& ex) {
             spdlog::warn("Background real init failed for device {} ({}). Keeping safe stub.", index, ex.what());
             cleanupLocal();
+            if (!st.stopFlag && st.sessionGen.load(std::memory_order_acquire) == myGen) {
+                std::lock_guard<std::mutex> lk(st.stateMutex);
+                st.runtimeState = "hardware failed, using stub";
+            }
         } catch (...) {
             spdlog::warn("Background real init failed for device {} with unknown exception (SEH/driver). Keeping safe stub.", index);
             cleanupLocal();
+            if (!st.stopFlag && st.sessionGen.load(std::memory_order_acquire) == myGen) {
+                std::lock_guard<std::mutex> lk(st.stateMutex);
+                st.runtimeState = "hardware failed, using stub";
+            }
         }
     });
     // Immediately detach: this is the open-worker for untrusted driver. We never join it again.
@@ -633,6 +651,10 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
     // !HAVE_SOAPYSDR: stay on the fast safe stub that was started above. The CLI/GUI/ tests
     // continue to work for list/enable/tune/mode/stats/spectrum/demod (using the internal stub path in rxThreadFunc).
     spdlog::info("SoapySDR not available in this build — device {} staying on safe internal stub (no real hardware).", index);
+    {
+        std::lock_guard<std::mutex> lk(st.stateMutex);
+        st.runtimeState = "simulated/stub";
+    }
 #endif
     return true;
 }
@@ -723,6 +745,7 @@ void DeviceManager::stopStreaming(size_t index) {
         st.active = false;
         st.isReal = false;
         st.nativeFrequencyCorrectionActive = false;
+        st.runtimeState = "stopped";
     }
     resetStreamBuffers(st);
     spdlog::info("Stopped streaming for device {}", index);
@@ -788,6 +811,34 @@ bool DeviceManager::getLatestSpectrum(size_t index, std::vector<float>& powerDb,
     centerFreq = st.currentCenter;
     sampleRate = st.currentRate;
     return true;
+}
+
+void DeviceManager::setSpectrumFftBins(size_t index, size_t bins) {
+    const size_t fftBins = normalizeSpectrumFftBins(bins);
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (index >= devices.size()) return;
+        if (streams.size() <= index) streams.resize(index + 1);
+        if (!streams[index]) streams[index] = std::make_unique<StreamState>();
+    }
+
+    auto& st = *streams[index];
+    {
+        std::lock_guard<std::mutex> lk(st.queueMutex);
+        if (st.spectrumBins == fftBins) return;
+        st.spectrumBins = fftBins;
+        st.latestPower.clear();
+        st.spectrumAvg.clear();
+        st.spectrumPeak.clear();
+    }
+    spdlog::info("Device {} spectrum FFT bins set to {}", index, fftBins);
+}
+
+size_t DeviceManager::getSpectrumFftBins(size_t index) const {
+    if (index >= streams.size() || !streams[index]) return 8192;
+    auto& st = *streams[index];
+    std::lock_guard<std::mutex> lk(st.queueMutex);
+    return st.spectrumBins;
 }
 
 double DeviceManager::getCurrentGain(size_t index) const {
@@ -908,6 +959,13 @@ size_t DeviceManager::getIQQueueDepth(size_t index) const {
     auto& st = *streams[index];
     std::lock_guard<std::mutex> lk(st.queueMutex);
     return st.iqQueue.size();
+}
+
+std::string DeviceManager::getRuntimeStateLabel(size_t index) const {
+    if (index >= streams.size() || !streams[index]) return "stopped";
+    auto& st = *streams[index];
+    std::lock_guard<std::mutex> lk(st.stateMutex);
+    return st.runtimeState.empty() ? std::string("stopped") : st.runtimeState;
 }
 
 // S0-3 (P1): non-consuming recent window so N receivers on the same device each get a coherent
@@ -1242,7 +1300,7 @@ void DeviceManager::rxThreadFunc(size_t index) {
                     appendIQBlock(index, std::move(block));
 
                     // === State-of-the-art spectrum pipeline (P1 audit + this stabilization) ===
-                    // - Real radix-2 FFT, 8192 bins (supports 4096/8192/16384)
+                    // - Real radix-2 FFT, selectable 4K/8K/16K/64K bins
                     // - Hann + Blackman-Harris windows (Blackman-Harris for main viz)
                     // - Window taken from high-quality per-device ring (overlap friendly via ring)
                     // - Exponential averaging + peak hold (slow decay) maintained in StreamState
@@ -1250,7 +1308,11 @@ void DeviceManager::rxThreadFunc(size_t index) {
                     // - Published as high-res latestPower so SpectrumWidget can do true-resolution zoomed waterfall from source history.
                     auto now = std::chrono::steady_clock::now();
                     if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastSpectrumTime).count() > 45) {
-                        const size_t fftN = 8192; // SOTA default; higher = more resolution for zoom
+                        size_t fftN = 8192;
+                        {
+                            std::lock_guard<std::mutex> lk(st.queueMutex);
+                            fftN = st.spectrumBins;
+                        }
                         std::vector<float> localPower;
 
                         // Draw window from ring (best continuous recent IQ, enables overlap if we hop)
@@ -1303,12 +1365,14 @@ void DeviceManager::rxThreadFunc(size_t index) {
                     }
                 }
                 // No unconditional sleep. Only yield if queue is getting very full (backpressure).
-                // P2 audit: .size() read was unlocked (race with push under queueMutex); fix by short re-lock or decision under lock.
+                // P2 audit: decide under the lock, then sleep after releasing it so consumers are never blocked by backpressure.
+                bool shouldBackpressureSleep = false;
                 {
                     std::lock_guard<std::mutex> lk(st.queueMutex);
-                    if (st.iqQueue.size() > 96) {
-                        std::this_thread::sleep_for(std::chrono::microseconds(200));
-                    }
+                    shouldBackpressureSleep = st.iqQueue.size() > 96;
+                }
+                if (shouldBackpressureSleep) {
+                    std::this_thread::sleep_for(std::chrono::microseconds(200));
                 }
             }
         } catch (const std::exception& ex) {
@@ -1329,6 +1393,7 @@ void DeviceManager::rxThreadFunc(size_t index) {
             if (st.rxStream == stream) st.rxStream = nullptr;
             st.isReal = false;
             st.active = true;
+            st.runtimeState = "hardware failed, using stub";
         }
         try {
             if (stream && dev) {
@@ -1361,9 +1426,13 @@ void DeviceManager::rxThreadFunc(size_t index) {
         // Centralized append: ring fed before move (no more "ring receives no samples" after std::move)
         appendIQBlock(index, std::move(block));
 
-        // spectrum for stub (high bin count via the *same* real FFT path so zoomed views look consistent and "high res" even in demo/no-hw)
+        // spectrum for stub (same real FFT path so zoomed views look consistent and high-res even in demo/no-hw)
         {
-            const size_t fftN = 8192;
+            size_t fftN = 8192;
+            {
+                std::lock_guard<std::mutex> lk(st.queueMutex);
+                fftN = st.spectrumBins;
+            }
             std::vector<std::complex<float>> fake(fftN);
             for (size_t i = 0; i < fftN; ++i) {
                 double phase = 2 * 3.14159265 * (100e6 + 0.1e6 * std::sin(t * 0.3)) / fs * (double)i;

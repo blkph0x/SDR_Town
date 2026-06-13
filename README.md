@@ -2,7 +2,7 @@
 
 **Professional multi-SDR monitoring, smart scanning, unencrypted voice/data playback, and advanced signal analysis for Windows.** (formerly MaulAudio Pro, rebranded as SDR Town)
 
-Connect multiple HackRF (and other SoapySDR) devices in one clean GUI. Smart scanning with voice activity detection. High-quality analog + digital voice (NFM/AM/WFM/SSB + P25/DMR/NXDN clear). Weather satellite downlinks (NOAA APT). Dedicated multi-device audio output (listen on speakers while simultaneously piping to VB-Audio Cable or other virtual devices). Powerful Signal Analyzer with state-of-the-art (hybrid classical + modern) automatic modulation recognition for ASK, PSK, FSK, QAM and more — with decoding tools for unencrypted signals only.
+Connect multiple HackRF (and other SoapySDR) devices in one clean GUI. Smart scanning with voice activity detection. High-quality analog radio paths, P25 control/voice work, dedicated multi-device audio output, and a growing signal-analyzer/classifier workflow. Satellite, DMR/NXDN, pager/data, and deeper reverse-engineering workflows are roadmap modules, not finished decoder suites yet.
 
 **Status:** Early development (see [DESIGN.md](./DESIGN.md) for the full approved architecture and incremental PR plan).
 
@@ -16,10 +16,9 @@ Connect multiple HackRF (and other SoapySDR) devices in one clean GUI. Smart sca
 - **Advanced signal classifier**: ROI-based spectrum/waterfall feature extraction with exact mode/BW/filter recommendations and a future-ready model interface. See `docs/signal_classifier.md` and `docs/classifier_training_data_plan.md`.
 - Classifier training tools: GUI/CLI SigMF capture, synthetic bootstrap generation, manifest splitting, optional PyTorch-to-ONNX training, and optional model-backend hooks.
 - Saved frequencies: one-click GUI recall plus CLI favorites for repeaters, broadcast stations, control channels, and test frequencies.
-- Excellent analog voice with CTCSS/DCS, squelch, AGC, recording.
-- Data: POCSAG pager decoding, basic AX.25.
-- Weather sats: live NOAA APT image decoding and save.
-- Digital voice: P25 Phase 1 (clear IMBE), P25 Phase 2 TDMA control/grant tracking, DMR clear, NXDN (phased delivery).
+- Analog voice: NFM/WFM/AM/SSB/CW paths with squelch, AGC foundations, filters, and saved-frequency workflow.
+- Data/satellite roadmap: IQ capture/classifier tooling is present; POCSAG, AX.25, NOAA APT, Meteor LRPT, and pass/Doppler workflows are planned modules.
+- Digital voice: P25 Phase 1 clear IMBE path, P25 Phase 2 TDMA control/grant tracking and experimental gated AMBE validation; DMR/NXDN are phased delivery items.
 - **Advanced Signal Analyzer**: pick freq + bandwidth → automatic modulation classification (ASK/OOK, PSK variants, QAM, FSK etc.), constellation, eye diagram, parameter estimation, generic + protocol-aware decoding of *unencrypted* signals. No decryption ever.
 - Robust error handling (device removal, buffer health, etc.).
 - JSON config, session restore, dark modern professional theme, keyboard-driven.
@@ -34,7 +33,7 @@ Connect multiple HackRF (and other SoapySDR) devices in one clean GUI. Smart sca
 4. Audio → Configure Output Devices... — check your speakers and a virtual cable (e.g. VB-Audio CABLE Input). Set volumes. Test tones.
 5. Load or edit band plans, hit "Start Smart Scan".
 6. Watch hits, promote interesting ones to persistent receivers, monitor audio on your chosen outputs.
-7. For satellite: tune a NOAA freq (~137.1 MHz etc.) or let scanner find it; open APT decoder pane.
+7. For satellite work today: use IQ capture/classifier tooling around NOAA/Meteor frequencies; full APT/LRPT decode panes are still roadmap work.
 8. For advanced analysis: right-click spectrum or receiver → "Analyze in Signal Analyzer".
 
 See DESIGN.md for detailed feature descriptions and roadmap.

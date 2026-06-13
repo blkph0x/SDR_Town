@@ -168,8 +168,12 @@ struct P25Phase2Burst {
     int syncErrors = -1;
     bool superframeLocked = false;
     size_t superframeDibitOffset = 0;
+    bool superframeBurstIndexKnown = false;
+    uint8_t superframeBurstIndex = 0;
+    bool grantSlotKnown = false;
+    uint8_t grantSlot = 0;
     bool tdmaSlotKnown = false;
-    uint8_t tdmaSlotId = 0;
+    uint8_t tdmaSlotId = 0; // Compatibility alias for superframeBurstIndex; do not treat as grant slot.
     P25Phase2IschState isch;
     uint8_t rawDuidCodeword = 0;
     int duid = -1;
@@ -180,6 +184,8 @@ struct P25Phase2Burst {
     bool macCrcValid = false;
     bool essKnown = false;
     bool encrypted = false;
+    std::vector<int> rawPayloadDibits;
+    std::vector<int> maskedPayloadDibits;
     std::vector<P25Phase2VoiceCodeword> voiceCodewords;
 };
 

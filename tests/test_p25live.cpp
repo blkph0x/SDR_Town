@@ -770,6 +770,10 @@ TEST_CASE("P25 live decoder locks Phase 2 superframes and annotates all TDMA bur
         REQUIRE(burst.superframeDibitOffset == 0);
         REQUIRE(burst.tdmaSlotKnown);
         REQUIRE(burst.tdmaSlotId == slot);
+        REQUIRE(burst.superframeBurstIndexKnown);
+        REQUIRE(burst.superframeBurstIndex == slot);
+        REQUIRE(burst.grantSlotKnown);
+        REQUIRE(burst.grantSlot == (slot & 0x01u));
         REQUIRE(burst.duid == 0x0);
         REQUIRE(burst.kind == P25Phase2BurstKind::Voice4);
         REQUIRE(burst.voiceCodewords.size() == 4);
