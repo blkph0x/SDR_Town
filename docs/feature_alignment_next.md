@@ -66,7 +66,7 @@ Still to do from Pack A:
 
 ## Best Next Build Step
 
-The next non-P25 build should be **Feature Pack B: Display Engine**. The radio workflow is now corrected, recallable, and band-aware enough to support the next visible leap: higher FFT resolution, professional palettes, display presets, and explicit waterfall controls. The active P25 track should keep hardening Phase 2 TDMA follow, especially ISCH/superframe timing and de-whitened AMBE voice validation.
+The next non-P25 build should be **Feature Pack B: Display Engine**. The radio workflow is now corrected, recallable, and band-aware enough to support the next visible leap: higher FFT resolution, professional palettes, display presets, and explicit waterfall controls. The active P25 track should keep hardening Phase 2 TDMA follow, especially real-system ISCH/superframe timing, AMBE frame validation, and any required de-whitening mask work.
 
 ## Following Packs
 

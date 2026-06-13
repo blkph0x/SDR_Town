@@ -1809,6 +1809,8 @@ P25VoiceDecodeResult P25ImbeVoiceDecoder::decodeImbe4400Frame(const std::array<u
     mbe_processImbe4400Dataf(audio, &errs, &errs2, errText, imbeBits,
                              &m_impl->current, &m_impl->previous, &m_impl->enhanced, 3);
     result.status = P25VoiceDecodeStatus::Decoded;
+    result.errors = errs;
+    result.totalErrors = errs2;
     result.pcm.assign(std::begin(audio), std::end(audio));
     result.message = errText[0] ? errText : "decoded";
     return result;
@@ -1876,6 +1878,8 @@ P25VoiceDecodeResult P25AmbeVoiceDecoder::decodeAmbe2450Data(const std::array<ui
     mbe_processAmbe2450Dataf(audio, &errs, &errs2, errText, ambeBits,
                              &m_impl->current, &m_impl->previous, &m_impl->enhanced, 3);
     result.status = P25VoiceDecodeStatus::Decoded;
+    result.errors = errs;
+    result.totalErrors = errs2;
     result.pcm.assign(std::begin(audio), std::end(audio));
     result.message = errText[0] ? errText : "decoded";
     return result;
@@ -1911,6 +1915,8 @@ P25VoiceDecodeResult P25AmbeVoiceDecoder::decodeAmbe3600x2450Frame(const std::ar
     mbe_processAmbe3600x2450Framef(audio, &errs, &errs2, errText, ambeFrame, ambeData,
                                    &m_impl->current, &m_impl->previous, &m_impl->enhanced, 3);
     result.status = P25VoiceDecodeStatus::Decoded;
+    result.errors = errs;
+    result.totalErrors = errs2;
     result.pcm.assign(std::begin(audio), std::end(audio));
     result.message = errText[0] ? errText : "decoded";
     return result;

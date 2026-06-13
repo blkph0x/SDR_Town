@@ -28,7 +28,8 @@ SDR Town now uses a hybrid classifier workflow:
    - The main window shows a live classifier status line with class, confidence, bandwidth, and filter recommendation.
    - CLI command `classify [dev] [rx]` prints the same decision and feature summary.
    - P25 voice follow reports the live decoder stage (`no voice sync`, `NID not validated`, `waiting voice frames`, `voice backend missing`, `Phase 2 metadata missing`, `Phase 2 TDMA mask missing`, or `decoding clear voice`) in the GUI and CLI diagnostics.
-   - GUI P25 monitoring includes an `Auto Follow Grants` checkbox that follows clear talkgroup grants from the monitored control channel and retunes back to the control channel after voice activity falls away.
+   - GUI/CLI P25 monitoring mutes raw control-channel audio, includes an `Auto Follow Grants` checkbox in the GUI, and retunes back to the muted control channel after voice activity falls away.
+   - Clear Phase 2 follow attempts direct AMBE synthesis only for FEC-clean frames; bad, scrambled, encrypted, or non-FEC-clean frames remain muted.
 
 ## Why This Shape
 
@@ -58,4 +59,4 @@ This is the production path that scales to a true trained model later:
    - P25 control/voice split.
    - DMR/NXDN/POCSAG/AX.25 candidate classes.
 5. Persist classifier decisions with saved frequencies and scan hits for later review.
-6. Finish live Phase 2 TDMA voice: derive/apply the NAC/SYSID/WACN XOR mask with correct superframe/ISCH timing, decode TDMA MAC/encryption state, deinterleave and FEC-correct voice codewords, then feed exact AMBE frames to the existing mbelib-backed synthesis path.
+6. Keep hardening Phase 2 TDMA voice: derive/apply any required NAC/SYSID/WACN XOR mask with correct superframe/ISCH timing, decode TDMA MAC/encryption state earlier, and expand corpus-driven validation of AMBE frame mapping on real clear systems.

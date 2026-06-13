@@ -140,6 +140,8 @@ struct P25VoiceDecodeResult {
     P25VoiceDecodeStatus status = P25VoiceDecodeStatus::BackendUnavailable;
     std::vector<float> pcm;
     double sampleRate = 8000.0;
+    int errors = 0;
+    int totalErrors = 0;
     std::string message;
 };
 

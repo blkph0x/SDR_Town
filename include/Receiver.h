@@ -46,6 +46,7 @@ struct Receiver {
     uint16_t p25VoiceNac = 0;
     uint32_t p25VoiceWacn = 0;
     uint16_t p25VoiceSystemId = 0;
+    bool p25ControlChannelMute = false;
     P25LiveDecoder p25VoiceLiveDecoder;
     P25ImbeVoiceDecoder p25ImbeVoiceDecoder;
     P25AmbeVoiceDecoder p25AmbeVoiceDecoder;

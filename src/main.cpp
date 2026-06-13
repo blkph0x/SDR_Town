@@ -1231,6 +1231,7 @@ struct P25VoiceAudioBlock {
     bool phase2VoiceUnsupported = false;
     bool phase2MetadataMissing = false;
     bool phase2MaskMissing = false;
+    size_t phase2RejectedVoiceCodewords = 0;
     std::string demodPath;
 };
 
@@ -1309,6 +1310,26 @@ static std::vector<float> resampleDecodedP25Pcm(const std::vector<float>& pcm,
     return out;
 }
 
+static bool p25AmbeDecodeFrameLooksUsable(const P25VoiceDecodeResult& decoded)
+{
+    if (decoded.status != P25VoiceDecodeStatus::Decoded || decoded.pcm.empty()) return false;
+
+    double peak = 0.0;
+    double sumSquares = 0.0;
+    for (float sample : decoded.pcm) {
+        if (!std::isfinite(sample)) return false;
+        const double v = static_cast<double>(sample);
+        peak = std::max(peak, std::abs(v));
+        sumSquares += v * v;
+    }
+    if (peak <= 1e-7 || sumSquares <= 1e-10) return false;
+
+    // mbelib's AMBE path exposes hard-decision FEC correction counts. Direct
+    // Phase 2 audio is only released when the frame is plausibly correct; random
+    // scrambled/misaligned bursts tend to land far above this range and stay muted.
+    return decoded.totalErrors <= 18;
+}
+
 static P25VoiceAudioBlock decodeP25VoiceAudioBlock(Receiver& rx,
                                                    const std::vector<std::complex<float>>& iq,
                                                    double sampleRateHz,
@@ -1351,25 +1372,25 @@ static P25VoiceAudioBlock decodeP25VoiceAudioBlock(Receiver& rx,
     }
 
     if (rx.p25VoicePhase2) {
-        bool maskedVoice = false;
-        bool unmaskedVoice = false;
+        bool sawVoice = false;
+        bool acceptedVoice = false;
         for (const auto& burst : live.phase2Bursts) {
             if (burst.voiceCodewords.empty()) continue;
-            if (!burst.xorMaskApplied) {
-                unmaskedVoice = true;
-                continue;
-            }
-            maskedVoice = true;
+            sawVoice = true;
             for (const auto& codeword : burst.voiceCodewords) {
                 const auto ambeFrame = p25Phase2VoiceCodewordToAmbe3600x2450Frame(codeword);
                 const auto decoded = rx.p25AmbeVoiceDecoder.decodeAmbe3600x2450Frame(ambeFrame);
-                if (decoded.status != P25VoiceDecodeStatus::Decoded || decoded.pcm.empty()) continue;
+                if (!p25AmbeDecodeFrameLooksUsable(decoded)) {
+                    ++out.phase2RejectedVoiceCodewords;
+                    continue;
+                }
                 auto block = resampleDecodedP25Pcm(decoded.pcm, decoded.sampleRate, outputRateHz);
                 out.audio.insert(out.audio.end(), block.begin(), block.end());
                 ++out.decodedFrames;
+                acceptedVoice = true;
             }
         }
-        if (unmaskedVoice && !maskedVoice) {
+        if (sawVoice && !acceptedVoice) {
             if (rx.p25VoiceMaskParamsKnown) out.phase2MaskMissing = true;
             else out.phase2MetadataMissing = true;
             out.phase2VoiceUnsupported = true;
@@ -2177,6 +2198,16 @@ public:
             return true;
         };
 
+        auto setP25ControlChannelMute = [this](bool muted) {
+            std::lock_guard<std::mutex> lk(receiversMutex);
+            ensureReceiver();
+            if (receivers.empty() || !receivers[0]) return;
+            auto& rx = *receivers[0];
+            std::lock_guard<std::mutex> rxLock(rx.stateMutex);
+            rx.p25ControlChannelMute = muted;
+            if (muted) rx.resetDemodState();
+        };
+
         auto clearP25VoiceFollowState = [this]() {
             std::lock_guard<std::mutex> lk(receiversMutex);
             ensureReceiver();
@@ -2194,11 +2225,12 @@ public:
             rx.p25VoiceNac = 0;
             rx.p25VoiceWacn = 0;
             rx.p25VoiceSystemId = 0;
+            rx.p25ControlChannelMute = false;
             rx.resetP25VoiceState();
             clearP25VoiceDiagnostics();
         };
 
-        auto returnP25AutoFollowToControl = [this, p25Status, p25TgFollowBtn, tuneP25Path, clearP25VoiceFollowState]() {
+        auto returnP25AutoFollowToControl = [this, p25Status, p25TgFollowBtn, tuneP25Path, clearP25VoiceFollowState, setP25ControlChannelMute]() {
             const double ccHz = p25AutoFollowReturnControlFreqHz > 0.0
                 ? p25AutoFollowReturnControlFreqHz
                 : p25MonitoredControlFreqHz;
@@ -2213,9 +2245,10 @@ public:
             clearP25VoiceFollowState();
             if (ccHz > 0.0 && tuneP25Path(ccHz)) {
                 p25MonitoredControlFreqHz = ccHz;
+                setP25ControlChannelMute(true);
                 p25LiveDecoder.reset();
                 p25LastDiagSignature.clear();
-                appendP25LogLine(QString("P25 auto-follow returned to control channel %1MHz.").arg(ccHz / 1e6, 0, 'f', 5));
+                appendP25LogLine(QString("P25 auto-follow returned to muted control channel %1MHz.").arg(ccHz / 1e6, 0, 'f', 5));
                 if (p25Status) p25Status->setText(QString("Monitoring CC %1 MHz").arg(ccHz / 1e6, 0, 'f', 5));
             } else if (p25Status) {
                 p25Status->setText("Auto follow idle");
@@ -2239,6 +2272,7 @@ public:
             rx.p25VoiceNac = tg.nac;
             rx.p25VoiceWacn = tg.wacn;
             rx.p25VoiceSystemId = tg.systemId;
+            rx.p25ControlChannelMute = false;
             rx.resetDemodState();
             rx.resetP25VoiceState();
         };
@@ -2410,7 +2444,7 @@ public:
                     p25Status->setText(on ? "Auto follow armed" : "Auto follow off");
                 }
             });
-        connect(p25MonitorBtn, &QPushButton::clicked, this, [this, p25Status, selectedP25ControlHz, tuneP25Path, clearP25VoiceFollowState]() {
+        connect(p25MonitorBtn, &QPushButton::clicked, this, [this, p25Status, selectedP25ControlHz, tuneP25Path, clearP25VoiceFollowState, setP25ControlChannelMute]() {
             const double ccHz = selectedP25ControlHz();
             if (!tuneP25Path(ccHz)) return;
             p25MonitoredControlFreqHz = ccHz;
@@ -2426,9 +2460,10 @@ public:
             p25LiveControlAnalyzer.reset();
             p25LastDiagSignature.clear();
             clearP25VoiceFollowState();
-            appendP25LogLine(QString("Monitoring P25 control channel target=%1MHz.").arg(ccHz / 1e6, 0, 'f', 5));
+            setP25ControlChannelMute(true);
+            appendP25LogLine(QString("Monitoring muted P25 control channel target=%1MHz.").arg(ccHz / 1e6, 0, 'f', 5));
             p25Status->setText(QString("Monitoring CC %1 MHz").arg(ccHz / 1e6, 0, 'f', 5));
-            statusBar()->showMessage(QString("Monitoring P25 control channel %1 MHz").arg(ccHz / 1e6, 0, 'f', 5), 2500);
+            statusBar()->showMessage(QString("Monitoring muted P25 control channel %1 MHz").arg(ccHz / 1e6, 0, 'f', 5), 2500);
         });
         connect(p25Table, &QTableWidget::cellDoubleClicked, this, [monFreq, setMonBtn, p25Table](int row, int) {
             auto* item = p25Table->item(row, 0);
@@ -2572,7 +2607,7 @@ public:
                 return;
             }
             if (p25TalkgroupIsPhase2(tg)) {
-                appendP25LogLine(QString("Following clear Phase 2 TDMA TG %1 at %2MHz slot=%3; AMBE audio is enabled when valid de-whitened TDMA voice bursts are available.")
+                appendP25LogLine(QString("Following clear Phase 2 TDMA TG %1 at %2MHz slot=%3; AMBE audio is enabled for FEC-clean voice frames; bad/scrambled frames remain muted.")
                     .arg(tg.talkgroupId)
                     .arg(tg.lastVoiceFreqHz > 0.0 ? tg.lastVoiceFreqHz / 1e6 : 0.0, 0, 'f', 5)
                     .arg(tg.tdmaSlotKnown ? QString::number(static_cast<int>(tg.tdmaSlot)) : QString("unknown")));
@@ -3303,6 +3338,7 @@ public:
                         double monGain = 1.0, monWfmDe = 75.0, monWfmNotch = 0.96, monBw = 180000.0;
                         DemodMode monMode = DemodMode::AUTO;
                         bool monAudioLpfEnabled = true;
+                        bool monP25ControlMute = false;
 
                         std::lock_guard<std::mutex> rxLock(rx.stateMutex);
                         if (!rx.active || rx.deviceIndex != i) continue;
@@ -3315,6 +3351,7 @@ public:
                         monGain = rx.audioGain;
                         monWfmDe = rx.wfmDeTauUs;
                         monWfmNotch = rx.wfmPilotNotchR;
+                        monP25ControlMute = rx.p25ControlChannelMute;
                         const double demodFreq = applyNfmAfcFromSpectrum(rx, pwr, sr, cf, monFreq, monBw, monMode);
                         afcOffsetHz = demodFreq - monFreq;
 
@@ -3334,7 +3371,10 @@ public:
                         double orate = (engineForAudio ? engineForAudio->getSampleRate() : 48000.0);
                         size_t need = (size_t)std::round(t * orate);
                         auto t0 = std::chrono::steady_clock::now();
-                        if (rx.p25VoiceDecodeEnabled) {
+                        if (monP25ControlMute && !rx.p25VoiceDecodeEnabled) {
+                            rms = -120.0;
+                            (void)need;
+                        } else if (rx.p25VoiceDecodeEnabled) {
                             const auto p25Audio = decodeP25VoiceAudioBlock(rx, iq, sr, cf, demodFreq, orate);
                             publishP25VoiceDiagnostics(p25Audio);
                             ch = p25Audio.audio;
@@ -3978,6 +4018,7 @@ private:
             rx.p25VoiceNac = 0;
             rx.p25VoiceWacn = 0;
             rx.p25VoiceSystemId = 0;
+            rx.p25ControlChannelMute = false;
             rx.resetP25VoiceState();
             p25FollowEnabled = false;
             p25FollowAutoActive = false;
@@ -4234,6 +4275,7 @@ int runCLI(int argc, char* argv[]) {
         rx.p25VoiceNac = 0;
         rx.p25VoiceWacn = 0;
         rx.p25VoiceSystemId = 0;
+        rx.p25ControlChannelMute = false;
         rx.resetP25VoiceState();
         clearP25VoiceDiagnostics();
     };
@@ -4274,6 +4316,7 @@ int runCLI(int argc, char* argv[]) {
                     double rxAudioGain = 1.0, rxWfmDe = 75.0, rxWfmNotch = 0.96, rxBw = 25000.0;
                     DemodMode rxMode = DemodMode::NFM;
                     bool rxAudioLpfEnabled = true;
+                    bool rxP25ControlMute = false;
 
                     std::lock_guard<std::mutex> rxLock(rx.stateMutex);
                     if (!rx.active || rx.deviceIndex != di) continue;
@@ -4286,6 +4329,7 @@ int runCLI(int argc, char* argv[]) {
                     rxAudioGain = rx.audioGain;
                     rxWfmDe = rx.wfmDeTauUs;
                     rxWfmNotch = rx.wfmPilotNotchR;
+                    rxP25ControlMute = rx.p25ControlChannelMute;
 
                     // audit-followup-2: cursor-based new samples only for this rx (chronological, no overlap with other rxs on same dev).
                     size_t tgt = (sr > 0 ? (size_t)(sr * 0.025) : 8192);
@@ -4314,7 +4358,10 @@ int runCLI(int argc, char* argv[]) {
                     double orate = (cliAudio ? cliAudio->getSampleRate() : 48000.0);
                     size_t need = (size_t)std::round(t * orate);
                     auto t0 = std::chrono::steady_clock::now();
-                    if (rx.p25VoiceDecodeEnabled) {
+                    if (rxP25ControlMute && !rx.p25VoiceDecodeEnabled) {
+                        rms = -120.0;
+                        (void)need;
+                    } else if (rx.p25VoiceDecodeEnabled) {
                         const auto p25Audio = decodeP25VoiceAudioBlock(rx, iq, sr, cf, demodFreq, orate);
                         publishP25VoiceDiagnostics(p25Audio);
                         ch = p25Audio.audio;
@@ -4363,6 +4410,7 @@ int runCLI(int argc, char* argv[]) {
         double bwHz = 12500.0;
         double lpfHz = 3000.0;
         bool lpfOn = true;
+        bool ccMuted = false;
         DemodMode mode = DemodMode::NFM;
         {
             std::lock_guard<std::mutex> lk(cliRxMutex);
@@ -4374,6 +4422,7 @@ int runCLI(int argc, char* argv[]) {
             bwHz = rx.channelBwHz;
             lpfHz = rx.lpfHz;
             lpfOn = rx.audioLpfEnabled;
+            ccMuted = rx.p25ControlChannelMute;
             mode = rx.mode;
         }
         double g = (di < mgr.getDevices().size() ? mgr.getCurrentGain(di) : 0.0);
@@ -4395,6 +4444,7 @@ int runCLI(int argc, char* argv[]) {
                   << " bw=" << (bwHz/1000) << "kHz gain=" << g << "dB IQdepth=" << qd
                   << " ppm=" << ppm
                   << " lpf=" << (lpfOn ? std::to_string(lpfHz/1000.0) + "kHz" : std::string("off"))
+                  << " ccMute=" << (ccMuted ? "yes" : "no")
                   << " level=" << level << "dB AFC=" << (afcHz / 1000.0) << "kHz"
                   << " DSP=" << dsp << "ms ring=" << ring << "% underruns=" << underr << "\n";
         const auto p25Code = static_cast<P25VoiceDiagCode>(
@@ -4456,6 +4506,7 @@ int runCLI(int argc, char* argv[]) {
                       << "  p25 tgs                 - list discovered/verified P25 talkgroups\n"
                       << "  p25 addtg <cc_mhz> <tgid> [tag] - manually verify a TG\n"
                       << "  p25 deltg <index>       - delete a saved P25 talkgroup row\n"
+                      << "  p25 monitor <cc_mhz> [rx] - tune muted P25 control channel\n"
                       << "  p25 follow <index> [rx] - tune to unencrypted active TG voice freq\n"
                       << "  p25 tsbk <cc_mhz> <hex> - ingest decoded P25 TSBK bytes\n"
                       << "  p25 sync [dev] [target_mhz] [ms] - live C4FM/CQPSK frame-sync/NID check\n"
@@ -4956,7 +5007,40 @@ int runCLI(int argc, char* argv[]) {
             iss >> sub;
             for (auto& c : sub) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
-            if (sub == "sync" || sub == "decode") {
+            if (sub == "monitor" || sub == "cc") {
+                double ccMhz = 0.0;
+                int rxidx = 0;
+                if (!(iss >> ccMhz) || ccMhz <= 0.0) {
+                    std::cout << "usage: p25 monitor <cc_mhz> [rx]\n";
+                    continue;
+                }
+                if (iss >> rxidx) {}
+                size_t devIndex = 0;
+                {
+                    std::lock_guard<std::mutex> lk(cliRxMutex);
+                    ensureCliRxLocked(static_cast<size_t>(std::max(0, rxidx)));
+                    Receiver& rx = *cliReceivers[static_cast<size_t>(std::max(0, rxidx))];
+                    std::lock_guard<std::mutex> rxLock(rx.stateMutex);
+                    devIndex = rx.deviceIndex;
+                    clearCliP25VoiceFollow(rx);
+                    rx.resetDemodState();
+                    rx.freqHz = ccMhz * 1e6;
+                    rx.mode = DemodMode::NFM;
+                    rx.channelBwHz = 12500.0;
+                    rx.lpfHz = 3000.0;
+                    rx.audioLpfEnabled = false;
+                    rx.squelchDb = -105.0;
+                    rx.p25ControlChannelMute = true;
+                    rx.active = true;
+                }
+                if (!mgr.isStreaming(devIndex) && devIndex < mgr.getDevices().size()) {
+                    mgr.setEnabled(devIndex, true);
+                    mgr.startStreaming(devIndex, true);
+                }
+                if (mgr.isStreaming(devIndex)) mgr.setCenterFreq(devIndex, ccMhz * 1e6);
+                std::cout << "Monitoring muted P25 control channel " << ccMhz
+                          << " MHz on RX" << rxidx << " (use p25 sync to inspect frames, p25 follow for clear TG audio)\n";
+            } else if (sub == "sync" || sub == "decode") {
                 int devIndex = 0;
                 double targetMhz = 0.0;
                 double ms = 250.0;
@@ -5048,7 +5132,7 @@ int runCLI(int argc, char* argv[]) {
                                   << " vcw=" << burst.voiceCodewords.size()
                                   << " xorMask=" << (burst.xorMaskApplied ? "yes" : "not-yet") << "\n";
                     }
-                    std::cout << "  note: Phase 2 voice bursts still need valid TDMA de-whitening mask/timing before AMBE audio output.\n";
+                    std::cout << "  note: live follow now attempts FEC-gated clear Phase 2 AMBE decode; if no clean AMBE frames appear, TDMA mask/timing is still missing and audio remains muted.\n";
                 }
                 for (const auto& warning : result.warnings) {
                     std::cout << "  note: " << warning << "\n";
@@ -5062,9 +5146,9 @@ int runCLI(int argc, char* argv[]) {
                               : " (build with SDR_TOWN_ENABLE_MBELIB=ON and mbelib installed)") << "\n"
                           << "P25 AMBE backend: " << (ambe.backendAvailable() ? "available" : "not available")
                           << (ambe.backendAvailable()
-                              ? " (clear Phase 2 AMBE synthesis path is available after TDMA de-whitening)"
+                              ? " (clear Phase 2 AMBE synthesis path is available with FEC-gated frame validation)"
                               : " (build with SDR_TOWN_ENABLE_MBELIB=ON and mbelib installed)") << "\n"
-                          << "P25 Phase 2 status: TDMA sync/DUID/2V/4V burst detection and AMBE audio plumbing are enabled; live audio still needs valid NAC/SYSID/WACN mask timing on the followed voice bursts.\n";
+                          << "P25 Phase 2 status: TDMA sync/DUID/2V/4V burst detection and direct AMBE synthesis are enabled. Bad, scrambled, encrypted, or non-FEC-clean frames stay muted.\n";
             } else if (sub == "tg" || sub == "tgs" || sub == "talkgroups") {
                 auto talkgroups = loadP25Talkgroups();
                 if (talkgroups.empty()) {
@@ -5201,6 +5285,7 @@ int runCLI(int argc, char* argv[]) {
                     rx.p25VoiceNac = tg.nac;
                     rx.p25VoiceWacn = tg.wacn;
                     rx.p25VoiceSystemId = tg.systemId;
+                    rx.p25ControlChannelMute = false;
                     rx.resetP25VoiceState();
                     rx.active = true;
                 }
