@@ -1062,6 +1062,16 @@ std::vector<std::complex<float>> DeviceManager::getNewSamplesForReceiver(size_t 
     return out;
 }
 
+void DeviceManager::setReceiverCursorToLiveEdge(size_t devIndex, Receiver& rx) {
+    if (devIndex >= streams.size() || !streams[devIndex]) {
+        rx.lastConsumedAbsolute = 0;
+        return;
+    }
+    auto& st = *streams[devIndex];
+    std::lock_guard<std::mutex> ringLock(st.ringMutex);
+    rx.lastConsumedAbsolute = st.totalSamplesWritten.load(std::memory_order_acquire);
+}
+
 void DeviceManager::appendIQBlock(size_t index, std::vector<std::complex<float>>&& block) {
     if (index >= streams.size() || !streams[index] || block.empty()) return;
     auto& st = *streams[index];

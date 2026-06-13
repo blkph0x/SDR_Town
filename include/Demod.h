@@ -19,8 +19,12 @@ struct SignalOffsetEstimate {
     double offsetHz = 0.0;
     double signalFreqHz = 0.0;
     double peakDb = -120.0;
+    double noiseFloorDb = -120.0;
     double snrDb = 0.0;
     double confidence = 0.0;
+    double bandwidthHz = 0.0;
+    double binHz = 0.0;
+    int peakBin = -1;
 };
 
 double detectChannelBandwidth(const std::vector<float>& powerDb, double sampleRate);
@@ -39,6 +43,7 @@ SignalOffsetEstimate estimateSignalOffsetFromSpectrum(const std::vector<float>& 
                                                        double targetFreqHz,
                                                        double searchHz,
                                                        double maxSignalBandwidthHz);
+double estimatePpmCorrectionDelta(double observedOffsetHz, double targetFreqHz);
 DemodMode classifyMode(const std::vector<float>& powerDb, double sampleRate, double centerFreq);
 DemodMode classifyModeAround(const std::vector<float>& powerDb,
                              double sampleRate,

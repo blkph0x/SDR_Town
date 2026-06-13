@@ -26,6 +26,7 @@ enum class P25VoiceProtocol {
 struct P25ChannelIdentifier {
     bool valid = false;
     uint8_t id = 0;
+    uint8_t channelType = 0;
     double baseHz = 0.0;
     double spacingHz = 0.0;
     double txOffsetHz = 0.0;

@@ -91,6 +91,7 @@ public:
     // The receiver's lastConsumedAbsolute is updated. Returns only *new* samples in chronological order.
     // If the rx is too far behind the write cursor, log a drop, advance the cursor, and return a short zeroed/faded block.
     std::vector<std::complex<float>> getNewSamplesForReceiver(size_t devIndex, Receiver& rx, size_t maxSamples);
+    void setReceiverCursorToLiveEdge(size_t devIndex, Receiver& rx);
 
     // For spectrum: get latest power spectrum (dB) and center/sample info
     bool getLatestSpectrum(size_t index, std::vector<float>& powerDb, double& centerFreq, double& sampleRate);

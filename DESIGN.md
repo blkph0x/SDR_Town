@@ -559,6 +559,14 @@ Each PR should be reviewable, buildable, and deliver incremental user value. Ord
 
 ## Implementation Log (Living Updates as We Code)
 
+**2026-06-14 - v0.2.13 experimental tester build: P25 follow/Phase 2 diagnostics, CQPSK lock hardening, AFC/PPM visibility**
+- Added a stricter P25 Phase 2 follow gate: encrypted ESS now reports as skipped before backend/audio decode, Phase 2 audio remains muted until slot, superframe/audio lock, XOR mask, MAC/ESS clear state, and AMBE validation agree.
+- Improved Phase 2/CQPSK observability for tester logs: mask phase search, mask phase score, MAC CRC evidence, CQPSK sticky lock state, symbol phase, fine phase correction, residual carrier Hz, and RMS phase error are now surfaced in validation JSON, GUI P25 logs, and CLI sync output.
+- Hardened CQPSK/LSM demod selection: residual carrier/phase correction is applied before dibit slicing, clean signals no longer show fake large residual offsets, and sticky CQPSK lock persistence now requires hard evidence (CRC/NID/ESS/voice), not just Phase 2 superframe shape.
+- Improved local alignment tooling: spectrum offset estimator now reports noise floor, measured bandwidth, bin size, peak bin, fractional-bin narrow carrier offset, and a PPM correction delta; CLI has `ppm cal` / `ppm apply` helper output.
+- Improved P25 follow tuning behavior: following a TG jumps receiver cursors to the live edge, discards settle windows after retune, allows Phase 2 unknown-grant tuning while keeping audio muted until MAC/ESS proves clear, and preserves TDMA channel type/slot metadata from IDEN_UP_TDMA.
+- Verification gate for release: Release app build, unit tests, CLI harness, and diff sanity must pass before pushing v0.2.13 code/assets to GitHub for external tester logs.
+
 **Autonomous night work (while user sleeping) - Phase 0 start**
 - Created include/Receiver.h and src/Receiver.cpp with basic per-receiver struct (deviceIndex, Demodulator, freq/mode/bw fields, active flag, reset helper). Stubs for future audioTargets, recorder, waterfall.
 - Updated CMakeLists.txt for both app and test targets to compile the new Receiver files.

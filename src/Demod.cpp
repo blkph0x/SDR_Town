@@ -6,6 +6,7 @@
 #include <complex>
 #include <vector>
 #include <cstddef>
+#include <limits>
 
 static double localPercentile(std::vector<double> values, double percentile, double fallback)
 {
@@ -20,6 +21,16 @@ static double localPercentile(std::vector<double> values, double percentile, dou
     return values[idx];
 }
 
+static double quadraticPeakDeltaDb(double leftDb, double centerDb, double rightDb)
+{
+    if (!std::isfinite(leftDb) || !std::isfinite(centerDb) || !std::isfinite(rightDb)) return 0.0;
+    const double denom = leftDb - 2.0 * centerDb + rightDb;
+    if (std::abs(denom) < 1e-9) return 0.0;
+    const double delta = 0.5 * (leftDb - rightDb) / denom;
+    if (!std::isfinite(delta)) return 0.0;
+    return std::clamp(delta, -0.5, 0.5);
+}
+
 SignalOffsetEstimate estimateSignalOffsetFromSpectrum(const std::vector<float>& powerDb,
                                                        double sampleRateHz,
                                                        double centerFreqHz,
@@ -32,6 +43,7 @@ SignalOffsetEstimate estimateSignalOffsetFromSpectrum(const std::vector<float>& 
     if (bins < 64 || sampleRateHz <= 0.0 || !std::isfinite(sampleRateHz)) return out;
 
     const double binHz = sampleRateHz / static_cast<double>(bins);
+    out.binHz = binHz;
     const double fullStart = centerFreqHz - sampleRateHz * 0.5;
     const double rel = (targetFreqHz - fullStart) / binHz;
     if (!std::isfinite(rel) || rel < 0.0 || rel >= static_cast<double>(bins)) return out;
@@ -39,7 +51,7 @@ SignalOffsetEstimate estimateSignalOffsetFromSpectrum(const std::vector<float>& 
     searchHz = std::clamp(searchHz, binHz * 4.0, sampleRateHz * 0.5);
     maxSignalBandwidthHz = std::clamp(maxSignalBandwidthHz, binHz * 4.0, searchHz * 2.0);
 
-    const int targetBin = std::clamp(static_cast<int>(std::llround(rel - 0.5)), 0, bins - 1);
+    const int targetBin = std::clamp(static_cast<int>(std::floor(rel)), 0, bins - 1);
     const int halfSearch = std::max(4, static_cast<int>(std::ceil(searchHz / binHz)));
     const int lo = std::max(0, targetBin - halfSearch);
     const int hi = std::min(bins - 1, targetBin + halfSearch);
@@ -51,17 +63,21 @@ SignalOffsetEstimate estimateSignalOffsetFromSpectrum(const std::vector<float>& 
     double peakDb = -180.0;
     for (int i = lo; i <= hi; ++i) {
         const double v = powerDb[static_cast<size_t>(i)];
+        if (!std::isfinite(v)) continue;
         local.push_back(v);
         if (v > peakDb) {
             peakDb = v;
             peakIdx = i;
         }
     }
+    if (!std::isfinite(peakDb) || local.empty()) return out;
 
     const double floorDb = localPercentile(local, 0.25, -120.0);
     const double snrDb = peakDb - floorDb;
     out.peakDb = peakDb;
+    out.noiseFloorDb = floorDb;
     out.snrDb = snrDb;
+    out.peakBin = peakIdx;
     if (snrDb < 5.0) return out;
 
     const double thresholdDb = floorDb + std::clamp(snrDb * 0.35, 3.0, 10.0);
@@ -70,9 +86,10 @@ SignalOffsetEstimate estimateSignalOffsetFromSpectrum(const std::vector<float>& 
 
     int left = peakIdx;
     int quiet = 0;
-    while (left > lo && peakIdx - left < maxSignalBins) {
+    while (left > lo && peakIdx - left + 1 < maxSignalBins) {
         --left;
-        if (powerDb[static_cast<size_t>(left)] >= thresholdDb) quiet = 0;
+        const double v = powerDb[static_cast<size_t>(left)];
+        if (std::isfinite(v) && v >= thresholdDb) quiet = 0;
         else if (++quiet >= quietRunNeeded) {
             left += quietRunNeeded;
             break;
@@ -81,9 +98,10 @@ SignalOffsetEstimate estimateSignalOffsetFromSpectrum(const std::vector<float>& 
 
     int right = peakIdx;
     quiet = 0;
-    while (right < hi && right - left < maxSignalBins) {
+    while (right < hi && right - left + 1 < maxSignalBins) {
         ++right;
-        if (powerDb[static_cast<size_t>(right)] >= thresholdDb) quiet = 0;
+        const double v = powerDb[static_cast<size_t>(right)];
+        if (std::isfinite(v) && v >= thresholdDb) quiet = 0;
         else if (++quiet >= quietRunNeeded) {
             right -= quietRunNeeded;
             break;
@@ -96,16 +114,42 @@ SignalOffsetEstimate estimateSignalOffsetFromSpectrum(const std::vector<float>& 
 
     double weighted = 0.0;
     double weightSum = 0.0;
+    int activeLeft = -1;
+    int activeRight = -1;
     for (int i = left; i <= right; ++i) {
-        const double aboveFloor = static_cast<double>(powerDb[static_cast<size_t>(i)]) - floorDb;
+        const double p = static_cast<double>(powerDb[static_cast<size_t>(i)]);
+        if (!std::isfinite(p)) continue;
+        const double aboveFloor = p - floorDb;
         if (aboveFloor < 1.5) continue;
-        const double w = std::max(0.0, std::pow(10.0, std::clamp(aboveFloor, 0.0, 80.0) / 10.0) - 1.0);
+        if (p >= thresholdDb) {
+            if (activeLeft < 0) activeLeft = i;
+            activeRight = i;
+        }
+        const double w = std::max(0.0, std::pow(10.0, std::clamp(aboveFloor, 0.0, 70.0) / 10.0) - 1.0);
         weighted += (static_cast<double>(i) + 0.5) * w;
         weightSum += w;
     }
     if (weightSum <= 0.0) return out;
 
-    const double centerBin = weighted / weightSum;
+    if (activeLeft < 0 || activeRight < activeLeft) {
+        activeLeft = peakIdx;
+        activeRight = peakIdx;
+    }
+    out.bandwidthHz = std::max(binHz, (activeRight - activeLeft + 1) * binHz);
+
+    const double centroidBin = weighted / weightSum;
+    double peakCenterBin = static_cast<double>(peakIdx) + 0.5;
+    if (peakIdx > lo && peakIdx < hi) {
+        const double y0 = powerDb[static_cast<size_t>(peakIdx - 1)];
+        const double y1 = powerDb[static_cast<size_t>(peakIdx)];
+        const double y2 = powerDb[static_cast<size_t>(peakIdx + 1)];
+        peakCenterBin += quadraticPeakDeltaDb(y0, y1, y2);
+    }
+
+    const bool narrowCarrier = out.bandwidthHz <= std::max(2500.0, binHz * 5.0);
+    double peakBlend = narrowCarrier ? std::clamp((3500.0 - out.bandwidthHz) / 3000.0, 0.35, 0.85) : 0.0;
+    if (snrDb < 12.0) peakBlend *= 0.5;
+    const double centerBin = centroidBin * (1.0 - peakBlend) + peakCenterBin * peakBlend;
     const double signalFreqHz = fullStart + centerBin * binHz;
     const double offsetHz = signalFreqHz - targetFreqHz;
     if (!std::isfinite(offsetHz) || std::abs(offsetHz) > searchHz + binHz) return out;
@@ -113,12 +157,24 @@ SignalOffsetEstimate estimateSignalOffsetFromSpectrum(const std::vector<float>& 
     const bool nearSearchEdge = (peakIdx - lo) < 2 || (hi - peakIdx) < 2;
     double confidence = std::clamp((snrDb - 5.0) / 18.0, 0.0, 1.0);
     if (nearSearchEdge) confidence *= 0.5;
+    if (std::abs(offsetHz) > searchHz * 0.90) confidence *= 0.6;
+    if (out.bandwidthHz >= maxSignalBandwidthHz * 0.95) confidence *= 0.85;
 
     out.valid = confidence >= 0.20;
     out.offsetHz = offsetHz;
     out.signalFreqHz = signalFreqHz;
     out.confidence = confidence;
     return out;
+}
+
+double estimatePpmCorrectionDelta(double observedOffsetHz, double targetFreqHz)
+{
+    const double denom = std::abs(targetFreqHz);
+    if (!std::isfinite(observedOffsetHz) || !std::isfinite(denom) || denom < 1.0) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    // App convention: positive PPM compensates a receiver reading high, which makes carriers appear low.
+    return -observedOffsetHz / denom * 1.0e6;
 }
 
 std::vector<P25ControlCandidate> detectP25ControlCandidates(const std::vector<float>& powerDb,

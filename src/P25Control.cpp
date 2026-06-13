@@ -162,6 +162,7 @@ void P25ControlChannelAnalyzer::applyIdentifierUpdate(const std::vector<uint8_t>
     P25ChannelIdentifier plan;
     plan.valid = true;
     plan.id = id;
+    plan.channelType = 0;
     plan.baseHz = static_cast<double>(baseUnits) * 5.0;
     plan.spacingHz = static_cast<double>(spacingUnits) * 125.0;
     plan.txOffsetHz = static_cast<double>(offsetMagnitude) * 250000.0 * (positiveOffset ? 1.0 : -1.0);
@@ -194,6 +195,7 @@ void P25ControlChannelAnalyzer::applyIdentifierUpdateVhfUhf(const std::vector<ui
     P25ChannelIdentifier plan;
     plan.valid = true;
     plan.id = id;
+    plan.channelType = 0;
     plan.baseHz = static_cast<double>(baseUnits) * 5.0;
     plan.spacingHz = spacingHz;
     plan.txOffsetHz = static_cast<double>(offsetMagnitude) * spacingHz * (positiveOffset ? 1.0 : -1.0);
@@ -226,6 +228,7 @@ void P25ControlChannelAnalyzer::applyIdentifierUpdateTdma(const std::vector<uint
     P25ChannelIdentifier plan;
     plan.valid = true;
     plan.id = id;
+    plan.channelType = channelType;
     plan.baseHz = static_cast<double>(baseUnits) * 5.0;
     plan.spacingHz = spacingHz;
     plan.txOffsetHz = static_cast<double>(offsetMagnitude) * spacingHz * (positiveOffset ? 1.0 : -1.0);
@@ -239,6 +242,9 @@ void P25ControlChannelAnalyzer::applyIdentifierUpdateTdma(const std::vector<uint
 
     out.type = P25ControlEventType::IdentifierUpdate;
     out.label = "Identifier update TDMA";
+    if (channelType > 0x4) {
+        out.label += " (unknown channel type; assuming " + std::to_string(plan.slotsPerCarrier) + "-slot)";
+    }
     out.channel = static_cast<uint16_t>(id << 12);
     populateIdentifierEvent(out, plan, channelType);
 }
@@ -285,6 +291,7 @@ void P25ControlChannelAnalyzer::annotateVoiceChannel(P25ControlEvent& event, uin
     if (id >= m_identifiers.size()) return;
     const auto& plan = m_identifiers[id];
     if (!plan.valid) return;
+    populateIdentifierEvent(event, plan, plan.channelType);
 
     if (plan.slotsPerCarrier > 1) {
         event.voiceProtocol = P25VoiceProtocol::Phase2TDMA;

@@ -4,6 +4,7 @@
 #include "P25LiveDecoder.h"
 #include <vector>
 #include <cstddef>
+#include <cstdint>
 #include <mutex>
 
 // Basic per-receiver state holder.
@@ -46,6 +47,8 @@ struct Receiver {
     uint16_t p25VoiceNac = 0;
     uint32_t p25VoiceWacn = 0;
     uint16_t p25VoiceSystemId = 0;
+    int64_t p25VoiceSettleUntilMs = 0;
+    int p25VoiceDiscardWindows = 0;
     bool p25ControlChannelMute = false;
     P25LiveDecoder p25VoiceLiveDecoder;
     P25ImbeVoiceDecoder p25ImbeVoiceDecoder;

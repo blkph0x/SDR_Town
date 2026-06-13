@@ -166,11 +166,37 @@ TEST_CASE("P25 control analyzer marks TDMA voice grants with protocol and slot")
     const auto& ev = events.front();
     REQUIRE(ev.type == P25ControlEventType::GroupVoiceGrant);
     REQUIRE(ev.talkgroupId == 77);
+    REQUIRE(ev.identifierKnown);
+    REQUIRE(ev.identifier == 4);
+    REQUIRE(ev.channelType == 3);
+    REQUIRE(ev.slotsPerCarrier == 2);
+    REQUIRE(ev.baseFrequencyHz == Catch::Approx(450000000.0).margin(1.0));
+    REQUIRE(ev.channelSpacingHz == Catch::Approx(12500.0).margin(1.0));
     REQUIRE(ev.voiceProtocol == P25VoiceProtocol::Phase2TDMA);
     REQUIRE(ev.phase2Candidate);
     REQUIRE(ev.tdmaSlotKnown);
     REQUIRE(ev.tdmaSlot == 1);
     REQUIRE(ev.voiceFrequencyHz == Catch::Approx(450012500.0).margin(1.0));
+}
+
+TEST_CASE("P25 control analyzer labels unknown TDMA channel types")
+{
+    P25ControlChannelAnalyzer analyzer;
+    auto iden = makeTsbk(0x33);
+    writeBitsMsb(iden, 16, 4, 7);
+    writeBitsMsb(iden, 20, 4, 9);
+    writeBitsMsb(iden, 24, 14, 0x2000u);
+    writeBitsMsb(iden, 38, 10, 100);
+    writeBitsMsb(iden, 48, 32, static_cast<uint32_t>(420000000.0 / 5.0));
+
+    auto events = analyzer.ingestTsbk(iden);
+    REQUIRE(events.size() == 1);
+    const auto& ev = events.front();
+    REQUIRE(ev.type == P25ControlEventType::IdentifierUpdate);
+    REQUIRE(ev.identifier == 7);
+    REQUIRE(ev.channelType == 9);
+    REQUIRE(ev.slotsPerCarrier == 2);
+    REQUIRE(ev.label.find("unknown channel type") != std::string::npos);
 }
 
 TEST_CASE("P25 control analyzer parses Motorola regroup channel grant as slot-aware voice")

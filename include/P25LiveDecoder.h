@@ -130,6 +130,9 @@ struct P25LiveDecoderStats {
     uint16_t bestNidNac = 0;
     uint8_t bestNidRawDuid = 0;
     double sampleRate = 0.0;
+    double channelSampleRate = 0.0;
+    double inputTargetOffsetHz = 0.0;
+    double discriminatorMeanHz = 0.0;
     double symbolRate = 4800.0;
     double symbolConfidence = 0.0;
     bool voiceBackendAvailable = false;
@@ -141,6 +144,19 @@ struct P25LiveDecoderStats {
     size_t phase2MacCrcValid = 0;
     bool phase2EssKnown = false;
     bool phase2EssEncrypted = false;
+    bool phase2MaskPhaseKnown = false;
+    uint8_t phase2MaskPhase = 0;
+    int phase2MaskPhaseScore = 0;
+    size_t phase2MaskPhaseMacCrcValid = 0;
+    bool cqpskLockActive = false;
+    bool cqpskLockUsed = false;
+    bool cqpskLockUpdated = false;
+    double cqpskSymbolPhaseFraction = 0.0;
+    bool cqpskFineCorrectionApplied = false;
+    double cqpskFineRotationRad = 0.0;
+    double cqpskResidualCarrierHz = 0.0;
+    double cqpskPhaseErrorRmsRad = 0.0;
+    size_t cqpskFineCorrectionSymbols = 0;
     size_t phase2IschDecoded = 0;
     size_t phase2IschSync = 0;
     int bestPhase2SyncErrors = -1;
@@ -168,6 +184,9 @@ struct P25Phase2Burst {
     int syncErrors = -1;
     bool superframeLocked = false;
     size_t superframeDibitOffset = 0;
+    int superframeSyncScore = 0;
+    int superframeSyncErrors = 0;
+    bool phase2AudioLock = false;
     bool superframeBurstIndexKnown = false;
     uint8_t superframeBurstIndex = 0;
     bool grantSlotKnown = false;
@@ -180,6 +199,9 @@ struct P25Phase2Burst {
     int duidErrors = -1;
     P25Phase2BurstKind kind = P25Phase2BurstKind::Unknown;
     bool xorMaskApplied = false;
+    bool xorMaskPhaseKnown = false;
+    uint8_t xorMaskPhase = 0;
+    int xorMaskPhaseScore = 0;
     bool macFecDecoded = false;
     bool macCrcValid = false;
     bool essKnown = false;
@@ -263,12 +285,31 @@ public:
     static std::string phase2BurstKindToString(P25Phase2BurstKind kind);
 
 private:
+    struct CqpskDemodLock {
+        bool valid = false;
+        bool differential = true;
+        bool conjugate = false;
+        double rotation = 0.0;
+        std::array<int, 4> permutation{0, 1, 2, 3};
+        double symbolPhaseFraction = 0.5;
+        double fineRotation = 0.0;
+        double residualCarrierHz = 0.0;
+        double phaseErrorRmsRad = 0.0;
+        size_t fineCorrectionSymbols = 0;
+        int trustScore = 0;
+        int misses = 0;
+    };
+
     P25LiveDecoderConfig m_config;
     P25Phase2MaskParameters m_phase2MaskParams;
     std::array<int, Phase2BurstDibits * 12> m_phase2XorMask{};
     P25Phase2EssState m_phase2Ess;
     std::array<uint8_t, 16> m_phase2EssB{};
     std::array<bool, 4> m_phase2EssBSeen{};
+    bool m_phase2MaskPhaseKnown = false;
+    uint8_t m_phase2MaskPhase = 0;
+    int m_phase2MaskPhaseScore = 0;
+    CqpskDemodLock m_cqpskLock;
 };
 
 class P25ImbeVoiceDecoder {

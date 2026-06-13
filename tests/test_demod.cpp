@@ -113,6 +113,26 @@ static void paintPowerRange(std::vector<float>& pwr,
     }
 }
 
+static void paintNarrowCarrier(std::vector<float>& pwr,
+                               double sampleRate,
+                               double centerFreq,
+                               double carrierFreq,
+                               float peakDb,
+                               double sigmaHz)
+{
+    const double binHz = sampleRate / static_cast<double>(pwr.size());
+    const double fullStart = centerFreq - sampleRate / 2.0;
+    const int centerBin = std::clamp(static_cast<int>(std::floor((carrierFreq - fullStart) / binHz)),
+                                     0, static_cast<int>(pwr.size()) - 1);
+    const int radiusBins = std::max(3, static_cast<int>(std::ceil((sigmaHz * 4.0) / binHz)));
+    for (int i = std::max(0, centerBin - radiusBins); i <= std::min(static_cast<int>(pwr.size()) - 1, centerBin + radiusBins); ++i) {
+        const double binCenterHz = fullStart + (static_cast<double>(i) + 0.5) * binHz;
+        const double x = (binCenterHz - carrierFreq) / std::max(1.0, sigmaHz);
+        const float db = static_cast<float>(peakDb - 8.686 * x * x * 0.5);
+        pwr[static_cast<size_t>(i)] = std::max(pwr[static_cast<size_t>(i)], db);
+    }
+}
+
 TEST_CASE("Bandwidth detector and classifier recognize wide AM around tuned signal") {
     const double sr = 2.0e6;
     const double cf = 476.0e6;
@@ -179,6 +199,30 @@ TEST_CASE("Signal offset estimator finds off-center NFM carrier for AFC") {
     REQUIRE(estimate.valid);
     REQUIRE(estimate.offsetHz == Catch::Approx(offset).margin(500.0));
     REQUIRE(estimate.snrDb > 20.0);
+    REQUIRE(estimate.noiseFloorDb == Catch::Approx(-118.0).margin(1.0));
+    REQUIRE(estimate.bandwidthHz >= 10000.0);
+    REQUIRE(estimate.binHz == Catch::Approx(sr / 8192.0));
+    REQUIRE(estimate.peakBin >= 0);
+}
+
+TEST_CASE("Signal offset estimator resolves fractional-bin narrow carriers") {
+    const double sr = 48000.0;
+    const double cf = 14.025e6;
+    const double target = 14.025e6;
+    const double offset = 137.4;
+    auto pwr = makePowerSpectrum(4096, -122.0f);
+    paintNarrowCarrier(pwr, sr, cf, target + offset, -55.0f, 34.0);
+
+    auto estimate = estimateSignalOffsetFromSpectrum(pwr, sr, cf, target, 2000.0, 800.0);
+    REQUIRE(estimate.valid);
+    REQUIRE(estimate.offsetHz == Catch::Approx(offset).margin(12.0));
+    REQUIRE(estimate.bandwidthHz < 500.0);
+    REQUIRE(estimate.confidence > 0.7);
+}
+
+TEST_CASE("PPM correction delta follows app tuning convention") {
+    REQUIRE(estimatePpmCorrectionDelta(-4200.0, 420.0e6) == Catch::Approx(10.0).margin(0.01));
+    REQUIRE(estimatePpmCorrectionDelta(4200.0, 420.0e6) == Catch::Approx(-10.0).margin(0.01));
 }
 
 TEST_CASE("Advanced classifier recommends exact AM workflow from carrier and balanced sidebands") {
