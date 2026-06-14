@@ -58,6 +58,19 @@ static double correctedTuneFrequencyHz(double logicalHz, double ppm) {
     return logicalHz / scale;
 }
 
+static std::string makeDeviceStableKey(const DeviceInfo& d) {
+    std::string key = d.driver;
+    key += "|";
+    if (!d.serial.empty()) {
+        key += "serial:" + d.serial;
+    } else if (!d.hardware.empty()) {
+        key += "hardware:" + d.hardware;
+    } else {
+        key += "label:" + d.label;
+    }
+    return key;
+}
+
 static size_t normalizeSpectrumFftBins(size_t bins) {
     if (bins <= 4096) return 4096;
     if (bins <= 8192) return 8192;
@@ -88,6 +101,20 @@ static double chooseDefaultSampleRate(const DeviceInfo& d) {
 }
 
 std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
+    std::vector<size_t> activeStreams;
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        for (size_t i = 0; i < streams.size(); ++i) {
+            if (!streams[i]) continue;
+            std::lock_guard<std::mutex> stateLock(streams[i]->stateMutex);
+            if (streams[i]->active) activeStreams.push_back(i);
+        }
+    }
+    for (size_t index : activeStreams) {
+        spdlog::warn("Stopping active stream {} before device re-enumeration to avoid index/device identity mismatch.", index);
+        stopStreaming(index);
+    }
+
     std::lock_guard<std::mutex> lk(devicesMutex);
     devices.clear();
 
@@ -200,6 +227,7 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
                 }
             }
 
+            di.stableKey = makeDeviceStableKey(di);
             devices.push_back(di);
         }
 
@@ -212,7 +240,7 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
         if (!hasRtl) {
             DeviceInfo di;
             di.driver = "rtlsdr";
-            di.label = "RTL-SDR (Generic RTL2832U)";
+            di.label = "RTL-SDR placeholder (enable will try hardware)";
             di.serial = "";
             di.hardware = "RTL-SDR";
             di.antennas = {"RX"};
@@ -225,6 +253,7 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
             di.gainMin = 0.0;
             di.gainMax = 49.6;
             di.gainName = "TUNER";
+            di.stableKey = makeDeviceStableKey(di);
             devices.push_back(di);
             spdlog::info("  Added RTL-SDR entry (will attempt real when enabled if hardware present)");
         }
@@ -247,6 +276,7 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
     fake1.gainMax = 80.0;
     fake1.minFreq = 1e6;
     fake1.maxFreq = 6e9;
+    fake1.stableKey = makeDeviceStableKey(fake1);
     devices.push_back(fake1);
 
     DeviceInfo fake2;
@@ -262,6 +292,7 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
     fake2.gainMax = 49.6;
     fake2.minFreq = 24e6;
     fake2.maxFreq = 1766e6;
+    fake2.stableKey = makeDeviceStableKey(fake2);
     devices.push_back(fake2);
 #endif
 
@@ -342,6 +373,7 @@ nlohmann::json DeviceManager::toJson() const {
         nlohmann::json j;
         j["driver"] = d.driver;
         j["serial"] = d.serial;
+        j["stableKey"] = d.stableKey.empty() ? makeDeviceStableKey(d) : d.stableKey;
         j["enabled"] = d.enabled;
         j["sampleRate"] = d.sampleRate;
         j["gain"] = d.gain;
@@ -355,9 +387,13 @@ nlohmann::json DeviceManager::toJson() const {
 void DeviceManager::fromJson(const nlohmann::json& j) {
     if (!j.is_array()) return;
     for (auto& d : devices) {
+        if (d.stableKey.empty()) d.stableKey = makeDeviceStableKey(d);
         for (const auto& saved : j) {
-            if (saved.contains("driver") && saved["driver"] == d.driver &&
-                saved.contains("serial") && saved["serial"] == d.serial) {
+            const bool stableMatch = saved.contains("stableKey") && saved["stableKey"].is_string() &&
+                saved["stableKey"].get<std::string>() == d.stableKey;
+            const bool legacyMatch = saved.contains("driver") && saved["driver"] == d.driver &&
+                saved.contains("serial") && saved["serial"] == d.serial;
+            if (stableMatch || legacyMatch) {
                 if (saved.contains("enabled")) d.enabled = saved["enabled"];
                 if (saved.contains("sampleRate")) d.sampleRate = saved["sampleRate"];
                 if (saved.contains("gain")) d.gain = clampGainForDevice(d, saved["gain"].get<double>());
@@ -581,7 +617,8 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(2));
                     }
                     if (st.rxThreadRunning.load(std::memory_order_acquire)) {
-                        spdlog::warn("Stub rxThread for device {} did not stop during real upgrade; detaching and aborting upgrade.", index);
+                        const int count = st.stubStopTimeoutCount.fetch_add(1, std::memory_order_relaxed) + 1;
+                        spdlog::error("Internal stub rxThread for device {} did not stop during real upgrade (count={}); detaching and aborting upgrade. This is not a native Soapy hang and needs RX-loop investigation.", index, count);
                         try { st.rxThread.detach(); } catch (...) {}
                         stubDetached = true;
                     } else {

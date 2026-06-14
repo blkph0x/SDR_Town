@@ -23,6 +23,7 @@ struct DeviceInfo {
     std::string label;            // friendly name
     std::string serial;           // serial or unique id (important for multiple HackRFs)
     std::string hardware;         // hardware key
+    std::string stableKey;         // driver + serial/hardware/label fallback for settings/re-enumeration identity
     std::vector<std::string> antennas;
     std::vector<double> sampleRates; // some common or full range later
     double minFreq = 0;
@@ -143,6 +144,7 @@ private:
         std::string runtimeState = "stopped";
         std::thread rxThread;
         std::atomic<bool> rxThreadRunning{false};
+        std::atomic<int> stubStopTimeoutCount{0};
         std::mutex lifecycleMutex;      // serializes start/stop and async real-hardware handoff
         // CRITICAL (P0 audit shutdown hang + best practice for untrusted SDR drivers):
         // realInitThread is intentionally a plain std::thread, not jthread.

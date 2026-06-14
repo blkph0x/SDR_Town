@@ -150,6 +150,51 @@ TEST_CASE("P25 control analyzer maps TDMA identifiers to slot-aware channel freq
     REQUIRE(*nextSlot1Freq == Catch::Approx(450012500.0).margin(1.0));
 }
 
+TEST_CASE("P25 control analyzer maps TDMA channel numbers to carrier and slot")
+{
+    P25ControlChannelAnalyzer analyzer;
+    auto iden = makeTsbk(0x33);
+
+    const uint8_t id = 11;
+    const uint8_t channelType = 3;
+    const uint32_t baseUnits = static_cast<uint32_t>(450000000.0 / 5.0);
+    const uint32_t spacingUnits = static_cast<uint32_t>(12500.0 / 125.0);
+
+    writeBitsMsb(iden, 16, 4, id);
+    writeBitsMsb(iden, 20, 4, channelType);
+    writeBitsMsb(iden, 24, 14, 0x2000u);
+    writeBitsMsb(iden, 38, 10, spacingUnits);
+    writeBitsMsb(iden, 48, 32, baseUnits);
+    analyzer.ingestTsbk(iden);
+
+    const struct Expected {
+        uint16_t channel;
+        uint8_t slot;
+        double freqHz;
+    } expected[] = {
+        {0xB000, 0, 450000000.0},
+        {0xB001, 1, 450000000.0},
+        {0xB002, 0, 450012500.0},
+        {0xB003, 1, 450012500.0},
+    };
+
+    for (const auto& item : expected) {
+        auto grant = makeTsbk(0x00);
+        writeBitsMsb(grant, 16, 8, 0x00);
+        writeBitsMsb(grant, 24, 16, item.channel);
+        writeBitsMsb(grant, 40, 16, 2000 + item.channel);
+        writeBitsMsb(grant, 56, 24, 0x010203);
+
+        const auto events = analyzer.ingestTsbk(grant);
+        REQUIRE(events.size() == 1);
+        const auto& ev = events.front();
+        REQUIRE(ev.voiceProtocol == P25VoiceProtocol::Phase2TDMA);
+        REQUIRE(ev.tdmaSlotKnown);
+        REQUIRE(ev.tdmaSlot == item.slot);
+        REQUIRE(ev.voiceFrequencyHz == Catch::Approx(item.freqHz).margin(1.0));
+    }
+}
+
 TEST_CASE("P25 control analyzer marks TDMA voice grants with protocol and slot")
 {
     P25ControlChannelAnalyzer analyzer;

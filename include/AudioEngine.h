@@ -39,7 +39,7 @@ public:
     // Push a block of mono float samples (will be duplicated + gained to all active devices)
     // Call from your demod/resample thread at ~10-50ms blocks for low latency.
     void pushAudio(const float* samples, size_t count);
-    void pushAudioToOutputs(const float* samples, size_t count, const std::vector<size_t>& activeOutputIndices);
+    void pushAudioToActiveOutputs(const float* samples, size_t count, const std::vector<size_t>& activeOutputIndices);
     void clearBuffers();
 
     // Test tone on a specific active output (or all)

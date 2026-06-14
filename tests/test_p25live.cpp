@@ -979,8 +979,6 @@ TEST_CASE("P25 live decoder locks Phase 2 superframes and annotates all TDMA bur
         REQUIRE(burst.superframeDibitOffset == 0);
         REQUIRE(burst.superframeSyncScore >= 4);
         REQUIRE(burst.phase2AudioLock);
-        REQUIRE(burst.tdmaSlotKnown);
-        REQUIRE(burst.tdmaSlotId == slot);
         REQUIRE(burst.superframeBurstIndexKnown);
         REQUIRE(burst.superframeBurstIndex == slot);
         REQUIRE(burst.grantSlotKnown);
@@ -998,6 +996,54 @@ TEST_CASE("P25 live decoder locks Phase 2 superframes and annotates all TDMA bur
     REQUIRE(result.stats.phase2VoiceCodewords == 48);
     REQUIRE(result.stats.phase2MaskedBursts == 0);
     REQUIRE(result.stats.phase2IschSync == 6);
+}
+
+TEST_CASE("P25 live decoder emits stable Phase 2 session codeword IDs")
+{
+    P25LiveDecoder decoder;
+    const auto dibits = makeSyntheticPhase2Superframe();
+
+    const auto first = decoder.processHardDibits(dibits);
+    REQUIRE(first.phase2Bursts.size() == 12);
+    REQUIRE(first.stats.phase2VoiceCodewords == 48);
+    std::vector<uint64_t> ids;
+    ids.reserve(first.stats.phase2VoiceCodewords);
+    for (const auto& burst : first.phase2Bursts) {
+        for (const auto& codeword : burst.voiceCodewords) {
+            REQUIRE(codeword.sessionCodewordIdKnown);
+            REQUIRE_FALSE(codeword.duplicateInSession);
+            ids.push_back(codeword.sessionCodewordId);
+        }
+    }
+    REQUIRE(ids.size() == 48);
+
+    std::vector<int> nextWindow(P25LiveDecoder::Phase2BurstDibits, 0);
+    nextWindow.insert(nextWindow.end(), dibits.begin(), dibits.end());
+    const auto next = decoder.processHardDibits(nextWindow);
+    REQUIRE(next.phase2Bursts.size() == 12);
+    std::vector<uint64_t> nextIds;
+    nextIds.reserve(next.stats.phase2VoiceCodewords);
+    for (const auto& burst : next.phase2Bursts) {
+        for (const auto& codeword : burst.voiceCodewords) {
+            REQUIRE(codeword.sessionCodewordIdKnown);
+            REQUIRE_FALSE(codeword.duplicateInSession);
+            nextIds.push_back(codeword.sessionCodewordId);
+        }
+    }
+    REQUIRE(nextIds.size() == ids.size());
+
+    const auto repeated = decoder.processHardDibits(nextWindow);
+    REQUIRE(repeated.phase2Bursts.size() == 12);
+    size_t index = 0;
+    for (const auto& burst : repeated.phase2Bursts) {
+        for (const auto& codeword : burst.voiceCodewords) {
+            REQUIRE(codeword.sessionCodewordIdKnown);
+            REQUIRE(codeword.duplicateInSession);
+            REQUIRE(index < nextIds.size());
+            REQUIRE(codeword.sessionCodewordId == nextIds[index++]);
+        }
+    }
+    REQUIRE(index == nextIds.size());
 }
 
 TEST_CASE("P25 Phase 2 XOR mask generation matches known local-system vector")

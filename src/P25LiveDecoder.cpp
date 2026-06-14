@@ -1636,8 +1636,6 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
     burst.superframeBurstIndex = static_cast<uint8_t>(superframeBurstIndex & 0x0fu);
     burst.grantSlotKnown = superframeLocked;
     burst.grantSlot = static_cast<uint8_t>(superframeBurstIndex & 0x01u);
-    burst.tdmaSlotKnown = burst.superframeBurstIndexKnown;
-    burst.tdmaSlotId = burst.superframeBurstIndex;
     burst.isch = decodePhase2IschAt(dibits, pos);
 
     const size_t payload = pos + 10; // DUID/voice payload starts after the first ten dibits.
@@ -1729,7 +1727,7 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
         burst.essKnown = session->ess.known;
         burst.encrypted = session->ess.encrypted;
     }
-    burst.audioRelease = burst.phase2AudioLock &&
+    burst.sessionAudioRelease = burst.phase2AudioLock &&
         burst.xorMaskApplied &&
         burst.macCrcLock &&
         burst.essKnown &&
@@ -2258,6 +2256,11 @@ void P25LiveDecoder::reset()
     m_phase2MaskPhaseKnown = false;
     m_phase2MaskPhase = 0;
     m_phase2MaskPhaseScore = 0;
+    m_phase2RecentCodewords.clear();
+    m_phase2DibitTail.clear();
+    m_phase2NextCodewordId = 1;
+    m_phase2DecodeGeneration = 0;
+    m_phase2StreamDibits = 0;
     m_cqpskLock = {};
 }
 
@@ -2293,6 +2296,28 @@ std::array<int, P25LiveDecoder::Phase2BurstDibits * 12> P25LiveDecoder::phase2Xo
     return makePhase2XorMaskDibits(nac, wacn, systemId);
 }
 
+static void restoreSelectedDemodStats(P25LiveDecodeResult& result, const P25LiveDecoderStats& selected)
+{
+    result.stats.inputSamples = selected.inputSamples;
+    result.stats.discriminatorSamples = selected.discriminatorSamples;
+    result.stats.sampleRate = selected.sampleRate;
+    result.stats.channelSampleRate = selected.channelSampleRate;
+    result.stats.inputTargetOffsetHz = selected.inputTargetOffsetHz;
+    result.stats.discriminatorMeanHz = selected.discriminatorMeanHz;
+    result.stats.symbolRate = selected.symbolRate;
+    result.stats.symbolConfidence = selected.symbolConfidence;
+    result.stats.demodPath = selected.demodPath;
+    result.stats.cqpskLockActive = selected.cqpskLockActive;
+    result.stats.cqpskLockUsed = selected.cqpskLockUsed;
+    result.stats.cqpskLockUpdated = selected.cqpskLockUpdated;
+    result.stats.cqpskSymbolPhaseFraction = selected.cqpskSymbolPhaseFraction;
+    result.stats.cqpskFineCorrectionApplied = selected.cqpskFineCorrectionApplied;
+    result.stats.cqpskFineRotationRad = selected.cqpskFineRotationRad;
+    result.stats.cqpskResidualCarrierHz = selected.cqpskResidualCarrierHz;
+    result.stats.cqpskPhaseErrorRmsRad = selected.cqpskPhaseErrorRmsRad;
+    result.stats.cqpskFineCorrectionSymbols = selected.cqpskFineCorrectionSymbols;
+}
+
 P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<float>>& iq,
                                               double sampleRate,
                                               double centerFreqHz,
@@ -2314,7 +2339,7 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
     };
 
     auto fm = fmDiscriminatorFromChannel(channel.samples, channel.sampleRate);
-    auto c4fm = processFmDiscriminator(fm.hz, fm.sampleRate);
+    auto c4fm = processFmDiscriminatorInternal(fm.hz, fm.sampleRate, false);
     stampCommonStats(c4fm);
     c4fm.stats.discriminatorMeanHz = fm.meanHz;
     c4fm.stats.demodPath = "C4FM";
@@ -2350,12 +2375,12 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
             effectiveParams.phaseErrorRmsRad = m_cqpskLock.phaseErrorRmsRad;
             effectiveParams.fineCorrectionSymbols = m_cqpskLock.fineCorrectionSymbols;
         }
-        candidate = processHardDibits(cqpskSymbolsToDibits(
+        candidate = processHardDibitsInternal(cqpskSymbolsToDibits(
             complexSymbols.symbols,
             effectiveParams.differential,
             effectiveParams.conjugate,
             wrapPhase(effectiveParams.rotation + effectiveParams.fineRotation),
-            effectiveParams.permutation));
+            effectiveParams.permutation), false);
         stampCommonStats(candidate);
         candidate.stats.sampleRate = channel.sampleRate;
         candidate.stats.symbolRate = m_config.symbolRate;
@@ -2425,12 +2450,12 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
                             params.phaseErrorRmsRad = correction.phaseErrorRmsRad;
                             params.fineCorrectionSymbols = correction.symbols;
                         }
-                        auto candidate = processHardDibits(cqpskSymbolsToDibits(
+                        auto candidate = processHardDibitsInternal(cqpskSymbolsToDibits(
                             complexSymbols.symbols,
                             differential,
                             conjugate,
                             wrapPhase(rotation + params.fineRotation),
-                            perm));
+                            perm), false);
                         stampCommonStats(candidate);
                         candidate.stats.sampleRate = channel.sampleRate;
                         candidate.stats.symbolRate = m_config.symbolRate;
@@ -2481,11 +2506,24 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
     } else if (m_cqpskLock.valid && !isCqpskPath(best.stats.demodPath)) {
         if (++m_cqpskLock.misses >= 8) m_cqpskLock = {};
     }
+    if (!best.dibits.empty()) {
+        const auto selectedStats = best.stats;
+        auto committed = processHardDibitsInternal(best.dibits, true);
+        restoreSelectedDemodStats(committed, selectedStats);
+        best = std::move(committed);
+    }
     return best;
 }
 
 P25LiveDecodeResult P25LiveDecoder::processFmDiscriminator(const std::vector<float>& discriminatorHz,
                                                            double sampleRate)
+{
+    return processFmDiscriminatorInternal(discriminatorHz, sampleRate, true);
+}
+
+P25LiveDecodeResult P25LiveDecoder::processFmDiscriminatorInternal(const std::vector<float>& discriminatorHz,
+                                                                   double sampleRate,
+                                                                   bool annotateSessionCodewords)
 {
     P25LiveDecodeResult best;
     best.stats.discriminatorSamples = discriminatorHz.size();
@@ -2500,16 +2538,18 @@ P25LiveDecodeResult P25LiveDecoder::processFmDiscriminator(const std::vector<flo
     for (bool invertDeviation : {false, true}) {
         for (bool reverseBitOrder : {false, true}) {
             for (double scaleMultiplier : {1.0, 0.85, 1.15, 0.70, 1.30}) {
-                auto candidate = processHardDibits(symbolsToDibits(
-                    symbols.symbolsHz, m_config, invertDeviation, reverseBitOrder, scaleMultiplier));
+                auto candidate = processHardDibitsInternal(symbolsToDibits(
+                    symbols.symbolsHz, m_config, invertDeviation, reverseBitOrder, scaleMultiplier),
+                    false);
                 if (!haveCandidate || betterLiveResult(candidate, best)) {
                     best = std::move(candidate);
                     haveCandidate = true;
                 }
             }
             for (double fixedScale : {m_config.c4fmInnerDeviationHz, m_config.c4fmInnerDeviationHz * 0.80, m_config.c4fmInnerDeviationHz * 1.20}) {
-                auto candidate = processHardDibits(symbolsToDibits(
-                    symbols.symbolsHz, m_config, invertDeviation, reverseBitOrder, 1.0, fixedScale));
+                auto candidate = processHardDibitsInternal(symbolsToDibits(
+                    symbols.symbolsHz, m_config, invertDeviation, reverseBitOrder, 1.0, fixedScale),
+                    false);
                 if (!haveCandidate || betterLiveResult(candidate, best)) {
                     best = std::move(candidate);
                     haveCandidate = true;
@@ -2522,10 +2562,129 @@ P25LiveDecodeResult P25LiveDecoder::processFmDiscriminator(const std::vector<flo
     best.stats.symbolRate = m_config.symbolRate;
     best.stats.symbolConfidence = symbols.confidence;
     best.stats.demodPath = "C4FM";
+    if (annotateSessionCodewords && !best.dibits.empty()) {
+        const auto selectedStats = best.stats;
+        auto committed = processHardDibitsInternal(best.dibits, true);
+        restoreSelectedDemodStats(committed, selectedStats);
+        best = std::move(committed);
+    }
     return best;
 }
 
+void P25LiveDecoder::annotatePhase2SessionCodewords(P25Phase2DecodeResult& out,
+                                                    const std::vector<int>& dibits)
+{
+    const uint64_t generation = ++m_phase2DecodeGeneration;
+    constexpr uint64_t kRetentionGenerations = 8;
+    constexpr size_t kMaxRecentCodewords = 512;
+    constexpr size_t kMaxDibitTail = 8192;
+    constexpr size_t kMinTrustedOverlap = Phase2BurstDibits / 2;
+    constexpr uint64_t kDibitTolerance = 8;
+
+    auto longestTailPrefixOverlap = [&]() -> size_t {
+        const size_t n = std::min({kMaxDibitTail, m_phase2DibitTail.size(), dibits.size()});
+        if (n == 0) return 0;
+
+        std::vector<int> combined;
+        combined.reserve(n * 2 + 1);
+        combined.insert(combined.end(), dibits.begin(), dibits.begin() + static_cast<std::ptrdiff_t>(n));
+        combined.push_back(-1);
+        combined.insert(combined.end(), m_phase2DibitTail.end() - static_cast<std::ptrdiff_t>(n), m_phase2DibitTail.end());
+
+        std::vector<size_t> pi(combined.size(), 0);
+        for (size_t i = 1; i < combined.size(); ++i) {
+            size_t j = pi[i - 1];
+            while (j > 0 && combined[i] != combined[j]) j = pi[j - 1];
+            if (combined[i] == combined[j]) ++j;
+            pi[i] = j;
+        }
+        return std::min(pi.back(), n);
+    };
+
+    auto fingerprintFor = [](const P25Phase2Burst& burst, const P25Phase2VoiceCodeword& codeword) {
+        uint64_t h = 1469598103934665603ull; // FNV-1a
+        auto mix = [&](uint64_t v) {
+            for (int i = 0; i < 8; ++i) {
+                h ^= (v >> (i * 8)) & 0xffu;
+                h *= 1099511628211ull;
+            }
+        };
+        mix(static_cast<uint64_t>(burst.kind));
+        mix(burst.superframeBurstIndexKnown ? burst.superframeBurstIndex : 0xffu);
+        mix(burst.grantSlotKnown ? burst.grantSlot : 0xffu);
+        mix(codeword.voiceIndex);
+        for (uint8_t bit : codeword.bits) {
+            h ^= bit ? 1u : 0u;
+            h *= 1099511628211ull;
+        }
+        return h;
+    };
+
+    const size_t overlap = longestTailPrefixOverlap();
+    const bool trustedOverlap = overlap >= kMinTrustedOverlap &&
+                                static_cast<uint64_t>(overlap) <= m_phase2StreamDibits;
+    const uint64_t streamStart = trustedOverlap
+        ? m_phase2StreamDibits - static_cast<uint64_t>(overlap)
+        : m_phase2StreamDibits;
+
+    for (auto& burst : out.bursts) {
+        for (auto& codeword : burst.voiceCodewords) {
+            const uint64_t fp = fingerprintFor(burst, codeword);
+            const uint64_t streamDibit = streamStart +
+                static_cast<uint64_t>(burst.dibitOffset) +
+                static_cast<uint64_t>(codeword.dibitOffset);
+            auto it = std::find_if(m_phase2RecentCodewords.begin(), m_phase2RecentCodewords.end(),
+                [&](const RecentPhase2Codeword& seen) {
+                    const uint64_t distance = streamDibit > seen.streamDibit
+                        ? streamDibit - seen.streamDibit
+                        : seen.streamDibit - streamDibit;
+                    return seen.fingerprint == fp &&
+                           distance <= kDibitTolerance &&
+                           generation >= seen.generation &&
+                           generation - seen.generation <= kRetentionGenerations;
+                });
+            codeword.sessionCodewordIdKnown = true;
+            if (it != m_phase2RecentCodewords.end()) {
+                codeword.sessionCodewordId = it->id;
+                codeword.duplicateInSession = true;
+                it->generation = generation;
+            } else {
+                codeword.sessionCodewordId = m_phase2NextCodewordId++;
+                codeword.duplicateInSession = false;
+                m_phase2RecentCodewords.push_back({streamDibit, fp, codeword.sessionCodewordId, generation});
+            }
+        }
+    }
+
+    const uint64_t streamEnd = streamStart + static_cast<uint64_t>(dibits.size());
+    if (streamEnd > m_phase2StreamDibits) {
+        const uint64_t alreadyCovered = m_phase2StreamDibits > streamStart
+            ? m_phase2StreamDibits - streamStart
+            : 0;
+        const size_t appendFrom = static_cast<size_t>(std::min<uint64_t>(alreadyCovered, dibits.size()));
+        for (size_t i = appendFrom; i < dibits.size(); ++i) {
+            m_phase2DibitTail.push_back(dibits[i] & 0x03);
+        }
+        m_phase2StreamDibits = streamEnd;
+    }
+    while (m_phase2DibitTail.size() > kMaxDibitTail) {
+        m_phase2DibitTail.pop_front();
+    }
+
+    while (!m_phase2RecentCodewords.empty() &&
+           (generation > m_phase2RecentCodewords.front().generation + kRetentionGenerations ||
+            m_phase2RecentCodewords.size() > kMaxRecentCodewords)) {
+        m_phase2RecentCodewords.pop_front();
+    }
+}
+
 P25LiveDecodeResult P25LiveDecoder::processHardDibits(const std::vector<int>& dibits)
+{
+    return processHardDibitsInternal(dibits, true);
+}
+
+P25LiveDecodeResult P25LiveDecoder::processHardDibitsInternal(const std::vector<int>& dibits,
+                                                              bool annotateSessionCodewords)
 {
     P25LiveDecodeResult result;
     result.dibits = dibits;
@@ -2533,7 +2692,7 @@ P25LiveDecodeResult P25LiveDecoder::processHardDibits(const std::vector<int>& di
     result = processHardBits(result.bits);
     result.dibits = dibits;
     result.stats.symbols = dibits.size();
-    auto phase2 = processPhase2HardDibitsDetailed(dibits);
+    auto phase2 = processPhase2HardDibitsDetailedInternal(dibits, annotateSessionCodewords);
     result.phase2Bursts = std::move(phase2.bursts);
     result.phase2MacPdus = std::move(phase2.macPdus);
     result.phase2Ess = phase2.ess;
@@ -2571,6 +2730,12 @@ std::vector<P25Phase2Burst> P25LiveDecoder::processPhase2HardDibits(const std::v
 }
 
 P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailed(const std::vector<int>& dibits)
+{
+    return processPhase2HardDibitsDetailedInternal(dibits, true);
+}
+
+P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(const std::vector<int>& dibits,
+                                                                              bool annotateSessionCodewords)
 {
     P25Phase2DecodeResult out;
     if (dibits.size() < Phase2BurstDibits) {
@@ -2626,7 +2791,7 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailed(const std:
                 selectedMaskPhase = bestWindow.phase;
                 selectedMaskScore = bestWindow.score;
                 selectedMacCrc = bestWindow.macCrcValid;
-                if (bestWindow.macCrcValid > 0 || bestWindow.essKnown) {
+                if (annotateSessionCodewords && (bestWindow.macCrcValid > 0 || bestWindow.essKnown)) {
                     m_phase2MaskPhaseKnown = true;
                     m_phase2MaskPhase = selectedMaskPhase;
                     m_phase2MaskPhaseScore = selectedMaskScore;
@@ -2647,7 +2812,7 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailed(const std:
                 if (burst.xorMaskApplied && selectedMacCrc > 0) {
                     burst.phase2AudioLock = true;
                     burst.macCrcLock = true;
-                    burst.audioRelease = burst.phase2AudioLock &&
+                    burst.sessionAudioRelease = burst.phase2AudioLock &&
                         burst.xorMaskApplied &&
                         burst.essKnown &&
                         !burst.encrypted;
@@ -2671,10 +2836,13 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailed(const std:
             out.bursts.push_back(std::move(burst));
         }
     }
-    m_phase2Ess = session.ess;
-    m_phase2EssB = session.essB;
-    m_phase2EssBSeen = session.essBSeen;
-    out.ess = m_phase2Ess;
+    out.ess = session.ess;
+    if (annotateSessionCodewords) {
+        m_phase2Ess = session.ess;
+        m_phase2EssB = session.essB;
+        m_phase2EssBSeen = session.essBSeen;
+        annotatePhase2SessionCodewords(out, dibits);
+    }
     return out;
 }
 

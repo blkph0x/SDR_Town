@@ -4,6 +4,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <string>
 #include <vector>
@@ -175,6 +176,9 @@ struct P25ImbeFrame {
 struct P25Phase2VoiceCodeword {
     size_t dibitOffset = 0;
     uint8_t voiceIndex = 0;
+    bool sessionCodewordIdKnown = false;
+    uint64_t sessionCodewordId = 0;
+    bool duplicateInSession = false;
     std::array<uint8_t, 72> bits{};
 };
 
@@ -191,13 +195,11 @@ struct P25Phase2Burst {
     bool superframeLock = false;
     bool maskPhaseLock = false;
     bool macCrcLock = false;
-    bool audioRelease = false;
+    bool sessionAudioRelease = false;
     bool superframeBurstIndexKnown = false;
     uint8_t superframeBurstIndex = 0;
     bool grantSlotKnown = false;
     uint8_t grantSlot = 0;
-    bool tdmaSlotKnown = false;
-    uint8_t tdmaSlotId = 0; // Compatibility alias for superframeBurstIndex; do not treat as grant slot.
     P25Phase2IschState isch;
     uint8_t rawDuidCodeword = 0;
     int duid = -1;
@@ -306,6 +308,23 @@ private:
     };
 
     P25LiveDecoderConfig m_config;
+    struct RecentPhase2Codeword {
+        uint64_t streamDibit = 0;
+        uint64_t fingerprint = 0;
+        uint64_t id = 0;
+        uint64_t generation = 0;
+    };
+
+    P25LiveDecodeResult processHardDibitsInternal(const std::vector<int>& dibits,
+                                                  bool annotateSessionCodewords);
+    P25LiveDecodeResult processFmDiscriminatorInternal(const std::vector<float>& discriminatorHz,
+                                                       double sampleRate,
+                                                       bool annotateSessionCodewords);
+    P25Phase2DecodeResult processPhase2HardDibitsDetailedInternal(const std::vector<int>& dibits,
+                                                                  bool annotateSessionCodewords);
+    void annotatePhase2SessionCodewords(P25Phase2DecodeResult& out,
+                                        const std::vector<int>& dibits);
+
     P25Phase2MaskParameters m_phase2MaskParams;
     std::array<int, Phase2BurstDibits * 12> m_phase2XorMask{};
     P25Phase2EssState m_phase2Ess;
@@ -314,6 +333,11 @@ private:
     bool m_phase2MaskPhaseKnown = false;
     uint8_t m_phase2MaskPhase = 0;
     int m_phase2MaskPhaseScore = 0;
+    std::deque<RecentPhase2Codeword> m_phase2RecentCodewords;
+    std::deque<int> m_phase2DibitTail;
+    uint64_t m_phase2NextCodewordId = 1;
+    uint64_t m_phase2DecodeGeneration = 0;
+    uint64_t m_phase2StreamDibits = 0;
     CqpskDemodLock m_cqpskLock;
 };
 

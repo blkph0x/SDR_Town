@@ -324,7 +324,7 @@ void AudioEngine::pushAudio(const float* samples, size_t count)
     }
 }
 
-void AudioEngine::pushAudioToOutputs(const float* samples, size_t count, const std::vector<size_t>& activeOutputIndices)
+void AudioEngine::pushAudioToActiveOutputs(const float* samples, size_t count, const std::vector<size_t>& activeOutputIndices)
 {
     if (!samples || count == 0) return;
     if (activeOutputIndices.empty()) {

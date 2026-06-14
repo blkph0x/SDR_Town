@@ -1424,7 +1424,7 @@ static void pushAudioFrames(AudioEngine* engine,
 
     size_t consumed = 0;
     while (pending.size() - consumed >= frameSize) {
-        engine->pushAudioToOutputs(pending.data() + consumed, frameSize, activeOutputIndices);
+        engine->pushAudioToActiveOutputs(pending.data() + consumed, frameSize, activeOutputIndices);
         consumed += frameSize;
     }
     if (consumed > 0) {
@@ -1556,6 +1556,15 @@ static bool p25Phase2ValidationLoggingEnabled()
     return enabled;
 }
 
+static bool p25Phase2ValidationRedactionEnabled()
+{
+    static const bool enabled = [] {
+        const QByteArray value = qgetenv("SDR_TOWN_P25_VALIDATION_REDACT").trimmed().toLower();
+        return value == "1" || value == "true" || value == "yes" || value == "on";
+    }();
+    return enabled;
+}
+
 static void rotateP25Phase2ValidationLogIfNeeded(const QString& path)
 {
     static qint64 lastRotateCheckMs = 0;
@@ -1590,17 +1599,18 @@ static std::string p25CompactBits(const std::array<uint8_t, 96>& bits)
     return out;
 }
 
-static json p25Phase2EssJson(const P25Phase2EssState& ess)
+static json p25Phase2EssJson(const P25Phase2EssState& ess, bool redactSensitive = false)
 {
     json out;
     out["known"] = ess.known;
     out["encrypted"] = ess.encrypted;
     out["algId"] = ess.algId;
-    out["keyId"] = ess.keyId;
+    out["keyId"] = redactSensitive ? json(nullptr) : json(ess.keyId);
     out["fecValidated"] = ess.fecValidated;
     out["correctedSymbols"] = ess.correctedSymbols;
     std::vector<uint8_t> mi(ess.messageIndicator.begin(), ess.messageIndicator.end());
-    out["messageIndicatorHex"] = p25BytesToHex(mi).toStdString();
+    out["messageIndicatorHex"] = redactSensitive ? std::string("<redacted>") : p25BytesToHex(mi).toStdString();
+    out["redacted"] = redactSensitive;
     return out;
 }
 
@@ -1615,6 +1625,7 @@ static void writeP25Phase2ValidationRecord(const Receiver& rx,
 {
     if (!rx.p25VoicePhase2 || live.stats.phase2Bursts == 0) return;
     if (!p25Phase2ValidationLoggingEnabled()) return;
+    const bool redactRaw = p25Phase2ValidationRedactionEnabled();
 
     static std::mutex validationMutex;
     static qint64 lastWriteMs = 0;
@@ -1650,7 +1661,7 @@ static void writeP25Phase2ValidationRecord(const Receiver& rx,
         {"phaseScore", live.stats.phase2MaskPhaseScore},
         {"phaseMacCrcValid", live.stats.phase2MaskPhaseMacCrcValid},
     };
-    record["ess"] = p25Phase2EssJson(live.phase2Ess);
+    record["ess"] = p25Phase2EssJson(live.phase2Ess, redactRaw);
     record["stats"] = {
         {"syncs", audio.syncs},
         {"nids", audio.nids},
@@ -1703,7 +1714,7 @@ static void writeP25Phase2ValidationRecord(const Receiver& rx,
             {"correctedSymbols", pdu.correctedSymbols},
             {"bytesHex", p25BytesToHex(pdu.bytes).toStdString()},
             {"essPresent", pdu.essPresent},
-            {"ess", p25Phase2EssJson(pdu.ess)},
+            {"ess", p25Phase2EssJson(pdu.ess, redactRaw)},
         });
     }
 
@@ -1715,7 +1726,10 @@ static void writeP25Phase2ValidationRecord(const Receiver& rx,
             codewords.push_back({
                 {"voiceIndex", cw.voiceIndex},
                 {"dibitOffset", cw.dibitOffset},
-                {"ambeBits", p25CompactBits(ambe)},
+                {"ambeBits", redactRaw ? std::string("<redacted>") : p25CompactBits(ambe)},
+                {"sessionCodewordIdKnown", cw.sessionCodewordIdKnown},
+                {"sessionCodewordId", cw.sessionCodewordIdKnown ? static_cast<long long>(cw.sessionCodewordId) : -1},
+                {"duplicateInSession", cw.duplicateInSession},
             });
         }
         record["bursts"].push_back({
@@ -1748,8 +1762,8 @@ static void writeP25Phase2ValidationRecord(const Receiver& rx,
             {"ischLocation", burst.isch.location},
             {"ischFreeAccess", burst.isch.freeAccess},
             {"ischUltraframeCounter", burst.isch.ultraframeCounter},
-            {"rawPayloadDibits", p25CompactDibits(burst.rawPayloadDibits)},
-            {"postMaskPayloadDibits", p25CompactDibits(burst.maskedPayloadDibits)},
+            {"rawPayloadDibits", redactRaw ? std::string("<redacted>") : p25CompactDibits(burst.rawPayloadDibits)},
+            {"postMaskPayloadDibits", redactRaw ? std::string("<redacted>") : p25CompactDibits(burst.maskedPayloadDibits)},
             {"voiceCodewords", std::move(codewords)},
         });
     }
@@ -1763,7 +1777,7 @@ static void writeP25Phase2ValidationRecord(const Receiver& rx,
             {"grantSlotKnown", frame.grantSlotKnown},
             {"grantSlot", frame.grantSlot},
             {"voiceIndex", frame.voiceIndex},
-            {"ambeBits", frame.ambeBits},
+            {"ambeBits", redactRaw ? std::string("<redacted>") : frame.ambeBits},
             {"status", frame.status},
             {"errors", frame.errors},
             {"totalErrors", frame.totalErrors},
@@ -1870,7 +1884,12 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
                 : 0;
             const uint64_t codewordEndAbsDibit = codewordAbsDibit + 36u;
             constexpr uint64_t kPhase2DuplicateDibitTolerance = 8u;
-            if (haveAbsoluteDibits &&
+            if (codeword.duplicateInSession) {
+                skippedDuplicateVoice = true;
+                continue;
+            }
+            if (!codeword.sessionCodewordIdKnown &&
+                haveAbsoluteDibits &&
                 rx.p25Phase2LastEmittedAbsDibit != 0 &&
                 codewordEndAbsDibit <= rx.p25Phase2LastEmittedAbsDibit + kPhase2DuplicateDibitTolerance) {
                 skippedDuplicateVoice = true;
@@ -2469,8 +2488,8 @@ public:
         QLabel* rmsLabel = new QLabel("SIG: --- dB  NF: --- dB");
         rmsLabel->setToolTip("Live RF signal, local noise floor, and SNR used by the squelch gate.");
         gainLay->addWidget(rmsLabel);
-        QLabel* classifierStatus = new QLabel("Classifier: ---");
-        classifierStatus->setToolTip("Advanced ROI classifier: predicted signal family, confidence, standard BW, and filter recommendation.");
+        QLabel* classifierStatus = new QLabel("Classifier: deterministic ---");
+        classifierStatus->setToolTip("Deterministic ROI classifier is active. ONNX model loading is an experimental placeholder until a trained model contract is validated.");
         gainLay->addWidget(classifierStatus);
         rxLay->addLayout(gainLay);
 
@@ -3630,7 +3649,7 @@ public:
                                     ? AdvancedSignalClassifier::instance().classifyWaterfallTile(tile, sr, cf, monFreqForClassifier, roiHz)
                                     : AdvancedSignalClassifier::instance().classifySpectrum(pwr, sr, cf, monFreqForClassifier));
                             if (classifierStatus) {
-                                classifierStatus->setText(QString("Classifier: %1 %2%  BW %3 kHz  %4")
+                                classifierStatus->setText(QString("Classifier: deterministic %1 %2%  BW %3 kHz  %4")
                                     .arg(QString::fromStdString(liveRec.label))
                                     .arg(liveRec.confidence * 100.0, 0, 'f', 0)
                                     .arg(liveRec.standardBandwidthHz / 1000.0, 0, 'f', 1)
@@ -3862,7 +3881,7 @@ public:
                                                 .arg(burst.superframeLocked ? "locked" : "no")
                                                 .arg(burst.superframeSyncScore)
                                                 .arg(burst.phase2AudioLock ? "yes" : "no")
-                                                .arg(burst.audioRelease ? "yes" : "no")
+                                                .arg(burst.sessionAudioRelease ? "yes" : "no")
                                                 .arg(burst.superframeBurstIndexKnown ? QString::number(static_cast<int>(burst.superframeBurstIndex)) : QString("-"))
                                                 .arg(burst.grantSlotKnown ? QString::number(static_cast<int>(burst.grantSlot)) : QString("-"))
                                                 .arg(burst.xorMaskApplied ? "yes" : "not-yet")
@@ -5477,7 +5496,7 @@ int runCLI(int argc, char* argv[]) {
                       << "  plans                   - show built-in band auto-mode plans\n"
                       << "  classify [dev] [rx]     - advanced mode/BW/filter classifier\n"
                       << "  capture <label> [rx]    - save SigMF + classifier tile training sample\n"
-                      << "  model status|load|unload - classifier model hook (fails closed until ONNX inference is finished)\n"
+                      << "  model status|load|unload - experimental ONNX placeholder; deterministic classifier remains active\n"
                       << "  p25 [dev]               - list likely P25 control-channel candidates\n"
                       << "  p25 tgs                 - list discovered/verified P25 talkgroups\n"
                       << "  p25 addtg <cc_mhz> <tgid> [tag] - manually verify a TG\n"
@@ -6199,7 +6218,7 @@ int runCLI(int argc, char* argv[]) {
                                   << " sf=" << (burst.superframeLocked ? "locked" : "no")
                                   << " sfScore=" << burst.superframeSyncScore
                                   << " legacyAudioLock=" << (burst.phase2AudioLock ? "yes" : "no")
-                                  << " sessionRelease=" << (burst.audioRelease ? "yes" : "no")
+                                  << " sessionRelease=" << (burst.sessionAudioRelease ? "yes" : "no")
                                   << " sfBurst=" << (burst.superframeBurstIndexKnown ? std::to_string(burst.superframeBurstIndex) : std::string("-"))
                                   << " grantSlot=" << (burst.grantSlotKnown ? std::to_string(burst.grantSlot) : std::string("-"))
                                   << " xorMask=" << (burst.xorMaskApplied ? "yes" : "not-yet")
@@ -6227,7 +6246,9 @@ int runCLI(int argc, char* argv[]) {
                               : " (build with SDR_TOWN_ENABLE_MBELIB=ON and mbelib installed)") << "\n"
                           << "P25 Phase 2 status: TDMA sync/DUID/2V/4V burst detection is enabled. Clear AMBE audio remains muted until superframe timing, mask application, and MAC/ESS state are complete.\n"
                           << "P25 Phase 2 validation log: "
-                          << (p25Phase2ValidationLoggingEnabled() ? p25Phase2ValidationPath().toStdString() : std::string("disabled; set SDR_TOWN_P25_VALIDATION_LOG=1 before launch to enable raw diagnostic JSONL"))
+                          << (p25Phase2ValidationLoggingEnabled()
+                              ? p25Phase2ValidationPath().toStdString() + (p25Phase2ValidationRedactionEnabled() ? " (raw symbols redacted)" : " (raw symbols enabled; set SDR_TOWN_P25_VALIDATION_REDACT=1 to redact)")
+                              : std::string("disabled; set SDR_TOWN_P25_VALIDATION_LOG=1 before launch to enable JSONL, add SDR_TOWN_P25_VALIDATION_REDACT=1 to redact raw symbols"))
                           << "\n";
             } else if (sub == "tg" || sub == "tgs" || sub == "talkgroups") {
                 auto talkgroups = loadP25Talkgroups();
