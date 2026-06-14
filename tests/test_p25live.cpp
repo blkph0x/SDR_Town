@@ -177,7 +177,7 @@ std::vector<int> makeSyntheticMaskedPhase2Superframe(uint16_t nac, uint32_t wacn
         for (size_t i = 0; i < 170; ++i) {
             if (i < 10) continue; // The local burst model overlaps these dibits with the sync pattern.
             if (std::find(duidDibits.begin(), duidDibits.end(), i) != duidDibits.end()) continue;
-            dibits[base + 10 + i] ^= mask[slot * P25LiveDecoder::Phase2BurstDibits + i] & 0x03;
+            dibits[base + 10 + i] ^= mask[slot * P25LiveDecoder::Phase2BurstDibits + 10 + i] & 0x03;
         }
     }
     return dibits;
@@ -328,7 +328,7 @@ std::vector<int> maskSyntheticPhase2SuperframeForTest(std::vector<int> dibits,
         for (size_t i = 0; i < 170; ++i) {
             if (i < 10) continue;
             if (std::find(duidDibits.begin(), duidDibits.end(), i) != duidDibits.end()) continue;
-            dibits[base + 10 + i] ^= mask[maskSlot * P25LiveDecoder::Phase2BurstDibits + i] & 0x03;
+            dibits[base + 10 + i] ^= mask[maskSlot * P25LiveDecoder::Phase2BurstDibits + 10 + i] & 0x03;
         }
     }
     return dibits;

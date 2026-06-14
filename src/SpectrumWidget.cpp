@@ -577,7 +577,7 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
         int plotLeft = specRect.left();
         int plotRight = specRect.right();
 
-        int sqY = yFromDb(squelchSnap, specH);
+        int sqY = yFromSquelchViz(squelchSnap, specH);
         sqY = std::clamp(sqY, specRect.top() + 1, specRect.bottom() - 1);
 
         // Horizontal "cut" line (dashed orange) across the plot area + into waterfall for visibility
@@ -662,12 +662,12 @@ void SpectrumWidget::mousePressEvent(QMouseEvent* event)
 
         // Priority: right-side squelch grab bar or close to the horizontal squelch line → interactive squelch drag
         bool nearRightBar = (mx >= ww - 35);
-        int currentSqY = yFromDb(m_squelchThresholdDb, specHlocal);
+        int currentSqY = yFromSquelchViz(m_squelchThresholdDb, specHlocal);
         bool nearLine = std::abs(my - currentSqY) <= 10;
 
         if (nearRightBar || nearLine) {
             m_squelchDragging = true;
-            double db = dbFromY(my, specHlocal);
+            double db = squelchVizDbFromY(my, specHlocal);
             db = std::clamp(db, -130.0, 40.0);
             m_squelchThresholdDb = db;
             emit squelchThresholdChanged(db);
@@ -693,7 +693,7 @@ void SpectrumWidget::mouseMoveEvent(QMouseEvent* event)
     int specHlocal = hh * 2 / 3;
 
     // Hover feedback: change cursor when over the right squelch bar or the line (affordance)
-    int currentSqY = yFromDb(m_squelchThresholdDb, specHlocal);
+    int currentSqY = yFromSquelchViz(m_squelchThresholdDb, specHlocal);
     bool overSquelchZone = (mx >= ww - 35) || (std::abs(my - currentSqY) <= 10);
     if (overSquelchZone) {
         setCursor(Qt::SplitVCursor);
@@ -702,7 +702,7 @@ void SpectrumWidget::mouseMoveEvent(QMouseEvent* event)
     }
 
     if (m_squelchDragging) {
-        double db = dbFromY(my, specHlocal);
+        double db = squelchVizDbFromY(my, specHlocal);
         db = std::clamp(db, -130.0, 40.0);
         if (std::abs(db - m_squelchThresholdDb) > 0.05) {
             m_squelchThresholdDb = db;

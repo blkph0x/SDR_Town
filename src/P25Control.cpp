@@ -481,6 +481,15 @@ std::vector<uint8_t> p25ParseHexBytes(const std::string& text)
     return out;
 }
 
+bool p25ControlEventIsVoiceGrant(const P25ControlEvent& event)
+{
+    const bool grantType =
+        event.type == P25ControlEventType::GroupVoiceGrant ||
+        event.type == P25ControlEventType::GroupVoiceUpdate ||
+        event.type == P25ControlEventType::GroupVoiceGrantExplicit;
+    return grantType && event.talkgroupId != 0;
+}
+
 std::string p25VoiceProtocolToString(P25VoiceProtocol protocol)
 {
     switch (protocol) {

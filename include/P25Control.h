@@ -114,5 +114,6 @@ private:
 };
 
 std::vector<uint8_t> p25ParseHexBytes(const std::string& text);
+bool p25ControlEventIsVoiceGrant(const P25ControlEvent& event);
 std::string p25ControlEventTypeToString(P25ControlEventType type);
 std::string p25VoiceProtocolToString(P25VoiceProtocol protocol);

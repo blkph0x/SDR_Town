@@ -18,6 +18,7 @@
 #include <QDebug>
 #include <QStringList>
 #include <QVector>
+#include <QRegularExpression>
 #include <algorithm>
 
 static const QString MANIFEST_URL = "https://github.com/Blkph0x/SDR_Town/releases/latest/download/update.json";
@@ -49,6 +50,22 @@ static int compareVersions(const QString& a, const QString& b)
     return 0;
 }
 
+static bool isAllowedUpdateUrl(const QUrl& url)
+{
+    const QString host = url.host().toLower();
+    if (host != "github.com") return false;
+
+    const QString path = url.path();
+    return path.startsWith("/Blkph0x/SDR_Town/releases/download/", Qt::CaseSensitive) ||
+           path.startsWith("/Blkph0x/SDR_Town/releases/latest/download/", Qt::CaseSensitive);
+}
+
+static bool isValidSha256Hex(const QString& text)
+{
+    static const QRegularExpression re(QStringLiteral("^[0-9a-fA-F]{64}$"));
+    return re.match(text).hasMatch();
+}
+
 UpdateManager::UpdateManager(QObject* parent)
     : QObject(parent)
 {
@@ -74,11 +91,7 @@ void UpdateManager::checkForUpdates(bool manual)
         return; // rate limit (startup / background)
     }
 
-    m_lastCheck = now;
     m_lastCheckWasManual = manual;
-    QSettings s;
-    s.setValue("updates/lastCheck", m_lastCheck);
-
     fetchManifest();
 }
 
@@ -106,6 +119,10 @@ void UpdateManager::onManifestReply(QNetworkReply* reply)
         emit error("Update manifest was invalid or empty.");
         return;
     }
+
+    m_lastCheck = QDateTime::currentDateTime();
+    QSettings s;
+    s.setValue("updates/lastCheck", m_lastCheck);
 
     QString current = QCoreApplication::applicationVersion();
     if (compareVersions(info.version, current) <= 0 || info.version == m_skippedVersion) {
@@ -140,7 +157,8 @@ bool UpdateManager::parseUpdateJson(const QByteArray& data, UpdateInfo& out)
     return !out.version.isEmpty() &&
            installer.isValid() &&
            installer.scheme().compare("https", Qt::CaseInsensitive) == 0 &&
-           !out.sha256.isEmpty();
+           isAllowedUpdateUrl(installer) &&
+           isValidSha256Hex(out.sha256);
 }
 
 void UpdateManager::downloadAndApplyUpdate(const UpdateInfo& info)
@@ -158,6 +176,14 @@ void UpdateManager::doDownload(const QString& url, const QString& expectedSha256
     QUrl updateUrl(url);
     if (!updateUrl.isValid() || updateUrl.scheme().compare("https", Qt::CaseInsensitive) != 0) {
         emit error("Update download URL must be valid HTTPS.");
+        return;
+    }
+    if (!isAllowedUpdateUrl(updateUrl)) {
+        emit error("Update download URL is not a trusted SDR_Town GitHub release asset.");
+        return;
+    }
+    if (!isValidSha256Hex(expectedSha256)) {
+        emit error("Update manifest has an invalid SHA256 digest.");
         return;
     }
 

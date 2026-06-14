@@ -29,6 +29,12 @@ DeviceManager& DeviceManager::instance() {
     return mgr;
 }
 
+DeviceManager::StreamState* DeviceManager::streamState(size_t index) const {
+    std::lock_guard<std::mutex> lk(devicesMutex);
+    if (index >= streams.size()) return nullptr;
+    return streams[index].get();
+}
+
 static double clampGainForDevice(const DeviceInfo& d, double gainDb) {
     double minGain = d.gainMin;
     double maxGain = d.gainMax;
@@ -389,15 +395,16 @@ void DeviceManager::resetStreamBuffers(StreamState& st) {
 
 bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
     DeviceInfo d;
+    StreamState* stPtr = nullptr;
     {
         std::lock_guard<std::mutex> lk(devicesMutex);
         if (index >= devices.size()) return false;
         d = devices[index];
+        if (streams.size() <= index) streams.resize(index + 1);
+        if (!streams[index]) streams[index] = std::make_unique<StreamState>();
+        stPtr = streams[index].get();
     }
-    if (streams.size() <= index) streams.resize(index + 1);
-    if (!streams[index]) streams[index] = std::make_unique<StreamState>();
-
-    auto& st = *streams[index];
+    auto& st = *stPtr;
 
     bool wasActive = false;
     bool wasReal = false;
@@ -417,6 +424,8 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
             return true; // already streaming the desired mode
         }
     }
+
+    std::unique_lock<std::mutex> lifecycleLock(st.lifecycleMutex);
 
     // ALWAYS start a fast stub simulation first. This makes every "start" (Add Receiver,
     // Apply, Scan, CLI) return instantly with working spectrum + basic demod + audio routing.
@@ -443,7 +452,7 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
         st.isReal = false;
         st.runtimeState = attemptReal ? "opening hardware (stub active)" : "simulated/stub";
     }
-    st.rxThread = std::thread(&DeviceManager::rxThreadFunc, this, index);
+    st.rxThread = std::thread(&DeviceManager::rxThreadFunc, this, index, streamGen);
     if (!attemptReal) {
         spdlog::info("Started stub/sim streaming for device {} (safe mode)", index);
         return true;
@@ -461,8 +470,9 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
     // All safety is via sessionGen + stopFlag captured at launch time. The worker self-aborts and cleans (unmake) if gen mismatches or stop set.
     // stopStreaming simply bumps gen + stopFlag and never joins this worker. Abandoned make threads are reaped on process exit (acceptable; alternative is out-of-proc probe helper).
     st.realInitThread = std::thread([this, index, d, useRate, myGen]() mutable {
-        if (index >= streams.size() || !streams[index]) return;
-        auto& st = *streams[index];
+        auto* stPtr = streamState(index);
+        if (!stPtr) return;
+        auto& st = *stPtr;
         if (st.stopFlag) return;
         if (st.sessionGen.load() != myGen) return;
         SoapySDR::Device* localDev = nullptr;
@@ -551,53 +561,71 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                 return;
             }
 
-            // Success path: stop stub (our code, normally safe to join), start real rx thread.
-            // Keep this bounded anyway: a wedged thread must never block the async upgrade path.
-            st.stopFlag = true;
-            bool stubDetached = false;
-            if (st.rxThread.joinable()) {
-                auto start = std::chrono::steady_clock::now();
-                while (st.rxThreadRunning.load(std::memory_order_acquire) &&
-                       std::chrono::steady_clock::now() - start < std::chrono::milliseconds(500)) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            // Success path: serialize final stub->real handoff with stopStreaming(). The generation
+            // guard prevents stale publication; lifecycleMutex prevents stop from racing the final
+            // stopFlag=false + rxThread assignment.
+            {
+                std::unique_lock<std::mutex> lifecycleLock(st.lifecycleMutex);
+                if (st.stopFlag.load(std::memory_order_acquire) ||
+                    st.sessionGen.load(std::memory_order_acquire) != myGen) {
+                    cleanupLocal();
+                    return;
                 }
-                if (st.rxThreadRunning.load(std::memory_order_acquire)) {
-                    spdlog::warn("Stub rxThread for device {} did not stop during real upgrade; detaching and aborting upgrade.", index);
-                    try { st.rxThread.detach(); } catch (...) {}
-                    stubDetached = true;
-                } else {
-                    try { st.rxThread.join(); } catch (...) { try { st.rxThread.detach(); stubDetached = true; } catch (...) {} }
+
+                st.stopFlag.store(true, std::memory_order_release);
+                bool stubDetached = false;
+                if (st.rxThread.joinable()) {
+                    auto start = std::chrono::steady_clock::now();
+                    while (st.rxThreadRunning.load(std::memory_order_acquire) &&
+                           std::chrono::steady_clock::now() - start < std::chrono::milliseconds(500)) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                    }
+                    if (st.rxThreadRunning.load(std::memory_order_acquire)) {
+                        spdlog::warn("Stub rxThread for device {} did not stop during real upgrade; detaching and aborting upgrade.", index);
+                        try { st.rxThread.detach(); } catch (...) {}
+                        stubDetached = true;
+                    } else {
+                        try { st.rxThread.join(); } catch (...) { try { st.rxThread.detach(); stubDetached = true; } catch (...) {} }
+                    }
                 }
-            }
-            if (stubDetached) {
-                cleanupLocal();
+                if (stubDetached) {
+                    cleanupLocal();
+                    {
+                        std::lock_guard<std::mutex> lk(st.stateMutex);
+                        st.active = false;
+                        st.isReal = false;
+                        st.runtimeState = "driver stuck, restart recommended";
+                    }
+                    return;
+                }
+
+                resetStreamBuffers(st);
+
+                bool staleSession = false;
                 {
                     std::lock_guard<std::mutex> lk(st.stateMutex);
-                    st.active = false;
-                    st.isReal = false;
-                    st.runtimeState = "driver stuck, restart recommended";
+                    if (st.sessionGen.load(std::memory_order_acquire) != myGen) {
+                        staleSession = true;
+                    } else {
+                        st.soapyDev = localDev;
+                        st.rxStream = localStream;
+                        st.stopFlag.store(false, std::memory_order_release);
+                        st.active = true;
+                        st.isReal = true;
+                        st.runtimeState = "live hardware";
+                        st.frequencyCorrectionPpm = usePpm;
+                        st.nativeFrequencyCorrectionActive = nativePpm;
+                        localDev = nullptr;
+                        localStream = nullptr;
+                    }
                 }
-                return;
+                if (staleSession) {
+                    cleanupLocal();
+                    return;
+                }
+
+                st.rxThread = std::thread(&DeviceManager::rxThreadFunc, this, index, myGen);
             }
-            if (st.sessionGen.load(std::memory_order_acquire) != myGen) {
-                cleanupLocal();
-                return;
-            }
-            {
-                std::lock_guard<std::mutex> lk(st.stateMutex);
-                st.soapyDev = localDev;
-                st.rxStream = localStream;
-                st.active = true;
-                st.isReal = true;
-                st.runtimeState = "live hardware";
-                st.frequencyCorrectionPpm = usePpm;
-                st.nativeFrequencyCorrectionActive = nativePpm;
-                localDev = nullptr;
-                localStream = nullptr;
-            }
-            resetStreamBuffers(st);
-            st.stopFlag = false;
-            st.rxThread = std::thread(&DeviceManager::rxThreadFunc, this, index);
             spdlog::info("Background upgrade: Started real Soapy streaming for device {}", index);
 
             // Catch-up: re-apply the current desired RF gain now that the real soapyDev is published and active.
@@ -660,8 +688,10 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
 }
 
 void DeviceManager::stopStreaming(size_t index) {
-    if (index >= streams.size() || !streams[index]) return;
-    auto& st = *streams[index];
+    auto* stPtr = streamState(index);
+    if (!stPtr) return;
+    auto& st = *stPtr;
+    std::unique_lock<std::mutex> lifecycleLock(st.lifecycleMutex);
     bool activeNow = false;
     bool soapyIdle =
 #ifdef HAVE_SOAPYSDR
@@ -752,15 +782,17 @@ void DeviceManager::stopStreaming(size_t index) {
 }
 
 bool DeviceManager::isStreaming(size_t index) const {
-    if (index >= streams.size() || !streams[index]) return false;
-    auto& st = *streams[index];
+    auto* stPtr = streamState(index);
+    if (!stPtr) return false;
+    auto& st = *stPtr;
     std::lock_guard<std::mutex> lk(st.stateMutex);
     return st.active;
 }
 
 size_t DeviceManager::getNextIQBlock(size_t index, std::complex<float>* buffer, size_t maxSamples, int timeoutMs) {
-    if (index >= streams.size() || !streams[index]) return 0;
-    auto& st = *streams[index];
+    auto* stPtr = streamState(index);
+    if (!stPtr) return 0;
+    auto& st = *stPtr;
     {
         std::lock_guard<std::mutex> stateLock(st.stateMutex);
         if (!st.active) return 0;
@@ -798,8 +830,9 @@ size_t DeviceManager::getNextIQBlock(size_t index, std::complex<float>* buffer, 
 }
 
 bool DeviceManager::getLatestSpectrum(size_t index, std::vector<float>& powerDb, double& centerFreq, double& sampleRate) {
-    if (index >= streams.size() || !streams[index]) return false;
-    auto& st = *streams[index];
+    auto* stPtr = streamState(index);
+    if (!stPtr) return false;
+    auto& st = *stPtr;
     {
         std::lock_guard<std::mutex> stateLock(st.stateMutex);
         if (!st.active) return false;
@@ -815,14 +848,16 @@ bool DeviceManager::getLatestSpectrum(size_t index, std::vector<float>& powerDb,
 
 void DeviceManager::setSpectrumFftBins(size_t index, size_t bins) {
     const size_t fftBins = normalizeSpectrumFftBins(bins);
+    StreamState* stPtr = nullptr;
     {
         std::lock_guard<std::mutex> lk(devicesMutex);
         if (index >= devices.size()) return;
         if (streams.size() <= index) streams.resize(index + 1);
         if (!streams[index]) streams[index] = std::make_unique<StreamState>();
+        stPtr = streams[index].get();
     }
 
-    auto& st = *streams[index];
+    auto& st = *stPtr;
     {
         std::lock_guard<std::mutex> lk(st.queueMutex);
         if (st.spectrumBins == fftBins) return;
@@ -835,8 +870,9 @@ void DeviceManager::setSpectrumFftBins(size_t index, size_t bins) {
 }
 
 size_t DeviceManager::getSpectrumFftBins(size_t index) const {
-    if (index >= streams.size() || !streams[index]) return 8192;
-    auto& st = *streams[index];
+    auto* stPtr = streamState(index);
+    if (!stPtr) return 8192;
+    auto& st = *stPtr;
     std::lock_guard<std::mutex> lk(st.queueMutex);
     return st.spectrumBins;
 }
@@ -867,8 +903,8 @@ void DeviceManager::setLiveGain(size_t index, double gainDb) {
     // This makes GUI RF gain changes (main window spin and per-device dialog) take effect immediately on a running device.
     // The background real-init path still does its own initial setGain from the DeviceInfo snapshot at launch time.
     bool appliedLive = false;
-    if (index < streams.size() && streams[index]) {
-        auto& st = *streams[index];
+    if (auto* stPtr = streamState(index)) {
+        auto& st = *stPtr;
         std::lock_guard<std::mutex> stateLock(st.stateMutex);
         if (st.soapyDev && !st.stopFlag) {
             try {
@@ -900,8 +936,9 @@ void DeviceManager::setFrequencyCorrection(size_t index, double ppm) {
         saveSettings();
     }
 
-    if (index >= streams.size() || !streams[index]) return;
-    auto& st = *streams[index];
+    auto* stPtr = streamState(index);
+    if (!stPtr) return;
+    auto& st = *stPtr;
 
     double logicalCenter = 0.0;
     {
@@ -955,15 +992,17 @@ void DeviceManager::setFrequencyCorrection(size_t index, double ppm) {
 
 size_t DeviceManager::getIQQueueDepth(size_t index) const {
     // Safe under stream's queueMutex (P2 audit: was unlocked .size() read in rx path too)
-    if (index >= streams.size() || !streams[index]) return 0;
-    auto& st = *streams[index];
+    auto* stPtr = streamState(index);
+    if (!stPtr) return 0;
+    auto& st = *stPtr;
     std::lock_guard<std::mutex> lk(st.queueMutex);
     return st.iqQueue.size();
 }
 
 std::string DeviceManager::getRuntimeStateLabel(size_t index) const {
-    if (index >= streams.size() || !streams[index]) return "stopped";
-    auto& st = *streams[index];
+    auto* stPtr = streamState(index);
+    if (!stPtr) return "stopped";
+    auto& st = *stPtr;
     std::lock_guard<std::mutex> lk(st.stateMutex);
     return st.runtimeState.empty() ? std::string("stopped") : st.runtimeState;
 }
@@ -971,44 +1010,55 @@ std::string DeviceManager::getRuntimeStateLabel(size_t index) const {
 // S0-3 (P1): non-consuming recent window so N receivers on the same device each get a coherent
 // recent RF capture for their private channelizer/demod. Read from the absolute-sample ring
 // instead of the consuming iqQueue so monitor/CLI P25 sync cannot starve or disturb spectrum.
-std::vector<std::complex<float>> DeviceManager::getRecentIQWindow(size_t index, size_t maxSamples) {
-    if (index >= streams.size() || !streams[index] || maxSamples == 0) return {};
-    auto& st = *streams[index];
+DeviceManager::RecentIQWindow DeviceManager::getRecentIQWindowWithCursor(size_t index, size_t maxSamples) {
+    RecentIQWindow outWindow;
+    if (maxSamples == 0) return outWindow;
+    auto* stPtr = streamState(index);
+    if (!stPtr) return outWindow;
+    auto& st = *stPtr;
     {
         std::lock_guard<std::mutex> stateLock(st.stateMutex);
-        if (!st.active) return {};
+        if (!st.active) return outWindow;
     }
 
     std::lock_guard<std::mutex> ringLock(st.ringMutex);
     const size_t cap = st.ringCapacity;
     const uint64_t total = st.totalSamplesWritten.load(std::memory_order_acquire);
-    if (cap == 0 || st.iqRing.empty() || total == 0) return {};
+    if (cap == 0 || st.iqRing.empty() || total == 0) return outWindow;
 
     const uint64_t available = std::min<uint64_t>(total, static_cast<uint64_t>(cap));
     const size_t toRead = static_cast<size_t>(std::min<uint64_t>(available, static_cast<uint64_t>(maxSamples)));
-    std::vector<std::complex<float>> out;
-    out.reserve(toRead);
+    outWindow.samples.reserve(toRead);
 
     // Return the newest contiguous ring window in chronological order.
     const uint64_t start = total - static_cast<uint64_t>(toRead);
+    outWindow.startAbsolute = start;
+    outWindow.endAbsolute = total;
     const bool powerOfTwoCap = (cap & (cap - 1)) == 0;
     for (size_t k = 0; k < toRead; ++k) {
         const uint64_t absolute = start + static_cast<uint64_t>(k);
         const size_t idx = powerOfTwoCap
             ? static_cast<size_t>(absolute) & (cap - 1)
             : static_cast<size_t>(absolute % static_cast<uint64_t>(cap));
-        out.push_back(st.iqRing[idx]);
+        outWindow.samples.push_back(st.iqRing[idx]);
     }
-    return out;
+    return outWindow;
 
+}
+
+std::vector<std::complex<float>> DeviceManager::getRecentIQWindow(size_t index, size_t maxSamples) {
+    return getRecentIQWindowWithCursor(index, maxSamples).samples;
 }
 
 // S0 / audit-followup-2: cursor based new-samples only, chronological, per-rx.
 // Replaces the "always take newest overlapping window" anti-pattern that caused repeated demod of the same data / chop.
-std::vector<std::complex<float>> DeviceManager::getNewSamplesForReceiver(size_t devIndex, Receiver& rx, size_t maxSamples) {
-    if (devIndex >= streams.size() || !streams[devIndex] || maxSamples == 0) return {};
-    auto& st = *streams[devIndex];
-    if (st.ringCapacity == 0) return {};
+DeviceManager::RecentIQWindow DeviceManager::getNewIQWindowForReceiver(size_t devIndex, Receiver& rx, size_t maxSamples) {
+    RecentIQWindow outWindow;
+    if (maxSamples == 0) return outWindow;
+    auto* stPtr = streamState(devIndex);
+    if (!stPtr) return outWindow;
+    auto& st = *stPtr;
+    if (st.ringCapacity == 0) return outWindow;
 
     std::lock_guard<std::mutex> ringLock(st.ringMutex);
     uint64_t myLast = rx.lastConsumedAbsolute;
@@ -1029,7 +1079,7 @@ std::vector<std::complex<float>> DeviceManager::getNewSamplesForReceiver(size_t 
         available = total - myLast;
     }
 
-    if (available == 0) return {};
+    if (available == 0) return outWindow;
 
     // If we are way behind the ring (data was overwritten), skip forward.
     // Log once per big drop and advance cursor. Return a short zero block so demod can ramp/squelch naturally (fade).
@@ -1039,42 +1089,57 @@ std::vector<std::complex<float>> DeviceManager::getNewSamplesForReceiver(size_t 
         myLast = total - (st.ringCapacity / 2);
         rx.lastConsumedAbsolute = myLast;
         available = (total > myLast) ? (total - myLast) : 0;
-        if (available == 0) return {};
+        if (available == 0) return outWindow;
         // Return a small zeroed block to give the downstream (squelch, resample, audio) a chance to fade cleanly
         size_t fadeLen = std::min((size_t)256, maxSamples);
-        return std::vector<std::complex<float>>(fadeLen, std::complex<float>(0,0));
+        outWindow.samples.assign(fadeLen, std::complex<float>(0,0));
+        outWindow.startAbsolute = myLast;
+        outWindow.endAbsolute = myLast + static_cast<uint64_t>(fadeLen);
+        rx.lastConsumedAbsolute = outWindow.endAbsolute;
+        return outWindow;
     }
 
     size_t toRead = (size_t)std::min((uint64_t)maxSamples, available);
 
-    std::vector<std::complex<float>> out;
-    out.reserve(toRead);
+    outWindow.samples.reserve(toRead);
+    outWindow.startAbsolute = myLast;
+    outWindow.endAbsolute = myLast + static_cast<uint64_t>(toRead);
 
     size_t cap = st.ringCapacity;
     size_t startWrapped = (size_t)(myLast % cap);
+    const bool powerOfTwoCap = (cap & (cap - 1)) == 0;
 
     for (size_t k = 0; k < toRead; ++k) {
-        size_t pos = (startWrapped + k) & (cap - 1);
-        out.push_back(st.iqRing[pos]);
+        size_t pos = powerOfTwoCap
+            ? ((startWrapped + k) & (cap - 1))
+            : ((startWrapped + k) % cap);
+        outWindow.samples.push_back(st.iqRing[pos]);
     }
 
     rx.lastConsumedAbsolute += toRead;
-    return out;
+    return outWindow;
+}
+
+std::vector<std::complex<float>> DeviceManager::getNewSamplesForReceiver(size_t devIndex, Receiver& rx, size_t maxSamples) {
+    return getNewIQWindowForReceiver(devIndex, rx, maxSamples).samples;
 }
 
 void DeviceManager::setReceiverCursorToLiveEdge(size_t devIndex, Receiver& rx) {
-    if (devIndex >= streams.size() || !streams[devIndex]) {
+    auto* stPtr = streamState(devIndex);
+    if (!stPtr) {
         rx.lastConsumedAbsolute = 0;
         return;
     }
-    auto& st = *streams[devIndex];
+    auto& st = *stPtr;
     std::lock_guard<std::mutex> ringLock(st.ringMutex);
     rx.lastConsumedAbsolute = st.totalSamplesWritten.load(std::memory_order_acquire);
 }
 
 void DeviceManager::appendIQBlock(size_t index, std::vector<std::complex<float>>&& block) {
-    if (index >= streams.size() || !streams[index] || block.empty()) return;
-    auto& st = *streams[index];
+    if (block.empty()) return;
+    auto* stPtr = streamState(index);
+    if (!stPtr) return;
+    auto& st = *stPtr;
 
     // Feed the per-rx ring *first* while we still own the data (before any move into queue).
     if (st.ringCapacity > 0) {
@@ -1165,8 +1230,9 @@ void DeviceManager::setupSoapyForRTLSDR() {
 }
 
 void DeviceManager::setCenterFreq(size_t index, double freqHz) {
-    if (index >= streams.size() || !streams[index]) return;
-    auto& st = *streams[index];
+    auto* stPtr = streamState(index);
+    if (!stPtr) return;
+    auto& st = *stPtr;
     double ppm = 0.0;
     bool nativePpm = false;
 #ifdef HAVE_SOAPYSDR
@@ -1262,15 +1328,16 @@ std::vector<float> DeviceManager::computeRealFFTPower(const std::vector<std::com
     return power;
 }
 
-void DeviceManager::rxThreadFunc(size_t index) {
-    if (index >= streams.size() || !streams[index]) return;
-    auto& st = *streams[index];
+void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
+    auto* stPtr = streamState(index);
+    if (!stPtr) return;
+    auto& st = *stPtr;
     st.rxThreadRunning.store(true, std::memory_order_release);
     struct RunningGuard {
         StreamState& st;
         ~RunningGuard() { st.rxThreadRunning.store(false, std::memory_order_release); }
     } runningGuard{st};
-    const uint64_t myGen = st.sessionGen.load(std::memory_order_acquire);
+    const uint64_t myGen = expectedGeneration;
     const size_t blockSize = 32768; // much larger blocks to sustain 2MS/s+ without overflow. 2048 was only ~1ms of RF at 2.048MS/s.
 
 #ifdef HAVE_SOAPYSDR

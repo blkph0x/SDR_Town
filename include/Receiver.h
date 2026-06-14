@@ -11,6 +11,26 @@
 // Goal: each SDR/monitor path gets its own demod, audio targets, recorder stub, etc.
 // This eliminates global monitor* state and enables true multi-device independence.
 
+struct P25VoiceDiagSnapshot {
+    int diag = 0;
+    uint32_t talkgroupId = 0;
+    long long syncs = 0;
+    long long nids = 0;
+    long long imbeFrames = 0;
+    long long decodedFrames = 0;
+    long long audioSamples = 0;
+    long long phase2Bursts = 0;
+    long long phase2VoiceCodewords = 0;
+    long long phase2SuperframeBursts = 0;
+    long long phase2MaskedBursts = 0;
+    long long phase2MacPdus = 0;
+    long long phase2MacCrcValid = 0;
+    bool phase2EssKnown = false;
+    bool phase2EssEncrypted = false;
+    bool backendAvailable = false;
+    bool nidLock = false;
+};
+
 struct Receiver {
     mutable std::mutex stateMutex;
 
@@ -50,6 +70,8 @@ struct Receiver {
     int64_t p25VoiceSettleUntilMs = 0;
     int p25VoiceDiscardWindows = 0;
     bool p25ControlChannelMute = false;
+    uint64_t p25Phase2LastEmittedAbsDibit = 0;
+    P25VoiceDiagSnapshot p25VoiceDiagnostics;
     P25LiveDecoder p25VoiceLiveDecoder;
     P25ImbeVoiceDecoder p25ImbeVoiceDecoder;
     P25AmbeVoiceDecoder p25AmbeVoiceDecoder;
@@ -60,8 +82,8 @@ struct Receiver {
     bool afcLocked = false;
     double afcOffsetHz = 0.0;
 
-    // Future: per-receiver audio routing
-    // std::vector<size_t> audioOutputIndices;  // which ActiveOutputs this receiver feeds
+    // Per-receiver audio routing. Empty means mirror to all active outputs.
+    std::vector<size_t> audioOutputIndices;  // active AudioEngine output indices
 
     // Stubs for future features (recording, waterfall data, scheduler)
     bool recordingAudio = false;
@@ -83,6 +105,7 @@ struct Receiver {
         p25VoiceLiveDecoder.reset();
         p25ImbeVoiceDecoder = P25ImbeVoiceDecoder();
         p25AmbeVoiceDecoder = P25AmbeVoiceDecoder();
+        p25Phase2LastEmittedAbsDibit = 0;
     }
 
     // Force immediate squelch gate close (bypass hang) when user raises threshold via main controls or CLI.

@@ -82,6 +82,7 @@ TEST_CASE("P25 control analyzer extracts talkgroups from group voice grants")
     REQUIRE(ev.encryptionKnown);
     REQUIRE_FALSE(ev.encrypted);
     REQUIRE(ev.voiceProtocol == P25VoiceProtocol::Phase1FDMA);
+    REQUIRE(p25ControlEventIsVoiceGrant(ev));
     REQUIRE_FALSE(ev.phase2Candidate);
     REQUIRE_FALSE(ev.tdmaSlotKnown);
     REQUIRE(ev.voiceFrequencyHz == Catch::Approx(450125000.0).margin(1.0));
@@ -103,6 +104,7 @@ TEST_CASE("P25 control analyzer does not treat Motorola regroup add as voice gra
     REQUIRE(ev.voiceFrequencyHz == Catch::Approx(0.0));
     REQUIRE(ev.voiceProtocol == P25VoiceProtocol::Unknown);
     REQUIRE_FALSE(ev.tdmaSlotKnown);
+    REQUIRE_FALSE(p25ControlEventIsVoiceGrant(ev));
 }
 
 TEST_CASE("P25 control analyzer maps TDMA identifiers to slot-aware channel frequencies")
@@ -110,7 +112,7 @@ TEST_CASE("P25 control analyzer maps TDMA identifiers to slot-aware channel freq
     P25ControlChannelAnalyzer analyzer;
     auto iden = makeTsbk(0x33);
 
-    const uint8_t id = 4;
+    const uint8_t id = 11;
     const uint8_t channelType = 3; // common two-slot Phase 2 traffic profile
     const uint32_t baseUnits = static_cast<uint32_t>(450000000.0 / 5.0);
     const uint32_t spacingUnits = static_cast<uint32_t>(12500.0 / 125.0);
@@ -130,18 +132,22 @@ TEST_CASE("P25 control analyzer maps TDMA identifiers to slot-aware channel freq
     REQUIRE(ev.channelType == channelType);
     REQUIRE(ev.slotsPerCarrier == 2);
     REQUIRE(ev.phase2Candidate);
+    REQUIRE_FALSE(p25ControlEventIsVoiceGrant(ev));
     REQUIRE(ev.baseFrequencyHz == Catch::Approx(450000000.0).margin(1.0));
     REQUIRE(ev.channelSpacingHz == Catch::Approx(12500.0).margin(1.0));
 
-    auto slot0Freq = analyzer.channelToFrequencyHz(static_cast<uint16_t>((id << 12) | 0));
-    auto slot1Freq = analyzer.channelToFrequencyHz(static_cast<uint16_t>((id << 12) | 1));
-    auto nextSlot0Freq = analyzer.channelToFrequencyHz(static_cast<uint16_t>((id << 12) | 2));
+    auto slot0Freq = analyzer.channelToFrequencyHz(0xB000);
+    auto slot1Freq = analyzer.channelToFrequencyHz(0xB001);
+    auto nextSlot0Freq = analyzer.channelToFrequencyHz(0xB002);
+    auto nextSlot1Freq = analyzer.channelToFrequencyHz(0xB003);
     REQUIRE(slot0Freq.has_value());
     REQUIRE(slot1Freq.has_value());
     REQUIRE(nextSlot0Freq.has_value());
+    REQUIRE(nextSlot1Freq.has_value());
     REQUIRE(*slot0Freq == Catch::Approx(450000000.0).margin(1.0));
     REQUIRE(*slot1Freq == Catch::Approx(450000000.0).margin(1.0));
     REQUIRE(*nextSlot0Freq == Catch::Approx(450012500.0).margin(1.0));
+    REQUIRE(*nextSlot1Freq == Catch::Approx(450012500.0).margin(1.0));
 }
 
 TEST_CASE("P25 control analyzer marks TDMA voice grants with protocol and slot")
@@ -174,6 +180,7 @@ TEST_CASE("P25 control analyzer marks TDMA voice grants with protocol and slot")
     REQUIRE(ev.channelSpacingHz == Catch::Approx(12500.0).margin(1.0));
     REQUIRE(ev.voiceProtocol == P25VoiceProtocol::Phase2TDMA);
     REQUIRE(ev.phase2Candidate);
+    REQUIRE(p25ControlEventIsVoiceGrant(ev));
     REQUIRE(ev.tdmaSlotKnown);
     REQUIRE(ev.tdmaSlot == 1);
     REQUIRE(ev.voiceFrequencyHz == Catch::Approx(450012500.0).margin(1.0));
@@ -224,6 +231,7 @@ TEST_CASE("P25 control analyzer parses Motorola regroup channel grant as slot-aw
     REQUIRE(ev.sourceId == 0x102030);
     REQUIRE(ev.channel == 0x637d);
     REQUIRE(ev.voiceProtocol == P25VoiceProtocol::Phase2TDMA);
+    REQUIRE(p25ControlEventIsVoiceGrant(ev));
     REQUIRE(ev.tdmaSlotKnown);
     REQUIRE(ev.tdmaSlot == 1);
     REQUIRE(ev.voiceFrequencyHz == Catch::Approx(418050000.0).margin(1.0));

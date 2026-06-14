@@ -1630,6 +1630,8 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
     burst.superframeSyncScore = superframeSyncScore;
     burst.superframeSyncErrors = superframeSyncErrors;
     burst.phase2AudioLock = superframeLocked && superframeSyncScore >= 4;
+    burst.tdmaSyncLock = syncErrors >= 0 && syncErrors <= 2;
+    burst.superframeLock = burst.phase2AudioLock;
     burst.superframeBurstIndexKnown = superframeLocked;
     burst.superframeBurstIndex = static_cast<uint8_t>(superframeBurstIndex & 0x0fu);
     burst.grantSlotKnown = superframeLocked;
@@ -1658,7 +1660,10 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
     for (size_t i = 0; i < payloadDibits.size(); ++i) {
         int d = dibits[payload + i] & 0x03;
         burst.rawPayloadDibits.push_back(d & 0x03);
-        if (canApplyMask) d ^= ((*xorMask)[maskBurstIndex * P25LiveDecoder::Phase2BurstDibits + i] & 0x03);
+        if (canApplyMask) {
+            const size_t maskIndex = maskBurstIndex * P25LiveDecoder::Phase2BurstDibits + 10u + i;
+            d ^= ((*xorMask)[maskIndex] & 0x03);
+        }
         payloadDibits[i] = d & 0x03;
         burst.maskedPayloadDibits.push_back(payloadDibits[i]);
     }
@@ -1666,11 +1671,13 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
     burst.xorMaskPhaseKnown = canApplyMask;
     burst.xorMaskPhase = static_cast<uint8_t>(xorMaskPhase % 12u);
     burst.xorMaskPhaseScore = canApplyMask ? xorMaskPhaseScore : 0;
+    burst.maskPhaseLock = canApplyMask && xorMaskPhaseScore > 0;
 
     if (burst.xorMaskApplied) {
         if (auto pdu = decodePhase2Acch(payloadDibits, burst.kind, payload)) {
             burst.macFecDecoded = pdu->fecDecoded;
             burst.macCrcValid = pdu->crcValid;
+            burst.macCrcLock = burst.macCrcValid;
             if (burst.macCrcValid) burst.phase2AudioLock = true;
             if (pdu->crcValid && session) {
                 if (pdu->opcode == 1) {
@@ -1722,6 +1729,11 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
         burst.essKnown = session->ess.known;
         burst.encrypted = session->ess.encrypted;
     }
+    burst.audioRelease = burst.phase2AudioLock &&
+        burst.xorMaskApplied &&
+        burst.macCrcLock &&
+        burst.essKnown &&
+        !burst.encrypted;
 
     return burst;
 }
@@ -2632,7 +2644,14 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailed(const std:
                                              mask, selectedMaskPhase, selectedMaskScore,
                                              &session, &out.macPdus);
             if (burst.valid) {
-                if (burst.xorMaskApplied && selectedMacCrc > 0) burst.phase2AudioLock = true;
+                if (burst.xorMaskApplied && selectedMacCrc > 0) {
+                    burst.phase2AudioLock = true;
+                    burst.macCrcLock = true;
+                    burst.audioRelease = burst.phase2AudioLock &&
+                        burst.xorMaskApplied &&
+                        burst.essKnown &&
+                        !burst.encrypted;
+                }
                 out.bursts.push_back(std::move(burst));
             }
         }

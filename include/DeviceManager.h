@@ -86,11 +86,18 @@ public:
     // Returns up to maxSamples of the most recent IQ (from the live end of the per-dev queue)
     // without advancing any read offset. Short lock only.
     std::vector<std::complex<float>> getRecentIQWindow(size_t index, size_t maxSamples);
+    struct RecentIQWindow {
+        std::vector<std::complex<float>> samples;
+        uint64_t startAbsolute = 0;
+        uint64_t endAbsolute = 0;
+    };
+    RecentIQWindow getRecentIQWindowWithCursor(size_t index, size_t maxSamples);
 
     // S0 / audit-followup-2 (P0): proper cursor-based consumption.
     // The receiver's lastConsumedAbsolute is updated. Returns only *new* samples in chronological order.
     // If the rx is too far behind the write cursor, log a drop, advance the cursor, and return a short zeroed/faded block.
     std::vector<std::complex<float>> getNewSamplesForReceiver(size_t devIndex, Receiver& rx, size_t maxSamples);
+    RecentIQWindow getNewIQWindowForReceiver(size_t devIndex, Receiver& rx, size_t maxSamples);
     void setReceiverCursorToLiveEdge(size_t devIndex, Receiver& rx);
 
     // For spectrum: get latest power spectrum (dB) and center/sample info
@@ -136,6 +143,7 @@ private:
         std::string runtimeState = "stopped";
         std::thread rxThread;
         std::atomic<bool> rxThreadRunning{false};
+        std::mutex lifecycleMutex;      // serializes start/stop and async real-hardware handoff
         // CRITICAL (P0 audit shutdown hang + best practice for untrusted SDR drivers):
         // realInitThread is intentionally a plain std::thread, not jthread.
         // SoapySDR::Device::make() (and the native USB stack) can block indefinitely.
@@ -182,7 +190,8 @@ private:
     };
     std::vector<std::unique_ptr<StreamState>> streams;
 
-    void rxThreadFunc(size_t index);  // background RX loop
+    StreamState* streamState(size_t index) const;
+    void rxThreadFunc(size_t index, uint64_t expectedGeneration);  // background RX loop
     void resetStreamBuffers(StreamState& st);
 
     // Centralized append for both the consuming deque (for getNext/spectrum) and the per-rx ring.

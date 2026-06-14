@@ -6,6 +6,7 @@
 #include <memory>
 #include <atomic>
 #include <mutex>
+#include <stdexcept>
 
 #include "miniaudio.h"
 
@@ -38,6 +39,7 @@ public:
     // Push a block of mono float samples (will be duplicated + gained to all active devices)
     // Call from your demod/resample thread at ~10-50ms blocks for low latency.
     void pushAudio(const float* samples, size_t count);
+    void pushAudioToOutputs(const float* samples, size_t count, const std::vector<size_t>& activeOutputIndices);
     void clearBuffers();
 
     // Test tone on a specific active output (or all)
@@ -67,9 +69,12 @@ public:
     // Diagnostics counters (incremented from RT callback; read lock-free from stats)
     std::atomic<int> underrunCount{0};
 
+    struct ActiveOutput;
+
 private:
     void startDevice(size_t enumIndex);
     void stopDevice(size_t enumIndex);
+    void pushAudioToActiveOutputLocked(ActiveOutput& output, const float* samples, size_t count);
 
     ma_context m_context;
     bool m_contextValid = false;
@@ -105,6 +110,9 @@ public:
         }
 
         void init(size_t cap) {
+            if (cap == 0 || (cap & (cap - 1)) != 0) {
+                throw std::invalid_argument("AudioEngine RingBuffer capacity must be a power of two");
+            }
             capacity = 1;
             while (capacity < cap) capacity <<= 1;
             data.assign(capacity, 0.0f);

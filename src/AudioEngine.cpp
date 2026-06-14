@@ -8,6 +8,10 @@
 #include <thread>
 #include <chrono>
 
+namespace {
+constexpr size_t kOutputRingFrames = 1u << 18; // storage capacity; queued depth is capped to about 250 ms.
+}
+
 static void data_callback(ma_device* pDevice, void* pOutput, const void* /*pInput*/, ma_uint32 frameCount)
 {
     // P1: direct pointer from this device's pUserData (set at startDevice time) avoids any m_active walk or find from RT thread.
@@ -215,7 +219,7 @@ void AudioEngine::startDevice(size_t enumIndex)
     // (no m_active iteration or findActiveOutput from the realtime thread). The engine is reachable via owningEngine.
     actPtr->device.get()->pUserData = actPtr.get();
 
-    actPtr->ring.init(48000 * 4); // ~4 seconds of audio, power-of-2
+    actPtr->ring.init(kOutputRingFrames);
     actPtr->valid.store(true, std::memory_order_release);
 
     m_active.push_back(actPtr);
@@ -283,36 +287,59 @@ void AudioEngine::clearBuffers()
     }
 }
 
+void AudioEngine::pushAudioToActiveOutputLocked(ActiveOutput& output, const float* samples, size_t count)
+{
+    if (!output.valid.load(std::memory_order_acquire)) return;
+    auto& rb = output.ring;
+    if (rb.capacity == 0) return;
+
+    const size_t maxQueuedFrames = std::max<size_t>(256, (size_t)(getSampleRate() * 0.25f));
+    size_t w = rb.writePos.load(std::memory_order_relaxed);
+    size_t r = rb.readPos.load(std::memory_order_acquire);
+    size_t queued = (w - r) & (rb.capacity - 1);
+    if (queued + count > maxQueuedFrames) {
+        const size_t keep = (maxQueuedFrames > count) ? (maxQueuedFrames - count) : 0;
+        const size_t newRead = (w + rb.capacity - keep) & (rb.capacity - 1);
+        rb.readPos.store(newRead, std::memory_order_release);
+    }
+
+    for (size_t i = 0; i < count; ++i) {
+        size_t next = (w + 1) & (rb.capacity - 1);
+        if (next == rb.readPos.load(std::memory_order_acquire)) {
+            rb.readPos.store((rb.readPos.load(std::memory_order_relaxed) + 1) & (rb.capacity - 1), std::memory_order_relaxed);
+        }
+        rb.data[w] = samples[i];
+        w = next;
+    }
+    rb.writePos.store(w, std::memory_order_release);
+}
+
 void AudioEngine::pushAudio(const float* samples, size_t count)
 {
     if (!samples || count == 0) return;
     std::lock_guard<std::mutex> lk(audioMutex);
 
     for (auto& actPtr : m_active) {
-        if (!actPtr || !actPtr->valid.load(std::memory_order_acquire)) continue;
-        auto& rb = actPtr->ring;
-        if (rb.capacity == 0) continue;
+        if (actPtr) pushAudioToActiveOutputLocked(*actPtr, samples, count);
+    }
+}
 
-        const size_t maxQueuedFrames = std::max<size_t>(256, (size_t)(getSampleRate() * 0.25f));
-        size_t w = rb.writePos.load(std::memory_order_relaxed);
-        size_t r = rb.readPos.load(std::memory_order_acquire);
-        size_t queued = (w - r) & (rb.capacity - 1);
-        if (queued + count > maxQueuedFrames) {
-            const size_t keep = (maxQueuedFrames > count) ? (maxQueuedFrames - count) : 0;
-            const size_t newRead = (w + rb.capacity - keep) & (rb.capacity - 1);
-            rb.readPos.store(newRead, std::memory_order_release);
-        }
+void AudioEngine::pushAudioToOutputs(const float* samples, size_t count, const std::vector<size_t>& activeOutputIndices)
+{
+    if (!samples || count == 0) return;
+    if (activeOutputIndices.empty()) {
+        pushAudio(samples, count);
+        return;
+    }
 
-        for (size_t i = 0; i < count; ++i) {
-            size_t next = (w + 1) & (rb.capacity - 1);
-            if (next == rb.readPos.load(std::memory_order_acquire)) {
-                // ring full - advance read to drop oldest
-                rb.readPos.store((rb.readPos.load(std::memory_order_relaxed) + 1) & (rb.capacity - 1), std::memory_order_relaxed);
-            }
-            rb.data[w] = samples[i];
-            w = next;
-        }
-        rb.writePos.store(w, std::memory_order_release);
+    std::lock_guard<std::mutex> lk(audioMutex);
+    std::vector<size_t> pushed;
+    pushed.reserve(activeOutputIndices.size());
+    for (size_t activeIndex : activeOutputIndices) {
+        if (activeIndex >= m_active.size() || !m_active[activeIndex]) continue;
+        if (std::find(pushed.begin(), pushed.end(), activeIndex) != pushed.end()) continue;
+        pushAudioToActiveOutputLocked(*m_active[activeIndex], samples, count);
+        pushed.push_back(activeIndex);
     }
 }
 

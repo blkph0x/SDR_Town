@@ -1,8 +1,19 @@
 #include <catch2/catch_test_macros.hpp>
 #include "AudioEngine.h"
+#include <stdexcept>
 #include <thread>
 #include <chrono>
 #include <vector>
+
+TEST_CASE("AudioEngine ring buffer requires power-of-two capacity", "[audioengine]") {
+    AudioEngine::RingBuffer rb;
+    rb.init(1u << 18);
+    REQUIRE(rb.capacity == (1u << 18));
+    REQUIRE_FALSE(rb.data.empty());
+
+    AudioEngine::RingBuffer bad;
+    REQUIRE_THROWS_AS(bad.init(48000 * 4), std::invalid_argument);
+}
 
 TEST_CASE("AudioEngine multi-device and push", "[audioengine]") {
     AudioEngine* eng = nullptr;

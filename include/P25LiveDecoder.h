@@ -187,6 +187,11 @@ struct P25Phase2Burst {
     int superframeSyncScore = 0;
     int superframeSyncErrors = 0;
     bool phase2AudioLock = false;
+    bool tdmaSyncLock = false;
+    bool superframeLock = false;
+    bool maskPhaseLock = false;
+    bool macCrcLock = false;
+    bool audioRelease = false;
     bool superframeBurstIndexKnown = false;
     uint8_t superframeBurstIndex = 0;
     bool grantSlotKnown = false;
