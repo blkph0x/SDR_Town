@@ -161,11 +161,15 @@ private:
         std::deque<std::vector<std::complex<float>>> iqQueue;  // deque to support partial block consumption without dropping samples (P0 fix)
         size_t frontBlockReadOffset = 0;  // for consuming partials from front block without copying remainders under lock (P1)
         std::vector<float> latestPower;
+        // Logical center requested by UI/scanner/P25 follow. Live hardware retunes are
+        // queued via the sequence counters below and applied by rxThread between reads.
         double currentCenter = 0;
         double currentRate = 0;
         double frequencyCorrectionPpm = 0.0;
         bool nativeFrequencyCorrectionActive = false;
         std::atomic<bool> stopFlag{false};
+        std::atomic<uint64_t> centerTuneRequestSeq{0};
+        std::atomic<uint64_t> centerTuneAppliedSeq{0};
 
         // P1 audit: session generation to make init thread publishing and stop teardown safe.
         // Init thread captures the gen at launch; only publishes (soapyDev, active, rxThread, isReal)

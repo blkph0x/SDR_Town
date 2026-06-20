@@ -177,7 +177,7 @@ std::vector<int> makeSyntheticMaskedPhase2Superframe(uint16_t nac, uint32_t wacn
         for (size_t i = 0; i < 170; ++i) {
             if (i < 10) continue; // The local burst model overlaps these dibits with the sync pattern.
             if (std::find(duidDibits.begin(), duidDibits.end(), i) != duidDibits.end()) continue;
-            dibits[base + 10 + i] ^= mask[slot * P25LiveDecoder::Phase2BurstDibits + 10 + i] & 0x03;
+            dibits[base + 10 + i] ^= mask[slot * P25LiveDecoder::Phase2BurstDibits + i] & 0x03;
         }
     }
     return dibits;
@@ -233,6 +233,20 @@ uint16_t p25Phase2Crc12ForTest(const std::vector<uint8_t>& bits, size_t len)
     return static_cast<uint16_t>((rem ^ 0x0fffu) & 0x0fffu);
 }
 
+uint16_t p25Phase2Crc16ForTest(const std::vector<uint8_t>& bits, size_t len)
+{
+    static constexpr std::array<uint8_t, 17> poly{1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    std::vector<uint8_t> work(len + 16, 0);
+    for (size_t i = 0; i < len && i < bits.size(); ++i) work[i] = bits[i] ? 1u : 0u;
+    for (size_t pos = 0; pos < len; ++pos) {
+        if (!work[pos]) continue;
+        for (size_t j = 0; j < poly.size(); ++j) work[pos + j] ^= poly[j];
+    }
+    uint16_t rem = 0;
+    for (size_t i = 0; i < 16; ++i) rem = static_cast<uint16_t>((rem << 1) | (work[len + i] & 1u));
+    return static_cast<uint16_t>((rem ^ 0xffffu) & 0xffffu);
+}
+
 std::vector<uint8_t> bytesToBitsMsbForTest(const std::vector<uint8_t>& bytes, size_t bitCount)
 {
     std::vector<uint8_t> bits;
@@ -259,14 +273,8 @@ void writeDibitsFromBitsForTest(std::vector<int>& payload, size_t start, size_t 
     }
 }
 
-std::vector<int> makeSyntheticPhase2SacchPayloadForTest()
+std::vector<int> makeSyntheticPhase2SlowAcchPayloadForTest(uint8_t duid, const std::vector<uint8_t>& bits)
 {
-    std::vector<uint8_t> dataBytes(21, 0);
-    dataBytes[0] = 0x20;  // MAC opcode 1, offset 0.
-    dataBytes[10] = 0x80; // algId 0x80 means clear.
-    auto bits = bytesToBitsMsbForTest(dataBytes, 168);
-    const uint16_t crc = p25Phase2Crc12ForTest(bits, bits.size());
-    for (int bit = 11; bit >= 0; --bit) bits.push_back(static_cast<uint8_t>((crc >> bit) & 1u));
     REQUIRE(bits.size() == 180);
 
     std::array<uint8_t, 63> symbols{};
@@ -289,7 +297,7 @@ std::vector<int> makeSyntheticPhase2SacchPayloadForTest()
     REQUIRE(codedBits.size() == 312);
 
     std::vector<int> payload(170, 0);
-    const uint8_t raw = encodePhase2DuidForTest(0x3);
+    const uint8_t raw = encodePhase2DuidForTest(duid);
     payload[10] = (raw >> 6) & 0x03;
     payload[47] = (raw >> 4) & 0x03;
     payload[132] = (raw >> 2) & 0x03;
@@ -303,10 +311,45 @@ std::vector<int> makeSyntheticPhase2SacchPayloadForTest()
     return payload;
 }
 
+std::vector<int> makeSyntheticPhase2SacchPayloadForTest()
+{
+    std::vector<uint8_t> dataBytes(21, 0);
+    dataBytes[0] = 0x20;  // MAC opcode 1, offset 0.
+    dataBytes[10] = 0x80; // algId 0x80 means clear.
+    auto bits = bytesToBitsMsbForTest(dataBytes, 168);
+    const uint16_t crc = p25Phase2Crc12ForTest(bits, bits.size());
+    for (int bit = 11; bit >= 0; --bit) bits.push_back(static_cast<uint8_t>((crc >> bit) & 1u));
+    return makeSyntheticPhase2SlowAcchPayloadForTest(0x3, bits);
+}
+
+std::vector<int> makeSyntheticPhase2LcchPayloadForTest()
+{
+    std::vector<uint8_t> dataBytes(19, 0);
+    dataBytes[0] = 0x00; // MAC_SIGNAL header, no additional structures.
+    auto bits = bytesToBitsMsbForTest(dataBytes, 152);
+    constexpr uint16_t nac = 0x2d2;
+    for (int bit = 11; bit >= 0; --bit) bits.push_back(static_cast<uint8_t>((nac >> bit) & 1u));
+    REQUIRE(bits.size() == 164);
+    const uint16_t crc = p25Phase2Crc16ForTest(bits, bits.size());
+    for (int bit = 15; bit >= 0; --bit) bits.push_back(static_cast<uint8_t>((crc >> bit) & 1u));
+    return makeSyntheticPhase2SlowAcchPayloadForTest(0xD, bits);
+}
+
 std::vector<int> makeSyntheticPhase2SuperframeWithSacchForTest()
 {
     auto dibits = makeSyntheticPhase2Superframe();
     const auto payload = makeSyntheticPhase2SacchPayloadForTest();
+    const size_t base = 2 * P25LiveDecoder::Phase2BurstDibits + 10;
+    for (size_t i = 10; i < payload.size(); ++i) {
+        dibits[base + i] = payload[i] & 0x03;
+    }
+    return dibits;
+}
+
+std::vector<int> makeSyntheticPhase2SuperframeWithLcchForTest()
+{
+    auto dibits = makeSyntheticPhase2Superframe();
+    const auto payload = makeSyntheticPhase2LcchPayloadForTest();
     const size_t base = 2 * P25LiveDecoder::Phase2BurstDibits + 10;
     for (size_t i = 10; i < payload.size(); ++i) {
         dibits[base + i] = payload[i] & 0x03;
@@ -328,9 +371,34 @@ std::vector<int> maskSyntheticPhase2SuperframeForTest(std::vector<int> dibits,
         for (size_t i = 0; i < 170; ++i) {
             if (i < 10) continue;
             if (std::find(duidDibits.begin(), duidDibits.end(), i) != duidDibits.end()) continue;
-            dibits[base + 10 + i] ^= mask[maskSlot * P25LiveDecoder::Phase2BurstDibits + 10 + i] & 0x03;
+            dibits[base + 10 + i] ^= mask[maskSlot * P25LiveDecoder::Phase2BurstDibits + i] & 0x03;
         }
     }
+    return dibits;
+}
+
+std::vector<int> shiftSyntheticPhase2BurstForTest(std::vector<int> dibits,
+                                                  size_t slot,
+                                                  int shiftDibits)
+{
+    const size_t base = slot * P25LiveDecoder::Phase2BurstDibits;
+    REQUIRE(base + P25LiveDecoder::Phase2BurstDibits <= dibits.size());
+
+    const auto signedBase = static_cast<long long>(base);
+    const auto signedEnd = signedBase + static_cast<long long>(P25LiveDecoder::Phase2BurstDibits);
+    const auto signedTarget = signedBase + static_cast<long long>(shiftDibits);
+    REQUIRE(signedTarget >= 0);
+    REQUIRE(signedTarget + static_cast<long long>(P25LiveDecoder::Phase2BurstDibits) <= static_cast<long long>(dibits.size()));
+    REQUIRE(signedTarget != signedBase);
+
+    const std::vector<int> burst(dibits.begin() + static_cast<std::ptrdiff_t>(signedBase),
+                                 dibits.begin() + static_cast<std::ptrdiff_t>(signedEnd));
+    std::fill(dibits.begin() + static_cast<std::ptrdiff_t>(signedBase),
+              dibits.begin() + static_cast<std::ptrdiff_t>(signedEnd),
+              0);
+    std::copy(burst.begin(),
+              burst.end(),
+              dibits.begin() + static_cast<std::ptrdiff_t>(signedTarget));
     return dibits;
 }
 
@@ -729,6 +797,9 @@ TEST_CASE("P25 live decoder locks synthetic C4FM discriminator symbols")
 
     REQUIRE_FALSE(result.syncs.empty());
     REQUIRE(result.stats.symbols >= bits.size() / 2);
+    REQUIRE(result.stats.softDecisionSymbols > 0);
+    REQUIRE(result.stats.softDecisionQuality > 0.20);
+    REQUIRE(result.stats.softBitLlrMean > 0.25);
     REQUIRE_FALSE(result.nids.empty());
     REQUIRE(result.nids.front().nac == 0x123);
     REQUIRE(result.nids.front().duid == P25DataUnitId::TSDU);
@@ -802,6 +873,9 @@ TEST_CASE("P25 live decoder locks offset RTL-rate synthetic CQPSK LSM IQ")
     REQUIRE_FALSE(result.rawTsbkBlocks.empty());
     REQUIRE(result.rawTsbkBlocks.front().crcValid);
     REQUIRE(result.stats.demodPath.find("CQPSK") != std::string::npos);
+    REQUIRE(result.stats.softDecisionSymbols > 0);
+    REQUIRE(result.stats.softDecisionQuality > 0.10);
+    REQUIRE(result.stats.softBitLlrMean > 0.10);
     REQUIRE(std::abs(result.stats.cqpskResidualCarrierHz) < 120.0);
 }
 
@@ -827,6 +901,8 @@ TEST_CASE("P25 live decoder reuses sticky CQPSK demod lock after validation")
     REQUIRE(second.stats.demodPath.find("CQPSK") != std::string::npos);
     REQUIRE(second.stats.cqpskLockActive);
     REQUIRE(second.stats.cqpskLockUsed);
+    REQUIRE(second.stats.cqpskLockTrustScore > 0);
+    REQUIRE(second.stats.cqpskLockMisses == 0);
     REQUIRE(second.nids.front().fecValidated);
     REQUIRE_FALSE(second.rawTsbkBlocks.empty());
     REQUIRE(second.rawTsbkBlocks.front().crcValid);
@@ -978,7 +1054,8 @@ TEST_CASE("P25 live decoder locks Phase 2 superframes and annotates all TDMA bur
         REQUIRE(burst.superframeLocked);
         REQUIRE(burst.superframeDibitOffset == 0);
         REQUIRE(burst.superframeSyncScore >= 4);
-        REQUIRE(burst.phase2AudioLock);
+        REQUIRE_FALSE(burst.phase2AudioLock);
+        REQUIRE_FALSE(burst.sessionAudioRelease);
         REQUIRE(burst.superframeBurstIndexKnown);
         REQUIRE(burst.superframeBurstIndex == slot);
         REQUIRE(burst.grantSlotKnown);
@@ -1050,9 +1127,11 @@ TEST_CASE("P25 Phase 2 XOR mask generation matches known local-system vector")
 {
     const auto mask = P25LiveDecoder::phase2XorMaskDibits(0x2d2, 0xbee00, 0x2d1);
     REQUIRE(mask.size() == P25LiveDecoder::Phase2BurstDibits * 12);
-    const std::array<int, 24> expected{
-        2, 3, 3, 2, 3, 2, 0, 0, 0, 0, 0, 2,
-        3, 1, 0, 1, 0, 2, 3, 1, 0, 2, 2, 0,
+    const std::array<int, 40> expected{
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 2, 3, 1, 0, 1, 0, 2, 3, 1,
+        0, 2, 2, 0, 2, 3, 2, 1, 3, 3,
+        1, 0, 0, 2, 1, 2, 1, 1, 2, 1,
     };
     for (size_t i = 0; i < expected.size(); ++i) REQUIRE(mask[i] == expected[i]);
 }
@@ -1116,6 +1195,92 @@ TEST_CASE("P25 live decoder searches Phase 2 XOR mask phase using MAC CRC eviden
     REQUIRE(burst->macCrcValid);
     REQUIRE(burst->essKnown);
     REQUIRE_FALSE(burst->encrypted);
+
+    size_t releasedVoiceBursts = 0;
+    bool releasedWithoutLocalMac = false;
+    for (const auto& voiceBurst : result.phase2Bursts) {
+        if (voiceBurst.voiceCodewords.empty()) continue;
+        if (voiceBurst.superframeBurstIndexKnown && voiceBurst.superframeBurstIndex > 2) {
+            REQUIRE(voiceBurst.grantSlotKnown);
+            REQUIRE((voiceBurst.superframeLock || voiceBurst.macCrcLock));
+            REQUIRE((voiceBurst.maskPhaseLock || voiceBurst.macCrcLock));
+            REQUIRE(voiceBurst.macCrcLock);
+            REQUIRE(voiceBurst.essKnown);
+            REQUIRE_FALSE(voiceBurst.encrypted);
+            REQUIRE(voiceBurst.sessionAudioRelease);
+            ++releasedVoiceBursts;
+            releasedWithoutLocalMac = releasedWithoutLocalMac || !voiceBurst.macCrcValid;
+        }
+    }
+    REQUIRE(releasedVoiceBursts > 0);
+    REQUIRE(releasedWithoutLocalMac);
+}
+
+TEST_CASE("P25 live decoder aligns masked Phase 2 MAC decode to near sync hits")
+{
+    constexpr uint16_t nac = 0x2d2;
+    constexpr uint32_t wacn = 0xbee00;
+    constexpr uint16_t systemId = 0x2d1;
+    constexpr uint8_t maskPhase = 5;
+
+    const auto clear = makeSyntheticPhase2SuperframeWithSacchForTest();
+    auto masked = maskSyntheticPhase2SuperframeForTest(clear, nac, wacn, systemId, maskPhase);
+    masked = shiftSyntheticPhase2BurstForTest(std::move(masked), 2, -1);
+
+    P25LiveDecoder decoder;
+    decoder.setPhase2MaskParameters(nac, wacn, systemId);
+    const auto result = decoder.processHardDibits(masked);
+
+    REQUIRE(result.stats.phase2Bursts == 12);
+    REQUIRE(result.stats.phase2SyncOffsetCorrections >= 1);
+    REQUIRE(result.stats.phase2SyncOffsetCorrectionDibits < 0);
+    REQUIRE(result.stats.phase2MaskPhaseKnown);
+    REQUIRE(result.stats.phase2MaskPhase == maskPhase);
+    REQUIRE(result.stats.phase2MaskPhaseMacCrcValid >= 1);
+    REQUIRE(result.stats.phase2MacCrcValid >= 1);
+    REQUIRE(result.stats.phase2EssKnown);
+    REQUIRE_FALSE(result.stats.phase2EssEncrypted);
+
+    const auto burst = std::find_if(result.phase2Bursts.begin(), result.phase2Bursts.end(), [](const P25Phase2Burst& b) {
+        return b.kind == P25Phase2BurstKind::SacchScrambled && b.macCrcValid;
+    });
+    REQUIRE(burst != result.phase2Bursts.end());
+    REQUIRE(burst->xorMaskApplied);
+    REQUIRE(burst->xorMaskPhaseKnown);
+    REQUIRE(burst->xorMaskPhase == maskPhase);
+    REQUIRE(burst->syncOffsetAdjusted);
+    REQUIRE(burst->syncOffsetDibits == -1);
+    REQUIRE(burst->essKnown);
+    REQUIRE_FALSE(burst->encrypted);
+}
+
+TEST_CASE("P25 live decoder decodes clear Phase 2 LCCH without XOR mask")
+{
+    const auto dibits = makeSyntheticPhase2SuperframeWithLcchForTest();
+
+    P25LiveDecoder decoder;
+    const auto result = decoder.processHardDibits(dibits);
+
+    REQUIRE(result.stats.phase2Bursts == 12);
+    REQUIRE(result.stats.phase2MaskedBursts == 0);
+    REQUIRE(result.stats.phase2MacCrcValid >= 1);
+    REQUIRE(result.stats.phase2MacNominalCrcValid >= 1);
+    REQUIRE(result.stats.phase2MacAltKindCrcValid == 0);
+    REQUIRE(result.stats.phase2MacBitSwapCrcValid == 0);
+    REQUIRE(result.stats.phase2MacSlipCrcValid == 0);
+    REQUIRE(result.stats.phase2MacInvertCrcValid == 0);
+
+    const auto pdu = std::find_if(result.phase2MacPdus.begin(), result.phase2MacPdus.end(), [](const P25Phase2MacPdu& p) {
+        return p.source == P25Phase2BurstKind::LcchClear && p.crcValid;
+    });
+    REQUIRE(pdu != result.phase2MacPdus.end());
+    REQUIRE(pdu->opcode == 0);
+    REQUIRE(pdu->bytes.size() == 19);
+    REQUIRE(pdu->acchHypothesisKnown);
+    REQUIRE_FALSE(pdu->acchBitOrderSwapped);
+    REQUIRE_FALSE(pdu->acchDibitInverted);
+    REQUIRE(pdu->acchSlipDibits == 0);
+    REQUIRE(pdu->detectedKind == pdu->source);
 }
 
 TEST_CASE("P25 live decoder decodes informational Phase 2 ISCH fields")

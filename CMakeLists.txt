@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.15 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.17 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -51,6 +51,7 @@ set(SDR_TOWN_SOURCES
     src/Demod.cpp
     src/P25Control.cpp
     src/P25LiveDecoder.cpp
+    src/P25FollowStateMachine.cpp
     src/SignalClassifier.cpp
     src/ClassifierModelBackend.cpp
     src/Receiver.cpp
@@ -177,11 +178,13 @@ if(BUILD_TESTS)
     tests/test_demod.cpp
     tests/test_p25control.cpp
     tests/test_p25live.cpp
+    tests/test_p25follow.cpp
     src/DeviceManager.cpp
     src/AudioEngine.cpp
     src/Demod.cpp
     src/P25Control.cpp
     src/P25LiveDecoder.cpp
+    src/P25FollowStateMachine.cpp
     src/SignalClassifier.cpp
     src/ClassifierModelBackend.cpp
     src/Receiver.cpp

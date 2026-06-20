@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <atomic>
 
 // Basic per-receiver state holder.
 // Goal: each SDR/monitor path gets its own demod, audio targets, recorder stub, etc.
@@ -25,14 +26,32 @@ struct P25VoiceDiagSnapshot {
     long long phase2MaskedBursts = 0;
     long long phase2MacPdus = 0;
     long long phase2MacCrcValid = 0;
+    long long phase2MacNominalCrcValid = 0;
+    long long phase2MacAltKindCrcValid = 0;
+    long long phase2MacBitSwapCrcValid = 0;
+    long long phase2MacSlipCrcValid = 0;
+    long long phase2MacInvertCrcValid = 0;
     bool phase2EssKnown = false;
     bool phase2EssEncrypted = false;
     bool backendAvailable = false;
     bool nidLock = false;
 };
 
+inline P25LiveDecoderConfig p25RealtimeVoiceDecoderConfig()
+{
+    P25LiveDecoderConfig cfg;
+    cfg.enableC4fmFixedPhaseSearch = false;
+    cfg.maxFrameSyncs = 6;
+    cfg.maxRawTsbkBlocksPerFrame = 4;
+    return cfg;
+}
+
 struct Receiver {
     mutable std::mutex stateMutex;
+    // Protects mutable DSP internals (demodulator filters/squelch, P25 live
+    // decoder state, and IMBE/AMBE decoder history). Keep UI/control state under
+    // stateMutex and avoid holding stateMutex while running heavy DSP blocks.
+    mutable std::recursive_mutex dspMutex;
 
     size_t deviceIndex = 0;           // which DeviceManager device this receiver uses
     Demodulator demod;                // own demod instance (already per-state)
@@ -63,6 +82,8 @@ struct Receiver {
     bool p25VoicePhase2 = false;
     bool p25VoiceTdmaSlotKnown = false;
     uint8_t p25VoiceTdmaSlot = 0;
+    bool p25VoiceSlotProbePending = false;
+    uint8_t p25VoiceSlotProbeRequested = 0;
     bool p25VoiceMaskParamsKnown = false;
     uint16_t p25VoiceNac = 0;
     uint32_t p25VoiceWacn = 0;
@@ -71,8 +92,9 @@ struct Receiver {
     int p25VoiceDiscardWindows = 0;
     bool p25ControlChannelMute = false;
     uint64_t p25Phase2LastEmittedAbsDibit = 0;
+    bool p25VoiceResetPending = false;
     P25VoiceDiagSnapshot p25VoiceDiagnostics;
-    P25LiveDecoder p25VoiceLiveDecoder;
+    P25LiveDecoder p25VoiceLiveDecoder{p25RealtimeVoiceDecoderConfig()};
     P25ImbeVoiceDecoder p25ImbeVoiceDecoder;
     P25AmbeVoiceDecoder p25AmbeVoiceDecoder;
 
@@ -81,6 +103,8 @@ struct Receiver {
     bool afcEnabled = true;
     bool afcLocked = false;
     double afcOffsetHz = 0.0;
+    bool p25AfcFrozen = false;
+    double p25FrozenAfcOffsetHz = 0.0;
 
     // Per-receiver audio routing. Empty means mirror to all active outputs.
     std::vector<size_t> audioOutputIndices;  // active AudioEngine output indices
@@ -96,12 +120,22 @@ struct Receiver {
 
     // S0 / audit-followup-2: per-receiver read cursor (absolute samples) for the device's IQ ring.
     // Allows each rx to consume its own new chronological data without fighting other rxs on the same device.
-    uint64_t lastConsumedAbsolute = 0;
+    std::atomic<uint64_t> lastConsumedAbsolute{0};
 
     // Simple reset helper (calls into Demodulator)
-    void resetDemodState() { demod.resetState(); lastConsumedAbsolute = 0; afcLocked = false; afcOffsetHz = 0.0; }
+    void resetDemodState()
+    {
+        std::lock_guard<std::recursive_mutex> dspLock(dspMutex);
+        demod.resetState();
+        lastConsumedAbsolute.store(0, std::memory_order_release);
+        afcLocked = false;
+        afcOffsetHz = 0.0;
+        p25AfcFrozen = false;
+        p25FrozenAfcOffsetHz = 0.0;
+    }
     void resetP25VoiceState()
     {
+        std::lock_guard<std::recursive_mutex> dspLock(dspMutex);
         p25VoiceLiveDecoder.reset();
         p25ImbeVoiceDecoder = P25ImbeVoiceDecoder();
         p25AmbeVoiceDecoder = P25AmbeVoiceDecoder();
@@ -110,7 +144,11 @@ struct Receiver {
 
     // Force immediate squelch gate close (bypass hang) when user raises threshold via main controls or CLI.
     // Makes "set sq higher" live without requiring a freq retune/click (which previously forced a full reset).
-    void resetSquelchGate() { demod.resetSquelchGate(); }
+    void resetSquelchGate()
+    {
+        std::lock_guard<std::recursive_mutex> dspLock(dspMutex);
+        demod.resetSquelchGate();
+    }
 };
 
 // Placeholder for future per-receiver audio push (currently falls back to global engine)

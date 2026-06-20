@@ -45,6 +45,11 @@ struct P25LiveDecoderConfig {
     int maxFrameSyncBitErrors = 2;
     size_t maxFrameSyncs = 8;
     size_t maxRawTsbkBlocksPerFrame = 8;
+    bool enableC4fmFixedPhaseSearch = false;
+    size_t maxC4fmFixedPhaseCandidates = 10;
+    bool stopCqpskSearchOnHardLock = true;
+    size_t cqpskLockMissTolerance = 24;
+    bool realtimeVoiceSearch = false;
 };
 
 struct P25Phase2MaskParameters {
@@ -67,12 +72,17 @@ struct P25Phase2EssState {
 struct P25Phase2MacPdu {
     bool valid = false;
     size_t dibitOffset = 0;
+    P25Phase2BurstKind detectedKind = P25Phase2BurstKind::Unknown;
     P25Phase2BurstKind source = P25Phase2BurstKind::Unknown;
     uint8_t opcode = 0;
     uint8_t offset = 0;
     bool fecDecoded = false;
     bool crcValid = false;
     int correctedSymbols = 0;
+    bool acchHypothesisKnown = false;
+    bool acchBitOrderSwapped = false;
+    bool acchDibitInverted = false;
+    int acchSlipDibits = 0;
     std::vector<uint8_t> bytes;
     bool essPresent = false;
     P25Phase2EssState ess;
@@ -136,6 +146,11 @@ struct P25LiveDecoderStats {
     double discriminatorMeanHz = 0.0;
     double symbolRate = 4800.0;
     double symbolConfidence = 0.0;
+    size_t softDecisionSymbols = 0;
+    double softDecisionQuality = 0.0;
+    double softBitLlrMean = 0.0;
+    double softBitLlrMinimum = 0.0;
+    size_t softLowConfidenceSymbols = 0;
     bool voiceBackendAvailable = false;
     size_t phase2Bursts = 0;
     size_t phase2VoiceCodewords = 0;
@@ -143,6 +158,11 @@ struct P25LiveDecoderStats {
     size_t phase2MaskedBursts = 0;
     size_t phase2MacPdus = 0;
     size_t phase2MacCrcValid = 0;
+    size_t phase2MacNominalCrcValid = 0;
+    size_t phase2MacAltKindCrcValid = 0;
+    size_t phase2MacBitSwapCrcValid = 0;
+    size_t phase2MacSlipCrcValid = 0;
+    size_t phase2MacInvertCrcValid = 0;
     bool phase2EssKnown = false;
     bool phase2EssEncrypted = false;
     bool phase2MaskPhaseKnown = false;
@@ -158,8 +178,13 @@ struct P25LiveDecoderStats {
     double cqpskResidualCarrierHz = 0.0;
     double cqpskPhaseErrorRmsRad = 0.0;
     size_t cqpskFineCorrectionSymbols = 0;
+    int cqpskLockTrustScore = 0;
+    int cqpskLockMisses = 0;
+    bool cqpskStickyOverride = false;
     size_t phase2IschDecoded = 0;
     size_t phase2IschSync = 0;
+    size_t phase2SyncOffsetCorrections = 0;
+    int phase2SyncOffsetCorrectionDibits = 0;
     int bestPhase2SyncErrors = -1;
     size_t bestPhase2SyncDibitOffset = 0;
     std::string demodPath;
@@ -198,6 +223,8 @@ struct P25Phase2Burst {
     bool sessionAudioRelease = false;
     bool superframeBurstIndexKnown = false;
     uint8_t superframeBurstIndex = 0;
+    bool syncOffsetAdjusted = false;
+    int syncOffsetDibits = 0;
     bool grantSlotKnown = false;
     uint8_t grantSlot = 0;
     P25Phase2IschState isch;
@@ -263,6 +290,12 @@ public:
     static constexpr double SymbolRate = 4800.0;
 
     explicit P25LiveDecoder(P25LiveDecoderConfig config = {});
+    ~P25LiveDecoder();
+
+    P25LiveDecoder(const P25LiveDecoder& other);
+    P25LiveDecoder& operator=(const P25LiveDecoder& other);
+    P25LiveDecoder(P25LiveDecoder&& other) noexcept;
+    P25LiveDecoder& operator=(P25LiveDecoder&& other) noexcept;
 
     void reset();
 
@@ -330,6 +363,11 @@ private:
     P25Phase2EssState m_phase2Ess;
     std::array<uint8_t, 16> m_phase2EssB{};
     std::array<bool, 4> m_phase2EssBSeen{};
+    bool m_phase2SessionMacCrcSeen = false;
+    int m_phase2First4vSlot = -1;
+    std::array<P25Phase2EssState, 5> m_phase2EssHypotheses{};
+    std::array<std::array<uint8_t, 16>, 5> m_phase2EssBHypotheses{};
+    std::array<std::array<bool, 4>, 5> m_phase2EssBSeenHypotheses{};
     bool m_phase2MaskPhaseKnown = false;
     uint8_t m_phase2MaskPhase = 0;
     int m_phase2MaskPhaseScore = 0;

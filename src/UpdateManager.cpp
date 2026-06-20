@@ -20,9 +20,12 @@
 #include <QVector>
 #include <QRegularExpression>
 #include <algorithm>
+#include <atomic>
 
 static const QString MANIFEST_URL = "https://github.com/Blkph0x/SDR_Town/releases/latest/download/update.json";
 static const int CHECK_INTERVAL_HOURS = 24;
+
+static std::atomic_bool gUpdateDownloadInFlight{false};
 
 static QVector<int> parseVersionParts(QString v)
 {
@@ -64,6 +67,17 @@ static bool isValidSha256Hex(const QString& text)
 {
     static const QRegularExpression re(QStringLiteral("^[0-9a-fA-F]{64}$"));
     return re.match(text).hasMatch();
+}
+
+static bool isAllowedNotesUrl(const QUrl& url)
+{
+    if (!url.isValid()) return false;
+    if (url.scheme().compare("https", Qt::CaseInsensitive) != 0) return false;
+    const QString host = url.host().toLower();
+    const QString path = url.path();
+    return host == "github.com" &&
+           (path.startsWith("/Blkph0x/SDR_Town/releases", Qt::CaseSensitive) ||
+            path.startsWith("/Blkph0x/SDR_Town/blob/", Qt::CaseSensitive));
 }
 
 UpdateManager::UpdateManager(QObject* parent)
@@ -154,10 +168,16 @@ bool UpdateManager::parseUpdateJson(const QByteArray& data, UpdateInfo& out)
     out.size         = inst.value("size").toInteger(0);
 
     QUrl installer(out.installerUrl);
+    QUrl notes(out.notesUrl);
+    const bool notesOk = out.notesUrl.isEmpty() || isAllowedNotesUrl(notes);
+    constexpr qint64 kMaxInstallerBytes = 512ll * 1024ll * 1024ll;
+    const bool sizeOk = out.size > 0 && out.size <= kMaxInstallerBytes;
     return !out.version.isEmpty() &&
            installer.isValid() &&
            installer.scheme().compare("https", Qt::CaseInsensitive) == 0 &&
            isAllowedUpdateUrl(installer) &&
+           notesOk &&
+           sizeOk &&
            isValidSha256Hex(out.sha256);
 }
 
@@ -173,17 +193,28 @@ void UpdateManager::downloadAndApplyUpdate(const UpdateInfo& info)
 
 void UpdateManager::doDownload(const QString& url, const QString& expectedSha256)
 {
+    bool expected = false;
+    if (!gUpdateDownloadInFlight.compare_exchange_strong(expected, true)) {
+        emit error("An update download is already in progress.");
+        return;
+    }
+
+    auto clearInFlight = [] { gUpdateDownloadInFlight.store(false); };
+
     QUrl updateUrl(url);
     if (!updateUrl.isValid() || updateUrl.scheme().compare("https", Qt::CaseInsensitive) != 0) {
         emit error("Update download URL must be valid HTTPS.");
+        clearInFlight();
         return;
     }
     if (!isAllowedUpdateUrl(updateUrl)) {
         emit error("Update download URL is not a trusted SDR_Town GitHub release asset.");
+        clearInFlight();
         return;
     }
     if (!isValidSha256Hex(expectedSha256)) {
         emit error("Update manifest has an invalid SHA256 digest.");
+        clearInFlight();
         return;
     }
 
@@ -197,6 +228,16 @@ void UpdateManager::doDownload(const QString& url, const QString& expectedSha256
         if (reply->error() != QNetworkReply::NoError) {
             emit error("Download failed: " + reply->errorString());
             reply->deleteLater();
+            gUpdateDownloadInFlight.store(false);
+            return;
+        }
+
+        QByteArray payload = reply->readAll();
+        constexpr qint64 kMaxDownloadedInstallerBytes = 512ll * 1024ll * 1024ll;
+        if (payload.size() <= 0 || static_cast<qint64>(payload.size()) > kMaxDownloadedInstallerBytes) {
+            emit error("Downloaded update payload size is invalid or too large.");
+            reply->deleteLater();
+            gUpdateDownloadInFlight.store(false);
             return;
         }
 
@@ -215,11 +256,18 @@ void UpdateManager::doDownload(const QString& url, const QString& expectedSha256
         if (!f.open(QIODevice::WriteOnly)) {
             emit error("Could not write update file.");
             reply->deleteLater();
+            gUpdateDownloadInFlight.store(false);
             return;
         }
-        f.write(reply->readAll());
+        const qint64 written = f.write(payload);
         f.close();
         reply->deleteLater();
+        if (written != payload.size()) {
+            emit error("Update file write was incomplete.");
+            QFile::remove(fileName);
+            gUpdateDownloadInFlight.store(false);
+            return;
+        }
 
         bool ok = verifySha256(fileName, expectedSha256);
         emit downloadFinished(fileName, ok);
@@ -230,6 +278,7 @@ void UpdateManager::doDownload(const QString& url, const QString& expectedSha256
             emit error("SHA256 verification failed. Update aborted for safety.");
             QFile::remove(fileName);
         }
+        gUpdateDownloadInFlight.store(false);
     });
 }
 

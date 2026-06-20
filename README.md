@@ -110,11 +110,18 @@ GUI:
    seen.
 6. Encrypted calls are skipped/muted.
 
+The `Grant Test` button performs the common tester workflow in one click: it
+tunes the selected/known control channel, mutes raw control-channel audio,
+enables auto-follow, and opens the P25 log window so grant and voice-gate
+diagnostics are visible immediately.
+
 CLI:
 
 ```powershell
 .\SDR_Town.exe --cli
 p25 monitor 420.250
+p25 waitgrant 420.350 0 60 follow record=8
+p25 followtest "C:\path\to\capture.sigmf-meta" 420.350 10000 followms=5000 tg=10609
 p25 tgs
 p25 follow 0
 p25 voice
@@ -124,6 +131,9 @@ Phase 2 clear voice release is intentionally gated. Audio is released only when
 the decoder has enough TDMA mask, MAC/ESS clear-state, and AMBE validation
 evidence. Late entry into a call may show voice bursts before MAC/ESS state is
 confirmed; the log will say that it is waiting rather than silently failing.
+For tester reports, add `record=8` to `p25 waitgrant`; the CLI saves a SigMF IQ
+slice plus the final P25 voice-gate diagnostics under the app data
+`iq_test_captures` folder before retuning back to the control channel.
 
 Optional Phase 2 validation logging:
 
@@ -180,6 +190,9 @@ p25 deltg <index>
 p25 follow <talkgroup-index> [rx]
 p25 tsbk <cc_mhz> <10-or-12-byte-hex-block>
 p25 sync [device] [target_mhz] [ms]
+p25 waitgrant <cc_mhz> [device] [seconds] [follow] [record[=seconds]]
+p25 replay <sigmf-meta|sigmf-data|capture_dir> [target_mhz] [ms] [phase2] [skip=<ms>] [center=<mhz>] [nac=<id> wacn=<id> system=<id>]
+p25 followtest <sigmf-meta|sigmf-data|capture_dir> <cc_mhz> [ms] [skip=<ms>] [center=<mhz>] [followms=<ms>] [tg=<id>]
 p25 voice
 audio list
 audio enable <output0> [output1 ...]

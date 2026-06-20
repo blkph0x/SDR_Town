@@ -4,18 +4,19 @@
 #include <cmath>
 #include <limits>
 #include <numeric>
+#include <array>
 
 namespace {
 
-double percentile(std::vector<double> values, double p, double fallback)
+double percentile(std::vector<double>& values, double p, double fallback)
 {
     values.erase(std::remove_if(values.begin(), values.end(), [](double v) {
         return !std::isfinite(v);
     }), values.end());
     if (values.empty()) return fallback;
-    std::sort(values.begin(), values.end());
     p = std::clamp(p, 0.0, 1.0);
     const size_t idx = std::min(values.size() - 1, static_cast<size_t>(std::llround(p * (values.size() - 1))));
+    std::nth_element(values.begin(), values.begin() + static_cast<std::ptrdiff_t>(idx), values.end());
     return values[idx];
 }
 
@@ -49,7 +50,23 @@ double meanRange(const std::vector<float>& v, int lo, int hi, double fallback)
 
 double linearPower(double db)
 {
-    return std::pow(10.0, db / 10.0);
+    if (!std::isfinite(db)) return 0.0;
+    db = std::clamp(db, -160.0, 80.0);
+    constexpr double kMinDb = -160.0;
+    constexpr double kStepDb = 0.25;
+    constexpr size_t kLutSize = 961; // -160.0 .. 80.0 dB inclusive.
+    static const std::array<double, kLutSize> lut = [] {
+        std::array<double, kLutSize> table{};
+        for (size_t i = 0; i < table.size(); ++i) {
+            table[i] = std::pow(10.0, (kMinDb + static_cast<double>(i) * kStepDb) / 10.0);
+        }
+        return table;
+    }();
+    const double pos = (db - kMinDb) / kStepDb;
+    const size_t lo = std::min(static_cast<size_t>(pos), kLutSize - 1);
+    const size_t hi = std::min(lo + 1, kLutSize - 1);
+    const double frac = pos - static_cast<double>(lo);
+    return lut[lo] * (1.0 - frac) + lut[hi] * frac;
 }
 
 SignalRecommendation makeStandard(SignalClass c, const SignalFeatures& f, double confidence, std::string reason)

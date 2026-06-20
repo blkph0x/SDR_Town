@@ -155,11 +155,75 @@ Run-CliTest -Name "Scan Stub and Multi Enable" `
     -Commands "enable 0`nstats`nquit`n" `
     -MustContain @("Enabled+streaming", "RX0 dev=")  # exercise enable+stats; full smart scan later. Relaxed for harness timing after recent threading/ring changes.
 
+# Test 6: P25 SigMF replay command path. The synthetic capture is not expected to decode;
+# this guards CLI parsing, SigMF metadata/data loading, and replay window setup.
+$p25ReplayDir = Join-Path ([System.IO.Path]::GetTempPath()) ("sdr-town-p25-replay-" + [guid]::NewGuid().ToString("N"))
+try {
+    [void](New-Item -ItemType Directory -Path $p25ReplayDir -Force)
+    $p25ReplayBase = Join-Path $p25ReplayDir "smoke"
+    $p25ReplayMeta = "$p25ReplayBase.sigmf-meta"
+    $p25ReplayData = "$p25ReplayBase.sigmf-data"
+    @"
+{
+  "global": {
+    "core:datatype": "cf32_le",
+    "core:sample_rate": 48000
+  },
+  "captures": [
+    {
+      "core:sample_start": 0,
+      "core:frequency": 420350000
+    }
+  ],
+  "annotations": [
+    {
+      "core:sample_start": 0,
+      "core:sample_count": 24576,
+      "core:freq_lower_edge": 420343750,
+      "core:freq_upper_edge": 420356250
+    }
+  ]
+}
+"@ | Out-File -FilePath $p25ReplayMeta -Encoding ascii -NoNewline
+
+    $stream = [System.IO.File]::Open($p25ReplayData, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write)
+    try {
+        $writer = New-Object System.IO.BinaryWriter($stream)
+        try {
+            for ($i = 0; $i -lt 24576; $i++) {
+                $writer.Write([single]0.0)
+                $writer.Write([single]0.0)
+            }
+        } finally {
+            $writer.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+
+    Run-CliTest -Name "P25 SigMF Replay Smoke" `
+        -Commands "p25 replay `"$p25ReplayDir`" 420.350 512`nquit`n" `
+        -MustContain @("Loaded SigMF replay", "Replay windows")
+
+    Run-CliTest -Name "P25 Follow Test Replay Smoke" `
+        -Commands "p25 followtest `"$p25ReplayDir`" 420.350 512 followms=512 tg=999999`nquit`n" `
+        -MustContain @("P25 followtest control", "targetTg=999999", "P25 followtest result=")
+} finally {
+    if (Test-Path $p25ReplayDir) { Remove-Item $p25ReplayDir -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+# Test 7: Live wait-grant command path. On machines without RF hardware this is
+# expected to time out cleanly; the test guards command parsing, tuning, muted
+# CC setup, and loop exit behavior.
+Run-CliTest -Name "P25 Wait Grant Smoke" `
+    -Commands "p25 waitgrant 420.350 0 1 follow record=1`nquit`n" `
+    -MustContain @("P25 waitgrant monitoring", "record=")
+
 # Summary
 Write-Host "`n=== Test Summary ===" -ForegroundColor Green
 $script:testResults | Format-Table -AutoSize
-$passed = ($script:testResults | Where-Object { $_.Result -eq "PASS" }).Count
-$failed = ($script:testResults | Where-Object { $_.Result -ne "PASS" }).Count
+$passed = @($script:testResults | Where-Object { $_.Result -eq "PASS" }).Count
+$failed = @($script:testResults | Where-Object { $_.Result -ne "PASS" }).Count
 Write-Host "Passed: $passed  Failed/Error: $failed"
 if ($failed -gt 0) {
     Write-Host "Some tests failed. Review output above and logs." -ForegroundColor Red

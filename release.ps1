@@ -1,10 +1,10 @@
 # Quick launcher for SDR Town dev releases
 # Usage (in a fresh PowerShell):
-#   .\release.ps1          # uses 0.2.8 (or edit default)
-#   .\release.ps1 0.2.9 experimental
+#   .\release.ps1          # uses 0.2.17 (or edit default)
+#   .\release.ps1 0.2.17 experimental
 
 param(
-    [string]$Version = "0.2.8",
+    [string]$Version = "0.2.17",
     [string]$Channel = "stable"
 )
 

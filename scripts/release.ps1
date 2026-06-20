@@ -3,7 +3,7 @@
 # Run from project root after a successful build/fix session.
 
 param(
-    [string]$Version = "0.2.10",
+    [string]$Version = "0.2.17",
     [ValidateSet("stable", "experimental")]
     [string]$Channel = "stable",
     [switch]$SkipPush,

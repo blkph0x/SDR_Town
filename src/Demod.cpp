@@ -7,18 +7,39 @@
 #include <vector>
 #include <cstddef>
 #include <limits>
+#include <array>
 
-static double localPercentile(std::vector<double> values, double percentile, double fallback)
+static double localPercentile(std::vector<double>& values, double percentile, double fallback)
 {
     values.erase(std::remove_if(values.begin(), values.end(), [](double v) {
         return !std::isfinite(v);
     }), values.end());
     if (values.empty()) return fallback;
-    std::sort(values.begin(), values.end());
     percentile = std::clamp(percentile, 0.0, 1.0);
     size_t idx = static_cast<size_t>(std::llround(percentile * (values.size() - 1)));
     idx = std::min(idx, values.size() - 1);
+    std::nth_element(values.begin(), values.begin() + static_cast<std::ptrdiff_t>(idx), values.end());
     return values[idx];
+}
+
+static double dbAboveFloorWeight(double aboveFloorDb) noexcept
+{
+    if (!std::isfinite(aboveFloorDb) || aboveFloorDb <= 0.0) return 0.0;
+    aboveFloorDb = std::clamp(aboveFloorDb, 0.0, 70.0);
+    constexpr double kStepDb = 0.1;
+    constexpr size_t kLutSize = 701; // 0.0 .. 70.0 dB inclusive.
+    static const std::array<double, kLutSize> lut = [] {
+        std::array<double, kLutSize> table{};
+        for (size_t i = 0; i < table.size(); ++i) {
+            table[i] = std::pow(10.0, (static_cast<double>(i) * kStepDb) / 10.0) - 1.0;
+        }
+        return table;
+    }();
+    const double pos = aboveFloorDb / kStepDb;
+    const size_t lo = std::min(static_cast<size_t>(pos), kLutSize - 1);
+    const size_t hi = std::min(lo + 1, kLutSize - 1);
+    const double frac = pos - static_cast<double>(lo);
+    return std::max(0.0, lut[lo] * (1.0 - frac) + lut[hi] * frac);
 }
 
 static double quadraticPeakDeltaDb(double leftDb, double centerDb, double rightDb)
@@ -125,7 +146,7 @@ SignalOffsetEstimate estimateSignalOffsetFromSpectrum(const std::vector<float>& 
             if (activeLeft < 0) activeLeft = i;
             activeRight = i;
         }
-        const double w = std::max(0.0, std::pow(10.0, std::clamp(aboveFloor, 0.0, 70.0) / 10.0) - 1.0);
+        const double w = dbAboveFloorWeight(aboveFloor);
         weighted += (static_cast<double>(i) + 0.5) * w;
         weightSum += w;
     }
@@ -211,7 +232,7 @@ std::vector<P25ControlCandidate> detectP25ControlCandidates(const std::vector<fl
             double weighted = 0.0;
             double weightSum = 0.0;
             for (int i = regionStart; i <= regionEnd; ++i) {
-                double w = std::max(0.0, std::pow(10.0, (powerDb[static_cast<size_t>(i)] - floorDb) / 10.0) - 1.0);
+                double w = dbAboveFloorWeight(static_cast<double>(powerDb[static_cast<size_t>(i)]) - floorDb);
                 weighted += (i + 0.5) * w;
                 weightSum += w;
             }
@@ -323,8 +344,7 @@ double detectChannelBandwidthAround(const std::vector<float>& powerDb,
         }
     }
     if (local.empty()) return 25000.0;
-    std::sort(local.begin(), local.end());
-    double floorDb = local[static_cast<size_t>(std::floor((local.size() - 1) * 0.25))];
+    double floorDb = localPercentile(local, 0.25, -120.0);
     const double snrDb = std::max(0.0, static_cast<double>(peak) - floorDb);
     if (snrDb < 3.0) return 2500.0;
 
@@ -374,6 +394,11 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
     double lpfHz, double squelchDb, double gain, double wfmDeTauUs, double wfmPilotNotchR,
     double channelBwHz, size_t target_audio_samples, double outputRate, double externalSquelchLevelDb, bool audioLpfEnabled)
 {
+    // AUTO must be resolved by the caller/classifier before reaching the DSP core.
+    // Treat any leaked AUTO as conservative NFM rather than WFM; otherwise AUTO
+    // uses broadcast-FM deviation/bandwidth and breaks narrowband reception.
+    if (mode == DemodMode::AUTO) mode = DemodMode::NFM;
+
     rmsOut = -100;
     if (iq.empty()) return {};
     if (sr <= 0.0 || !std::isfinite(sr)) return {};

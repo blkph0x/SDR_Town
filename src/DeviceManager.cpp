@@ -24,6 +24,13 @@
 #include <SoapySDR/Logger.hpp>
 #endif
 
+#ifdef HAVE_SOAPYSDR
+// Serialize live Soapy I/O calls that can otherwise race during P25 voice-follow retunes.
+// RTL/USB backends are not always safe when setFrequency/setGain/PPM happens while
+// readStream is active; that race matches the observed hang right after TG follow.
+static std::mutex gSoapyLiveIoMutex;
+#endif
+
 DeviceManager& DeviceManager::instance() {
     static DeviceManager mgr;
     return mgr;
@@ -469,10 +476,22 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
     // when the RTL dongle or audio devices are in a bad state.
     const uint64_t streamGen = st.sessionGen.fetch_add(1, std::memory_order_acq_rel) + 1;
     st.stopFlag = false;
-    st.currentCenter = 100e6;
+    double requestedCenter = 100e6;
+    {
+        std::lock_guard<std::mutex> lk(st.queueMutex);
+        if (std::isfinite(st.currentCenter) && st.currentCenter > 0.0) {
+            requestedCenter = st.currentCenter;
+        }
+    }
     double useRate = d.sampleRate;
     if (useRate < 0.25e6 || useRate > 60e6) useRate = (d.driver == "rtlsdr" ? 2.048e6 : 2.4e6);
-    st.currentRate = useRate;
+    {
+        std::lock_guard<std::mutex> lk(st.queueMutex);
+        st.currentCenter = requestedCenter;
+        st.currentRate = useRate;
+    }
+    const uint64_t initialTuneSeq = st.centerTuneRequestSeq.load(std::memory_order_acquire);
+    st.centerTuneAppliedSeq.store(initialTuneSeq, std::memory_order_release);
     st.frequencyCorrectionPpm = clampFrequencyCorrectionPpm(d.frequencyCorrectionPpm);
     st.nativeFrequencyCorrectionActive = false;
 
@@ -564,6 +583,7 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                 try { localDev->setGain(SOAPY_SDR_RX, 0, useGain); } catch (...) {}
             }
             double center = 100e6;
+            uint64_t centerTuneSeq = st.centerTuneRequestSeq.load(std::memory_order_acquire);
             {
                 std::lock_guard<std::mutex> lk(st.queueMutex);
                 center = st.currentCenter;
@@ -582,7 +602,10 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                 nativePpm = false;
             }
             const double tuneCenter = nativePpm ? center : correctedTuneFrequencyHz(center, usePpm);
-            try { localDev->setFrequency(SOAPY_SDR_RX, 0, tuneCenter); } catch (...) {}
+            try {
+                localDev->setFrequency(SOAPY_SDR_RX, 0, tuneCenter);
+                st.centerTuneAppliedSeq.store(centerTuneSeq, std::memory_order_release);
+            } catch (...) {}
 
             localStream = localDev->setupStream(SOAPY_SDR_RX, "CF32");
             if (!localStream) throw std::runtime_error("setupStream null");
@@ -794,16 +817,18 @@ void DeviceManager::stopStreaming(size_t index) {
             // is a use-after-free risk. Leak this stuck handle until process exit instead.
             spdlog::warn("Leaving Soapy device {} open because its rxThread was detached while stuck in native code.", index);
         } else if (streamToClose && devToClose) {
+            std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
             devToClose->deactivateStream(streamToClose);
             devToClose->closeStream(streamToClose);
             SoapySDR::Device::unmake(devToClose);
         } else if (devToClose) {
+            std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
             SoapySDR::Device::unmake(devToClose);
         }
     } catch (const std::exception& ex) {
-        spdlog::warn("Exception during Soapy teardown for device {}: {}", index, ex.what());
+        spdlog::warn("Soapy teardown reported a recoverable native issue for device {}: {}", index, ex.what());
     } catch (...) {
-        spdlog::warn("Unknown exception during Soapy teardown for device {}", index);
+        spdlog::warn("Soapy teardown reported a recoverable non-standard native issue for device {}", index);
     }
 #endif
 
@@ -945,6 +970,7 @@ void DeviceManager::setLiveGain(size_t index, double gainDb) {
         std::lock_guard<std::mutex> stateLock(st.stateMutex);
         if (st.soapyDev && !st.stopFlag) {
             try {
+                std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
                 try { st.soapyDev->setGainMode(SOAPY_SDR_RX, 0, false); } catch (...) {}
                 if (!d.gainName.empty()) {
                     st.soapyDev->setGain(SOAPY_SDR_RX, 0, d.gainName, useGain);
@@ -990,6 +1016,7 @@ void DeviceManager::setFrequencyCorrection(size_t index, double ppm) {
         st.frequencyCorrectionPpm = usePpm;
         st.nativeFrequencyCorrectionActive = false;
         if (st.soapyDev && !st.stopFlag) {
+            std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
             try {
                 if (st.soapyDev->hasFrequencyCorrection(SOAPY_SDR_RX, 0)) {
                     st.soapyDev->setFrequencyCorrection(SOAPY_SDR_RX, 0, usePpm);
@@ -1098,13 +1125,13 @@ DeviceManager::RecentIQWindow DeviceManager::getNewIQWindowForReceiver(size_t de
     if (st.ringCapacity == 0) return outWindow;
 
     std::lock_guard<std::mutex> ringLock(st.ringMutex);
-    uint64_t myLast = rx.lastConsumedAbsolute;
+    uint64_t myLast = rx.lastConsumedAbsolute.load(std::memory_order_acquire);
     uint64_t total = st.totalSamplesWritten.load(std::memory_order_acquire);
     uint64_t available = (total > myLast) ? (total - myLast) : 0;
 
     if (myLast > total) {
         myLast = (total > (uint64_t)maxSamples) ? (total - (uint64_t)maxSamples) : 0;
-        rx.lastConsumedAbsolute = myLast;
+        rx.lastConsumedAbsolute.store(myLast, std::memory_order_release);
         available = (total > myLast) ? (total - myLast) : 0;
     }
 
@@ -1112,7 +1139,7 @@ DeviceManager::RecentIQWindow DeviceManager::getNewIQWindowForReceiver(size_t de
     // left in the shared ring from a previous station or mode.
     if (myLast == 0 && total > (uint64_t)maxSamples) {
         myLast = total - (uint64_t)maxSamples;
-        rx.lastConsumedAbsolute = myLast;
+        rx.lastConsumedAbsolute.store(myLast, std::memory_order_release);
         available = total - myLast;
     }
 
@@ -1124,7 +1151,7 @@ DeviceManager::RecentIQWindow DeviceManager::getNewIQWindowForReceiver(size_t de
         spdlog::warn("Receiver on dev {} fell behind by {} samples; dropping old data and skipping forward (audio may have a brief dropout/fade).", devIndex, (unsigned long long)(available - st.ringCapacity));
         // Leave a little headroom so we have some new data this time
         myLast = total - (st.ringCapacity / 2);
-        rx.lastConsumedAbsolute = myLast;
+        rx.lastConsumedAbsolute.store(myLast, std::memory_order_release);
         available = (total > myLast) ? (total - myLast) : 0;
         if (available == 0) return outWindow;
         // Return a small zeroed block to give the downstream (squelch, resample, audio) a chance to fade cleanly
@@ -1132,7 +1159,7 @@ DeviceManager::RecentIQWindow DeviceManager::getNewIQWindowForReceiver(size_t de
         outWindow.samples.assign(fadeLen, std::complex<float>(0,0));
         outWindow.startAbsolute = myLast;
         outWindow.endAbsolute = myLast + static_cast<uint64_t>(fadeLen);
-        rx.lastConsumedAbsolute = outWindow.endAbsolute;
+        rx.lastConsumedAbsolute.store(outWindow.endAbsolute, std::memory_order_release);
         return outWindow;
     }
 
@@ -1153,7 +1180,7 @@ DeviceManager::RecentIQWindow DeviceManager::getNewIQWindowForReceiver(size_t de
         outWindow.samples.push_back(st.iqRing[pos]);
     }
 
-    rx.lastConsumedAbsolute += toRead;
+    rx.lastConsumedAbsolute.store(outWindow.endAbsolute, std::memory_order_release);
     return outWindow;
 }
 
@@ -1164,12 +1191,13 @@ std::vector<std::complex<float>> DeviceManager::getNewSamplesForReceiver(size_t 
 void DeviceManager::setReceiverCursorToLiveEdge(size_t devIndex, Receiver& rx) {
     auto* stPtr = streamState(devIndex);
     if (!stPtr) {
-        rx.lastConsumedAbsolute = 0;
+        rx.lastConsumedAbsolute.store(0, std::memory_order_release);
         return;
     }
     auto& st = *stPtr;
     std::lock_guard<std::mutex> ringLock(st.ringMutex);
-    rx.lastConsumedAbsolute = st.totalSamplesWritten.load(std::memory_order_acquire);
+    rx.lastConsumedAbsolute.store(st.totalSamplesWritten.load(std::memory_order_acquire),
+                                  std::memory_order_release);
 }
 
 void DeviceManager::appendIQBlock(size_t index, std::vector<std::complex<float>>&& block) {
@@ -1267,39 +1295,41 @@ void DeviceManager::setupSoapyForRTLSDR() {
 }
 
 void DeviceManager::setCenterFreq(size_t index, double freqHz) {
-    auto* stPtr = streamState(index);
-    if (!stPtr) return;
-    auto& st = *stPtr;
-    double ppm = 0.0;
-    bool nativePpm = false;
-#ifdef HAVE_SOAPYSDR
-    SoapySDR::Device* dev = nullptr;
-#endif
+    StreamState* stPtr = nullptr;
     {
-        std::lock_guard<std::mutex> lk(st.stateMutex);
-        if (!st.active) return;
-        ppm = st.frequencyCorrectionPpm;
-        nativePpm = st.nativeFrequencyCorrectionActive;
-#ifdef HAVE_SOAPYSDR
-        dev = st.soapyDev;
-#endif
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (index >= devices.size()) return;
+        if (streams.size() <= index) streams.resize(index + 1);
+        if (!streams[index]) streams[index] = std::make_unique<StreamState>();
+        stPtr = streams[index].get();
     }
-
+    auto& st = *stPtr;
     {
         std::lock_guard<std::mutex> lk(st.queueMutex);
         st.currentCenter = freqHz;
     }
+    const uint64_t seq = st.centerTuneRequestSeq.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+    bool active = false;
+#ifdef HAVE_SOAPYSDR
+    bool realHardwareReady = false;
+#endif
+    {
+        std::lock_guard<std::mutex> lk(st.stateMutex);
+        active = st.active;
+#ifdef HAVE_SOAPYSDR
+        realHardwareReady = (st.soapyDev != nullptr);
+#endif
+    }
 
 #ifdef HAVE_SOAPYSDR
-    if (dev) {
-        try {
-            const double tuneHz = nativePpm ? freqHz : correctedTuneFrequencyHz(freqHz, ppm);
-            dev->setFrequency(SOAPY_SDR_RX, 0, tuneHz);
-            spdlog::debug("Set center freq {} for device {} (hardware tune {}, ppm {})", freqHz, index, tuneHz, ppm);
-        } catch (const std::exception& ex) {
-            spdlog::warn("setFrequency failed: {}", ex.what());
-        }
+    if (active && realHardwareReady) {
+        spdlog::debug("Queued center freq {} for device {} (retune seq {})", freqHz, index, seq);
+    } else {
+        spdlog::debug("Recorded center freq {} for device {} (active={}, realReady={}, seq {})", freqHz, index, active, realHardwareReady, seq);
     }
+#else
+    spdlog::debug("Recorded center freq {} for device {} (active={}, seq {})", freqHz, index, active, seq);
 #endif
 }
 
@@ -1392,10 +1422,59 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
         try {
             auto lastSpectrumTime = std::chrono::steady_clock::now();
             while (!st.stopFlag && st.sessionGen.load(std::memory_order_acquire) == myGen) {
+                const uint64_t requestedTuneSeq = st.centerTuneRequestSeq.load(std::memory_order_acquire);
+                const uint64_t appliedTuneSeq = st.centerTuneAppliedSeq.load(std::memory_order_acquire);
+                if (requestedTuneSeq != appliedTuneSeq) {
+                    double logicalCenter = 0.0;
+                    {
+                        std::lock_guard<std::mutex> lk(st.queueMutex);
+                        logicalCenter = st.currentCenter;
+                    }
+
+                    double ppm = 0.0;
+                    bool nativePpm = false;
+                    {
+                        std::lock_guard<std::mutex> lk(st.stateMutex);
+                        ppm = st.frequencyCorrectionPpm;
+                        nativePpm = st.nativeFrequencyCorrectionActive;
+                    }
+
+                    if (std::isfinite(logicalCenter) && logicalCenter > 0.0) {
+                        const double tuneHz = nativePpm ? logicalCenter : correctedTuneFrequencyHz(logicalCenter, ppm);
+                        const auto tuneStart = std::chrono::steady_clock::now();
+                        try {
+                            std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+                            dev->setFrequency(SOAPY_SDR_RX, 0, tuneHz);
+                            st.centerTuneAppliedSeq.store(requestedTuneSeq, std::memory_order_release);
+                            resetStreamBuffers(st);
+                            lastSpectrumTime = std::chrono::steady_clock::now();
+                            const auto tuneMs = std::chrono::duration_cast<std::chrono::milliseconds>(lastSpectrumTime - tuneStart).count();
+                            if (tuneMs > 75) {
+                                spdlog::warn("Applied queued center freq {} for device {} in {} ms (hardware tune {}, ppm {}). UI thread was not blocked.", logicalCenter, index, tuneMs, tuneHz, ppm);
+                            } else {
+                                spdlog::debug("Applied queued center freq {} for device {} (hardware tune {}, ppm {}, seq {})", logicalCenter, index, tuneHz, ppm, requestedTuneSeq);
+                            }
+                        } catch (const std::exception& ex) {
+                            st.centerTuneAppliedSeq.store(requestedTuneSeq, std::memory_order_release);
+                            spdlog::warn("Queued center retune failed for device {} to {} Hz: {}", index, logicalCenter, ex.what());
+                        } catch (...) {
+                            st.centerTuneAppliedSeq.store(requestedTuneSeq, std::memory_order_release);
+                            spdlog::warn("Queued center retune failed for device {} to {} Hz with unknown native error.", index, logicalCenter);
+                        }
+                    } else {
+                        st.centerTuneAppliedSeq.store(requestedTuneSeq, std::memory_order_release);
+                        spdlog::warn("Ignoring invalid queued center freq {} for device {} (seq {})", logicalCenter, index, requestedTuneSeq);
+                    }
+                }
+
                 int flags = 0;
                 long long timeNs = 0;
                 void* buffs[] = { buff.data() };
-                int numElems = dev->readStream(stream, buffs, blockSize, flags, timeNs, 100000);
+                int numElems = 0;
+                {
+                    std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+                    numElems = dev->readStream(stream, buffs, blockSize, flags, timeNs, 100000);
+                }
                 if (numElems < 0) {
                     spdlog::warn("readStream error code: {}", numElems);
                     if (numElems == -4) { // SOAPY_SDR_OVERFLOW - samples were dropped before we read
@@ -1510,70 +1589,62 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
             st.runtimeState = "hardware failed, using stub";
         }
         try {
+            std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
             if (stream && dev) {
                 dev->deactivateStream(stream);
                 dev->closeStream(stream);
             }
             if (dev) SoapySDR::Device::unmake(dev);
         } catch (const std::exception& ex) {
-            spdlog::warn("Exception while cleaning faulted Soapy device {}: {}", index, ex.what());
+            spdlog::warn("Recoverable native issue while cleaning faulted Soapy device {}: {}", index, ex.what());
         } catch (...) {
-            spdlog::warn("Unknown exception while cleaning faulted Soapy device {}", index);
+            spdlog::warn("Recoverable non-standard native issue while cleaning faulted Soapy device {}", index);
         }
         resetStreamBuffers(st);
     }
 #endif
 
-    // Stub simulation: generate IQ with a few carriers + noise, update spectrum
-    double t = 0.0;
-    const double fs = 2.4e6;
+    // Stub/no-hardware fallback. Keep the original stable start/handoff behavior, but do
+    // NOT draw a fake moving RF carrier. If the real SDR does not open, the waterfall must
+    // look flat and logs must say stub/no-hardware instead of hiding the problem.
+    double stubFs = 0.0;
+    double stubCenterHz = 0.0;
+    {
+        std::lock_guard<std::mutex> lk(st.queueMutex);
+        stubFs = (std::isfinite(st.currentRate) && st.currentRate > 0.0) ? st.currentRate : 2.4e6;
+        stubCenterHz = (std::isfinite(st.currentCenter) && st.currentCenter > 0.0) ? st.currentCenter : 100e6;
+    }
+    spdlog::warn("Device {} is in STUB/no-hardware IQ mode: synthetic carrier disabled; no real RF is being displayed until Soapy hardware opens.", index);
     auto nextStubBlockTime = std::chrono::steady_clock::now();
-    const auto stubBlockPeriod = std::chrono::duration<double>((double)blockSize / fs);
+    uint64_t stubBlocks = 0;
     while (!st.stopFlag && st.sessionGen.load(std::memory_order_acquire) == myGen) {
+        {
+            std::lock_guard<std::mutex> lk(st.queueMutex);
+            if (std::isfinite(st.currentRate) && st.currentRate > 0.0) stubFs = st.currentRate;
+            if (std::isfinite(st.currentCenter) && st.currentCenter > 0.0) stubCenterHz = st.currentCenter;
+        }
+        const auto stubBlockPeriod = std::chrono::duration<double>((double)blockSize / std::max(1.0, stubFs));
         std::vector<std::complex<float>> block(blockSize);
         for (size_t i = 0; i < blockSize; ++i) {
-            double phase = 2 * 3.14159265 * (100e6 + 0.1e6 * std::sin(t * 0.3)) / fs * i; // drifting carrier example
-            float re = std::cos(phase) * 0.8f + (rand() % 1000 - 500) * 0.0002f;
-            float im = std::sin(phase) * 0.8f + (rand() % 1000 - 500) * 0.0002f;
+            const float re = (rand() % 1000 - 500) * 0.00005f;
+            const float im = (rand() % 1000 - 500) * 0.00005f;
             block[i] = {re, im};
         }
-        // Centralized append: ring fed before move (no more "ring receives no samples" after std::move)
         appendIQBlock(index, std::move(block));
 
-        // spectrum for stub (same real FFT path so zoomed views look consistent and high-res even in demo/no-hw)
         {
-            size_t fftN = 8192;
-            {
-                std::lock_guard<std::mutex> lk(st.queueMutex);
-                fftN = st.spectrumBins;
-            }
-            std::vector<std::complex<float>> fake(fftN);
-            for (size_t i = 0; i < fftN; ++i) {
-                double phase = 2 * 3.14159265 * (100e6 + 0.1e6 * std::sin(t * 0.3)) / fs * (double)i;
-                float re = std::cos(phase) * 0.7f + (rand() % 1000 - 500) * 0.00015f;
-                float im = std::sin(phase) * 0.7f + (rand() % 1000 - 500) * 0.00015f;
-                fake[i] = {re, im};
-            }
-            auto lp = computeRealFFTPower(fake, fftN, true);
-            {
-                std::lock_guard<std::mutex> lk(st.queueMutex);
-                if (st.spectrumAvg.size() != lp.size()) {
-                    st.spectrumAvg = lp;
-                    st.spectrumPeak = lp;
-                }
-                std::vector<float> published(lp.size(), -120.0f);
-                for (size_t b = 0; b < lp.size(); ++b) {
-                    st.spectrumAvg[b] = st.spectrumAvg[b] * 0.7f + lp[b] * 0.3f;
-                    float decayedPeak = std::max(-180.0f, st.spectrumPeak[b] - 0.8f);
-                    st.spectrumPeak[b] = std::max(decayedPeak, lp[b]);
-                    published[b] = std::max(st.spectrumAvg[b], st.spectrumPeak[b] - 4.0f);
-                }
-                st.latestPower = std::move(published);
-                st.currentRate = fs;
-            }
+            std::lock_guard<std::mutex> lk(st.queueMutex);
+            const size_t bins = std::max<size_t>(64, st.spectrumBins);
+            st.latestPower.assign(bins, -120.0f);
+            st.spectrumAvg.assign(bins, -120.0f);
+            st.spectrumPeak.assign(bins, -120.0f);
+            st.currentRate = stubFs;
+            st.currentCenter = stubCenterHz;
         }
 
-        t += 0.05;
+        if ((++stubBlocks % 300) == 0) {
+            spdlog::warn("Device {} still in STUB/no-hardware IQ mode after {} blocks; check Soapy make/activate/readStream logs.", index, stubBlocks);
+        }
         nextStubBlockTime += std::chrono::duration_cast<std::chrono::steady_clock::duration>(stubBlockPeriod);
         auto now = std::chrono::steady_clock::now();
         if (nextStubBlockTime > now) {

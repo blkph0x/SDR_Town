@@ -163,11 +163,12 @@ void SpectrumWidget::updateIQ(const std::vector<std::complex<float>>& iq, double
     updateSpectrum(computeIqFftPower(iq), centerFreqHz, sampleRateHz);
 }
 
-void SpectrumWidget::setCenterFreq(double hz) { m_centerFreq = hz; update(); }
-void SpectrumWidget::setSampleRate(double hz) { m_sampleRate = hz; update(); }
+void SpectrumWidget::setCenterFreq(double hz) { QMutexLocker lock(&m_dataMutex); m_centerFreq = hz; update(); }
+void SpectrumWidget::setSampleRate(double hz) { QMutexLocker lock(&m_dataMutex); m_sampleRate = hz; update(); }
 
 void SpectrumWidget::setFreqRange(double minHz, double maxHz)
 {
+    QMutexLocker lock(&m_dataMutex);
     m_minFreq = minHz;
     m_maxFreq = maxHz;
     update();
@@ -175,6 +176,7 @@ void SpectrumWidget::setFreqRange(double minHz, double maxHz)
 
 void SpectrumWidget::setColorRange(double minDb, double maxDb)
 {
+    QMutexLocker lock(&m_dataMutex);
     m_colorMinDb = minDb;
     m_colorMaxDb = maxDb;
     update();
@@ -182,24 +184,28 @@ void SpectrumWidget::setColorRange(double minDb, double maxDb)
 
 void SpectrumWidget::setViewBandwidth(double bwHz)
 {
+    QMutexLocker lock(&m_dataMutex);
     m_viewBandwidthHz = std::max(1000.0, bwHz);
     update();
 }
 
 void SpectrumWidget::setSquelchThreshold(double db)
 {
+    QMutexLocker lock(&m_dataMutex);
     m_squelchThresholdDb = db;
     update();
 }
 
 void SpectrumWidget::setLiveRms(double rmsDb)
 {
+    QMutexLocker lock(&m_dataMutex);
     m_liveSignalDb = rmsDb;
     update();
 }
 
 void SpectrumWidget::setLiveLevels(double signalDb, double noiseFloorDb)
 {
+    QMutexLocker lock(&m_dataMutex);
     m_liveSignalDb = signalDb;
     m_liveNoiseFloorDb = noiseFloorDb;
     update();
@@ -331,26 +337,19 @@ double SpectrumWidget::dbFromY(int y, int specH) const
     return m_colorMinDb + n * range;
 }
 
-// Dedicated fixed range for the interactive squelch line and live level marker.
-// This is mapped over the spectrum curve height so the user can always drag from
-// "always open" (bottom of curve area) to "force mute even loud signals" (top of curve area)
-// completely independently of the WF Color Min/Max used for coloring.
-static constexpr double kSquelchVizMinDb = -130.0;
-static constexpr double kSquelchVizMaxDb =  40.0;
-
+// Squelch, SIG, and NF must share the same spectrum dB axis. Older builds
+// used a fixed -130..+40 dB squelch visualization scale while SIG/NF used
+// the current spectrum color axis, which made the orange SQ line visually
+// disagree with the actual RF gate. Keep these wrapper names for header/API
+// compatibility, but delegate to the same mapping used by SIG/NF.
 int SpectrumWidget::yFromSquelchViz(double db, int specH) const
 {
-    double range = kSquelchVizMaxDb - kSquelchVizMinDb;
-    double norm = std::clamp( (db - kSquelchVizMinDb) / range , 0.0, 1.0);
-    return specH - 5 - static_cast<int>(norm * (specH - 10));
+    return yFromDb(db, specH);
 }
 
 double SpectrumWidget::squelchVizDbFromY(int y, int specH) const
 {
-    double range = kSquelchVizMaxDb - kSquelchVizMinDb;
-    double n = (specH - 5.0 - y) / (specH - 10.0);
-    n = std::clamp(n, 0.0, 1.0);
-    return kSquelchVizMinDb + n * range;   // high on screen (low y) = high (less negative / positive) dB
+    return dbFromY(y, specH);
 }
 
 void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
@@ -736,10 +735,13 @@ void SpectrumWidget::wheelEvent(QWheelEvent* event)
 {
     // Zoom the display view (affects both spectrum curve and waterfall).
     // Smaller view BW = higher effective resolution / fine detail on both parts.
-    double currentBw = (m_viewBandwidthHz > 0 ? m_viewBandwidthHz : m_sampleRate);
-    double factor = (event->angleDelta().y() > 0) ? 0.7 : 1.4; // stronger zoom steps
-    double newBw = std::clamp(currentBw * factor, 50e3, 20e6);
-    m_viewBandwidthHz = newBw;
+    {
+        QMutexLocker lock(&m_dataMutex);
+        double currentBw = (m_viewBandwidthHz > 0 ? m_viewBandwidthHz : m_sampleRate);
+        double factor = (event->angleDelta().y() > 0) ? 0.7 : 1.4; // stronger zoom steps
+        double newBw = std::clamp(currentBw * factor, 50e3, 20e6);
+        m_viewBandwidthHz = newBw;
+    }
     update();
     event->accept();
 }
@@ -747,6 +749,7 @@ void SpectrumWidget::wheelEvent(QWheelEvent* event)
 void SpectrumWidget::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
+    QMutexLocker lock(&m_dataMutex);
     // resize waterfall keeping history aspect
     if (width() > 0) {
         int newW = width();

@@ -7,9 +7,41 @@
 #include <cstring>
 #include <thread>
 #include <chrono>
+#include <memory>
 
 namespace {
 constexpr size_t kOutputRingFrames = 1u << 18; // storage capacity; queued depth is capped to about 250 ms.
+static_assert((kOutputRingFrames & (kOutputRingFrames - 1)) == 0,
+              "Audio output ring capacity must stay a power of two for the fast wrap path.");
+
+static bool isPowerOfTwo(size_t v) noexcept
+{
+    return v != 0 && (v & (v - 1)) == 0;
+}
+
+static size_t ringWrap(size_t value, size_t capacity) noexcept
+{
+    if (capacity == 0) return 0;
+    return isPowerOfTwo(capacity) ? (value & (capacity - 1)) : (value % capacity);
+}
+
+static size_t ringDistance(size_t writePos, size_t readPos, size_t capacity) noexcept
+{
+    if (capacity == 0) return 0;
+    if (isPowerOfTwo(capacity)) return (writePos - readPos) & (capacity - 1);
+    return writePos >= readPos ? (writePos - readPos) : (capacity - (readPos - writePos));
+}
+
+static void stopAndUninitOutput(const std::shared_ptr<AudioEngine::ActiveOutput>& act)
+{
+    if (!act) return;
+    act->valid.store(false, std::memory_order_release);
+    if (act->device && act->device->pContext) {
+        ma_device_stop(act->device.get());
+        ma_device_uninit(act->device.get());
+        act->device.reset();
+    }
+}
 }
 
 static void data_callback(ma_device* pDevice, void* pOutput, const void* /*pInput*/, ma_uint32 frameCount)
@@ -64,15 +96,19 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* /*pInpu
 
             size_t rpos = rb.readPos.load(std::memory_order_relaxed);
             size_t wpos = rb.writePos.load(std::memory_order_acquire);
-            size_t available = (wpos - rpos) & (rb.capacity - 1);
+            if (rb.capacity == 0) {
+                std::memset(out, 0, toRead * sizeof(float));
+                return;
+            }
+            size_t available = ringDistance(wpos, rpos, rb.capacity);
 
             size_t canRead = std::min(toRead, available);
 
             for (size_t i = 0; i < canRead; ++i) {
-                out[i] = rb.data[(rpos + i) & (rb.capacity - 1)] * v;
+                out[i] = rb.data[ringWrap(rpos + i, rb.capacity)] * v;
             }
             read += canRead;
-            rpos = (rpos + canRead) & (rb.capacity - 1);
+            rpos = ringWrap(rpos + canRead, rb.capacity);
             rb.readPos.store(rpos, std::memory_order_release);
 
             if (read < toRead) {
@@ -102,17 +138,20 @@ AudioEngine::AudioEngine()
 
 AudioEngine::~AudioEngine()
 {
+    std::vector<std::shared_ptr<ActiveOutput>> oldOutputs;
     {
         std::lock_guard<std::mutex> lk(audioMutex);
         for (auto& act : m_active) {
-            if (act && act->device && act->device->pContext) {
-                act->valid.store(false, std::memory_order_release);
-                ma_device_stop(act->device.get());
-                ma_device_uninit(act->device.get());
-            }
+            if (act) act->valid.store(false, std::memory_order_release);
         }
-        m_active.clear();
+        oldOutputs.swap(m_active);
     }
+
+    // Stop/uninit outside audioMutex. This lets miniaudio join any in-flight callback
+    // scopes while ActiveOutput storage remains alive in oldOutputs, avoiding UAF.
+    for (auto& act : oldOutputs) stopAndUninitOutput(act);
+    oldOutputs.clear();
+
     if (m_contextValid) {
         ma_context_uninit(&m_context);
     }
@@ -159,17 +198,28 @@ void AudioEngine::setActiveOutputs(const std::vector<size_t>& indicesFromLastEnu
         spdlog::warn("Audio context not valid, cannot set active outputs");
         return;
     }
-    std::lock_guard<std::mutex> lk(audioMutex);
-    // stop all current (ma_stop first to quiesce callbacks, then clear vector of shared_ptrs)
-    for (size_t i = 0; i < m_active.size(); ++i) stopDevice(i);
-    m_active.clear();
 
-    for (size_t idx : indicesFromLastEnum) {
-        if (idx < m_devices.size()) {
-            startDevice(idx);
+    std::vector<std::shared_ptr<ActiveOutput>> oldOutputs;
+    {
+        std::lock_guard<std::mutex> lk(audioMutex);
+        for (auto& act : m_active) {
+            if (act) act->valid.store(false, std::memory_order_release);
         }
+        oldOutputs.swap(m_active);
     }
-    spdlog::info("Active audio outputs set: {}", m_active.size());
+
+    for (auto& act : oldOutputs) stopAndUninitOutput(act);
+    oldOutputs.clear();
+
+    {
+        std::lock_guard<std::mutex> lk(audioMutex);
+        for (size_t idx : indicesFromLastEnum) {
+            if (idx < m_devices.size()) {
+                startDevice(idx);
+            }
+        }
+        spdlog::info("Active audio outputs set: {}", m_active.size());
+    }
 }
 
 void AudioEngine::setActiveOutputsByName(const std::vector<std::string>& nameSubstrings)
@@ -190,13 +240,26 @@ void AudioEngine::startDevice(size_t enumIndex)
 {
     if (!m_contextValid || enumIndex >= m_devices.size()) return;
 
+    auto actPtr = std::make_shared<ActiveOutput>();
+    actPtr->enumIndex = enumIndex;
+    actPtr->volume = 0.9f;
+    actPtr->owningEngine = this;
+    actPtr->ring.init(kOutputRingFrames);
+    if (!isPowerOfTwo(actPtr->ring.capacity)) {
+        spdlog::error("Audio ring capacity {} is not a power of two; refusing to start output {}.",
+                      actPtr->ring.capacity, m_devices[enumIndex].name);
+        return;
+    }
+
     ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
     cfg.playback.pDeviceID = &m_devices[enumIndex].id;
     cfg.playback.format = ma_format_f32;
     cfg.playback.channels = 1;
     cfg.sampleRate = 48000;
     cfg.dataCallback = data_callback;
-    cfg.pUserData = this;
+    // The realtime callback reinterpret_casts pUserData as ActiveOutput, so pass
+    // the exact ActiveOutput object from the outset rather than the AudioEngine.
+    cfg.pUserData = actPtr.get();
 
     auto dev = std::make_unique<ma_device>();
     ma_result res = ma_device_init(&m_context, &cfg, dev.get());
@@ -205,21 +268,11 @@ void AudioEngine::startDevice(size_t enumIndex)
         return;
     }
 
-    float actualRate = (float)cfg.sampleRate;
-    m_sampleRate.store(actualRate, std::memory_order_relaxed);
-
-    // Add to m_active and init ring *before* starting the device.
-    auto actPtr = std::make_shared<ActiveOutput>();
-    actPtr->enumIndex = enumIndex;
     actPtr->device = std::move(dev);
-    actPtr->volume = 0.9f;
-    actPtr->owningEngine = this;
-
-    // P1: give *this device's* ma_device a direct pointer to its ActiveOutput so data_callback has zero-cost access
-    // (no m_active iteration or findActiveOutput from the realtime thread). The engine is reachable via owningEngine.
-    actPtr->device.get()->pUserData = actPtr.get();
-
-    actPtr->ring.init(kOutputRingFrames);
+    const ma_uint32 actualDeviceRate = actPtr->device ? actPtr->device->sampleRate : cfg.sampleRate;
+    float actualRate = static_cast<float>(actualDeviceRate != 0 ? actualDeviceRate : cfg.sampleRate);
+    m_sampleRate.store(actualRate, std::memory_order_relaxed);
+    actPtr->device->pUserData = actPtr.get();
     actPtr->valid.store(true, std::memory_order_release);
 
     m_active.push_back(actPtr);
@@ -227,31 +280,32 @@ void AudioEngine::startDevice(size_t enumIndex)
     res = ma_device_start(actPtr->device.get());
     if (res != MA_SUCCESS) {
         spdlog::error("Failed to start playback device {}", m_devices[enumIndex].name);
-        actPtr->valid.store(false);
+        actPtr->valid.store(false, std::memory_order_release);
         if (actPtr->device && actPtr->device->pContext) {
             ma_device_uninit(actPtr->device.get());
         }
-        // remove the bad entry
         m_active.pop_back();
         return;
     }
 
     spdlog::info("Started audio output: {} @ {} Hz ({} bit float, mono)", m_devices[enumIndex].name, (int)actualRate, 32);
-    spdlog::info("  All audio block sizes, de-emphasis, 19kHz notch, final LPF are calculated for this exact device rate.", (int)actualRate);
+    spdlog::info("  All audio block sizes, de-emphasis, 19kHz notch, final LPF are calculated for {} Hz.", (int)actualRate);
 }
 
 void AudioEngine::stopDevice(size_t activeIdx)
 {
-    if (activeIdx >= m_active.size()) return;
-    auto& actPtr = m_active[activeIdx];
-    if (actPtr) {
-        actPtr->valid.store(false, std::memory_order_release);
-        if (actPtr->device && actPtr->device->pContext) {
-            ma_device_stop(actPtr->device.get());
-            ma_device_uninit(actPtr->device.get());
-            spdlog::info("Stopped audio output #{}", activeIdx);
-        }
+    std::shared_ptr<ActiveOutput> actPtr;
+    {
+        std::lock_guard<std::mutex> lk(audioMutex);
+        if (activeIdx >= m_active.size()) return;
+        actPtr = m_active[activeIdx];
+        m_active.erase(m_active.begin() + static_cast<std::ptrdiff_t>(activeIdx));
     }
+
+    // Stop/uninit outside audioMutex so a backend teardown cannot deadlock with
+    // a callback or another control path that only needs the active-output list.
+    stopAndUninitOutput(actPtr);
+    spdlog::info("Stopped audio output #{}", activeIdx);
 }
 
 void AudioEngine::setMasterVolume(float vol)
@@ -295,19 +349,24 @@ void AudioEngine::pushAudioToActiveOutputLocked(ActiveOutput& output, const floa
 
     const size_t maxQueuedFrames = std::max<size_t>(256, (size_t)(getSampleRate() * 0.25f));
     size_t w = rb.writePos.load(std::memory_order_relaxed);
-    size_t r = rb.readPos.load(std::memory_order_acquire);
-    size_t queued = (w - r) & (rb.capacity - 1);
-    if (queued + count > maxQueuedFrames) {
-        const size_t keep = (maxQueuedFrames > count) ? (maxQueuedFrames - count) : 0;
-        const size_t newRead = (w + rb.capacity - keep) & (rb.capacity - 1);
-        rb.readPos.store(newRead, std::memory_order_release);
+    const size_t r = rb.readPos.load(std::memory_order_acquire);
+    const size_t queued = ringDistance(w, r, rb.capacity);
+
+    // SPSC hardening: only the realtime callback owns readPos. The previous
+    // overload path advanced readPos from the producer, which violates the
+    // single-producer/single-consumer contract and can click/drop under load.
+    // If the queued depth is already too high, drop the oldest part of this new
+    // producer block instead of moving the consumer cursor.
+    if (queued >= maxQueuedFrames) return;
+    const size_t allowedByDepth = maxQueuedFrames - queued;
+    if (count > allowedByDepth) {
+        samples += (count - allowedByDepth);
+        count = allowedByDepth;
     }
 
     for (size_t i = 0; i < count; ++i) {
-        size_t next = (w + 1) & (rb.capacity - 1);
-        if (next == rb.readPos.load(std::memory_order_acquire)) {
-            rb.readPos.store((rb.readPos.load(std::memory_order_relaxed) + 1) & (rb.capacity - 1), std::memory_order_relaxed);
-        }
+        const size_t next = ringWrap(w + 1, rb.capacity);
+        if (next == rb.readPos.load(std::memory_order_acquire)) break;
         rb.data[w] = samples[i];
         w = next;
     }
@@ -419,7 +478,7 @@ double AudioEngine::getRingFillPercent() const {
             size_t r = rb.readPos.load(std::memory_order_relaxed);
             size_t w = rb.writePos.load(std::memory_order_acquire);
             size_t cap = (rb.capacity ? rb.capacity : 1);
-            size_t avail = (w - r) & (cap - 1);
+            size_t avail = ringDistance(w, r, cap);
             return (100.0 * avail) / cap;
         }
     }
