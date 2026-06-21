@@ -27,9 +27,13 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         snapshot.phase2Bursts > 0 ||
         snapshot.phase2VoiceCodewords > 0;
 
+    const bool trustedEncryptedEss =
+        snapshot.phase2EssKnown &&
+        snapshot.phase2EssEncrypted &&
+        snapshot.phase2MacCrcValid > 0;
     decision.encryptedOnVoice =
         diagIs(snapshot.diag, P25FollowDiagCode::SkippedEncrypted) ||
-        (snapshot.phase2EssKnown && snapshot.phase2EssEncrypted);
+        trustedEncryptedEss;
     if (decision.encryptedOnVoice) {
         decision.action = P25FollowAction::ReturnEncrypted;
         return decision;
@@ -54,19 +58,19 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         snapshot.decodedFrames == 0 &&
         snapshot.phase2VoiceCodewords == 0;
 
-    const bool noPhase2MacEssYet =
+    const bool noTrustedPhase2MacEssYet =
         snapshot.tunedAtMs > 0 &&
         snapshot.phase2MacCrcValid == 0 &&
-        !snapshot.phase2EssKnown &&
+        (!snapshot.phase2EssKnown || snapshot.phase2EssEncrypted) &&
         snapshot.decodedFrames == 0;
 
     decision.tdmaEpochLockedNoMacEss =
-        noPhase2MacEssYet &&
+        noTrustedPhase2MacEssYet &&
         snapshot.phase2SuperframeBursts >= 6 &&
         snapshot.phase2MaskedBursts >= 6;
 
     decision.tdmaVcwNoSuperframeTimeout =
-        noPhase2MacEssYet &&
+        noTrustedPhase2MacEssYet &&
         snapshot.nowMs - snapshot.tunedAtMs > 15000 &&
         snapshot.phase2VoiceCodewords >= 4 &&
         snapshot.phase2SuperframeBursts == 0 &&

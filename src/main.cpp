@@ -755,6 +755,26 @@ static bool p25TalkgroupCanTuneForFollow(const P25TalkgroupEntry& tg)
     return p25TalkgroupIsPhase2(tg);
 }
 
+static bool p25PrepareTalkgroupForFollowGrant(P25TalkgroupEntry& tg,
+                                              const P25ControlEvent& event,
+                                              bool& probingUnknownPhase2EncryptedHistory)
+{
+    probingUnknownPhase2EncryptedHistory = false;
+    if (event.encryptionKnown) {
+        tg.encryptionKnown = true;
+        tg.encrypted = event.encrypted;
+    } else if (p25TalkgroupIsPhase2(tg) && tg.encryptionKnown && tg.encrypted) {
+        // SDRTrunk-style traffic handling allocates/probes a Phase 2 traffic
+        // channel from grant/update information first, then lets PTT/ESS prove
+        // encryption state.  Do the same for grant updates without service
+        // options so stale encrypted history cannot suppress a later clear call.
+        tg.encryptionKnown = false;
+        tg.encrypted = false;
+        probingUnknownPhase2EncryptedHistory = true;
+    }
+    return p25TalkgroupCanTuneForFollow(tg);
+}
+
 static bool p25TalkgroupHasUsableMaskMetadata(const P25TalkgroupEntry& tg)
 {
     return tg.p25MaskParamsKnown &&
@@ -1414,7 +1434,10 @@ static QString p25LiveLockStageText(const P25LiveDecodeResult& result, size_t tr
         return "ClearVoiceReady";
     }
     if (result.stats.phase2EssKnown) {
-        return result.stats.phase2EssEncrypted ? "Phase2EssEncrypted" : "Phase2EssClear";
+        if (result.stats.phase2EssEncrypted) {
+            return result.stats.phase2MacCrcValid > 0 ? "Phase2EssEncrypted" : "Phase2EssEncryptedPendingMac";
+        }
+        return "Phase2EssClear";
     }
     if (result.stats.phase2MacCrcValid > 0) return "Phase2MacCrcValid";
     if (result.stats.phase2MaskedBursts > 0) return "Phase2MaskHypothesis";
@@ -1478,6 +1501,7 @@ static constexpr double kP25ControlDecodeWindowSeconds = 0.512;
 static constexpr int kP25ControlDecodeCadenceMs = 360;
 static constexpr double kP25Phase2VoiceDecodeWindowSeconds = 0.512;
 static constexpr int kP25Phase2VoiceDecodeCadenceMs = 384;
+static constexpr qint64 kP25AutoFollowDifferentCallMinDwellMs = 12000;
 
 static qint64 p25PostArmSettleMs(bool phase2) noexcept
 {
@@ -4203,11 +4227,17 @@ static P25VoiceAudioBlock decodeP25VoiceAudioBlock(Receiver& rx,
                                              static_cast<long double>(sampleRateHz)))
         : 0;
 
-    if (rx.p25VoicePhase2 && out.phase2EssKnown) {
+    const bool trustedPhase2EncryptedEss =
+        rx.p25VoicePhase2 &&
+        out.phase2EssKnown &&
+        out.phase2EssEncrypted &&
+        out.phase2MacCrcValid > 0;
+    if (rx.p25VoicePhase2 && out.phase2EssKnown &&
+        (!out.phase2EssEncrypted || trustedPhase2EncryptedEss)) {
         rx.p25VoiceClearKnown = true;
         rx.p25VoiceEncrypted = out.phase2EssEncrypted;
     }
-    if (rx.p25VoicePhase2 && out.phase2EssKnown && out.phase2EssEncrypted) {
+    if (trustedPhase2EncryptedEss) {
         out.skippedEncrypted = true;
         out.diag = P25VoiceDiagCode::SkippedEncrypted;
         writeP25Phase2ValidationRecord(rx, live, out, {}, sampleRateHz, centerFreqHz, targetFreqHz, outputRateHz);
@@ -4295,15 +4325,25 @@ static void runP25ReplayFollowTest(const P25ReplayCliArgs& args)
 
         P25TalkgroupEntry candidate = *it;
         p25AugmentTalkgroupFromKnownSite(candidate, talkgroups, ccHz);
+        bool probingUnknownPhase2EncryptedHistory = false;
+        const bool followReady = p25PrepareTalkgroupForFollowGrant(
+            candidate,
+            grant,
+            probingUnknownPhase2EncryptedHistory);
         if (candidate.encryptionKnown && candidate.encrypted) {
             ++encryptedSkipped;
             ++skippedEncryptedTgs[candidate.talkgroupId];
             return;
         }
-        if (!p25TalkgroupCanTuneForFollow(candidate) || candidate.lastVoiceFreqHz <= 0.0) {
+        if (!followReady || candidate.lastVoiceFreqHz <= 0.0) {
             ++notReadySkipped;
             ++skippedNotReadyTgs[candidate.talkgroupId];
             return;
+        }
+        if (probingUnknownPhase2EncryptedHistory && skippedEncryptedTgs[candidate.talkgroupId] == 0) {
+            std::cout << "P25 followtest probing Phase 2 TG " << candidate.talkgroupId
+                      << " despite previous encrypted history; grant/update has no service options, "
+                         "so voice audio remains gated until MAC/ESS proves clear.\n";
         }
         if (!std::isfinite(candidate.lastVoiceFreqHz) ||
             std::abs(candidate.lastVoiceFreqHz - capture.centerFreqHz) > passbandHalfHz) {
@@ -4481,7 +4521,8 @@ static void runP25ReplayFollowTest(const P25ReplayCliArgs& args)
         phase2MacCrcValid += static_cast<long long>(audio.phase2MacCrcValid);
         essKnown = essKnown || audio.phase2EssKnown;
         essEncrypted = essEncrypted || audio.phase2EssEncrypted;
-        voiceEncrypted = voiceEncrypted || audio.skippedEncrypted || (audio.phase2EssKnown && audio.phase2EssEncrypted);
+        voiceEncrypted = voiceEncrypted || audio.skippedEncrypted ||
+            (audio.phase2EssKnown && audio.phase2EssEncrypted && audio.phase2MacCrcValid > 0);
         lastDiag = audio.diag;
 
         std::ostringstream sig;
@@ -5619,13 +5660,13 @@ public:
                 }
             }
 
-            const bool currentGrantEncryptionKnown = event.encryptionKnown;
-            if (currentGrantEncryptionKnown) {
-                followTg.encryptionKnown = true;
-                followTg.encrypted = event.encrypted;
-            }
+            bool probingUnknownPhase2EncryptedHistory = false;
+            const bool followReady = p25PrepareTalkgroupForFollowGrant(
+                followTg,
+                event,
+                probingUnknownPhase2EncryptedHistory);
 
-            if (currentGrantEncryptionKnown && followTg.encrypted) {
+            if (followTg.encryptionKnown && followTg.encrypted) {
                 appendP25LogLineKeyed(QString("auto-skip-encrypted:%1:%2").arg(followTg.talkgroupId).arg(static_cast<int>(grantLooksPhase2)),
                     QString("Auto-follow skipped encrypted P25 TG %1 (%2); staying on/returning to control channel.")
                         .arg(followTg.talkgroupId)
@@ -5637,18 +5678,13 @@ public:
                 }
                 return false;
             }
-            if (!currentGrantEncryptionKnown && grantLooksPhase2 && tg.encryptionKnown && tg.encrypted) {
-                appendP25LogLineKeyed(QString("auto-skip-p2-likely-encrypted:%1").arg(followTg.talkgroupId),
-                    QString("Auto-follow skipped Phase 2 TG %1 because the grant update has no service options and this TG/call is already known encrypted; waiting for an explicit clear grant.")
+            if (probingUnknownPhase2EncryptedHistory) {
+                appendP25LogLineKeyed(QString("auto-probe-p2-unknown-after-encrypted:%1").arg(followTg.talkgroupId),
+                    QString("Auto-follow probing Phase 2 TG %1 even though previous TG history says encrypted; this grant/update has no service options, so audio remains gated until MAC/ESS proves clear or encrypted.")
                         .arg(followTg.talkgroupId),
                     8000);
-                if (p25FollowAutoActive && p25FollowTalkgroupId == followTg.talkgroupId) {
-                    appendP25LogLine(QString("Likely encrypted re-grant/update for followed TG %1; releasing voice follow immediately.").arg(followTg.talkgroupId));
-                    returnP25AutoFollowToControl();
-                }
-                return false;
             }
-            if (!p25TalkgroupCanTuneForFollow(followTg)) {
+            if (!followReady) {
                 appendP25LogLineKeyed(QString("auto-skip-clear-unknown:%1").arg(followTg.talkgroupId),
                     QString("Auto-follow is waiting for a clear-state grant before following P25 TG %1.").arg(followTg.talkgroupId),
                     5000);
@@ -5667,7 +5703,22 @@ public:
                 p25AutoFollowLastActiveMs = nowMs;
                 return false;
             }
-            if (p25FollowAutoActive && nowMs - p25AutoFollowTunedAtMs < 1500) return false;
+            if (p25FollowAutoActive) {
+                const qint64 dwellMs = p25AutoFollowTunedAtMs > 0
+                    ? nowMs - p25AutoFollowTunedAtMs
+                    : 0;
+                if (dwellMs < kP25AutoFollowDifferentCallMinDwellMs) {
+                    appendP25LogLineKeyed(QString("auto-follow-dwell:%1").arg(p25FollowTalkgroupId),
+                        QString("P25 auto-follow holding TG %1 voice=%2MHz for TDMA MAC/ESS acquisition; ignoring different TG %3 until minimum dwell completes (%4/%5ms).")
+                            .arg(p25FollowTalkgroupId)
+                            .arg(p25AutoFollowVoiceFreqHz / 1e6, 0, 'f', 5)
+                            .arg(followTg.talkgroupId)
+                            .arg(std::max<qint64>(0, dwellMs))
+                            .arg(kP25AutoFollowDifferentCallMinDwellMs),
+                        3000);
+                    return false;
+                }
+            }
 
             static std::atomic_bool p25AutoFollowTransitionBusy{false};
             bool expectedTransition = false;
@@ -10409,6 +10460,11 @@ int runCLI(int argc, char* argv[]) {
                             P25TalkgroupEntry candidate = *it;
                             p25AugmentTalkgroupFromKnownSite(candidate, talkgroups, ccHz);
                             if (followGrant) {
+                                bool probingUnknownPhase2EncryptedHistory = false;
+                                const bool followReady = p25PrepareTalkgroupForFollowGrant(
+                                    candidate,
+                                    grant,
+                                    probingUnknownPhase2EncryptedHistory);
                                 if (candidate.encryptionKnown && candidate.encrypted) {
                                     ++encryptedGrantSkips;
                                     if (++skippedEncryptedTgs[candidate.talkgroupId] == 1) {
@@ -10417,13 +10473,18 @@ int runCLI(int argc, char* argv[]) {
                                     }
                                     return;
                                 }
-                                if (!p25TalkgroupCanTuneForFollow(candidate) || candidate.lastVoiceFreqHz <= 0.0) {
+                                if (!followReady || candidate.lastVoiceFreqHz <= 0.0) {
                                     ++notReadyGrantSkips;
                                     if (++skippedNotReadyTgs[candidate.talkgroupId] == 1) {
                                         std::cout << "    grant not ready for follow test yet: "
                                                   << p25FollowDetailLogText(candidate).toStdString() << "\n";
                                     }
                                     return;
+                                }
+                                if (probingUnknownPhase2EncryptedHistory) {
+                                    std::cout << "    probing Phase 2 TG " << candidate.talkgroupId
+                                              << " despite previous encrypted history; grant/update has no service options, "
+                                                 "so audio remains gated until MAC/ESS proves clear\n";
                                 }
                             }
                             selectedGrant = candidate;

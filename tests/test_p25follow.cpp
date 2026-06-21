@@ -26,6 +26,27 @@ TEST_CASE("P25 follow returns immediately when a voice channel proves encrypted"
     REQUIRE(decision.effectiveTalkgroupId == 101);
 }
 
+TEST_CASE("P25 follow does not treat encrypted ESS without MAC CRC as final proof", "[p25][follow]")
+{
+    P25FollowSnapshot snapshot;
+    snapshot.autoActive = true;
+    snapshot.nowMs = 20'500;
+    snapshot.tunedAtMs = 1'000;
+    snapshot.lastActiveMs = 20'500;
+    snapshot.talkgroupId = 102;
+    snapshot.diag = diag(P25FollowDiagCode::Phase2MaskAppliedNoMacCrc);
+    snapshot.phase2SuperframeBursts = 6;
+    snapshot.phase2MaskedBursts = 6;
+    snapshot.phase2EssKnown = true;
+    snapshot.phase2EssEncrypted = true;
+    snapshot.phase2MacCrcValid = 0;
+
+    const auto decision = evaluateP25Follow(snapshot);
+    REQUIRE_FALSE(decision.encryptedOnVoice);
+    REQUIRE(decision.tdmaEpochLockedNoMacEss);
+    REQUIRE(decision.action == P25FollowAction::ReturnNoMacEss);
+}
+
 TEST_CASE("P25 follow holds briefly after tune before declaring a quiet voice channel ended", "[p25][follow]")
 {
     P25FollowSnapshot snapshot;

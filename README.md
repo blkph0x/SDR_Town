@@ -131,6 +131,10 @@ Phase 2 clear voice release is intentionally gated. Audio is released only when
 the decoder has enough TDMA mask, MAC/ESS clear-state, and AMBE validation
 evidence. Late entry into a call may show voice bursts before MAC/ESS state is
 confirmed; the log will say that it is waiting rather than silently failing.
+Grant updates without service options are still followed/probed even when old
+talkgroup history says encrypted; the traffic-channel MAC/ESS path makes the
+final clear/encrypted decision. Encrypted ESS is treated as final only when
+MAC CRC backs it or the voice decoder explicitly marks the call encrypted.
 For tester reports, add `record=8` to `p25 waitgrant`; the CLI saves a SigMF IQ
 slice plus the final P25 voice-gate diagnostics under the app data
 `iq_test_captures` folder before retuning back to the control channel.
