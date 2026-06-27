@@ -171,13 +171,13 @@ std::vector<int> makeSyntheticMaskedPhase2Superframe(uint16_t nac, uint32_t wacn
 {
     auto dibits = makeSyntheticPhase2Superframe();
     const auto mask = P25LiveDecoder::phase2XorMaskDibits(nac, wacn, systemId);
-    constexpr std::array<size_t, 4> duidDibits{10, 47, 132, 169};
+    constexpr std::array<size_t, 4> duidDibits{0, 37, 122, 159};
     for (size_t slot = 0; slot < 12; ++slot) {
         const size_t base = slot * P25LiveDecoder::Phase2BurstDibits;
-        for (size_t i = 0; i < 170; ++i) {
-            if (i < 10) continue; // The local burst model overlaps these dibits with the sync pattern.
-            if (std::find(duidDibits.begin(), duidDibits.end(), i) != duidDibits.end()) continue;
-            dibits[base + 10 + i] ^= mask[slot * P25LiveDecoder::Phase2BurstDibits + i] & 0x03;
+        for (size_t payloadDibit = 0; payloadDibit < 160; ++payloadDibit) {
+            if (std::find(duidDibits.begin(), duidDibits.end(), payloadDibit) != duidDibits.end()) continue;
+            dibits[base + P25LiveDecoder::Phase2FrameSyncDibits + payloadDibit] ^=
+                mask[slot * P25LiveDecoder::Phase2BurstDibits + payloadDibit] & 0x03;
         }
     }
     return dibits;
@@ -364,14 +364,14 @@ std::vector<int> maskSyntheticPhase2SuperframeForTest(std::vector<int> dibits,
                                                       uint8_t maskPhase)
 {
     const auto mask = P25LiveDecoder::phase2XorMaskDibits(nac, wacn, systemId);
-    constexpr std::array<size_t, 4> duidDibits{10, 47, 132, 169};
+    constexpr std::array<size_t, 4> duidDibits{0, 37, 122, 159};
     for (size_t slot = 0; slot < 12; ++slot) {
         const size_t base = slot * P25LiveDecoder::Phase2BurstDibits;
         const size_t maskSlot = (slot + static_cast<size_t>(maskPhase)) % 12u;
-        for (size_t i = 0; i < 170; ++i) {
-            if (i < 10) continue;
-            if (std::find(duidDibits.begin(), duidDibits.end(), i) != duidDibits.end()) continue;
-            dibits[base + 10 + i] ^= mask[maskSlot * P25LiveDecoder::Phase2BurstDibits + i] & 0x03;
+        for (size_t payloadDibit = 0; payloadDibit < 160; ++payloadDibit) {
+            if (std::find(duidDibits.begin(), duidDibits.end(), payloadDibit) != duidDibits.end()) continue;
+            dibits[base + P25LiveDecoder::Phase2FrameSyncDibits + payloadDibit] ^=
+                mask[maskSlot * P25LiveDecoder::Phase2BurstDibits + payloadDibit] & 0x03;
         }
     }
     return dibits;
@@ -1059,7 +1059,8 @@ TEST_CASE("P25 live decoder locks Phase 2 superframes and annotates all TDMA bur
         REQUIRE(burst.superframeBurstIndexKnown);
         REQUIRE(burst.superframeBurstIndex == slot);
         REQUIRE(burst.grantSlotKnown);
-        REQUIRE(burst.grantSlot == (slot & 0x01u));
+        const uint8_t expectedGrantSlot = (slot == 10) ? 1 : (slot == 11) ? 0 : static_cast<uint8_t>(slot & 0x01u);
+        REQUIRE(burst.grantSlot == expectedGrantSlot);
         REQUIRE(burst.duid == 0x0);
         REQUIRE(burst.kind == P25Phase2BurstKind::Voice4);
         REQUIRE(burst.voiceCodewords.size() == 4);
@@ -1128,10 +1129,10 @@ TEST_CASE("P25 Phase 2 XOR mask generation matches known local-system vector")
     const auto mask = P25LiveDecoder::phase2XorMaskDibits(0x2d2, 0xbee00, 0x2d1);
     REQUIRE(mask.size() == P25LiveDecoder::Phase2BurstDibits * 12);
     const std::array<int, 40> expected{
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 2, 3, 1, 0, 1, 0, 2, 3, 1,
         0, 2, 2, 0, 2, 3, 2, 1, 3, 3,
         1, 0, 0, 2, 1, 2, 1, 1, 2, 1,
+        1, 0, 2, 2, 0, 2, 1, 2, 3, 2,
     };
     for (size_t i = 0; i < expected.size(); ++i) REQUIRE(mask[i] == expected[i]);
 }
@@ -1196,12 +1197,18 @@ TEST_CASE("P25 live decoder searches Phase 2 XOR mask phase using MAC CRC eviden
     REQUIRE(burst->essKnown);
     REQUIRE_FALSE(burst->encrypted);
 
+    REQUIRE(burst->grantSlotKnown);
+    const uint8_t pttGrantSlot = burst->grantSlot;
     size_t releasedVoiceBursts = 0;
     bool releasedWithoutLocalMac = false;
     for (const auto& voiceBurst : result.phase2Bursts) {
         if (voiceBurst.voiceCodewords.empty()) continue;
+        REQUIRE(voiceBurst.grantSlotKnown);
+        if (voiceBurst.grantSlot != pttGrantSlot) {
+            REQUIRE_FALSE(voiceBurst.sessionAudioRelease);
+            continue;
+        }
         if (voiceBurst.superframeBurstIndexKnown && voiceBurst.superframeBurstIndex > 2) {
-            REQUIRE(voiceBurst.grantSlotKnown);
             REQUIRE((voiceBurst.superframeLock || voiceBurst.macCrcLock));
             REQUIRE((voiceBurst.maskPhaseLock || voiceBurst.macCrcLock));
             REQUIRE(voiceBurst.macCrcLock);

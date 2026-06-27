@@ -14,6 +14,7 @@
 
 struct P25VoiceDiagSnapshot {
     int diag = 0;
+    long long updatedMs = 0;
     uint32_t talkgroupId = 0;
     long long syncs = 0;
     long long nids = 0;
@@ -22,6 +23,10 @@ struct P25VoiceDiagSnapshot {
     long long audioSamples = 0;
     long long phase2Bursts = 0;
     long long phase2VoiceCodewords = 0;
+    long long phase2TargetVoiceCodewords = 0;
+    long long phase2OppositeVoiceCodewords = 0;
+    long long phase2AmbeDecodeAttempts = 0;
+    long long phase2AmbeAcceptedFrames = 0;
     long long phase2SuperframeBursts = 0;
     long long phase2MaskedBursts = 0;
     long long phase2MacPdus = 0;
@@ -79,6 +84,8 @@ struct Receiver {
     bool p25VoiceClearKnown = false;
     bool p25VoiceEncrypted = false;
     uint32_t p25VoiceTalkgroupId = 0;
+    uint32_t p25VoiceSourceId = 0;
+    int64_t p25VoiceGrantEpochMs = 0;
     bool p25VoicePhase2 = false;
     bool p25VoiceTdmaSlotKnown = false;
     uint8_t p25VoiceTdmaSlot = 0;
@@ -91,7 +98,33 @@ struct Receiver {
     int64_t p25VoiceSettleUntilMs = 0;
     int p25VoiceDiscardWindows = 0;
     bool p25ControlChannelMute = false;
+    // True when this receiver is an sdrtrunk-style traffic-channel source
+    // created from a P25 trunking grant rather than the user's primary monitor
+    // receiver.  These receivers are safe to remove automatically when the call
+    // ends/returns to control.  The same pattern can be reused by other demods
+    // that need an independent virtual channel source from a wideband SDR ring.
+    bool p25IndependentTrafficSource = false;
+    // True when this traffic source was created by retuning the primary
+    // physical tuner away from the control channel.  The application must
+    // retune RF back to p25TrafficControlFreqHz before reporting CC monitor.
+    bool p25TrafficRetunesPrimary = false;
+    // Monotonic generation assigned by the GUI/control side when creating a
+    // P25 traffic-channel source.  DSP workers check this before processing so
+    // a stale shared_ptr captured in a previous receiver snapshot cannot keep
+    // demodulating an old grant after a newer grant/source has replaced it.
+    uint64_t p25TrafficGeneration = 0;
+    double p25TrafficControlFreqHz = 0.0;
+    double p25TrafficVoiceFreqHz = 0.0;
+    uint8_t p25TrafficSlot = 0;
+    int64_t p25TrafficLastGrantMs = 0;
     uint64_t p25Phase2LastEmittedAbsDibit = 0;
+    // sdrtrunk-style Phase 2 audio security gate: for unknown grants, follow
+    // the traffic channel but hold decoded PCM until current-call MAC/ESS or a
+    // trusted clear grant establishes clear audio.  Drop the queue if trusted
+    // encrypted metadata arrives or the call identity changes.
+    std::vector<float> p25Phase2PendingAudio;
+    uint32_t p25Phase2PendingTalkgroupId = 0;
+    bool p25Phase2PendingAudioArmed = false;
     bool p25VoiceResetPending = false;
     P25VoiceDiagSnapshot p25VoiceDiagnostics;
     P25LiveDecoder p25VoiceLiveDecoder{p25RealtimeVoiceDecoderConfig()};
@@ -140,6 +173,11 @@ struct Receiver {
         p25ImbeVoiceDecoder = P25ImbeVoiceDecoder();
         p25AmbeVoiceDecoder = P25AmbeVoiceDecoder();
         p25Phase2LastEmittedAbsDibit = 0;
+        p25Phase2PendingAudio.clear();
+        p25Phase2PendingTalkgroupId = 0;
+        p25Phase2PendingAudioArmed = false;
+        p25VoiceSourceId = 0;
+        p25VoiceGrantEpochMs = 0;
     }
 
     // Force immediate squelch gate close (bypass hang) when user raises threshold via main controls or CLI.

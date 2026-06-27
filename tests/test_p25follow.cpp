@@ -68,6 +68,7 @@ TEST_CASE("P25 follow uses explicit TDMA watchdog actions", "[p25][follow]")
 {
     P25FollowSnapshot noMacEss;
     noMacEss.autoActive = true;
+    noMacEss.phase2Voice = true;
     noMacEss.nowMs = 20'500;
     noMacEss.tunedAtMs = 1'000;
     noMacEss.lastActiveMs = 20'500;
@@ -84,9 +85,10 @@ TEST_CASE("P25 follow uses explicit TDMA watchdog actions", "[p25][follow]")
 
     P25FollowSnapshot vcwNoSuperframe;
     vcwNoSuperframe.autoActive = true;
+    vcwNoSuperframe.phase2Voice = true;
     vcwNoSuperframe.nowMs = 17'500;
     vcwNoSuperframe.tunedAtMs = 1'000;
-    vcwNoSuperframe.lastActiveMs = 17'500;
+    vcwNoSuperframe.lastActiveMs = 13'000;
     vcwNoSuperframe.diag = diag(P25FollowDiagCode::Phase2AudioLockMissing);
     vcwNoSuperframe.phase2VoiceCodewords = 4;
     vcwNoSuperframe.phase2SuperframeBursts = 0;
@@ -101,9 +103,10 @@ TEST_CASE("P25 follow uses explicit TDMA watchdog actions", "[p25][follow]")
 
     P25FollowSnapshot noVcw;
     noVcw.autoActive = true;
+    noVcw.phase2Voice = true;
     noVcw.nowMs = 11'000;
     noVcw.tunedAtMs = 1'000;
-    noVcw.lastActiveMs = 11'000;
+    noVcw.lastActiveMs = 7'000;
     noVcw.diag = diag(P25FollowDiagCode::Phase2AudioLockMissing);
     noVcw.decodedFrames = 0;
     noVcw.phase2VoiceCodewords = 0;

@@ -1200,6 +1200,20 @@ void DeviceManager::setReceiverCursorToLiveEdge(size_t devIndex, Receiver& rx) {
                                   std::memory_order_release);
 }
 
+void DeviceManager::setReceiverCursorBeforeLiveEdge(size_t devIndex, Receiver& rx, size_t preRollSamples) {
+    auto* stPtr = streamState(devIndex);
+    if (!stPtr) {
+        rx.lastConsumedAbsolute.store(0, std::memory_order_release);
+        return;
+    }
+    auto& st = *stPtr;
+    std::lock_guard<std::mutex> ringLock(st.ringMutex);
+    const uint64_t total = st.totalSamplesWritten.load(std::memory_order_acquire);
+    const uint64_t available = std::min<uint64_t>(total, static_cast<uint64_t>(st.ringCapacity));
+    const uint64_t pre = std::min<uint64_t>(available, static_cast<uint64_t>(preRollSamples));
+    rx.lastConsumedAbsolute.store(total >= pre ? total - pre : 0, std::memory_order_release);
+}
+
 void DeviceManager::appendIQBlock(size_t index, std::vector<std::complex<float>>&& block) {
     if (block.empty()) return;
     auto* stPtr = streamState(index);

@@ -100,6 +100,12 @@ public:
     std::vector<std::complex<float>> getNewSamplesForReceiver(size_t devIndex, Receiver& rx, size_t maxSamples);
     RecentIQWindow getNewIQWindowForReceiver(size_t devIndex, Receiver& rx, size_t maxSamples);
     void setReceiverCursorToLiveEdge(size_t devIndex, Receiver& rx);
+    // Place a receiver cursor slightly before the current live edge so a newly
+    // created logical traffic-channel source can immediately decode with enough
+    // Phase-2 pre-roll/context.  This is only safe for same-wideband/existing
+    // sources; for physical retunes the caller should use live edge so old-RF IQ
+    // is not decoded as traffic.
+    void setReceiverCursorBeforeLiveEdge(size_t devIndex, Receiver& rx, size_t preRollSamples);
 
     // For spectrum: get latest power spectrum (dB) and center/sample info
     bool getLatestSpectrum(size_t index, std::vector<float>& powerDb, double& centerFreq, double& sampleRate);

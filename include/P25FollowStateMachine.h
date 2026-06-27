@@ -27,7 +27,9 @@ struct P25FollowSnapshot {
     int64_t nowMs = 0;
     int64_t tunedAtMs = 0;
     int64_t lastActiveMs = 0;
+    int64_t diagUpdatedMs = 0;
     bool autoActive = false;
+    bool phase2Voice = false;
     uint32_t talkgroupId = 0;
     uint32_t fallbackTalkgroupId = 0;
     int diag = static_cast<int>(P25FollowDiagCode::Idle);

@@ -1810,7 +1810,7 @@ std::string p25Phase2MacPduTypeToString(uint8_t pduType)
         case 0x3: return "MAC_IDLE";
         case 0x4: return "MAC_ACTIVE";
         case 0x5: return "MAC reserved/unknown";
-        case 0x6: return "MAC reserved/unknown";
+        case 0x6: return "MAC_HANGTIME";
         case 0x7: return "MAC reserved/unknown";
         default: return "MAC unknown";
     }

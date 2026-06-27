@@ -10,7 +10,7 @@
 #include <memory>
 
 namespace {
-constexpr size_t kOutputRingFrames = 1u << 18; // storage capacity; queued depth is capped to about 250 ms.
+constexpr size_t kOutputRingFrames = 1u << 19; // storage capacity; queued depth is capped below for jitter buffering.
 static_assert((kOutputRingFrames & (kOutputRingFrames - 1)) == 0,
               "Audio output ring capacity must stay a power of two for the fast wrap path.");
 
@@ -347,21 +347,28 @@ void AudioEngine::pushAudioToActiveOutputLocked(ActiveOutput& output, const floa
     auto& rb = output.ring;
     if (rb.capacity == 0) return;
 
-    const size_t maxQueuedFrames = std::max<size_t>(256, (size_t)(getSampleRate() * 0.25f));
+    // Digital voice decoders synthesize fixed 20 ms PCM frames.  We need enough
+    // depth for one Phase-2 superframe-sized producer burst, but not a 1.5 second
+    // backlog.  Keep the SPSC ownership strict: the producer must not advance
+    // rb.readPos while the realtime callback is consuming audio.  On overload,
+    // drop from the incoming producer block and let the callback drain naturally.
+    constexpr double kDigitalVoiceJitterSeconds = 0.65;
+    const size_t sampleRate = std::max<size_t>(8000, (size_t)getSampleRate());
+    const size_t maxQueuedFrames = std::max<size_t>(4096, (size_t)(sampleRate * kDigitalVoiceJitterSeconds));
     size_t w = rb.writePos.load(std::memory_order_relaxed);
-    const size_t r = rb.readPos.load(std::memory_order_acquire);
-    const size_t queued = ringDistance(w, r, rb.capacity);
+    size_t r = rb.readPos.load(std::memory_order_acquire);
+    size_t queued = ringDistance(w, r, rb.capacity);
 
-    // SPSC hardening: only the realtime callback owns readPos. The previous
-    // overload path advanced readPos from the producer, which violates the
-    // single-producer/single-consumer contract and can click/drop under load.
-    // If the queued depth is already too high, drop the oldest part of this new
-    // producer block instead of moving the consumer cursor.
     if (queued >= maxQueuedFrames) return;
-    const size_t allowedByDepth = maxQueuedFrames - queued;
+
+    const size_t allowedByDepth = (queued < maxQueuedFrames) ? (maxQueuedFrames - queued) : 0;
     if (count > allowedByDepth) {
-        samples += (count - allowedByDepth);
+        // Drop the oldest part of an unusually large producer block, keeping the
+        // most recent speech rather than adding a late burst to the queue.
+        const size_t drop = count - allowedByDepth;
+        samples += drop;
         count = allowedByDepth;
+        if (count == 0) return;
     }
 
     for (size_t i = 0; i < count; ++i) {

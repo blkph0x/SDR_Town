@@ -50,6 +50,10 @@ struct P25LiveDecoderConfig {
     bool stopCqpskSearchOnHardLock = true;
     size_t cqpskLockMissTolerance = 24;
     bool realtimeVoiceSearch = false;
+    // Phase 2 burst/MAC decode is enabled by default so realtime control
+    // monitoring and offline diagnostics share the same grant evidence path.
+    // Low-power views may opt out explicitly when they only need Phase 1 TSBK.
+    bool enablePhase2Decode = true;
 };
 
 struct P25Phase2MaskParameters {
@@ -212,6 +216,9 @@ struct P25Phase2Burst {
     size_t dibitOffset = 0;
     int syncErrors = -1;
     bool superframeLocked = false;
+    // True when this isolated burst was mapped to a retained streaming
+    // superframe epoch instead of a fresh 12-burst lock in the current window.
+    bool stickySuperframe = false;
     size_t superframeDibitOffset = 0;
     int superframeSyncScore = 0;
     int superframeSyncErrors = 0;
@@ -276,6 +283,8 @@ struct P25VoiceDecodeResult {
 
 P25ImbeFrame p25DecodeImbeFrameFromVoiceDibits(const std::vector<int>& voiceFrameDibits);
 std::array<uint8_t, 96> p25Phase2VoiceCodewordToAmbe3600x2450Frame(const P25Phase2VoiceCodeword& codeword);
+std::array<uint8_t, 96> p25Phase2VoiceCodewordToAmbe3600x2450FrameVariant(const P25Phase2VoiceCodeword& codeword, int variant);
+int p25Phase2AmbeFrameVariantCount();
 uint64_t p25EncodeNidBch(uint16_t nac, P25DataUnitId duid);
 
 class P25LiveDecoder {
@@ -360,6 +369,12 @@ private:
 
     P25Phase2MaskParameters m_phase2MaskParams;
     std::array<int, Phase2BurstDibits * 12> m_phase2XorMask{};
+    // Retained Phase-2 session state.  The legacy single-session fields below are
+    // kept as the public/summary view, but the live decoder now also retains one
+    // independent session per logical TDMA traffic slot.  A Phase-2 RF carrier
+    // carries TS1 and TS2 simultaneously; sharing ESS/MAC/PTT state between those
+    // slots lets one call poison the other.  sdrtrunk keeps separate Phase-2
+    // timeslot processors, so we mirror that ownership here.
     P25Phase2EssState m_phase2Ess;
     std::array<uint8_t, 16> m_phase2EssB{};
     std::array<bool, 4> m_phase2EssBSeen{};
@@ -368,9 +383,27 @@ private:
     std::array<P25Phase2EssState, 5> m_phase2EssHypotheses{};
     std::array<std::array<uint8_t, 16>, 5> m_phase2EssBHypotheses{};
     std::array<std::array<bool, 4>, 5> m_phase2EssBSeenHypotheses{};
+    std::array<P25Phase2EssState, 2> m_phase2SlotEss{};
+    std::array<std::array<uint8_t, 16>, 2> m_phase2SlotEssB{};
+    std::array<std::array<bool, 4>, 2> m_phase2SlotEssBSeen{};
+    std::array<bool, 2> m_phase2SlotSessionMacCrcSeen{};
+    std::array<int, 2> m_phase2SlotFirst4vSlot{{-1, -1}};
+    std::array<std::array<P25Phase2EssState, 5>, 2> m_phase2SlotEssHypotheses{};
+    std::array<std::array<std::array<uint8_t, 16>, 5>, 2> m_phase2SlotEssBHypotheses{};
+    std::array<std::array<std::array<bool, 4>, 5>, 2> m_phase2SlotEssBSeenHypotheses{};
     bool m_phase2MaskPhaseKnown = false;
     uint8_t m_phase2MaskPhase = 0;
     int m_phase2MaskPhaseScore = 0;
+    // Sticky Phase-2 superframe epoch used for late-entry/live scanner follow.
+    // sdrtrunk's traffic decoder is a continuous stream, so a single voice
+    // timeslot after acquisition still has a known superframe index and XOR
+    // mask segment.  Our rolling-window scanner path can see only one burst in
+    // a window; retain the absolute stream dibit of burst-0 from the last
+    // trusted 12-burst lock so those isolated bursts can still be descrambled
+    // and mapped to the granted slot.
+    bool m_phase2SuperframeAnchorKnown = false;
+    uint64_t m_phase2SuperframeAnchorDibit = 0;
+    uint64_t m_phase2SuperframeAnchorGeneration = 0;
     std::deque<RecentPhase2Codeword> m_phase2RecentCodewords;
     std::deque<int> m_phase2DibitTail;
     uint64_t m_phase2NextCodewordId = 1;
