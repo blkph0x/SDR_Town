@@ -57,6 +57,39 @@ TEST_CASE("P25 traffic processor opens sustained audio on clear target-slot sess
     REQUIRE(processor.mayEmitSustainedAudio());
 }
 
+TEST_CASE("P25 traffic processor closes audio immediately on Phase 2 call-end MAC", "[p25][traffic]")
+{
+    P25TrafficChannelProcessor processor(45, 30302, 416550000, 0);
+
+    P25LiveDecodeResult voice;
+    P25Phase2Burst voiceBurst;
+    voiceBurst.valid = true;
+    voiceBurst.sessionAudioRelease = true;
+    voiceBurst.encrypted = false;
+    voiceBurst.voiceCodewords.push_back(P25Phase2VoiceCodeword{});
+    voice.phase2Bursts.push_back(voiceBurst);
+
+    processor.observeDecodeResult(voice, 1000);
+    REQUIRE(processor.mayEmitSustainedAudio());
+
+    P25LiveDecodeResult ended;
+    P25Phase2Burst endBurst;
+    endBurst.valid = true;
+    endBurst.macCrcValid = true;
+    endBurst.macEndPttSeen = true;
+    ended.phase2Bursts.push_back(endBurst);
+
+    processor.observeDecodeResult(ended, 1180);
+    const auto diag = processor.getDiag();
+
+    REQUIRE(diag.macEndPttSeen);
+    REQUIRE(diag.callEnded);
+    REQUIRE(diag.endReason == "end-ptt");
+    REQUIRE(diag.state == "end-ptt");
+    REQUIRE_FALSE(diag.audioOpen);
+    REQUIRE_FALSE(processor.mayEmitSustainedAudio());
+}
+
 TEST_CASE("P25 traffic processor keeps encrypted calls muted and supports teardown", "[p25][traffic]")
 {
     P25TrafficChannelProcessor processor(44, 12068, 421350000, 1);

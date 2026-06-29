@@ -1951,6 +1951,12 @@ static void printP25CliDecodeReport(const std::string& label,
                      << ",cnt=" << static_cast<int>(burst.isch.ultraframeCounter)
                      << ",err=" << burst.isch.errors;
             }
+            std::string macEvent = "-";
+            if (burst.macPttSeen) macEvent = "ptt";
+            else if (burst.macActiveSeen) macEvent = "active";
+            else if (burst.macEndPttSeen) macEvent = "end-ptt";
+            else if (burst.macIdleSeen) macEvent = "idle";
+            else if (burst.macHangtimeSeen) macEvent = "hangtime";
             std::cout << "  P25P2 burst dibit=" << burst.dibitOffset
                       << " kind=" << P25LiveDecoder::phase2BurstKindToString(burst.kind)
                        << " duid=0x" << std::hex << burst.duid << std::dec
@@ -1969,6 +1975,7 @@ static void printP25CliDecodeReport(const std::string& label,
                       << " maskPhase=" << (burst.xorMaskPhaseKnown ? std::to_string(burst.xorMaskPhase) : std::string("-"))
                       << " phaseScore=" << burst.xorMaskPhaseScore
                       << " mac=" << (burst.macCrcValid ? "crc-ok" : (burst.macFecDecoded ? "fec-only" : "-"))
+                      << " macEvent=" << macEvent
                       << " ess=" << (burst.essKnown ? (burst.encrypted ? "encrypted" : "clear") : "unknown")
                       << " isch=" << isch.str() << "\n";
         }
@@ -14279,6 +14286,9 @@ int runCLI(int argc, char* argv[]) {
                                   << " " << p25Phase2AcchStatsText(diag).toStdString()
                                   << " p2ess=" << p2ess
                                   << " traffic=" << (trafficStatus.present ? trafficStatus.diag.state : "none")
+                                  << " trafficEnd=" << (trafficStatus.present && !trafficStatus.diag.endReason.empty()
+                                      ? trafficStatus.diag.endReason
+                                      : std::string("-"))
                                   << " trafficCall=" << (trafficStatus.callActive ? "yes" : "no")
                                   << " backend=" << (diag.backendAvailable ? "yes" : "no")
                                   << std::endl;

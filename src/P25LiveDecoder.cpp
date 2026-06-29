@@ -3237,6 +3237,7 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
                 session->maskPhaseMacCrcSeen = true;
                 switch (macType) {
                     case 1: // MAC_PTT
+                        burst.macPttSeen = true;
                         session->macCrcSeen = true;
                         session->pttSeen = true;
                         session->activeSeen = false;
@@ -3250,18 +3251,22 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
                         phase2ResetEssFragments(*session);
                         break;
                     case 2: // MAC_END_PTT
+                        burst.macEndPttSeen = true;
                         phase2ClearCallSession(*session);
                         session->endPttSeen = true;
                         break;
                     case 3: // MAC_IDLE
+                        burst.macIdleSeen = true;
                         phase2ClearCallSession(*session);
                         session->idleSeen = true;
                         break;
                     case 6: // MAC_HANGTIME
+                        burst.macHangtimeSeen = true;
                         phase2ClearCallSession(*session);
                         session->hangtimeSeen = true;
                         break;
                     case 4: // MAC_ACTIVE
+                        burst.macActiveSeen = true;
                         session->activeSeen = true;
                         session->first4vSlot = pdu->offset > 4 ? 0 : pdu->offset;
                         break;

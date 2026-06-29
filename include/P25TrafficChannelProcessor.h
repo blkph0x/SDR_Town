@@ -47,9 +47,20 @@ public:
         bool essTrusted = false;
         bool encrypted = false;
         bool audioOpen = false;
+        bool macPttSeen = false;
+        bool macActiveSeen = false;
+        bool macEndPttSeen = false;
+        bool macIdleSeen = false;
+        bool macHangtimeSeen = false;
+        bool callEnded = false;
         std::string state;
+        std::string endReason;
         std::string teardownReason;
         uint64_t lastActiveMs = 0;
+        uint64_t lastVoiceMs = 0;
+        uint64_t lastMacMs = 0;
+        uint64_t lastEssMs = 0;
+        uint64_t endedMs = 0;
         uint64_t lastAbsoluteDibit = 0;
     };
 
@@ -76,14 +87,27 @@ private:
     std::atomic<bool> m_encrypted{false};
     std::atomic<bool> m_audioOpen{false};
     std::atomic<bool> m_teardownRequested{false};
+    std::atomic<bool> m_macPttSeen{false};
+    std::atomic<bool> m_macActiveSeen{false};
+    std::atomic<bool> m_macEndPttSeen{false};
+    std::atomic<bool> m_macIdleSeen{false};
+    std::atomic<bool> m_macHangtimeSeen{false};
+    std::atomic<bool> m_callEnded{false};
 
     std::atomic<uint64_t> m_lastActiveMs{0};
+    std::atomic<uint64_t> m_lastVoiceMs{0};
+    std::atomic<uint64_t> m_lastMacMs{0};
+    std::atomic<uint64_t> m_lastEssMs{0};
+    std::atomic<uint64_t> m_endedMs{0};
     std::atomic<uint64_t> m_createdMs{0};
     std::atomic<uint64_t> m_lastAbsoluteDibit{0};
 
     mutable std::mutex m_mutex;
     P25LiveDecoder m_decoder;
     std::string m_teardownReason;
+    std::string m_endReason;
 
     static constexpr uint64_t kMaxSilenceMs = 18000;
+    static constexpr uint64_t kEndedHoldMs = 750;
+    static constexpr uint64_t kHangtimeHoldMs = 1500;
 };

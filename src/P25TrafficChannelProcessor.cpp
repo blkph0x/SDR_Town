@@ -61,11 +61,21 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
     bool sessionAudioRelease = false;
     bool burstEssKnown = false;
     bool burstEncrypted = false;
+    bool macPttSeen = false;
+    bool macActiveSeen = false;
+    bool macEndPttSeen = false;
+    bool macIdleSeen = false;
+    bool macHangtimeSeen = false;
     for (const auto& burst : result.phase2Bursts) {
         burstVoiceCodewords += burst.voiceCodewords.size();
         sessionAudioRelease = sessionAudioRelease || burst.sessionAudioRelease;
         burstEssKnown = burstEssKnown || burst.essKnown;
         burstEncrypted = burstEncrypted || (burst.essKnown && burst.encrypted);
+        macPttSeen = macPttSeen || burst.macPttSeen;
+        macActiveSeen = macActiveSeen || burst.macActiveSeen;
+        macEndPttSeen = macEndPttSeen || burst.macEndPttSeen;
+        macIdleSeen = macIdleSeen || burst.macIdleSeen;
+        macHangtimeSeen = macHangtimeSeen || burst.macHangtimeSeen;
     }
 
     const int p2vcw = static_cast<int>(std::min<size_t>(
@@ -92,7 +102,9 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
         (result.phase2Ess.known && result.phase2Ess.encrypted) ||
         burstEncrypted;
     const bool clearEss = essKnown && !encrypted;
-    const bool audioOpen = !encrypted && (sessionAudioRelease || clearEss);
+    const bool callEnded = macEndPttSeen || macIdleSeen || macHangtimeSeen;
+    const bool audioOpen = !callEnded && !encrypted && (sessionAudioRelease || clearEss);
+    const uint64_t now = steadyNowMs();
 
     m_p2bursts.store(p2bursts, std::memory_order_release);
     m_p2vcw.store(p2vcw, std::memory_order_release);
@@ -108,6 +120,34 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
     m_encrypted.store(encrypted, std::memory_order_release);
     m_audioOpen.store(audioOpen, std::memory_order_release);
     m_lastAbsoluteDibit.store(absoluteDibitIndex, std::memory_order_release);
+    if (macPttSeen) m_macPttSeen.store(true, std::memory_order_release);
+    if (macActiveSeen) m_macActiveSeen.store(true, std::memory_order_release);
+    if (macEndPttSeen) m_macEndPttSeen.store(true, std::memory_order_release);
+    if (macIdleSeen) m_macIdleSeen.store(true, std::memory_order_release);
+    if (macHangtimeSeen) m_macHangtimeSeen.store(true, std::memory_order_release);
+    if (callEnded) {
+        m_callEnded.store(true, std::memory_order_release);
+        m_audioOpen.store(false, std::memory_order_release);
+        m_endedMs.store(now, std::memory_order_release);
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (macEndPttSeen) m_endReason = "end-ptt";
+        else if (macIdleSeen) m_endReason = "idle";
+        else if (macHangtimeSeen) m_endReason = "hangtime";
+    } else if (p2vcw > 0 || macPttSeen || macActiveSeen || sessionAudioRelease || audioOpen) {
+        m_callEnded.store(false, std::memory_order_release);
+        m_endedMs.store(0, std::memory_order_release);
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_endReason.clear();
+    }
+    if (p2vcw > 0 || burstVoiceCodewords > 0) {
+        m_lastVoiceMs.store(now, std::memory_order_release);
+    }
+    if (p2macPdus > 0 || p2macCrcValid > 0 || macPttSeen || macActiveSeen || callEnded) {
+        m_lastMacMs.store(now, std::memory_order_release);
+    }
+    if (essKnown) {
+        m_lastEssMs.store(now, std::memory_order_release);
+    }
 
     const bool trafficEvidence =
         p2vcw > 0 ||
@@ -118,7 +158,7 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
         !result.phase2Bursts.empty() ||
         !result.phase2MacPdus.empty();
     if (trafficEvidence) {
-        m_lastActiveMs.store(steadyNowMs(), std::memory_order_release);
+        m_lastActiveMs.store(now, std::memory_order_release);
     }
 }
 
@@ -138,13 +178,26 @@ bool P25TrafficChannelProcessor::isCallStillActive() const
 {
     if (m_teardownRequested.load()) return false;
     const uint64_t now = steadyNowMs();
+    if (m_callEnded.load(std::memory_order_acquire)) {
+        const uint64_t ended = m_endedMs.load(std::memory_order_acquire);
+        if (ended == 0 || now < ended) return false;
+        std::string reason;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            reason = m_endReason;
+        }
+        const uint64_t hold = reason == "hangtime" ? kHangtimeHoldMs : kEndedHoldMs;
+        return (now - ended) <= hold;
+    }
     const uint64_t last = m_lastActiveMs.load(std::memory_order_acquire);
+    if (now < last) return true;
     return (now - last) <= kMaxSilenceMs;
 }
 
 bool P25TrafficChannelProcessor::mayEmitSustainedAudio() const
 {
     return isCallStillActive() &&
+        !m_callEnded.load(std::memory_order_acquire) &&
         m_audioOpen.load(std::memory_order_acquire) &&
         !m_encrypted.load(std::memory_order_acquire) &&
         m_p2vcw.load(std::memory_order_acquire) > 0;
@@ -179,13 +232,25 @@ P25TrafficChannelProcessor::Diag P25TrafficChannelProcessor::getDiag() const
     d.essTrusted = m_essTrusted.load();
     d.encrypted  = m_encrypted.load();
     d.audioOpen  = m_audioOpen.load();
+    d.macPttSeen = m_macPttSeen.load();
+    d.macActiveSeen = m_macActiveSeen.load();
+    d.macEndPttSeen = m_macEndPttSeen.load();
+    d.macIdleSeen = m_macIdleSeen.load();
+    d.macHangtimeSeen = m_macHangtimeSeen.load();
+    d.callEnded = m_callEnded.load();
     d.lastActiveMs = m_lastActiveMs.load();
+    d.lastVoiceMs = m_lastVoiceMs.load();
+    d.lastMacMs = m_lastMacMs.load();
+    d.lastEssMs = m_lastEssMs.load();
+    d.endedMs = m_endedMs.load();
     d.lastAbsoluteDibit = m_lastAbsoluteDibit.load();
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         d.teardownReason = m_teardownReason;
+        d.endReason = m_endReason;
     }
     if (m_teardownRequested.load()) d.state = "teardown";
+    else if (d.callEnded) d.state = d.endReason.empty() ? "ended" : d.endReason;
     else if (d.encrypted) d.state = "encrypted";
     else if (d.audioOpen) d.state = "decoding_sustained";
     else if (d.p2vcw > 0) d.state = "decoding";
