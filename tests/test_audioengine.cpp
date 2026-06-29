@@ -4,6 +4,8 @@
 #include <thread>
 #include <chrono>
 #include <vector>
+#include <cstdint>
+#include <new>
 
 TEST_CASE("AudioEngine ring buffer requires power-of-two capacity", "[audioengine]") {
     AudioEngine::RingBuffer rb;
@@ -13,6 +15,17 @@ TEST_CASE("AudioEngine ring buffer requires power-of-two capacity", "[audioengin
 
     AudioEngine::RingBuffer bad;
     REQUIRE_THROWS_AS(bad.init(48000 * 4), std::invalid_argument);
+}
+
+TEST_CASE("AudioEngine ring cursors are cache-line separated", "[audioengine]") {
+    AudioEngine::RingBuffer rb;
+    rb.init(1u << 18);
+    const auto writeAddr = reinterpret_cast<std::uintptr_t>(&rb.writePos);
+    const auto readAddr = reinterpret_cast<std::uintptr_t>(&rb.readPos);
+    constexpr std::size_t line = std::hardware_destructive_interference_size;
+    REQUIRE(writeAddr % line == 0);
+    REQUIRE(readAddr % line == 0);
+    REQUIRE(writeAddr / line != readAddr / line);
 }
 
 TEST_CASE("AudioEngine multi-device and push", "[audioengine]") {

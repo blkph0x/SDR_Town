@@ -2432,6 +2432,7 @@ struct Phase2SessionState {
     bool endPttSeen = false;
     bool idleSeen = false;
     bool hangtimeSeen = false;
+    bool securityStateFromPtt = false;
     bool maskPhaseMacCrcSeen = false;
     bool essTrusted = false;
     int first4vSlot = -1;
@@ -2497,6 +2498,7 @@ void phase2ClearCallSession(Phase2SessionState& session)
     session.endPttSeen = false;
     session.idleSeen = false;
     session.hangtimeSeen = false;
+    session.securityStateFromPtt = false;
     session.maskPhaseMacCrcSeen = false;
     phase2ClearSessionEss(session);
 }
@@ -2511,6 +2513,7 @@ bool phase2AcceptVoiceEss(Phase2SessionState& session, const P25Phase2EssState& 
     if (session.pttSeen || !candidate.encrypted) {
         session.ess = candidate;
         session.essTrusted = true;
+        session.securityStateFromPtt = false;
         session.tentativeEss = {};
         session.tentativeEssRepeats = 0;
         return true;
@@ -3240,6 +3243,7 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
                         session->endPttSeen = false;
                         session->idleSeen = false;
                         session->hangtimeSeen = false;
+                        session->securityStateFromPtt = true;
                         session->ess = pdu->ess;
                         session->essTrusted = pdu->ess.known && pdu->ess.fecValidated;
                         session->first4vSlot = static_cast<int>((phase2LogicalVoiceSequenceIndex(superframeBurstIndex) + pdu->offset + 1) % 5);
@@ -3303,6 +3307,7 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
         burst.macCrcLock = session->pttSeen || session->activeSeen || burst.macCrcValid;
         burst.phase2AudioLock = session->pttSeen || session->activeSeen ||
             (burst.essKnown && session->ess.fecValidated);
+        burst.securityStateFromPtt = session->securityStateFromPtt;
     }
     burst.sessionAudioRelease =
         burst.xorMaskApplied &&
@@ -3880,7 +3885,10 @@ std::array<uint8_t, 96> p25Phase2AmbeBitsToMbelibFrame(const std::array<uint8_t,
 
 int p25Phase2AmbeFrameVariantCount()
 {
-    return 6;
+    // sdrtrunk/JMBE receives the 72-bit Voice2/Voice4 frame in one canonical
+    // order.  Keep mbelib on that same foundation; fallback bit-order probes can
+    // synthesize plausible but wrong bursts and break continuous speech.
+    return 1;
 }
 
 std::array<uint8_t, 96> p25Phase2VoiceCodewordToAmbe3600x2450FrameVariant(const P25Phase2VoiceCodeword& codeword, int variant)

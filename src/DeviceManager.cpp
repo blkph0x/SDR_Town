@@ -1224,10 +1224,12 @@ void DeviceManager::appendIQBlock(size_t index, std::vector<std::complex<float>>
     // Feed the per-rx ring *first* while we still own the data (before any move into queue).
     if (st.ringCapacity > 0) {
         std::lock_guard<std::mutex> ringLock(st.ringMutex);
+        const size_t cap = st.ringCapacity;
+        const bool powerOfTwoCap = (cap & (cap - 1)) == 0;
         size_t w = st.ringWriteIdx.load(std::memory_order_relaxed);
         for (const auto& s : block) {
             st.iqRing[w] = s;
-            w = (w + 1) & (st.ringCapacity - 1);
+            w = powerOfTwoCap ? ((w + 1) & (cap - 1)) : ((w + 1) % cap);
         }
         st.ringWriteIdx.store(w, std::memory_order_release);
         st.totalSamplesWritten.fetch_add(block.size(), std::memory_order_release);

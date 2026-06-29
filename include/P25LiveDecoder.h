@@ -232,6 +232,7 @@ struct P25Phase2Burst {
     bool maskPhaseLock = false;
     bool macCrcLock = false;
     bool sessionAudioRelease = false;
+    bool securityStateFromPtt = false;
     bool superframeBurstIndexKnown = false;
     uint8_t superframeBurstIndex = 0;
     bool syncOffsetAdjusted = false;

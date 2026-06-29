@@ -7,6 +7,7 @@
 #include <atomic>
 #include <mutex>
 #include <stdexcept>
+#include <new>
 
 #include "miniaudio.h"
 
@@ -85,8 +86,8 @@ public:
     // Capacity must be power of 2.
     struct RingBuffer {
         std::vector<float> data;
-        std::atomic<size_t> writePos{0};
-        std::atomic<size_t> readPos{0};
+        alignas(std::hardware_destructive_interference_size) std::atomic<size_t> writePos{0};
+        alignas(std::hardware_destructive_interference_size) std::atomic<size_t> readPos{0};
         size_t capacity = 0; // power of 2
 
         RingBuffer() = default;
