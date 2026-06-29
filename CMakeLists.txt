@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.19 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.20 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -54,6 +54,8 @@ set(SDR_TOWN_SOURCES
     src/P25FollowStateMachine.cpp
     src/SignalClassifier.cpp
     src/ClassifierModelBackend.cpp
+    src/P25TrafficChannelProcessor.cpp
+    include/P25TrafficChannelProcessor.h
     src/Receiver.cpp
     src/UpdateManager.cpp   # professional GitHub release + safe in-app updater
     include/UpdateManager.h
@@ -179,12 +181,14 @@ if(BUILD_TESTS)
     tests/test_p25control.cpp
     tests/test_p25live.cpp
     tests/test_p25follow.cpp
+    tests/test_p25traffic_processor.cpp
     src/DeviceManager.cpp
     src/AudioEngine.cpp
     src/Demod.cpp
     src/P25Control.cpp
     src/P25LiveDecoder.cpp
     src/P25FollowStateMachine.cpp
+    src/P25TrafficChannelProcessor.cpp
     src/SignalClassifier.cpp
     src/ClassifierModelBackend.cpp
     src/Receiver.cpp

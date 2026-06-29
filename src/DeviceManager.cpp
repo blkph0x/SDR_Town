@@ -1159,6 +1159,7 @@ DeviceManager::RecentIQWindow DeviceManager::getNewIQWindowForReceiver(size_t de
         outWindow.samples.assign(fadeLen, std::complex<float>(0,0));
         outWindow.startAbsolute = myLast;
         outWindow.endAbsolute = myLast + static_cast<uint64_t>(fadeLen);
+        outWindow.cursorDiscontinuity = true;
         rx.lastConsumedAbsolute.store(outWindow.endAbsolute, std::memory_order_release);
         return outWindow;
     }

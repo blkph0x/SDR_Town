@@ -45,12 +45,14 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         snapshot.phase2MacPdus > 0 ||
         snapshot.phase2MacCrcValid > 0 ||
         snapshot.phase2EssKnown ||
+        snapshot.phase2TrafficProcessorActive ||
         diagIsPhase2Specific(snapshot.diag);
 
     const bool phase2TrustedActivity =
         snapshot.decodedFrames > 0 ||
         snapshot.phase2MacCrcValid > 0 ||
         snapshot.phase2EssKnown ||
+        snapshot.phase2TrafficAudioOpen ||
         (snapshot.phase2SuperframeBursts >= 10 && snapshot.phase2MaskedBursts >= 10);
 
     decision.voiceStillLooksActive = diagnosticFresh &&
@@ -62,6 +64,7 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
          // should not refresh the traffic-channel lifetime forever.
          ((snapshot.phase2Bursts == 0 && snapshot.phase2VoiceCodewords == 0) &&
           (snapshot.syncs > 0 || snapshot.nids > 0)) ||
+         snapshot.phase2TrafficCallActive ||
          phase2TrustedActivity);
 
     const bool trustedEncryptedEss =
@@ -70,6 +73,7 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         snapshot.phase2MacCrcValid > 0;
     decision.encryptedOnVoice =
         diagIs(snapshot.diag, P25FollowDiagCode::SkippedEncrypted) ||
+        snapshot.phase2TrafficEncrypted ||
         trustedEncryptedEss;
     if (decision.encryptedOnVoice) {
         decision.action = P25FollowAction::ReturnEncrypted;
@@ -90,28 +94,41 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         (diagIs(snapshot.diag, P25FollowDiagCode::NoSync) ||
          diagIs(snapshot.diag, P25FollowDiagCode::NoLduVoice));
 
-    decision.hardTimeout =
-        snapshot.tunedAtMs > 0 &&
-        snapshot.nowMs - snapshot.tunedAtMs > 20000 &&
-        snapshot.decodedFrames == 0 &&
-        snapshot.phase2VoiceCodewords == 0;
-
     const bool noTrustedPhase2MacEssYet =
         phase2Follow &&
         snapshot.tunedAtMs > 0 &&
         snapshot.phase2MacCrcValid == 0 &&
         (!snapshot.phase2EssKnown || snapshot.phase2EssEncrypted) &&
-        snapshot.decodedFrames == 0;
+        snapshot.decodedFrames == 0 &&
+        !snapshot.phase2TrafficAudioOpen;
 
     decision.tdmaEpochLockedNoMacEss =
         noTrustedPhase2MacEssYet &&
         snapshot.phase2SuperframeBursts >= 4 &&
         snapshot.phase2MaskedBursts >= 4;
 
+    const bool phase2RecentContinuation =
+        phase2Follow &&
+        snapshot.lastActiveMs > snapshot.tunedAtMs &&
+        snapshot.nowMs > snapshot.lastActiveMs &&
+        !snapshot.phase2EssEncrypted;
+    const int64_t tdmaVcwNoSuperframeTunedMs = phase2RecentContinuation ? 22000 : 15000;
+    const int64_t tdmaVcwNoSuperframeSilenceMs = phase2RecentContinuation ? 10000 : 3500;
+    const int64_t tdmaNoVcwTunedMs = phase2RecentContinuation ? 18000 : 9000;
+    const int64_t tdmaNoVcwSilenceMs = phase2RecentContinuation ? 10000 : 3500;
+
+    decision.hardTimeout =
+        snapshot.tunedAtMs > 0 &&
+        snapshot.nowMs - snapshot.tunedAtMs > 20000 &&
+        silenceSinceSignalMs > 8000 &&
+        !snapshot.phase2TrafficCallActive &&
+        snapshot.decodedFrames == 0 &&
+        snapshot.phase2VoiceCodewords == 0;
+
     decision.tdmaVcwNoSuperframeTimeout =
         noTrustedPhase2MacEssYet &&
-        snapshot.nowMs - snapshot.tunedAtMs > 15000 &&
-        silenceSinceSignalMs > 3500 &&
+        snapshot.nowMs - snapshot.tunedAtMs > tdmaVcwNoSuperframeTunedMs &&
+        silenceSinceSignalMs > tdmaVcwNoSuperframeSilenceMs &&
         snapshot.phase2VoiceCodewords >= 4 &&
         snapshot.phase2SuperframeBursts == 0 &&
         snapshot.phase2MaskedBursts == 0 &&
@@ -139,8 +156,9 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
     decision.tdmaNoVcwTimeout =
         phase2Follow &&
         snapshot.tunedAtMs > 0 &&
-        snapshot.nowMs - snapshot.tunedAtMs > 9000 &&
-        silenceSinceSignalMs > 3500 &&
+        snapshot.nowMs - snapshot.tunedAtMs > tdmaNoVcwTunedMs &&
+        silenceSinceSignalMs > tdmaNoVcwSilenceMs &&
+        !snapshot.phase2TrafficCallActive &&
         snapshot.decodedFrames == 0 &&
         snapshot.phase2VoiceCodewords == 0 &&
         snapshot.phase2Bursts == 0 &&

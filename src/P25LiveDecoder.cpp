@@ -3,9 +3,12 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <cstdint>
+#include <cstdlib>
+#include <fstream>
 #include <limits>
 #include <numeric>
 #include <optional>
@@ -23,6 +26,43 @@ extern "C" {
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
+
+bool p25DecoderTraceEnabled()
+{
+    static const bool enabled = []() {
+        const char* v = std::getenv("SDR_TOWN_P25_DECODER_TRACE");
+        return v && *v && std::strcmp(v, "0") != 0;
+    }();
+    return enabled;
+}
+
+void p25DecoderTrace(const char* stage, const char* detail = "")
+{
+    if (!p25DecoderTraceEnabled()) return;
+    static std::mutex traceMutex;
+    std::lock_guard<std::mutex> lock(traceMutex);
+    std::ofstream out("p25_decoder_trace.log", std::ios::app);
+    if (!out) return;
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+    out << ms << ' ' << stage;
+    if (detail && *detail) out << ' ' << detail;
+    out << '\n';
+}
+
+struct P25DecoderTraceScope {
+    const char* name = "";
+
+    explicit P25DecoderTraceScope(const char* n) : name(n)
+    {
+        p25DecoderTrace(name, "enter");
+    }
+
+    ~P25DecoderTraceScope()
+    {
+        p25DecoderTrace(name, "leave");
+    }
+};
 
 double clampFinite(double v, double fallback)
 {
@@ -443,6 +483,7 @@ ChannelizedIqBlock channelizeP25Iq(const std::vector<std::complex<float>>& iq,
                                    double targetFreqHz,
                                    const P25LiveDecoderConfig& config)
 {
+    P25DecoderTraceScope trace("channelizeP25Iq");
     ChannelizedIqBlock out;
     if (iq.size() < 2 || !std::isfinite(sampleRate) || sampleRate <= 0.0) return out;
 
@@ -518,6 +559,7 @@ ChannelizedIqBlock channelizeP25Iq(const std::vector<std::complex<float>>& iq,
 FmDiscriminatorBlock fmDiscriminatorFromChannel(std::vector<std::complex<float>> channel,
                                                 double sampleRate)
 {
+    P25DecoderTraceScope trace("fmDiscriminatorFromChannel");
     FmDiscriminatorBlock out;
     out.sampleRate = sampleRate;
     if (channel.size() < 2 || !std::isfinite(sampleRate) || sampleRate <= 0.0) return out;
@@ -722,6 +764,7 @@ std::vector<SymbolRecovery> recoverC4fmSymbolCandidates(const std::vector<float>
                                                         const P25LiveDecoderConfig& config,
                                                         P25BlockTimingState* streamState = nullptr)
 {
+    P25DecoderTraceScope trace("recoverC4fmSymbolCandidates");
     std::vector<SymbolRecovery> candidates;
     std::vector<float> block = discriminatorHz;
     const size_t tailSamples = static_cast<size_t>(std::ceil(std::max(2.0, sampleRate / std::max(config.symbolRate, 1.0)) * 4.0));
@@ -2379,6 +2422,7 @@ struct Phase2SessionState {
     P25Phase2EssState ess;
     std::array<uint8_t, 16> essB{};
     std::array<bool, 4> essBSeen{};
+    uint8_t essBNext = 0;
     // Legacy retained flag now means current-call PTT anchor, not just "any
     // CRC-valid MAC existed".  Generic MAC CRC is useful for mask confidence,
     // but must not authorize ESS/security or audio release.
@@ -2419,11 +2463,22 @@ void phase2ResetEssFragments(Phase2SessionState& session)
 {
     session.essB = {};
     session.essBSeen = {};
+    session.essBNext = 0;
     session.essHypotheses = {};
     session.essBHypotheses = {};
     session.essBSeenHypotheses = {};
     session.tentativeEss = {};
     session.tentativeEssRepeats = 0;
+}
+
+void phase2ResetEssAssembly(Phase2SessionState& session)
+{
+    session.essB = {};
+    session.essBSeen = {};
+    session.essBNext = 0;
+    session.essHypotheses = {};
+    session.essBHypotheses = {};
+    session.essBSeenHypotheses = {};
 }
 
 void phase2ClearSessionEss(Phase2SessionState& session)
@@ -2734,28 +2789,30 @@ std::optional<P25Phase2MacPdu> decodePhase2Acch(const std::vector<int>& payloadD
     return bestNonCrc;
 }
 
-std::optional<P25Phase2EssState> decodePhase2VoiceEss(const std::vector<int>& payloadDibits,
-                                                       int burstId,
-                                                       Phase2SessionState& session)
+void phase2StoreVoiceEssB(const std::vector<int>& payloadDibits, int burstId, Phase2SessionState& session)
 {
-    if (payloadDibits.size() < 160 || burstId < 0 || burstId > 4) return std::nullopt;
     const size_t essStart = 74;
-    if (essStart + 84 > payloadDibits.size()) return std::nullopt;
+    if (payloadDibits.size() < 160 || burstId < 0 || burstId > 3 || essStart + 12 > payloadDibits.size()) return;
 
     // sdrtrunk maps Phase 2 ESS as:
     //   Voice4: 24-bit ESS-B fragment at timeslot bits 148..171
     //   Voice2: 168-bit ESS-A fragment at timeslot bits 148..243 and 246..317
     // In dibits within the 320-bit timeslot, ESS starts at bit 148 / dibit 74.
-    if (burstId < 4) {
-        for (int i = 0; i < 12; i += 3) {
-            session.essB[static_cast<size_t>(burstId * 4 + (i / 3))] =
-                static_cast<uint8_t>(((payloadDibits[essStart + static_cast<size_t>(i)] & 0x03) << 4) |
-                                     ((payloadDibits[essStart + static_cast<size_t>(i + 1)] & 0x03) << 2) |
-                                     (payloadDibits[essStart + static_cast<size_t>(i + 2)] & 0x03));
-        }
-        session.essBSeen[static_cast<size_t>(burstId)] = true;
-        return std::nullopt;
+    for (int i = 0; i < 12; i += 3) {
+        session.essB[static_cast<size_t>(burstId * 4 + (i / 3))] =
+            static_cast<uint8_t>(((payloadDibits[essStart + static_cast<size_t>(i)] & 0x03) << 4) |
+                                 ((payloadDibits[essStart + static_cast<size_t>(i + 1)] & 0x03) << 2) |
+                                 (payloadDibits[essStart + static_cast<size_t>(i + 2)] & 0x03));
     }
+    session.essBSeen[static_cast<size_t>(burstId)] = true;
+}
+
+std::optional<P25Phase2EssState> decodePhase2VoiceEssA(const std::vector<int>& payloadDibits,
+                                                       Phase2SessionState& session)
+{
+    if (payloadDibits.size() < 160) return std::nullopt;
+    const size_t essStart = 74;
+    if (essStart + 84 > payloadDibits.size()) return std::nullopt;
 
     std::array<uint8_t, 28> essA{};
     size_t cursor = essStart;
@@ -2832,6 +2889,39 @@ std::optional<P25Phase2EssState> decodePhase2VoiceEss(const std::vector<int>& pa
     }
     ess.encrypted = ess.algId != 0x80;
     return ess;
+}
+
+std::optional<P25Phase2EssState> decodePhase2VoiceEss(const std::vector<int>& payloadDibits,
+                                                       int burstId,
+                                                       Phase2SessionState& session)
+{
+    if (burstId < 0 || burstId > 4) return std::nullopt;
+    if (burstId < 4) {
+        phase2StoreVoiceEssB(payloadDibits, burstId, session);
+        return std::nullopt;
+    }
+    return decodePhase2VoiceEssA(payloadDibits, session);
+}
+
+std::optional<P25Phase2EssState> decodePhase2VoiceEssSdrtrunkOrder(const std::vector<int>& payloadDibits,
+                                                                   P25Phase2BurstKind kind,
+                                                                   Phase2SessionState& session)
+{
+    if (kind == P25Phase2BurstKind::Voice4) {
+        // sdrtrunk does not derive ESS-B1..B4 from a superframe index.  Each
+        // traffic-slot ESS processor simply consumes Voice4 timeslots in order,
+        // then Voice2 supplies ESS-A and triggers an RS decode/reset.
+        const int burstId = static_cast<int>(session.essBNext % 4u);
+        phase2StoreVoiceEssB(payloadDibits, burstId, session);
+        session.essBNext = static_cast<uint8_t>((session.essBNext + 1u) % 4u);
+        return std::nullopt;
+    }
+    if (kind == P25Phase2BurstKind::Voice2) {
+        auto ess = decodePhase2VoiceEssA(payloadDibits, session);
+        phase2ResetEssAssembly(session);
+        return ess;
+    }
+    return std::nullopt;
 }
 
 struct Phase2SyncHit {
@@ -3182,50 +3272,8 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
     if (phase2BurstKindHasVoice(burst.kind)) {
         const auto& voicePayloadDibits = canApplyMask ? descrambledPayloadDibits : rawPayloadDibits;
         if (session && burst.xorMaskApplied && superframeLocked) {
-            int currentSlot = phase2LogicalVoiceSequenceIndex(superframeBurstIndex);
-            if (session->first4vSlot >= 0) {
-                if (currentSlot < session->first4vSlot) currentSlot += 5;
-                const int burstId = currentSlot - session->first4vSlot;
-                if (auto ess = decodePhase2VoiceEss(voicePayloadDibits, burstId, *session)) {
-                    phase2AcceptVoiceEss(*session, *ess);
-                }
-            } else {
-                // Late-entry soft ESS acquisition. When no MAC PTT PDU is available
-                // in the current capture window, the first 4V slot is unknown. Try
-                // all legal first-4V hypotheses using persistent per-hypothesis B
-                // fragments. A validated clear ESS is strong enough to release
-                // late-entry audio even if the MAC PTT was missed in this window.
-                for (int candidateFirst4v = 0; candidateFirst4v < 5; ++candidateFirst4v) {
-                    int hypothesisSlot = currentSlot;
-                    if (hypothesisSlot < candidateFirst4v) hypothesisSlot += 5;
-                    const int burstId = hypothesisSlot - candidateFirst4v;
-                    if (burstId < 0 || burstId > 4) continue;
-
-                    Phase2SessionState hyp;
-                    hyp.ess = session->essHypotheses[static_cast<size_t>(candidateFirst4v)];
-                    hyp.essB = session->essBHypotheses[static_cast<size_t>(candidateFirst4v)];
-                    hyp.essBSeen = session->essBSeenHypotheses[static_cast<size_t>(candidateFirst4v)];
-                    hyp.first4vSlot = candidateFirst4v;
-
-                    bool acceptedEss = false;
-                    if (auto ess = decodePhase2VoiceEss(voicePayloadDibits, burstId, hyp)) {
-                        acceptedEss = phase2AcceptVoiceEss(hyp, *ess);
-                    }
-
-                    session->essHypotheses[static_cast<size_t>(candidateFirst4v)] = hyp.ess;
-                    session->essBHypotheses[static_cast<size_t>(candidateFirst4v)] = hyp.essB;
-                    session->essBSeenHypotheses[static_cast<size_t>(candidateFirst4v)] = hyp.essBSeen;
-                    if (acceptedEss && hyp.essTrusted) {
-                        session->ess = hyp.ess;
-                        session->essTrusted = true;
-                        session->essB = hyp.essB;
-                        session->essBSeen = hyp.essBSeen;
-                        session->tentativeEss = {};
-                        session->tentativeEssRepeats = 0;
-                        session->first4vSlot = candidateFirst4v;
-                        break;
-                    }
-                }
+            if (auto ess = decodePhase2VoiceEssSdrtrunkOrder(voicePayloadDibits, burst.kind, *session)) {
+                phase2AcceptVoiceEss(*session, *ess);
             }
         }
 
@@ -3876,6 +3924,7 @@ P25LiveDecoder::P25LiveDecoder(const P25LiveDecoder& other)
       m_phase2Ess(other.m_phase2Ess),
       m_phase2EssB(other.m_phase2EssB),
       m_phase2EssBSeen(other.m_phase2EssBSeen),
+      m_phase2EssBNext(other.m_phase2EssBNext),
       m_phase2SessionMacCrcSeen(other.m_phase2SessionMacCrcSeen),
       m_phase2First4vSlot(other.m_phase2First4vSlot),
       m_phase2EssHypotheses(other.m_phase2EssHypotheses),
@@ -3884,6 +3933,7 @@ P25LiveDecoder::P25LiveDecoder(const P25LiveDecoder& other)
       m_phase2SlotEss(other.m_phase2SlotEss),
       m_phase2SlotEssB(other.m_phase2SlotEssB),
       m_phase2SlotEssBSeen(other.m_phase2SlotEssBSeen),
+      m_phase2SlotEssBNext(other.m_phase2SlotEssBNext),
       m_phase2SlotSessionMacCrcSeen(other.m_phase2SlotSessionMacCrcSeen),
       m_phase2SlotFirst4vSlot(other.m_phase2SlotFirst4vSlot),
       m_phase2SlotEssHypotheses(other.m_phase2SlotEssHypotheses),
@@ -3914,6 +3964,7 @@ P25LiveDecoder& P25LiveDecoder::operator=(const P25LiveDecoder& other)
     m_phase2Ess = other.m_phase2Ess;
     m_phase2EssB = other.m_phase2EssB;
     m_phase2EssBSeen = other.m_phase2EssBSeen;
+    m_phase2EssBNext = other.m_phase2EssBNext;
     m_phase2SessionMacCrcSeen = other.m_phase2SessionMacCrcSeen;
     m_phase2First4vSlot = other.m_phase2First4vSlot;
     m_phase2EssHypotheses = other.m_phase2EssHypotheses;
@@ -3922,6 +3973,7 @@ P25LiveDecoder& P25LiveDecoder::operator=(const P25LiveDecoder& other)
     m_phase2SlotEss = other.m_phase2SlotEss;
     m_phase2SlotEssB = other.m_phase2SlotEssB;
     m_phase2SlotEssBSeen = other.m_phase2SlotEssBSeen;
+    m_phase2SlotEssBNext = other.m_phase2SlotEssBNext;
     m_phase2SlotSessionMacCrcSeen = other.m_phase2SlotSessionMacCrcSeen;
     m_phase2SlotFirst4vSlot = other.m_phase2SlotFirst4vSlot;
     m_phase2SlotEssHypotheses = other.m_phase2SlotEssHypotheses;
@@ -3949,6 +4001,7 @@ P25LiveDecoder::P25LiveDecoder(P25LiveDecoder&& other) noexcept
       m_phase2Ess(other.m_phase2Ess),
       m_phase2EssB(other.m_phase2EssB),
       m_phase2EssBSeen(other.m_phase2EssBSeen),
+      m_phase2EssBNext(other.m_phase2EssBNext),
       m_phase2SessionMacCrcSeen(other.m_phase2SessionMacCrcSeen),
       m_phase2First4vSlot(other.m_phase2First4vSlot),
       m_phase2EssHypotheses(other.m_phase2EssHypotheses),
@@ -3957,6 +4010,7 @@ P25LiveDecoder::P25LiveDecoder(P25LiveDecoder&& other) noexcept
       m_phase2SlotEss(other.m_phase2SlotEss),
       m_phase2SlotEssB(other.m_phase2SlotEssB),
       m_phase2SlotEssBSeen(other.m_phase2SlotEssBSeen),
+      m_phase2SlotEssBNext(other.m_phase2SlotEssBNext),
       m_phase2SlotSessionMacCrcSeen(other.m_phase2SlotSessionMacCrcSeen),
       m_phase2SlotFirst4vSlot(other.m_phase2SlotFirst4vSlot),
       m_phase2SlotEssHypotheses(other.m_phase2SlotEssHypotheses),
@@ -3988,6 +4042,7 @@ P25LiveDecoder& P25LiveDecoder::operator=(P25LiveDecoder&& other) noexcept
     m_phase2Ess = other.m_phase2Ess;
     m_phase2EssB = other.m_phase2EssB;
     m_phase2EssBSeen = other.m_phase2EssBSeen;
+    m_phase2EssBNext = other.m_phase2EssBNext;
     m_phase2SessionMacCrcSeen = other.m_phase2SessionMacCrcSeen;
     m_phase2First4vSlot = other.m_phase2First4vSlot;
     m_phase2EssHypotheses = other.m_phase2EssHypotheses;
@@ -3996,6 +4051,7 @@ P25LiveDecoder& P25LiveDecoder::operator=(P25LiveDecoder&& other) noexcept
     m_phase2SlotEss = other.m_phase2SlotEss;
     m_phase2SlotEssB = other.m_phase2SlotEssB;
     m_phase2SlotEssBSeen = other.m_phase2SlotEssBSeen;
+    m_phase2SlotEssBNext = other.m_phase2SlotEssBNext;
     m_phase2SlotSessionMacCrcSeen = other.m_phase2SlotSessionMacCrcSeen;
     m_phase2SlotFirst4vSlot = other.m_phase2SlotFirst4vSlot;
     m_phase2SlotEssHypotheses = other.m_phase2SlotEssHypotheses;
@@ -4029,6 +4085,7 @@ void P25LiveDecoder::reset()
     m_phase2Ess = {};
     m_phase2EssB = {};
     m_phase2EssBSeen = {};
+    m_phase2EssBNext = 0;
     m_phase2SessionMacCrcSeen = false;
     m_phase2First4vSlot = -1;
     m_phase2EssHypotheses = {};
@@ -4037,6 +4094,7 @@ void P25LiveDecoder::reset()
     m_phase2SlotEss = {};
     m_phase2SlotEssB = {};
     m_phase2SlotEssBSeen = {};
+    m_phase2SlotEssBNext = {};
     m_phase2SlotSessionMacCrcSeen = {};
     m_phase2SlotFirst4vSlot = {-1, -1};
     m_phase2SlotEssHypotheses = {};
@@ -4082,6 +4140,19 @@ void P25LiveDecoder::clearPhase2MaskParameters()
     reset();
 }
 
+bool P25LiveDecoder::phase2MaskParametersKnown() const
+{
+    return m_phase2MaskParams.valid;
+}
+
+bool P25LiveDecoder::phase2MaskParametersMatch(uint16_t nac, uint32_t wacn, uint16_t systemId) const
+{
+    return m_phase2MaskParams.valid &&
+        m_phase2MaskParams.nac == static_cast<uint16_t>(nac & 0x0fffu) &&
+        m_phase2MaskParams.wacn == (wacn & 0x000fffffu) &&
+        m_phase2MaskParams.systemId == static_cast<uint16_t>(systemId & 0x0fffu);
+}
+
 std::array<int, P25LiveDecoder::Phase2BurstDibits * 12> P25LiveDecoder::phase2XorMaskDibits(uint16_t nac,
                                                                                             uint32_t wacn,
                                                                                             uint16_t systemId)
@@ -4104,6 +4175,7 @@ static void restoreSelectedDemodStats(P25LiveDecodeResult& result, const P25Live
     result.stats.softBitLlrMean = selected.softBitLlrMean;
     result.stats.softBitLlrMinimum = selected.softBitLlrMinimum;
     result.stats.softLowConfidenceSymbols = selected.softLowConfidenceSymbols;
+    result.stats.phase2MaskParametersKnown = selected.phase2MaskParametersKnown;
     result.stats.demodPath = selected.demodPath;
     result.stats.cqpskLockActive = selected.cqpskLockActive;
     result.stats.cqpskLockUsed = selected.cqpskLockUsed;
@@ -4124,6 +4196,7 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
                                               double centerFreqHz,
                                               double targetFreqHz)
 {
+    P25DecoderTraceScope trace("P25LiveDecoder::processIq");
     P25LiveDecodeResult best;
     const double inputTargetOffsetHz = targetFreqHz - centerFreqHz;
     auto channel = channelizeP25Iq(iq, sampleRate, centerFreqHz, targetFreqHz, m_config);
@@ -4148,6 +4221,10 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
     c4fm.stats.discriminatorMeanHz = fm.meanHz;
     if (c4fm.stats.demodPath.empty()) c4fm.stats.demodPath = "C4FM";
     best = std::move(c4fm);
+
+    if (!m_config.enableCqpskSearch) {
+        return best;
+    }
 
     // processFmDiscriminatorInternal updates the same persistent timing state for C4FM.
     // Reload before CQPSK recovery so the final save below merges with those updates
@@ -4250,9 +4327,15 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
     }
 
     bool stopCqpskSearch = m_config.stopCqpskSearchOnHardLock &&
-        ((isCqpskPath(best.stats.demodPath) && hasCqpskHardLockEvidence(best)) ||
-         hasPhase2FastStopEvidence(best));
+        isCqpskPath(best.stats.demodPath) &&
+        hasCqpskHardLockEvidence(best);
+    size_t cqpskCandidatesEvaluated = 0;
+    auto cqpskBudgetReached = [&]() {
+        return m_config.maxCqpskSearchCandidates > 0 &&
+            cqpskCandidatesEvaluated >= m_config.maxCqpskSearchCandidates;
+    };
     for (int p = 0; p < phaseSteps && !stopCqpskSearch; ++p) {
+        if (cqpskBudgetReached()) break;
         const double phase = (static_cast<double>(p) + 0.5) * sps / static_cast<double>(phaseSteps);
         const double phaseFraction = std::clamp(phase / std::max(sps, 1e-9), 0.0, 0.999);
         auto candidateTiming = timingStateStorage;
@@ -4272,6 +4355,11 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
                                                                          rotation,
                                                                          m_config.symbolRate);
                     for (const auto& perm : cqpskDibitPermutations()) {
+                        if (cqpskBudgetReached()) {
+                            stopCqpskSearch = true;
+                            break;
+                        }
+                        ++cqpskCandidatesEvaluated;
                         CqpskCandidateParams params;
                         params.differential = differential;
                         params.conjugate = conjugate;
@@ -4310,7 +4398,9 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
                             selectedCqpskTiming = candidateTiming;
                             selectedCqpskTrust = liveResultTrustScore(candidate);
                             best = std::move(candidate);
-                            if (m_config.stopCqpskSearchOnHardLock && hasCqpskHardLockEvidence(best)) {
+                            if (m_config.stopCqpskSearchOnHardLock &&
+                                isCqpskPath(best.stats.demodPath) &&
+                                hasCqpskHardLockEvidence(best)) {
                                 stopCqpskSearch = true;
                                 break;
                             }
@@ -4406,6 +4496,7 @@ P25LiveDecodeResult P25LiveDecoder::processFmDiscriminatorInternal(const std::ve
                                                                    double sampleRate,
                                                                    bool annotateSessionCodewords)
 {
+    P25DecoderTraceScope trace("P25LiveDecoder::processFmDiscriminatorInternal");
     P25LiveDecodeResult best;
     best.stats.discriminatorSamples = discriminatorHz.size();
     best.stats.sampleRate = sampleRate;
@@ -4453,7 +4544,8 @@ P25LiveDecodeResult P25LiveDecoder::processFmDiscriminatorInternal(const std::ve
                         selectedSymbolConfidence = symbols.confidence;
                         selectedPath = symbols.path;
                         haveCandidate = true;
-                        if (m_config.stopCqpskSearchOnHardLock && hasPhase2FastStopEvidence(best)) {
+                        if ((m_config.stopC4fmSearchOnHardLock && hasCqpskHardLockEvidence(best)) ||
+                            (m_config.stopCqpskSearchOnHardLock && hasPhase2FastStopEvidence(best))) {
                             stopCandidateSearch = true;
                             break;
                         }
@@ -4487,7 +4579,8 @@ P25LiveDecodeResult P25LiveDecoder::processFmDiscriminatorInternal(const std::ve
                         selectedSymbolConfidence = symbols.confidence;
                         selectedPath = symbols.path;
                         haveCandidate = true;
-                        if (m_config.stopCqpskSearchOnHardLock && hasPhase2FastStopEvidence(best)) {
+                        if ((m_config.stopC4fmSearchOnHardLock && hasCqpskHardLockEvidence(best)) ||
+                            (m_config.stopCqpskSearchOnHardLock && hasPhase2FastStopEvidence(best))) {
                             stopCandidateSearch = true;
                             break;
                         }
@@ -4629,6 +4722,7 @@ P25LiveDecodeResult P25LiveDecoder::processHardDibits(const std::vector<int>& di
 P25LiveDecodeResult P25LiveDecoder::processHardDibitsInternal(const std::vector<int>& dibits,
                                                               bool annotateSessionCodewords)
 {
+    P25DecoderTraceScope trace("P25LiveDecoder::processHardDibitsInternal");
     P25LiveDecodeResult result;
     result.dibits = dibits;
     appendBitsFromDibits(result.bits, dibits);
@@ -4662,6 +4756,7 @@ P25LiveDecodeResult P25LiveDecoder::processHardDibitsInternal(const std::vector<
     }
     result.stats.phase2EssKnown = result.phase2Ess.known;
     result.stats.phase2EssEncrypted = result.phase2Ess.encrypted;
+    result.stats.phase2MaskParametersKnown = m_phase2MaskParams.valid;
     result.stats.phase2MaskPhaseKnown = m_phase2MaskPhaseKnown;
     result.stats.phase2MaskPhase = m_phase2MaskPhase;
     result.stats.phase2MaskPhaseScore = m_phase2MaskPhaseScore;
@@ -4776,11 +4871,15 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
     for (size_t ts = 0; ts < slotSessions.size(); ++ts) {
         auto& session = slotSessions[ts];
         const bool slotHasRetainedState = m_phase2SlotEss[ts].known ||
-            m_phase2SlotSessionMacCrcSeen[ts] || m_phase2SlotFirst4vSlot[ts] >= 0;
+            m_phase2SlotSessionMacCrcSeen[ts] ||
+            m_phase2SlotFirst4vSlot[ts] >= 0 ||
+            m_phase2SlotEssBNext[ts] != 0 ||
+            std::any_of(m_phase2SlotEssBSeen[ts].begin(), m_phase2SlotEssBSeen[ts].end(), [](bool seen) { return seen; });
         session.ess = slotHasRetainedState ? m_phase2SlotEss[ts] : m_phase2Ess;
         session.essTrusted = session.ess.known && session.ess.fecValidated;
         session.essB = slotHasRetainedState ? m_phase2SlotEssB[ts] : m_phase2EssB;
         session.essBSeen = slotHasRetainedState ? m_phase2SlotEssBSeen[ts] : m_phase2EssBSeen;
+        session.essBNext = slotHasRetainedState ? m_phase2SlotEssBNext[ts] : m_phase2EssBNext;
         session.macCrcSeen = slotHasRetainedState ? m_phase2SlotSessionMacCrcSeen[ts] : m_phase2SessionMacCrcSeen;
         session.pttSeen = session.macCrcSeen;
         session.first4vSlot = slotHasRetainedState ? m_phase2SlotFirst4vSlot[ts] : m_phase2First4vSlot;
@@ -4818,8 +4917,26 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
                         static_cast<uint8_t>(b.isch.channel & 0x01u) == static_cast<uint8_t>(b.grantSlot & 0x01u) &&
                         b.isch.errors >= 0 && b.isch.errors < 3;
                 }) && selectedMaskScore > 0;
+                size_t maskedVoiceBursts = 0;
+                size_t maskedVoiceCodewords = 0;
+                for (const auto& b : bestWindow.bursts) {
+                    if (!b.xorMaskApplied || b.voiceCodewords.empty()) continue;
+                    ++maskedVoiceBursts;
+                    maskedVoiceCodewords += b.voiceCodewords.size();
+                }
+                // Do not make Phase-2 timing persistence depend only on MAC/ESS.  In
+                // late-entry clear calls, sdrtrunk's continuous framer keeps the
+                // traffic superframe cadence alive while security metadata catches up.
+                // A multi-burst masked voice window is strong enough to keep the
+                // descrambler phase for the next bounded IQ window; speaker release
+                // is still decided later by the MAC/ESS/audio gate.
+                const bool strongMaskedVoiceWindow =
+                    selectedMaskScore > 0 &&
+                    bestWindow.bursts.size() >= 4 &&
+                    maskedVoiceBursts >= 2 &&
+                    maskedVoiceCodewords >= 4;
                 if (annotateSessionCodewords &&
-                    (bestWindow.macCrcValid > 0 || bestWindow.essKnown || ischAnchoredMaskPhase)) {
+                    (bestWindow.macCrcValid > 0 || bestWindow.essKnown || ischAnchoredMaskPhase || strongMaskedVoiceWindow)) {
                     m_phase2MaskPhaseKnown = true;
                     m_phase2MaskPhase = selectedMaskPhase;
                     m_phase2MaskPhaseScore = selectedMaskScore;
@@ -4870,7 +4987,10 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
         if (m_phase2SuperframeAnchorKnown && m_phase2MaskPhaseKnown && mask) {
             const uint64_t hitStreamDibit = phase2WorkingStreamStart + static_cast<uint64_t>(hit.dibitOffset);
             constexpr uint64_t kPhase2SuperframeSpanDibits = static_cast<uint64_t>(P25LiveDecoder::Phase2BurstDibits) * 12ull;
-            constexpr uint64_t kPhase2StickyAnchorMaxAgeDibits = kPhase2SuperframeSpanDibits * 10ull;
+            // sdrtrunk keeps Phase 2 framing state as a continuous dibit stream. Our live path is
+            // invoked in bounded IQ windows, so retain a validated superframe/mask anchor long
+            // enough to bridge quiet scheduler gaps and late-entry chunks on the same grant.
+            constexpr uint64_t kPhase2StickyAnchorMaxAgeDibits = kPhase2SuperframeSpanDibits * 72ull;
             if (hitStreamDibit >= m_phase2SuperframeAnchorDibit &&
                 hitStreamDibit - m_phase2SuperframeAnchorDibit <= kPhase2StickyAnchorMaxAgeDibits) {
                 const uint64_t delta = hitStreamDibit - m_phase2SuperframeAnchorDibit;
@@ -4895,6 +5015,8 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
                                                            false);
                     if (stickyBurst.valid) {
                         stickyBurst.stickySuperframe = true;
+                        stickyBurst.superframeLock = true;
+                        stickyBurst.maskPhaseLock = stickyBurst.xorMaskApplied && stickyBurst.xorMaskPhaseKnown;
                         normalizePhase2BurstOffsets(stickyBurst);
                         out.bursts.push_back(std::move(stickyBurst));
                         stickyDecoded = true;
@@ -4927,6 +5049,7 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
             m_phase2SlotEss[ts] = slotSessions[ts].ess;
             m_phase2SlotEssB[ts] = slotSessions[ts].essB;
             m_phase2SlotEssBSeen[ts] = slotSessions[ts].essBSeen;
+            m_phase2SlotEssBNext[ts] = slotSessions[ts].essBNext;
             m_phase2SlotSessionMacCrcSeen[ts] = slotSessions[ts].pttSeen;
             m_phase2SlotFirst4vSlot[ts] = slotSessions[ts].first4vSlot;
             m_phase2SlotEssHypotheses[ts] = slotSessions[ts].essHypotheses;
@@ -4936,6 +5059,7 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
         m_phase2Ess = retainedSession->ess;
         m_phase2EssB = retainedSession->essB;
         m_phase2EssBSeen = retainedSession->essBSeen;
+        m_phase2EssBNext = retainedSession->essBNext;
         m_phase2SessionMacCrcSeen = retainedSession->pttSeen;
         m_phase2First4vSlot = retainedSession->first4vSlot;
         m_phase2EssHypotheses = retainedSession->essHypotheses;
@@ -4948,6 +5072,7 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
 
 P25LiveDecodeResult P25LiveDecoder::processHardBits(const std::vector<uint8_t>& inputBits)
 {
+    P25DecoderTraceScope trace("P25LiveDecoder::processHardBits");
     P25LiveDecodeResult result;
     size_t prefixBits = 0;
     result.bits = buildPhase1BitStreamWithTail(this, inputBits, prefixBits);

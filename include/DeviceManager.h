@@ -91,6 +91,7 @@ public:
         std::vector<std::complex<float>> samples;
         uint64_t startAbsolute = 0;
         uint64_t endAbsolute = 0;
+        bool cursorDiscontinuity = false;
     };
     RecentIQWindow getRecentIQWindowWithCursor(size_t index, size_t maxSamples);
 

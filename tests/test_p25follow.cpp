@@ -88,7 +88,7 @@ TEST_CASE("P25 follow uses explicit TDMA watchdog actions", "[p25][follow]")
     vcwNoSuperframe.phase2Voice = true;
     vcwNoSuperframe.nowMs = 17'500;
     vcwNoSuperframe.tunedAtMs = 1'000;
-    vcwNoSuperframe.lastActiveMs = 13'000;
+    vcwNoSuperframe.lastActiveMs = 1'000;
     vcwNoSuperframe.diag = diag(P25FollowDiagCode::Phase2AudioLockMissing);
     vcwNoSuperframe.phase2VoiceCodewords = 4;
     vcwNoSuperframe.phase2SuperframeBursts = 0;
@@ -106,7 +106,7 @@ TEST_CASE("P25 follow uses explicit TDMA watchdog actions", "[p25][follow]")
     noVcw.phase2Voice = true;
     noVcw.nowMs = 11'000;
     noVcw.tunedAtMs = 1'000;
-    noVcw.lastActiveMs = 7'000;
+    noVcw.lastActiveMs = 1'000;
     noVcw.diag = diag(P25FollowDiagCode::Phase2AudioLockMissing);
     noVcw.decodedFrames = 0;
     noVcw.phase2VoiceCodewords = 0;
@@ -114,6 +114,95 @@ TEST_CASE("P25 follow uses explicit TDMA watchdog actions", "[p25][follow]")
     decision = evaluateP25Follow(noVcw);
     REQUIRE(decision.tdmaNoVcwTimeout);
     REQUIRE(decision.action == P25FollowAction::ReturnNoVoiceCodewords);
+}
+
+TEST_CASE("P25 follow holds Phase 2 traffic after recent activity while reacquiring timing", "[p25][follow]")
+{
+    P25FollowSnapshot reacquiring;
+    reacquiring.autoActive = true;
+    reacquiring.phase2Voice = true;
+    reacquiring.nowMs = 17'500;
+    reacquiring.tunedAtMs = 1'000;
+    reacquiring.lastActiveMs = 13'000;
+    reacquiring.diag = diag(P25FollowDiagCode::Phase2AudioLockMissing);
+    reacquiring.phase2VoiceCodewords = 4;
+    reacquiring.phase2SuperframeBursts = 0;
+    reacquiring.phase2MaskedBursts = 0;
+    reacquiring.phase2MacCrcValid = 0;
+    reacquiring.phase2EssKnown = false;
+
+    auto decision = evaluateP25Follow(reacquiring);
+    REQUIRE_FALSE(decision.tdmaVcwNoSuperframeTimeout);
+    REQUIRE(decision.action == P25FollowAction::None);
+
+    reacquiring.nowMs = 26'000;
+    decision = evaluateP25Follow(reacquiring);
+    REQUIRE(decision.tdmaVcwNoSuperframeTimeout);
+    REQUIRE(decision.action == P25FollowAction::ReturnNoMacEss);
+}
+
+TEST_CASE("P25 follow trusts the persistent traffic processor for call lifetime", "[p25][follow]")
+{
+    P25FollowSnapshot snapshot;
+    snapshot.autoActive = true;
+    snapshot.phase2Voice = true;
+    snapshot.nowMs = 26'000;
+    snapshot.tunedAtMs = 1'000;
+    snapshot.lastActiveMs = 1'000;
+    snapshot.diag = diag(P25FollowDiagCode::Phase2AudioLockMissing);
+    snapshot.decodedFrames = 0;
+    snapshot.phase2VoiceCodewords = 0;
+    snapshot.phase2Bursts = 0;
+    snapshot.phase2TrafficProcessorActive = true;
+    snapshot.phase2TrafficCallActive = true;
+
+    const auto decision = evaluateP25Follow(snapshot);
+    REQUIRE(decision.voiceStillLooksActive);
+    REQUIRE_FALSE(decision.hardTimeout);
+    REQUIRE_FALSE(decision.tdmaNoVcwTimeout);
+    REQUIRE(decision.action == P25FollowAction::None);
+}
+
+TEST_CASE("P25 follow keeps Phase 2 audio open while MAC or ESS catches up", "[p25][follow]")
+{
+    P25FollowSnapshot snapshot;
+    snapshot.autoActive = true;
+    snapshot.phase2Voice = true;
+    snapshot.nowMs = 8'000;
+    snapshot.tunedAtMs = 1'000;
+    snapshot.lastActiveMs = 1'000;
+    snapshot.diag = diag(P25FollowDiagCode::Phase2LateEntryWaiting);
+    snapshot.phase2VoiceCodewords = 8;
+    snapshot.phase2SuperframeBursts = 6;
+    snapshot.phase2MaskedBursts = 6;
+    snapshot.phase2MacCrcValid = 0;
+    snapshot.phase2EssKnown = false;
+    snapshot.phase2TrafficProcessorActive = true;
+    snapshot.phase2TrafficAudioOpen = true;
+
+    const auto decision = evaluateP25Follow(snapshot);
+    REQUIRE(decision.voiceStillLooksActive);
+    REQUIRE_FALSE(decision.tdmaEpochLockedNoMacEss);
+    REQUIRE_FALSE(decision.tdmaNoProgressTimeout);
+    REQUIRE(decision.action == P25FollowAction::None);
+}
+
+TEST_CASE("P25 follow returns when the traffic processor proves encryption", "[p25][follow]")
+{
+    P25FollowSnapshot snapshot;
+    snapshot.autoActive = true;
+    snapshot.phase2Voice = true;
+    snapshot.nowMs = 8'000;
+    snapshot.tunedAtMs = 1'000;
+    snapshot.talkgroupId = 505;
+    snapshot.diag = diag(P25FollowDiagCode::Phase2LateEntryWaiting);
+    snapshot.phase2TrafficProcessorActive = true;
+    snapshot.phase2TrafficEncrypted = true;
+
+    const auto decision = evaluateP25Follow(snapshot);
+    REQUIRE(decision.encryptedOnVoice);
+    REQUIRE(decision.action == P25FollowAction::ReturnEncrypted);
+    REQUIRE(decision.effectiveTalkgroupId == 505);
 }
 
 TEST_CASE("P25 slot probe flips on repeated wrong-slot VCWs while MAC/ESS is absent", "[p25][follow]")

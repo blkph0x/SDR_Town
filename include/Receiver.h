@@ -2,9 +2,12 @@
 
 #include "Demod.h"
 #include "P25LiveDecoder.h"
+#include "P25TrafficChannelProcessor.h"
 #include <vector>
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <atomic>
 
@@ -40,6 +43,8 @@ struct P25VoiceDiagSnapshot {
     bool phase2EssEncrypted = false;
     bool backendAvailable = false;
     bool nidLock = false;
+    double phase2CenterFreqHz = 0.0;
+    double phase2EffectiveTargetFreqHz = 0.0;
 };
 
 inline P25LiveDecoderConfig p25RealtimeVoiceDecoderConfig()
@@ -117,6 +122,10 @@ struct Receiver {
     double p25TrafficVoiceFreqHz = 0.0;
     uint8_t p25TrafficSlot = 0;
     int64_t p25TrafficLastGrantMs = 0;
+    bool p25Phase2TrafficTargetOffsetKnown = false;
+    double p25Phase2TrafficTargetOffsetHz = 0.0;
+    int p25Phase2TrafficTargetOffsetTrust = 0;
+    int p25Phase2TrafficTargetOffsetMisses = 0;
     uint64_t p25Phase2LastEmittedAbsDibit = 0;
     // sdrtrunk-style Phase 2 audio security gate: for unknown grants, follow
     // the traffic channel but hold decoded PCM until current-call MAC/ESS or a
@@ -128,8 +137,15 @@ struct Receiver {
     bool p25VoiceResetPending = false;
     P25VoiceDiagSnapshot p25VoiceDiagnostics;
     P25LiveDecoder p25VoiceLiveDecoder{p25RealtimeVoiceDecoderConfig()};
+    std::unique_ptr<P25TrafficChannelProcessor> p25TrafficProcessor;
     P25ImbeVoiceDecoder p25ImbeVoiceDecoder;
     P25AmbeVoiceDecoder p25AmbeVoiceDecoder;
+    int p25Phase2PreferredAmbeVariant = -1;
+    int p25Phase2PreferredAmbeVariantHits = 0;
+    int p25Phase2PreferredAmbeVariantMisses = 0;
+    std::array<int, 4> p25Phase2PreferredAmbeVariantByVoiceIndex = {-1, -1, -1, -1};
+    std::array<int, 4> p25Phase2PreferredAmbeVariantHitsByVoiceIndex = {};
+    std::array<int, 4> p25Phase2PreferredAmbeVariantMissesByVoiceIndex = {};
 
     // Narrow-FM AFC: keeps the user tuned to the nominal channel while DSP
     // recenters the demodulator when SDR PPM/tuning error moves the carrier.
@@ -165,13 +181,28 @@ struct Receiver {
         afcOffsetHz = 0.0;
         p25AfcFrozen = false;
         p25FrozenAfcOffsetHz = 0.0;
+        p25Phase2TrafficTargetOffsetKnown = false;
+        p25Phase2TrafficTargetOffsetHz = 0.0;
+        p25Phase2TrafficTargetOffsetTrust = 0;
+        p25Phase2TrafficTargetOffsetMisses = 0;
     }
     void resetP25VoiceState()
     {
         std::lock_guard<std::recursive_mutex> dspLock(dspMutex);
         p25VoiceLiveDecoder.reset();
+        p25TrafficProcessor.reset();
         p25ImbeVoiceDecoder = P25ImbeVoiceDecoder();
         p25AmbeVoiceDecoder = P25AmbeVoiceDecoder();
+        p25Phase2PreferredAmbeVariant = -1;
+        p25Phase2PreferredAmbeVariantHits = 0;
+        p25Phase2PreferredAmbeVariantMisses = 0;
+        p25Phase2PreferredAmbeVariantByVoiceIndex.fill(-1);
+        p25Phase2PreferredAmbeVariantHitsByVoiceIndex.fill(0);
+        p25Phase2PreferredAmbeVariantMissesByVoiceIndex.fill(0);
+        p25Phase2TrafficTargetOffsetKnown = false;
+        p25Phase2TrafficTargetOffsetHz = 0.0;
+        p25Phase2TrafficTargetOffsetTrust = 0;
+        p25Phase2TrafficTargetOffsetMisses = 0;
         p25Phase2LastEmittedAbsDibit = 0;
         p25Phase2PendingAudio.clear();
         p25Phase2PendingTalkgroupId = 0;

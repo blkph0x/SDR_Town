@@ -47,7 +47,10 @@ struct P25LiveDecoderConfig {
     size_t maxRawTsbkBlocksPerFrame = 8;
     bool enableC4fmFixedPhaseSearch = false;
     size_t maxC4fmFixedPhaseCandidates = 10;
+    bool stopC4fmSearchOnHardLock = false;
+    bool enableCqpskSearch = true;
     bool stopCqpskSearchOnHardLock = true;
+    size_t maxCqpskSearchCandidates = 0;
     size_t cqpskLockMissTolerance = 24;
     bool realtimeVoiceSearch = false;
     // Phase 2 burst/MAC decode is enabled by default so realtime control
@@ -169,6 +172,7 @@ struct P25LiveDecoderStats {
     size_t phase2MacInvertCrcValid = 0;
     bool phase2EssKnown = false;
     bool phase2EssEncrypted = false;
+    bool phase2MaskParametersKnown = false;
     bool phase2MaskPhaseKnown = false;
     uint8_t phase2MaskPhase = 0;
     int phase2MaskPhaseScore = 0;
@@ -321,6 +325,8 @@ public:
 
     void setPhase2MaskParameters(uint16_t nac, uint32_t wacn, uint16_t systemId);
     void clearPhase2MaskParameters();
+    bool phase2MaskParametersKnown() const;
+    bool phase2MaskParametersMatch(uint16_t nac, uint32_t wacn, uint16_t systemId) const;
 
     static std::array<uint8_t, FrameSyncBits> frameSyncBits();
     static std::array<int, Phase2FrameSyncDibits> phase2FrameSyncDibits();
@@ -378,6 +384,7 @@ private:
     P25Phase2EssState m_phase2Ess;
     std::array<uint8_t, 16> m_phase2EssB{};
     std::array<bool, 4> m_phase2EssBSeen{};
+    uint8_t m_phase2EssBNext = 0;
     bool m_phase2SessionMacCrcSeen = false;
     int m_phase2First4vSlot = -1;
     std::array<P25Phase2EssState, 5> m_phase2EssHypotheses{};
@@ -386,6 +393,7 @@ private:
     std::array<P25Phase2EssState, 2> m_phase2SlotEss{};
     std::array<std::array<uint8_t, 16>, 2> m_phase2SlotEssB{};
     std::array<std::array<bool, 4>, 2> m_phase2SlotEssBSeen{};
+    std::array<uint8_t, 2> m_phase2SlotEssBNext{};
     std::array<bool, 2> m_phase2SlotSessionMacCrcSeen{};
     std::array<int, 2> m_phase2SlotFirst4vSlot{{-1, -1}};
     std::array<std::array<P25Phase2EssState, 5>, 2> m_phase2SlotEssHypotheses{};
