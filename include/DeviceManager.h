@@ -104,8 +104,8 @@ public:
     // Place a receiver cursor slightly before the current live edge so a newly
     // created logical traffic-channel source can immediately decode with enough
     // Phase-2 pre-roll/context.  This is only safe for same-wideband/existing
-    // sources; for physical retunes the caller should use live edge so old-RF IQ
-    // is not decoded as traffic.
+    // sources.  For physical retunes, keep the pre-roll bounded and arm after
+    // the queued tune has applied when a synchronous caller can safely wait.
     void setReceiverCursorBeforeLiveEdge(size_t devIndex, Receiver& rx, size_t preRollSamples);
 
     // For spectrum: get latest power spectrum (dB) and center/sample info
@@ -114,7 +114,10 @@ public:
     size_t getSpectrumFftBins(size_t index) const;
 
     // Tune / scanner support
-    void setCenterFreq(size_t index, double freqHz);
+    uint64_t setCenterFreq(size_t index, double freqHz);
+    uint64_t getCenterTuneRequestSeq(size_t index) const;
+    uint64_t getCenterTuneAppliedSeq(size_t index) const;
+    bool waitForCenterTuneApplied(size_t index, uint64_t requestSeq, int timeoutMs) const;
 
     // Live diagnostics (addressing audit P1 RF gain, P2 unlocked queue size)
     double getCurrentGain(size_t index) const;   // configured gain after clamping to the device's advertised range

@@ -44,7 +44,8 @@ TEST_CASE("P25 follow does not treat encrypted ESS without MAC CRC as final proo
     const auto decision = evaluateP25Follow(snapshot);
     REQUIRE_FALSE(decision.encryptedOnVoice);
     REQUIRE(decision.tdmaEpochLockedNoMacEss);
-    REQUIRE(decision.action == P25FollowAction::ReturnNoMacEss);
+    REQUIRE_FALSE(decision.tdmaNoProgressTimeout);
+    REQUIRE(decision.action == P25FollowAction::None);
 }
 
 TEST_CASE("P25 follow holds briefly after tune before declaring a quiet voice channel ended", "[p25][follow]")
@@ -79,6 +80,13 @@ TEST_CASE("P25 follow uses explicit TDMA watchdog actions", "[p25][follow]")
     noMacEss.phase2EssKnown = false;
 
     auto decision = evaluateP25Follow(noMacEss);
+    REQUIRE(decision.tdmaEpochLockedNoMacEss);
+    REQUIRE_FALSE(decision.tdmaNoProgressTimeout);
+    REQUIRE(decision.action == P25FollowAction::None);
+
+    noMacEss.nowMs = 22'500;
+    noMacEss.lastActiveMs = 1'000;
+    decision = evaluateP25Follow(noMacEss);
     REQUIRE(decision.tdmaEpochLockedNoMacEss);
     REQUIRE(decision.tdmaNoProgressTimeout);
     REQUIRE(decision.action == P25FollowAction::ReturnNoMacEss);
@@ -139,6 +147,25 @@ TEST_CASE("P25 follow holds Phase 2 traffic after recent activity while reacquir
     decision = evaluateP25Follow(reacquiring);
     REQUIRE(decision.tdmaVcwNoSuperframeTimeout);
     REQUIRE(decision.action == P25FollowAction::ReturnNoMacEss);
+}
+
+TEST_CASE("P25 follow does not call idle unpublished diagnostics a no-VCW voice failure", "[p25][follow]")
+{
+    P25FollowSnapshot snapshot;
+    snapshot.autoActive = true;
+    snapshot.phase2Voice = true;
+    snapshot.nowMs = 12'000;
+    snapshot.tunedAtMs = 1'000;
+    snapshot.lastActiveMs = 1'000;
+    snapshot.diagUpdatedMs = 0;
+    snapshot.diag = diag(P25FollowDiagCode::Idle);
+    snapshot.decodedFrames = 0;
+    snapshot.phase2Bursts = 0;
+    snapshot.phase2VoiceCodewords = 0;
+
+    const auto decision = evaluateP25Follow(snapshot);
+    REQUIRE_FALSE(decision.tdmaNoVcwTimeout);
+    REQUIRE(decision.action == P25FollowAction::None);
 }
 
 TEST_CASE("P25 follow trusts the persistent traffic processor for call lifetime", "[p25][follow]")

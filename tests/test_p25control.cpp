@@ -993,6 +993,105 @@ TEST_CASE("P25 control analyzer names SDRTrunk-covered Phase 2 MAC opcodes")
     REQUIRE(p25Phase2MacMessageOpcodeToString(0xa0, 0xa4).find("L3Harris") != std::string::npos);
 }
 
+TEST_CASE("P25 control analyzer parses Phase 1 AMBTC group voice grants")
+{
+    P25ControlChannelAnalyzer analyzer;
+    P25ChannelIdentifier identifier;
+    identifier.valid = true;
+    identifier.id = 7;
+    identifier.channelType = 3;
+    identifier.baseHz = 420000000.0;
+    identifier.spacingHz = 12500.0;
+    identifier.bandwidthHz = 12500.0;
+    identifier.slotsPerCarrier = 2;
+    identifier.phase2Capable = true;
+    analyzer.setChannelIdentifier(identifier);
+
+    std::vector<uint8_t> header(12, 0);
+    writeBitsMsb(header, 2, 1, 1);       // outbound
+    writeBitsMsb(header, 3, 5, 23);      // AMBTC
+    writeBitsMsb(header, 16, 8, 0x00);   // standard
+    writeBitsMsb(header, 24, 24, 0x123456);
+    writeBitsMsb(header, 49, 7, 1);
+    writeBitsMsb(header, 58, 6, 0x00);
+    writeBitsMsb(header, 64, 8, 0x00);
+
+    std::vector<uint8_t> block0(12, 0);
+    writeBitsMsb(block0, 16, 4, 7);
+    writeBitsMsb(block0, 20, 12, 0x039);
+    writeBitsMsb(block0, 32, 4, 7);
+    writeBitsMsb(block0, 36, 12, 0x039);
+    writeBitsMsb(block0, 48, 16, 11178);
+
+    const auto events = analyzer.ingestPhase1Pdu(23, 0x00, 0x00, header, {block0}, true);
+    REQUIRE(events.size() == 1);
+    const auto& ev = events.front();
+    REQUIRE(ev.type == P25ControlEventType::GroupVoiceGrant);
+    REQUIRE(p25ControlEventIsVoiceGrant(ev));
+    REQUIRE(ev.sourceId == 0x123456);
+    REQUIRE(ev.talkgroupId == 11178);
+    REQUIRE(ev.channel == 0x7039);
+    REQUIRE(ev.voiceFrequencyHz == Catch::Approx(420350000.0).margin(1.0));
+    REQUIRE(ev.voiceProtocol == P25VoiceProtocol::Phase2TDMA);
+    REQUIRE(ev.tdmaSlotKnown);
+    REQUIRE(ev.tdmaSlot == 1);
+}
+
+TEST_CASE("P25 control analyzer parses Motorola AMBTC regroup grants")
+{
+    P25ControlChannelAnalyzer analyzer;
+    P25ChannelIdentifier identifier;
+    identifier.valid = true;
+    identifier.id = 7;
+    identifier.channelType = 3;
+    identifier.baseHz = 420000000.0;
+    identifier.spacingHz = 12500.0;
+    identifier.bandwidthHz = 12500.0;
+    identifier.slotsPerCarrier = 2;
+    identifier.phase2Capable = true;
+    analyzer.setChannelIdentifier(identifier);
+
+    std::vector<uint8_t> header(12, 0);
+    writeBitsMsb(header, 2, 1, 1);
+    writeBitsMsb(header, 3, 5, 23);
+    writeBitsMsb(header, 16, 8, 0x90);
+    writeBitsMsb(header, 24, 24, 0x654321);
+    writeBitsMsb(header, 49, 7, 1);
+    writeBitsMsb(header, 58, 6, 0x02);
+    writeBitsMsb(header, 64, 8, 0x40);
+
+    std::vector<uint8_t> block0(12, 0);
+    writeBitsMsb(block0, 0, 4, 7);
+    writeBitsMsb(block0, 4, 12, 0x038);
+    writeBitsMsb(block0, 16, 4, 7);
+    writeBitsMsb(block0, 20, 12, 0x120);
+    writeBitsMsb(block0, 32, 16, 2222);
+
+    const auto events = analyzer.ingestPhase1Pdu(23, 0x90, 0x02, header, {block0}, true);
+    REQUIRE(events.size() == 1);
+    const auto& ev = events.front();
+    REQUIRE(ev.type == P25ControlEventType::GroupVoiceGrantExplicit);
+    REQUIRE(p25ControlEventIsVoiceGrant(ev));
+    REQUIRE(ev.encryptionKnown);
+    REQUIRE(ev.encrypted);
+    REQUIRE(ev.sourceId == 0x654321);
+    REQUIRE(ev.talkgroupId == 2222);
+    REQUIRE(ev.channel == 0x7038);
+    REQUIRE(ev.channelB == 0x7120);
+    REQUIRE(ev.explicitChannelKnown);
+    REQUIRE(ev.voiceFrequencyHz == Catch::Approx(420350000.0).margin(1.0));
+}
+
+TEST_CASE("P25 control analyzer rejects CRC-failed Phase 1 PDU headers")
+{
+    P25ControlChannelAnalyzer analyzer;
+    std::vector<uint8_t> header(12, 0);
+    writeBitsMsb(header, 3, 5, 23);
+    writeBitsMsb(header, 58, 6, 0x00);
+    std::vector<uint8_t> block0(12, 0);
+    REQUIRE(analyzer.ingestPhase1Pdu(23, 0x00, 0x00, header, {block0}, false).empty());
+}
+
 TEST_CASE("P25 hex parser accepts spaced and separated bytes")
 {
     auto bytes = p25ParseHexBytes("00 01 02:03-04");

@@ -107,7 +107,7 @@ private:
     std::string m_teardownReason;
     std::string m_endReason;
 
-    static constexpr uint64_t kMaxSilenceMs = 18000;
+    static constexpr uint64_t kMaxSilenceMs = 6000;  // 6s max, much shorter after voice to avoid sticking on inactive/noisy TGs
     static constexpr uint64_t kEndedHoldMs = 750;
     static constexpr uint64_t kHangtimeHoldMs = 1500;
 };

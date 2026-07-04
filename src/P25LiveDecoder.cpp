@@ -69,6 +69,24 @@ double clampFinite(double v, double fallback)
     return std::isfinite(v) ? v : fallback;
 }
 
+std::vector<float> normalizedMbelibPcm(const float* audio, size_t count)
+{
+    // mbelib's float synthesizer uses the same internal scale that its short
+    // wrapper later multiplies by seven and clamps into int16.  Normalize that
+    // contract at the codec boundary so the rest of SDR Town consistently sees
+    // native float PCM in roughly [-1, 1].
+    static constexpr float kMbelibFloatToShortGain = 7.0f;
+    static constexpr float kInt16FullScale = 32768.0f;
+    std::vector<float> out;
+    out.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+        const float sample = std::isfinite(audio[i]) ? audio[i] : 0.0f;
+        out.push_back(std::clamp(sample * kMbelibFloatToShortGain / kInt16FullScale,
+                                 -1.0f, 1.0f));
+    }
+    return out;
+}
+
 double percentile(std::vector<double>& values, double p)
 {
     if (values.empty()) return 0.0;
@@ -220,6 +238,9 @@ struct P25BlockTimingState {
     double cqpskMu = 0.0;
     double c4fmSampleRate = 0.0;
     double cqpskSampleRate = 0.0;
+    bool cqpskCarrierLoopValid = false;
+    double cqpskCarrierLoopPhase = 0.0;
+    double cqpskCarrierLoopOmega = 0.0;
     std::vector<float> c4fmTail;
     std::vector<std::complex<float>> cqpskTail;
 };
@@ -281,6 +302,20 @@ void storePhase1BitTail(const P25LiveDecoder* decoder, const std::vector<uint8_t
     if (keep > 0) {
         tail.insert(tail.end(), bits.end() - static_cast<std::ptrdiff_t>(keep), bits.end());
     }
+}
+
+std::deque<uint8_t> snapshotPhase1BitTail(const P25LiveDecoder* decoder)
+{
+    std::lock_guard<std::mutex> lk(gP25StreamingStateMutex);
+    auto it = gP25StreamingState.find(decoder);
+    if (it == gP25StreamingState.end()) return {};
+    return it->second.phase1BitTail;
+}
+
+void restorePhase1BitTail(const P25LiveDecoder* decoder, const std::deque<uint8_t>& snapshot)
+{
+    std::lock_guard<std::mutex> lk(gP25StreamingStateMutex);
+    gP25StreamingState[decoder].phase1BitTail = snapshot;
 }
 
 template <typename T>
@@ -380,6 +415,27 @@ std::vector<std::complex<float>> applyFirSame(const std::vector<std::complex<flo
     return out;
 }
 
+std::vector<std::complex<float>> decimateFirSame(const std::vector<std::complex<float>>& x,
+                                                 const std::vector<double>& taps,
+                                                 int decimation)
+{
+    if (x.empty() || taps.empty() || decimation <= 1) return applyFirSame(x, taps);
+    std::vector<std::complex<float>> out;
+    out.reserve(x.size() / static_cast<size_t>(decimation) + 1);
+    const int half = static_cast<int>(taps.size() / 2);
+    for (size_t n = 0; n < x.size(); n += static_cast<size_t>(decimation)) {
+        std::complex<double> acc(0.0, 0.0);
+        for (size_t k = 0; k < taps.size(); ++k) {
+            const int idx = static_cast<int>(n) + static_cast<int>(k) - half;
+            if (idx < 0 || idx >= static_cast<int>(x.size())) continue;
+            const double w = taps[k];
+            acc += std::complex<double>(x[static_cast<size_t>(idx)].real(), x[static_cast<size_t>(idx)].imag()) * w;
+        }
+        out.emplace_back(static_cast<float>(acc.real()), static_cast<float>(acc.imag()));
+    }
+    return out;
+}
+
 std::vector<float> applyFirSame(const std::vector<float>& x, const std::vector<double>& taps)
 {
     if (x.empty() || taps.empty()) return {};
@@ -466,6 +522,71 @@ void limitComplexEnvelope(std::vector<std::complex<float>>& x)
     }
 }
 
+double wrapRadiansLocal(double p)
+{
+    if (!std::isfinite(p)) return 0.0;
+    p = std::remainder(p, 2.0 * kPi);
+    if (p <= -kPi) p += 2.0 * kPi;
+    if (p > kPi) p -= 2.0 * kPi;
+    return p;
+}
+
+double nearestPiOverFourPhase(double phase)
+{
+    const double step = kPi * 0.25;
+    return wrapRadiansLocal(std::round(phase / step) * step);
+}
+
+struct FrontEndDcBlockResult {
+    bool applied = false;
+    double estimateMagnitude = 0.0;
+};
+
+FrontEndDcBlockResult applyPersistentFrontEndDcBlock(std::vector<std::complex<float>>& iq,
+                                                     double sampleRate,
+                                                     double alpha,
+                                                     bool& estimateValid,
+                                                     double& estimateSampleRate,
+                                                     std::complex<double>& estimate)
+{
+    FrontEndDcBlockResult out;
+    if (iq.empty() || !std::isfinite(sampleRate) || sampleRate <= 0.0) return out;
+
+    const bool sampleRateChanged = estimateValid &&
+        (!std::isfinite(estimateSampleRate) ||
+         std::abs(estimateSampleRate - sampleRate) > std::max(1.0, sampleRate * 0.02));
+    if (!estimateValid || sampleRateChanged) {
+        std::complex<double> sum(0.0, 0.0);
+        size_t count = 0;
+        const size_t probe = std::min<size_t>(iq.size(), 4096);
+        for (size_t i = 0; i < probe; ++i) {
+            const auto& v = iq[i];
+            if (std::isfinite(v.real()) && std::isfinite(v.imag())) {
+                sum += std::complex<double>(v.real(), v.imag());
+                ++count;
+            }
+        }
+        estimate = count > 0 ? sum / static_cast<double>(count) : std::complex<double>(0.0, 0.0);
+        estimateSampleRate = sampleRate;
+        estimateValid = true;
+    }
+
+    const double a = std::clamp(alpha, 1e-6, 0.02);
+    for (auto& v : iq) {
+        if (!std::isfinite(v.real()) || !std::isfinite(v.imag())) {
+            v = {};
+            continue;
+        }
+        const std::complex<double> x(v.real(), v.imag());
+        estimate += (x - estimate) * a;
+        const std::complex<double> y = x - estimate;
+        v = {static_cast<float>(y.real()), static_cast<float>(y.imag())};
+    }
+    out.applied = true;
+    out.estimateMagnitude = std::abs(estimate);
+    return out;
+}
+
 struct FmDiscriminatorBlock {
     std::vector<float> hz;
     double sampleRate = 0.0;
@@ -521,6 +642,7 @@ ChannelizedIqBlock channelizeP25Iq(const std::vector<std::complex<float>>& iq,
     }
 
     if (mixed.size() < 2) return out;
+    std::vector<std::complex<float>> channel;
     if (decim > 1) {
         const double antiAliasCutoffHz = std::clamp(intermediateRate * 0.42,
                                                     config.channelBandwidthHz * 2.5,
@@ -528,13 +650,12 @@ ChannelizedIqBlock channelizeP25Iq(const std::vector<std::complex<float>>& iq,
         const double antiAliasTransitionHz = std::clamp(intermediateRate * 0.18,
                                                         config.channelBandwidthHz,
                                                         sampleRate * 0.20);
-        mixed = applyFirSame(mixed, designLowpassTaps(sampleRate, antiAliasCutoffHz, antiAliasTransitionHz, 241));
-    }
-
-    std::vector<std::complex<float>> channel;
-    channel.reserve(mixed.size() / static_cast<size_t>(decim) + 1);
-    for (size_t i = 0; i < mixed.size(); i += static_cast<size_t>(decim)) {
-        channel.push_back(mixed[i]);
+        channel = decimateFirSame(
+            mixed,
+            designLowpassTaps(sampleRate, antiAliasCutoffHz, antiAliasTransitionHz, 161),
+            decim);
+    } else {
+        channel = std::move(mixed);
     }
 
     if (channel.size() < 2) return out;
@@ -608,6 +729,10 @@ struct ComplexSymbolRecovery {
     double confidence = 0.0;
     double recoveredSampleRate = 0.0;
     double averageTimingError = 0.0;
+    bool carrierLoopApplied = false;
+    double carrierLoopCorrectionHz = 0.0;
+    double carrierLoopPhaseErrorRmsRad = 0.0;
+    size_t carrierLoopSymbols = 0;
 };
 
 std::vector<float> prepareC4fmDiscriminatorForSymbols(const std::vector<float>& discriminatorHz,
@@ -621,9 +746,12 @@ std::vector<float> prepareC4fmDiscriminatorForSymbols(const std::vector<float>& 
     std::vector<float> centered = discriminatorHz;
     removeMean(centered);
 
-    const double filterCutoffHz = std::clamp(config.symbolRate * 0.78, 2600.0, sampleRate * 0.42);
-    const double filterTransitionHz = std::clamp(config.symbolRate * 0.45, 1200.0, sampleRate * 0.2);
-    centered = applyFirSame(centered, designLowpassTaps(sampleRate, filterCutoffHz, filterTransitionHz, 101));
+    // Slightly tighter post-discriminator LPF for C4FM to reduce noise/ISI while passing the
+    // main lobes of the 4-level FSK (closer to typical P25 C4FM receiver filtering + SDRTrunk
+    // processing for cleaner symbol decisions leading to clearer voice frames).
+    const double filterCutoffHz = std::clamp(config.symbolRate * 0.62, 2400.0, sampleRate * 0.38);
+    const double filterTransitionHz = std::clamp(config.symbolRate * 0.38, 1100.0, sampleRate * 0.18);
+    centered = applyFirSame(centered, designLowpassTaps(sampleRate, filterCutoffHz, filterTransitionHz, 121));
     removeMean(centered);
     return centered;
 }
@@ -723,6 +851,20 @@ SymbolRecovery recoverSymbolsFromPreparedC4fm(const std::vector<float>& centered
         streamState->c4fmSampleRate = sampleRate;
         streamState->c4fmOmega = timingLoop.omega;
         streamState->c4fmMu = std::fmod(std::max(t, 0.0), std::max(timingLoop.omega, 1e-6));
+    }
+
+    // Lightweight running level normalization (AGC-like) to improve slice stability across fades/offsets.
+    // Matches spirit of SDRTrunk C4FM equalizer/gain compensation for cleaner dibits -> clearer voice.
+    if (out.symbolsHz.size() >= 8) {
+        std::vector<double> absS;
+        absS.reserve(out.symbolsHz.size());
+        for (double s : out.symbolsHz) absS.push_back(std::abs(s));
+        double ref = percentile(absS, 0.80);
+        if (ref > 50.0) {
+            const double target = config.c4fmInnerDeviationHz * 1.0;
+            const double g = std::clamp(target / ref, 0.6, 1.8);
+            for (double& s : out.symbolsHz) s *= g;
+        }
     }
     return out;
 }
@@ -850,6 +992,22 @@ ComplexSymbolRecovery recoverComplexSymbols(const std::vector<std::complex<float
     level = std::max(level, 1e-3);
 
     SecondOrderTimingLoop timingLoop(sps, config.symbolRate, 0.012, 0.707);
+    const bool carrierLoopEnabled = config.enableCqpskCarrierLoop &&
+        std::isfinite(config.cqpskCarrierLoopBandwidth) &&
+        config.cqpskCarrierLoopBandwidth > 0.0;
+    const double carrierLoopBandwidth = std::clamp(config.cqpskCarrierLoopBandwidth, 0.002, 0.120);
+    const double carrierLoopDamping = 0.707;
+    const double carrierLoopDenom = 1.0 +
+        2.0 * carrierLoopDamping * carrierLoopBandwidth +
+        carrierLoopBandwidth * carrierLoopBandwidth;
+    const double carrierLoopAlpha = (4.0 * carrierLoopDamping * carrierLoopBandwidth) / carrierLoopDenom;
+    const double carrierLoopBeta = (4.0 * carrierLoopBandwidth * carrierLoopBandwidth) / carrierLoopDenom;
+    const double maxCarrierCorrectionHz = std::clamp(config.cqpskCarrierLoopMaxCorrectionHz,
+                                                     50.0,
+                                                     std::max(50.0, config.symbolRate * 0.45));
+    const double maxCarrierOmega = 2.0 * kPi * maxCarrierCorrectionHz / std::max(config.symbolRate, 1.0);
+    double carrierPhase = 0.0;
+    double carrierOmega = 0.0;
     double t = std::clamp(initialPhase, 0.0, std::max(0.0, sps - 1.0));
     if (streamState && streamState->cqpskValid &&
         std::abs(streamState->cqpskSampleRate - sampleRate) <= sampleRate * 0.02 &&
@@ -857,21 +1015,94 @@ ComplexSymbolRecovery recoverComplexSymbols(const std::vector<std::complex<float
         timingLoop.omega = std::clamp(streamState->cqpskOmega, timingLoop.omegaMin, timingLoop.omegaMax);
         t = std::clamp(streamState->cqpskMu, 0.0, std::max(0.0, timingLoop.omega - 1.0));
     }
+    if (carrierLoopEnabled &&
+        streamState &&
+        streamState->cqpskCarrierLoopValid &&
+        streamState->cqpskValid &&
+        std::abs(streamState->cqpskSampleRate - sampleRate) <= sampleRate * 0.02) {
+        carrierPhase = wrapRadiansLocal(streamState->cqpskCarrierLoopPhase);
+        carrierOmega = std::clamp(streamState->cqpskCarrierLoopOmega, -maxCarrierOmega, maxCarrierOmega);
+    }
     double timingEnergy = 0.0;
     size_t timingCount = 0;
+    double carrierErrorEnergy = 0.0;
+    size_t carrierErrorCount = 0;
+
+    std::complex<double> previousMiddleSample{0.0, 0.0};
+    std::complex<double> previousCurrentSample{0.0, 0.0};
+    std::complex<double> previousDecisionSymbol{0.0, 0.0};
+    bool havePreviousSamples = false;
+    bool havePreviousDecision = false;
+
+    auto normalizedComplex = [](std::complex<double> z) {
+        const double mag = std::abs(z);
+        if (!std::isfinite(mag) || mag < 1e-9 ||
+            !std::isfinite(z.real()) || !std::isfinite(z.imag())) {
+            return std::complex<double>{0.0, 0.0};
+        }
+        return z / mag;
+    };
+    auto idealPhaseForDqpsk = [](const std::complex<double>& z) {
+        if (z.imag() > 0.0) {
+            return z.real() > 0.0 ? kPi * 0.25 : kPi * 0.75;
+        }
+        return z.real() > 0.0 ? -kPi * 0.25 : -kPi * 0.75;
+    };
 
     while (t < static_cast<double>(filtered.size() - 1)) {
-        const auto s = sampleLinearComplex(filtered, t);
-        out.symbols.emplace_back(static_cast<double>(s.real()), static_cast<double>(s.imag()));
+        const double halfSymbol = timingLoop.omega * 0.5;
+        const auto rawMiddle = sampleLinearComplex(filtered, t - halfSymbol);
+        const auto rawSample = sampleLinearComplex(filtered, t);
+        std::complex<double> middle(static_cast<double>(rawMiddle.real()), static_cast<double>(rawMiddle.imag()));
+        std::complex<double> s(static_cast<double>(rawSample.real()), static_cast<double>(rawSample.imag()));
+        if (carrierLoopEnabled) {
+            const std::complex<double> nco(std::cos(-carrierPhase), std::sin(-carrierPhase));
+            middle *= nco;
+            s *= nco;
+        }
+        out.symbols.push_back(s);
 
-        const auto early = sampleLinearComplex(filtered, t - timingLoop.omega * 0.5);
-        const auto late = sampleLinearComplex(filtered, t + timingLoop.omega * 0.5);
-        const auto errComplex = (early - late) * std::conj(s);
-        double err = static_cast<double>(errComplex.real()) / std::max(level * level, 1e-6);
-        err = std::clamp(err, -1.0, 1.0);
+        double err = 0.0;
+        double phaseError = 0.0;
+        bool haveDecision = false;
+        std::complex<double> currentDecisionSymbol{0.0, 0.0};
+        if (havePreviousSamples) {
+            const auto middleSymbol = normalizedComplex(middle * std::conj(previousMiddleSample));
+            currentDecisionSymbol = normalizedComplex(s * std::conj(previousCurrentSample));
+            haveDecision = std::abs(middleSymbol) > 0.0 && std::abs(currentDecisionSymbol) > 0.0;
+            if (haveDecision) {
+                if (havePreviousDecision) {
+                    err = ((previousDecisionSymbol.real() - currentDecisionSymbol.real()) * middleSymbol.real()) +
+                          ((previousDecisionSymbol.imag() - currentDecisionSymbol.imag()) * middleSymbol.imag());
+                    err = std::clamp(err / 0.3, -1.0, 1.0);
+                }
+                const double observedPhase = std::atan2(currentDecisionSymbol.imag(), currentDecisionSymbol.real());
+                phaseError = -wrapRadiansLocal(observedPhase - idealPhaseForDqpsk(currentDecisionSymbol));
+                phaseError = std::clamp(phaseError, -0.3, 0.3);
+            }
+        }
         timingEnergy += err * err;
         ++timingCount;
 
+        if (carrierLoopEnabled) {
+            if (haveDecision) {
+                carrierOmega = std::clamp(carrierOmega + carrierLoopBeta * phaseError,
+                                           -maxCarrierOmega,
+                                           maxCarrierOmega);
+                carrierPhase = wrapRadiansLocal(carrierPhase + carrierOmega + carrierLoopAlpha * phaseError);
+                carrierErrorEnergy += phaseError * phaseError;
+                ++carrierErrorCount;
+            } else {
+                carrierPhase = wrapRadiansLocal(carrierPhase + carrierOmega);
+            }
+        }
+        previousMiddleSample = middle;
+        previousCurrentSample = s;
+        havePreviousSamples = true;
+        if (haveDecision) {
+            previousDecisionSymbol = currentDecisionSymbol;
+            havePreviousDecision = true;
+        }
         t += timingLoop.advance(err);
     }
 
@@ -891,11 +1122,39 @@ ComplexSymbolRecovery recoverComplexSymbols(const std::vector<std::complex<float
     out.confidence = std::clamp((avgMag / std::max(avgMag + std::sqrt(magVar), 1e-6)) *
                                 (1.0 - std::min(0.45, timingRms * 0.08)),
                                 0.0, 1.0);
+    if (carrierLoopEnabled && carrierErrorCount >= 16) {
+        out.carrierLoopApplied = true;
+        out.carrierLoopCorrectionHz = carrierOmega * config.symbolRate / (2.0 * kPi);
+        out.carrierLoopPhaseErrorRmsRad =
+            std::sqrt(carrierErrorEnergy / static_cast<double>(carrierErrorCount));
+        out.carrierLoopSymbols = carrierErrorCount;
+    }
+
+    // Lightweight magnitude normalization on CQPSK symbols (analogous to the C4FM AGC).
+    // Helps stabilize decisions across fades/levels, approximating SDRTrunk equalizer/gain correction
+    // for cleaner dibits and thus clearer voice audio.
+    if (!out.symbols.empty()) {
+        double sumMag = 0.0;
+        for (const auto& s : out.symbols) {
+            sumMag += std::abs(s);
+        }
+        const double avgMag = sumMag / static_cast<double>(out.symbols.size());
+        if (avgMag > 1e-6) {
+            const double g = std::clamp(1.0 / avgMag, 0.5, 2.0);
+            for (auto& s : out.symbols) {
+                s *= g;
+            }
+        }
+    }
+
     if (streamState && !out.symbols.empty()) {
         streamState->cqpskValid = true;
         streamState->cqpskSampleRate = sampleRate;
         streamState->cqpskOmega = timingLoop.omega;
         streamState->cqpskMu = std::fmod(std::max(t, 0.0), std::max(timingLoop.omega, 1e-6));
+        streamState->cqpskCarrierLoopValid = out.carrierLoopApplied;
+        streamState->cqpskCarrierLoopPhase = carrierPhase;
+        streamState->cqpskCarrierLoopOmega = carrierOmega;
     }
     return out;
 }
@@ -1292,6 +1551,10 @@ int liveResultTrustScore(const P25LiveDecodeResult& r)
         if (block.fecDecoded && block.crcValid) score += 200;
         else if (block.fecDecoded) score += 8;
     }
+    for (const auto& pdu : r.phase1Pdus) {
+        if (pdu.headerFecDecoded && pdu.headerCrcValid) score += pdu.format == 23 ? 220 : 160;
+        else if (pdu.headerFecDecoded) score += 8;
+    }
     for (const auto& nid : r.nids) {
         if (nid.fecValidated) score += 60;
     }
@@ -1325,6 +1588,9 @@ int liveResultHardEvidenceScore(const P25LiveDecodeResult& r)
     for (const auto& block : r.rawTsbkBlocks) {
         if (block.fecDecoded && block.crcValid) score += 40;
     }
+    for (const auto& pdu : r.phase1Pdus) {
+        if (pdu.headerFecDecoded && pdu.headerCrcValid) score += pdu.format == 23 ? 42 : 30;
+    }
     for (const auto& nid : r.nids) {
         if (nid.fecValidated) score += 12;
     }
@@ -1348,15 +1614,30 @@ bool betterLiveResult(const P25LiveDecodeResult& a, const P25LiveDecodeResult& b
             return nid.fecValidated;
         });
     };
+    const auto bestValidatedNidCorrections = [](const P25LiveDecodeResult& r) {
+        int best = std::numeric_limits<int>::max();
+        for (const auto& nid : r.nids) {
+            if (nid.fecValidated) best = std::min(best, nid.correctedBitErrors);
+        }
+        return best;
+    };
     const auto trustedTsbks = [](const P25LiveDecodeResult& r) {
         return std::count_if(r.rawTsbkBlocks.begin(), r.rawTsbkBlocks.end(), [](const P25TsbkBlock& block) {
             return block.fecDecoded && block.crcValid;
         });
     };
+    const auto trustedPhase1Pdus = [](const P25LiveDecodeResult& r) {
+        return std::count_if(r.phase1Pdus.begin(), r.phase1Pdus.end(), [](const P25Phase1PduMessage& pdu) {
+            return pdu.headerFecDecoded && pdu.headerCrcValid;
+        });
+    };
     const auto aTrustedTsbks = trustedTsbks(a);
     const auto bTrustedTsbks = trustedTsbks(b);
-    if (aTrustedTsbks != bTrustedTsbks) return aTrustedTsbks > bTrustedTsbks;
-
+    const auto aTrustedPdus = trustedPhase1Pdus(a);
+    const auto bTrustedPdus = trustedPhase1Pdus(b);
+    const auto aTrustedPhase1Control = aTrustedTsbks + aTrustedPdus;
+    const auto bTrustedPhase1Control = bTrustedTsbks + bTrustedPdus;
+    if (aTrustedPhase1Control != bTrustedPhase1Control) return aTrustedPhase1Control > bTrustedPhase1Control;
     const auto phase2VoiceCodewords = [](const P25LiveDecodeResult& r) {
         size_t out = 0;
         for (const auto& burst : r.phase2Bursts) out += burst.voiceCodewords.size();
@@ -1398,15 +1679,28 @@ bool betterLiveResult(const P25LiveDecodeResult& a, const P25LiveDecodeResult& b
     // "decoded=4" and "NID not validated" even while p2vcw was present.  With
     // no trusted TSBK in the candidate, prefer clear Phase-2 traffic evidence
     // before Phase-1 NID evidence.
-    if (aTrustedTsbks == 0 && bTrustedTsbks == 0) {
-        const int aP2 = phase2TelemetryScore(a);
-        const int bP2 = phase2TelemetryScore(b);
-        if (aP2 != bP2 && std::max(aP2, bP2) >= 8) return aP2 > bP2;
-    }
-
+    const bool phase2HardEvidencePresent =
+        a.stats.phase2MacCrcValid > 0 || b.stats.phase2MacCrcValid > 0 ||
+        a.stats.phase2EssKnown || b.stats.phase2EssKnown;
     const auto aValidNids = validNids(a);
     const auto bValidNids = validNids(b);
+    if (aTrustedPhase1Control == 0 && bTrustedPhase1Control == 0) {
+        const int aP2 = phase2TelemetryScore(a);
+        const int bP2 = phase2TelemetryScore(b);
+        if (aP2 != bP2 &&
+            (phase2HardEvidencePresent || (aValidNids == bValidNids && std::max(aP2, bP2) >= 8))) {
+            return aP2 > bP2;
+        }
+    }
+
     if (aValidNids != bValidNids) return aValidNids > bValidNids;
+    if (aValidNids > 0 && bValidNids > 0) {
+        const int aBestNidCorrections = bestValidatedNidCorrections(a);
+        const int bBestNidCorrections = bestValidatedNidCorrections(b);
+        if (aBestNidCorrections != bBestNidCorrections) {
+            return aBestNidCorrections < bBestNidCorrections;
+        }
+    }
     const auto phase2HardEvidence = [](const P25LiveDecodeResult& r) {
         int out = 0;
         out += static_cast<int>(r.stats.phase2MacCrcValid) * 8;
@@ -1426,13 +1720,13 @@ bool betterLiveResult(const P25LiveDecodeResult& a, const P25LiveDecodeResult& b
     }
     if (a.nids.size() != b.nids.size()) return a.nids.size() > b.nids.size();
     if (a.syncs.size() != b.syncs.size()) return a.syncs.size() > b.syncs.size();
-    if (a.stats.bestFrameSyncBitErrors >= 0 && b.stats.bestFrameSyncBitErrors >= 0 &&
-        a.stats.bestFrameSyncBitErrors != b.stats.bestFrameSyncBitErrors) {
-        return a.stats.bestFrameSyncBitErrors < b.stats.bestFrameSyncBitErrors;
-    }
     if (a.stats.bestNidBchDistance >= 0 && b.stats.bestNidBchDistance >= 0 &&
         a.stats.bestNidBchDistance != b.stats.bestNidBchDistance) {
         return a.stats.bestNidBchDistance < b.stats.bestNidBchDistance;
+    }
+    if (a.stats.bestFrameSyncBitErrors >= 0 && b.stats.bestFrameSyncBitErrors >= 0 &&
+        a.stats.bestFrameSyncBitErrors != b.stats.bestFrameSyncBitErrors) {
+        return a.stats.bestFrameSyncBitErrors < b.stats.bestFrameSyncBitErrors;
     }
     const int aTrust = liveResultTrustScore(a);
     const int bTrust = liveResultTrustScore(b);
@@ -1440,8 +1734,8 @@ bool betterLiveResult(const P25LiveDecodeResult& a, const P25LiveDecodeResult& b
     const bool aCqpsk = isCqpskPath(a.stats.demodPath);
     const bool bCqpsk = isCqpskPath(b.stats.demodPath);
     if (aCqpsk != bCqpsk &&
-        (aTrustedTsbks > 0 || aValidNids > 0) &&
-        (bTrustedTsbks > 0 || bValidNids > 0)) {
+        (aTrustedPhase1Control > 0 || aValidNids > 0) &&
+        (bTrustedPhase1Control > 0 || bValidNids > 0)) {
         return aCqpsk;
     }
     if (std::abs(a.stats.softDecisionQuality - b.stats.softDecisionQuality) > 1e-6) {
@@ -1460,6 +1754,11 @@ bool hasCqpskHardLockEvidence(const P25LiveDecodeResult& r)
     });
     if (trustedTsbk) return true;
 
+    const bool trustedPhase1Pdu = std::any_of(r.phase1Pdus.begin(), r.phase1Pdus.end(), [](const P25Phase1PduMessage& pdu) {
+        return pdu.headerFecDecoded && pdu.headerCrcValid;
+    });
+    if (trustedPhase1Pdu) return true;
+
     const bool trustedNid = std::any_of(r.nids.begin(), r.nids.end(), [](const P25Nid& nid) {
         return nid.fecValidated;
     });
@@ -1470,6 +1769,62 @@ bool hasCqpskHardLockEvidence(const P25LiveDecodeResult& r)
     return std::any_of(r.imbeFrames.begin(), r.imbeFrames.end(), [](const P25ImbeFrame& frame) {
         return frame.valid;
     });
+}
+
+bool hasPhase2SoftCqpskLockEvidence(const P25LiveDecodeResult& r)
+{
+    if (!isCqpskPath(r.stats.demodPath)) return false;
+    if (hasCqpskHardLockEvidence(r)) return true;
+
+    const bool superframeMask =
+        r.stats.phase2SuperframeBursts >= 6 &&
+        r.stats.phase2MaskedBursts >= 6;
+    const bool targetLikeVoice =
+        r.stats.phase2VoiceCodewords >= 4 &&
+        r.stats.phase2MacPdus > 0;
+    const bool goodBurstSync =
+        r.stats.bestPhase2SyncErrors >= 0 &&
+        r.stats.bestPhase2SyncErrors <= 3;
+
+    // This is a realtime demod-lock hint only.  It is deliberately weaker than
+    // the MAC/ESS speaker gate: a strong TDMA superframe keeps the CQPSK timing
+    // path warm, but it never proves clear voice by itself.
+    return superframeMask && targetLikeVoice && goodBurstSync;
+}
+
+bool hasCqpskSoftContinuityEvidence(const P25LiveDecodeResult& r)
+{
+    if (!isCqpskPath(r.stats.demodPath)) return false;
+    if (hasCqpskHardLockEvidence(r)) return true;
+    if (r.stats.phase2VoiceCodewords > 0 ||
+        r.stats.phase2SuperframeBursts > 0 ||
+        r.stats.phase2MaskedBursts > 0 ||
+        r.stats.phase2MacPdus > 0 ||
+        r.stats.phase2IschDecoded > 0 ||
+        r.stats.bestPhase2SyncErrors >= 0 ||
+        !r.phase2Bursts.empty()) {
+        return true;
+    }
+    if (r.stats.bestFrameSyncBitErrors >= 0 &&
+        r.stats.bestFrameSyncBitErrors <= 3) {
+        return true;
+    }
+    if (r.stats.softDecisionSymbols >= 96 &&
+        r.stats.softDecisionQuality >= 0.08) {
+        return true;
+    }
+    return r.stats.symbols >= 96 &&
+        r.stats.symbolConfidence >= 0.02 &&
+        r.stats.softDecisionSymbols >= 96;
+}
+
+bool hasPhase2TrafficTelemetry(const P25LiveDecodeResult& r)
+{
+    return r.stats.phase2VoiceCodewords > 0 ||
+        r.stats.phase2SuperframeBursts > 0 ||
+        r.stats.phase2MaskedBursts > 0 ||
+        r.stats.bestPhase2SyncErrors >= 0 ||
+        !r.phase2Bursts.empty();
 }
 
 bool hasPhase2FastStopEvidence(const P25LiveDecodeResult& r)
@@ -2551,6 +2906,191 @@ P25Phase2EssState phase2EssFromMacPtt(const std::vector<uint8_t>& bytes, bool fe
     return ess;
 }
 
+size_t phase2MacStructureLengthForLiveValidation(const std::vector<uint8_t>& bytes, size_t offset)
+{
+    if (offset >= bytes.size()) return 0;
+    const uint8_t op = bytes[offset];
+    switch (op) {
+        case 0x00: return 1;   // Null / pad.
+        case 0x01: return 7;
+        case 0x02: return 8;
+        case 0x03: return 7;
+        case 0x05: return 16;
+        case 0x21: return 14;
+        case 0x22: return 15;
+        case 0x25: return 15;
+        case 0x30: return 5;
+        case 0x31: return 7;
+        case 0x40: return 9;
+        case 0x41: return 7;
+        case 0x42: return 9;
+        case 0x44: return 9;
+        case 0x45: return 10;
+        case 0x46: return 9;
+        case 0x48: return 10;
+        case 0x49: return 10;
+        case 0x4a: return 7;
+        case 0x4c: return 10;
+        case 0x52: return 8;
+        case 0x53: return 9;
+        case 0x54: return 9;
+        case 0x55: return 7;
+        case 0x58: return 10;
+        case 0x5a: return 7;
+        case 0x5c: return 10;
+        case 0x5d: return 8;
+        case 0x5e: return 14;
+        case 0x5f: return 7;
+        case 0x60: return 9;
+        case 0x61: return 9;
+        case 0x64: return 9;
+        case 0x67: return 9;
+        case 0x68: return 10;
+        case 0x6a: return 7;
+        case 0x6b: return 10;
+        case 0x6c: return 10;
+        case 0x6d: return 7;
+        case 0x6f: return 9;
+        case 0x70: return 9;
+        case 0x71: return 18;
+        case 0x72: return 9;
+        case 0x73: return 9;
+        case 0x74: return 9;
+        case 0x75: return 9;
+        case 0x76: return 10;
+        case 0x77: return 13;
+        case 0x78: return 9;
+        case 0x79: return 9;
+        case 0x7a: return 9;
+        case 0x7b: return 11;
+        case 0x7c: return 9;
+        case 0x7d: return 9;
+        case 0x88: return 5;
+        case 0x90: return 7;
+        case 0xc0: return 11;
+        case 0xc3: return 8;
+        case 0xc4: return 15;
+        case 0xc5: return 14;
+        case 0xc6: return 15;
+        case 0xc7: return 18;
+        case 0xc8: return 12;
+        case 0xc9: return 12;
+        case 0xcb: return 18;
+        case 0xcc: return 14;
+        case 0xcd: return 18;
+        case 0xce: return 18;
+        case 0xcf: return 18;
+        case 0xd6: return 9;
+        case 0xd8: return 14;
+        case 0xd9: return 18;
+        case 0xda: return 11;
+        case 0xdb: return 18;
+        case 0xdc: return 14;
+        case 0xde: return 18;
+        case 0xdf: return 11;
+        case 0xe0: return 18;
+        case 0xe4: return 17;
+        case 0xe5: return 14;
+        case 0xe8: return 16;
+        case 0xe9: return 8;
+        case 0xea: return 11;
+        case 0xec: return 13;
+        case 0xf2: return 16;
+        case 0xf3: return 14;
+        case 0xfa: return 11;
+        case 0xfb: return 13;
+        case 0xfc: return 11;
+        case 0xfe: return 15;
+        default:
+            break;
+    }
+
+    if ((op == 0x08 || op == 0x10 || op == 0x11 || op == 0x12) &&
+        offset + 1 < bytes.size()) {
+        const size_t len = bytes[offset + 1] & 0x3fu;
+        if (len >= 2) return len;
+    }
+
+    if ((op & 0xc0u) == 0x80u && offset + 1 < bytes.size()) {
+        const uint8_t mfid = bytes[offset + 1];
+        if (mfid == 0x90) {
+            switch (op) {
+                case 0x80: return 8;
+                case 0x81: return 17;
+                case 0x83: return 7;
+                case 0x84: return 11;
+                case 0x89: return 17;
+                case 0x91: return 17;
+                case 0x95: return 17;
+                case 0xa0: return 16;
+                case 0xa3: return 11;
+                case 0xa4: return 13;
+                case 0xa5: return 11;
+                case 0xa6: return 11;
+                case 0xa7: return 11;
+                case 0xa8: return 10;
+                default: break;
+            }
+        } else if (mfid == 0xa4) {
+            switch (op) {
+                case 0xa0: return 9;
+                case 0xaa: return 17;
+                case 0xac: return 12;
+                default: break;
+            }
+        }
+    }
+
+    if ((op & 0xc0u) == 0x80u && offset + 2 < bytes.size()) {
+        const size_t len = bytes[offset + 2] & 0x3fu;
+        if (len >= 3) return len;
+    }
+    return 0;
+}
+
+bool phase2AllRemainingZero(const std::vector<uint8_t>& bytes, size_t offset)
+{
+    return std::all_of(bytes.begin() + static_cast<std::ptrdiff_t>(std::min(offset, bytes.size())),
+                       bytes.end(),
+                       [](uint8_t b) { return b == 0; });
+}
+
+bool phase2DirectCrcMacPduLooksSdrtrunkParseable(const P25Phase2MacPdu& pdu, size_t macContentBits)
+{
+    if (pdu.bytes.empty()) return false;
+    const uint8_t pduType = static_cast<uint8_t>((pdu.bytes[0] >> 5) & 0x07u);
+    if (pduType == 5 || pduType == 7) return false;
+
+    const size_t maxBytes = std::min(pdu.bytes.size(), (macContentBits + 7u) / 8u);
+    switch (pduType) {
+        case 1: // MAC_PTT has fixed ESS/current-call fields instead of MAC structures.
+            return maxBytes >= 13u;
+        case 2: // MAC_END_PTT.
+            return maxBytes >= 3u;
+        case 0:
+        case 3:
+        case 4:
+        case 6:
+            break;
+        default:
+            return false;
+    }
+
+    size_t pos = 1;
+    size_t structures = 0;
+    while (pos < maxBytes) {
+        if (phase2AllRemainingZero(pdu.bytes, pos)) return true;
+        const uint8_t op = pdu.bytes[pos];
+        if (op == 0x00) return true;
+        const size_t len = phase2MacStructureLengthForLiveValidation(pdu.bytes, pos);
+        if (len == 0 || pos + len > maxBytes) return false;
+        ++structures;
+        if (structures >= 3) return true;
+        pos += len;
+    }
+    return structures > 0;
+}
+
 std::optional<P25Phase2MacPdu> decodePhase2Acch(const std::vector<int>& payloadDibits,
                                                 P25Phase2BurstKind kind,
                                                 size_t dibitOffset,
@@ -2670,17 +3210,20 @@ std::optional<P25Phase2MacPdu> decodePhase2Acch(const std::vector<int>& payloadD
 
         // Field debugging showed a pathological strong-signal failure where the
         // timeslot layout/DUID looked correct, but p2mac stayed 0/0 forever.
-        // If our local RS orientation/generator is wrong, an otherwise perfect
-        // ACCH message would be discarded before the MAC CRC is ever tested.
-        // sdrtrunk ultimately validates the reconstructed MAC message with the
-        // P25 CRC; do that first on the raw information field as a fail-safe.
+        // Keep a direct information-field CRC probe as a recovery path, but only
+        // promote it when the resulting MAC PDU has a structure that SDRTrunk's
+        // MAC factory would actually parse.  CRC-12 is too small to let an
+        // otherwise unknown MAC_ACTIVE/opcode pattern become hard mask/audio
+        // evidence by itself.
         std::vector<uint8_t> directBits;
         if (codedBits.size() >= totalPayloadBits) {
             directBits.assign(codedBits.begin(), codedBits.begin() + static_cast<std::ptrdiff_t>(totalPayloadBits));
             const bool directCrcOk = lcch ? p25Phase2Crc16Ok(directBits, crcProtectedBits)
                                           : p25Phase2Crc12Ok(directBits, crcProtectedBits);
             auto directPdu = makePduFromBits(directBits, false, directCrcOk, 0);
-            if (directCrcOk) return directPdu;
+            if (directCrcOk && phase2DirectCrcMacPduLooksSdrtrunkParseable(directPdu, macContentBits)) {
+                return directPdu;
+            }
         }
 
         // P25 Phase 2 ACCH Reed-Solomon words are transmitted as
@@ -2734,7 +3277,11 @@ std::optional<P25Phase2MacPdu> decodePhase2Acch(const std::vector<int>& payloadD
             }
         }
 
-        const int maxUnknownSymbols = deepSearch ? 1 : -1;
+        // Keep the live path close to sdrtrunk's Reed-Solomon behavior instead
+        // of accepting p2sf/p2mask/VCW telemetry without a recoverable MAC.
+        // Normal realtime decode permits one unknown transmitted RS symbol;
+        // deep/offline search permits two.  CRC remains the final authority.
+        const int maxUnknownSymbols = deepSearch ? 2 : 1;
         const auto rs = rs63DecodeWithUnknownSymbolErrors(symbols, erasures, transmittedPositions, maxUnknownSymbols);
         if (!rs.ok) {
             // Return a non-CRC diagnostic candidate instead of null so the field
@@ -3163,7 +3710,10 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
 
     std::vector<int> rawPayloadDibits(kPhase2TimeslotPayloadDibits, 0);
     std::vector<int> descrambledPayloadDibits(kPhase2TimeslotPayloadDibits, 0);
-    const bool canApplyMask = xorMask && superframeLocked && superframeBurstIndex < 12;
+    // If mask params known (from grant or set), always apply using the selected/current phase.
+    // This makes descrambling consistent for followed target voice even if superframe lock is marginal in some windows.
+    // Phase comes from sticky/previous lock or the per-window best search.
+    const bool canApplyMask = (xorMask != nullptr);
     const size_t maskBurstIndex = (superframeBurstIndex + static_cast<size_t>(xorMaskPhase)) % 12u;
     burst.rawPayloadDibits.reserve(rawPayloadDibits.size());
     burst.maskedPayloadDibits.reserve(descrambledPayloadDibits.size());
@@ -3278,7 +3828,14 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
         }
     }
 
-    if (phase2BurstKindHasVoice(burst.kind)) {
+    bool tryVoiceCw = phase2BurstKindHasVoice(burst.kind);
+    if (!tryVoiceCw && canApplyMask) {
+        // Force voice codeword extraction for masked phase2 bursts even if DUID/kind not voice
+        // (common in late-entry or when DUID decode marginal). OP25 processes voice data on the slot
+        // once descrambled. This captures more frames in the capture for continuous audio.
+        tryVoiceCw = true;
+    }
+    if (tryVoiceCw) {
         const auto& voicePayloadDibits = canApplyMask ? descrambledPayloadDibits : rawPayloadDibits;
         if (session && burst.xorMaskApplied && superframeLocked) {
             if (auto ess = decodePhase2VoiceEssSdrtrunkOrder(voicePayloadDibits, burst.kind, *session)) {
@@ -3286,19 +3843,24 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
             }
         }
 
-        // sdrtrunk Voice4Timeslot/Voice2Timeslot extracts AMBE from timeslot
-        // bit starts 2, 76, 172, 246.  In dibits within the 320-bit timeslot
-        // that is 1, 38, 86, 123.  Do not add the old half-ISCH +10 offset.
+        // sdrtrunk Voice4Timeslot/Voice2Timeslot uses bit offsets
+        // 2/76/172/246 inside the 320-bit timeslot.  In dibits, relative to
+        // the 160-dibit descrambled payload, those are 1/38/86/123.  OP25's
+        // p25p2_tdma.cc reports 11/48/96/133 from its xored_burst pointer,
+        // but that pointer is already shifted 10 dibits from the raw 180-dibit
+        // burst; the same absolute positions are pos+21/58/106/143.
         const std::array<size_t, 4> starts{1, 38, 86, 123};
-        const size_t count = burst.kind == P25Phase2BurstKind::Voice4 ? 4u : 2u;
+        const size_t count = (burst.kind == P25Phase2BurstKind::Voice4 || !phase2BurstKindHasVoice(burst.kind)) ? 4u : 2u;
         for (size_t i = 0; i < count; ++i) {
             const size_t start = starts[i];
+            const size_t absPos = payload + start;
             if (start + 36 > voicePayloadDibits.size()) continue;
             P25Phase2VoiceCodeword cw;
-            cw.dibitOffset = payload + start;
+            cw.dibitOffset = absPos;
             cw.voiceIndex = static_cast<uint8_t>(i);
             for (size_t d = 0; d < 36; ++d) {
-                const auto bits = P25LiveDecoder::bitsFromDibit(voicePayloadDibits[start + d] & 0x03);
+                const int dval = voicePayloadDibits[start + d] & 0x03;
+                const auto bits = P25LiveDecoder::bitsFromDibit(dval);
                 cw.bits[d * 2] = bits[0];
                 cw.bits[d * 2 + 1] = bits[1];
             }
@@ -3380,6 +3942,13 @@ Phase2MaskPhaseWindow scorePhase2MaskPhaseWindow(const std::vector<int>& dibits,
     // Soft evidence keeps stable prior phases from bouncing when a block has voice-only bursts.
     window.score = lock.syncScore * 20 - lock.syncErrors * 2;
     if (stickyPhase) window.score += 35;
+    // Much stronger sticky for voice periods to prevent phase flip causing choppy audio.
+    // Once good mask phase for target voice, stick hard across windows.
+    if (stickyPhase) {
+        size_t stickyVoiceCw = 0;
+        for (const auto& b : window.bursts) if (b.xorMaskApplied) stickyVoiceCw += b.voiceCodewords.size();
+        if (stickyVoiceCw > 0) window.score += 300;
+    }
     window.score += static_cast<int>(window.macFecDecoded) * 8;
     window.score += static_cast<int>(window.macCrcValid) * 500;
     if (window.essKnown) window.score += 900;
@@ -3498,8 +4067,105 @@ uint16_t p25Crc16(const std::vector<uint8_t>& bytes, size_t count)
 bool p25TsbkCrcValid(const std::vector<uint8_t>& bytes)
 {
     if (bytes.size() != 12) return false;
+
+    static constexpr std::array<uint16_t, 96> kCcitt80Checksums = {
+        0x1bcb, 0x8de5, 0xc6f2, 0x6b69, 0xb5b4, 0x52ca, 0x2175, 0x90ba,
+        0x404d, 0xa026, 0x5803, 0xac01, 0xd600, 0x6310, 0x3998, 0x14dc,
+        0x027e, 0x092f, 0x8497, 0xc24b, 0xe125, 0xf092, 0x7059, 0xb82c,
+        0x5406, 0x2213, 0x9109, 0xc884, 0x6c52, 0x3e39, 0x9f1c, 0x479e,
+        0x2bdf, 0x95ef, 0xcaf7, 0xe57b, 0xf2bd, 0xf95e, 0x74bf, 0xba5f,
+        0xdd2f, 0xee97, 0xf74b, 0xfba5, 0xfdd2, 0x76f9, 0xbb7c, 0x55ae,
+        0x22c7, 0x9163, 0xc8b1, 0xe458, 0x7a3c, 0x350e, 0x1297, 0x894b,
+        0xc4a5, 0xe252, 0x7939, 0xbc9c, 0x565e, 0x233f, 0x919f, 0xc8cf,
+        0xe467, 0xf233, 0xf919, 0xfc8c, 0x7656, 0x333b, 0x999d, 0xccce,
+        0x6e77, 0xb73b, 0xdb9d, 0xedce, 0x7ef7, 0xbf7b, 0xdfbd, 0xefde,
+        0x0001, 0x0002, 0x0004, 0x0008, 0x0010, 0x0020, 0x0040, 0x0080,
+        0x0100, 0x0200, 0x0400, 0x0800, 0x1000, 0x2000, 0x4000, 0x8000,
+    };
+
+    uint16_t calculated = 0xffffu;
+    for (size_t bit = 0; bit < 80; ++bit) {
+        const size_t byteIndex = bit / 8;
+        const int bitInByte = 7 - static_cast<int>(bit % 8);
+        if (((bytes[byteIndex] >> bitInByte) & 0x01u) != 0) {
+            calculated ^= kCcitt80Checksums[bit];
+        }
+    }
     const uint16_t transmitted = static_cast<uint16_t>((static_cast<uint16_t>(bytes[10]) << 8) | bytes[11]);
-    return transmitted == p25Crc16(bytes, 10);
+    const uint16_t residual = static_cast<uint16_t>(calculated ^ transmitted);
+    return residual == 0u || residual == 0xffffu;
+}
+
+struct P25Ccitt80Correction {
+    bool valid = false;
+    bool corrected = false;
+    bool invertedResidual = false;
+    int correctedBits = 0;
+};
+
+P25Ccitt80Correction p25CorrectCcitt80(std::vector<uint8_t>& bytes)
+{
+    P25Ccitt80Correction out;
+    if (bytes.size() != 12) return out;
+
+    static constexpr std::array<uint16_t, 96> kCcitt80Checksums = {
+        0x1bcb, 0x8de5, 0xc6f2, 0x6b69, 0xb5b4, 0x52ca, 0x2175, 0x90ba,
+        0x404d, 0xa026, 0x5803, 0xac01, 0xd600, 0x6310, 0x3998, 0x14dc,
+        0x027e, 0x092f, 0x8497, 0xc24b, 0xe125, 0xf092, 0x7059, 0xb82c,
+        0x5406, 0x2213, 0x9109, 0xc884, 0x6c52, 0x3e39, 0x9f1c, 0x479e,
+        0x2bdf, 0x95ef, 0xcaf7, 0xe57b, 0xf2bd, 0xf95e, 0x74bf, 0xba5f,
+        0xdd2f, 0xee97, 0xf74b, 0xfba5, 0xfdd2, 0x76f9, 0xbb7c, 0x55ae,
+        0x22c7, 0x9163, 0xc8b1, 0xe458, 0x7a3c, 0x350e, 0x1297, 0x894b,
+        0xc4a5, 0xe252, 0x7939, 0xbc9c, 0x565e, 0x233f, 0x919f, 0xc8cf,
+        0xe467, 0xf233, 0xf919, 0xfc8c, 0x7656, 0x333b, 0x999d, 0xccce,
+        0x6e77, 0xb73b, 0xdb9d, 0xedce, 0x7ef7, 0xbf7b, 0xdfbd, 0xefde,
+        0x0001, 0x0002, 0x0004, 0x0008, 0x0010, 0x0020, 0x0040, 0x0080,
+        0x0100, 0x0200, 0x0400, 0x0800, 0x1000, 0x2000, 0x4000, 0x8000,
+    };
+
+    auto bitIsSet = [&bytes](size_t bit) -> bool {
+        const size_t byteIndex = bit / 8;
+        const int bitInByte = 7 - static_cast<int>(bit % 8);
+        return ((bytes[byteIndex] >> bitInByte) & 0x01u) != 0;
+    };
+    auto flipBit = [&bytes](size_t bit) {
+        const size_t byteIndex = bit / 8;
+        const int bitInByte = 7 - static_cast<int>(bit % 8);
+        bytes[byteIndex] ^= static_cast<uint8_t>(1u << bitInByte);
+    };
+    auto residualFor = [&]() -> uint16_t {
+        uint16_t calculated = 0xffffu;
+        for (size_t bit = 0; bit < 80; ++bit) {
+            if (bitIsSet(bit)) calculated ^= kCcitt80Checksums[bit];
+        }
+        const uint16_t transmitted = static_cast<uint16_t>((static_cast<uint16_t>(bytes[10]) << 8) | bytes[11]);
+        return static_cast<uint16_t>(calculated ^ transmitted);
+    };
+
+    uint16_t residual = residualFor();
+    if (residual == 0u || residual == 0xffffu) {
+        out.valid = true;
+        out.invertedResidual = residual == 0xffffu;
+        return out;
+    }
+
+    auto it = std::find(kCcitt80Checksums.begin(), kCcitt80Checksums.end(), residual);
+    if (it != kCcitt80Checksums.end()) {
+        const size_t bit = static_cast<size_t>(std::distance(kCcitt80Checksums.begin(), it));
+        flipBit(bit);
+        residual = residualFor();
+        if (residual == 0u || residual == 0xffffu) {
+            out.valid = true;
+            out.corrected = true;
+            out.correctedBits = 1;
+            out.invertedResidual = residual == 0xffffu;
+            return out;
+        }
+        flipBit(bit);
+    }
+
+    out.correctedBits = 2;
+    return out;
 }
 
 struct StatusSplit {
@@ -3553,6 +4219,62 @@ std::vector<int> deinterleaveTsbkCodedDibits(const std::vector<int>& coded)
     std::vector<int> out;
     out.reserve(kP25TsbkDeinterleave.size());
     for (size_t idx : kP25TsbkDeinterleave) out.push_back(coded[idx] & 0x03);
+    return out;
+}
+
+std::vector<int> deinterleaveP25DataCodedDibits(const std::vector<int>& coded)
+{
+    if (coded.size() != 98) return {};
+
+    std::array<uint8_t, 196> interleavedBits{};
+    for (size_t i = 0; i < coded.size(); ++i) {
+        const auto pair = P25LiveDecoder::bitsFromDibit(coded[i] & 0x03);
+        interleavedBits[i * 2] = pair[0];
+        interleavedBits[i * 2 + 1] = pair[1];
+    }
+
+    std::array<uint8_t, 196> deinterleavedBits{};
+    for (size_t i = 0; i < interleavedBits.size(); ++i) {
+        const size_t nibble = i / 4;
+        const size_t bit = i % 4;
+        size_t row = 0;
+        size_t column = 0;
+        if (nibble < 13) {
+            row = nibble;
+            column = 0;
+        } else if (nibble < 25) {
+            row = nibble - 13;
+            column = 1;
+        } else if (nibble < 37) {
+            row = nibble - 25;
+            column = 2;
+        } else {
+            row = nibble - 37;
+            column = 3;
+        }
+        const size_t out = ((row * 4) + column) * 4 + bit;
+        if (out < deinterleavedBits.size()) deinterleavedBits[out] = interleavedBits[i];
+    }
+
+    std::vector<int> out;
+    out.reserve(98);
+    for (size_t i = 0; i + 1 < deinterleavedBits.size(); i += 2) {
+        out.push_back(P25LiveDecoder::dibitFromBits(deinterleavedBits[i], deinterleavedBits[i + 1]));
+    }
+    return out;
+}
+
+uint64_t readBitsFromBytesMsb(const std::vector<uint8_t>& bytes, int startBit, int count)
+{
+    if (count <= 0 || count > 64 || startBit < 0) return 0;
+    uint64_t out = 0;
+    for (int i = 0; i < count; ++i) {
+        const int bit = startBit + i;
+        const int byteIndex = bit / 8;
+        if (byteIndex < 0 || byteIndex >= static_cast<int>(bytes.size())) return 0;
+        const int bitInByte = 7 - (bit % 8);
+        out = (out << 1) | ((bytes[static_cast<size_t>(byteIndex)] >> bitInByte) & 0x01u);
+    }
     return out;
 }
 
@@ -3651,8 +4373,70 @@ P25TsbkBlock decodeCodedTsbkBlock(const std::vector<int>& onAirCodedDibits, size
     block.bytes = dibitsToBytes(decoded.dibits);
     block.fecDecoded = block.bytes.size() == 12;
     block.correctedDibitErrors = decoded.correctedDibitErrors;
-    block.crcValid = p25TsbkCrcValid(block.bytes);
+    auto crc = p25CorrectCcitt80(block.bytes);
+    block.crcValid = crc.valid;
+    block.crcCorrected = crc.corrected;
+    block.crcCorrectedBits = crc.correctedBits;
+    block.crcPassedInvertedResidual = crc.invertedResidual;
     return block;
+}
+
+P25Phase1PduDataBlock decodeCodedP25DataBlock(const std::vector<int>& onAirCodedDibits,
+                                              size_t bitOffset)
+{
+    P25Phase1PduDataBlock block;
+    block.bitOffset = bitOffset;
+
+    auto deinterleaved = deinterleaveP25DataCodedDibits(onAirCodedDibits);
+    auto decoded = decodeP25HalfRateTrellis(deinterleaved);
+    if (!decoded.ok || decoded.dibits.size() != 48) return block;
+
+    block.bytes = dibitsToBytes(decoded.dibits);
+    block.fecDecoded = block.bytes.size() == 12;
+    block.correctedDibitErrors = decoded.correctedDibitErrors;
+    return block;
+}
+
+P25Phase1PduMessage decodeP25PduSequence(const StatusSplit& split,
+                                         size_t payloadDibitOffset,
+                                         size_t maxBlocks)
+{
+    P25Phase1PduMessage pdu;
+    size_t blockStartDibit = 32;
+    if (blockStartDibit + 98 > split.dataDibits.size()) return pdu;
+
+    std::vector<int> codedHeader(split.dataDibits.begin() + static_cast<std::ptrdiff_t>(blockStartDibit),
+                                 split.dataDibits.begin() + static_cast<std::ptrdiff_t>(blockStartDibit + 98));
+    auto header = decodeCodedP25DataBlock(codedHeader, (payloadDibitOffset + blockStartDibit) * 2);
+    pdu.bitOffset = header.bitOffset;
+    pdu.headerBytes = std::move(header.bytes);
+    pdu.headerFecDecoded = header.fecDecoded;
+    pdu.headerCorrectedDibitErrors = header.correctedDibitErrors;
+    auto crc = p25CorrectCcitt80(pdu.headerBytes);
+    pdu.headerCrcValid = crc.valid;
+    pdu.headerCrcCorrected = crc.corrected;
+    pdu.headerCrcCorrectedBits = crc.correctedBits;
+    pdu.headerCrcPassedInvertedResidual = crc.invertedResidual;
+    if (!pdu.headerFecDecoded) return pdu;
+
+    pdu.outbound = readBitsFromBytesMsb(pdu.headerBytes, 2, 1) != 0;
+    pdu.format = static_cast<uint8_t>(readBitsFromBytesMsb(pdu.headerBytes, 3, 5));
+    pdu.vendor = static_cast<uint8_t>(readBitsFromBytesMsb(pdu.headerBytes, 16, 8));
+    pdu.logicalLinkId = static_cast<uint32_t>(readBitsFromBytesMsb(pdu.headerBytes, 24, 24));
+    pdu.blocksToFollow = static_cast<uint8_t>(readBitsFromBytesMsb(pdu.headerBytes, 49, 7));
+    pdu.opcode = static_cast<uint8_t>(readBitsFromBytesMsb(pdu.headerBytes, 58, 6));
+
+    blockStartDibit += 98;
+    const size_t blocksToDecode = std::min<size_t>(pdu.blocksToFollow, maxBlocks);
+    for (size_t blockIndex = 0; blockIndex < blocksToDecode; ++blockIndex) {
+        if (blockStartDibit + 98 > split.dataDibits.size()) break;
+        std::vector<int> coded(split.dataDibits.begin() + static_cast<std::ptrdiff_t>(blockStartDibit),
+                               split.dataDibits.begin() + static_cast<std::ptrdiff_t>(blockStartDibit + 98));
+        auto data = decodeCodedP25DataBlock(coded, (payloadDibitOffset + blockStartDibit) * 2);
+        if (!data.bytes.empty()) pdu.dataBlocks.push_back(std::move(data));
+        blockStartDibit += 98;
+    }
+    return pdu;
 }
 
 struct VoiceZigZag {
@@ -3835,6 +4619,14 @@ std::array<uint8_t, 72> p25Phase2AmbeVariantBits(const P25Phase2VoiceCodeword& c
             std::reverse(bits.begin(), bits.end());
             for (auto& b : bits) b ^= 1u;
             break;
+        case 6:
+            // Simulate small mask phase slip (rotate bitstream by 2 bits)
+            std::rotate(bits.begin(), bits.begin() + 2, bits.end());
+            break;
+        case 7:
+            // Simulate larger slip
+            std::rotate(bits.begin(), bits.begin() + 4, bits.end());
+            break;
         default:
             break;
     }
@@ -3922,6 +4714,18 @@ P25LiveDecoder::P25LiveDecoder(P25LiveDecoderConfig config)
     if (!std::isfinite(m_config.channelBandwidthHz) || m_config.channelBandwidthHz <= 0.0) {
         m_config.channelBandwidthHz = 12500.0;
     }
+    if (!std::isfinite(m_config.frontEndDcBlockAlpha) || m_config.frontEndDcBlockAlpha <= 0.0) {
+        m_config.frontEndDcBlockAlpha = 0.00025;
+    }
+    m_config.frontEndDcBlockAlpha = std::clamp(m_config.frontEndDcBlockAlpha, 1e-6, 0.02);
+    if (!std::isfinite(m_config.cqpskCarrierLoopBandwidth) || m_config.cqpskCarrierLoopBandwidth <= 0.0) {
+        m_config.cqpskCarrierLoopBandwidth = 0.040;
+    }
+    m_config.cqpskCarrierLoopBandwidth = std::clamp(m_config.cqpskCarrierLoopBandwidth, 0.002, 0.120);
+    if (!std::isfinite(m_config.cqpskCarrierLoopMaxCorrectionHz) ||
+        m_config.cqpskCarrierLoopMaxCorrectionHz <= 0.0) {
+        m_config.cqpskCarrierLoopMaxCorrectionHz = 1800.0;
+    }
     m_config.maxC4fmFixedPhaseCandidates = std::min<size_t>(m_config.maxC4fmFixedPhaseCandidates, 16);
 }
 
@@ -3963,7 +4767,10 @@ P25LiveDecoder::P25LiveDecoder(const P25LiveDecoder& other)
       m_phase2NextCodewordId(other.m_phase2NextCodewordId),
       m_phase2DecodeGeneration(other.m_phase2DecodeGeneration),
       m_phase2StreamDibits(other.m_phase2StreamDibits),
-      m_cqpskLock(other.m_cqpskLock)
+      m_cqpskLock(other.m_cqpskLock),
+      m_frontEndDcEstimateValid(other.m_frontEndDcEstimateValid),
+      m_frontEndDcSampleRate(other.m_frontEndDcSampleRate),
+      m_frontEndDcEstimate(other.m_frontEndDcEstimate)
 {
 }
 
@@ -4004,6 +4811,9 @@ P25LiveDecoder& P25LiveDecoder::operator=(const P25LiveDecoder& other)
     m_phase2DecodeGeneration = other.m_phase2DecodeGeneration;
     m_phase2StreamDibits = other.m_phase2StreamDibits;
     m_cqpskLock = other.m_cqpskLock;
+    m_frontEndDcEstimateValid = other.m_frontEndDcEstimateValid;
+    m_frontEndDcSampleRate = other.m_frontEndDcSampleRate;
+    m_frontEndDcEstimate = other.m_frontEndDcEstimate;
     return *this;
 }
 
@@ -4040,7 +4850,10 @@ P25LiveDecoder::P25LiveDecoder(P25LiveDecoder&& other) noexcept
       m_phase2NextCodewordId(other.m_phase2NextCodewordId),
       m_phase2DecodeGeneration(other.m_phase2DecodeGeneration),
       m_phase2StreamDibits(other.m_phase2StreamDibits),
-      m_cqpskLock(other.m_cqpskLock)
+      m_cqpskLock(other.m_cqpskLock),
+      m_frontEndDcEstimateValid(other.m_frontEndDcEstimateValid),
+      m_frontEndDcSampleRate(other.m_frontEndDcSampleRate),
+      m_frontEndDcEstimate(other.m_frontEndDcEstimate)
 {
     eraseStreamingState(&other);
 }
@@ -4082,6 +4895,9 @@ P25LiveDecoder& P25LiveDecoder::operator=(P25LiveDecoder&& other) noexcept
     m_phase2DecodeGeneration = other.m_phase2DecodeGeneration;
     m_phase2StreamDibits = other.m_phase2StreamDibits;
     m_cqpskLock = other.m_cqpskLock;
+    m_frontEndDcEstimateValid = other.m_frontEndDcEstimateValid;
+    m_frontEndDcSampleRate = other.m_frontEndDcSampleRate;
+    m_frontEndDcEstimate = other.m_frontEndDcEstimate;
     eraseStreamingState(&other);
     return *this;
 }
@@ -4125,6 +4941,9 @@ void P25LiveDecoder::reset()
     m_phase2DecodeGeneration = 0;
     m_phase2StreamDibits = 0;
     m_cqpskLock = {};
+    m_frontEndDcEstimateValid = false;
+    m_frontEndDcSampleRate = 0.0;
+    m_frontEndDcEstimate = {};
     eraseStreamingState(this);
 }
 
@@ -4202,6 +5021,12 @@ static void restoreSelectedDemodStats(P25LiveDecodeResult& result, const P25Live
     result.stats.cqpskLockTrustScore = selected.cqpskLockTrustScore;
     result.stats.cqpskLockMisses = selected.cqpskLockMisses;
     result.stats.cqpskStickyOverride = selected.cqpskStickyOverride;
+    result.stats.frontEndDcBlockApplied = selected.frontEndDcBlockApplied;
+    result.stats.frontEndDcEstimateMagnitude = selected.frontEndDcEstimateMagnitude;
+    result.stats.cqpskCarrierLoopApplied = selected.cqpskCarrierLoopApplied;
+    result.stats.cqpskCarrierLoopCorrectionHz = selected.cqpskCarrierLoopCorrectionHz;
+    result.stats.cqpskCarrierLoopPhaseErrorRmsRad = selected.cqpskCarrierLoopPhaseErrorRmsRad;
+    result.stats.cqpskCarrierLoopSymbols = selected.cqpskCarrierLoopSymbols;
 }
 
 P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<float>>& iq,
@@ -4212,10 +5037,25 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
     P25DecoderTraceScope trace("P25LiveDecoder::processIq");
     P25LiveDecodeResult best;
     const double inputTargetOffsetHz = targetFreqHz - centerFreqHz;
-    auto channel = channelizeP25Iq(iq, sampleRate, centerFreqHz, targetFreqHz, m_config);
+    FrontEndDcBlockResult dcBlock;
+    std::vector<std::complex<float>> dcBlockedIq;
+    const std::vector<std::complex<float>>* channelInput = &iq;
+    if (m_config.enableFrontEndDcBlock && !iq.empty()) {
+        dcBlockedIq = iq;
+        dcBlock = applyPersistentFrontEndDcBlock(dcBlockedIq,
+                                                 sampleRate,
+                                                 m_config.frontEndDcBlockAlpha,
+                                                 m_frontEndDcEstimateValid,
+                                                 m_frontEndDcSampleRate,
+                                                 m_frontEndDcEstimate);
+        channelInput = &dcBlockedIq;
+    }
+    auto channel = channelizeP25Iq(*channelInput, sampleRate, centerFreqHz, targetFreqHz, m_config);
     if (channel.samples.empty() && !iq.empty()) {
         best.stats.inputSamples = iq.size();
         best.stats.inputTargetOffsetHz = inputTargetOffsetHz;
+        best.stats.frontEndDcBlockApplied = dcBlock.applied;
+        best.stats.frontEndDcEstimateMagnitude = dcBlock.estimateMagnitude;
         best.warnings.push_back("P25 target is outside the sampled RF passband or IQ block is too short.");
         return best;
     }
@@ -4223,19 +5063,39 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         result.stats.inputSamples = iq.size();
         result.stats.channelSampleRate = channel.sampleRate;
         result.stats.inputTargetOffsetHz = inputTargetOffsetHz;
+        result.stats.frontEndDcBlockApplied = dcBlock.applied;
+        result.stats.frontEndDcEstimateMagnitude = dcBlock.estimateMagnitude;
     };
 
     auto streamState = loadStreamingState(this);
     auto timingStateStorage = streamState.timing;
+    const auto phase1TailSnapshot = snapshotPhase1BitTail(this);
 
-    auto fm = fmDiscriminatorFromChannel(channel.samples, channel.sampleRate);
-    auto c4fm = processFmDiscriminatorInternal(fm.hz, fm.sampleRate, false);
-    stampCommonStats(c4fm);
-    c4fm.stats.discriminatorMeanHz = fm.meanHz;
-    if (c4fm.stats.demodPath.empty()) c4fm.stats.demodPath = "C4FM";
-    best = std::move(c4fm);
+    const bool phase2TrafficDecoder = m_config.symbolRate >= 5900.0 && m_config.enablePhase2Decode;
+    if (!phase2TrafficDecoder || !m_config.enableCqpskSearch) {
+        auto fm = fmDiscriminatorFromChannel(channel.samples, channel.sampleRate);
+        auto c4fm = processFmDiscriminatorInternal(fm.hz, fm.sampleRate, false);
+        stampCommonStats(c4fm);
+        c4fm.stats.discriminatorMeanHz = fm.meanHz;
+        if (c4fm.stats.demodPath.empty()) c4fm.stats.demodPath = "C4FM";
+        best = std::move(c4fm);
+    } else {
+        stampCommonStats(best);
+        best.stats.sampleRate = channel.sampleRate;
+        best.stats.symbolRate = m_config.symbolRate;
+        best.stats.demodPath = "CQPSK-search";
+    }
 
     if (!m_config.enableCqpskSearch) {
+        if (!best.dibits.empty()) {
+            const auto selectedStats = best.stats;
+            restorePhase1BitTail(this, phase1TailSnapshot);
+            auto committed = processHardDibitsInternal(best.dibits, true);
+            restoreSelectedDemodStats(committed, selectedStats);
+            best = std::move(committed);
+        } else {
+            restorePhase1BitTail(this, phase1TailSnapshot);
+        }
         return best;
     }
 
@@ -4255,6 +5115,10 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
     std::optional<CqpskCandidateParams> lockedCqpskParams;
     std::optional<P25BlockTimingState> lockedCqpskTimingState;
     int lockedCqpskTrust = 0;
+    std::optional<P25LiveDecodeResult> bestCqpskCandidate;
+    std::optional<CqpskCandidateParams> bestCqpskParams;
+    std::optional<P25BlockTimingState> bestCqpskTimingState;
+    int bestCqpskTrust = 0;
 
     auto evaluateCqpsk = [&](const CqpskCandidateParams& params,
                              bool fromLock,
@@ -4288,7 +5152,9 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
             effectiveParams.conjugate,
             wrapPhase(effectiveParams.rotation + effectiveParams.fineRotation),
             effectiveParams.permutation);
+        restorePhase1BitTail(this, phase1TailSnapshot);
         candidate = processHardDibitsInternal(soft.dibits, false);
+        restorePhase1BitTail(this, phase1TailSnapshot);
         stampSoftDibitStats(candidate, soft);
         stampCommonStats(candidate);
         candidate.stats.sampleRate = channel.sampleRate;
@@ -4303,7 +5169,27 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         candidate.stats.cqpskResidualCarrierHz = effectiveParams.residualCarrierHz;
         candidate.stats.cqpskPhaseErrorRmsRad = effectiveParams.phaseErrorRmsRad;
         candidate.stats.cqpskFineCorrectionSymbols = effectiveParams.fineCorrectionSymbols;
+        candidate.stats.cqpskCarrierLoopApplied = complexSymbols.carrierLoopApplied;
+        candidate.stats.cqpskCarrierLoopCorrectionHz = complexSymbols.carrierLoopCorrectionHz;
+        candidate.stats.cqpskCarrierLoopPhaseErrorRmsRad = complexSymbols.carrierLoopPhaseErrorRmsRad;
+        candidate.stats.cqpskCarrierLoopSymbols = complexSymbols.carrierLoopSymbols;
         return candidate;
+    };
+    auto rememberBestCqpsk = [&](const P25LiveDecodeResult& candidate,
+                                 const CqpskCandidateParams& params,
+                                 const P25BlockTimingState& timing,
+                                 int trust) {
+        if (!hasPhase2TrafficTelemetry(candidate) &&
+            trust <= 0 &&
+            !hasCqpskSoftContinuityEvidence(candidate)) {
+            return;
+        }
+        if (!bestCqpskCandidate || betterLiveResult(candidate, *bestCqpskCandidate)) {
+            bestCqpskCandidate = candidate;
+            bestCqpskParams = params;
+            bestCqpskTimingState = timing;
+            bestCqpskTrust = trust;
+        }
     };
 
     if (m_cqpskLock.valid) {
@@ -4320,7 +5206,8 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         auto lockedTiming = timingStateStorage;
         auto candidate = evaluateCqpsk(locked, true, lockedTiming);
         const int trust = liveResultTrustScore(candidate);
-        if (trust > 0) {
+        rememberBestCqpsk(candidate, locked, lockedTiming, trust);
+        if (trust > 0 || hasCqpskSoftContinuityEvidence(candidate)) {
             locked.fineRotation = candidate.stats.cqpskFineRotationRad;
             locked.fineCorrectionApplied = candidate.stats.cqpskFineCorrectionApplied;
             locked.residualCarrierHz = candidate.stats.cqpskResidualCarrierHz;
@@ -4342,6 +5229,25 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
     bool stopCqpskSearch = m_config.stopCqpskSearchOnHardLock &&
         isCqpskPath(best.stats.demodPath) &&
         hasCqpskHardLockEvidence(best);
+    bool realtimeSoftHoldSelected = false;
+    if (!stopCqpskSearch &&
+        m_config.realtimeVoiceSearch &&
+        m_cqpskLock.valid &&
+        isCqpskPath(best.stats.demodPath) &&
+        hasPhase2SoftCqpskLockEvidence(best)) {
+        // Live Phase-2 traffic is a continuous CQPSK/H-DQPSK stream.  Once a
+        // locked candidate is producing repeated TDMA superframe/mask/voice
+        // evidence, keep consuming the stream instead of spending the next DSP
+        // tick on the full 96-candidate grid.  Re-open the search periodically
+        // while MAC/ESS is still absent so a wrong soft lock can be challenged.
+        if (m_cqpskLock.misses < 3) {
+            stopCqpskSearch = true;
+            realtimeSoftHoldSelected = true;
+            m_cqpskLock.misses = std::min(m_cqpskLock.misses + 1, 96);
+            best.stats.cqpskStickyOverride = true;
+            best.stats.cqpskLockMisses = m_cqpskLock.misses;
+        }
+    }
     size_t cqpskCandidatesEvaluated = 0;
     auto cqpskBudgetReached = [&]() {
         return m_config.maxCqpskSearchCandidates > 0 &&
@@ -4392,7 +5298,9 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
                             conjugate,
                             wrapPhase(rotation + params.fineRotation),
                             perm);
+                        restorePhase1BitTail(this, phase1TailSnapshot);
                         auto candidate = processHardDibitsInternal(soft.dibits, false);
+                        restorePhase1BitTail(this, phase1TailSnapshot);
                         stampSoftDibitStats(candidate, soft);
                         stampCommonStats(candidate);
                         candidate.stats.sampleRate = channel.sampleRate;
@@ -4406,10 +5314,16 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
                         candidate.stats.cqpskResidualCarrierHz = params.residualCarrierHz;
                         candidate.stats.cqpskPhaseErrorRmsRad = params.phaseErrorRmsRad;
                         candidate.stats.cqpskFineCorrectionSymbols = params.fineCorrectionSymbols;
+                        candidate.stats.cqpskCarrierLoopApplied = complexSymbols.carrierLoopApplied;
+                        candidate.stats.cqpskCarrierLoopCorrectionHz = complexSymbols.carrierLoopCorrectionHz;
+                        candidate.stats.cqpskCarrierLoopPhaseErrorRmsRad = complexSymbols.carrierLoopPhaseErrorRmsRad;
+                        candidate.stats.cqpskCarrierLoopSymbols = complexSymbols.carrierLoopSymbols;
+                        const int trust = liveResultTrustScore(candidate);
+                        rememberBestCqpsk(candidate, params, candidateTiming, trust);
                         if (betterLiveResult(candidate, best)) {
                             selectedCqpskParams = params;
                             selectedCqpskTiming = candidateTiming;
-                            selectedCqpskTrust = liveResultTrustScore(candidate);
+                            selectedCqpskTrust = trust;
                             best = std::move(candidate);
                             if (m_config.stopCqpskSearchOnHardLock &&
                                 isCqpskPath(best.stats.demodPath) &&
@@ -4423,10 +5337,29 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
             }
         }
     }
+    if (m_config.symbolRate >= 5900.0 &&
+        bestCqpskCandidate &&
+        bestCqpskParams &&
+        bestCqpskTimingState &&
+        !isCqpskPath(best.stats.demodPath) &&
+        hasPhase2TrafficTelemetry(*bestCqpskCandidate) &&
+        !hasCqpskHardLockEvidence(best)) {
+        // Phase 2 traffic is H-DQPSK/CQPSK-family modulation.  Do not let a
+        // C4FM discriminator candidate with only soft superframe/voice-looking
+        // telemetry outrank the best CQPSK traffic candidate; that creates
+        // p2sf/p2mask without RS-valid MAC/ESS and starves clear audio on LSM
+        // systems.  Hard evidence above still wins regardless of demod path.
+        selectedCqpskParams = *bestCqpskParams;
+        selectedCqpskTiming = *bestCqpskTimingState;
+        selectedCqpskTrust = bestCqpskTrust;
+        best = *bestCqpskCandidate;
+        best.warnings.push_back("Phase 2 traffic selected CQPSK demod over C4FM without hard MAC/ESS evidence.");
+    }
     const int cqpskMissLimit = static_cast<int>(std::clamp<size_t>(
         m_config.cqpskLockMissTolerance,
         8,
         96));
+    bool cqpskWarmHoldSelected = false;
     if (m_cqpskLock.valid &&
         lockedCqpskCandidate &&
         lockedCqpskParams &&
@@ -4443,10 +5376,24 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
             selectedCqpskTrust = lockedCqpskTrust;
             best = *lockedCqpskCandidate;
             best.stats.cqpskStickyOverride = true;
+        } else if (competingHard == 0 &&
+                   hasCqpskSoftContinuityEvidence(*lockedCqpskCandidate) &&
+                   m_cqpskLock.misses + 1 < cqpskMissLimit) {
+            selectedCqpskParams = *lockedCqpskParams;
+            selectedCqpskTiming = *lockedCqpskTimingState;
+            selectedCqpskTrust = lockedCqpskTrust;
+            best = *lockedCqpskCandidate;
+            best.stats.cqpskStickyOverride = true;
+            best.warnings.push_back("Held proven CQPSK/LSM demod lock through a soft-only continuity window.");
+            cqpskWarmHoldSelected = true;
         }
     }
+    const bool selectedHardCqpskLock =
+        selectedCqpskTrust >= 40 && hasCqpskHardLockEvidence(best);
+    const bool selectedSoftPhase2CqpskLock =
+        m_config.realtimeVoiceSearch && hasPhase2SoftCqpskLockEvidence(best);
     if (selectedCqpskParams && isCqpskPath(best.stats.demodPath) &&
-        selectedCqpskTrust >= 40 && hasCqpskHardLockEvidence(best)) {
+        (selectedHardCqpskLock || selectedSoftPhase2CqpskLock)) {
         m_cqpskLock.valid = true;
         m_cqpskLock.differential = selectedCqpskParams->differential;
         m_cqpskLock.conjugate = selectedCqpskParams->conjugate;
@@ -4457,8 +5404,10 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         m_cqpskLock.residualCarrierHz = selectedCqpskParams->residualCarrierHz;
         m_cqpskLock.phaseErrorRmsRad = selectedCqpskParams->phaseErrorRmsRad;
         m_cqpskLock.fineCorrectionSymbols = selectedCqpskParams->fineCorrectionSymbols;
-        m_cqpskLock.trustScore = selectedCqpskTrust;
-        m_cqpskLock.misses = 0;
+        m_cqpskLock.trustScore = selectedHardCqpskLock ? selectedCqpskTrust : std::max(selectedCqpskTrust, 20);
+        m_cqpskLock.misses = selectedHardCqpskLock
+            ? 0
+            : (cqpskCandidatesEvaluated > 0 ? 0 : m_cqpskLock.misses);
         best.stats.cqpskLockUpdated = true;
         best.stats.cqpskLockActive = true;
         best.stats.cqpskLockTrustScore = m_cqpskLock.trustScore;
@@ -4469,6 +5418,16 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         best.stats.cqpskResidualCarrierHz = m_cqpskLock.residualCarrierHz;
         best.stats.cqpskPhaseErrorRmsRad = m_cqpskLock.phaseErrorRmsRad;
         best.stats.cqpskFineCorrectionSymbols = m_cqpskLock.fineCorrectionSymbols;
+        if (realtimeSoftHoldSelected) best.stats.cqpskStickyOverride = true;
+    } else if (m_cqpskLock.valid && cqpskWarmHoldSelected) {
+        const int retainedTrust = m_cqpskLock.trustScore;
+        const int retainedMisses = std::min(cqpskMissLimit, m_cqpskLock.misses + 1);
+        m_cqpskLock.misses = retainedMisses;
+        best.stats.cqpskLockActive = true;
+        best.stats.cqpskLockUsed = true;
+        best.stats.cqpskLockTrustScore = retainedTrust;
+        best.stats.cqpskLockMisses = retainedMisses;
+        if (retainedMisses >= cqpskMissLimit) m_cqpskLock = {};
     } else if (m_cqpskLock.valid && !isCqpskPath(best.stats.demodPath)) {
         best.stats.cqpskLockActive = true;
 
@@ -4484,15 +5443,21 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
     }
     if (!best.dibits.empty()) {
         const auto selectedStats = best.stats;
+        restorePhase1BitTail(this, phase1TailSnapshot);
         auto committed = processHardDibitsInternal(best.dibits, true);
         restoreSelectedDemodStats(committed, selectedStats);
         best = std::move(committed);
+    } else {
+        restorePhase1BitTail(this, phase1TailSnapshot);
     }
     if (selectedCqpskTiming && isCqpskPath(best.stats.demodPath)) {
         timingStateStorage.cqpskValid = selectedCqpskTiming->cqpskValid;
         timingStateStorage.cqpskOmega = selectedCqpskTiming->cqpskOmega;
         timingStateStorage.cqpskMu = selectedCqpskTiming->cqpskMu;
         timingStateStorage.cqpskSampleRate = selectedCqpskTiming->cqpskSampleRate;
+        timingStateStorage.cqpskCarrierLoopValid = selectedCqpskTiming->cqpskCarrierLoopValid;
+        timingStateStorage.cqpskCarrierLoopPhase = selectedCqpskTiming->cqpskCarrierLoopPhase;
+        timingStateStorage.cqpskCarrierLoopOmega = selectedCqpskTiming->cqpskCarrierLoopOmega;
         timingStateStorage.cqpskTail = selectedCqpskTiming->cqpskTail;
     }
     storeTimingState(this, timingStateStorage);
@@ -4518,8 +5483,27 @@ P25LiveDecodeResult P25LiveDecoder::processFmDiscriminatorInternal(const std::ve
     auto streamState = loadStreamingState(this);
     auto timingStateStorage = streamState.timing;
     P25BlockTimingState* timingState = &timingStateStorage;
+    const auto phase1TailSnapshot = snapshotPhase1BitTail(this);
+    auto evaluateCandidateDibits = [&](const std::vector<int>& dibits) {
+        restorePhase1BitTail(this, phase1TailSnapshot);
+        auto candidate = processHardDibitsInternal(dibits, false);
+        restorePhase1BitTail(this, phase1TailSnapshot);
+        return candidate;
+    };
 
-    const auto symbolCandidates = recoverC4fmSymbolCandidates(discriminatorHz, sampleRate, m_config, timingState);
+    auto c4fmRecoveryConfig = m_config;
+    if (annotateSessionCodewords && !c4fmRecoveryConfig.enableC4fmFixedPhaseSearch) {
+        // Standalone discriminator decoding has no IQ/CQPSK arbiter to rescue a
+        // Gardner timing lock that latched onto a false preamble.  Enable the
+        // bounded fixed-phase grid here; processIq() keeps using the caller's
+        // explicit config so CQPSK/LSM traffic is not displaced by weak C4FM
+        // hypotheses.
+        c4fmRecoveryConfig.enableC4fmFixedPhaseSearch = true;
+        if (c4fmRecoveryConfig.maxC4fmFixedPhaseCandidates == 0) {
+            c4fmRecoveryConfig.maxC4fmFixedPhaseCandidates = 10;
+        }
+    }
+    const auto symbolCandidates = recoverC4fmSymbolCandidates(discriminatorHz, sampleRate, c4fmRecoveryConfig, timingState);
     if (symbolCandidates.empty()) {
         storeTimingState(this, timingStateStorage);
         return best;
@@ -4549,7 +5533,7 @@ P25LiveDecodeResult P25LiveDecoder::processFmDiscriminatorInternal(const std::ve
                                                           invertDeviation,
                                                           reverseBitOrder,
                                                           scaleMultiplier);
-                    auto candidate = processHardDibitsInternal(soft.dibits, false);
+                    auto candidate = evaluateCandidateDibits(soft.dibits);
                     stampSoftDibitStats(candidate, soft);
                     candidate.stats.symbolConfidence = symbols.confidence;
                     if (!haveCandidate || betterLiveResult(candidate, best)) {
@@ -4584,7 +5568,7 @@ P25LiveDecodeResult P25LiveDecoder::processFmDiscriminatorInternal(const std::ve
                                                           reverseBitOrder,
                                                           1.0,
                                                           fixedScale);
-                    auto candidate = processHardDibitsInternal(soft.dibits, false);
+                    auto candidate = evaluateCandidateDibits(soft.dibits);
                     stampSoftDibitStats(candidate, soft);
                     candidate.stats.symbolConfidence = symbols.confidence;
                     if (!haveCandidate || betterLiveResult(candidate, best)) {
@@ -4609,9 +5593,12 @@ P25LiveDecodeResult P25LiveDecoder::processFmDiscriminatorInternal(const std::ve
     best.stats.demodPath = selectedPath;
     if (annotateSessionCodewords && !best.dibits.empty()) {
         const auto selectedStats = best.stats;
+        restorePhase1BitTail(this, phase1TailSnapshot);
         auto committed = processHardDibitsInternal(best.dibits, true);
         restoreSelectedDemodStats(committed, selectedStats);
         best = std::move(committed);
+    } else {
+        restorePhase1BitTail(this, phase1TailSnapshot);
     }
     storeTimingState(this, timingStateStorage);
     return best;
@@ -5004,6 +5991,14 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
             // invoked in bounded IQ windows, so retain a validated superframe/mask anchor long
             // enough to bridge quiet scheduler gaps and late-entry chunks on the same grant.
             constexpr uint64_t kPhase2StickyAnchorMaxAgeDibits = kPhase2SuperframeSpanDibits * 72ull;
+            // Rolling GUI/CLI traffic windows are re-demodulated chunks, not a
+            // single monotonically-clocked symbol stream. The stream overlap
+            // estimator can be several dibits off even when the burst sync itself
+            // is good. Keep the retained sdrtrunk-style superframe epoch alive
+            // for bounded timing slip; decode at the actual sync hit while using
+            // the nearest retained superframe index for the XOR segment.
+            constexpr uint64_t kPhase2StickyAnchorMaxSlipDibits =
+                static_cast<uint64_t>(P25LiveDecoder::Phase2BurstDibits / 3);
             if (hitStreamDibit >= m_phase2SuperframeAnchorDibit &&
                 hitStreamDibit - m_phase2SuperframeAnchorDibit <= kPhase2StickyAnchorMaxAgeDibits) {
                 const uint64_t delta = hitStreamDibit - m_phase2SuperframeAnchorDibit;
@@ -5013,23 +6008,33 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
                 const size_t superframeIndex = static_cast<size_t>(nearest % 12ull);
                 const uint64_t expectedMod = static_cast<uint64_t>(superframeIndex) *
                     static_cast<uint64_t>(P25LiveDecoder::Phase2BurstDibits);
+                const uint64_t superframeBaseStreamDibit = hitStreamDibit - mod;
+                const uint64_t expectedStreamDibit = superframeBaseStreamDibit + expectedMod;
+                const size_t expectedWorkingDibit = expectedStreamDibit >= phase2WorkingStreamStart
+                    ? static_cast<size_t>(expectedStreamDibit - phase2WorkingStreamStart)
+                    : 0u;
                 const uint64_t err = mod > expectedMod ? mod - expectedMod : expectedMod - mod;
                 const uint64_t wrappedErr = std::min(err, kPhase2SuperframeSpanDibits - err);
-                if (wrappedErr <= 2ull) {
+                if (wrappedErr <= kPhase2StickyAnchorMaxSlipDibits) {
                     const size_t syntheticLockOffset = hit.dibitOffset >= superframeIndex * Phase2BurstDibits
                         ? hit.dibitOffset - superframeIndex * Phase2BurstDibits
                         : 0;
                     auto& stickySession = slotSessions[phase2TrafficSlotFromSuperframeBurstIndex(superframeIndex) & 0x01u];
                     auto stickyBurst = decodePhase2BurstAt(workingDibits, hit.dibitOffset, hit.errors,
-                                                           true, syntheticLockOffset, superframeIndex,
-                                                           0, hit.errors,
-                                                           mask, m_phase2MaskPhase, m_phase2MaskPhaseScore,
-                                                           &stickySession, &out.macPdus,
-                                                           false);
+                                                            true, syntheticLockOffset, superframeIndex,
+                                                            4, static_cast<int>(wrappedErr),
+                                                            mask, m_phase2MaskPhase, m_phase2MaskPhaseScore,
+                                                            &stickySession, &out.macPdus,
+                                                            false);
                     if (stickyBurst.valid) {
                         stickyBurst.stickySuperframe = true;
                         stickyBurst.superframeLock = true;
                         stickyBurst.maskPhaseLock = stickyBurst.xorMaskApplied && stickyBurst.xorMaskPhaseKnown;
+                        if (wrappedErr > 0) {
+                            stickyBurst.syncOffsetAdjusted = true;
+                            stickyBurst.syncOffsetDibits =
+                                phase2SignedSyncSlipDibits(hit.dibitOffset, expectedWorkingDibit);
+                        }
                         normalizePhase2BurstOffsets(stickyBurst);
                         out.bursts.push_back(std::move(stickyBurst));
                         stickyDecoded = true;
@@ -5192,13 +6197,14 @@ P25LiveDecodeResult P25LiveDecoder::processHardBits(const std::vector<uint8_t>& 
             nid.rawDuid = static_cast<uint8_t>((nid.raw >> 48) & 0x0fu);
         }
         nid.duid = toDuid(nid.rawDuid);
-        result.nids.push_back(nid);
         if (!nid.fecValidated) {
+            result.nids.push_back(nid);
             result.warnings.push_back("P25 frame sync found but NID BCH validation/correction failed.");
             continue;
         }
 
         if (nid.duid == P25DataUnitId::TSDU) {
+            const size_t blocksBefore = result.rawTsbkBlocks.size();
             size_t blockStartDibit = 32;
             size_t blocks = 0;
             while (blockStartDibit + 98 <= split.dataDibits.size() && blocks < m_config.maxRawTsbkBlocksPerFrame) {
@@ -5211,13 +6217,28 @@ P25LiveDecodeResult P25LiveDecoder::processHardBits(const std::vector<uint8_t>& 
                 blockStartDibit += 98;
                 ++blocks;
             }
-            if (!result.rawTsbkBlocks.empty()) {
-                const bool anyValid = std::any_of(result.rawTsbkBlocks.begin(), result.rawTsbkBlocks.end(), [](const P25TsbkBlock& b) {
+            if (result.rawTsbkBlocks.size() > blocksBefore) {
+                const bool anyValid = std::any_of(result.rawTsbkBlocks.begin() + static_cast<std::ptrdiff_t>(blocksBefore),
+                                                  result.rawTsbkBlocks.end(), [](const P25TsbkBlock& b) {
                     return b.fecDecoded && b.crcValid;
                 });
-                if (!anyValid) {
+                if (anyValid) {
+                    nid.downstreamValidated = true;
+                    nid.downstreamScore += 4;
+                } else {
                     result.warnings.push_back("TSDU block candidates were trellis-decoded but failed CRC validation.");
                 }
+            }
+        } else if (nid.duid == P25DataUnitId::PDU) {
+            auto pdu = decodeP25PduSequence(split, payloadDibitOffset, m_config.maxRawTsbkBlocksPerFrame);
+            if (pdu.headerFecDecoded) {
+                if (pdu.headerCrcValid) {
+                    nid.downstreamValidated = true;
+                    nid.downstreamScore += pdu.format == 23 ? 4 : 3;
+                } else {
+                    result.warnings.push_back("P25 PDU header trellis-decoded but failed CRC validation.");
+                }
+                result.phase1Pdus.push_back(std::move(pdu));
             }
         } else if (nid.duid == P25DataUnitId::LDU1 || nid.duid == P25DataUnitId::LDU2) {
             size_t cursor = 32;
@@ -5237,16 +6258,30 @@ P25LiveDecodeResult P25LiveDecoder::processHardBits(const std::vector<uint8_t>& 
             }
             if (decodedFrames == 0) {
                 result.warnings.push_back("P25 LDU voice frame detected but no IMBE frames could be decoded.");
+            } else {
+                nid.downstreamValidated = true;
+                nid.downstreamScore += static_cast<int>(std::min<size_t>(decodedFrames, 3));
             }
         }
+        result.nids.push_back(nid);
     }
 
     std::stable_sort(result.nids.begin(), result.nids.end(), [](const P25Nid& a, const P25Nid& b) {
+        if (a.downstreamValidated != b.downstreamValidated) return a.downstreamValidated;
+        if (a.downstreamScore != b.downstreamScore) return a.downstreamScore > b.downstreamScore;
         if (a.fecValidated != b.fecValidated) return a.fecValidated;
+        if (a.correctedBitErrors != b.correctedBitErrors) return a.correctedBitErrors < b.correctedBitErrors;
         return a.bitOffset < b.bitOffset;
     });
 
     result.stats.voiceBackendAvailable = compiledVoiceBackendAvailable();
+    result.stats.phase1PduHeaders = result.phase1Pdus.size();
+    result.stats.phase1PduCrcValid = static_cast<size_t>(std::count_if(result.phase1Pdus.begin(), result.phase1Pdus.end(), [](const P25Phase1PduMessage& pdu) {
+        return pdu.headerFecDecoded && pdu.headerCrcValid;
+    }));
+    result.stats.phase1AmbtcPdus = static_cast<size_t>(std::count_if(result.phase1Pdus.begin(), result.phase1Pdus.end(), [](const P25Phase1PduMessage& pdu) {
+        return pdu.headerFecDecoded && pdu.headerCrcValid && pdu.format == 23;
+    }));
     storePhase1BitTail(this, result.bits);
     return result;
 }
@@ -5378,7 +6413,7 @@ P25VoiceDecodeResult P25ImbeVoiceDecoder::decodeImbe4400Frame(const std::array<u
     result.status = P25VoiceDecodeStatus::Decoded;
     result.errors = errs;
     result.totalErrors = errs2;
-    result.pcm.assign(std::begin(audio), std::end(audio));
+    result.pcm = normalizedMbelibPcm(audio, std::size(audio));
     result.message = errText[0] ? errText : "decoded";
     return result;
 #else
@@ -5447,7 +6482,7 @@ P25VoiceDecodeResult P25AmbeVoiceDecoder::decodeAmbe2450Data(const std::array<ui
     result.status = P25VoiceDecodeStatus::Decoded;
     result.errors = errs;
     result.totalErrors = errs2;
-    result.pcm.assign(std::begin(audio), std::end(audio));
+    result.pcm = normalizedMbelibPcm(audio, std::size(audio));
     result.message = errText[0] ? errText : "decoded";
     return result;
 #else
@@ -5514,7 +6549,7 @@ P25VoiceDecodeResult P25AmbeVoiceDecoder::decodeAmbe3600x2450Frame(const std::ar
     // performs the upstream P25 TDMA/slot/mask/clear-grant gates before samples
     // reach the speaker.
     result.status = P25VoiceDecodeStatus::Decoded;
-    result.pcm.assign(std::begin(audio), std::end(audio));
+    result.pcm = normalizedMbelibPcm(audio, std::size(audio));
     result.message = errText[0] ? errText : "decoded";
     return result;
 #else

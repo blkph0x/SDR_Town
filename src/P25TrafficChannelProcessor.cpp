@@ -58,6 +58,7 @@ void P25TrafficChannelProcessor::processDibits(const int16_t* dibits, size_t cou
 void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& result, uint64_t absoluteDibitIndex)
 {
     size_t burstVoiceCodewords = 0;
+    size_t meaningfulVoiceCodewords = 0;
     bool sessionAudioRelease = false;
     bool burstEssKnown = false;
     bool burstEncrypted = false;
@@ -68,6 +69,16 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
     bool macHangtimeSeen = false;
     for (const auto& burst : result.phase2Bursts) {
         burstVoiceCodewords += burst.voiceCodewords.size();
+        // Only count as meaningful voice activity (for lifetime / "active" tracking) if it has
+        // descrambling (mask) + some lock (superframe or mac or ess or session). This prevents
+        // background noise or garbage dibits from being treated as "real data" keeping us stuck
+        // on an inactive TG.
+        const bool goodVoiceEvidence = burst.xorMaskApplied &&
+            (burst.superframeLock || burst.maskPhaseLock || burst.macCrcLock ||
+             burst.essKnown || burst.sessionAudioRelease || burst.macPttSeen || burst.macActiveSeen);
+        if (goodVoiceEvidence) {
+            meaningfulVoiceCodewords += burst.voiceCodewords.size();
+        }
         sessionAudioRelease = sessionAudioRelease || burst.sessionAudioRelease;
         burstEssKnown = burstEssKnown || burst.essKnown;
         burstEncrypted = burstEncrypted || (burst.essKnown && burst.encrypted);
@@ -107,7 +118,9 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
     const uint64_t now = steadyNowMs();
 
     m_p2bursts.store(p2bursts, std::memory_order_release);
-    m_p2vcw.store(p2vcw, std::memory_order_release);
+    // For activity/lifetime use the filtered meaningful count; the raw p2vcw is still available via other stats if needed for UI.
+    size_t effectiveP2vcw = (meaningfulVoiceCodewords > p2vcw) ? meaningfulVoiceCodewords : p2vcw;
+    m_p2vcw.store(meaningfulVoiceCodewords > 0 ? effectiveP2vcw : p2vcw, std::memory_order_release);
     m_p2mac.store(p2macCrcValid, std::memory_order_release);
     m_p2macPdus.store(p2macPdus, std::memory_order_release);
     m_p2macCrcValid.store(p2macCrcValid, std::memory_order_release);
@@ -139,7 +152,7 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
         std::lock_guard<std::mutex> lock(m_mutex);
         m_endReason.clear();
     }
-    if (p2vcw > 0 || burstVoiceCodewords > 0) {
+    if (meaningfulVoiceCodewords > 0 || burstVoiceCodewords > 0) {
         m_lastVoiceMs.store(now, std::memory_order_release);
     }
     if (p2macPdus > 0 || p2macCrcValid > 0 || macPttSeen || macActiveSeen || callEnded) {
@@ -149,15 +162,18 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
         m_lastEssMs.store(now, std::memory_order_release);
     }
 
-    const bool trafficEvidence =
-        p2vcw > 0 ||
-        p2macPdus > 0 ||
-        p2macCrcValid > 0 ||
-        p2sf > 0 ||
-        p2mask > 0 ||
-        !result.phase2Bursts.empty() ||
-        !result.phase2MacPdus.empty();
-    if (trafficEvidence) {
+    // Voice-call lifetime evidence should be driven by actual voice activity (VCW or voice MAC/ESS release),
+    // not just framing (sf/mask) or any bursts. Framing telemetry can persist after a call ends or on
+    // an inactive TG, causing "stuck on inactive talkgroup".
+    // Matches SDRTrunk behavior where traffic channel lifetime is tied to voice frames and call state (PTT/end).
+    const bool voiceCallEvidence =
+        meaningfulVoiceCodewords > 0 ||
+        macPttSeen || macActiveSeen || sessionAudioRelease || (audioOpen && meaningfulVoiceCodewords > 0);
+    if (voiceCallEvidence) {
+        m_lastActiveMs.store(now, std::memory_order_release);
+    } else if ((p2sf > 0 || p2mask > 0) && m_lastVoiceMs.load(std::memory_order_acquire) == 0) {
+        // Only during very early acquisition (no voice seen yet) allow sf/mask to bootstrap the active timer.
+        // Once any voice VCW has been seen, only voice evidence refreshes it.
         m_lastActiveMs.store(now, std::memory_order_release);
     }
 }
@@ -189,9 +205,16 @@ bool P25TrafficChannelProcessor::isCallStillActive() const
         const uint64_t hold = reason == "hangtime" ? kHangtimeHoldMs : kEndedHoldMs;
         return (now - ended) <= hold;
     }
+    // Prefer recent voice activity for "still active" once we have seen any VCW.
+    // This helps the follow machine return promptly from inactive TGs.
+    // Use lastVoiceMs which is only updated on meaningful VCW.
+    const uint64_t lastVoice = m_lastVoiceMs.load(std::memory_order_acquire);
     const uint64_t last = m_lastActiveMs.load(std::memory_order_acquire);
-    if (now < last) return true;
-    return (now - last) <= kMaxSilenceMs;
+    const uint64_t effectiveLast = (lastVoice > 0) ? std::max(last, lastVoice) : last;
+    if (now < effectiveLast) return true;
+    // Much shorter timeout after voice activity seen. Background noise should not keep us "active" for long.
+    const uint64_t silenceLimit = (lastVoice > 0) ? 4000ULL : 8000ULL;  // 4s voice, 8s pure acq
+    return (now - effectiveLast) <= silenceLimit;
 }
 
 bool P25TrafficChannelProcessor::mayEmitSustainedAudio() const

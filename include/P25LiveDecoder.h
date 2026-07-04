@@ -48,7 +48,12 @@ struct P25LiveDecoderConfig {
     bool enableC4fmFixedPhaseSearch = false;
     size_t maxC4fmFixedPhaseCandidates = 10;
     bool stopC4fmSearchOnHardLock = false;
+    bool enableFrontEndDcBlock = true;
+    double frontEndDcBlockAlpha = 0.00025;
     bool enableCqpskSearch = true;
+    bool enableCqpskCarrierLoop = true;
+    double cqpskCarrierLoopBandwidth = 0.040;
+    double cqpskCarrierLoopMaxCorrectionHz = 1800.0;
     bool stopCqpskSearchOnHardLock = true;
     size_t maxCqpskSearchCandidates = 0;
     size_t cqpskLockMissTolerance = 24;
@@ -122,6 +127,8 @@ struct P25Nid {
     uint64_t raw = 0;
     bool fecValidated = false;
     int correctedBitErrors = 0;
+    bool downstreamValidated = false;
+    int downstreamScore = 0;
 };
 
 struct P25TsbkBlock {
@@ -129,8 +136,36 @@ struct P25TsbkBlock {
     std::vector<uint8_t> bytes;
     bool crcPresent = true;
     bool crcValid = false;
+    bool crcCorrected = false;
+    bool crcPassedInvertedResidual = false;
+    int crcCorrectedBits = 0;
     bool fecDecoded = false;
     int correctedDibitErrors = 0;
+};
+
+struct P25Phase1PduDataBlock {
+    size_t bitOffset = 0;
+    std::vector<uint8_t> bytes;
+    bool fecDecoded = false;
+    int correctedDibitErrors = 0;
+};
+
+struct P25Phase1PduMessage {
+    size_t bitOffset = 0;
+    std::vector<uint8_t> headerBytes;
+    bool headerFecDecoded = false;
+    bool headerCrcValid = false;
+    bool headerCrcCorrected = false;
+    bool headerCrcPassedInvertedResidual = false;
+    int headerCrcCorrectedBits = 0;
+    int headerCorrectedDibitErrors = 0;
+    uint8_t format = 0;
+    uint8_t vendor = 0;
+    uint8_t opcode = 0;
+    uint8_t blocksToFollow = 0;
+    uint32_t logicalLinkId = 0;
+    bool outbound = false;
+    std::vector<P25Phase1PduDataBlock> dataBlocks;
 };
 
 struct P25LiveDecoderStats {
@@ -165,6 +200,9 @@ struct P25LiveDecoderStats {
     size_t phase2MaskedBursts = 0;
     size_t phase2MacPdus = 0;
     size_t phase2MacCrcValid = 0;
+    size_t phase1PduHeaders = 0;
+    size_t phase1PduCrcValid = 0;
+    size_t phase1AmbtcPdus = 0;
     size_t phase2MacNominalCrcValid = 0;
     size_t phase2MacAltKindCrcValid = 0;
     size_t phase2MacBitSwapCrcValid = 0;
@@ -189,6 +227,12 @@ struct P25LiveDecoderStats {
     int cqpskLockTrustScore = 0;
     int cqpskLockMisses = 0;
     bool cqpskStickyOverride = false;
+    bool frontEndDcBlockApplied = false;
+    double frontEndDcEstimateMagnitude = 0.0;
+    bool cqpskCarrierLoopApplied = false;
+    double cqpskCarrierLoopCorrectionHz = 0.0;
+    double cqpskCarrierLoopPhaseErrorRmsRad = 0.0;
+    size_t cqpskCarrierLoopSymbols = 0;
     size_t phase2IschDecoded = 0;
     size_t phase2IschSync = 0;
     size_t phase2SyncOffsetCorrections = 0;
@@ -268,6 +312,7 @@ struct P25LiveDecodeResult {
     std::vector<P25FrameSyncEvent> syncs;
     std::vector<P25Nid> nids;
     std::vector<P25TsbkBlock> rawTsbkBlocks;
+    std::vector<P25Phase1PduMessage> phase1Pdus;
     std::vector<P25ImbeFrame> imbeFrames;
     std::vector<P25Phase2Burst> phase2Bursts;
     std::vector<P25Phase2MacPdu> phase2MacPdus;
@@ -424,6 +469,9 @@ private:
     uint64_t m_phase2DecodeGeneration = 0;
     uint64_t m_phase2StreamDibits = 0;
     CqpskDemodLock m_cqpskLock;
+    bool m_frontEndDcEstimateValid = false;
+    double m_frontEndDcSampleRate = 0.0;
+    std::complex<double> m_frontEndDcEstimate{0.0, 0.0};
 };
 
 class P25ImbeVoiceDecoder {

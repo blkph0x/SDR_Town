@@ -426,7 +426,10 @@ void DeviceManager::resetStreamBuffers(StreamState& st) {
     {
         std::lock_guard<std::mutex> ringLock(st.ringMutex);
         if (st.ringCapacity == 0) {
-            st.ringCapacity = 1u << 22; // 4M samples
+            // Keep enough recent RF for P25 follow diagnostics.  At 2.048 MS/s
+            // this is about 16 seconds of complex IQ, which lets saved
+            // follow captures include the actual post-retune traffic window.
+            st.ringCapacity = 1u << 25;
             st.iqRing.assign(st.ringCapacity, std::complex<float>(0, 0));
         }
         st.ringWriteIdx.store(0, std::memory_order_release);
@@ -451,13 +454,18 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
 
     bool wasActive = false;
     bool wasReal = false;
+    std::string wasRuntime;
     {
         std::lock_guard<std::mutex> lk(st.stateMutex);
         wasActive = st.active;
         wasReal = st.isReal;
+        wasRuntime = st.runtimeState;
     }
     if (wasActive) {
         if (attemptReal && !wasReal) {
+            if (wasRuntime.find("opening hardware") != std::string::npos) {
+                return true;
+            }
             // User explicitly wants real hardware (e.g. Apply in dialog), but we currently have
             // a safe stub running (from launch auto-start or previous failure). Stop the stub
             // cleanly then fall through to attempt the real open. This avoids "double use".
@@ -469,6 +477,37 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
     }
 
     std::unique_lock<std::mutex> lifecycleLock(st.lifecycleMutex);
+    {
+        bool activeNow = false;
+        bool realNow = false;
+        std::string runtimeNow;
+        {
+            std::lock_guard<std::mutex> lk(st.stateMutex);
+            activeNow = st.active;
+            realNow = st.isReal;
+            runtimeNow = st.runtimeState;
+        }
+        if (activeNow) {
+            const bool realOpenInFlight = runtimeNow.find("opening hardware") != std::string::npos;
+            if (attemptReal && !realNow && !realOpenInFlight) {
+                lifecycleLock.unlock();
+                stopStreaming(index);
+                lifecycleLock.lock();
+                {
+                    std::lock_guard<std::mutex> lk(st.stateMutex);
+                    activeNow = st.active;
+                    realNow = st.isReal;
+                    runtimeNow = st.runtimeState;
+                }
+                if (activeNow) {
+                    spdlog::warn("Device {} start requested real hardware but existing stream state=\"{}\" did not stop cleanly; refusing duplicate rxThread start.", index, runtimeNow);
+                    return realNow || !attemptReal;
+                }
+            } else {
+                return true;
+            }
+        }
+    }
 
     // ALWAYS start a fast stub simulation first. This makes every "start" (Add Receiver,
     // Apply, Scan, CLI) return instantly with working spectrum + basic demod + audio routing.
@@ -1311,11 +1350,11 @@ void DeviceManager::setupSoapyForRTLSDR() {
 #endif
 }
 
-void DeviceManager::setCenterFreq(size_t index, double freqHz) {
+uint64_t DeviceManager::setCenterFreq(size_t index, double freqHz) {
     StreamState* stPtr = nullptr;
     {
         std::lock_guard<std::mutex> lk(devicesMutex);
-        if (index >= devices.size()) return;
+        if (index >= devices.size()) return 0;
         if (streams.size() <= index) streams.resize(index + 1);
         if (!streams[index]) streams[index] = std::make_unique<StreamState>();
         stPtr = streams[index].get();
@@ -1348,6 +1387,34 @@ void DeviceManager::setCenterFreq(size_t index, double freqHz) {
 #else
     spdlog::debug("Recorded center freq {} for device {} (active={}, seq {})", freqHz, index, active, seq);
 #endif
+    return seq;
+}
+
+uint64_t DeviceManager::getCenterTuneRequestSeq(size_t index) const {
+    auto* stPtr = streamState(index);
+    if (!stPtr) return 0;
+    return stPtr->centerTuneRequestSeq.load(std::memory_order_acquire);
+}
+
+uint64_t DeviceManager::getCenterTuneAppliedSeq(size_t index) const {
+    auto* stPtr = streamState(index);
+    if (!stPtr) return 0;
+    return stPtr->centerTuneAppliedSeq.load(std::memory_order_acquire);
+}
+
+bool DeviceManager::waitForCenterTuneApplied(size_t index, uint64_t requestSeq, int timeoutMs) const {
+    if (requestSeq == 0) return false;
+    auto* stPtr = streamState(index);
+    if (!stPtr) return false;
+    const auto deadline = std::chrono::steady_clock::now() +
+        std::chrono::milliseconds(std::max(0, timeoutMs));
+    do {
+        if (stPtr->centerTuneAppliedSeq.load(std::memory_order_acquire) >= requestSeq) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    } while (std::chrono::steady_clock::now() < deadline);
+    return stPtr->centerTuneAppliedSeq.load(std::memory_order_acquire) >= requestSeq;
 }
 
 // Real radix-2 FFT implementation (iterative, double precision for dynamic range).
@@ -1462,8 +1529,8 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                         try {
                             std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
                             dev->setFrequency(SOAPY_SDR_RX, 0, tuneHz);
-                            st.centerTuneAppliedSeq.store(requestedTuneSeq, std::memory_order_release);
                             resetStreamBuffers(st);
+                            st.centerTuneAppliedSeq.store(requestedTuneSeq, std::memory_order_release);
                             lastSpectrumTime = std::chrono::steady_clock::now();
                             const auto tuneMs = std::chrono::duration_cast<std::chrono::milliseconds>(lastSpectrumTime - tuneStart).count();
                             if (tuneMs > 75) {

@@ -152,6 +152,15 @@ public:
                                                     const std::vector<uint8_t>& bytes,
                                                     bool crcValid = true);
 
+    // Ingest one decoded Phase 1 packet data unit.  AMBTC grants are normalized
+    // into the same control events as TSBK and Phase 2 MAC grants.
+    std::vector<P25ControlEvent> ingestPhase1Pdu(uint8_t format,
+                                                 uint8_t vendor,
+                                                 uint8_t opcode,
+                                                 const std::vector<uint8_t>& header,
+                                                 const std::vector<std::vector<uint8_t>>& dataBlocks,
+                                                 bool headerCrcValid = true);
+
     std::optional<double> channelToFrequencyHz(uint16_t channel) const;
     const std::array<P25ChannelIdentifier, 16>& channelIdentifiers() const { return m_identifiers; }
     void setChannelIdentifier(const P25ChannelIdentifier& identifier);
@@ -181,6 +190,7 @@ private:
     std::vector<P25ControlEvent> parsePhase2MacMessages(uint8_t pduType,
                                                         uint8_t pduOffset,
                                                         const std::vector<uint8_t>& bytes);
+    void applyExplicitChannel(P25ControlEvent& event, uint16_t downlinkChannel, uint16_t uplinkChannel) const;
     void annotateVoiceChannel(P25ControlEvent& event, uint16_t channel) const;
     void annotateSystemMetadata(P25ControlEvent& event) const;
 };

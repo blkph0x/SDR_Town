@@ -49,6 +49,12 @@ struct P25FollowSnapshot {
     bool phase2TrafficCallActive = false;
     bool phase2TrafficAudioOpen = false;
     bool phase2TrafficEncrypted = false;
+
+    // RF carrier detection for robust "transmission ended" even if protocol state lingers or noise fools VCW count.
+    double recentSignalLevelDb = -120.0;
+    double recentNoiseFloorDb = -120.0;
+    double recentSnrDb = 0.0;
+    bool rfMetricsPopulated = false;
 };
 
 enum class P25FollowAction {
@@ -71,6 +77,7 @@ struct P25FollowDecision {
     bool tdmaNoProgressTimeout = false;
     bool tdmaVcwNoSuperframeTimeout = false;
     bool tdmaNoVcwTimeout = false;
+    bool carrierDropped = false;
 };
 
 P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot);

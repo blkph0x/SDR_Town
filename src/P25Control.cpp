@@ -659,6 +659,78 @@ std::vector<P25ControlEvent> P25ControlChannelAnalyzer::ingestPhase2MacPdu(uint8
     return events;
 }
 
+std::vector<P25ControlEvent> P25ControlChannelAnalyzer::ingestPhase1Pdu(uint8_t format,
+                                                                         uint8_t vendor,
+                                                                         uint8_t opcode,
+                                                                         const std::vector<uint8_t>& header,
+                                                                         const std::vector<std::vector<uint8_t>>& dataBlocks,
+                                                                         bool headerCrcValid)
+{
+    std::vector<P25ControlEvent> events;
+    if (!headerCrcValid || header.size() < 10) return events;
+
+    constexpr uint8_t kAmbtcFormat = 23;
+    if (format != kAmbtcFormat) {
+        P25ControlEvent ev;
+        ev.type = P25ControlEventType::ControlMessage;
+        ev.opcode = opcode;
+        ev.mfid = vendor;
+        ev.label = "Phase 1 PDU format " + std::to_string(format);
+        annotateSystemMetadata(ev);
+        events.push_back(ev);
+        return events;
+    }
+
+    P25ControlEvent ev;
+    ev.opcode = opcode;
+    ev.mfid = vendor;
+    ev.sourceId = readU24Msb(header, 3);
+
+    const auto& block0 = dataBlocks.empty() ? header : dataBlocks.front();
+    auto readBlockChannel = [&](int bandBit, int numberBit) -> uint16_t {
+        const uint8_t band = static_cast<uint8_t>(readBitsMsb(block0, bandBit, 4));
+        const uint16_t number = static_cast<uint16_t>(readBitsMsb(block0, numberBit, 12));
+        return static_cast<uint16_t>((static_cast<uint16_t>(band) << 12) | number);
+    };
+
+    if (vendor == 0x00 && opcode == 0x00 && !dataBlocks.empty()) {
+        ev.type = P25ControlEventType::GroupVoiceGrant;
+        ev.label = "AMBTC group voice channel grant";
+        applyServiceOptions(ev, static_cast<uint8_t>(readBitsMsb(header, 64, 8)));
+        const uint16_t downlink = readBlockChannel(16, 20);
+        const uint16_t uplink = readBlockChannel(32, 36);
+        ev.talkgroupId = static_cast<uint32_t>(readBitsMsb(block0, 48, 16));
+        if ((downlink & 0x0fff) != (uplink & 0x0fff) || ((downlink >> 12) & 0x0f) != ((uplink >> 12) & 0x0f)) {
+            applyExplicitChannel(ev, downlink, uplink);
+        } else {
+            ev.channel = downlink;
+            if (auto f = channelToFrequencyHz(ev.channel)) ev.voiceFrequencyHz = *f;
+            annotateVoiceChannel(ev, ev.channel);
+        }
+        if (shouldEmitGrant(ev.talkgroupId, ev.channel)) events.push_back(ev);
+    } else if (vendor == 0x90 && opcode == 0x02 && !dataBlocks.empty()) {
+        ev.type = P25ControlEventType::GroupVoiceGrantExplicit;
+        ev.label = "Motorola AMBTC group regroup channel grant";
+        applyServiceOptions(ev, static_cast<uint8_t>(readBitsMsb(header, 64, 8)));
+        const uint16_t downlink = readBlockChannel(0, 4);
+        const uint16_t uplink = readBlockChannel(16, 20);
+        ev.talkgroupId = static_cast<uint32_t>(readBitsMsb(block0, 32, 16));
+        applyExplicitChannel(ev, downlink, uplink);
+        if (shouldEmitGrant(ev.talkgroupId, ev.channel)) events.push_back(ev);
+    } else {
+        ev.type = vendor == 0x00 ? P25ControlEventType::ControlMessage : P25ControlEventType::VendorCommand;
+        ev.label = vendor == 0x00
+            ? ("AMBTC " + std::string(standardOspTsbkLabel(opcode)))
+            : (vendor == 0x90 ? ("Motorola AMBTC " + std::string(motorolaOspTsbkLabel(opcode)))
+                              : ("Vendor AMBTC opcode " + hexOpcode(opcode)));
+        annotateSystemMetadata(ev);
+        events.push_back(ev);
+    }
+
+    for (auto& event : events) annotateSystemMetadata(event);
+    return events;
+}
+
 void P25ControlChannelAnalyzer::applyIdentifierUpdate(const std::vector<uint8_t>& b, P25ControlEvent& out)
 {
     const uint8_t id = static_cast<uint8_t>(readBitsMsb(b, 16, 4));
@@ -1483,6 +1555,41 @@ std::vector<P25ControlEvent> P25ControlChannelAnalyzer::parsePhase2MacMessages(u
     }
 
     return events;
+}
+
+void P25ControlChannelAnalyzer::applyExplicitChannel(P25ControlEvent& ev,
+                                                     uint16_t downlinkChannel,
+                                                     uint16_t uplinkChannel) const
+{
+    ev.explicitChannelKnown = true;
+    ev.explicitChannel.valid = true;
+    ev.explicitChannel.protocolTransmitChannel = downlinkChannel;
+    ev.explicitChannel.protocolReceiveChannel = uplinkChannel;
+    ev.explicitChannel.scannerDownlinkChannel = downlinkChannel;
+    ev.explicitChannel.subscriberUplinkChannel = uplinkChannel;
+    ev.explicitChannel.transmitBand = static_cast<uint8_t>((downlinkChannel >> 12) & 0x0f);
+    ev.explicitChannel.transmitNumber = static_cast<uint16_t>(downlinkChannel & 0x0fff);
+    ev.explicitChannel.receiveBand = static_cast<uint8_t>((uplinkChannel >> 12) & 0x0f);
+    ev.explicitChannel.receiveNumber = static_cast<uint16_t>(uplinkChannel & 0x0fff);
+    ev.explicitChannel.downlinkChannel = downlinkChannel;
+    ev.explicitChannel.uplinkChannel = uplinkChannel;
+    ev.channel = downlinkChannel;
+    ev.channelB = uplinkChannel;
+    if (auto f = channelToFrequencyHz(downlinkChannel)) {
+        ev.explicitChannel.downlinkHz = *f;
+        ev.explicitChannel.transmitHz = *f;
+        ev.explicitChannel.protocolTransmitHz = *f;
+        ev.explicitChannel.scannerDownlinkHz = *f;
+        ev.voiceFrequencyHz = *f;
+    }
+    if (auto f = channelToFrequencyHz(uplinkChannel)) {
+        ev.explicitChannel.uplinkHz = *f;
+        ev.explicitChannel.receiveHz = *f;
+        ev.explicitChannel.protocolReceiveHz = *f;
+        ev.explicitChannel.subscriberUplinkHz = *f;
+        ev.voiceFrequencyHzB = *f;
+    }
+    annotateVoiceChannel(ev, downlinkChannel);
 }
 
 void P25ControlChannelAnalyzer::annotateVoiceChannel(P25ControlEvent& event, uint16_t channel) const

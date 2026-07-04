@@ -9,6 +9,8 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <iomanip>
+#include <sstream>
 #include <vector>
 
 namespace {
@@ -77,7 +79,27 @@ uint16_t p25Crc16(const std::vector<uint8_t>& bytes)
 
 void finishTsbkCrc(std::vector<uint8_t>& tsbk)
 {
-    const uint16_t crc = p25Crc16(tsbk);
+    REQUIRE(tsbk.size() == 12);
+    static constexpr std::array<uint16_t, 80> checksums = {
+        0x1bcb, 0x8de5, 0xc6f2, 0x6b69, 0xb5b4, 0x52ca, 0x2175, 0x90ba,
+        0x404d, 0xa026, 0x5803, 0xac01, 0xd600, 0x6310, 0x3998, 0x14dc,
+        0x027e, 0x092f, 0x8497, 0xc24b, 0xe125, 0xf092, 0x7059, 0xb82c,
+        0x5406, 0x2213, 0x9109, 0xc884, 0x6c52, 0x3e39, 0x9f1c, 0x479e,
+        0x2bdf, 0x95ef, 0xcaf7, 0xe57b, 0xf2bd, 0xf95e, 0x74bf, 0xba5f,
+        0xdd2f, 0xee97, 0xf74b, 0xfba5, 0xfdd2, 0x76f9, 0xbb7c, 0x55ae,
+        0x22c7, 0x9163, 0xc8b1, 0xe458, 0x7a3c, 0x350e, 0x1297, 0x894b,
+        0xc4a5, 0xe252, 0x7939, 0xbc9c, 0x565e, 0x233f, 0x919f, 0xc8cf,
+        0xe467, 0xf233, 0xf919, 0xfc8c, 0x7656, 0x333b, 0x999d, 0xccce,
+        0x6e77, 0xb73b, 0xdb9d, 0xedce, 0x7ef7, 0xbf7b, 0xdfbd, 0xefde,
+    };
+    uint16_t crc = 0xffffu;
+    for (size_t bit = 0; bit < 80; ++bit) {
+        const size_t byteIndex = bit / 8;
+        const int bitInByte = 7 - static_cast<int>(bit % 8);
+        if (((tsbk[byteIndex] >> bitInByte) & 0x01u) != 0) {
+            crc ^= checksums[bit];
+        }
+    }
     tsbk[10] = static_cast<uint8_t>((crc >> 8) & 0xffu);
     tsbk[11] = static_cast<uint8_t>(crc & 0xffu);
 }
@@ -483,6 +505,51 @@ std::vector<int> interleaveTsbkCodedDibits(const std::vector<int>& deinterleaved
     return out;
 }
 
+size_t p25DataDeinterleaveIndexForTest(size_t interleavedBitIndex)
+{
+    const size_t nibble = interleavedBitIndex / 4;
+    const size_t bit = interleavedBitIndex % 4;
+    size_t row = 0;
+    size_t column = 0;
+    if (nibble < 13) {
+        row = nibble;
+        column = 0;
+    } else if (nibble < 25) {
+        row = nibble - 13;
+        column = 1;
+    } else if (nibble < 37) {
+        row = nibble - 25;
+        column = 2;
+    } else {
+        row = nibble - 37;
+        column = 3;
+    }
+    return ((row * 4) + column) * 4 + bit;
+}
+
+std::vector<int> interleaveP25DataCodedDibits(const std::vector<int>& deinterleaved)
+{
+    REQUIRE(deinterleaved.size() == 98);
+    std::array<uint8_t, 196> deinterleavedBits{};
+    for (size_t i = 0; i < deinterleaved.size(); ++i) {
+        const auto pair = P25LiveDecoder::bitsFromDibit(deinterleaved[i] & 0x03);
+        deinterleavedBits[i * 2] = pair[0];
+        deinterleavedBits[i * 2 + 1] = pair[1];
+    }
+
+    std::array<uint8_t, 196> interleavedBits{};
+    for (size_t i = 0; i < interleavedBits.size(); ++i) {
+        interleavedBits[i] = deinterleavedBits[p25DataDeinterleaveIndexForTest(i)];
+    }
+
+    std::vector<int> out;
+    out.reserve(98);
+    for (size_t i = 0; i + 1 < interleavedBits.size(); i += 2) {
+        out.push_back(P25LiveDecoder::dibitFromBits(interleavedBits[i], interleavedBits[i + 1]));
+    }
+    return out;
+}
+
 void appendDibitBits(std::vector<uint8_t>& bits, int dibit)
 {
     const auto pair = P25LiveDecoder::bitsFromDibit(dibit);
@@ -638,6 +705,31 @@ std::vector<uint8_t> makeSyntheticTsduFrameBits(uint16_t nac, const std::vector<
     return bits;
 }
 
+std::vector<uint8_t> makeSyntheticPduFrameBits(uint16_t nac,
+                                               const std::vector<uint8_t>& header,
+                                               const std::vector<std::vector<uint8_t>>& blocks)
+{
+    std::vector<uint8_t> bits;
+    appendBitsMsb(bits, 0x2aau, 8);
+    const auto sync = P25LiveDecoder::frameSyncBits();
+    bits.insert(bits.end(), sync.begin(), sync.end());
+
+    std::vector<int> payload = makeNidDibits(nac, P25DataUnitId::PDU);
+    auto codedHeader = trellisEncodeHalfRate(bytesToDibits(header));
+    REQUIRE(codedHeader.size() == 98);
+    codedHeader = interleaveP25DataCodedDibits(codedHeader);
+    payload.insert(payload.end(), codedHeader.begin(), codedHeader.end());
+    for (const auto& block : blocks) {
+        auto coded = trellisEncodeHalfRate(bytesToDibits(block));
+        REQUIRE(coded.size() == 98);
+        coded = interleaveP25DataCodedDibits(coded);
+        payload.insert(payload.end(), coded.begin(), coded.end());
+    }
+
+    for (int dibit : statusInterleaveAfterSync(payload)) appendDibitBits(bits, dibit);
+    return bits;
+}
+
 std::vector<float> makeC4fmDiscriminator(const std::vector<uint8_t>& bits, double innerDeviationHz)
 {
     std::vector<float> fm;
@@ -783,6 +875,93 @@ TEST_CASE("P25 live decoder finds frame sync, NID, and raw TSDU block candidates
     REQUIRE(events.front().type == P25ControlEventType::IdentifierUpdate);
 }
 
+TEST_CASE("P25 live decoder applies SDRTrunk-style CCITT80 single-bit TSBK correction")
+{
+    auto good = makeTsbk(0x3d);
+    writeBitsMsb(good, 16, 4, 2);
+    writeBitsMsb(good, 29, 9, 0x100u);
+    writeBitsMsb(good, 38, 10, 100);
+    writeBitsMsb(good, 48, 32, static_cast<uint32_t>(450000000.0 / 5.0));
+    finishTsbkCrc(good);
+
+    auto corrupted = good;
+    corrupted[2] ^= 0x20u; // one post-Viterbi payload bit error, corrected by CCITT80 syndrome.
+
+    P25LiveDecoder decoder;
+    const auto bits = makeSyntheticTsduFrameBits(0x293, corrupted);
+    const auto result = decoder.processHardBits(bits);
+
+    REQUIRE(result.rawTsbkBlocks.size() == 1);
+    const auto& block = result.rawTsbkBlocks.front();
+    std::ostringstream blockHex;
+    for (uint8_t b : block.bytes) {
+        blockHex << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b);
+    }
+    INFO("decoded block=" << blockHex.str());
+    REQUIRE(block.fecDecoded);
+    REQUIRE(block.crcValid);
+    REQUIRE(block.crcCorrected);
+    REQUIRE(block.crcCorrectedBits == 1);
+    REQUIRE(block.bytes == good);
+}
+
+TEST_CASE("P25 live decoder decodes Phase 1 PDU AMBTC grant candidates")
+{
+    std::vector<uint8_t> header(12, 0);
+    writeBitsMsb(header, 2, 1, 1);
+    writeBitsMsb(header, 3, 5, 23);
+    writeBitsMsb(header, 16, 8, 0x00);
+    writeBitsMsb(header, 24, 24, 0x112233);
+    writeBitsMsb(header, 49, 7, 1);
+    writeBitsMsb(header, 58, 6, 0x00);
+    writeBitsMsb(header, 64, 8, 0x00);
+    finishTsbkCrc(header);
+
+    std::vector<uint8_t> block0(12, 0);
+    writeBitsMsb(block0, 16, 4, 7);
+    writeBitsMsb(block0, 20, 12, 0x039);
+    writeBitsMsb(block0, 32, 4, 7);
+    writeBitsMsb(block0, 36, 12, 0x039);
+    writeBitsMsb(block0, 48, 16, 11178);
+
+    P25LiveDecoder decoder;
+    const auto bits = makeSyntheticPduFrameBits(0x2d2, header, {block0});
+    const auto result = decoder.processHardBits(bits);
+
+    REQUIRE_FALSE(result.nids.empty());
+    REQUIRE(result.nids.front().duid == P25DataUnitId::PDU);
+    REQUIRE(result.stats.phase1PduHeaders == 1);
+    REQUIRE(result.stats.phase1PduCrcValid == 1);
+    REQUIRE(result.stats.phase1AmbtcPdus == 1);
+    REQUIRE(result.phase1Pdus.size() == 1);
+    const auto& pdu = result.phase1Pdus.front();
+    REQUIRE(pdu.headerCrcValid);
+    REQUIRE(pdu.format == 23);
+    REQUIRE(pdu.vendor == 0x00);
+    REQUIRE(pdu.opcode == 0x00);
+    REQUIRE(pdu.blocksToFollow == 1);
+    REQUIRE(pdu.dataBlocks.size() == 1);
+    REQUIRE(pdu.dataBlocks.front().bytes == block0);
+
+    P25ControlChannelAnalyzer analyzer;
+    P25ChannelIdentifier identifier;
+    identifier.valid = true;
+    identifier.id = 7;
+    identifier.channelType = 3;
+    identifier.baseHz = 420000000.0;
+    identifier.spacingHz = 12500.0;
+    identifier.bandwidthHz = 12500.0;
+    identifier.slotsPerCarrier = 2;
+    identifier.phase2Capable = true;
+    analyzer.setChannelIdentifier(identifier);
+    const auto events = analyzer.ingestPhase1Pdu(
+        pdu.format, pdu.vendor, pdu.opcode, pdu.headerBytes, {pdu.dataBlocks.front().bytes}, pdu.headerCrcValid);
+    REQUIRE(events.size() == 1);
+    REQUIRE(events.front().type == P25ControlEventType::GroupVoiceGrant);
+    REQUIRE(events.front().talkgroupId == 11178);
+    REQUIRE(events.front().tdmaSlotKnown);
+}
+
 TEST_CASE("P25 live decoder locks synthetic C4FM discriminator symbols")
 {
     auto tsbk = makeTsbk(0x02);
@@ -879,6 +1058,61 @@ TEST_CASE("P25 live decoder locks offset RTL-rate synthetic CQPSK LSM IQ")
     REQUIRE(std::abs(result.stats.cqpskResidualCarrierHz) < 120.0);
 }
 
+TEST_CASE("P25 live decoder removes persistent front-end DC from C4FM IQ")
+{
+    auto tsbk = makeTsbk(0x02);
+    writeBitsMsb(tsbk, 16, 16, 0x1001);
+    writeBitsMsb(tsbk, 32, 16, 2001);
+    finishTsbkCrc(tsbk);
+    const auto bits = makeSyntheticTsduFrameBits(0x461, tsbk);
+
+    constexpr double sampleRate = 2048000.0;
+    constexpr double centerHz = 419112500.0;
+    constexpr double carrierOffsetHz = 9250.0;
+    auto iq = makeC4fmIq(bits, sampleRate, carrierOffsetHz, 600.0, 0.21);
+    for (auto& sample : iq) sample += std::complex<float>(0.30f, -0.24f);
+
+    P25LiveDecoder decoder;
+    const auto result = decoder.processIq(iq, sampleRate, centerHz, centerHz + carrierOffsetHz);
+
+    REQUIRE(result.stats.frontEndDcBlockApplied);
+    REQUIRE(result.stats.frontEndDcEstimateMagnitude > 0.05);
+    REQUIRE_FALSE(result.nids.empty());
+    REQUIRE(result.nids.front().fecValidated);
+    REQUIRE(result.nids.front().nac == 0x461);
+    REQUIRE_FALSE(result.rawTsbkBlocks.empty());
+    REQUIRE(result.rawTsbkBlocks.front().crcValid);
+}
+
+TEST_CASE("P25 live decoder removes persistent front-end DC from CQPSK LSM IQ")
+{
+    auto tsbk = makeTsbk(0x02);
+    writeBitsMsb(tsbk, 16, 16, 0x1001);
+    writeBitsMsb(tsbk, 32, 16, 2001);
+    finishTsbkCrc(tsbk);
+    const auto bits = makeSyntheticTsduFrameBits(0x78a, tsbk);
+
+    constexpr double sampleRate = 2048000.0;
+    constexpr double centerHz = 419112500.0;
+    constexpr double carrierOffsetHz = -7250.0;
+    auto iq = makeCqpskIq(bits, sampleRate, carrierOffsetHz, 0.42);
+    for (auto& sample : iq) sample += std::complex<float>(-0.26f, 0.22f);
+
+    P25LiveDecoder decoder;
+    const auto result = decoder.processIq(iq, sampleRate, centerHz, centerHz + carrierOffsetHz);
+
+    REQUIRE(result.stats.frontEndDcBlockApplied);
+    REQUIRE(result.stats.frontEndDcEstimateMagnitude > 0.05);
+    REQUIRE(result.stats.demodPath.find("CQPSK") != std::string::npos);
+    REQUIRE(result.stats.cqpskCarrierLoopApplied);
+    REQUIRE(result.stats.cqpskCarrierLoopSymbols > 80);
+    REQUIRE_FALSE(result.nids.empty());
+    REQUIRE(result.nids.front().fecValidated);
+    REQUIRE(result.nids.front().nac == 0x78a);
+    REQUIRE_FALSE(result.rawTsbkBlocks.empty());
+    REQUIRE(result.rawTsbkBlocks.front().crcValid);
+}
+
 TEST_CASE("P25 live decoder reuses sticky CQPSK demod lock after validation")
 {
     auto tsbk = makeTsbk(0x02);
@@ -926,9 +1160,13 @@ TEST_CASE("P25 live decoder corrects residual CQPSK carrier offset")
     const auto result = decoder.processIq(iq, sampleRate, centerHz, centerHz + carrierOffsetHz + tuneErrorHz);
 
     REQUIRE(result.stats.demodPath.find("CQPSK") != std::string::npos);
-    REQUIRE(result.stats.cqpskFineCorrectionApplied);
-    REQUIRE(std::abs(result.stats.cqpskResidualCarrierHz) > 150.0);
-    REQUIRE(std::abs(result.stats.cqpskResidualCarrierHz) < 600.0);
+    const double totalCorrectionHz = std::abs(result.stats.cqpskResidualCarrierHz) +
+        std::abs(result.stats.cqpskCarrierLoopCorrectionHz);
+    INFO("fine residual Hz=" << result.stats.cqpskResidualCarrierHz
+         << " carrier loop Hz=" << result.stats.cqpskCarrierLoopCorrectionHz);
+    REQUIRE((result.stats.cqpskFineCorrectionApplied || result.stats.cqpskCarrierLoopApplied));
+    REQUIRE(totalCorrectionHz > 150.0);
+    REQUIRE(totalCorrectionHz < 900.0);
     REQUIRE(result.stats.cqpskPhaseErrorRmsRad < 0.45);
     REQUIRE(result.stats.cqpskFineCorrectionSymbols > 80);
     REQUIRE_FALSE(result.nids.empty());
@@ -1223,6 +1461,49 @@ TEST_CASE("P25 live decoder searches Phase 2 XOR mask phase using MAC CRC eviden
     REQUIRE(releasedWithoutLocalMac);
 }
 
+TEST_CASE("P25 live decoder keeps sticky Phase 2 superframe lock through drifted single-burst windows")
+{
+    constexpr uint16_t nac = 0x2d2;
+    constexpr uint32_t wacn = 0xbee00;
+    constexpr uint16_t systemId = 0x2d1;
+    constexpr uint8_t maskPhase = 5;
+    constexpr size_t driftDibits = 8;
+
+    const auto clear = makeSyntheticPhase2SuperframeWithSacchForTest();
+    const auto masked = maskSyntheticPhase2SuperframeForTest(clear, nac, wacn, systemId, maskPhase);
+
+    P25LiveDecoder decoder;
+    decoder.setPhase2MaskParameters(nac, wacn, systemId);
+    const auto locked = decoder.processHardDibits(masked);
+    REQUIRE(locked.stats.phase2MaskPhaseKnown);
+    REQUIRE(locked.stats.phase2MaskPhase == maskPhase);
+    REQUIRE(locked.stats.phase2MaskedBursts == 12);
+
+    std::vector<int> nextWindow(driftDibits, 0);
+    nextWindow.insert(nextWindow.end(),
+                      masked.begin(),
+                      masked.begin() + static_cast<std::ptrdiff_t>(P25LiveDecoder::Phase2BurstDibits * 3));
+
+    const auto sticky = decoder.processHardDibits(nextWindow);
+
+    REQUIRE(sticky.stats.phase2Bursts >= 1);
+    REQUIRE(sticky.stats.phase2SuperframeBursts >= 1);
+    REQUIRE(sticky.stats.phase2MaskedBursts >= 1);
+    REQUIRE(sticky.stats.phase2VoiceCodewords >= 4);
+    REQUIRE(sticky.stats.phase2SyncOffsetCorrections >= 1);
+
+    const auto burst = std::find_if(sticky.phase2Bursts.begin(), sticky.phase2Bursts.end(), [](const P25Phase2Burst& b) {
+        return b.stickySuperframe && b.superframeBurstIndexKnown && b.superframeBurstIndex == 2 && !b.voiceCodewords.empty();
+    });
+    REQUIRE(burst != sticky.phase2Bursts.end());
+    REQUIRE(burst->xorMaskApplied);
+    REQUIRE(burst->xorMaskPhaseKnown);
+    REQUIRE(burst->xorMaskPhase == maskPhase);
+    REQUIRE(burst->grantSlotKnown);
+    REQUIRE(burst->syncOffsetAdjusted);
+    REQUIRE(std::abs(burst->syncOffsetDibits) == static_cast<int>(driftDibits));
+}
+
 TEST_CASE("P25 live decoder aligns masked Phase 2 MAC decode to near sync hits")
 {
     constexpr uint16_t nac = 0x2d2;
@@ -1315,18 +1596,39 @@ TEST_CASE("P25 live decoder decodes informational Phase 2 ISCH fields")
 
 TEST_CASE("P25 Phase 2 voice codewords map into AMBE frame layout")
 {
-    P25Phase2VoiceCodeword codeword;
-    codeword.bits[0] = 1;
-    codeword.bits[1] = 1;
-    codeword.bits[2] = 1;
-    codeword.bits[3] = 1;
+    // Mirrors OP25 p25p2_vf::extract_vcw/interleave_vcw exactly.  Each one-hot
+    // 72-bit TDMA voice frame bit must land in the mbelib C0/C1/C2/C3 matrix
+    // cell that OP25 assigns to c0/c1/c2/c3.
+    static constexpr std::array<size_t, 72> expected = {
+        0 * 24 + 23, 0 * 24 + 5, 1 * 24 + 10, 2 * 24 + 3,
+        0 * 24 + 22, 0 * 24 + 4, 1 * 24 + 9, 2 * 24 + 2,
+        0 * 24 + 21, 0 * 24 + 3, 1 * 24 + 8, 2 * 24 + 1,
+        0 * 24 + 20, 0 * 24 + 2, 1 * 24 + 7, 2 * 24 + 0,
+        0 * 24 + 19, 0 * 24 + 1, 1 * 24 + 6, 3 * 24 + 13,
+        0 * 24 + 18, 0 * 24 + 0, 1 * 24 + 5, 3 * 24 + 12,
+        0 * 24 + 17, 1 * 24 + 22, 1 * 24 + 4, 3 * 24 + 11,
+        0 * 24 + 16, 1 * 24 + 21, 1 * 24 + 3, 3 * 24 + 10,
+        0 * 24 + 15, 1 * 24 + 20, 1 * 24 + 2, 3 * 24 + 9,
+        0 * 24 + 14, 1 * 24 + 19, 1 * 24 + 1, 3 * 24 + 8,
+        0 * 24 + 13, 1 * 24 + 18, 1 * 24 + 0, 3 * 24 + 7,
+        0 * 24 + 12, 1 * 24 + 17, 2 * 24 + 10, 3 * 24 + 6,
+        0 * 24 + 11, 1 * 24 + 16, 2 * 24 + 9, 3 * 24 + 5,
+        0 * 24 + 10, 1 * 24 + 15, 2 * 24 + 8, 3 * 24 + 4,
+        0 * 24 + 9, 1 * 24 + 14, 2 * 24 + 7, 3 * 24 + 3,
+        0 * 24 + 8, 1 * 24 + 13, 2 * 24 + 6, 3 * 24 + 2,
+        0 * 24 + 7, 1 * 24 + 12, 2 * 24 + 5, 3 * 24 + 1,
+        0 * 24 + 6, 1 * 24 + 11, 2 * 24 + 4, 3 * 24 + 0,
+    };
 
-    const auto ambe = p25Phase2VoiceCodewordToAmbe3600x2450Frame(codeword);
-    REQUIRE(ambe[23] == 1);
-    REQUIRE(ambe[5] == 1);
-    REQUIRE(ambe[24 + 10] == 1);
-    REQUIRE(ambe[48 + 3] == 1);
-    REQUIRE(std::count(ambe.begin(), ambe.end(), static_cast<uint8_t>(1)) == 4);
+    for (size_t bit = 0; bit < expected.size(); ++bit) {
+        P25Phase2VoiceCodeword codeword;
+        codeword.bits[bit] = 1;
+        const auto ambe = p25Phase2VoiceCodewordToAmbe3600x2450Frame(codeword);
+
+        INFO("TDMA AMBE bit " << bit);
+        REQUIRE(ambe[expected[bit]] == 1);
+        REQUIRE(std::count(ambe.begin(), ambe.end(), static_cast<uint8_t>(1)) == 1);
+    }
 }
 
 TEST_CASE("P25 live decoder extracts valid IMBE frames from synthetic LDU")

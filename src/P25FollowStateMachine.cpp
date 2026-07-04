@@ -32,10 +32,27 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         ? snapshot.talkgroupId
         : snapshot.fallbackTalkgroupId;
 
+    const bool hasPublishedVoiceDiagnostic =
+        snapshot.diagUpdatedMs > 0 ||
+        snapshot.diag != static_cast<int>(P25FollowDiagCode::Idle) ||
+        snapshot.syncs > 0 ||
+        snapshot.nids > 0 ||
+        snapshot.imbeFrames > 0 ||
+        snapshot.decodedFrames > 0 ||
+        snapshot.phase2Bursts > 0 ||
+        snapshot.phase2VoiceCodewords > 0 ||
+        snapshot.phase2SuperframeBursts > 0 ||
+        snapshot.phase2MaskedBursts > 0 ||
+        snapshot.phase2MacPdus > 0 ||
+        snapshot.phase2MacCrcValid > 0 ||
+        snapshot.phase2EssKnown ||
+        snapshot.phase2TrafficProcessorActive;
+
     const bool diagnosticFresh =
-        snapshot.diagUpdatedMs <= 0 ||
-        snapshot.nowMs <= 0 ||
-        snapshot.nowMs - snapshot.diagUpdatedMs <= 2500;
+        hasPublishedVoiceDiagnostic &&
+        (snapshot.diagUpdatedMs <= 0 ||
+         snapshot.nowMs <= 0 ||
+         snapshot.nowMs - snapshot.diagUpdatedMs <= 2500);
 
     const bool phase2Follow = snapshot.phase2Voice ||
         snapshot.phase2Bursts > 0 ||
@@ -55,17 +72,24 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         snapshot.phase2TrafficAudioOpen ||
         (snapshot.phase2SuperframeBursts >= 10 && snapshot.phase2MaskedBursts >= 10);
 
+    // Voice still active requires recent *voice* evidence (VCW or decoded or traffic audio open with VCW),
+    // not just any bursts or sf/mask framing (which can linger on a dead freq or inactive TG).
+    // This fixes "stuck on inactive talk groups".
+    // Partial sf/mask without ongoing VCW is explicitly not sufficient (see SDRTrunk comments in prior code).
+    const bool hasRecentVoiceVcws = snapshot.phase2VoiceCodewords > 0 || snapshot.decodedFrames > 0 || snapshot.imbeFrames > 0;
+    bool hasCarrier = true;
+    if (snapshot.rfMetricsPopulated) {
+        hasCarrier = snapshot.recentSnrDb > 3.0 ||
+                     (snapshot.recentSignalLevelDb > snapshot.recentNoiseFloorDb + 5.0);
+    }
     decision.voiceStillLooksActive = diagnosticFresh &&
-        (snapshot.imbeFrames > 0 ||
-         snapshot.decodedFrames > 0 ||
-         // For Phase 1, sync/NID evidence is enough to keep following briefly.
-         // For Phase 2 one-RTL traffic mode, partial repeated telemetry such as
-         // p2sf=5/p2mask=5/p2vcw=6 is not a call-progress event in sdrtrunk; it
-         // should not refresh the traffic-channel lifetime forever.
-         ((snapshot.phase2Bursts == 0 && snapshot.phase2VoiceCodewords == 0) &&
-          (snapshot.syncs > 0 || snapshot.nids > 0)) ||
+        (hasRecentVoiceVcws || snapshot.phase2TrafficCallActive) &&
+        hasCarrier &&  // use actual RF energy (peak in BW vs noise floor) to ignore background noise as "real data"
+        (snapshot.phase2TrafficAudioOpen ||
          snapshot.phase2TrafficCallActive ||
-         phase2TrustedActivity);
+         // Only fall back to pure sync/nid for very brief P1-style or initial acquisition; not for sustained follow.
+         (snapshot.phase2VoiceCodewords == 0 && snapshot.phase2Bursts == 0 &&
+          (snapshot.syncs > 0 || snapshot.nids > 0) && (snapshot.nowMs - snapshot.tunedAtMs) < 3000));
 
     const bool trustedEncryptedEss =
         snapshot.phase2EssKnown &&
@@ -116,14 +140,32 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
     const int64_t tdmaVcwNoSuperframeSilenceMs = phase2RecentContinuation ? 10000 : 3500;
     const int64_t tdmaNoVcwTunedMs = phase2RecentContinuation ? 18000 : 9000;
     const int64_t tdmaNoVcwSilenceMs = phase2RecentContinuation ? 10000 : 3500;
+    const int64_t tdmaNoMacEssTunedMs = phase2RecentContinuation ? 30000 : 15000;
+    const int64_t tdmaNoMacEssSilenceMs = phase2RecentContinuation ? 10000 : 3500;
+
+    const bool firstDiagnosticGraceExpired =
+        phase2Follow &&
+        !hasPublishedVoiceDiagnostic &&
+        snapshot.tunedAtMs > 0 &&
+        snapshot.nowMs - snapshot.tunedAtMs > 30000;
 
     decision.hardTimeout =
         snapshot.tunedAtMs > 0 &&
-        snapshot.nowMs - snapshot.tunedAtMs > 20000 &&
-        silenceSinceSignalMs > 8000 &&
+        (hasPublishedVoiceDiagnostic || firstDiagnosticGraceExpired) &&
+        snapshot.nowMs - snapshot.tunedAtMs > 12000 &&
+        silenceSinceSignalMs > 3000 &&
         !snapshot.phase2TrafficCallActive &&
         snapshot.decodedFrames == 0 &&
         snapshot.phase2VoiceCodewords == 0;
+
+    bool hasCarrierForDrop = true;
+    if (snapshot.rfMetricsPopulated) {
+        hasCarrierForDrop = snapshot.recentSnrDb > 3.0 ||
+                            (snapshot.recentSignalLevelDb > snapshot.recentNoiseFloorDb + 5.0);
+    }
+    decision.carrierDropped = initialHoldExpired &&
+        !hasCarrierForDrop &&
+        silenceSinceSignalMs > 800;  // quick return once carrier drops after voice ends
 
     decision.tdmaVcwNoSuperframeTimeout =
         noTrustedPhase2MacEssYet &&
@@ -140,7 +182,8 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
 
     const bool tdmaPartialEpochNoProgress =
         noTrustedPhase2MacEssYet &&
-        snapshot.nowMs - snapshot.tunedAtMs > 4500 &&
+        snapshot.nowMs - snapshot.tunedAtMs > tdmaNoMacEssTunedMs &&
+        silenceSinceSignalMs > tdmaNoMacEssSilenceMs &&
         snapshot.phase2VoiceCodewords >= 4 &&
         snapshot.phase2SuperframeBursts > 0 &&
         snapshot.phase2MaskedBursts > 0 &&
@@ -148,20 +191,34 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
 
     decision.tdmaNoProgressTimeout =
         (decision.tdmaEpochLockedNoMacEss &&
-         snapshot.nowMs - snapshot.tunedAtMs > 4500) ||
+         snapshot.nowMs - snapshot.tunedAtMs > tdmaNoMacEssTunedMs &&
+         silenceSinceSignalMs > tdmaNoMacEssSilenceMs) ||
         decision.tdmaVcwNoSuperframeTimeout ||
         tdmaPartialEpochNoProgress;
 
 
+    const bool tdmaNoAcquireIdleTimeout =
+        phase2Follow &&
+        hasPublishedVoiceDiagnostic &&
+        snapshot.tunedAtMs > 0 &&
+        snapshot.nowMs - snapshot.tunedAtMs > 4500 &&
+        silenceSinceSignalMs > 1200 &&
+        !snapshot.phase2TrafficCallActive &&
+        snapshot.decodedFrames == 0 &&
+        snapshot.phase2VoiceCodewords == 0 &&
+        diagIs(snapshot.diag, P25FollowDiagCode::Idle);
+
     decision.tdmaNoVcwTimeout =
         phase2Follow &&
+        hasPublishedVoiceDiagnostic &&
         snapshot.tunedAtMs > 0 &&
-        snapshot.nowMs - snapshot.tunedAtMs > tdmaNoVcwTunedMs &&
+        (snapshot.nowMs - snapshot.tunedAtMs > tdmaNoVcwTunedMs ||
+         tdmaNoAcquireIdleTimeout) &&
         silenceSinceSignalMs > tdmaNoVcwSilenceMs &&
         !snapshot.phase2TrafficCallActive &&
         snapshot.decodedFrames == 0 &&
         snapshot.phase2VoiceCodewords == 0 &&
-        snapshot.phase2Bursts == 0 &&
+        // Do not require bursts==0; noise can still produce "bursts" counts. VCW==0 + no decoded is enough.
         (diagIs(snapshot.diag, P25FollowDiagCode::Idle) ||
          diagIs(snapshot.diag, P25FollowDiagCode::WaitingForClearGrant) ||
          diagIs(snapshot.diag, P25FollowDiagCode::NoSync) ||
@@ -176,6 +233,8 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         decision.action = P25FollowAction::ReturnActivityGone;
     } else if (decision.hardTimeout) {
         decision.action = P25FollowAction::ReturnHardTimeout;
+    } else if (decision.carrierDropped) {
+        decision.action = P25FollowAction::ReturnActivityGone;
     }
 
     return decision;

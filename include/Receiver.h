@@ -126,6 +126,7 @@ struct Receiver {
     double p25Phase2TrafficTargetOffsetHz = 0.0;
     int p25Phase2TrafficTargetOffsetTrust = 0;
     int p25Phase2TrafficTargetOffsetMisses = 0;
+    int64_t p25Phase2RecentTrafficEvidenceMs = 0;
     uint64_t p25Phase2LastEmittedAbsDibit = 0;
     // sdrtrunk-style Phase 2 audio security gate: for unknown grants, follow
     // the traffic channel but hold decoded PCM until current-call MAC/ESS or a
@@ -134,6 +135,24 @@ struct Receiver {
     std::vector<float> p25Phase2PendingAudio;
     uint32_t p25Phase2PendingTalkgroupId = 0;
     bool p25Phase2PendingAudioArmed = false;
+    // Short-lived, active-call Phase-2 security evidence.  MAC/ESS and voice
+    // often arrive in different DSP windows, so the audio gate must remember
+    // current-call MAC/ESS context without promoting it across calls.
+    uint32_t p25Phase2RecentSecurityTalkgroupId = 0;
+    uint8_t p25Phase2RecentSecuritySlot = 0xffu;
+    int64_t p25Phase2RecentSecurityFrequencyHz = 0;
+    int64_t p25Phase2RecentSecurityEvidenceMs = 0;
+    bool p25Phase2RecentTargetMacCrcValid = false;
+    bool p25Phase2RecentAnyMacCrcValid = false;
+    bool p25Phase2RecentTargetEssKnown = false;
+    bool p25Phase2RecentTargetEssEncrypted = false;
+    bool p25Phase2RecentTargetSessionAudioRelease = false;
+    bool p25Phase2RecentSuperframeMaskLock = false;
+    // Guarded Phase-2 field recovery. Explicit encrypted grants/ESS still mute
+    // immediately, while late-entry unknown calls queue audio until target-slot
+    // PTT/ESS, trusted clear grant, or strong target MAC/mask/voice evidence
+    // plus sane decoded PCM proves the current traffic slot is clear.
+    bool p25Phase2AllowLateEntryAudioProbe = false;
     bool p25VoiceResetPending = false;
     P25VoiceDiagSnapshot p25VoiceDiagnostics;
     P25LiveDecoder p25VoiceLiveDecoder{p25RealtimeVoiceDecoderConfig()};
@@ -185,6 +204,7 @@ struct Receiver {
         p25Phase2TrafficTargetOffsetHz = 0.0;
         p25Phase2TrafficTargetOffsetTrust = 0;
         p25Phase2TrafficTargetOffsetMisses = 0;
+        p25Phase2RecentTrafficEvidenceMs = 0;
     }
     void resetP25VoiceState()
     {
@@ -203,10 +223,21 @@ struct Receiver {
         p25Phase2TrafficTargetOffsetHz = 0.0;
         p25Phase2TrafficTargetOffsetTrust = 0;
         p25Phase2TrafficTargetOffsetMisses = 0;
+        p25Phase2RecentTrafficEvidenceMs = 0;
         p25Phase2LastEmittedAbsDibit = 0;
         p25Phase2PendingAudio.clear();
         p25Phase2PendingTalkgroupId = 0;
         p25Phase2PendingAudioArmed = false;
+        p25Phase2RecentSecurityTalkgroupId = 0;
+        p25Phase2RecentSecuritySlot = 0xffu;
+        p25Phase2RecentSecurityFrequencyHz = 0;
+        p25Phase2RecentSecurityEvidenceMs = 0;
+        p25Phase2RecentTargetMacCrcValid = false;
+        p25Phase2RecentAnyMacCrcValid = false;
+        p25Phase2RecentTargetEssKnown = false;
+        p25Phase2RecentTargetEssEncrypted = false;
+        p25Phase2RecentTargetSessionAudioRelease = false;
+        p25Phase2RecentSuperframeMaskLock = false;
         p25VoiceSourceId = 0;
         p25VoiceGrantEpochMs = 0;
     }

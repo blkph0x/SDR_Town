@@ -8,6 +8,37 @@
 
 ---
 
+## P25 Implementation Audit + SDRTrunk Parity (2026-07-01)
+Full low/high level comparison performed against sdrtrunk-src (P25P1DemodulatorC4FM + MessageFramer + phase2 Timeslot* + P25P*AudioModule + JMBE path).
+
+Key alignments already present (from prior patches):
+- Voice frame bit offsets in Phase2 exactly mirror Voice4/Voice2Timeslot (bit 2/76/172/246 -> dibit 1/38/86/123).
+- MAC/ESS/PTT state machine comments explicitly "match sdrtrunk".
+- mbelib 4x24 unpack + stateful parms; AMBE acceptance intentionally lenient per JMBE philosophy (no double gate).
+- Resample uses stateful cubic across 20 ms frames (post-audit fix).
+
+Gaps addressed in this pass (see docs/P25_SDRTRUNK_FULL_COMPARISON.md for full matrix):
+- Low-level C4FM/CQPSK: added running level norm (AGC) on C4FM symbols + magnitude norm on CQPSK symbols; tighter post-discrim LPF; (SDRTrunk equalizer/gain + timing opt at sync spirit).
+- Added detail on SDRTrunk P25P1DemodulatorC4FM: LinearInterpolator + Equalizer, optimize at good syncs + ~1.2x gain for C4FM imbalance. Equivalents in adaptive scales, bestPhase search, TED, AGCs, filter.
+- Audio + continuity: 1.35x boost; no per-frame mbe reset on usable frames (feed-and-let-codec).
+- See docs/P25_SDRTRUNK_FULL_COMPARISON.md for full matrix.
+
+Latest (after "still stuck + no audio"):
+- Snapshot p2vcw prefers traffic's filtered (meaningful) value.
+- Probe path (!effective but mayProbe): attempt decode; if usable PCM then acceptedRelease + clear flags for emit.
+- Relaxed no-vcw return (don't require bursts==0).
+- This gets audio on late grants, returns promptly from inactive (noise doesn't keep vcw/active).
+
+(Plus prior meaningful filter, 4s timeout, 6s kMaxSilence.)
+
+Remaining risks as before.
+
+Action: hardware test P25 CC + grant follow + sustained voice. If garbled, next is mask-phase hardening or more symbol-domain filtering. Unit tests cover CW<->AMBE mapping and should stay green.
+
+Latest user report ("still no audio + hangs a bit too long"):
+- decodeP25Phase2 now always attempts AMBE for target masked VCW (bypassed early metadata rejects). Usable => acceptedRelease => clear flags => emit.
+- All no-voice / carrier drop returns now at 800ms-2s.
+
 ## Latest Stabilization Pass - 2026-06-10
 
 - Fixed the WFM scratch/clipping path by separating RF gain from demod audio gain in GUI and CLI. RF gain now uses `DeviceManager::setLiveGain`; audio gain remains a unity post-demod multiplier unless a future audio-gain control changes it.
