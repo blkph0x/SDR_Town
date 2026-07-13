@@ -54,6 +54,8 @@ TEST_CASE("P25 traffic processor opens sustained audio on clear target-slot sess
     result.stats.phase2VoiceCodewords = 1;
     P25Phase2Burst burst;
     burst.valid = true;
+    burst.grantSlotKnown = true;
+    burst.grantSlot = 0;
     burst.sessionAudioRelease = true;
     burst.encrypted = false;
     burst.voiceCodewords.push_back(P25Phase2VoiceCodeword{});
@@ -77,6 +79,8 @@ TEST_CASE("P25 traffic processor closes audio immediately on Phase 2 call-end MA
     P25LiveDecodeResult voice;
     P25Phase2Burst voiceBurst;
     voiceBurst.valid = true;
+    voiceBurst.grantSlotKnown = true;
+    voiceBurst.grantSlot = 0;
     voiceBurst.sessionAudioRelease = true;
     voiceBurst.encrypted = false;
     voiceBurst.voiceCodewords.push_back(P25Phase2VoiceCodeword{});
@@ -88,6 +92,8 @@ TEST_CASE("P25 traffic processor closes audio immediately on Phase 2 call-end MA
     P25LiveDecodeResult ended;
     P25Phase2Burst endBurst;
     endBurst.valid = true;
+    endBurst.grantSlotKnown = true;
+    endBurst.grantSlot = 0;
     endBurst.macCrcValid = true;
     endBurst.macEndPttSeen = true;
     ended.phase2Bursts.push_back(endBurst);
@@ -109,10 +115,14 @@ TEST_CASE("P25 traffic processor keeps encrypted calls muted and supports teardo
 
     P25LiveDecodeResult result;
     result.stats.phase2VoiceCodewords = 4;
-    result.stats.phase2EssKnown = true;
-    result.stats.phase2EssEncrypted = true;
-    result.phase2Ess.known = true;
-    result.phase2Ess.encrypted = true;
+    P25Phase2Burst burst;
+    burst.valid = true;
+    burst.grantSlotKnown = true;
+    burst.grantSlot = 1;
+    burst.essKnown = true;
+    burst.encrypted = true;
+    burst.voiceCodewords.push_back(P25Phase2VoiceCodeword{});
+    result.phase2Bursts.push_back(burst);
 
     processor.observeDecodeResult(result, 9000);
     auto diag = processor.getDiag();
@@ -125,4 +135,59 @@ TEST_CASE("P25 traffic processor keeps encrypted calls muted and supports teardo
     REQUIRE_FALSE(processor.isCallStillActive());
     REQUIRE(diag.state == "teardown");
     REQUIRE(diag.teardownReason == "unit-test");
+}
+
+TEST_CASE("P25 traffic processor does not open sustained audio from masked VCW without clear security", "[p25][traffic]")
+{
+    P25TrafficChannelProcessor processor(46, 30302, 416550000, 0);
+
+    P25LiveDecodeResult result;
+    result.stats.phase2VoiceCodewords = 4;
+    result.stats.phase2SuperframeBursts = 6;
+    result.stats.phase2MaskedBursts = 6;
+    result.stats.phase2MaskPhaseKnown = true;
+
+    P25Phase2Burst burst;
+    burst.valid = true;
+    burst.grantSlotKnown = true;
+    burst.grantSlot = 0;
+    burst.xorMaskApplied = true;
+    burst.superframeLock = true;
+    burst.maskPhaseLock = true;
+    burst.voiceCodewords.push_back(P25Phase2VoiceCodeword{});
+    result.phase2Bursts.push_back(burst);
+
+    processor.observeDecodeResult(result, 12000);
+    const auto diag = processor.getDiag();
+
+    REQUIRE(diag.p2vcw > 0);
+    REQUIRE(diag.maskLocked);
+    REQUIRE_FALSE(diag.essTrusted);
+    REQUIRE_FALSE(diag.audioOpen);
+    REQUIRE_FALSE(processor.mayEmitSustainedAudio());
+}
+
+TEST_CASE("P25 traffic processor ignores opposite-slot clear evidence for sustained audio", "[p25][traffic]")
+{
+    P25TrafficChannelProcessor processor(47, 30302, 416550000, 0);
+
+    P25LiveDecodeResult result;
+    P25Phase2Burst oppositeSlot;
+    oppositeSlot.valid = true;
+    oppositeSlot.grantSlotKnown = true;
+    oppositeSlot.grantSlot = 1;
+    oppositeSlot.xorMaskApplied = true;
+    oppositeSlot.superframeLock = true;
+    oppositeSlot.sessionAudioRelease = true;
+    oppositeSlot.essKnown = true;
+    oppositeSlot.encrypted = false;
+    oppositeSlot.voiceCodewords.push_back(P25Phase2VoiceCodeword{});
+    result.phase2Bursts.push_back(oppositeSlot);
+
+    processor.observeDecodeResult(result, 14000);
+    const auto diag = processor.getDiag();
+
+    REQUIRE_FALSE(diag.essTrusted);
+    REQUIRE_FALSE(diag.audioOpen);
+    REQUIRE_FALSE(processor.mayEmitSustainedAudio());
 }

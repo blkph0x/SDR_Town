@@ -18,7 +18,7 @@ checks = {
     'Slot probe uses recent decoded PCM to suppress flips': 'currentSlotHasUsefulAudio' in main and 'decodedFrames > 0' in main,
     'Phase 2 release is target-slot keyed, not grant-clear keyed': 'P25P2CallAudioKey' in main and 'phase2TargetSessionAudioRelease' in main,
     'Unknown audio queues by target call key before release': 'if (unknownSecurity)' in main and 'p25QueuePhase2PendingAmbeFrame(rx, audioKey, pending);' in main and ('p25TakePhase2PendingAudio(rx, key)' in main or 'p25TakePhase2PendingAudio(rx, audioKey)' in main),
-    'Explicit clear grant can release only target-slot masked voice': 'cleargranttargetreleaseallowed' in main_l and 'explicit clear control grant can promote target-slot masked voice2/voice4' in main_l and 'const bool grantMayReleaseVoice' in main and 'sdrtrunkLateEntryVoiceRelease &&' in main and 'burst.xorMaskApplied' in main and 'burst.superframeLock' in main,
+    'Explicit clear grant queues only; target PTT/ESS releases speaker': 'cleargranttargetreleaseallowed' not in main_l and 'explicit clear control grant can follow and queue target-slot voice' in main_l and 'const bool grantMayReleaseVoice' in main and 'establishedClearCall' in main and 'out.phase2TargetSessionAudioRelease' in main,
     'Known TDMA slot must not decode opposite-slot VCWs as target audio': 'armed follow + masked vcw always counts toward the followed target slot' not in main and 'armed follow + descrambled voice' not in main and 'count for target audio' not in main and 'std::swap(out.phase2TargetVoiceCodewords' not in main and 'phase2AutoInvertGrantSlot' not in main and 'don\'t skip decode even on slot mismatch' not in main,
     'Call/session reset clears keyed pending queue': 'p25ClearPhase2PendingAudio(rx);' in main,
 }

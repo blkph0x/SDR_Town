@@ -55,7 +55,7 @@ void P25TrafficChannelProcessor::feedHardDibits(const std::vector<int>& dibits, 
 
     P25LiveDecodeResult result;
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::lock_guard<std::mutex> lock(m_decoderMutex);
         m_decoder.alignPhase2AbsoluteDibitCursor(absoluteDibitIndex, dibits.size());
         result = m_decoder.processHardDibits(dibits);
     }
@@ -66,17 +66,18 @@ void P25TrafficChannelProcessor::processDibits(const int16_t* dibits, size_t cou
 {
     if (!dibits || count == 0 || m_teardownRequested.load()) return;
 
-    m_hardDibitScratch.clear();
-    m_hardDibitScratch.reserve(count);
+    std::vector<int> hardDibits;
+    hardDibits.reserve(count);
     for (size_t i = 0; i < count; ++i) {
-        m_hardDibitScratch.push_back(static_cast<int>(dibits[i]) & 0x03);
+        hardDibits.push_back(static_cast<int>(dibits[i]) & 0x03);
     }
-    feedHardDibits(m_hardDibitScratch, absoluteDibitIndex);
+    feedHardDibits(hardDibits, absoluteDibitIndex);
 }
 
 void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& result, uint64_t absoluteDibitIndex)
 {
     size_t burstVoiceCodewords = 0;
+    size_t targetVoiceCodewords = 0;
     size_t meaningfulVoiceCodewords = 0;
     bool sessionAudioRelease = false;
     bool burstEssKnown = false;
@@ -86,8 +87,15 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
     bool macEndPttSeen = false;
     bool macIdleSeen = false;
     bool macHangtimeSeen = false;
+    const bool targetSlotKnown = m_grantedSlot == 0 || m_grantedSlot == 1;
+    const uint8_t targetSlot = static_cast<uint8_t>(m_grantedSlot & 0x01);
     for (const auto& burst : result.phase2Bursts) {
         burstVoiceCodewords += burst.voiceCodewords.size();
+        const bool burstTargetsCall = !targetSlotKnown ||
+            (burst.grantSlotKnown &&
+             static_cast<uint8_t>(burst.grantSlot & 0x01u) == targetSlot);
+        if (!burstTargetsCall) continue;
+        targetVoiceCodewords += burst.voiceCodewords.size();
         // Only count as meaningful voice activity (for lifetime / "active" tracking) if it has
         // descrambling (mask) + some lock (superframe or mac or ess or session). This prevents
         // background noise or garbage dibits from being treated as "real data" keeping us stuck
@@ -128,13 +136,16 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
         result.stats.phase2MaskedBursts,
         static_cast<size_t>(std::numeric_limits<int>::max())));
 
-    const bool essKnown = result.stats.phase2EssKnown || result.phase2Ess.known || burstEssKnown;
-    const bool encrypted = result.stats.phase2EssEncrypted ||
-        (result.phase2Ess.known && result.phase2Ess.encrypted) ||
-        burstEncrypted;
+    const bool globalEssKnown = !targetSlotKnown &&
+        (result.stats.phase2EssKnown || result.phase2Ess.known);
+    const bool globalEncrypted = !targetSlotKnown &&
+        (result.stats.phase2EssEncrypted ||
+         (result.phase2Ess.known && result.phase2Ess.encrypted));
+    const bool essKnown = burstEssKnown || globalEssKnown;
+    const bool encrypted = burstEncrypted || globalEncrypted;
     const bool clearEss = essKnown && !encrypted;
     const bool callEnded = macEndPttSeen || macIdleSeen || macHangtimeSeen;
-    const bool audioOpen = !callEnded && !encrypted && (sessionAudioRelease || clearEss || (meaningfulVoiceCodewords > 0 && p2mask > 0));
+    const bool audioOpen = !callEnded && !encrypted && (sessionAudioRelease || clearEss);
     const uint64_t now = steadyNowMs();
 
     m_p2bursts.store(p2bursts, std::memory_order_release);
@@ -172,7 +183,7 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
         std::lock_guard<std::mutex> lock(m_mutex);
         m_endReason.clear();
     }
-    if (meaningfulVoiceCodewords > 0 || burstVoiceCodewords > 0) {
+    if (meaningfulVoiceCodewords > 0 || targetVoiceCodewords > 0) {
         m_lastVoiceMs.store(now, std::memory_order_release);
     }
     if (p2macPdus > 0 || p2macCrcValid > 0 || macPttSeen || macActiveSeen || callEnded) {
@@ -189,7 +200,7 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
     const bool voiceCallEvidence =
         meaningfulVoiceCodewords > 0 ||
         macPttSeen || macActiveSeen || sessionAudioRelease || (audioOpen && meaningfulVoiceCodewords > 0) ||
-        (burstVoiceCodewords > 0 && p2mask > 0);  // keep active on descrambled voice presence for established calls
+        (targetVoiceCodewords > 0 && p2mask > 0 && (sessionAudioRelease || clearEss));
     if (voiceCallEvidence) {
         m_lastActiveMs.store(now, std::memory_order_release);
     } else if ((p2sf > 0 || p2mask > 0) && m_lastVoiceMs.load(std::memory_order_acquire) == 0) {
@@ -201,13 +212,13 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
 
 void P25TrafficChannelProcessor::setPhase2MaskParameters(uint16_t nac, uint32_t wacn, uint16_t systemId)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard<std::mutex> lock(m_decoderMutex);
     m_decoder.setPhase2MaskParameters(nac, wacn, systemId);
 }
 
 void P25TrafficChannelProcessor::clearPhase2MaskParameters()
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard<std::mutex> lock(m_decoderMutex);
     m_decoder.clearPhase2MaskParameters();
 }
 

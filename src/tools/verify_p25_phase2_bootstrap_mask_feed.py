@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static checks for bootstrap mask immediate AMBE feed (clear grants only)."""
+"""Static checks that bootstrap mask evidence does not release Phase-2 audio."""
 
 from pathlib import Path
 
@@ -12,20 +12,19 @@ follow_h = FOLLOW_H.read_text(encoding="utf-8", errors="replace")
 
 checks = [
     ("bootstrapped helper", "p25Phase2BootstrappedMaskTargetVoiceEvidence"),
-    ("bootstrap immediate feed", "bootstrappedMaskImmediateFeed"),
     ("bootstrap late-entry evidence", "bootstrappedMaskEvidence"),
-    ("bootstrap requires clear grant", "grantClearTrusted &&"),
+    ("explicit clear grants queue only", "explicit clear control grant can follow and queue target-slot voice"),
+    ("speaker proof uses established clear state", "establishedClearCall"),
     ("grant mask blocks early flip", "grantMaskParamsKnown"),
 ]
 
 for label, needle in checks:
     assert needle in main or needle in follow_h, f"missing {label}: {needle}"
 
-assert "bootstrappedMaskImmediateFeed" in main
-assert "bootstrappedMaskImmediateFeed =\n            grantClearTrusted" in main or \
-       "bootstrappedMaskImmediateFeed =\n            grantClearTrusted &&" in main
+assert "bootstrappedMaskImmediateFeed" not in main
+assert "clearGrantTargetReleaseAllowed" not in main
 assert "!snapshot.grantMaskParamsKnown &&" in (ROOT / "src" / "P25FollowStateMachine.cpp").read_text(
     encoding="utf-8", errors="replace"
 )
 
-print("PASS bootstrap mask feed patch present")
+print("PASS bootstrap mask remains queue-only")

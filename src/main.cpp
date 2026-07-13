@@ -101,10 +101,10 @@ using json = nlohmann::json;
 
 // Phase-2 late entry on real systems often reaches the traffic channel after
 // PTT/ESS has already passed.  Keep the sdrtrunk-style queue as the primary
-// path. A bounded target-slot recovery path may release audio after either
-// target MAC/ESS proves clear or an explicit clear control-channel grant is
-// paired with target-slot masked Voice2/Voice4. Explicit encrypted grants/ESS
-// remain fail-closed.
+// path. Target MAC/ESS proves clear audio; explicit clear control-channel
+// grants may tune/follow and queue voice, but the Phase-2 speaker release stays
+// tied to target-slot PTT/ESS state. Explicit encrypted grants/ESS remain
+// fail-closed.
 static constexpr bool kP25Phase2AllowUnknownGrantFieldAudioProbe = true;
 // Capture 20260712_021852: unknown grants spent 700 ms queued while short PTTs
 // ended; clear-known releases still need a small grace, but keep it tight.
@@ -1208,10 +1208,10 @@ static bool p25TalkgroupCanTuneForFollow(const P25TalkgroupEntry& tg)
 
 static bool p25TalkgroupGrantProvesSpeakerClear(const P25TalkgroupEntry& tg)
 {
-    // A CRC-valid current voice grant carries the call service options.  Treat
-    // explicit clear as permission to release correctly descrambled AMBE for
-    // both Phase 1 and Phase 2; later target-slot PTT/ESS can still override to
-    // encrypted and mute immediately.
+    // A CRC-valid current voice grant carries the call service options. Track
+    // explicit clear here for follow/tune decisions and Phase-1 handling. The
+    // Phase-2 speaker gate still waits for target-slot PTT/ESS security state,
+    // matching sdrtrunk's P25P2AudioModule queue/drain behavior.
     return tg.encryptionKnown && !tg.encrypted;
 }
 
@@ -5786,8 +5786,8 @@ static P25VoiceAudioBlock applyP25Phase2SecurityAudioGate(Receiver& rx,
     // 1. burst.sessionAudioRelease && !encrypted : maskApplied + essKnown+Trusted+fec + (pttSeen from MAC_PTT or ess fec) + !enc
     // 2. burst.macCrcLock (crcValid || (fecDecoded && correctedSymbols < 10)) + MAC_PTT/MAC_ACTIVE with clear ESS
     // 3. targetEssKnown && !targetEssEncrypted (after valid PTT/ESS-A RS)
-    // 4. Explicit clear control grant + target-slot masked Voice2/Voice4 can release; explicit encrypted always drops.
-    // 5. sdrtrunkLateEntryVoiceRelease or lateEntryStrongTargetReleaseAllowed ONLY when macEvidenceForLateEntryProbe + strong target VCW + grant clear + superframe/mask/slot
+    // 4. Explicit clear control grant can follow and queue target voice; target-slot PTT/ESS releases speaker audio.
+    // 5. sdrtrunkLateEntryVoiceRelease or lateEntryStrongTargetReleaseAllowed ONLY when target MAC/ESS proves clear plus strong target VCW + superframe/mask/slot.
     //    (unknown late entry still requires proof MAC or ESS; VCW count alone never suffices for emit)
     //
     // Edge cases fully defined/handled:
@@ -5810,8 +5810,8 @@ static P25VoiceAudioBlock applyP25Phase2SecurityAudioGate(Receiver& rx,
 
     // Fail closed on an explicit encrypted grant, but otherwise use the followed
     // traffic-slot's own PTT/ESS/voice-session state for speaker release. An
-    // explicit clear control grant can promote target-slot masked Voice2/Voice4
-    // into that session state after mbelib accepts it. The
+    // explicit clear control grant can follow and queue target-slot voice, but
+    // it does not promote speaker state until target PTT/ESS confirms clear. The
     // aggregate live.stats ESS/MAC counters can describe the other slot on the
     // same Phase-2 carrier and must not flush/drop the target call queue.
     const bool trustedEncrypted = rx.p25VoiceEncrypted ||
@@ -5826,13 +5826,11 @@ static P25VoiceAudioBlock applyP25Phase2SecurityAudioGate(Receiver& rx,
     const bool sdrtrunkLateEntryVoiceRelease =
         p25Phase2SdrtrunkLateEntryVoiceReleaseEvidence(rx, out);
     const bool trustedClear = !trustedEncrypted &&
-        (// Once target-slot PTT/ESS or explicit-clear target-slot voice proves
-         // a Phase-2 call is clear, preserve that established call state across
-         // later voice windows.
+        (// Once target-slot PTT/ESS proves a Phase-2 call is clear, preserve
+         // that established call state across later voice windows.
          out.phase2TargetSessionAudioRelease ||
          (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted) ||
-         sdrtrunkLateEntryVoiceRelease ||
-         (rx.p25VoiceClearKnown && !rx.p25VoiceEncrypted));
+         sdrtrunkLateEntryVoiceRelease);
     const bool trustedClearPendingRelease =
         trustedClear && key.valid() && p25Phase2PendingAudioMatches(rx, key);
     const bool unknownSecurity = !trustedClear && !trustedEncrypted;
@@ -7258,6 +7256,21 @@ static bool p25Phase2DeepTraceEnabled()
     return enabled;
 }
 
+static bool p25Phase2OffsetProbeLogAllowed(bool acquisitionOffsetProbe)
+{
+    const bool deepTrace = p25Phase2DeepTraceEnabled();
+    if (!acquisitionOffsetProbe && !deepTrace) return false;
+
+    static std::mutex logMutex;
+    static qint64 lastLogMs = 0;
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    const qint64 minSpacingMs = deepTrace ? 500 : 2000;
+    std::lock_guard<std::mutex> lk(logMutex);
+    if (nowMs - lastLogMs < minSpacingMs) return false;
+    lastLogMs = nowMs;
+    return true;
+}
+
 static void rotateP25Phase2ValidationLogIfNeeded(const QString& path)
 {
     static qint64 lastRotateCheckMs = 0;
@@ -7596,16 +7609,19 @@ static void writeP25Phase2ValidationRecord(const Receiver& rx,
         explicitValidationLog || autoDeepTraceLog || autoAmbeRejectLog || autoAmbePartialLog;
     const bool redactRaw = p25Phase2ValidationRedactionEnabled() || !explicitValidationLog;
 
-    static std::mutex validationMutex;
-    static qint64 lastWriteMs = 0;
+    static std::mutex validationThrottleMutex;
+    static qint64 lastAutoWriteMs = 0;
+    static qint64 lastExplicitWriteMs = 0;
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-
-    std::lock_guard<std::mutex> lk(validationMutex);
-    if (!explicitValidationLog) {
-        const qint64 minSpacingMs = autoDeepTraceLog ? 0 : (audio.decodedFrames > 0 ? 2000 : 3000);
+    {
+        std::lock_guard<std::mutex> lk(validationThrottleMutex);
+        qint64& lastWriteMs = explicitValidationLog ? lastExplicitWriteMs : lastAutoWriteMs;
+        const qint64 minSpacingMs = explicitValidationLog
+            ? 250
+            : (autoDeepTraceLog ? 1000 : (audio.decodedFrames > 0 ? 2000 : 3000));
         if (nowMs - lastWriteMs < minSpacingMs) return;
+        lastWriteMs = nowMs;
     }
-    lastWriteMs = nowMs;
 
     json record;
     record["schema"] = "sdr-town-p25-phase2-validation-v1";
@@ -7935,6 +7951,8 @@ static void writeP25Phase2ValidationRecord(const Receiver& rx,
     }
 
     try {
+        static std::mutex validationFileMutex;
+        std::lock_guard<std::mutex> lk(validationFileMutex);
         const QString path = p25Phase2ValidationPath();
         rotateP25Phase2ValidationLogIfNeeded(path);
         std::ofstream f(path.toStdString(), std::ios::app);
@@ -8401,13 +8419,18 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
     bool lateEntryStrongTargetReleaseDecoded = false;
     const bool writePreGateValidation = p25Phase2ValidationLoggingEnabled();
     const P25P2CallAudioKey audioKey = p25CurrentPhase2AudioKey(rx, targetFreqHz);
-    const bool grantClearTrustedForCall = rx.p25VoiceClearKnown && !rx.p25VoiceEncrypted;
-    const bool establishedClearCall = grantClearTrustedForCall && rx.p25VoiceMaskParamsKnown && rx.p25VoiceTdmaSlotKnown;
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
     if (!p25Phase2RecentSecurityEvidenceUsable(rx, audioKey, nowMs) &&
         rx.p25Phase2RecentSecurityTalkgroupId != 0) {
         p25ClearPhase2RecentSecurityEvidence(rx);
     }
+    const bool explicitClearGrantForCall = rx.p25VoiceClearKnown && !rx.p25VoiceEncrypted;
+    const bool recentClearSecurityForCall =
+        p25Phase2RecentSecurityEvidenceUsable(rx, audioKey, nowMs) &&
+        (rx.p25Phase2RecentTargetSessionAudioRelease ||
+         (rx.p25Phase2RecentTargetEssKnown && !rx.p25Phase2RecentTargetEssEncrypted));
+    const bool establishedClearCall =
+        recentClearSecurityForCall && rx.p25VoiceMaskParamsKnown && rx.p25VoiceTdmaSlotKnown;
 
     bool selectedSlotHasVoiceCodewords = false;
     bool oppositeSlotHasVoiceCodewords = false;
@@ -8448,7 +8471,7 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
         // Epoch-slip invert is only legal when the granted slot has ZERO voice and
         // the opposite slot is the only voice present.  Never invert on dual-call RF.
         const bool voiceOnlySuperframeAmbiguity =
-            grantClearTrustedForCall &&
+            establishedClearCall &&
             rx.p25VoiceMaskParamsKnown &&
             !bothSlotsHaveVoice &&
             oppositeOnlyVoice &&
@@ -8456,21 +8479,12 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             !live.stats.phase2EssKnown &&
             live.stats.phase2SuperframeBursts >= 6 &&
             live.stats.phase2MaskedBursts >= 6;
-        const bool bootstrappedUnknownSlotAmbiguity =
-            !grantClearTrustedForCall &&
-            !rx.p25VoiceEncrypted &&
-            rx.p25Phase2AllowLateEntryAudioProbe &&
-            rx.p25VoiceMaskParamsKnown &&
-            !bothSlotsHaveVoice &&
-            oppositeOnlyVoice &&
-            live.stats.phase2MacCrcValid == 0 &&
-            !live.stats.phase2EssKnown &&
-            live.stats.phase2MaskedBursts >= 1;
+        const bool bootstrappedUnknownSlotAmbiguity = false;
         if (bothSlotsHaveVoice || normalTargetVoiceCodewords > 0) {
             // Grant-slot labels are producing target voice — drop any prior invert.
             rx.p25Phase2OppositeOnlyWindows = 0;
             rx.p25Phase2StickySlotLabelInvert = false;
-        } else if (grantClearTrustedForCall && oppositeOnlyVoice &&
+        } else if (establishedClearCall && oppositeOnlyVoice &&
                    live.stats.phase2MaskedBursts >= 1) {
             rx.p25Phase2OppositeOnlyWindows =
                 std::min(rx.p25Phase2OppositeOnlyWindows + 1, 1000);
@@ -8482,18 +8496,14 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
         if (!bothSlotsHaveVoice && rx.p25Phase2OppositeOnlyWindows >= 3) {
             rx.p25Phase2StickySlotLabelInvert = true;
         }
-        if (voiceOnlySuperframeAmbiguity || bootstrappedUnknownSlotAmbiguity) {
-            rx.p25Phase2StickySlotLabelInvert = true;
-        }
-        if (bothSlotsHaveVoice) {
-            rx.p25Phase2StickySlotLabelInvert = false;
-            rx.p25Phase2OppositeOnlyWindows = 0;
-        }
-        phase2InvertSlotLabelsForWindow =
-            !bothSlotsHaveVoice &&
-            (rx.p25Phase2StickySlotLabelInvert ||
-             voiceOnlySuperframeAmbiguity ||
-             bootstrappedUnknownSlotAmbiguity);
+        (void)voiceOnlySuperframeAmbiguity;
+        (void)bootstrappedUnknownSlotAmbiguity;
+        // Match sdrtrunk's fixed TIMESLOT_1/TIMESLOT_2 binding. If a window
+        // appears opposite-only, keep it diagnostic; do not swap slot labels in
+        // the audio path and risk feeding another call into this one.
+        rx.p25Phase2StickySlotLabelInvert = false;
+        if (bothSlotsHaveVoice) rx.p25Phase2OppositeOnlyWindows = 0;
+        phase2InvertSlotLabelsForWindow = false;
 
         auto burstIsFollowedSlot = [&](const P25Phase2Burst& burst) noexcept {
             if (!burst.grantSlotKnown) return false;
@@ -8761,8 +8771,12 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             continue;
         }
         sawVoice = true;
-        const bool grantClearTrusted = grantClearTrustedForCall;
-        const bool grantUnknownProbe = rx.p25VoicePhase2 && rx.p25VoiceMaskParamsKnown && !rx.p25VoiceClearKnown;
+        const bool grantClearTrusted = explicitClearGrantForCall;
+        const bool grantUnknownProbe =
+            rx.p25VoicePhase2 &&
+            rx.p25VoiceMaskParamsKnown &&
+            !rx.p25VoiceEncrypted &&
+            !recentClearSecurityForCall;
         const bool grantMayProbeVoice = grantClearTrusted || grantUnknownProbe;
         // Unknown Phase-2 grants may be followed and decoded for diagnostics/short
         // pending queues, but they are not clear-audio proof.  sdrtrunk queues
@@ -8935,27 +8949,8 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             lateEntryAudioProbeAllowed &&
             macEvidenceForLateEntryProbe &&
             strongLateEntryVoiceEvidence &&
-            // Comment contract + sdrtrunk parity: strong late-entry release is for
-            // *clear* grants catching up on MAC/ESS, never for unknown security.
-            grantClearTrusted;
-        const bool clearGrantTargetReleaseAllowed =
-            grantClearTrusted &&
-            rx.p25VoiceMaskParamsKnown &&
-            burst.xorMaskApplied &&
-            !out.phase2TargetEssEncrypted &&
-            !burst.encrypted &&
-            (targetVoiceForLateEntryProbe ||
-             establishedClearCall ||
-             out.phase2TargetVoiceCodewords >= 1 ||
-             (out.phase2VoiceCodewords > 0 && out.phase2MaskedBursts >= 1));
-        const bool bootstrappedMaskImmediateFeed =
-            grantClearTrusted &&
-            grantMayProbeVoice &&
-            rx.p25VoiceMaskParamsKnown &&
-            !rx.p25VoiceEncrypted &&
-            burst.xorMaskApplied &&
-            !burst.encrypted &&
-            bootstrappedMaskEvidence;
+            out.phase2TargetEssKnown &&
+            !out.phase2TargetEssEncrypted;
         // Once the call is known clear, correctly descrambled 2V/4V frames go
         // straight to AMBE.  Until then, match sdrtrunk's P25P2AudioModule:
         // retain voice frames as raw queued AMBE and wait for PTT/ESS or a
@@ -8964,8 +8959,6 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             (burst.essKnown && !burst.encrypted && burst.sessionAudioRelease) ||
             sdrtrunkLateEntryVoiceRelease ||
             lateEntryStrongTargetReleaseAllowed ||
-            clearGrantTargetReleaseAllowed ||
-            bootstrappedMaskImmediateFeed ||
             p25Phase2EstablishedClearNoiseFeedAllowed(rx, out, burst, recentMacEvidenceForCall);
         if (!clearMetadataTrusted) {
             out.phase2AudioLockMissing = true;
@@ -8988,17 +8981,15 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
         const bool effectiveVoiceReleaseTrusted =
             voiceReleaseTrusted ||
             burstSdrtrunkLateEntryVoiceRelease ||
-            lateEntryStrongTargetReleaseAllowed ||
-            clearGrantTargetReleaseAllowed ||
-            bootstrappedMaskImmediateFeed;
+            lateEntryStrongTargetReleaseAllowed;
         if (!effectiveVoiceReleaseTrusted) {
             out.phase2AudioLockMissing = true;
         }
         // Immediate AMBE→speaker feed requires security already proved clear
-        // (explicit clear grant, target ESS clear, or prior trusted session).
+        // by target-slot ESS/PTT or prior same-call security state.
         // MAC CRC lock / mask alone must not open unknown or encrypted calls.
         const bool securityProvedClearForFeed =
-            grantClearTrusted ||
+            establishedClearCall ||
             out.phase2TargetSessionAudioRelease ||
             (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted) ||
             (burst.essKnown && !burst.encrypted && burst.sessionAudioRelease);
@@ -9168,7 +9159,7 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
     }
 
     if (lateEntryStrongTargetReleaseDecoded &&
-        grantClearTrustedForCall &&
+        establishedClearCall &&
         p25Phase2StrongVoiceTimeslotPcm(out)) {
         sdrtrunkLateEntryVoiceRelease = true;
         out.phase2SdrtrunkLateEntryVoiceRelease = true;
@@ -9193,7 +9184,7 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
     }
 
         if (acceptedReleaseVoice &&
-            (grantClearTrustedForCall ||
+            (establishedClearCall ||
              (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted) ||
              sdrtrunkLateEntryVoiceRelease ||
              out.phase2TargetSessionAudioRelease)) {
@@ -9232,7 +9223,7 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
         if (out.diag == P25VoiceDiagCode::Idle || out.diag == P25VoiceDiagCode::WaitingForClearGrant) {
             out.diag = P25VoiceDiagCode::Decoding;
         }
-    } else if (queuedRawVoice && !grantClearTrustedForCall) {
+    } else if (queuedRawVoice && !recentClearSecurityForCall) {
         // Late-entry voice is present and descrambled, but the target call has
         // not produced target-slot PTT/ESS or another trusted clear release yet.
         // Match sdrtrunk: hold raw voice frames and keep diagnostics explicit so
@@ -9267,7 +9258,7 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             // Only report "waiting clear grant" when security is actually unknown.
             // Field logs mislabeled clear grants that already had mask/VCW but no
             // usable AMBE as "waiting clear grant", hiding the real failure mode.
-            out.diag = grantClearTrustedForCall
+            out.diag = explicitClearGrantForCall
                 ? P25VoiceDiagCode::Phase2LateEntryWaiting
                 : P25VoiceDiagCode::WaitingForClearGrant;
             if (writePreGateValidation) {
@@ -9276,7 +9267,7 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             return out;
         }
         const bool trafficClearTrusted =
-            grantClearTrustedForCall ||
+            establishedClearCall ||
             sdrtrunkLateEntryVoiceRelease ||
             out.phase2TargetSessionAudioRelease ||
             (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted);
@@ -9590,7 +9581,8 @@ static P25VoiceAudioBlock decodeP25VoiceAudioBlock(Receiver& rx,
         int bestScore = p25Phase2LiveAudioRecoveryScore(rx, live);
         P25LiveDecoder bestDecoder = rx.p25VoiceLiveDecoder;
         const auto startEv = p25Phase2FollowedSlotEvidenceForReceiver(rx, live);
-        if (acquisitionOffsetProbe || p25Phase2DeepTraceEnabled()) {
+        const bool logOffsetProbe = p25Phase2OffsetProbeLogAllowed(acquisitionOffsetProbe);
+        if (logOffsetProbe) {
             spdlog::info("P25 P2 traffic offset probe start: nominal={} effective={} off={} path={} trust={} misses={} score={} strong={} targetVcw={} targetMask={} targetSf={} mac={} cold={}",
                          targetFreqHz, effectiveTargetFreqHz, effectiveTargetFreqHz - targetFreqHz,
                          live.stats.demodPath,
@@ -9641,7 +9633,7 @@ static P25VoiceAudioBlock decodeP25VoiceAudioBlock(Receiver& rx,
             const bool coldAcquireUsefulTelemetry =
                 acquisitionOffsetProbe &&
                 p25Phase2LiveHasRetuneProbeTelemetry(candidateLive);
-            if (acquisitionOffsetProbe || p25Phase2DeepTraceEnabled()) {
+            if (logOffsetProbe) {
                 const auto cev = p25Phase2FollowedSlotEvidenceForReceiver(rx, candidateLive);
                 spdlog::info("P25 P2 traffic offset probe candidate: candidate={} off={} path={} score={} strong={} seed={} nominal={} coldUseful={} targetVcw={} targetMask={} targetSf={} mac={} bursts={} ess={} enc={} contradictsClear={}",
                              candidateTarget, candidateTarget - targetFreqHz, candidateLive.stats.demodPath,
@@ -9684,7 +9676,7 @@ static P25VoiceAudioBlock decodeP25VoiceAudioBlock(Receiver& rx,
             }
         }
         if (std::abs(effectiveTargetFreqHz - initialEffectiveTargetFreqHz) >= 50.0) {
-            if (acquisitionOffsetProbe) {
+            if (logOffsetProbe) {
                 spdlog::info("P25 P2 traffic offset probe selected: nominal={} effective={} off={} score={} bursts={} mac={}/{} vcw={}",
                              targetFreqHz, effectiveTargetFreqHz, effectiveTargetFreqHz - targetFreqHz,
                              bestScore, live.stats.phase2Bursts, live.stats.phase2MacCrcValid,

@@ -5,11 +5,11 @@ main = (root / 'main.cpp').read_text(errors='ignore')
 required = [
     'if (rx.p25VoicePhase2) {',
     'return nominalFreqHz;',
-    'P25LiveDecoder baselineDecoder = rx.p25VoiceLiveDecoder;',
+    'P25LiveDecoder baselineDecoder = rx.p25VoiceLiveDecoder.createIndependentProbeCopy(true);',
     'p25Phase2NeedsTargetOffsetProbe(live)',
     'kOffsetProbeHz',
     'effectiveTargetFreqHz = candidateTarget;',
-    'grantClearTrusted &&',
+    'establishedClearCall &&',
     'burst.xorMaskApplied &&',
     'grantAgeMs >= (sdrtrunkLateEntryVoiceRelease ? 0 : 500)',
     'out.phase2TargetSessionAudioRelease = true;',
