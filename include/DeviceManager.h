@@ -91,6 +91,7 @@ public:
         std::vector<std::complex<float>> samples;
         uint64_t startAbsolute = 0;
         uint64_t endAbsolute = 0;
+        uint64_t streamEpoch = 0;
         bool cursorDiscontinuity = false;
     };
     RecentIQWindow getRecentIQWindowWithCursor(size_t index, size_t maxSamples);
@@ -107,6 +108,10 @@ public:
     // sources.  For physical retunes, keep the pre-roll bounded and arm after
     // the queued tune has applied when a synchronous caller can safely wait.
     void setReceiverCursorBeforeLiveEdge(size_t devIndex, Receiver& rx, size_t preRollSamples);
+    // Align a receiver's chronological pull cursor with a rolling decode buffer's
+    // absolute end so getNewIQWindowForReceiver() appends contiguous IQ instead
+    // of returning a disjoint window that would wipe accumulated Phase-2 context.
+    void syncReceiverCursorToAbsolute(size_t devIndex, Receiver& rx, uint64_t absoluteSample);
 
     // For spectrum: get latest power spectrum (dB) and center/sample info
     bool getLatestSpectrum(size_t index, std::vector<float>& powerDb, double& centerFreq, double& sampleRate);
@@ -191,6 +196,11 @@ private:
         std::vector<std::complex<float>> iqRing;
         std::atomic<size_t> ringWriteIdx{0};       // wrapped write position
         std::atomic<uint64_t> totalSamplesWritten{0};
+        std::atomic<uint64_t> streamEpoch{1};      // bumped whenever the ring/cursor epoch is reset
+        // Absolute sample index of the first IQ block captured after a MHz-scale retune.
+        // Receivers must not pre-roll before this point or they decode stale pre-retune RF.
+        std::atomic<uint64_t> retuneValidFromAbsolute{0};
+        std::atomic<double> lastAppliedCenterHz{0.0};
         size_t ringCapacity = 0;                   // power of 2
 
         // P1 SOTA spectrum pipeline state (real FFT + averaging + peak hold).
@@ -209,6 +219,9 @@ private:
     StreamState* streamState(size_t index) const;
     void rxThreadFunc(size_t index, uint64_t expectedGeneration);  // background RX loop
     void resetStreamBuffers(StreamState& st);
+    // Live center-frequency retune: bump stream epoch without resetting the absolute
+    // sample timeline or ring contents (full resetStreamBuffers breaks P25 rolling decode).
+    void markStreamRetune(StreamState& st, double appliedCenterHz);
 
     // Centralized append for both the consuming deque (for getNext/spectrum) and the per-rx ring.
     // Feeds ring *before* moving into queue so ring always gets the samples. Fixes the WFM ring bug.

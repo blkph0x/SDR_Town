@@ -23,11 +23,23 @@ P25TrafficChannelProcessor::P25TrafficChannelProcessor(uint64_t sessionId, uint3
     , m_decoder(P25LiveDecoderConfig{})
 {
     P25LiveDecoderConfig cfg;
+    // SDRTrunk P25P2DecoderHDQPSK: 6000 baud H-DQPSK, LPF-only (no RRC).
+    cfg.symbolRate = 6000.0;
+    cfg.workSampleRate = 48000.0;
     cfg.enablePhase2Decode = true;
+    cfg.enablePhase1Decode = false;
+    cfg.phase2CqpskTrafficDemod = true;
+    cfg.cqpskUseMatchedRrcFilter = false;
+    cfg.cqpskRrcAlpha = 0.20;
+    cfg.cqpskCarrierLoopBandwidth = (2.0 * 3.14159265358979323846) / 300.0;
+    cfg.cqpskCarrierLoopMaxCorrectionHz = 3000.0;
     cfg.realtimeVoiceSearch = true;
     cfg.maxFrameSyncBitErrors = 4;
-    cfg.maxFrameSyncs = 128;
-    cfg.maxRawTsbkBlocksPerFrame = 64;
+    cfg.maxFrameSyncs = 6;
+    cfg.maxRawTsbkBlocksPerFrame = 4;
+    cfg.realtimeDecodeBudgetMs = 220;
+    cfg.maxPhase2SyncHits = 96;
+    cfg.maxPhase2SuperframeLocks = 4;
     m_decoder = P25LiveDecoder(cfg);
 
     const uint64_t now = steadyNowMs();
@@ -37,22 +49,29 @@ P25TrafficChannelProcessor::P25TrafficChannelProcessor(uint64_t sessionId, uint3
 
 P25TrafficChannelProcessor::~P25TrafficChannelProcessor() = default;
 
-void P25TrafficChannelProcessor::processDibits(const int16_t* dibits, size_t count, uint64_t absoluteSampleIndex)
+void P25TrafficChannelProcessor::feedHardDibits(const std::vector<int>& dibits, uint64_t absoluteDibitIndex)
 {
-    if (!dibits || count == 0 || m_teardownRequested.load()) return;
-
-    std::vector<int> hardDibits;
-    hardDibits.reserve(count);
-    for (size_t i = 0; i < count; ++i) {
-        hardDibits.push_back(static_cast<int>(dibits[i]) & 0x03);
-    }
+    if (dibits.empty() || m_teardownRequested.load()) return;
 
     P25LiveDecodeResult result;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        result = m_decoder.processHardDibits(hardDibits);
+        m_decoder.alignPhase2AbsoluteDibitCursor(absoluteDibitIndex, dibits.size());
+        result = m_decoder.processHardDibits(dibits);
     }
-    observeDecodeResult(result, absoluteSampleIndex);
+    observeDecodeResult(result, absoluteDibitIndex + dibits.size());
+}
+
+void P25TrafficChannelProcessor::processDibits(const int16_t* dibits, size_t count, uint64_t absoluteDibitIndex)
+{
+    if (!dibits || count == 0 || m_teardownRequested.load()) return;
+
+    m_hardDibitScratch.clear();
+    m_hardDibitScratch.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+        m_hardDibitScratch.push_back(static_cast<int>(dibits[i]) & 0x03);
+    }
+    feedHardDibits(m_hardDibitScratch, absoluteDibitIndex);
 }
 
 void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& result, uint64_t absoluteDibitIndex)
@@ -74,7 +93,8 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
         // background noise or garbage dibits from being treated as "real data" keeping us stuck
         // on an inactive TG.
         const bool goodVoiceEvidence = burst.xorMaskApplied &&
-            (burst.superframeLock || burst.maskPhaseLock || burst.macCrcLock ||
+            (!burst.voiceCodewords.empty() ||
+             burst.superframeLock || burst.maskPhaseLock || burst.macCrcLock ||
              burst.essKnown || burst.sessionAudioRelease || burst.macPttSeen || burst.macActiveSeen);
         if (goodVoiceEvidence) {
             meaningfulVoiceCodewords += burst.voiceCodewords.size();
@@ -114,7 +134,7 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
         burstEncrypted;
     const bool clearEss = essKnown && !encrypted;
     const bool callEnded = macEndPttSeen || macIdleSeen || macHangtimeSeen;
-    const bool audioOpen = !callEnded && !encrypted && (sessionAudioRelease || clearEss);
+    const bool audioOpen = !callEnded && !encrypted && (sessionAudioRelease || clearEss || (meaningfulVoiceCodewords > 0 && p2mask > 0));
     const uint64_t now = steadyNowMs();
 
     m_p2bursts.store(p2bursts, std::memory_order_release);
@@ -168,7 +188,8 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
     // Matches SDRTrunk behavior where traffic channel lifetime is tied to voice frames and call state (PTT/end).
     const bool voiceCallEvidence =
         meaningfulVoiceCodewords > 0 ||
-        macPttSeen || macActiveSeen || sessionAudioRelease || (audioOpen && meaningfulVoiceCodewords > 0);
+        macPttSeen || macActiveSeen || sessionAudioRelease || (audioOpen && meaningfulVoiceCodewords > 0) ||
+        (burstVoiceCodewords > 0 && p2mask > 0);  // keep active on descrambled voice presence for established calls
     if (voiceCallEvidence) {
         m_lastActiveMs.store(now, std::memory_order_release);
     } else if ((p2sf > 0 || p2mask > 0) && m_lastVoiceMs.load(std::memory_order_acquire) == 0) {
@@ -212,8 +233,9 @@ bool P25TrafficChannelProcessor::isCallStillActive() const
     const uint64_t last = m_lastActiveMs.load(std::memory_order_acquire);
     const uint64_t effectiveLast = (lastVoice > 0) ? std::max(last, lastVoice) : last;
     if (now < effectiveLast) return true;
-    // Much shorter timeout after voice activity seen. Background noise should not keep us "active" for long.
-    const uint64_t silenceLimit = (lastVoice > 0) ? 4000ULL : 8000ULL;  // 4s voice, 8s pure acq
+    // Longer timeout to avoid dropping active during normal speech pauses / bursty periods.
+    // Background noise not an issue once we have mask+sf+vcw evidence.
+    const uint64_t silenceLimit = (lastVoice > 0) ? 12000ULL : 15000ULL;  // 12s voice, 15s acq
     return (now - effectiveLast) <= silenceLimit;
 }
 

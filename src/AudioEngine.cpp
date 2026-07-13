@@ -352,9 +352,7 @@ void AudioEngine::pushAudioToActiveOutputLocked(ActiveOutput& output, const floa
     // backlog.  Keep the SPSC ownership strict: the producer must not advance
     // rb.readPos while the realtime callback is consuming audio.  On overload,
     // drop from the incoming producer block and let the callback drain naturally.
-    constexpr double kDigitalVoiceJitterSeconds = 0.65;
-    const size_t sampleRate = std::max<size_t>(8000, (size_t)getSampleRate());
-    const size_t maxQueuedFrames = std::max<size_t>(4096, (size_t)(sampleRate * kDigitalVoiceJitterSeconds));
+    const size_t maxQueuedFrames = getJitterQueueCapFrames();
     size_t w = rb.writePos.load(std::memory_order_relaxed);
     size_t r = rb.readPos.load(std::memory_order_acquire);
     size_t queued = ringDistance(w, r, rb.capacity);
@@ -476,9 +474,31 @@ std::string AudioEngine::getActiveDeviceNames() const
     return s.empty() ? "None" : s;
 }
 
+size_t AudioEngine::getJitterQueueCapFrames() const {
+    const size_t sampleRate = std::max<size_t>(8000, (size_t)getSampleRate());
+    return std::max<size_t>(4096, (size_t)(sampleRate * 0.90));
+}
+
+size_t AudioEngine::getRingQueuedSamples() const {
+    std::lock_guard<std::mutex> lk(audioMutex);
+    for (auto& act : m_active) {
+        if (act && act->valid.load(std::memory_order_acquire)) {
+            auto& rb = act->ring;
+            const size_t r = rb.readPos.load(std::memory_order_relaxed);
+            const size_t w = rb.writePos.load(std::memory_order_acquire);
+            const size_t cap = (rb.capacity ? rb.capacity : 1);
+            return ringDistance(w, r, cap);
+        }
+    }
+    return 0;
+}
+
 double AudioEngine::getRingFillPercent() const {
     std::lock_guard<std::mutex> lk(audioMutex);
-    // Approx for first valid active (used in live stats). 0 if none.
+    const size_t jitterCapFrames = getJitterQueueCapFrames();
+    // Report fill relative to the live jitter queue cap, not the huge SPSC ring
+    // capacity.  A few 20 ms PCM frames looked like 0.3% on the old metric even
+    // when the jitter queue was reasonably fed.
     for (auto& act : m_active) {
         if (act && act->valid.load(std::memory_order_acquire)) {
             auto& rb = act->ring;
@@ -486,7 +506,8 @@ double AudioEngine::getRingFillPercent() const {
             size_t w = rb.writePos.load(std::memory_order_acquire);
             size_t cap = (rb.capacity ? rb.capacity : 1);
             size_t avail = ringDistance(w, r, cap);
-            return (100.0 * avail) / cap;
+            const size_t denom = std::max<size_t>(1, std::min(jitterCapFrames, cap));
+            return (100.0 * avail) / denom;
         }
     }
     return 0.0;

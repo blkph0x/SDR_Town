@@ -2,6 +2,19 @@
 
 #include "P25TrafficChannelProcessor.h"
 
+TEST_CASE("P25 traffic processor feeds hard dibits through internal decoder", "[p25][traffic]")
+{
+    P25TrafficChannelProcessor processor(99, 30003, 416550000, 0);
+
+    std::vector<int> dibits(180, 0);
+    processor.feedHardDibits(dibits, 5000);
+    REQUIRE(processor.getDiag().lastAbsoluteDibit == 5180);
+
+    std::vector<int16_t> raw(90, 1);
+    processor.processDibits(raw.data(), raw.size(), 6000);
+    REQUIRE(processor.getDiag().lastAbsoluteDibit == 6090);
+}
+
 TEST_CASE("P25 traffic processor tracks evidence without opening audio on generic MAC alone", "[p25][traffic]")
 {
     P25TrafficChannelProcessor processor(42, 30302, 416550000, 0);

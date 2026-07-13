@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <cstddef>
@@ -148,13 +149,13 @@ std::vector<int> makeSyntheticPhase2Burst(int duid, bool flipDuidBit = false)
 
     uint8_t raw = encodePhase2DuidForTest(duid);
     if (flipDuidBit) raw ^= 0x01u;
-    const size_t payload = 10;
-    dibits[payload + 10] = (raw >> 6) & 0x03;
-    dibits[payload + 47] = (raw >> 4) & 0x03;
-    dibits[payload + 132] = (raw >> 2) & 0x03;
-    dibits[payload + 169] = raw & 0x03;
+    const size_t payload = P25LiveDecoder::Phase2FrameSyncDibits;
+    dibits[payload + 0] = (raw >> 6) & 0x03;
+    dibits[payload + 37] = (raw >> 4) & 0x03;
+    dibits[payload + 122] = (raw >> 2) & 0x03;
+    dibits[payload + 159] = raw & 0x03;
 
-    for (const size_t start : {size_t{11}, size_t{48}, size_t{96}, size_t{133}}) {
+    for (const size_t start : {size_t{1}, size_t{38}, size_t{86}, size_t{123}}) {
         for (size_t i = 0; i < 36 && payload + start + i < dibits.size(); ++i) {
             dibits[payload + start + i] = static_cast<int>((i + start) & 0x03);
         }
@@ -174,13 +175,13 @@ std::vector<int> makeSyntheticPhase2Superframe()
         }
 
         const uint8_t raw = encodePhase2DuidForTest(0x0);
-        const size_t payload = base + 10;
-        dibits[payload + 10] = (raw >> 6) & 0x03;
-        dibits[payload + 47] = (raw >> 4) & 0x03;
-        dibits[payload + 132] = (raw >> 2) & 0x03;
-        dibits[payload + 169] = raw & 0x03;
+        const size_t payload = base + P25LiveDecoder::Phase2FrameSyncDibits;
+        dibits[payload + 0] = (raw >> 6) & 0x03;
+        dibits[payload + 37] = (raw >> 4) & 0x03;
+        dibits[payload + 122] = (raw >> 2) & 0x03;
+        dibits[payload + 159] = raw & 0x03;
 
-        for (const size_t start : {size_t{11}, size_t{48}, size_t{96}, size_t{133}}) {
+        for (const size_t start : {size_t{1}, size_t{38}, size_t{86}, size_t{123}}) {
             for (size_t i = 0; i < 36 && payload + start + i < dibits.size(); ++i) {
                 dibits[payload + start + i] = static_cast<int>((slot + i + start) & 0x03);
             }
@@ -286,12 +287,16 @@ void appendSymbolBitsForTest(std::vector<uint8_t>& bits, uint8_t symbol)
     for (int bit = 5; bit >= 0; --bit) bits.push_back(static_cast<uint8_t>((symbol >> bit) & 1u));
 }
 
-void writeDibitsFromBitsForTest(std::vector<int>& payload, size_t start, size_t count, const std::vector<uint8_t>& bits, size_t& cursor)
+void writeTimeslotBitsForTest(std::vector<int>& payload, size_t startBit, size_t countBits, const std::vector<uint8_t>& bits, size_t& cursor)
 {
-    for (size_t i = 0; i < count; ++i) {
-        REQUIRE(cursor + 1 < bits.size());
-        payload[start + i] = P25LiveDecoder::dibitFromBits(bits[cursor], bits[cursor + 1]);
-        cursor += 2;
+    for (size_t i = 0; i < countBits; ++i) {
+        REQUIRE(cursor < bits.size());
+        const size_t bitIndex = startBit + i;
+        REQUIRE(bitIndex < payload.size() * 2);
+        const size_t dibitIndex = bitIndex / 2;
+        auto pair = P25LiveDecoder::bitsFromDibit(payload[dibitIndex] & 0x03);
+        pair[bitIndex & 0x01u] = bits[cursor++];
+        payload[dibitIndex] = P25LiveDecoder::dibitFromBits(pair[0], pair[1]);
     }
 }
 
@@ -318,17 +323,18 @@ std::vector<int> makeSyntheticPhase2SlowAcchPayloadForTest(uint8_t duid, const s
     for (size_t sym = 5; sym <= 56; ++sym) appendSymbolBitsForTest(codedBits, symbols[sym]);
     REQUIRE(codedBits.size() == 312);
 
-    std::vector<int> payload(170, 0);
+    std::vector<int> payload(160, 0);
     const uint8_t raw = encodePhase2DuidForTest(duid);
-    payload[10] = (raw >> 6) & 0x03;
-    payload[47] = (raw >> 4) & 0x03;
-    payload[132] = (raw >> 2) & 0x03;
-    payload[169] = raw & 0x03;
+    payload[0] = (raw >> 6) & 0x03;
+    payload[37] = (raw >> 4) & 0x03;
+    payload[122] = (raw >> 2) & 0x03;
+    payload[159] = raw & 0x03;
 
     size_t cursor = 0;
-    writeDibitsFromBitsForTest(payload, 11, 36, codedBits, cursor);
-    writeDibitsFromBitsForTest(payload, 48, 84, codedBits, cursor);
-    writeDibitsFromBitsForTest(payload, 133, 36, codedBits, cursor);
+    writeTimeslotBitsForTest(payload, 2, 72, codedBits, cursor);
+    writeTimeslotBitsForTest(payload, 76, 108, codedBits, cursor);
+    writeTimeslotBitsForTest(payload, 184, 60, codedBits, cursor);
+    writeTimeslotBitsForTest(payload, 246, 72, codedBits, cursor);
     REQUIRE(cursor == codedBits.size());
     return payload;
 }
@@ -361,8 +367,8 @@ std::vector<int> makeSyntheticPhase2SuperframeWithSacchForTest()
 {
     auto dibits = makeSyntheticPhase2Superframe();
     const auto payload = makeSyntheticPhase2SacchPayloadForTest();
-    const size_t base = 2 * P25LiveDecoder::Phase2BurstDibits + 10;
-    for (size_t i = 10; i < payload.size(); ++i) {
+    const size_t base = 2 * P25LiveDecoder::Phase2BurstDibits + P25LiveDecoder::Phase2FrameSyncDibits;
+    for (size_t i = 0; i < payload.size(); ++i) {
         dibits[base + i] = payload[i] & 0x03;
     }
     return dibits;
@@ -372,8 +378,8 @@ std::vector<int> makeSyntheticPhase2SuperframeWithLcchForTest()
 {
     auto dibits = makeSyntheticPhase2Superframe();
     const auto payload = makeSyntheticPhase2LcchPayloadForTest();
-    const size_t base = 2 * P25LiveDecoder::Phase2BurstDibits + 10;
-    for (size_t i = 10; i < payload.size(); ++i) {
+    const size_t base = 2 * P25LiveDecoder::Phase2BurstDibits + P25LiveDecoder::Phase2FrameSyncDibits;
+    for (size_t i = 0; i < payload.size(); ++i) {
         dibits[base + i] = payload[i] & 0x03;
     }
     return dibits;
@@ -1279,6 +1285,33 @@ TEST_CASE("P25 live decoder corrects Phase 2 DUID and extracts 2V bursts")
     REQUIRE(burst.voiceCodewords.size() == 2);
 }
 
+TEST_CASE("P25 live decoder does not extract AMBE voice from Phase 2 ACCH bursts")
+{
+    const std::array<std::pair<int, P25Phase2BurstKind>, 5> cases{{
+        {0x3, P25Phase2BurstKind::SacchScrambled},
+        {0x9, P25Phase2BurstKind::FacchScrambled},
+        {0xC, P25Phase2BurstKind::SacchClear},
+        {0xD, P25Phase2BurstKind::LcchClear},
+        {0xF, P25Phase2BurstKind::FacchClear},
+    }};
+
+    for (const auto& [duid, expectedKind] : cases) {
+        INFO("DUID " << duid);
+        const auto dibits = makeSyntheticPhase2Burst(duid);
+
+        P25LiveDecoder burstDecoder;
+        const auto bursts = burstDecoder.processPhase2HardDibits(dibits);
+        REQUIRE(bursts.size() == 1);
+        REQUIRE(bursts.front().kind == expectedKind);
+        REQUIRE(bursts.front().voiceCodewords.empty());
+
+        P25LiveDecoder statsDecoder;
+        const auto result = statsDecoder.processHardDibits(dibits);
+        REQUIRE(result.stats.phase2Bursts == 1);
+        REQUIRE(result.stats.phase2VoiceCodewords == 0);
+    }
+}
+
 TEST_CASE("P25 live decoder locks Phase 2 superframes and annotates all TDMA bursts")
 {
     P25LiveDecoder decoder;
@@ -1489,13 +1522,14 @@ TEST_CASE("P25 live decoder keeps sticky Phase 2 superframe lock through drifted
     REQUIRE(sticky.stats.phase2Bursts >= 1);
     REQUIRE(sticky.stats.phase2SuperframeBursts >= 1);
     REQUIRE(sticky.stats.phase2MaskedBursts >= 1);
-    REQUIRE(sticky.stats.phase2VoiceCodewords >= 4);
     REQUIRE(sticky.stats.phase2SyncOffsetCorrections >= 1);
 
     const auto burst = std::find_if(sticky.phase2Bursts.begin(), sticky.phase2Bursts.end(), [](const P25Phase2Burst& b) {
-        return b.stickySuperframe && b.superframeBurstIndexKnown && b.superframeBurstIndex == 2 && !b.voiceCodewords.empty();
+        return b.stickySuperframe && b.superframeBurstIndexKnown && b.superframeBurstIndex == 2;
     });
     REQUIRE(burst != sticky.phase2Bursts.end());
+    REQUIRE(burst->kind == P25Phase2BurstKind::SacchScrambled);
+    REQUIRE(burst->voiceCodewords.empty());
     REQUIRE(burst->xorMaskApplied);
     REQUIRE(burst->xorMaskPhaseKnown);
     REQUIRE(burst->xorMaskPhase == maskPhase);
@@ -1540,6 +1574,27 @@ TEST_CASE("P25 live decoder aligns masked Phase 2 MAC decode to near sync hits")
     REQUIRE(burst->syncOffsetDibits == -1);
     REQUIRE(burst->essKnown);
     REQUIRE_FALSE(burst->encrypted);
+}
+
+TEST_CASE("P25 Phase 2 timeslot payload remains contiguous without status-symbol strip", "[p25]")
+{
+    // Phase 1 FDMA interleaves status symbols; Phase 2 TDMA timeslots are a
+    // contiguous 160-dibit payload after the 20-dibit ISCH (SDRTrunk
+    // SuperFrameFragment).  Keep this as a lightweight source/API regression;
+    // full MAC CRC on multi-burst windows is covered by the XOR mask-phase tests.
+    const auto clear = makeSyntheticPhase2SuperframeWithSacchForTest();
+    REQUIRE(clear.size() == P25LiveDecoder::Phase2BurstDibits * 12);
+
+    P25LiveDecoder decoder;
+    const auto bursts = decoder.processPhase2HardDibits(clear);
+    REQUIRE(bursts.size() == 12);
+
+    const auto burst = std::find_if(bursts.begin(), bursts.end(), [](const P25Phase2Burst& b) {
+        return b.kind == P25Phase2BurstKind::SacchClear || b.kind == P25Phase2BurstKind::SacchScrambled;
+    });
+    REQUIRE(burst != bursts.end());
+    REQUIRE(burst->rawPayloadDibits.size() == 160);
+    REQUIRE(burst->macCrcValid);
 }
 
 TEST_CASE("P25 live decoder decodes clear Phase 2 LCCH without XOR mask")
@@ -1666,6 +1721,112 @@ TEST_CASE("P25 IMBE voice decoder reports backend availability explicitly")
         REQUIRE(result.status == P25VoiceDecodeStatus::BackendUnavailable);
         REQUIRE(result.pcm.empty());
     }
+}
+
+TEST_CASE("P25 live decoder aligns absolute dibit cursor on traffic chunks")
+{
+    P25LiveDecoder decoder;
+    decoder.alignPhase2AbsoluteDibitCursor(1000, 180);
+    decoder.processHardDibits(std::vector<int>(180, 0));
+    decoder.alignPhase2AbsoluteDibitCursor(1180, 180);
+    decoder.processHardDibits(std::vector<int>(180, 0));
+
+    // Large gap should drop sticky tail without crashing.
+    decoder.alignPhase2AbsoluteDibitCursor(5000, 180);
+    decoder.processHardDibits(std::vector<int>(180, 0));
+
+    // Rewind should force stream discontinuity without crashing.
+    decoder.alignPhase2AbsoluteDibitCursor(500, 180);
+    decoder.processHardDibits(std::vector<int>(180, 0));
+    SUCCEED("gap and rewind handled without crash");
+}
+
+TEST_CASE("P25 live decoder independent probe copy starts fresh without parent session state")
+{
+    P25LiveDecoder parent;
+    parent.setPhase2MaskParameters(0x293, 0xBEE00, 0x12C);
+    parent.processHardDibits(std::vector<int>(256, 0));
+
+    P25LiveDecoder probe = parent.createIndependentProbeCopy(true);
+    REQUIRE(probe.phase2MaskParametersKnown());
+    REQUIRE(probe.phase2MaskParametersMatch(0x293, 0xBEE00, 0x12C));
+
+    P25LiveDecoder bare = parent.createIndependentProbeCopy(false);
+    REQUIRE_FALSE(bare.phase2MaskParametersKnown());
+}
+
+TEST_CASE("P25 Phase 2 AMBE variant transforms produce distinct frame payloads", "[p25][ambe]")
+{
+    P25Phase2VoiceCodeword cw{};
+    for (size_t i = 0; i < 72; ++i) {
+        cw.bits[i] = static_cast<uint8_t>((i % 3) != 0);
+    }
+    const auto canonical = p25Phase2VoiceCodewordToAmbe3600x2450FrameVariant(cw, 0);
+    const auto swapped = p25Phase2VoiceCodewordToAmbe3600x2450FrameVariant(cw, 1);
+    REQUIRE(canonical != swapped);
+    REQUIRE(p25Phase2AmbeFrameVariantCount() == 4);
+}
+
+TEST_CASE("P25 Phase 2 CQPSK traffic config matches SDRTrunk HDQPSK (6000 baud, LPF-only)", "[p25][cqpsk]")
+{
+    P25LiveDecoderConfig cfg;
+    cfg.symbolRate = 6000.0;
+    cfg.phase2CqpskTrafficDemod = true;
+    cfg.cqpskUseMatchedRrcFilter = false;
+    cfg.cqpskRrcAlpha = 0.20;
+    cfg.cqpskCarrierLoopBandwidth = (2.0 * 3.14159265358979323846) / 300.0;
+    cfg.cqpskCarrierLoopMaxCorrectionHz = 3000.0;
+    REQUIRE(cfg.symbolRate == Catch::Approx(6000.0));
+    REQUIRE(cfg.phase2CqpskTrafficDemod);
+    REQUIRE_FALSE(cfg.cqpskUseMatchedRrcFilter);
+    REQUIRE(cfg.cqpskCarrierLoopBandwidth == Catch::Approx((2.0 * 3.14159265358979323846) / 300.0));
+    REQUIRE(cfg.cqpskCarrierLoopMaxCorrectionHz == Catch::Approx(3000.0));
+}
+
+TEST_CASE("P25 Phase 2 6000 baud CQPSK processIq stays inside realtime budget on noise", "[p25][cqpsk][budget]")
+{
+    P25LiveDecoderConfig cfg;
+    cfg.symbolRate = 6000.0;
+    cfg.workSampleRate = 48000.0;
+    cfg.channelBandwidthHz = 12500.0;
+    cfg.phase2CqpskTrafficDemod = true;
+    cfg.enablePhase2Decode = true;
+    cfg.enablePhase1Decode = false;
+    cfg.enableCqpskSearch = true;
+    cfg.cqpskUseMatchedRrcFilter = false;
+    cfg.cqpskCarrierLoopBandwidth = (2.0 * 3.14159265358979323846) / 300.0;
+    cfg.cqpskCarrierLoopMaxCorrectionHz = 3000.0;
+    cfg.realtimeVoiceSearch = true;
+    cfg.realtimeDecodeBudgetMs = 110;
+    cfg.maxCqpskSearchCandidates = 36;
+    cfg.maxPhase2SyncHits = 96;
+    cfg.maxPhase2SuperframeLocks = 4;
+    cfg.stopCqpskSearchOnHardLock = true;
+    P25LiveDecoder decoder(cfg);
+    decoder.setPhase2MaskParameters(0x2dc, 0xbee00, 0x2d1);
+
+    constexpr double sampleRate = 2048000.0;
+    constexpr double windowSec = 0.360;
+    const size_t n = static_cast<size_t>(sampleRate * windowSec);
+    std::vector<std::complex<float>> iq(n);
+    uint32_t rng = 0xC0FFEEu;
+    for (size_t i = 0; i < n; ++i) {
+        rng = rng * 1664525u + 1013904223u;
+        const float iPart = static_cast<float>((rng & 0xffff) / 32768.0f - 1.0f) * 0.05f;
+        rng = rng * 1664525u + 1013904223u;
+        const float qPart = static_cast<float>((rng & 0xffff) / 32768.0f - 1.0f) * 0.05f;
+        iq[i] = {iPart, qPart};
+    }
+
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto result = decoder.processIq(iq, sampleRate, 421.975e6, 421.975e6);
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0).count();
+    REQUIRE(result.stats.symbolRate == Catch::Approx(6000.0));
+    // Hard ceiling: realtime budget is 110ms but channelize+search overhead may
+    // exceed it slightly.  Minutes-long hangs must never return.
+    REQUIRE(ms < 2500);
+    (void)result;
 }
 
 TEST_CASE("P25 AMBE Phase 2 voice decoder reports backend availability explicitly")

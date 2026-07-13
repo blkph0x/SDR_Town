@@ -48,4 +48,29 @@ The current P25 Phase 2 path must not be released as complete clear voice yet. C
    - Verify no audio is emitted on control channels, encrypted calls, wrong slots, or failed mask/MAC/ESS validation.
    - Verify clear calls produce stable 8 kHz PCM that resamples cleanly into the audio engine.
 
-Until all five areas pass, GitHub releases should describe Phase 2 as control/grant/burst diagnostics, not complete clear voice.
+## Defined Cases and Edge Cases for Security Gate (Strict, SDRTrunk-aligned)
+
+Only emit when MAC/ESS/PTT/session prove clear. Status symbols are stripped before payload/MAC/voice (SDRTrunk framer behavior). All offsets, mask, interleave, bit packing follow SDRTrunk Voice*Timeslot + ACCH layouts + ScramblingSequence.
+
+Defined clear proof cases (any one + !encrypted + maskApplied):
+1. sessionAudioRelease: xorMaskApplied + essKnown + essTrusted + fecValidated + (pttSeen from MAC_PTT or ess from Voice2) + !encrypted.
+2. macCrcLock (crcValid or (fecDecoded && correctedSymbols<10 from RS/deep)) from MAC_PTT (op=1, clear alg) or MAC_ACTIVE after clear PTT.
+3. targetEssKnown && !targetEssEncrypted (from carried or fresh Voice2 RS decode after PTT).
+4. lateEntryStrong + macEvidence (recent valid MAC or low-fec) + strong target VCW on grant slot + superframe/mask/slot + grant clear.
+
+Edge cases fully handled (no emit without proof):
+- Late entry, no superframe/MAC on first VCW: queue raw, emit only after proof MAC/ESS or defined late+mac.
+- Voice-only (no ACCH this burst): use persisted session (pttSeen etc) until END/IDLE/HANG MAC.
+- No superframe: allow if grant known + mask + proof (mac/ess/session).
+- Slot mismatch: drop opposite; only current grant slot (or !known + probe) proceeds.
+- Encrypted: trustedEncrypted -> drop always.
+- FEC vs CRC: FEC low used for state/lock (SDRTrunk MAC recovery); emit prefers full proof.
+- Unknown grant: follow/diag/queue but gate waits (unknownSecurity clears audio).
+- High p2vcw/p2mask/p2sf + p2mac=0: with status-strip, MAC CRC should recover; gate still requires proof before emit.
+- Mask phase: sticky + ISCH anchor + MAC/ESS dominate score.
+- Brute variant: picks lowest err for decode; emit gated separately.
+- No dummy/force/anyFinite: removed. Only low-err usable + proof.
+
+Cross-ref: P25LiveDecoder::decodePhase2BurstAt (clean payloadDibits + starts 1/38/86/123 + swapped bitsFromDibit + deep ACCH hypotheses), makePhase2XorMask, scorePhase2..., main::decodeP25Phase2VoiceBlock + applyP25... + p25DecodePhase2Ambe..., P25*Processor/Follow for slot/grant, mbelib feed via interleave.
+
+Until validated on captures with p2mac>0 + clear PCM only on above, Phase 2 audio is diagnostics + gated.

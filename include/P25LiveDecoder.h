@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <deque>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -58,10 +59,39 @@ struct P25LiveDecoderConfig {
     size_t maxCqpskSearchCandidates = 0;
     size_t cqpskLockMissTolerance = 24;
     bool realtimeVoiceSearch = false;
+    bool enablePhase1Decode = true;
+    int realtimeDecodeBudgetMs = 0;
+    size_t maxPhase2SyncHits = 0;
+    size_t maxPhase2SuperframeLocks = 0;
+    // Phase 2 traffic-channel demod: prefer CQPSK/H-DQPSK search over C4FM
+    // fallback.  Profile flag is independent of symbolRate; Phase-2 air rate is
+    // 6000 sps (do not reuse 4800 as a demod-mode sentinel).
+    bool phase2CqpskTrafficDemod = false;
+    // Optional RRC matched filter.  SDRTrunk P25P2DecoderHDQPSK uses LPF+AGC
+    // only (no RRC); leave false for Phase-2 traffic parity.  P1 LSM may enable.
+    bool cqpskUseMatchedRrcFilter = false;
+    double cqpskRrcAlpha = 0.20;
     // Phase 2 burst/MAC decode is enabled by default so realtime control
     // monitoring and offline diagnostics share the same grant evidence path.
     // Low-power views may opt out explicitly when they only need Phase 1 TSBK.
     bool enablePhase2Decode = true;
+};
+
+
+struct P25BlockTimingState {
+    bool c4fmValid = false;
+    bool cqpskValid = false;
+    double c4fmOmega = 0.0;
+    double c4fmMu = 0.0;
+    double cqpskOmega = 0.0;
+    double cqpskMu = 0.0;
+    double c4fmSampleRate = 0.0;
+    double cqpskSampleRate = 0.0;
+    bool cqpskCarrierLoopValid = false;
+    double cqpskCarrierLoopPhase = 0.0;
+    double cqpskCarrierLoopOmega = 0.0;
+    std::vector<float> c4fmTail;
+    std::vector<std::complex<float>> cqpskTail;
 };
 
 struct P25Phase2MaskParameters {
@@ -363,6 +393,12 @@ public:
 
     void reset();
 
+    // Independent copy for offset/slot/CQPSK probe paths.  Retains demod
+    // configuration and optionally Phase-2 mask parameters, but never copies
+    // streaming timing tails, CQPSK lock, ESS/MAC session state, superframe
+    // anchors, or codeword de-dupe history from the parent decoder.
+    P25LiveDecoder createIndependentProbeCopy(bool retainPhase2MaskParameters = true) const;
+
     P25LiveDecodeResult processIq(const std::vector<std::complex<float>>& iq,
                                   double sampleRate,
                                   double centerFreqHz,
@@ -378,6 +414,14 @@ public:
     void clearPhase2MaskParameters();
     bool phase2MaskParametersKnown() const;
     bool phase2MaskParametersMatch(uint16_t nac, uint32_t wacn, uint16_t systemId) const;
+    const P25LiveDecoderConfig& config() const { return m_config; }
+    void setRealtimeDecodeBudgetMs(int budgetMs) { m_config.realtimeDecodeBudgetMs = std::max(0, budgetMs); }
+    void setMaxCqpskSearchCandidates(size_t maxCandidates) { m_config.maxCqpskSearchCandidates = maxCandidates; }
+    bool cqpskLockValid() const noexcept { return m_cqpskLock.valid; }
+
+    // Align the internal Phase-2 dibit stream counter to an absolute ring
+    // cursor before processing a new traffic-channel chunk.
+    void alignPhase2AbsoluteDibitCursor(uint64_t chunkStartAbsolute, size_t chunkDibitCount);
 
     static std::array<uint8_t, FrameSyncBits> frameSyncBits();
     static std::array<int, Phase2FrameSyncDibits> phase2FrameSyncDibits();
@@ -414,6 +458,14 @@ private:
         uint64_t generation = 0;
     };
 
+    P25BlockTimingState streamTimingStateSnapshot() const;
+    void storeStreamTimingState(const P25BlockTimingState& timing);
+    std::vector<uint8_t> buildPhase1BitStreamWithTail(const std::vector<uint8_t>& inputBits,
+                                                      size_t& prefixBits) const;
+    void storePhase1BitTail(const std::vector<uint8_t>& bits);
+    std::deque<uint8_t> snapshotPhase1BitTail() const;
+    void restorePhase1BitTail(const std::deque<uint8_t>& snapshot);
+
     P25LiveDecodeResult processHardDibitsInternal(const std::vector<int>& dibits,
                                                   bool annotateSessionCodewords);
     P25LiveDecodeResult processFmDiscriminatorInternal(const std::vector<float>& discriminatorHz,
@@ -424,6 +476,9 @@ private:
     void annotatePhase2SessionCodewords(P25Phase2DecodeResult& out,
                                         const std::vector<int>& dibits);
 
+    mutable std::mutex m_streamingStateMutex;
+    P25BlockTimingState m_streamTimingState;
+    std::deque<uint8_t> m_phase1BitTail;
     P25Phase2MaskParameters m_phase2MaskParams;
     std::array<int, Phase2BurstDibits * 12> m_phase2XorMask{};
     // Retained Phase-2 session state.  The legacy single-session fields below are
@@ -453,6 +508,12 @@ private:
     bool m_phase2MaskPhaseKnown = false;
     uint8_t m_phase2MaskPhase = 0;
     int m_phase2MaskPhaseScore = 0;
+    // Consecutive annotate windows where a sticky mask phase produced voice/superframe
+    // evidence but zero MAC CRC and no ESS.  Field logs show wrong sticky phases can
+    // permanently mute clear grants (p2sf/p2mask high, p2mac=0/N, AMBE never decodes).
+    // After a short starve streak, re-open the 12-phase hunt (SDRTrunk never sticks to a
+    // wrong scrambling segment because its continuous framer re-validates continuously).
+    uint8_t m_phase2MaskPhaseStarveWindows = 0;
     // Sticky Phase-2 superframe epoch used for late-entry/live scanner follow.
     // sdrtrunk's traffic decoder is a continuous stream, so a single voice
     // timeslot after acquisition still has a known superframe index and XOR
@@ -463,6 +524,8 @@ private:
     bool m_phase2SuperframeAnchorKnown = false;
     uint64_t m_phase2SuperframeAnchorDibit = 0;
     uint64_t m_phase2SuperframeAnchorGeneration = 0;
+    P25Phase2MaskParameters m_phase2SuperframeAnchorMaskParams{};
+    uint8_t m_phase2SuperframeAnchorMaskPhase = 0;
     std::deque<RecentPhase2Codeword> m_phase2RecentCodewords;
     std::deque<int> m_phase2DibitTail;
     uint64_t m_phase2NextCodewordId = 1;

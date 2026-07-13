@@ -2,6 +2,7 @@
 
 #include "Demod.h"
 #include "P25LiveDecoder.h"
+#include "P25ReceiverSession.h"
 #include "P25TrafficChannelProcessor.h"
 #include <vector>
 #include <array>
@@ -28,8 +29,15 @@ struct P25VoiceDiagSnapshot {
     long long phase2VoiceCodewords = 0;
     long long phase2TargetVoiceCodewords = 0;
     long long phase2OppositeVoiceCodewords = 0;
+    long long phase2ExpectedVoiceCodewords = 0;
+    long long phase2FedToMbelib = 0;
+    long long phase2EmittedPcmFrames = 0;
+    long long phase2FeedGaps = 0;
     long long phase2AmbeDecodeAttempts = 0;
     long long phase2AmbeAcceptedFrames = 0;
+    long long phase2DiagnosticAmbeProbeAttempts = 0;
+    long long phase2DiagnosticAmbeProbeAccepted = 0;
+    long long phase2DuplicateSuppressedVoiceCodewords = 0;
     long long phase2SuperframeBursts = 0;
     long long phase2MaskedBursts = 0;
     long long phase2MacPdus = 0;
@@ -41,6 +49,10 @@ struct P25VoiceDiagSnapshot {
     long long phase2MacInvertCrcValid = 0;
     bool phase2EssKnown = false;
     bool phase2EssEncrypted = false;
+    bool phase2TargetEssKnown = false;
+    bool phase2TargetEssEncrypted = false;
+    bool phase2TargetMacCrcValid = false;
+    bool phase2TargetSessionAudioRelease = false;
     bool backendAvailable = false;
     bool nidLock = false;
     double phase2CenterFreqHz = 0.0;
@@ -91,9 +103,19 @@ struct Receiver {
     uint32_t p25VoiceTalkgroupId = 0;
     uint32_t p25VoiceSourceId = 0;
     int64_t p25VoiceGrantEpochMs = 0;
+    // Binds pending audio, ESS security, and emit gates to one call instance.
+    // Generated at grant arm from talkgroup + grant epoch (SDRTrunk current-call session).
+    uint64_t p25CurrentCallSessionId = 0;
     bool p25VoicePhase2 = false;
     bool p25VoiceTdmaSlotKnown = false;
     uint8_t p25VoiceTdmaSlot = 0;
+    // Sticky Phase-2 slot-label invert for the current call.  When the superframe
+    // epoch is one burst early/late, grant slot labels flip and all VCWs land on
+    // the opposite slot.  Once a clear-grant window proves that pattern, keep
+    // the invert active for the rest of the call (SDRTrunk never flips mid-call;
+    // it binds the traffic channel timeslot once and stays continuous).
+    bool p25Phase2StickySlotLabelInvert = false;
+    int p25Phase2OppositeOnlyWindows = 0;
     bool p25VoiceSlotProbePending = false;
     uint8_t p25VoiceSlotProbeRequested = 0;
     bool p25VoiceMaskParamsKnown = false;
@@ -129,8 +151,8 @@ struct Receiver {
     int64_t p25Phase2RecentTrafficEvidenceMs = 0;
     uint64_t p25Phase2LastEmittedAbsDibit = 0;
     // sdrtrunk-style Phase 2 audio security gate: for unknown grants, follow
-    // the traffic channel but hold decoded PCM until current-call MAC/ESS or a
-    // trusted clear grant establishes clear audio.  Drop the queue if trusted
+    // the traffic channel but hold decoded PCM until current-call MAC/ESS
+    // establishes clear audio.  Drop the queue if trusted
     // encrypted metadata arrives or the call identity changes.
     std::vector<float> p25Phase2PendingAudio;
     uint32_t p25Phase2PendingTalkgroupId = 0;
@@ -150,7 +172,7 @@ struct Receiver {
     bool p25Phase2RecentSuperframeMaskLock = false;
     // Guarded Phase-2 field recovery. Explicit encrypted grants/ESS still mute
     // immediately, while late-entry unknown calls queue audio until target-slot
-    // PTT/ESS, trusted clear grant, or strong target MAC/mask/voice evidence
+    // PTT/ESS or strong target MAC/mask/voice evidence
     // plus sane decoded PCM proves the current traffic slot is clear.
     bool p25Phase2AllowLateEntryAudioProbe = false;
     bool p25VoiceResetPending = false;
@@ -159,12 +181,16 @@ struct Receiver {
     std::unique_ptr<P25TrafficChannelProcessor> p25TrafficProcessor;
     P25ImbeVoiceDecoder p25ImbeVoiceDecoder;
     P25AmbeVoiceDecoder p25AmbeVoiceDecoder;
+    // Per-receiver P25 audio queue, resampler, and AMBE emit de-dupe (no global maps).
+    P25ReceiverSessionState p25SessionState;
     int p25Phase2PreferredAmbeVariant = -1;
     int p25Phase2PreferredAmbeVariantHits = 0;
     int p25Phase2PreferredAmbeVariantMisses = 0;
     std::array<int, 4> p25Phase2PreferredAmbeVariantByVoiceIndex = {-1, -1, -1, -1};
     std::array<int, 4> p25Phase2PreferredAmbeVariantHitsByVoiceIndex = {};
     std::array<int, 4> p25Phase2PreferredAmbeVariantMissesByVoiceIndex = {};
+    // Last good resampled AMBE block for packet-loss concealment between frames.
+    std::vector<float> p25Phase2LastGoodPcm;
 
     // Narrow-FM AFC: keeps the user tuned to the nominal channel while DSP
     // recenters the demodulator when SDR PPM/tuning error moves the carrier.
@@ -189,6 +215,8 @@ struct Receiver {
     // S0 / audit-followup-2: per-receiver read cursor (absolute samples) for the device's IQ ring.
     // Allows each rx to consume its own new chronological data without fighting other rxs on the same device.
     std::atomic<uint64_t> lastConsumedAbsolute{0};
+    std::atomic<uint64_t> lastSeenStreamEpoch{0};
+    std::atomic<uint64_t> p25TrafficSessionGeneration{1};
 
     // Simple reset helper (calls into Demodulator)
     void resetDemodState()
@@ -196,6 +224,7 @@ struct Receiver {
         std::lock_guard<std::recursive_mutex> dspLock(dspMutex);
         demod.resetState();
         lastConsumedAbsolute.store(0, std::memory_order_release);
+        lastSeenStreamEpoch.store(0, std::memory_order_release);
         afcLocked = false;
         afcOffsetHz = 0.0;
         p25AfcFrozen = false;
@@ -206,25 +235,31 @@ struct Receiver {
         p25Phase2TrafficTargetOffsetMisses = 0;
         p25Phase2RecentTrafficEvidenceMs = 0;
     }
-    void resetP25VoiceState()
+    void resetP25TrafficSession(const char* /*reason*/ = nullptr, bool fullClear = true)
     {
         std::lock_guard<std::recursive_mutex> dspLock(dspMutex);
+        p25TrafficSessionGeneration.fetch_add(1, std::memory_order_acq_rel);
         p25VoiceLiveDecoder.reset();
-        p25TrafficProcessor.reset();
-        p25ImbeVoiceDecoder = P25ImbeVoiceDecoder();
-        p25AmbeVoiceDecoder = P25AmbeVoiceDecoder();
+        if (fullClear) {
+            p25TrafficProcessor.reset();
+            p25ImbeVoiceDecoder = P25ImbeVoiceDecoder();
+            p25AmbeVoiceDecoder = P25AmbeVoiceDecoder();
+        }
         p25Phase2PreferredAmbeVariant = -1;
         p25Phase2PreferredAmbeVariantHits = 0;
         p25Phase2PreferredAmbeVariantMisses = 0;
         p25Phase2PreferredAmbeVariantByVoiceIndex.fill(-1);
         p25Phase2PreferredAmbeVariantHitsByVoiceIndex.fill(0);
         p25Phase2PreferredAmbeVariantMissesByVoiceIndex.fill(0);
+        p25Phase2LastGoodPcm.clear();
         p25Phase2TrafficTargetOffsetKnown = false;
         p25Phase2TrafficTargetOffsetHz = 0.0;
         p25Phase2TrafficTargetOffsetTrust = 0;
         p25Phase2TrafficTargetOffsetMisses = 0;
         p25Phase2RecentTrafficEvidenceMs = 0;
         p25Phase2LastEmittedAbsDibit = 0;
+        p25Phase2StickySlotLabelInvert = false;
+        p25Phase2OppositeOnlyWindows = 0;
         p25Phase2PendingAudio.clear();
         p25Phase2PendingTalkgroupId = 0;
         p25Phase2PendingAudioArmed = false;
@@ -238,8 +273,15 @@ struct Receiver {
         p25Phase2RecentTargetEssEncrypted = false;
         p25Phase2RecentTargetSessionAudioRelease = false;
         p25Phase2RecentSuperframeMaskLock = false;
+        p25SessionState.clearAll();
         p25VoiceSourceId = 0;
         p25VoiceGrantEpochMs = 0;
+        p25CurrentCallSessionId = 0;
+    }
+
+    void resetP25VoiceState()
+    {
+        resetP25TrafficSession("legacy-reset", true);
     }
 
     // Force immediate squelch gate close (bypass hang) when user raises threshold via main controls or CLI.

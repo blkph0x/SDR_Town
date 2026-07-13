@@ -56,6 +56,8 @@ public:
 
     // Live diagnostics (P1 audit): ring buffer fill and underrun count for CLI/GUI stats
     double getRingFillPercent() const;
+    size_t getRingQueuedSamples() const;
+    size_t getJitterQueueCapFrames() const;
     int    getUnderrunCount() const;
 
     // Exposed for data callback (test tone state)

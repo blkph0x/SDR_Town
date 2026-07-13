@@ -27,7 +27,11 @@ struct P25FollowSnapshot {
     int64_t nowMs = 0;
     int64_t tunedAtMs = 0;
     int64_t lastActiveMs = 0;
+    // Last time PCM was pushed to the speaker ring (may be fresher than lastActiveMs when GUI stats lag).
+    int64_t recentSpeakerOutputMs = 0;
     int64_t diagUpdatedMs = 0;
+    uint64_t currentCallSessionId = 0;
+    uint64_t essCallSessionId = 0;
     bool autoActive = false;
     bool phase2Voice = false;
     uint32_t talkgroupId = 0;
@@ -49,6 +53,9 @@ struct P25FollowSnapshot {
     bool phase2TrafficCallActive = false;
     bool phase2TrafficAudioOpen = false;
     bool phase2TrafficEncrypted = false;
+    bool grantEncryptionKnown = false;
+    bool grantEncrypted = false;
+    long long phase2OppositeVoiceCodewords = 0;
 
     // RF carrier detection for robust "transmission ended" even if protocol state lingers or noise fools VCW count.
     double recentSignalLevelDb = -120.0;
@@ -95,12 +102,19 @@ struct P25SlotProbeSnapshot {
     int flipCount = 0;
     int maxFlips = 6;
     int minVoiceCodewords = 4;
-    int wrongSlotThreshold = 1;
-    int64_t minFlipIntervalMs = 5000;
+    int wrongSlotThreshold = 3;
+    int64_t minFlipIntervalMs = 8000;
+    int64_t earlyNoSyncFlipMs = 8000;
     double voiceHzResetThreshold = 50.0;
     bool inPassband = false;
+    bool grantClearStateUnknown = false;
+    bool grantClearKnown = false;
+    bool grantMaskParamsKnown = false;
     int diag = static_cast<int>(P25FollowDiagCode::Idle);
+    long long phase2Bursts = 0;
     long long phase2VoiceCodewords = 0;
+    long long phase2TargetVoiceCodewords = 0;
+    long long phase2OppositeVoiceCodewords = 0;
     long long phase2SuperframeBursts = 0;
     long long phase2MaskedBursts = 0;
     long long phase2MacPdus = 0;
@@ -116,6 +130,8 @@ struct P25SlotProbeDecision {
     bool noMacEssYet = false;
     bool probeRateOk = false;
     bool shouldFlip = false;
+    bool earlyNoSyncFlip = false;
+    bool maskedOppositeDominantFlip = false;
     int wrongSlotChecksAfterObservation = 0;
     int flipCountAfterObservation = 0;
 };

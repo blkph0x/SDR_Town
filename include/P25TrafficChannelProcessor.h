@@ -14,13 +14,15 @@
 #include <cstddef>
 #include <mutex>
 #include <string>
+#include <vector>
 
 class P25TrafficChannelProcessor {
 public:
     P25TrafficChannelProcessor(uint64_t sessionId, uint32_t talkgroup, uint32_t voiceFreqHz, int grantedSlot);
     ~P25TrafficChannelProcessor();
 
-    void processDibits(const int16_t* dibits, size_t count, uint64_t absoluteSampleIndex);
+    void processDibits(const int16_t* dibits, size_t count, uint64_t absoluteDibitIndex);
+    void feedHardDibits(const std::vector<int>& dibits, uint64_t absoluteDibitIndex);
     void observeDecodeResult(const P25LiveDecodeResult& result, uint64_t absoluteDibitIndex);
     void setPhase2MaskParameters(uint16_t nac, uint32_t wacn, uint16_t systemId);
     void clearPhase2MaskParameters();
@@ -104,6 +106,7 @@ private:
 
     mutable std::mutex m_mutex;
     P25LiveDecoder m_decoder;
+    std::vector<int> m_hardDibitScratch;
     std::string m_teardownReason;
     std::string m_endReason;
 

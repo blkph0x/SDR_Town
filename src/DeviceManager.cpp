@@ -434,6 +434,28 @@ void DeviceManager::resetStreamBuffers(StreamState& st) {
         }
         st.ringWriteIdx.store(0, std::memory_order_release);
         st.totalSamplesWritten.store(0, std::memory_order_release);
+        st.streamEpoch.fetch_add(1, std::memory_order_acq_rel);
+    }
+}
+
+void DeviceManager::markStreamRetune(StreamState& st, double appliedCenterHz) {
+    std::lock_guard<std::mutex> ringLock(st.ringMutex);
+    if (st.ringCapacity == 0) {
+        st.ringCapacity = 1u << 25;
+        st.iqRing.assign(st.ringCapacity, std::complex<float>(0, 0));
+    }
+    const double lastHz = st.lastAppliedCenterHz.load(std::memory_order_relaxed);
+    const bool haveNewCenter = std::isfinite(appliedCenterHz) && appliedCenterHz > 0.0;
+    const bool haveLastCenter = std::isfinite(lastHz) && lastHz > 0.0;
+    const bool mhzHop = haveNewCenter && haveLastCenter &&
+        std::abs(appliedCenterHz - lastHz) > 25000.0;
+    if (mhzHop) {
+        const uint64_t total = st.totalSamplesWritten.load(std::memory_order_acquire);
+        st.retuneValidFromAbsolute.store(total, std::memory_order_release);
+        st.streamEpoch.fetch_add(1, std::memory_order_acq_rel);
+    }
+    if (haveNewCenter) {
+        st.lastAppliedCenterHz.store(appliedCenterHz, std::memory_order_release);
     }
 }
 
@@ -1126,24 +1148,36 @@ DeviceManager::RecentIQWindow DeviceManager::getRecentIQWindowWithCursor(size_t 
 
     std::lock_guard<std::mutex> ringLock(st.ringMutex);
     const size_t cap = st.ringCapacity;
+    outWindow.streamEpoch = st.streamEpoch.load(std::memory_order_acquire);
     const uint64_t total = st.totalSamplesWritten.load(std::memory_order_acquire);
     if (cap == 0 || st.iqRing.empty() || total == 0) return outWindow;
 
     const uint64_t available = std::min<uint64_t>(total, static_cast<uint64_t>(cap));
     const size_t toRead = static_cast<size_t>(std::min<uint64_t>(available, static_cast<uint64_t>(maxSamples)));
-    outWindow.samples.reserve(toRead);
-
     // Return the newest contiguous ring window in chronological order.
+    // Fast bulk copy (1-2 segments) to minimize time holding ringMutex.
+    // Previous element-by-element push_back loop could hold the mutex for tens of ms on
+    // large pulls (e.g. 256k-2M samples), causing GUI control-decode / DSP readers waiting
+    // on ring to stall the event loop / workers -> perceived freezes during capture + returns.
     const uint64_t start = total - static_cast<uint64_t>(toRead);
     outWindow.startAbsolute = start;
     outWindow.endAbsolute = total;
-    const bool powerOfTwoCap = (cap & (cap - 1)) == 0;
-    for (size_t k = 0; k < toRead; ++k) {
-        const uint64_t absolute = start + static_cast<uint64_t>(k);
-        const size_t idx = powerOfTwoCap
-            ? static_cast<size_t>(absolute) & (cap - 1)
-            : static_cast<size_t>(absolute % static_cast<uint64_t>(cap));
-        outWindow.samples.push_back(st.iqRing[idx]);
+    outWindow.samples.resize(toRead);
+    if (toRead > 0) {
+        const bool powerOfTwoCap = (cap & (cap - 1)) == 0;
+        const uint64_t startAbs = start;
+        const size_t startIdx = powerOfTwoCap
+            ? static_cast<size_t>(startAbs) & (cap - 1)
+            : static_cast<size_t>(startAbs % static_cast<uint64_t>(cap));
+        const size_t firstPart = std::min(toRead, cap - startIdx);
+        std::copy(st.iqRing.begin() + startIdx,
+                  st.iqRing.begin() + startIdx + firstPart,
+                  outWindow.samples.begin());
+        if (firstPart < toRead) {
+            std::copy(st.iqRing.begin(),
+                      st.iqRing.begin() + (toRead - firstPart),
+                      outWindow.samples.begin() + firstPart);
+        }
     }
     return outWindow;
 
@@ -1164,14 +1198,43 @@ DeviceManager::RecentIQWindow DeviceManager::getNewIQWindowForReceiver(size_t de
     if (st.ringCapacity == 0) return outWindow;
 
     std::lock_guard<std::mutex> ringLock(st.ringMutex);
+    const uint64_t epoch = st.streamEpoch.load(std::memory_order_acquire);
+    outWindow.streamEpoch = epoch;
     uint64_t myLast = rx.lastConsumedAbsolute.load(std::memory_order_acquire);
     uint64_t total = st.totalSamplesWritten.load(std::memory_order_acquire);
+    const uint64_t retuneFloor = st.retuneValidFromAbsolute.load(std::memory_order_acquire);
+
+    const uint64_t rxEpoch = rx.lastSeenStreamEpoch.load(std::memory_order_acquire);
+    if (rxEpoch != epoch) {
+        // Soft retune handoff: re-anchor at the live edge with pre-roll IQ instead of
+        // returning an empty discontinuity window.  Downstream P25 resets timing state
+        // on streamEpoch change but keeps decoding the returned samples.
+        myLast = (total > static_cast<uint64_t>(maxSamples))
+            ? total - static_cast<uint64_t>(maxSamples)
+            : 0;
+        if (retuneFloor > 0 && myLast < retuneFloor) {
+            myLast = retuneFloor;
+        }
+        rx.lastConsumedAbsolute.store(myLast, std::memory_order_release);
+        rx.lastSeenStreamEpoch.store(epoch, std::memory_order_release);
+    } else if (retuneFloor > 0 && myLast < retuneFloor) {
+        myLast = retuneFloor;
+        rx.lastConsumedAbsolute.store(myLast, std::memory_order_release);
+    }
+
     uint64_t available = (total > myLast) ? (total - myLast) : 0;
 
     if (myLast > total) {
-        myLast = (total > (uint64_t)maxSamples) ? (total - (uint64_t)maxSamples) : 0;
+        // Absolute cursor belongs to an older stream epoch or ring reset. Do not
+        // silently rewind; tell callers to reset their P25 rolling state.
+        myLast = (total > static_cast<uint64_t>(maxSamples))
+            ? total - static_cast<uint64_t>(maxSamples)
+            : 0;
         rx.lastConsumedAbsolute.store(myLast, std::memory_order_release);
-        available = (total > myLast) ? (total - myLast) : 0;
+        outWindow.startAbsolute = myLast;
+        outWindow.endAbsolute = myLast;
+        outWindow.cursorDiscontinuity = true;
+        return outWindow;
     }
 
     // New/reactivated/retuned receivers should monitor the live edge, not drain old IQ
@@ -1232,26 +1295,52 @@ void DeviceManager::setReceiverCursorToLiveEdge(size_t devIndex, Receiver& rx) {
     auto* stPtr = streamState(devIndex);
     if (!stPtr) {
         rx.lastConsumedAbsolute.store(0, std::memory_order_release);
+        rx.lastSeenStreamEpoch.store(0, std::memory_order_release);
         return;
     }
     auto& st = *stPtr;
     std::lock_guard<std::mutex> ringLock(st.ringMutex);
+    rx.lastSeenStreamEpoch.store(st.streamEpoch.load(std::memory_order_acquire),
+                                 std::memory_order_release);
     rx.lastConsumedAbsolute.store(st.totalSamplesWritten.load(std::memory_order_acquire),
                                   std::memory_order_release);
+}
+
+void DeviceManager::syncReceiverCursorToAbsolute(size_t devIndex, Receiver& rx, uint64_t absoluteSample) {
+    auto* stPtr = streamState(devIndex);
+    if (!stPtr) return;
+    auto& st = *stPtr;
+    std::lock_guard<std::mutex> ringLock(st.ringMutex);
+    const uint64_t total = st.totalSamplesWritten.load(std::memory_order_acquire);
+    const uint64_t epoch = st.streamEpoch.load(std::memory_order_acquire);
+    uint64_t anchor = std::min(absoluteSample, total);
+    if (st.ringCapacity > 0 && total > st.ringCapacity) {
+        anchor = std::max(anchor, total - st.ringCapacity);
+    }
+    rx.lastConsumedAbsolute.store(anchor, std::memory_order_release);
+    rx.lastSeenStreamEpoch.store(epoch, std::memory_order_release);
 }
 
 void DeviceManager::setReceiverCursorBeforeLiveEdge(size_t devIndex, Receiver& rx, size_t preRollSamples) {
     auto* stPtr = streamState(devIndex);
     if (!stPtr) {
         rx.lastConsumedAbsolute.store(0, std::memory_order_release);
+        rx.lastSeenStreamEpoch.store(0, std::memory_order_release);
         return;
     }
     auto& st = *stPtr;
     std::lock_guard<std::mutex> ringLock(st.ringMutex);
+    rx.lastSeenStreamEpoch.store(st.streamEpoch.load(std::memory_order_acquire),
+                                 std::memory_order_release);
     const uint64_t total = st.totalSamplesWritten.load(std::memory_order_acquire);
     const uint64_t available = std::min<uint64_t>(total, static_cast<uint64_t>(st.ringCapacity));
     const uint64_t pre = std::min<uint64_t>(available, static_cast<uint64_t>(preRollSamples));
-    rx.lastConsumedAbsolute.store(total >= pre ? total - pre : 0, std::memory_order_release);
+    uint64_t cursor = total >= pre ? total - pre : 0;
+    const uint64_t retuneFloor = st.retuneValidFromAbsolute.load(std::memory_order_acquire);
+    if (retuneFloor > 0 && cursor < retuneFloor) {
+        cursor = retuneFloor;
+    }
+    rx.lastConsumedAbsolute.store(cursor, std::memory_order_release);
 }
 
 void DeviceManager::appendIQBlock(size_t index, std::vector<std::complex<float>>&& block) {
@@ -1529,7 +1618,7 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                         try {
                             std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
                             dev->setFrequency(SOAPY_SDR_RX, 0, tuneHz);
-                            resetStreamBuffers(st);
+                            markStreamRetune(st, logicalCenter);
                             st.centerTuneAppliedSeq.store(requestedTuneSeq, std::memory_order_release);
                             lastSpectrumTime = std::chrono::steady_clock::now();
                             const auto tuneMs = std::chrono::duration_cast<std::chrono::milliseconds>(lastSpectrumTime - tuneStart).count();
