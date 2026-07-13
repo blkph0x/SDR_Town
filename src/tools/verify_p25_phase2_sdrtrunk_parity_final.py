@@ -7,7 +7,7 @@ session = (root / 'include' / 'P25ReceiverSession.h').read_text()
 call_key_eq = session[session.find('bool operator=='):session.find('};', session.find('bool operator=='))]
 checks = {
     'call key ignores grant epoch/source': 'sourceId == other.sourceId' not in call_key_eq and 'grantEpochMs == other.grantEpochMs' not in call_key_eq,
-    'explicit clear grant queues; PTT/ESS releases target voice': 'explicit clear control grant can follow and queue target-slot voice' in main and 'clearGrantTargetReleaseAllowed' not in main,
+    'explicit clear grant queues until traffic PTT/ESS': 'p25Phase2ExplicitClearGrantVoiceReleaseEvidence' not in main and 'explicit-clear-grant-target-release' not in main and 'const bool grantMayProbeVoice = grantClearTrusted || grantUnknownProbe;' in main,
     'field fallback aligns with speaker debounce': 'kP25Phase2UnknownGrantAudioProbeMinFrames = 2' in main and 'kP25Phase2UnknownGrantAudioProbeMinSamples = 1920u' in main,
     'phase2 partial does not refresh forever': 'phase2TrustedActivity' in follow and 'tdmaPartialEpochNoProgress' in follow,
     'bounded no-vcw timeout': 'const int64_t tdmaNoVcwTunedMs = waitingUnknownClearGrant' in follow and

@@ -4,8 +4,8 @@
 Unknown Phase 2 grants may be followed and queued into a bounded pending
 queue. Unknown AMBE plausibility must not feed the live vocoder, mark the call
 trusted-clear, or emit speaker audio. Target-slot PTT/ESS or target MAC/ESS may
-release audio; explicit clear grants may follow and queue but do not open the
-Phase-2 speaker by themselves.
+release audio; explicit clear control grants may only follow/queue until traffic
+PTT/ESS proves the call clear.
 """
 from pathlib import Path
 src = Path(__file__).resolve().parents[1] / "main.cpp"
@@ -14,7 +14,7 @@ required = [
     "const bool grantUnknownProbe =",
     "const bool grantMayReleaseVoice =",
     "const bool voiceReleaseTrusted = burst.sessionAudioRelease || grantMayReleaseVoice;",
-    "explicit clear control grant can follow and queue target-slot voice",
+    "const bool grantMayProbeVoice = grantClearTrusted || grantUnknownProbe;",
     "establishedClearCall",
     "if (!burst.essKnown && !burst.sessionAudioRelease) {",
     "queueUnknownAmbe",
@@ -37,6 +37,8 @@ if forbidden in text:
     print("unknown probe still releases voice")
     raise SystemExit(1)
 forbidden_fragments = [
+    "p25Phase2ExplicitClearGrantVoiceReleaseEvidence",
+    "explicit-clear-grant-target-release",
     "fieldProbeClear ||",
     "voiceReleaseTrusted || burstSdrtrunkLateEntryVoiceRelease || lateEntryAudioProbeAllowed",
     "late-entry-field-audio-probe-release",

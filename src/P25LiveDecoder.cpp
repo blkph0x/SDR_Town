@@ -2161,25 +2161,19 @@ struct Phase2DuidDecode {
 Phase2DuidDecode decodePhase2Duid(uint8_t codeword)
 {
     Phase2DuidDecode out;
-    int secondBest = 9;
     for (int duid = 0; duid < 16; ++duid) {
         const uint8_t expected = encodePhase2DuidCodeword(duid);
         const int distance = popcount64(static_cast<unsigned>(codeword ^ expected));
         if (distance < out.errors) {
-            secondBest = out.errors;
             out.errors = distance;
             out.duid = duid;
-        } else if (distance < secondBest) {
-            secondBest = distance;
         }
     }
-    // Match sdrtrunk DataUnitID.fromEncodedValue: accept nearest codeword within
-    // Hamming distance 2.  Require uniqueness at distance 2 so SACCH/FACCH cannot
-    // tie-break into Voice4 and feed scrambled AMBE (field dual-call scramble).
-    // Prefer unique distance-1 over any distance-2 voice misread.
+    // Match sdrtrunk DataUnitID.fromEncodedValue: exact table lookup first, then
+    // nearest encoded DUID at Hamming distance <= 2. Equal-distance ties retain
+    // the earlier enum/codeword because the comparison is strictly-less-than.
+    // Unknown results become UnknownTimeslot-equivalent and never produce AMBE.
     if (out.errors > 2) out.duid = -1;
-    else if (out.errors == 2 && secondBest <= 2) out.duid = -1; // ambiguous or near-tie
-    else if (out.errors == 1 && secondBest == 1) out.duid = -1; // two equally close
     return out;
 }
 
@@ -3989,24 +3983,14 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
         }
     }
 
-    // Extract AMBE for hard Voice2/Voice4 (sdrtrunk Voice*Timeslot).
-    // Never soft-probe SACCH/FACCH — that was the dominant scramble source
-    // (FACCH/Unknown VCWs flooded mbelib with garbage that still made PCM).
-    // Unknown DUID only: weak-field Voice often fails Hamming unique-decode;
-    // allow Voice4 offsets when superframe+mask are locked. main.cpp still
-    // requires hard kind OR low Golay errors before speaker emit.
+    // Extract AMBE for hard Voice2/Voice4 only (sdrtrunk Voice*Timeslot).
+    // Unknown DUID maps to UnknownTimeslot in sdrtrunk and must not manufacture
+    // AMBE; mbelib can synthesize plausible garbage from signaling bits.
     const bool hardVoice = phase2BurstKindHasVoice(burst.kind);
-    const bool softUnknownVoice =
-        !hardVoice &&
-        canApplyMask &&
-        superframeLocked &&
-        burst.kind == P25Phase2BurstKind::Unknown &&
-        duid.errors >= 2;
-    if (hardVoice || softUnknownVoice) {
+    if (hardVoice) {
         const auto& voicePayloadDibits = canApplyMask ? descrambledPayloadDibits : rawPayloadDibits;
-        const P25Phase2BurstKind voiceLayoutKind = hardVoice ? burst.kind : P25Phase2BurstKind::Voice4;
-        if (session && burst.xorMaskApplied && superframeLocked && hardVoice) {
-            if (auto ess = decodePhase2VoiceEssSdrtrunkOrder(voicePayloadDibits, voiceLayoutKind, *session)) {
+        if (session && burst.xorMaskApplied && superframeLocked) {
+            if (auto ess = decodePhase2VoiceEssSdrtrunkOrder(voicePayloadDibits, burst.kind, *session)) {
                 phase2AcceptVoiceEss(*session, *ess);
             }
         }
@@ -4018,7 +4002,7 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
         // but that pointer is already shifted 10 dibits from the raw 180-dibit
         // burst; the same absolute positions are pos+21/58/106/143.
         const std::array<size_t, 4> starts{1, 38, 86, 123};
-        const size_t count = voiceLayoutKind == P25Phase2BurstKind::Voice2 ? 2u : 4u;
+        const size_t count = burst.kind == P25Phase2BurstKind::Voice2 ? 2u : 4u;
         for (size_t i = 0; i < count; ++i) {
             const size_t start = starts[i];
             // Use mapped original stream dibit index so abs positions for dedupe / validation match the input dibit stream.

@@ -1398,6 +1398,7 @@ void DeviceManager::setupSoapyForRTLSDR() {
     const char* commonRoots[] = {
         "C:\\Program Files\\PothosSDR",
         "C:\\Program Files (x86)\\PothosSDR",
+        "C:\\ProgramData\\radioconda\\Library",
         nullptr
     };
     std::string appDir = QCoreApplication::applicationDirPath().toStdString();
@@ -1411,18 +1412,22 @@ void DeviceManager::setupSoapyForRTLSDR() {
         }
     }
 
-    // Prepend PothosSDR bin (has compatible rtlsdr.dll + module) and app dir to PATH so driver and module resolve correctly.
+    // Prepend known SDR bins and app dir to PATH so driver and module dependencies resolve correctly.
     // Only do this once (or when not already present) to avoid PATH growing without bound on every
     // enumerate / start / getAvailableDrivers call.
     std::string pothosBin = "C:\\Program Files\\PothosSDR\\bin";
+    std::string radiocondaBin = "C:\\ProgramData\\radioconda\\Library\\bin";
     std::string currentPath = getenv("PATH") ? getenv("PATH") : "";
     static bool pathSetupDone = false;
     if (!pathSetupDone) {
         bool needPothos = currentPath.find(pothosBin) == std::string::npos;
+        bool needRadioconda = currentPath.find(radiocondaBin) == std::string::npos &&
+            GetFileAttributesA(radiocondaBin.c_str()) != INVALID_FILE_ATTRIBUTES;
         bool needApp    = currentPath.find(appDir) == std::string::npos;
-        if (needPothos || needApp) {
+        if (needPothos || needRadioconda || needApp) {
             std::string newPath = currentPath;
             if (needPothos) newPath = pothosBin + ";" + newPath;
+            if (needRadioconda) newPath = radiocondaBin + ";" + newPath;
             if (needApp)    newPath = appDir + ";" + newPath;
             _putenv_s("PATH", newPath.c_str());
             spdlog::debug("Updated process PATH for Soapy/RTL (once)");
@@ -1432,10 +1437,24 @@ void DeviceManager::setupSoapyForRTLSDR() {
 #endif
 
 #ifdef HAVE_SOAPYSDR
-    // Note: Removed explicit loadModule here to avoid early hardware probe/crash on startup.
-    // Setting ROOT and PATH should allow Soapy to discover/load the RTL module when needed (during enumerate with driver filter or make).
-    // The forced rtlsdr enumerate below will ensure the device appears in the list for the user.
-    spdlog::info("Soapy path setup done for RTL discovery (module will be loaded on demand).");
+    // Register the bundled RTL factory before enumerate. This loads the module
+    // only; hardware open/make still happens on the detached streaming worker.
+    static bool bundledRtlModuleTried = false;
+    if (!bundledRtlModuleTried) {
+        bundledRtlModuleTried = true;
+        try {
+            const std::string bundledModule = appDir + "\\SoapyRTLSDR.dll";
+            if (GetFileAttributesA(bundledModule.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                SoapySDR::loadModule(bundledModule);
+                spdlog::info("Loaded bundled SoapyRTLSDR module for RTL discovery: {}", bundledModule);
+            }
+        } catch (const std::exception& ex) {
+            spdlog::warn("Bundled SoapyRTLSDR module load failed during discovery: {}", ex.what());
+        } catch (...) {
+            spdlog::warn("Bundled SoapyRTLSDR module load failed during discovery: unknown error");
+        }
+    }
+    spdlog::info("Soapy path setup done for RTL discovery.");
 #endif
 }
 

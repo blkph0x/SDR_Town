@@ -39,6 +39,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
+#include <QStorageInfo>
 #include <QStringList>
 #include <complex>
 #include <array>
@@ -101,9 +102,9 @@ using json = nlohmann::json;
 
 // Phase-2 late entry on real systems often reaches the traffic channel after
 // PTT/ESS has already passed.  Keep the sdrtrunk-style queue as the primary
-// path. Target MAC/ESS proves clear audio; explicit clear control-channel
-// grants may tune/follow and queue voice, but the Phase-2 speaker release stays
-// tied to target-slot PTT/ESS state. Explicit encrypted grants/ESS remain
+// path. Target MAC/ESS proves clear audio; an explicit clear control-channel
+// grant may follow and queue target voice, but traffic-channel PTT/ESS must
+// prove clear before speaker release. Explicit encrypted grants/ESS remain
 // fail-closed.
 static constexpr bool kP25Phase2AllowUnknownGrantFieldAudioProbe = true;
 // Capture 20260712_021852: unknown grants spent 700 ms queued while short PTTs
@@ -114,8 +115,7 @@ static constexpr qint64 kP25Phase2SpeakerAudioTailGraceMs = 2500;
 static constexpr qint64 kP25Phase2RecentSecurityEvidenceTtlMs = 7000;
 static constexpr size_t kP25Phase2UnknownGrantAudioProbeMinFrames = 2;
 static constexpr size_t kP25Phase2UnknownGrantAudioProbeMinSamples = 1920u;
-static constexpr size_t kP25Phase2ClearGrantAudioProbeMinFrames = 1;
-static constexpr size_t kP25Phase2ClearGrantAudioProbeMinSamples = 960u;
+static constexpr size_t kP25Phase2PendingReleaseMinFrames = 1;
 static constexpr size_t kP25Phase2LateEntryStrongSuperframeBursts = 6;
 static constexpr size_t kP25Phase2LateEntryStrongMaskedBursts = 6;
 static constexpr size_t kP25Phase2LateEntryStrongTargetMaskedBursts = 4;
@@ -136,13 +136,17 @@ struct GuiRuntimeConfig {
     bool p25GrantTest = false;
     bool openP25Log = false;
     bool p25LateEntryAudioProbe = kP25Phase2AllowUnknownGrantFieldAudioProbe;
+    bool iqCapture = false;
     bool dryRun = false;
     bool selfTest = false;
     bool requireClearAudio = false;
     double frequencyHz = 0.0;
     double p25ControlHz = 0.0;
+    int iqCaptureDurationMs = 0;
     int exitAfterMs = 0;
     int clearAudioTimeoutMs = 0;
+    std::string iqCaptureLabel;
+    std::string iqCaptureRoot;
     std::string selfTestPath;
     std::string debugStage;
     std::vector<std::string> warnings;
@@ -150,7 +154,7 @@ struct GuiRuntimeConfig {
     bool hasStartupWork() const noexcept
     {
         return requested || startDevice || defaultAudio || autoFollow || p25Monitor ||
-            p25GrantTest || openP25Log || selfTest || exitAfterMs > 0;
+            p25GrantTest || openP25Log || iqCapture || selfTest || exitAfterMs > 0;
     }
 };
 
@@ -285,6 +289,45 @@ static GuiRuntimeConfig parseGuiRuntimeConfig(int argc, char* argv[])
         } else if (key == "--gui-open-p25-log" || key == "--p25-log") {
             cfg.requested = true;
             cfg.openP25Log = true;
+        } else if (key == "--gui-start-iq-capture" || key == "--gui-iq-capture" ||
+                   key == "--start-iq-capture") {
+            cfg.requested = true;
+            cfg.iqCapture = true;
+        } else if (key == "--gui-capture-label" || key == "--capture-label") {
+            cfg.requested = true;
+            if (auto value = requireValue(key.c_str())) {
+                cfg.iqCaptureLabel = *value;
+                cfg.iqCapture = true;
+            }
+        } else if (key == "--gui-capture-root" || key == "--capture-root") {
+            cfg.requested = true;
+            if (auto value = requireValue(key.c_str())) {
+                cfg.iqCaptureRoot = *value;
+                cfg.iqCapture = true;
+            }
+        } else if (key == "--gui-capture-seconds" || key == "--capture-seconds") {
+            cfg.requested = true;
+            if (auto value = requireValue(key.c_str())) {
+                double seconds = 0.0;
+                if (guiRuntimeParseDouble(*value, seconds) && seconds > 0.0) {
+                    const double clamped = std::clamp(seconds, 1.0, 3600.0);
+                    cfg.iqCaptureDurationMs = static_cast<int>(std::lround(clamped * 1000.0));
+                    cfg.iqCapture = true;
+                } else {
+                    cfg.warnings.push_back("invalid GUI capture seconds: " + *value);
+                }
+            }
+        } else if (key == "--gui-capture-ms" || key == "--capture-ms") {
+            cfg.requested = true;
+            if (auto value = requireValue(key.c_str())) {
+                int ms = 0;
+                if (guiRuntimeParseInt(*value, ms) && ms > 0) {
+                    cfg.iqCaptureDurationMs = std::clamp(ms, 1000, 3600000);
+                    cfg.iqCapture = true;
+                } else {
+                    cfg.warnings.push_back("invalid GUI capture milliseconds: " + *value);
+                }
+            }
         } else if (key == "--gui-p25-late-entry-audio-probe" ||
                    key == "--p25-late-entry-audio-probe" ||
                    key == "--gui-p25-field-audio-probe" ||
@@ -4048,6 +4091,8 @@ struct LiveIqCaptureResult {
     QString message;
 };
 
+static QString gIqTestCapturesRootOverride;
+
 static QString trainingCapturesRoot()
 {
     const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -4058,9 +4103,25 @@ static QString trainingCapturesRoot()
 
 static QString iqTestCapturesRoot()
 {
+    if (!gIqTestCapturesRootOverride.trimmed().isEmpty()) {
+        QDir().mkpath(gIqTestCapturesRootOverride);
+        return gIqTestCapturesRootOverride;
+    }
     const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(appData + "/iq_test_captures");
     return appData + "/iq_test_captures";
+}
+
+static QString humanBytes(qint64 bytes)
+{
+    const double value = static_cast<double>(std::max<qint64>(0, bytes));
+    if (value >= 1024.0 * 1024.0 * 1024.0) {
+        return QString("%1 GiB").arg(value / (1024.0 * 1024.0 * 1024.0), 0, 'f', 2);
+    }
+    if (value >= 1024.0 * 1024.0) {
+        return QString("%1 MiB").arg(value / (1024.0 * 1024.0), 0, 'f', 1);
+    }
+    return QString("%1 bytes").arg(bytes);
 }
 
 static std::string sanitizeFileToken(std::string s)
@@ -5695,10 +5756,10 @@ static std::string p25VoiceBlockSpeakerGateReason(const P25VoiceAudioBlock& out)
     if (phase2Voice) {
         // Require real mbelib PCM before opening the speaker.  Pending-queue drains
         // and weak mask hits were producing audible blips without sustained VCW feed.
-        // Clear-trusted grants may emit on the first accepted AMBE frame so short
+        // Clear-trusted calls may emit on the first accepted AMBE frame so short
         // PTTs are not lost waiting for a second 20 ms frame.
         const size_t minMbelibFrames = out.phase2SecurityTrustedClear
-            ? kP25Phase2ClearGrantAudioProbeMinFrames
+            ? kP25Phase2PendingReleaseMinFrames
             : kP25Phase2UnknownGrantAudioProbeMinFrames;
         if (out.phase2EmittedPcmFrames == 0 &&
             out.phase2FedToMbelib < static_cast<long long>(minMbelibFrames)) {
@@ -5786,7 +5847,8 @@ static P25VoiceAudioBlock applyP25Phase2SecurityAudioGate(Receiver& rx,
     // 1. burst.sessionAudioRelease && !encrypted : maskApplied + essKnown+Trusted+fec + (pttSeen from MAC_PTT or ess fec) + !enc
     // 2. burst.macCrcLock (crcValid || (fecDecoded && correctedSymbols < 10)) + MAC_PTT/MAC_ACTIVE with clear ESS
     // 3. targetEssKnown && !targetEssEncrypted (after valid PTT/ESS-A RS)
-    // 4. Explicit clear control grant can follow and queue target voice; target-slot PTT/ESS releases speaker audio.
+    // 4. Explicit clear control grants may follow/queue the call, but they do not
+    //    release speaker audio until traffic-channel PTT/ESS proves clear.
     // 5. sdrtrunkLateEntryVoiceRelease or lateEntryStrongTargetReleaseAllowed ONLY when target MAC/ESS proves clear plus strong target VCW + superframe/mask/slot.
     //    (unknown late entry still requires proof MAC or ESS; VCW count alone never suffices for emit)
     //
@@ -5809,11 +5871,12 @@ static P25VoiceAudioBlock applyP25Phase2SecurityAudioGate(Receiver& rx,
     const P25P2CallAudioKey key = p25CurrentPhase2AudioKey(rx, targetFreqHz);
 
     // Fail closed on an explicit encrypted grant, but otherwise use the followed
-    // traffic-slot's own PTT/ESS/voice-session state for speaker release. An
-    // explicit clear control grant can follow and queue target-slot voice, but
-    // it does not promote speaker state until target PTT/ESS confirms clear. The
-    // aggregate live.stats ESS/MAC counters can describe the other slot on the
-    // same Phase-2 carrier and must not flush/drop the target call queue.
+    // traffic-slot's own PTT/ESS/voice-session state for speaker release. A
+    // control-channel clear service option is not enough to synthesize audio:
+    // sdrtrunk queues AbstractVoiceTimeslot instances until PTT/ESS establishes
+    // clear/encrypted state. The aggregate live.stats ESS/MAC counters can
+    // describe the other slot on the same Phase-2 carrier and must not flush/drop
+    // the target call queue.
     const bool trustedEncrypted = rx.p25VoiceEncrypted ||
         (out.phase2TargetEssKnown && out.phase2TargetEssEncrypted);
     if (trustedEncrypted && rx.p25CurrentCallSessionId != 0) {
@@ -5896,7 +5959,7 @@ static P25VoiceAudioBlock applyP25Phase2SecurityAudioGate(Receiver& rx,
     }
     if (trustedClear && ((!out.audio.empty() && out.decodedFrames > 0) ||
                          (trustedClearPendingRelease &&
-                          out.phase2FedToMbelib >= static_cast<long long>(kP25Phase2ClearGrantAudioProbeMinFrames)))) {
+                          out.phase2FedToMbelib >= static_cast<long long>(kP25Phase2PendingReleaseMinFrames)))) {
         p25ClearPhase2SpeakerMuteFlags(out);
     }
 
@@ -8755,18 +8818,13 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
 
     for (const auto& burst : orderedBurstsForFeed) {
         if (burst.voiceCodewords.empty()) continue;
-        // Hard Voice2/Voice4 preferred. Unknown-DUID soft VCWs are allowed only
-        // when superframe+mask locked (decoder marks them); SACCH/FACCH never.
-        // Soft frames still face the strict Golay gate below.
+        // Match sdrtrunk: only hard Voice2/Voice4 timeslots feed AMBE audio.
+        // UnknownTimeslot-equivalent bursts remain diagnostics and never become
+        // speaker audio; otherwise signaling bits can sound like scrambled voice.
         const bool hardVoiceKind =
             burst.kind == P25Phase2BurstKind::Voice4 ||
             burst.kind == P25Phase2BurstKind::Voice2;
-        const bool softUnknownVoiceKind =
-            burst.kind == P25Phase2BurstKind::Unknown &&
-            burst.xorMaskApplied &&
-            burst.superframeLock &&
-            !burst.voiceCodewords.empty();
-        if (!hardVoiceKind && !softUnknownVoiceKind) {
+        if (!hardVoiceKind) {
             out.phase2RejectedVoiceCodewords += burst.voiceCodewords.size();
             continue;
         }
@@ -8790,12 +8848,13 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
         // sdrtrunk's traffic-channel state, allow AMBE PCM to reach the speaker.
         // This fallback never applies to explicit encrypted grants/ESS.
         const qint64 grantAgeMs = nowMs - rx.p25VoiceGrantEpochMs;
+        const bool releaseHasRequiredLock = burst.superframeLock;
         const bool grantMayReleaseVoice =
             sdrtrunkLateEntryVoiceRelease &&
             rx.p25VoiceMaskParamsKnown &&
             burst.xorMaskApplied &&
-            burst.superframeLock &&
-            grantAgeMs >= (sdrtrunkLateEntryVoiceRelease ? 0 : 500) &&
+            releaseHasRequiredLock &&
+            grantAgeMs >= 0 &&
             !out.phase2TargetEssEncrypted;
         if (!rx.p25VoiceTdmaSlotKnown) {
             out.phase2RejectedVoiceCodewords += burst.voiceCodewords.size();
@@ -9111,20 +9170,7 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             out.phase2LastFedAbsDibit = std::max(out.phase2LastFedAbsDibit, codewordAbsDibit);
 
             const size_t audioSizeBefore = out.audio.size();
-            const size_t decodedBefore = out.decodedFrames;
-            const size_t emitBefore = out.phase2EmittedPcmFrames;
             bool ok = p25DecodePhase2AmbeFrameToAudio(rx, ambeFrame, outputRateHz, out, frame);
-            // Soft Unknown-DUID voice must be cleaner than hard 2V/4V — otherwise
-            // residual SACCH-looking Unknown frames reintroduce scramble.  Drop
-            // any PCM/PLC from this codeword; do not PLC soft junk.
-            if (softUnknownVoiceKind && frame.totalErrors > 2) {
-                ok = false;
-                frame.accepted = false;
-                ++out.phase2RejectedVoiceCodewords;
-                out.phase2EmittedPcmFrames = emitBefore;
-                out.decodedFrames = decodedBefore;
-                out.audio.resize(audioSizeBefore);
-            }
             // Hard voice: rejected frames already got PLC inside decode helper when
             // mbelib ran; treat any emitted PCM (including PLC) as continuity.
             const bool emittedPcm = out.audio.size() > audioSizeBefore;
@@ -15236,7 +15282,9 @@ public:
                                         else if (!vcwPresentDiag) blockReason = "no-vcw-from-live-window";
                                         else if ((!superframeLockedDiag || !maskLockedDiag) && grantUnknownProbeDiag) blockReason = "late-entry-vocoder-probe-active";
                                         else if (!superframeLockedDiag || !maskLockedDiag) blockReason = "vcw-present-but-no-sf-mask-yet";
-                                        else if (!macTrustedDiag && !essTrustedDiag) blockReason = "metadata-gate-waiting-traffic-mac-ess";
+                                        else if (!macTrustedDiag && !essTrustedDiag && !callClearTrustedDiag) blockReason = "metadata-gate-waiting-traffic-mac-ess";
+                                        else if (callClearTrustedDiag && p2AmbeAttempts == 0 && voiceDiag.phase2ExpectedVoiceCodewords > 0) blockReason = "clear-grant-vcw-not-fed";
+                                        else if (callClearTrustedDiag && p2AmbeAttempts == 0 && p2vcw > 0) blockReason = "vcw-soft-or-nonvoice-filtered";
                                         else if (p2AmbeAttempts > 0 && p2AmbeAccepted == 0) blockReason = "ambe-rejected-zero-accepted";
                                         else if (code == P25VoiceDiagCode::Phase2AmbeRejected) blockReason = "ambe-fec-rejected";
                                         else if (decoded == 0) blockReason = "vocoder-produced-no-frames";
@@ -18349,6 +18397,10 @@ private:
                 {"p25GrantTest", guiRuntimeConfig.p25GrantTest},
                 {"autoFollow", guiRuntimeConfig.autoFollow},
                 {"defaultAudio", guiRuntimeConfig.defaultAudio},
+                {"iqCapture", guiRuntimeConfig.iqCapture},
+                {"iqCaptureDurationMs", guiRuntimeConfig.iqCaptureDurationMs},
+                {"iqCaptureLabel", guiRuntimeConfig.iqCaptureLabel},
+                {"iqCaptureRoot", guiRuntimeConfig.iqCaptureRoot},
                 {"p25LateEntryAudioProbe", guiRuntimeConfig.p25LateEntryAudioProbe},
                 {"requireClearAudio", guiRuntimeConfig.requireClearAudio},
                 {"clearAudioTimeoutMs", guiRuntimeConfig.clearAudioTimeoutMs},
@@ -18444,6 +18496,14 @@ private:
                 {"samples", guiP25AudioOutputSamples.load(std::memory_order_relaxed)},
                 {"lastOutputMs", guiP25AudioLastOutputMs.load(std::memory_order_relaxed)},
             };
+            record["iqCapture"] = {
+                {"active", liveIqCapture.active},
+                {"directory", liveIqCapture.directory.toStdString()},
+                {"sampleCount", liveIqCapture.samplesWritten},
+                {"bytesWritten", liveIqCapture.bytesWritten},
+                {"ringOverrunSamples", liveIqCapture.ringOverrunSamples},
+                {"fileWriteErrorPolls", liveIqCapture.fileWriteErrorPolls},
+            };
             record["ok"] = guiRuntimeStartupErrors.isEmpty() &&
                 (!guiRuntimeConfig.requireClearAudio ||
                  guiP25AudioOutputEvents.load(std::memory_order_relaxed) > 0);
@@ -18459,6 +18519,85 @@ private:
         } catch (...) {
             spdlog::warn("GUI startup self-test write failed: unknown error");
         }
+    }
+
+    QString guiRuntimeCaptureLabel()
+    {
+        if (!guiRuntimeConfig.iqCaptureLabel.empty()) {
+            return QString::fromStdString(guiRuntimeConfig.iqCaptureLabel);
+        }
+        double freqHz = guiRuntimeConfig.p25ControlHz > 0.0
+            ? guiRuntimeConfig.p25ControlHz
+            : guiRuntimeConfig.frequencyHz;
+        DemodMode mode = currentMonitorMode;
+        {
+            std::lock_guard<std::mutex> lk(monitorParamsMutex);
+            if (freqHz <= 0.0) freqHz = currentMonitorFreq;
+            mode = currentMonitorMode;
+        }
+        return QString("iq_%1_%2MHz").arg(modeToQString(mode)).arg(freqHz / 1e6, 0, 'f', 5);
+    }
+
+    void scheduleGuiRuntimeIqCapture()
+    {
+        if (!guiRuntimeConfig.iqCapture) return;
+
+        const int durationMs = std::clamp(
+            guiRuntimeConfig.iqCaptureDurationMs > 0 ? guiRuntimeConfig.iqCaptureDurationMs : 300000,
+            1000,
+            3600000);
+        const QString label = guiRuntimeCaptureLabel();
+
+        if (guiRuntimeConfig.dryRun) {
+            appendP25LogLine(QString("GUI startup dry-run: would run IQ capture label=\"%1\" duration=%2ms.")
+                .arg(label)
+                .arg(durationMs));
+            return;
+        }
+
+        auto starter = std::make_shared<std::function<void(int)>>();
+        std::weak_ptr<std::function<void(int)>> weakStarter = starter;
+        *starter = [this, label, durationMs, weakStarter](int attempt) {
+            const auto result = startLiveIqCapture(label.toStdString(), durationMs);
+            if (result.ok) {
+                appendP25LogLine(QString("GUI runtime IQ capture started: label=\"%1\" duration=%2ms dir=%3")
+                    .arg(label)
+                    .arg(durationMs)
+                    .arg(result.directory));
+                QTimer::singleShot(durationMs, this, [this]() {
+                    const auto stopped = stopLiveIqCapture();
+                    if (stopped.ok) {
+                        appendP25LogLine(QString("GUI runtime IQ capture stopped: %1").arg(stopped.directory));
+                    } else {
+                        recordGuiRuntimeError(QString("GUI runtime IQ capture stop failed: %1").arg(stopped.message));
+                    }
+                    if (guiRuntimeConfig.selfTest) {
+                        writeGuiRuntimeSelfTestResult(stopped.ok ? "iq-capture-stopped" : "iq-capture-stop-failed");
+                        if (guiRuntimeConfig.exitAfterMs <= 0 && !guiRuntimeConfig.requireClearAudio) {
+                            QCoreApplication::quit();
+                        }
+                    }
+                });
+                return;
+            }
+
+            const bool likelyWaitingForDevice = result.message.contains("No live spectrum", Qt::CaseInsensitive);
+            if (likelyWaitingForDevice && attempt < 60) {
+                if (auto retry = weakStarter.lock()) {
+                    QTimer::singleShot(500, this, [retry, attempt]() { (*retry)(attempt + 1); });
+                }
+                return;
+            }
+
+            recordGuiRuntimeError(QString("GUI runtime IQ capture start failed: %1").arg(result.message));
+            if (guiRuntimeConfig.selfTest) {
+                writeGuiRuntimeSelfTestResult("iq-capture-start-failed");
+                if (guiRuntimeConfig.exitAfterMs <= 0 && !guiRuntimeConfig.requireClearAudio) {
+                    QCoreApplication::quit();
+                }
+            }
+        };
+        QTimer::singleShot(1500, this, [starter]() { (*starter)(0); });
     }
 
     void scheduleGuiRuntimeSelfTest()
@@ -18509,12 +18648,23 @@ private:
             recordGuiRuntimeError(QString::fromStdString(warning));
         }
 
-        appendP25LogLine(QString("GUI runtime startup applying: freq=%1MHz p25cc=%2MHz start=%3 autoFollow=%4 defaultAudio=%5 lateEntryProbe=%6 dryRun=%7.")
+        if (!guiRuntimeConfig.iqCaptureRoot.empty()) {
+            const QString root = QDir::fromNativeSeparators(QString::fromStdString(guiRuntimeConfig.iqCaptureRoot)).trimmed();
+            if (root.isEmpty() || !QDir().mkpath(root)) {
+                recordGuiRuntimeError(QString("GUI capture root is not writable/creatable: %1").arg(root));
+            } else {
+                gIqTestCapturesRootOverride = root;
+                appendP25LogLine(QString("GUI runtime IQ capture root override: %1").arg(root));
+            }
+        }
+
+        appendP25LogLine(QString("GUI runtime startup applying: freq=%1MHz p25cc=%2MHz start=%3 autoFollow=%4 defaultAudio=%5 iqCapture=%6 lateEntryProbe=%7 dryRun=%8.")
             .arg(guiRuntimeConfig.frequencyHz > 0.0 ? guiRuntimeConfig.frequencyHz / 1e6 : 0.0, 0, 'f', 5)
             .arg(guiRuntimeConfig.p25ControlHz > 0.0 ? guiRuntimeConfig.p25ControlHz / 1e6 : 0.0, 0, 'f', 5)
             .arg(guiRuntimeConfig.startDevice ? "yes" : "no")
             .arg(guiRuntimeConfig.autoFollow ? "yes" : "no")
             .arg(guiRuntimeConfig.defaultAudio ? "yes" : "no")
+            .arg(guiRuntimeConfig.iqCapture ? "yes" : "no")
             .arg(guiRuntimeConfig.p25LateEntryAudioProbe ? "yes" : "no")
             .arg(guiRuntimeConfig.dryRun ? "yes" : "no"));
 
@@ -18549,6 +18699,7 @@ private:
             showP25LogWindow();
         }
 
+        scheduleGuiRuntimeIqCapture();
         scheduleGuiRuntimeSelfTest();
     }
 
@@ -18710,7 +18861,7 @@ private:
         if (flushNow) liveIqCapture.events.flush();
     }
 
-    LiveIqCaptureResult startLiveIqCapture(const std::string& label) {
+    LiveIqCaptureResult startLiveIqCapture(const std::string& label, int plannedDurationMs = 0) {
         LiveIqCaptureResult out;
         if (liveIqCapture.active) {
             out.message = "An IQ capture is already running. Stop it before starting a new one.";
@@ -18762,6 +18913,28 @@ private:
         session.endAbsolute = cursorWindow.endAbsolute;
 
         const QString root = iqTestCapturesRoot();
+        if (plannedDurationMs > 0) {
+            QStorageInfo storage(root);
+            storage.refresh();
+            const double captureSeconds = static_cast<double>(plannedDurationMs) / 1000.0;
+            const double dataBytes = std::max(0.0, session.sampleRateHz) *
+                captureSeconds * static_cast<double>(sizeof(std::complex<float>));
+            const qint64 requiredBytes = static_cast<qint64>(std::ceil(dataBytes)) +
+                static_cast<qint64>(512) * 1024 * 1024;
+            if (!storage.isValid() || !storage.isReady()) {
+                out.message = QString("Capture storage is not ready: %1").arg(root);
+                return out;
+            }
+            if (storage.bytesAvailable() < requiredBytes) {
+                out.message = QString("Not enough free space for %1s IQ capture at %2 MS/s on %3: need at least %4, available %5. Use --gui-capture-root to target a larger disk.")
+                    .arg(captureSeconds, 0, 'f', 1)
+                    .arg(session.sampleRateHz / 1e6, 0, 'f', 3)
+                    .arg(root)
+                    .arg(humanBytes(requiredBytes))
+                    .arg(humanBytes(storage.bytesAvailable()));
+                return out;
+            }
+        }
         const QString stamp = session.startedUtc.toString("yyyyMMdd_HHmmss_zzz");
         const std::string labelToken = sanitizeFileToken(session.label);
         session.baseName = QString("%1_%2_%3MHz_startstop")
@@ -18880,15 +19053,17 @@ private:
             ? liveIqCapture.lastPollUtc.msecsTo(nowUtc)
             : 250;
         const double elapsedSeconds = std::clamp(static_cast<double>(std::max<qint64>(elapsedMsRaw, 50)) / 1000.0, 0.05, 2.0);
-        // Cap request <=0.5s. Even on bg capture writer, large ring pulls hold ringMutex during
-        // the bulk copy; other readers (GUI timer control decode getRecent, DSP getNewForRx) wait.
-        // Short max hold reduces stalls on GUI event loop and workers during capture + repeated
-        // returns/retunes. Dynamic still covers small gaps.
-        const double requestSeconds = std::clamp(elapsedSeconds * 2.0 + 0.25, 0.25, 0.5);
+        // Normal polls still pull about 0.5s, but startup, retune, disk, or heavy
+        // P25 decode can occasionally delay the writer close to a second. A 0.5s
+        // hard cap made those recoverable delays look like ring overruns because
+        // getRecentIQWindowWithCursor() returns the newest window. Allow a bounded
+        // catch-up pull so long captures stay gapless without turning every poll
+        // into a multi-megabyte ring copy.
+        const double requestSeconds = std::clamp(elapsedSeconds * 2.0 + 0.25, 0.25, 2.0);
         const size_t maxPull = static_cast<size_t>(std::clamp(
             liveIqCapture.sampleRateHz * requestSeconds,
             4096.0,
-            std::max(4096.0, liveIqCapture.sampleRateHz * 0.6)));
+            std::max(4096.0, liveIqCapture.sampleRateHz * 2.1)));
         const auto window = mgr.getRecentIQWindowWithCursor(liveIqCapture.deviceIndex, maxPull);
         const uint64_t cursorBefore = liveIqCapture.cursorAbsolute;
         uint64_t gapSamples = 0;
