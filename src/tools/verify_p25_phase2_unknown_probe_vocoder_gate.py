@@ -4,11 +4,11 @@
 Unknown Phase 2 grants may be followed and queued into a bounded pending
 queue. Plain AMBE plausibility must not mark the call permanently clear.
 Target-slot PTT/ESS or target MAC/ESS may release audio; explicit clear control
-grants may release after target-slot hard voice is XOR-masked and diagnostic
-AMBE validation succeeds. Unknown-grant field probing is a default-off lab
-diagnostic: it can be enabled for capture analysis, but normal GUI/CLI audio
-release remains fail-closed until MAC/ESS/PTT proves clear. Encrypted evidence
-still wins and mutes.
+grants may release only after target-slot hard voice, XOR mask, and diagnostic
+AMBE validation. Unknown-grant field probing is a default-off lab diagnostic:
+it can be enabled for capture analysis, but normal GUI/CLI audio release
+remains fail-closed until MAC/ESS/PTT proves clear. Encrypted evidence still
+wins and mutes.
 """
 from pathlib import Path
 src = Path(__file__).resolve().parents[1] / "main.cpp"
@@ -76,6 +76,24 @@ release_block = text.split("auto releasePendingRawVoiceFromValidatedExplicitClea
 if len(release_block) != 2 or "p25Phase2StrongVoiceTimeslotPcm(out)" in release_block[1].split("};", 1)[0]:
     print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
     print("explicit clear release must not require a full six-burst strong PCM window")
+    raise SystemExit(1)
+explicit_helper = text.split("static bool p25Phase2ExplicitClearGrantVoiceReleaseEvidence", 1)
+if len(explicit_helper) != 2:
+    print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
+    print("missing explicit-clear release evidence helper")
+    raise SystemExit(1)
+explicit_body = explicit_helper[1].split("static bool p25Phase2UnknownGrantProbeVoiceReleaseEvidence", 1)[0]
+if "targetTrafficSecurityEvidence &&" in explicit_body:
+    print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
+    print("explicit clear release must not require MAC/ESS when the control-channel grant already proved clear")
+    raise SystemExit(1)
+if "out.phase2OppositeVoiceCodewords > 0 && !targetSlotLabelled" not in explicit_body:
+    print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
+    print("explicit clear release must still block opposite-slot-only/ambiguous dual-slot windows")
+    raise SystemExit(1)
+if "boundedProbeAccepted &&" not in explicit_body:
+    print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
+    print("explicit clear release must keep bounded diagnostic AMBE validation")
     raise SystemExit(1)
 unknown_block = text.split("static bool p25Phase2UnknownGrantProbeVoiceReleaseEvidence", 1)
 if len(unknown_block) != 2:

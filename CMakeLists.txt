@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.27 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.28 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -57,6 +57,8 @@ set(SDR_TOWN_SOURCES
     src/P25TrafficChannelProcessor.cpp
     include/P25TrafficChannelProcessor.h
     src/Receiver.cpp
+    src/RemoteDiagnostics.cpp
+    include/RemoteDiagnostics.h
     src/UpdateManager.cpp   # professional GitHub release + safe in-app updater
     include/UpdateManager.h
 )

@@ -166,6 +166,42 @@ $env:SDR_TOWN_P25_VALIDATION_REDACT = "1"
 Logs are written under the app data `logs` folder, rotated at 8 MB, and can be
 redacted so raw symbols/AMBE bits and ESS key identifiers are not exported.
 
+## Remote Live Diagnostics
+
+Remote diagnostics are opt-in and are designed for tester debugging, not bulk
+capture upload. The app sends compact JSON events for startup, P25 follow/log
+state, voice-gate decisions, MAC/ESS state, AMBE counters, audio metrics, and
+drop counters. It does not upload IQ samples, PCM audio, raw dibits, raw
+symbols, or large log files.
+
+Start a collector on the machine that will receive tester events:
+
+```powershell
+python src\tools\remote_diag_server.py --host 0.0.0.0 --port 8787 --token test-token --out remote_diagnostics
+```
+
+Run the GUI or CLI with diagnostics enabled:
+
+```powershell
+.\SDR_Town.exe --diag-url http://collector-host:8787/ingest --diag-token test-token
+.\SDR_Town.exe --cli --diag-url http://collector-host:8787/ingest --diag-token test-token
+```
+
+Environment variables are also supported:
+
+```powershell
+$env:SDR_TOWN_DIAG_URL = "http://collector-host:8787/ingest"
+$env:SDR_TOWN_DIAG_TOKEN = "test-token"
+$env:SDR_TOWN_DIAG_MAX_BYTES_PER_MIN = "65536"
+$env:SDR_TOWN_DIAG_MAX_PAYLOAD_BYTES = "16384"
+$env:SDR_TOWN_DIAG_MIN_INTERVAL_MS = "1000"
+```
+
+The defaults limit live telemetry to roughly 64 KiB/minute, 16 KiB per event,
+one send per second, and a bounded queue. If the network or budget cannot keep
+up, events are dropped and the drop counters are included in later events.
+Use `--diag-off` or unset `SDR_TOWN_DIAG_URL` to disable it.
+
 ## CLI Help
 
 Start CLI mode from the built release folder:

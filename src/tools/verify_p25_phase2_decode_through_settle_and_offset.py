@@ -4,6 +4,9 @@ dec = Path('src/P25LiveDecoder.cpp').read_text(errors='ignore')
 assert 'Decode through settle' in main or 'Do not skip Phase-2 decode during retune/settle' in main
 assert 'p25VoiceOutputMutedForSettle' in main
 assert 'p25VoiceSettleUntilMs > nowMs' in main
+assert 'p25VoiceBlockMayBypassPostArmSettle' in main
+assert 'p25TalkgroupGrantProvesSpeakerClear(tg)\n                        ? nowMs' not in main
+assert main.count('p25VoiceBlockMayBypassPostArmSettle(') >= 4, 'GUI, worker, and CLI settle bypass must share proof-aware gate'
 assert 'mgr.setReceiverCursorToLiveEdge(i, rx);\n                            }\n                        }' not in main
 assert 'mgr.setReceiverCursorToLiveEdge(di, rx);\n                        }\n                    }' not in main
 assert 'Never assign rx.p25VoiceLiveDecoder unless rx.dspMutex is held' not in main or 'if (dspLock.owns_lock())' in main
