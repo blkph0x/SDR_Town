@@ -4,6 +4,7 @@ param(
     [string]$BindHost = "0.0.0.0",
     [string]$OutDir = "$env:APPDATA\SDR_Town\remote_diagnostics",
     [string]$TokenFile = "$env:APPDATA\SDR_Town\remote_diagnostics_token.txt",
+    [string]$AdminTokenFile = "$env:APPDATA\SDR_Town\remote_diagnostics_admin_token.txt",
     [string]$ConfigFile = "$env:APPDATA\SDR_Town\SDR Town\remote_diagnostics.json",
     [string]$CollectorUrl = "",
     [switch]$OpenFirewall,
@@ -33,6 +34,7 @@ function New-DiagnosticsToken {
 }
 
 New-Item -ItemType Directory -Force -Path (Split-Path $TokenFile -Parent) | Out-Null
+New-Item -ItemType Directory -Force -Path (Split-Path $AdminTokenFile -Parent) | Out-Null
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Split-Path $ConfigFile -Parent) | Out-Null
 
@@ -43,6 +45,14 @@ $token = (Get-Content -Path $TokenFile -Raw).Trim()
 if ([string]::IsNullOrWhiteSpace($token)) {
     $token = New-DiagnosticsToken
     $token | Set-Content -Path $TokenFile -Encoding ascii
+}
+if (-not (Test-Path $AdminTokenFile)) {
+    New-DiagnosticsToken | Set-Content -Path $AdminTokenFile -Encoding ascii
+}
+$adminToken = (Get-Content -Path $AdminTokenFile -Raw).Trim()
+if ([string]::IsNullOrWhiteSpace($adminToken)) {
+    $adminToken = New-DiagnosticsToken
+    $adminToken | Set-Content -Path $AdminTokenFile -Encoding ascii
 }
 
 if ([string]::IsNullOrWhiteSpace($CollectorUrl)) {
@@ -95,7 +105,7 @@ $stderr = Join-Path $logsDir "server.err.log"
 $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
 if ($listeners.Count -eq 0) {
     $python = (Get-Command python -ErrorAction Stop).Source
-    $args = @($server, "--host", $BindHost, "--port", "$Port", "--token", $token, "--out", $OutDir)
+    $args = @($server, "--host", $BindHost, "--port", "$Port", "--token", $token, "--admin-token", $adminToken, "--out", $OutDir)
     $proc = Start-Process -FilePath $python -ArgumentList $args -PassThru -WindowStyle Hidden `
         -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     Start-Sleep -Milliseconds 500
@@ -134,3 +144,5 @@ Write-Host "Diagnostics server health OK: $healthUrl"
 Write-Host "JSONL output: $OutDir"
 Write-Host "App auto-config: $ConfigFile"
 Write-Host "Bearer token file: $TokenFile"
+Write-Host "Admin token file: $AdminTokenFile"
+Write-Host "Admin UI: http://127.0.0.1:$Port/admin?token=$adminToken"

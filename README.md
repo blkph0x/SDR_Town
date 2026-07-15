@@ -206,6 +206,32 @@ Install the collector as a current-user logon task with:
 powershell -ExecutionPolicy Bypass -File scripts\install_remote_diag_task.ps1 -Port 8787 -Host 0.0.0.0
 ```
 
+The collector also keeps a lightweight issue database beside the JSONL files:
+
+```text
+%APPDATA%\SDR_Town\remote_diagnostics\diagnostics.sqlite3
+```
+
+Warning/error events are grouped into stable issue IDs. Open the admin UI with
+the local admin token:
+
+```powershell
+Get-Content %APPDATA%\SDR_Town\remote_diagnostics_admin_token.txt
+```
+
+Then browse to:
+
+```text
+http://127.0.0.1:8787/admin?token=<admin-token>
+```
+
+Each issue can be marked `outstanding`, `fixed`, or `unrequired`. When marked
+`fixed`, set the fixed version, such as `0.2.32`. On startup, the app checks the
+collector for issues reported by its pseudonymous client ID; if a newer release
+fixes one of that install's reports, it prompts the user to check for updates.
+The app sends a generated client/install ID and a hashed hardware fingerprint,
+not raw serial numbers or raw machine IDs.
+
 Maintainer release builds can also inject the collector endpoint into the
 portable ZIP and installer without committing the token to git:
 

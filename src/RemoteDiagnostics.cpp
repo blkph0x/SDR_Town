@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QEventLoop>
 #include <QFile>
@@ -18,9 +19,12 @@
 #include <QPointer>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QStringList>
+#include <QSysInfo>
 #include <QThread>
 #include <QTimer>
 #include <QUuid>
+#include <QUrlQuery>
 
 #include <algorithm>
 
@@ -34,6 +38,7 @@ QPointer<QThread> g_remoteDiagnosticsThread;
 QMutex g_remoteDiagnosticsMutex;
 bool g_remoteDiagnosticsEnabled = false;
 QString g_remoteDiagnosticsSessionId;
+QString g_remoteDiagnosticsClientId;
 
 QString envString(const char* name)
 {
@@ -153,6 +158,52 @@ QJsonObject sanitizedPayload(QJsonObject payload)
     payload.remove("rawDibits");
     return payload;
 }
+
+QString computeHardwareHashMaterial()
+{
+    QStringList parts;
+    parts << QString::fromUtf8(QSysInfo::machineUniqueId().toHex());
+    parts << QSysInfo::currentCpuArchitecture();
+    parts << QSysInfo::kernelType();
+    parts << QSysInfo::productType();
+    parts << QSysInfo::productVersion();
+    parts << QSysInfo::machineHostName();
+    parts.removeAll(QString());
+    return parts.join('|');
+}
+
+QString ensureHardwareHash()
+{
+    QSettings settings;
+    QString existing = settings.value("remoteDiagnostics/hardwareHash").toString().trimmed();
+    if (!existing.isEmpty()) return existing;
+
+    QString material = computeHardwareHashMaterial();
+    if (material.trimmed().isEmpty()) {
+        material = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    }
+    existing = QString::fromLatin1(QCryptographicHash::hash(material.toUtf8(), QCryptographicHash::Sha256).toHex()).left(32);
+    settings.setValue("remoteDiagnostics/hardwareHash", existing);
+    return existing;
+}
+
+QUrl clientStatusUrlForEndpoint(const QUrl& endpoint, const QString& clientId)
+{
+    QUrl url(endpoint);
+    QString path = url.path();
+    if (path.endsWith(QStringLiteral("/ingest"))) {
+        path.chop(QStringLiteral("/ingest").size());
+    }
+    if (path.isEmpty()) path = QStringLiteral("/");
+    if (!path.endsWith('/')) path += '/';
+    path += QStringLiteral("client-status");
+    url.setPath(path);
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("clientId"), clientId);
+    query.addQueryItem(QStringLiteral("version"), QStringLiteral(SDR_TOWN_VERSION));
+    url.setQuery(query);
+    return url;
+}
 }
 
 RemoteDiagnosticsClient::RemoteDiagnosticsClient(QObject* parent)
@@ -177,6 +228,7 @@ void RemoteDiagnosticsClient::configure(const RemoteDiagnosticsConfig& cfg)
     m_cfg.minIntervalMs = std::clamp(m_cfg.minIntervalMs, 100, 60 * 1000);
     m_cfg.maxQueue = std::clamp(m_cfg.maxQueue, 4, 1024);
     m_clientId = ensureClientId();
+    m_hardwareHash = ensureHardwareHash();
     m_windowStartMs = QDateTime::currentMSecsSinceEpoch();
 }
 
@@ -188,6 +240,16 @@ bool RemoteDiagnosticsClient::enabled() const
 QString RemoteDiagnosticsClient::sessionId() const
 {
     return m_cfg.sessionId;
+}
+
+QString RemoteDiagnosticsClient::clientId() const
+{
+    return m_clientId;
+}
+
+QString RemoteDiagnosticsClient::hardwareHash() const
+{
+    return m_hardwareHash;
 }
 
 QString RemoteDiagnosticsClient::ensureClientId()
@@ -227,6 +289,8 @@ void RemoteDiagnosticsClient::submitOnOwnerThread(QString type, QString severity
     envelope["mode"] = m_cfg.mode;
     envelope["sessionId"] = m_cfg.sessionId;
     envelope["clientId"] = m_clientId;
+    envelope["installId"] = m_clientId;
+    envelope["hardwareHash"] = m_hardwareHash;
     envelope["seq"] = QString::number(nextSeq);
     envelope["timeUtc"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
     envelope["type"] = type.left(80);
@@ -252,6 +316,50 @@ void RemoteDiagnosticsClient::submitOnOwnerThread(QString type, QString severity
     pending.bytes = body.size();
     m_queue.push_back(std::move(pending));
     schedulePump();
+}
+
+void RemoteDiagnosticsClient::checkClientStatus(QObject* context, std::function<void(const QJsonObject&)> callback)
+{
+    if (!enabled() || m_clientId.isEmpty() || !callback) return;
+    if (QThread::currentThread() != thread()) {
+        const QPointer<RemoteDiagnosticsClient> self(this);
+        QPointer<QObject> ctx(context);
+        QMetaObject::invokeMethod(this, [self, ctx, callback = std::move(callback)]() mutable {
+            if (self) self->checkClientStatus(ctx, std::move(callback));
+        }, Qt::QueuedConnection);
+        return;
+    }
+
+    QNetworkRequest request(clientStatusUrlForEndpoint(m_cfg.endpoint, m_clientId));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    request.setRawHeader("User-Agent", QByteArray("SDR_Town/") + QByteArray(SDR_TOWN_VERSION));
+    if (!m_cfg.bearerToken.trimmed().isEmpty()) {
+        request.setRawHeader("Authorization", QByteArray("Bearer ") + m_cfg.bearerToken.toUtf8());
+    }
+
+    QPointer<QObject> ctx(context);
+    QNetworkReply* reply = m_network->get(request);
+    connect(reply, &QNetworkReply::finished, this, [reply, ctx, callback = std::move(callback)]() mutable {
+        QJsonObject result;
+        result["ok"] = false;
+        if (reply->error() == QNetworkReply::NoError) {
+            QJsonParseError err{};
+            const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll(), &err);
+            if (err.error == QJsonParseError::NoError && doc.isObject()) {
+                result = doc.object();
+            } else {
+                result["error"] = "invalid-json";
+            }
+        } else {
+            result["error"] = reply->errorString();
+        }
+        reply->deleteLater();
+        if (ctx) {
+            QMetaObject::invokeMethod(ctx, [callback = std::move(callback), result]() mutable {
+                callback(result);
+            }, Qt::QueuedConnection);
+        }
+    });
 }
 
 void RemoteDiagnosticsClient::flushNow()
@@ -407,8 +515,14 @@ RemoteDiagnosticsClient* remoteDiagnosticsConfigureFromProcess(int argc, char* a
         client->configure(cfg);
     }, Qt::BlockingQueuedConnection);
     QString configuredSessionId;
+    QString configuredClientId;
+    QString configuredHardwareHash;
     QMetaObject::invokeMethod(client, [client, &configuredSessionId]() {
         configuredSessionId = client->sessionId();
+    }, Qt::BlockingQueuedConnection);
+    QMetaObject::invokeMethod(client, [client, &configuredClientId, &configuredHardwareHash]() {
+        configuredClientId = client->clientId();
+        configuredHardwareHash = client->hardwareHash();
     }, Qt::BlockingQueuedConnection);
     {
         QMutexLocker locker(&g_remoteDiagnosticsMutex);
@@ -416,12 +530,15 @@ RemoteDiagnosticsClient* remoteDiagnosticsConfigureFromProcess(int argc, char* a
         g_remoteDiagnosticsThread = thread;
         g_remoteDiagnosticsEnabled = true;
         g_remoteDiagnosticsSessionId = configuredSessionId;
+        g_remoteDiagnosticsClientId = configuredClientId;
     }
 
     QJsonObject payload;
     payload["endpointHost"] = cfg.endpoint.host();
     payload["endpointPath"] = cfg.endpoint.path().left(120);
     payload["configSource"] = cfg.configSource.left(240);
+    payload["clientId"] = configuredClientId;
+    payload["hardwareHash"] = configuredHardwareHash;
     payload["maxBytesPerMinute"] = cfg.maxBytesPerMinute;
     payload["maxPayloadBytes"] = cfg.maxPayloadBytes;
     payload["minIntervalMs"] = cfg.minIntervalMs;
@@ -441,6 +558,17 @@ void remoteDiagnosticsSubmit(const QString& type, const QString& severity, const
     client->submit(type, severity, payload);
 }
 
+void remoteDiagnosticsCheckClientStatus(QObject* context, std::function<void(const QJsonObject&)> callback)
+{
+    QPointer<RemoteDiagnosticsClient> client;
+    {
+        QMutexLocker locker(&g_remoteDiagnosticsMutex);
+        client = g_remoteDiagnosticsClient;
+    }
+    if (!client) return;
+    client->checkClientStatus(context, std::move(callback));
+}
+
 bool remoteDiagnosticsEnabled()
 {
     QMutexLocker locker(&g_remoteDiagnosticsMutex);
@@ -451,6 +579,12 @@ QString remoteDiagnosticsSessionId()
 {
     QMutexLocker locker(&g_remoteDiagnosticsMutex);
     return g_remoteDiagnosticsSessionId;
+}
+
+QString remoteDiagnosticsClientId()
+{
+    QMutexLocker locker(&g_remoteDiagnosticsMutex);
+    return g_remoteDiagnosticsClientId;
 }
 
 void remoteDiagnosticsShutdown()
@@ -465,6 +599,7 @@ void remoteDiagnosticsShutdown()
         g_remoteDiagnosticsThread.clear();
         g_remoteDiagnosticsEnabled = false;
         g_remoteDiagnosticsSessionId.clear();
+        g_remoteDiagnosticsClientId.clear();
     }
     if (client) {
         if (QThread::currentThread() == client->thread()) {

@@ -7,6 +7,8 @@
 #include <QString>
 #include <QUrl>
 
+#include <functional>
+
 struct RemoteDiagnosticsConfig {
     bool enabled = false;
     QUrl endpoint;
@@ -27,7 +29,10 @@ public:
     void configure(const RemoteDiagnosticsConfig& cfg);
     bool enabled() const;
     QString sessionId() const;
+    QString clientId() const;
+    QString hardwareHash() const;
     void submit(QString type, QString severity, QJsonObject payload);
+    void checkClientStatus(QObject* context, std::function<void(const QJsonObject&)> callback);
     void flushNow();
     void drainForMs(int maxMs);
 
@@ -56,11 +61,14 @@ private:
     quint64 m_networkDropped = 0;
     quint64 m_oversizeDropped = 0;
     QString m_clientId;
+    QString m_hardwareHash;
 };
 
 RemoteDiagnosticsConfig remoteDiagnosticsConfigFromProcess(int argc, char* argv[], const QString& mode);
 RemoteDiagnosticsClient* remoteDiagnosticsConfigureFromProcess(int argc, char* argv[], QObject* parent, const QString& mode);
 void remoteDiagnosticsSubmit(const QString& type, const QString& severity, const QJsonObject& payload);
+void remoteDiagnosticsCheckClientStatus(QObject* context, std::function<void(const QJsonObject&)> callback);
 bool remoteDiagnosticsEnabled();
 QString remoteDiagnosticsSessionId();
+QString remoteDiagnosticsClientId();
 void remoteDiagnosticsShutdown();

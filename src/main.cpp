@@ -17573,6 +17573,9 @@ public:
         QTimer::singleShot(7500, this, [this]() {
             if (m_updateManager) m_updateManager->checkForUpdates(false);
         });
+        QTimer::singleShot(5500, this, [this]() {
+            checkRemoteIssueFixStatus();
+        });
 
         // Allow deferred audio open only after show()+event-loop entry.  The DSP
         // worker is already running; keeping guiStartupSettled false through ctor
@@ -17599,6 +17602,59 @@ public:
     }
 
 private slots:
+    void checkRemoteIssueFixStatus()
+    {
+        if (!remoteDiagnosticsEnabled()) return;
+        remoteDiagnosticsCheckClientStatus(this, [this](const QJsonObject& status) {
+            if (!status.value("ok").toBool(false) ||
+                !status.value("bugFixUpdateAvailable").toBool(false)) {
+                return;
+            }
+
+            const QJsonArray fixedIssues = status.value("fixedIssues").toArray();
+            if (fixedIssues.isEmpty()) return;
+            const QString recommendedVersion = status.value("recommendedVersion").toString().trimmed();
+            if (recommendedVersion.isEmpty()) return;
+
+            QStringList issueIds;
+            QStringList titles;
+            for (const QJsonValue& v : fixedIssues) {
+                const QJsonObject issue = v.toObject();
+                const QString id = issue.value("issue_id").toString().trimmed();
+                if (!id.isEmpty()) issueIds << id;
+                const QString title = issue.value("title").toString().trimmed();
+                if (!title.isEmpty() && titles.size() < 3) titles << title.left(120);
+            }
+            const QString noticeKey = recommendedVersion + ":" + issueIds.join(",");
+            QSettings settings;
+            if (settings.value("remoteDiagnostics/lastFixNoticeKey").toString() == noticeKey) {
+                return;
+            }
+            settings.setValue("remoteDiagnostics/lastFixNoticeKey", noticeKey);
+
+            QJsonObject payload;
+            payload["recommendedVersion"] = recommendedVersion;
+            payload["fixedIssueCount"] = fixedIssues.size();
+            payload["issueIds"] = issueIds.join(",");
+            remoteDiagnosticsSubmit("diagnostics.fix_notice", "info", payload);
+
+            QString detail;
+            if (!titles.isEmpty()) {
+                detail = "\n\nFixed report(s):\n- " + titles.join("\n- ");
+            }
+            QMessageBox box(this);
+            box.setWindowTitle("Update Addresses Your Report");
+            box.setText(QString("SDR Town %1 includes fixes for issue reports from this installation.%2\n\nInstall the update to pick up those fixes.")
+                            .arg(recommendedVersion, detail));
+            QPushButton* checkNow = box.addButton("Check for Updates", QMessageBox::AcceptRole);
+            box.addButton("Later", QMessageBox::RejectRole);
+            box.exec();
+            if (box.clickedButton() == checkNow && m_updateManager) {
+                m_updateManager->checkForUpdates(true);
+            }
+        });
+    }
+
     void showAbout()
     {
         QMessageBox box(this);
