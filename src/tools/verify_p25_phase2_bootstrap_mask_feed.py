@@ -16,7 +16,9 @@ checks = [
     ("speaker proof uses established clear state", "establishedClearCall"),
     ("grant mask blocks early flip", "grantMaskParamsKnown"),
     ("explicit clear grant probes/queues before validation", "const bool grantMayProbeVoice = grantClearTrusted || grantUnknownProbe;"),
-    ("explicit clear release requires diagnostic AMBE validation", "p25Phase2ExplicitClearGrantVoiceReleaseEvidence"),
+    ("explicit clear release checks diagnostic AMBE validation", "p25Phase2ExplicitClearGrantVoiceReleaseEvidence"),
+    ("explicit clear release waits for traffic clear proof", "const bool targetTrafficClearEvidence ="),
+    ("explicit clear grant runs diagnostic AMBE probe", "explicitClearGrantProbeAllowed"),
     ("explicit clear release drains queued AMBE", "releasePendingRawVoiceFromValidatedExplicitClearGrant"),
 ]
 
@@ -32,4 +34,4 @@ assert "!snapshot.grantMaskParamsKnown &&" in (ROOT / "src" / "P25FollowStateMac
     encoding="utf-8", errors="replace"
 )
 
-print("PASS bootstrap mask remains queue-only; explicit clear needs validated target AMBE")
+print("PASS bootstrap mask remains queue-only; explicit clear needs traffic clear proof plus validated target AMBE")

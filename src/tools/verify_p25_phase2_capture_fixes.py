@@ -10,11 +10,12 @@ checks = {
     'dsp flush seq drain': 'lastPendingAudioFlushSeq' in main,
     'warm standby window': 'kP25Phase2WarmStandbyMs = 5000' in main,
     'warm standby re-follow path': 'warm-standby-same-mhz' in main,
-    'speaker follow hold extended': 'kP25Phase2SpeakerFollowHoldMs = 45000' in main,
-    'push returns consumed samples': 'return consumed;' in main,
+    'speaker follow hold bounded': 'kP25Phase2SpeakerFollowHoldMs = 2500' in main,
+    'push returns consumed samples': 'return totalPushed;' in main,
     'emit gate required for inline audio log': 'p25Audio.phase2SpeakerGateReason == "emit"' in main,
     'phase2 acquisition progress hold': 'phase2AcquisitionProgress' in follow,
-    'extended speaker grace in follow sm': 'kSpeakerFollowGraceMs = 45000' in follow,
+    'bounded speaker grace in follow sm': 'kSpeakerFollowGraceMs = 2500' in follow,
+    'speaker alone not live voice': 'recentSpeakerOutput ||' not in follow,
     'extended hard timeout for phase2': 'hardTimeoutTuneMs = phase2Follow ? 45000 : 12000' in follow,
 }
 

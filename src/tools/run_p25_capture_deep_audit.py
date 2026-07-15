@@ -226,7 +226,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--step-ms", type=float, default=5000.0, help="Sweep step in milliseconds")
     parser.add_argument("--max-grants", type=int, default=3)
     parser.add_argument("--out-dir", type=Path)
-    parser.add_argument("--window-ms", type=float, default=360.0, help="Continuous voice replay lookback window.")
+    parser.add_argument("--window-ms", type=float, default=720.0, help="Continuous voice replay lookback window.")
     parser.add_argument("--hop-ms", type=float, default=40.0, help="Continuous voice replay hop size.")
     parser.add_argument("--replay-ms", type=float, default=6000.0, help="Milliseconds to replay per sweep offset.")
     parser.add_argument("--minframes", type=int, default=2, help="Minimum decoded frames for a clear-audio pass.")

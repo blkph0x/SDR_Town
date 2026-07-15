@@ -27,7 +27,8 @@ struct P25FollowSnapshot {
     int64_t nowMs = 0;
     int64_t tunedAtMs = 0;
     int64_t lastActiveMs = 0;
-    // Last time PCM was pushed to the speaker ring (may be fresher than lastActiveMs when GUI stats lag).
+    // Last time PCM was pushed to the speaker ring. This may bridge only a short
+    // jitter gap and must not be treated as proof that a TDMA call is still live.
     int64_t recentSpeakerOutputMs = 0;
     int64_t diagUpdatedMs = 0;
     uint64_t currentCallSessionId = 0;

@@ -199,6 +199,38 @@ TEST_CASE("P25 follow uses explicit TDMA watchdog actions", "[p25][follow]")
     REQUIRE(decision.action == P25FollowAction::ReturnNoVoiceCodewords);
 }
 
+TEST_CASE("P25 follow returns quickly from untrusted clear Phase 2 acquire", "[p25][follow]")
+{
+    P25FollowSnapshot snapshot;
+    snapshot.autoActive = true;
+    snapshot.phase2Voice = true;
+    snapshot.nowMs = 17'000;
+    snapshot.tunedAtMs = 1'000;
+    snapshot.lastActiveMs = 1'000;
+    snapshot.diagUpdatedMs = 17'000;
+    snapshot.diag = diag(P25FollowDiagCode::WaitingForClearGrant);
+    snapshot.grantEncryptionKnown = true;
+    snapshot.grantEncrypted = false;
+    snapshot.phase2TrafficProcessorActive = true;
+    snapshot.phase2TrafficCallActive = true;
+    snapshot.phase2Bursts = 26;
+    snapshot.phase2SuperframeBursts = 24;
+    snapshot.phase2MaskedBursts = 24;
+    snapshot.phase2MacPdus = 24;
+    snapshot.phase2MacCrcValid = 0;
+    snapshot.phase2EssKnown = false;
+    snapshot.phase2VoiceCodewords = 0;
+    snapshot.decodedFrames = 0;
+    snapshot.rfMetricsPopulated = true;
+    snapshot.recentSnrDb = 18.0;
+    snapshot.recentSignalLevelDb = -40.0;
+    snapshot.recentNoiseFloorDb = -70.0;
+
+    const auto decision = evaluateP25Follow(snapshot);
+    REQUIRE(decision.tdmaNoProgressTimeout);
+    REQUIRE(decision.action == P25FollowAction::ReturnNoMacEss);
+}
+
 TEST_CASE("P25 follow holds Phase 2 traffic after recent activity while reacquiring timing", "[p25][follow]")
 {
     P25FollowSnapshot reacquiring;
@@ -456,15 +488,15 @@ TEST_CASE("P25 slot probe is rate limited and bounded", "[p25][follow]")
     REQUIRE_FALSE(evaluateP25SlotProbe(snapshot).shouldFlip);
 }
 
-TEST_CASE("P25 follow holds known clear-grant acquisition longer before no-VCW return", "[p25][follow]")
+TEST_CASE("P25 follow returns quickly from quiet known clear-grant acquisition", "[p25][follow]")
 {
     P25FollowSnapshot snapshot;
     snapshot.autoActive = true;
     snapshot.phase2Voice = true;
-    snapshot.nowMs = 20'000;
+    snapshot.nowMs = 5'000;
     snapshot.tunedAtMs = 1'000;
     snapshot.lastActiveMs = 1'000;
-    snapshot.diagUpdatedMs = 19'500;
+    snapshot.diagUpdatedMs = 4'500;
     snapshot.diag = diag(P25FollowDiagCode::Phase2AudioLockMissing);
     snapshot.grantEncryptionKnown = true;
     snapshot.grantEncrypted = false;
@@ -478,16 +510,12 @@ TEST_CASE("P25 follow holds known clear-grant acquisition longer before no-VCW r
     REQUIRE_FALSE(midDecision.tdmaNoVcwTimeout);
     REQUIRE(midDecision.action == P25FollowAction::None);
 
-    snapshot.nowMs = 46'500;
+    snapshot.nowMs = 20'000;
+    snapshot.diagUpdatedMs = 19'500;
     snapshot.lastActiveMs = 1'000;
     const auto lateDecision = evaluateP25Follow(snapshot);
-    REQUIRE_FALSE(lateDecision.tdmaNoVcwTimeout);
-    REQUIRE(lateDecision.action == P25FollowAction::None);
-
-    snapshot.nowMs = 70'000;
-    const auto timeoutDecision = evaluateP25Follow(snapshot);
-    REQUIRE(timeoutDecision.tdmaNoVcwTimeout);
-    REQUIRE(timeoutDecision.action == P25FollowAction::ReturnNoVoiceCodewords);
+    REQUIRE(lateDecision.tdmaNoVcwTimeout);
+    REQUIRE(lateDecision.action == P25FollowAction::ReturnNoVoiceCodewords);
 }
 
 TEST_CASE("P25 follow holds active traffic processor call during clear-grant no-VCW acquisition", "[p25][follow]")
@@ -559,7 +587,7 @@ TEST_CASE("P25 follow holds when opposite-slot VCWs suggest wrong grant slot", "
     REQUIRE(decision.action == P25FollowAction::None);
 }
 
-TEST_CASE("P25 follow holds after recent speaker output despite stale VCW stats", "[p25][follow]")
+TEST_CASE("P25 follow does not treat recent speaker output as live voice by itself", "[p25][follow]")
 {
     P25FollowSnapshot snapshot;
     snapshot.autoActive = true;
@@ -576,16 +604,17 @@ TEST_CASE("P25 follow holds after recent speaker output despite stale VCW stats"
 
     const auto decision = evaluateP25Follow(snapshot);
     REQUIRE_FALSE(decision.activityGone);
-    REQUIRE(decision.voiceStillLooksActive);
+    REQUIRE_FALSE(decision.voiceStillLooksActive);
     REQUIRE(decision.action == P25FollowAction::None);
 
     snapshot.nowMs = 20'500;
     snapshot.recentSpeakerOutputMs = 2'000;
     const auto lateDecision = evaluateP25Follow(snapshot);
-    REQUIRE_FALSE(lateDecision.activityGone);
-    REQUIRE(lateDecision.action == P25FollowAction::None);
+    REQUIRE(lateDecision.activityGone);
+    REQUIRE(lateDecision.action == P25FollowAction::ReturnNoVoiceCodewords);
 
     snapshot.nowMs = 50'500;
+    snapshot.recentSpeakerOutputMs = 50'400;
     const auto expiredDecision = evaluateP25Follow(snapshot);
     REQUIRE(expiredDecision.action != P25FollowAction::None);
     REQUIRE((expiredDecision.action == P25FollowAction::ReturnActivityGone ||
@@ -747,10 +776,10 @@ TEST_CASE("P25 follow does not return on brief carrier dip during clear-grant ac
     P25FollowSnapshot snapshot;
     snapshot.autoActive = true;
     snapshot.phase2Voice = true;
-    snapshot.nowMs = 20'000;
+    snapshot.nowMs = 5'000;
     snapshot.tunedAtMs = 1'000;
     snapshot.lastActiveMs = 1'000;
-    snapshot.diagUpdatedMs = 19'500;
+    snapshot.diagUpdatedMs = 4'500;
     snapshot.diag = diag(P25FollowDiagCode::NoSync);
     snapshot.grantEncryptionKnown = true;
     snapshot.grantEncrypted = false;

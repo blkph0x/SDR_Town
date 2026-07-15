@@ -3,9 +3,10 @@
 
 Unknown Phase 2 grants may be followed and queued into a bounded pending
 queue. Plain AMBE plausibility must not mark the call permanently clear.
-Target-slot PTT/ESS or target MAC/ESS may release audio; explicit clear control
-grants may release only after target-slot hard voice, XOR mask, and diagnostic
-AMBE validation. Unknown-grant field probing is a default-off lab diagnostic:
+Target-slot PTT/ESS may release audio. Explicit clear control grants may tune
+and queue, but release only after the followed traffic slot proves clear; AMBE
+validation remains diagnostic until then. Unknown-grant field probing is a
+default-off lab diagnostic:
 it can be enabled for capture analysis, but normal GUI/CLI audio release
 remains fail-closed until MAC/ESS/PTT proves clear. Encrypted evidence still
 wins and mutes.
@@ -41,6 +42,9 @@ required = [
     "const bool validatedExplicitClearGrant =",
     "const bool decodedExplicitClearPcm =",
     "out.decodedFrames >= static_cast<long long>(kP25Phase2ExplicitClearGrantProbeMinFrames)",
+    "const bool targetTrafficClearEvidence =",
+    "out.phase2TargetSessionAudioRelease ||",
+    "(out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted)",
     "!out.phase2TargetEssEncrypted",
     "late-entry-audio-probe-diagnostic-only",
     "Unknown-security AMBE is queued first",
@@ -83,13 +87,17 @@ if len(explicit_helper) != 2:
     print("missing explicit-clear release evidence helper")
     raise SystemExit(1)
 explicit_body = explicit_helper[1].split("static bool p25Phase2UnknownGrantProbeVoiceReleaseEvidence", 1)[0]
-if "targetTrafficSecurityEvidence &&" in explicit_body:
+if "targetTrafficClearEvidence &&" not in explicit_body:
     print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
-    print("explicit clear release must not require MAC/ESS when the control-channel grant already proved clear")
+    print("explicit clear release must wait for target traffic clear evidence")
     raise SystemExit(1)
-if "out.phase2OppositeVoiceCodewords > 0 && !targetSlotLabelled" not in explicit_body:
+if "out.phase2TargetSessionAudioRelease" not in explicit_body or "(out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted)" not in explicit_body:
     print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
-    print("explicit clear release must still block opposite-slot-only/ambiguous dual-slot windows")
+    print("explicit clear release must be target-slot ESS/session keyed")
+    raise SystemExit(1)
+if "out.phase2OppositeVoiceCodewords > 0 &&\n            !targetTrafficClearEvidence" not in text:
+    print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
+    print("explicit clear probe must not run through ambiguous dual-slot voice before traffic proof")
     raise SystemExit(1)
 if "boundedProbeAccepted &&" not in explicit_body:
     print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")

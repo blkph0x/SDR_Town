@@ -77,7 +77,7 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
     // This fixes "stuck on inactive talk groups".
     // Partial sf/mask without ongoing VCW is explicitly not sufficient (see SDRTrunk comments in prior code).
     const bool hasRecentVoiceVcws = snapshot.phase2VoiceCodewords > 0 || snapshot.decodedFrames > 0 || snapshot.imbeFrames > 0;
-    constexpr int64_t kSpeakerFollowGraceMs = 45000;
+    constexpr int64_t kSpeakerFollowGraceMs = 2500;
     const bool recentSpeakerOutput =
         snapshot.recentSpeakerOutputMs > 0 &&
         snapshot.nowMs > 0 &&
@@ -88,11 +88,11 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
                      (snapshot.recentSignalLevelDb > snapshot.recentNoiseFloorDb + 5.0);
     }
     decision.voiceStillLooksActive = diagnosticFresh &&
-        (hasRecentVoiceVcws || snapshot.phase2TrafficCallActive || recentSpeakerOutput) &&
+        (hasRecentVoiceVcws || snapshot.phase2TrafficCallActive ||
+         (snapshot.phase2TrafficAudioOpen && snapshot.phase2VoiceCodewords > 0)) &&
         hasCarrier &&  // use actual RF energy (peak in BW vs noise floor) to ignore background noise as "real data"
         (snapshot.phase2TrafficAudioOpen ||
          snapshot.phase2TrafficCallActive ||
-         recentSpeakerOutput ||
          // Only fall back to pure sync/nid for very brief P1-style or initial acquisition; not for sustained follow.
          (snapshot.phase2VoiceCodewords == 0 && snapshot.phase2Bursts == 0 &&
           (snapshot.syncs > 0 || snapshot.nids > 0) && (snapshot.nowMs - snapshot.tunedAtMs) < 3000));
@@ -124,9 +124,7 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         return decision;
     }
 
-    const int64_t effectiveLastActiveMs = recentSpeakerOutput
-        ? std::max(snapshot.lastActiveMs, snapshot.recentSpeakerOutputMs)
-        : snapshot.lastActiveMs;
+    const int64_t effectiveLastActiveMs = snapshot.lastActiveMs;
 
     const bool initialHoldExpired =
         snapshot.tunedAtMs > 0 && snapshot.nowMs - snapshot.tunedAtMs > 2500;
@@ -138,30 +136,57 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         snapshot.rfMetricsPopulated &&
         (snapshot.recentSnrDb > 6.0 ||
          snapshot.recentSignalLevelDb > snapshot.recentNoiseFloorDb + 8.0);
+    const int64_t tunedDurationMs = snapshot.tunedAtMs > 0
+        ? std::max<int64_t>(0, snapshot.nowMs - snapshot.tunedAtMs)
+        : 0;
+    const bool phase2HardProgress =
+        snapshot.decodedFrames > 0 ||
+        snapshot.phase2MacCrcValid > 0 ||
+        snapshot.phase2EssKnown ||
+        snapshot.phase2TrafficAudioOpen;
+    const bool phase2CurrentVoiceEvidence =
+        snapshot.phase2VoiceCodewords > 0 ||
+        snapshot.imbeFrames > 0;
+    const bool phase2CurrentStructureEvidence =
+        snapshot.phase2Bursts > 0 ||
+        snapshot.phase2SuperframeBursts > 0 ||
+        snapshot.phase2MaskedBursts > 0 ||
+        snapshot.phase2MacPdus > 0;
+    const bool phase2UntrustedClearAcquire =
+        clearGrantKnown &&
+        !phase2HardProgress &&
+        snapshot.decodedFrames == 0 &&
+        snapshot.phase2MacCrcValid == 0 &&
+        !snapshot.phase2EssKnown;
+    const int64_t untrustedClearAcquireLimitMs = phase2CurrentVoiceEvidence
+        ? 18000
+        : (phase2CurrentStructureEvidence ? 12000 : 6500);
+    const int64_t phase2AcquireLimitMs = phase2UntrustedClearAcquire
+        ? untrustedClearAcquireLimitMs
+        : (clearGrantKnown ? 45000 : 30000);
     const bool phase2AcquisitionProgress =
         phase2Follow &&
-        (snapshot.phase2VoiceCodewords > 0 ||
-         snapshot.phase2SuperframeBursts > 0 ||
-         snapshot.phase2MaskedBursts > 0 ||
-         snapshot.phase2Bursts > 0 ||
+        (phase2HardProgress ||
+         phase2CurrentVoiceEvidence ||
+         phase2CurrentStructureEvidence ||
          snapshot.phase2TrafficCallActive ||
-         snapshot.phase2TrafficAudioOpen ||
          diagIs(snapshot.diag, P25FollowDiagCode::Phase2AudioLockMissing) ||
          diagIs(snapshot.diag, P25FollowDiagCode::Phase2LateEntryWaiting) ||
          diagIs(snapshot.diag, P25FollowDiagCode::WaitingForClearGrant) ||
          diagIs(snapshot.diag, P25FollowDiagCode::Phase2MaskAppliedNoMacCrc) ||
          (clearGrantKnown &&
-          snapshot.nowMs - snapshot.tunedAtMs < 45000 &&
-          (diagIs(snapshot.diag, P25FollowDiagCode::NoSync) ||
-           diagIs(snapshot.diag, P25FollowDiagCode::Idle))));
+           tunedDurationMs < untrustedClearAcquireLimitMs &&
+           (diagIs(snapshot.diag, P25FollowDiagCode::NoSync) ||
+            diagIs(snapshot.diag, P25FollowDiagCode::Idle))));
     const bool phase2StillAcquiring =
         phase2Follow &&
         snapshot.decodedFrames == 0 &&
-        snapshot.nowMs - snapshot.tunedAtMs < (clearGrantKnown ? 60000 : 45000) &&
+        tunedDurationMs < phase2AcquireLimitMs &&
         (phase2AcquisitionProgress ||
          snapshot.phase2TrafficCallActive ||
-         snapshot.phase2TrafficProcessorActive ||
-         (clearGrantKnown && strongTrafficCarrier));
+         (clearGrantKnown &&
+          strongTrafficCarrier &&
+          tunedDurationMs < untrustedClearAcquireLimitMs));
     const int64_t activitySilenceLimitMs =
         phase2StillAcquiring ? 30000 : 3500;
     decision.activityGone =
@@ -185,7 +210,7 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         snapshot.phase2SuperframeBursts >= 4 &&
         snapshot.phase2MaskedBursts >= 4;
 
-    const int64_t continuationAnchorMs = std::max(snapshot.lastActiveMs, snapshot.recentSpeakerOutputMs);
+    const int64_t continuationAnchorMs = snapshot.lastActiveMs;
     const bool phase2RecentContinuation =
         phase2Follow &&
         continuationAnchorMs > snapshot.tunedAtMs &&
@@ -202,20 +227,28 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         snapshot.phase2Bursts > 0;
     const int64_t tdmaNoVcwTunedMs = waitingUnknownClearGrant
         ? 45000
-        : (clearGrantKnown && snapshot.phase2TrafficCallActive
+        : (phase2UntrustedClearAcquire
+            ? untrustedClearAcquireLimitMs
+            : (clearGrantKnown && snapshot.phase2TrafficCallActive
             ? 60000
             : (clearGrantKnown
                 ? 45000
-                : (wrongSlotNoTargetVcw ? 30000 : (phase2RecentContinuation ? 18000 : 9000))));
+                : (wrongSlotNoTargetVcw ? 30000 : (phase2RecentContinuation ? 18000 : 9000)))));
     const int64_t tdmaNoVcwSilenceMs = waitingUnknownClearGrant
         ? 40000
-        : (clearGrantKnown && snapshot.phase2TrafficCallActive
+        : (phase2UntrustedClearAcquire
+            ? (phase2CurrentStructureEvidence ? 2500 : 1200)
+            : (clearGrantKnown && snapshot.phase2TrafficCallActive
             ? 45000
             : (clearGrantKnown
                 ? 30000
-                : (wrongSlotNoTargetVcw ? 25000 : (phase2RecentContinuation ? 10000 : 3500))));
-    const int64_t tdmaNoMacEssTunedMs = phase2RecentContinuation ? 30000 : 15000;
-    const int64_t tdmaNoMacEssSilenceMs = phase2RecentContinuation ? 10000 : 3500;
+                : (wrongSlotNoTargetVcw ? 25000 : (phase2RecentContinuation ? 10000 : 3500)))));
+    const int64_t tdmaNoMacEssTunedMs = phase2UntrustedClearAcquire
+        ? untrustedClearAcquireLimitMs
+        : (phase2RecentContinuation ? 30000 : 15000);
+    const int64_t tdmaNoMacEssSilenceMs = phase2UntrustedClearAcquire
+        ? (phase2CurrentVoiceEvidence ? 3500 : 2500)
+        : (phase2RecentContinuation ? 10000 : 3500);
 
     const bool firstDiagnosticGraceExpired =
         phase2Follow &&
@@ -295,7 +328,7 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         clearGrantKnown &&
         strongTrafficCarrier &&
         snapshot.tunedAtMs > 0 &&
-        snapshot.nowMs - snapshot.tunedAtMs <= 45000;
+        tunedDurationMs <= (phase2UntrustedClearAcquire ? untrustedClearAcquireLimitMs : 45000);
 
     decision.tdmaNoVcwTimeout =
         !phase2StillAcquiring &&
@@ -317,18 +350,16 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
          diagIs(snapshot.diag, P25FollowDiagCode::NoLduVoice) ||
          diagIs(snapshot.diag, P25FollowDiagCode::Phase2AudioLockMissing));
 
-    if (!recentSpeakerOutput) {
-        if (decision.tdmaNoProgressTimeout) {
-            decision.action = P25FollowAction::ReturnNoMacEss;
-        } else if (decision.tdmaNoVcwTimeout) {
-            decision.action = P25FollowAction::ReturnNoVoiceCodewords;
-        } else if (decision.activityGone) {
-            decision.action = P25FollowAction::ReturnActivityGone;
-        } else if (decision.hardTimeout) {
-            decision.action = P25FollowAction::ReturnHardTimeout;
-        } else if (decision.carrierDropped) {
-            decision.action = P25FollowAction::ReturnActivityGone;
-        }
+    if (decision.tdmaNoProgressTimeout) {
+        decision.action = P25FollowAction::ReturnNoMacEss;
+    } else if (decision.tdmaNoVcwTimeout) {
+        decision.action = P25FollowAction::ReturnNoVoiceCodewords;
+    } else if (decision.activityGone) {
+        decision.action = P25FollowAction::ReturnActivityGone;
+    } else if (decision.hardTimeout) {
+        decision.action = P25FollowAction::ReturnHardTimeout;
+    } else if (decision.carrierDropped) {
+        decision.action = P25FollowAction::ReturnActivityGone;
     }
 
     return decision;
