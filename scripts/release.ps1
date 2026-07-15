@@ -6,6 +6,8 @@ param(
     [string]$Version = "0.2.19",
     [ValidateSet("stable", "experimental")]
     [string]$Channel = "stable",
+    [string]$RemoteDiagnosticsUrl = "",
+    [string]$RemoteDiagnosticsTokenFile = "$env:APPDATA\SDR_Town\remote_diagnostics_token.txt",
     [switch]$SkipPush,
     [switch]$SkipAssets
 )
@@ -37,6 +39,33 @@ if (Test-Path $qtWindeploy) {
 }
 
 cmake --build build --config Release --target deploy | Out-Null
+
+if (-not [string]::IsNullOrWhiteSpace($RemoteDiagnosticsUrl)) {
+    $portableStaging = "build\deploy_staging"
+    if (-not (Test-Path $portableStaging)) {
+        throw "Deploy staging was not created; cannot inject remote diagnostics config."
+    }
+    if (-not (Test-Path $RemoteDiagnosticsTokenFile)) {
+        throw "Remote diagnostics URL was supplied, but token file does not exist: $RemoteDiagnosticsTokenFile"
+    }
+    $diagToken = (Get-Content -Path $RemoteDiagnosticsTokenFile -Raw).Trim()
+    if ([string]::IsNullOrWhiteSpace($diagToken)) {
+        throw "Remote diagnostics token file is empty: $RemoteDiagnosticsTokenFile"
+    }
+    $diagConfig = [ordered]@{
+        enabled = $true
+        url = $RemoteDiagnosticsUrl
+        token = $diagToken
+        maxBytesPerMinute = 65536
+        maxPayloadBytes = 16384
+        minIntervalMs = 1000
+        maxQueue = 128
+    }
+    $diagConfigPath = Join-Path $portableStaging "remote_diagnostics.json"
+    $diagConfig | ConvertTo-Json -Depth 5 | Set-Content -Path $diagConfigPath -Encoding utf8
+    Write-Host "  Injected packaged remote diagnostics config: $RemoteDiagnosticsUrl"
+}
+
 cpack -G NSIS -C Release --config build/CPackConfig.cmake | Out-Null
 
 $setupName = "SDR_Town-$Version-win64-setup.exe"

@@ -206,6 +206,17 @@ Install the collector as a current-user logon task with:
 powershell -ExecutionPolicy Bypass -File scripts\install_remote_diag_task.ps1 -Port 8787 -Host 0.0.0.0
 ```
 
+Maintainer release builds can also inject the collector endpoint into the
+portable ZIP and installer without committing the token to git:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\release.ps1 -Version 0.2.30 -Channel experimental -RemoteDiagnosticsUrl http://your-public-ip:8787/ingest
+```
+
+That reads the bearer token from
+`%APPDATA%\SDR_Town\remote_diagnostics_token.txt` and writes only the packaged
+release `remote_diagnostics.json`.
+
 Run the GUI or CLI with diagnostics enabled:
 
 ```powershell
