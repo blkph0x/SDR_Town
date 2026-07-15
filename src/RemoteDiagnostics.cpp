@@ -4,7 +4,11 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QEventLoop>
+#include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QMetaObject>
 #include <QMutex>
 #include <QMutexLocker>
@@ -13,6 +17,7 @@
 #include <QNetworkRequest>
 #include <QPointer>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QThread>
 #include <QTimer>
 #include <QUuid>
@@ -63,6 +68,77 @@ bool endpointLooksUsable(const QUrl& url)
         (url.scheme().compare("http", Qt::CaseInsensitive) == 0 ||
          url.scheme().compare("https", Qt::CaseInsensitive) == 0) &&
         !url.host().isEmpty();
+}
+
+bool jsonBool(const QJsonObject& obj, const QString& key, bool fallback)
+{
+    const QJsonValue value = obj.value(key);
+    if (value.isBool()) return value.toBool();
+    if (value.isString()) {
+        const QString text = value.toString().trimmed().toLower();
+        if (text == "1" || text == "true" || text == "yes" || text == "on") return true;
+        if (text == "0" || text == "false" || text == "no" || text == "off") return false;
+    }
+    return fallback;
+}
+
+int jsonInt(const QJsonObject& obj, const QString& key, int fallback, int minimum, int maximum)
+{
+    const QJsonValue value = obj.value(key);
+    if (value.isDouble()) return std::clamp(value.toInt(fallback), minimum, maximum);
+    if (value.isString()) return parsePositiveInt(value.toString(), fallback, minimum, maximum);
+    return fallback;
+}
+
+bool readJsonObjectFile(const QString& path, QJsonObject* out)
+{
+    if (!out || path.trimmed().isEmpty()) return false;
+    QFile file(path);
+    if (!file.exists() || !file.open(QIODevice::ReadOnly)) return false;
+    QJsonParseError err{};
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) return false;
+    *out = doc.object();
+    return true;
+}
+
+void applyDiagnosticsJsonConfig(RemoteDiagnosticsConfig& cfg,
+                                const QJsonObject& obj,
+                                const QString& source,
+                                bool* requested)
+{
+    const bool enabled = jsonBool(obj, "enabled", false);
+    if (enabled && requested) *requested = true;
+
+    const QString url = obj.value("url").toString(obj.value("endpoint").toString()).trimmed();
+    if (!url.isEmpty()) cfg.endpoint = QUrl(url);
+
+    const QString token = obj.value("token").toString(obj.value("bearerToken").toString()).trimmed();
+    if (!token.isEmpty()) cfg.bearerToken = token;
+
+    cfg.maxBytesPerMinute = jsonInt(obj, "maxBytesPerMinute", cfg.maxBytesPerMinute, 4096, 1024 * 1024);
+    cfg.maxPayloadBytes = jsonInt(obj, "maxPayloadBytes", cfg.maxPayloadBytes, 2048, 128 * 1024);
+    cfg.minIntervalMs = jsonInt(obj, "minIntervalMs", cfg.minIntervalMs, 100, 60 * 1000);
+    cfg.maxQueue = jsonInt(obj, "maxQueue", cfg.maxQueue, 4, 1024);
+    if (!source.isEmpty()) cfg.configSource = source;
+}
+
+QStringList defaultDiagnosticsConfigPaths()
+{
+    QStringList paths;
+    if (QCoreApplication::instance()) {
+        paths << QCoreApplication::applicationDirPath() + "/remote_diagnostics.json";
+    }
+    const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    if (!appData.isEmpty()) {
+        paths << appData + "/remote_diagnostics.json";
+    }
+    const QString roaming = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    if (!roaming.isEmpty() && roaming != appData) {
+        paths << roaming + "/remote_diagnostics.json";
+    }
+    paths.removeDuplicates();
+    return paths;
 }
 
 QJsonObject sanitizedPayload(QJsonObject payload)
@@ -254,14 +330,36 @@ RemoteDiagnosticsConfig remoteDiagnosticsConfigFromProcess(int argc, char* argv[
 {
     RemoteDiagnosticsConfig cfg;
     cfg.mode = mode;
-    cfg.endpoint = QUrl(envString("SDR_TOWN_DIAG_URL"));
-    cfg.bearerToken = envString("SDR_TOWN_DIAG_TOKEN");
+    bool requested = false;
+    bool forcedOff = false;
+
+    auto applyConfigPath = [&](const QString& path) {
+        QJsonObject obj;
+        if (readJsonObjectFile(path, &obj)) {
+            applyDiagnosticsJsonConfig(cfg, obj, QFileInfo(path).absoluteFilePath(), &requested);
+        }
+    };
+    for (const QString& path : defaultDiagnosticsConfigPaths()) {
+        applyConfigPath(path);
+    }
+    const QString envConfig = envString("SDR_TOWN_DIAG_CONFIG");
+    if (!envConfig.isEmpty()) {
+        applyConfigPath(envConfig);
+    }
+
+    const QString envUrl = envString("SDR_TOWN_DIAG_URL");
+    if (!envUrl.isEmpty()) {
+        cfg.endpoint = QUrl(envUrl);
+        requested = true;
+        cfg.configSource = "env:SDR_TOWN_DIAG_URL";
+    }
+    const QString envToken = envString("SDR_TOWN_DIAG_TOKEN");
+    if (!envToken.isEmpty()) cfg.bearerToken = envToken;
     cfg.maxBytesPerMinute = parsePositiveInt(envString("SDR_TOWN_DIAG_MAX_BYTES_PER_MIN"), cfg.maxBytesPerMinute, 4096, 1024 * 1024);
     cfg.maxPayloadBytes = parsePositiveInt(envString("SDR_TOWN_DIAG_MAX_PAYLOAD_BYTES"), cfg.maxPayloadBytes, 2048, 128 * 1024);
     cfg.minIntervalMs = parsePositiveInt(envString("SDR_TOWN_DIAG_MIN_INTERVAL_MS"), cfg.minIntervalMs, 100, 60 * 1000);
     cfg.maxQueue = parsePositiveInt(envString("SDR_TOWN_DIAG_MAX_QUEUE"), cfg.maxQueue, 4, 1024);
 
-    bool forcedOff = false;
     for (int i = 1; i < argc; ++i) {
         if (!argv[i]) continue;
         const QString arg = QString::fromLocal8Bit(argv[i]);
@@ -270,8 +368,12 @@ RemoteDiagnosticsConfig remoteDiagnosticsConfigFromProcess(int argc, char* argv[
         if (eq >= 0) key = key.left(eq);
         key = key.toLower();
 
-        if (key == "--diag-url" || key == "--diagnostics-url" || key == "--remote-diagnostics-url") {
+        if (key == "--diag-config" || key == "--diagnostics-config" || key == "--remote-diagnostics-config") {
+            applyConfigPath(argValue(i, argc, argv, arg).trimmed());
+        } else if (key == "--diag-url" || key == "--diagnostics-url" || key == "--remote-diagnostics-url") {
             cfg.endpoint = QUrl(argValue(i, argc, argv, arg).trimmed());
+            requested = true;
+            cfg.configSource = "argv:" + key;
         } else if (key == "--diag-token" || key == "--diagnostics-token" || key == "--remote-diagnostics-token") {
             cfg.bearerToken = argValue(i, argc, argv, arg).trimmed();
         } else if (key == "--diag-max-bytes-per-min" || key == "--diagnostics-max-bytes-per-min") {
@@ -287,7 +389,7 @@ RemoteDiagnosticsConfig remoteDiagnosticsConfigFromProcess(int argc, char* argv[
         }
     }
 
-    cfg.enabled = !forcedOff && endpointLooksUsable(cfg.endpoint);
+    cfg.enabled = !forcedOff && requested && endpointLooksUsable(cfg.endpoint);
     return cfg;
 }
 
@@ -319,6 +421,7 @@ RemoteDiagnosticsClient* remoteDiagnosticsConfigureFromProcess(int argc, char* a
     QJsonObject payload;
     payload["endpointHost"] = cfg.endpoint.host();
     payload["endpointPath"] = cfg.endpoint.path().left(120);
+    payload["configSource"] = cfg.configSource.left(240);
     payload["maxBytesPerMinute"] = cfg.maxBytesPerMinute;
     payload["maxPayloadBytes"] = cfg.maxPayloadBytes;
     payload["minIntervalMs"] = cfg.minIntervalMs;

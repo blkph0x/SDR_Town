@@ -180,6 +180,32 @@ Start a collector on the machine that will receive tester events:
 python src\tools\remote_diag_server.py --host 0.0.0.0 --port 8787 --token test-token --out remote_diagnostics
 ```
 
+For the normal local service setup, use the helper script from the repo root or
+from the portable release folder:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\start_remote_diag_server.ps1 -Port 8787 -Host 0.0.0.0 -OpenFirewall
+```
+
+Run that command from an elevated PowerShell if you want `-OpenFirewall` to add
+the Windows inbound rule automatically. Without elevation, the collector still
+starts and the script tells you the firewall rule was skipped.
+
+The helper starts the collector, creates or reuses a bearer token, writes JSONL
+sessions to `%APPDATA%\SDR_Town\remote_diagnostics`, and writes an app
+auto-config file to:
+
+```text
+%APPDATA%\SDR_Town\SDR Town\remote_diagnostics.json
+```
+
+With that config file present, the GUI and CLI send diagnostics automatically.
+Install the collector as a current-user logon task with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_remote_diag_task.ps1 -Port 8787 -Host 0.0.0.0
+```
+
 Run the GUI or CLI with diagnostics enabled:
 
 ```powershell
@@ -197,10 +223,14 @@ $env:SDR_TOWN_DIAG_MAX_PAYLOAD_BYTES = "16384"
 $env:SDR_TOWN_DIAG_MIN_INTERVAL_MS = "1000"
 ```
 
+The app also supports `--diag-config <path>` or `SDR_TOWN_DIAG_CONFIG` for a
+JSON config file containing `enabled`, `url`, `token`, `maxBytesPerMinute`,
+`maxPayloadBytes`, `minIntervalMs`, and `maxQueue`.
+
 The defaults limit live telemetry to roughly 64 KiB/minute, 16 KiB per event,
 one send per second, and a bounded queue. If the network or budget cannot keep
 up, events are dropped and the drop counters are included in later events.
-Use `--diag-off` or unset `SDR_TOWN_DIAG_URL` to disable it.
+Use `--diag-off` to disable it even when an auto-config file exists.
 
 ## CLI Help
 

@@ -13,6 +13,7 @@ struct RemoteDiagnosticsConfig {
     QString bearerToken;
     QString mode = "unknown";
     QString sessionId;
+    QString configSource;
     int maxBytesPerMinute = 64 * 1024;
     int maxPayloadBytes = 16 * 1024;
     int minIntervalMs = 1000;

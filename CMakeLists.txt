@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.28 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.29 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -275,9 +275,20 @@ endif()
 add_custom_target(deploy
     COMMAND ${CMAKE_COMMAND} -E remove_directory "${DEPLOY_STAGING}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/tools/diagnostics"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/scripts"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Release/SDR_Town.exe" "${DEPLOY_STAGING}/"
     # Copy the entire windeployqt tree but then surgically remove anything that is not ours
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Release" "${DEPLOY_STAGING}"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/remote_diag_server.py"
+            "${DEPLOY_STAGING}/tools/diagnostics/remote_diag_server.py"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/start_remote_diag_server.ps1"
+            "${DEPLOY_STAGING}/scripts/start_remote_diag_server.ps1"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/install_remote_diag_task.ps1"
+            "${DEPLOY_STAGING}/scripts/install_remote_diag_task.ps1"
     COMMAND ${CMAKE_COMMAND} -E remove -f
             "${DEPLOY_STAGING}/MaulAudioPro.exe"
             "${DEPLOY_STAGING}/maulaudio_tests.exe"
@@ -322,6 +333,13 @@ if(WIN32)
             PATTERN "styles/*" PATTERN "iconengines/*" PATTERN "generic/*"
             PATTERN "networkinformation/*" PATTERN "translations/*"
   )
+  install(FILES
+          "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/remote_diag_server.py"
+          DESTINATION tools/diagnostics)
+  install(FILES
+          "${CMAKE_CURRENT_SOURCE_DIR}/scripts/start_remote_diag_server.ps1"
+          "${CMAKE_CURRENT_SOURCE_DIR}/scripts/install_remote_diag_task.ps1"
+          DESTINATION scripts)
 endif()
 
 # --- Installer packaging with CPack (NSIS for Windows) ---

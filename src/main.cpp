@@ -24014,10 +24014,25 @@ int runCLI(int argc, char* argv[]) {
         } // end while
     } catch (const std::exception& ex) {
         spdlog::error("Unhandled exception in CLI command loop: {}", ex.what());
+        if (remoteDiagnosticsEnabled()) {
+            QJsonObject payload;
+            payload["mode"] = "cli";
+            payload["stage"] = "command-loop";
+            payload["exceptionType"] = "std";
+            payload["message"] = QString::fromLocal8Bit(ex.what()).left(500);
+            remoteDiagnosticsSubmit("app.exception", "error", payload);
+        }
         std::cout << "CLI error (see log): " << ex.what() << "\n";
         cliStop = true;
     } catch (...) {
         spdlog::error("Unknown exception in CLI command loop");
+        if (remoteDiagnosticsEnabled()) {
+            QJsonObject payload;
+            payload["mode"] = "cli";
+            payload["stage"] = "command-loop";
+            payload["exceptionType"] = "unknown";
+            remoteDiagnosticsSubmit("app.exception", "error", payload);
+        }
         std::cout << "CLI unknown error\n";
         cliStop = true;
     }
@@ -24144,6 +24159,15 @@ int main(int argc, char *argv[])
             try {
                 spdlog::warn("Non-fatal exception during GUI shutdown after Qt event loop returned: {}", ex.what());
             } catch (...) {}
+            if (remoteDiagnosticsEnabled()) {
+                QJsonObject payload;
+                payload["mode"] = "gui";
+                payload["stage"] = "shutdown";
+                payload["exceptionType"] = "std";
+                payload["message"] = QString::fromLocal8Bit(ex.what()).left(500);
+                payload["returnCode"] = ret;
+                remoteDiagnosticsSubmit("app.exception", "warn", payload);
+            }
             remoteDiagnosticsShutdown();
             try { spdlog::default_logger()->flush(); } catch (...) {}
             try { spdlog::shutdown(); } catch (...) {}
@@ -24151,6 +24175,14 @@ int main(int argc, char *argv[])
         }
         writeEarlyCrashLog("std-exception", ex.what());
         try { spdlog::error("Fatal exception in main: {}", ex.what()); } catch (...) {}
+        if (remoteDiagnosticsEnabled()) {
+            QJsonObject payload;
+            payload["mode"] = "gui";
+            payload["stage"] = "startup-or-runtime";
+            payload["exceptionType"] = "std";
+            payload["message"] = QString::fromLocal8Bit(ex.what()).left(500);
+            remoteDiagnosticsSubmit("app.exception", "error", payload);
+        }
         MessageBoxA(nullptr,
             (std::string("SDR Town failed to start or crashed.\n\nDetails: ") + ex.what() +
              "\n\nSee %TEMP%\\sdr_town_launch.log and the sdr_town log in AppData for more.\n"
@@ -24162,6 +24194,14 @@ int main(int argc, char *argv[])
             try {
                 spdlog::warn("Non-fatal unknown exception during GUI shutdown after Qt event loop returned.");
             } catch (...) {}
+            if (remoteDiagnosticsEnabled()) {
+                QJsonObject payload;
+                payload["mode"] = "gui";
+                payload["stage"] = "shutdown";
+                payload["exceptionType"] = "unknown";
+                payload["returnCode"] = ret;
+                remoteDiagnosticsSubmit("app.exception", "warn", payload);
+            }
             remoteDiagnosticsShutdown();
             try { spdlog::default_logger()->flush(); } catch (...) {}
             try { spdlog::shutdown(); } catch (...) {}
@@ -24169,6 +24209,13 @@ int main(int argc, char *argv[])
         }
         writeEarlyCrashLog("unknown-exception");
         try { spdlog::error("Unknown fatal exception in main GUI path."); } catch (...) {}
+        if (remoteDiagnosticsEnabled()) {
+            QJsonObject payload;
+            payload["mode"] = "gui";
+            payload["stage"] = "startup-or-runtime";
+            payload["exceptionType"] = "unknown";
+            remoteDiagnosticsSubmit("app.exception", "error", payload);
+        }
         MessageBoxA(nullptr,
             "SDR Town failed with an unknown exception during startup.\n\n"
             "Check %TEMP%\\sdr_town_launch.log . Ensure you are running the exe from build\\bin\\Release "
