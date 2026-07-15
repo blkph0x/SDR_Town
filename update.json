@@ -1,13 +1,13 @@
 ﻿{
-    "tag":  "v0.2.32",
-    "version":  "0.2.32",
-    "notes_url":  "https://github.com/Blkph0x/SDR_Town/releases/tag/v0.2.32",
+    "tag":  "v0.2.33",
+    "version":  "0.2.33",
+    "notes_url":  "https://github.com/Blkph0x/SDR_Town/releases/tag/v0.2.33",
     "channel":  "experimental",
     "min_supported_version":  "0.2.0",
     "installer":  {
-                      "url":  "https://github.com/Blkph0x/SDR_Town/releases/download/v0.2.32/SDR_Town-0.2.32-win64-setup.exe",
-                      "sha256":  "8430c7afd2fe0f37235ebd6168bd49a0808b950cea122fa9900bd0400cdb165a",
-                      "size":  20368652
+                      "url":  "https://github.com/Blkph0x/SDR_Town/releases/download/v0.2.33/SDR_Town-0.2.33-win64-setup.exe",
+                      "sha256":  "139b355271cf8a947f767aa44c2a21d6f40cb1247fbe1269472a7ee218256d47",
+                      "size":  20387067
                   },
     "published":  "2026-07-15"
 }
