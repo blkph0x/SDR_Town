@@ -16,7 +16,9 @@
 #include <QStyleFactory>
 #include <QMessageBox>
 #include <QAction>
+#include <QCryptographicHash>
 #include <QDir>
+#include <QFileDialog>
 #include <QStandardPaths>
 #include <QDebug>
 #include <QSettings>   // for updater skipped version + last check persistence (best practice)
@@ -39,10 +41,13 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
 #include <QStorageInfo>
 #include <QStringList>
+#include <QSysInfo>
+#include <QUuid>
 #include <complex>
 #include <array>
 #include <cstddef>
@@ -95,6 +100,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <psapi.h>
 #endif
 
 using json = nlohmann::json;
@@ -11504,6 +11510,208 @@ static void writeEarlyCrashLog(const std::string& stage, const char* extra = nul
     } catch (...) {}
 }
 
+static QString diagnosticsLaunchLogPath()
+{
+#ifdef _WIN32
+    char tmp[MAX_PATH] = {0};
+    DWORD len = GetTempPathA(MAX_PATH, tmp);
+    return QString::fromLocal8Bit(len > 0 ? tmp : "C:\\Windows\\Temp\\") + "sdr_town_launch.log";
+#else
+    return QStringLiteral("/tmp/sdr_town_launch.log");
+#endif
+}
+
+static QByteArray readFileTailCapped(const QString& path, qint64 maxBytes)
+{
+    QFile file(path);
+    if (path.trimmed().isEmpty() || maxBytes <= 0 || !file.open(QIODevice::ReadOnly)) return {};
+    const qint64 size = file.size();
+    if (size > maxBytes) file.seek(size - maxBytes);
+    return file.read(maxBytes);
+}
+
+static QByteArray readFilePrefixCapped(const QString& path, qint64 maxBytes)
+{
+    QFile file(path);
+    if (path.trimmed().isEmpty() || maxBytes <= 0 || !file.open(QIODevice::ReadOnly)) return {};
+    return file.read(maxBytes);
+}
+
+static QString diagnosticsTextHash(const QString& text, int chars = 16)
+{
+    return QString::fromLatin1(QCryptographicHash::hash(text.toUtf8(), QCryptographicHash::Sha256).toHex()).left(chars);
+}
+
+static QString diagnosticsBytesHash(const QByteArray& bytes, int chars = 16)
+{
+    return QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()).left(chars);
+}
+
+static QString diagnosticsRedactIdentifierLikeText(QString text)
+{
+    text = text.left(180);
+    text.replace(QRegularExpression("\\b[0-9a-fA-F]{8,}\\b"), "<hex>");
+    text.replace(QRegularExpression("\\b\\d{6,}\\b"), "<num>");
+    text.replace(QRegularExpression("\\s+"), " ");
+    return text.trimmed();
+}
+
+static QString diagnosticsHashSensitive(const QString& text)
+{
+    const QString trimmed = text.trimmed();
+    if (trimmed.isEmpty()) return {};
+    return diagnosticsTextHash(trimmed, 20);
+}
+
+static bool diagnosticsLooksTextFile(const QFileInfo& info)
+{
+    const QString suffix = info.suffix().toLower();
+    return suffix == "txt" || suffix == "log" || suffix == "json" || suffix == "jsonl" ||
+        suffix == "csv" || suffix == "md" || suffix == "sigmf-meta" || suffix == "xml";
+}
+
+static QJsonObject diagnosticsAttachmentSummary(const QString& path, qint64 maxContentBytes)
+{
+    QJsonObject out;
+    QFileInfo info(path);
+    out["pathSelected"] = !path.trimmed().isEmpty();
+    if (path.trimmed().isEmpty()) return out;
+
+    out["name"] = info.fileName().left(160);
+    out["suffix"] = info.suffix().left(24);
+    out["sizeBytes"] = QString::number(info.exists() ? info.size() : 0);
+    out["maxContentBytes"] = static_cast<int>(std::clamp<qint64>(maxContentBytes, 0, 64 * 1024));
+    out["exists"] = info.exists();
+    out["readable"] = info.isReadable();
+    if (!info.exists() || !info.isReadable() || info.isDir()) return out;
+
+    const bool text = diagnosticsLooksTextFile(info);
+    const QByteArray sample = text
+        ? readFileTailCapped(path, maxContentBytes)
+        : readFilePrefixCapped(path, maxContentBytes);
+    out["sampleBytes"] = sample.size();
+    out["truncated"] = info.size() > sample.size();
+    out["sampleSha256"] = diagnosticsBytesHash(sample, 32);
+    out["contentEncoding"] = text ? "utf8-tail" : "base64-prefix";
+    if (text) {
+        out["content"] = QString::fromUtf8(sample).left(12000);
+    } else {
+        out["content"] = QString::fromLatin1(sample.toBase64()).left(24000);
+    }
+    return out;
+}
+
+static QJsonArray diagnosticsDeviceInventory(bool includeRuntimeState)
+{
+    QJsonArray rows;
+    try {
+        auto& mgr = DeviceManager::instance();
+        const auto devices = mgr.getDevices();
+        for (size_t i = 0; i < devices.size() && i < 12; ++i) {
+            const auto& d = devices[i];
+            QJsonObject row;
+            row["index"] = static_cast<int>(i);
+            row["driver"] = QString::fromStdString(d.driver).left(64);
+            row["label"] = diagnosticsRedactIdentifierLikeText(QString::fromStdString(d.label));
+            row["hardware"] = diagnosticsRedactIdentifierLikeText(QString::fromStdString(d.hardware));
+            row["stableKeyHash"] = diagnosticsHashSensitive(QString::fromStdString(d.stableKey));
+            row["serialHash"] = diagnosticsHashSensitive(QString::fromStdString(d.serial));
+            row["enabled"] = d.enabled;
+            row["sampleRateHz"] = d.sampleRate;
+            row["gainDb"] = d.gain;
+            row["gainMinDb"] = d.gainMin;
+            row["gainMaxDb"] = d.gainMax;
+            row["ppm"] = d.frequencyCorrectionPpm;
+            row["antenna"] = QString::fromStdString(d.antenna).left(80);
+            if (includeRuntimeState) {
+                row["streaming"] = mgr.isStreaming(i);
+                row["runtimeState"] = QString::fromStdString(mgr.getRuntimeStateLabel(i)).left(160);
+            }
+            rows.append(row);
+        }
+    } catch (...) {
+        QJsonObject row;
+        row["error"] = "device inventory unavailable";
+        rows.append(row);
+    }
+    return rows;
+}
+
+static QJsonObject diagnosticsSystemHealthPayload()
+{
+    QJsonObject payload;
+    payload["os"] = QSysInfo::prettyProductName().left(120);
+    payload["cpuArch"] = QSysInfo::currentCpuArchitecture().left(40);
+    payload["kernel"] = (QSysInfo::kernelType() + " " + QSysInfo::kernelVersion()).left(80);
+    const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    if (!appData.isEmpty()) {
+        QStorageInfo storage(appData);
+        payload["appDataBytesAvailable"] = QString::number(storage.bytesAvailable());
+        payload["appDataBytesTotal"] = QString::number(storage.bytesTotal());
+        payload["appDataVolumeReady"] = storage.isReady();
+    }
+#ifdef _WIN32
+    MEMORYSTATUSEX mem{};
+    mem.dwLength = sizeof(mem);
+    if (GlobalMemoryStatusEx(&mem)) {
+        payload["memoryLoadPercent"] = static_cast<int>(mem.dwMemoryLoad);
+        payload["physicalAvailableMb"] = static_cast<double>(mem.ullAvailPhys) / (1024.0 * 1024.0);
+        payload["physicalTotalMb"] = static_cast<double>(mem.ullTotalPhys) / (1024.0 * 1024.0);
+    }
+    PROCESS_MEMORY_COUNTERS_EX pmc{};
+    if (GetProcessMemoryInfo(GetCurrentProcess(),
+                             reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pmc),
+                             sizeof(pmc))) {
+        payload["processWorkingSetMb"] = static_cast<double>(pmc.WorkingSetSize) / (1024.0 * 1024.0);
+        payload["processPrivateUsageMb"] = static_cast<double>(pmc.PrivateUsage) / (1024.0 * 1024.0);
+    }
+#endif
+    return payload;
+}
+
+static bool diagnosticsSystemHealthLooksBad(const QJsonObject& payload)
+{
+    const double memLoad = payload.value("memoryLoadPercent").toDouble(0.0);
+    const double privateMb = payload.value("processPrivateUsageMb").toDouble(0.0);
+    const double availMb = payload.value("physicalAvailableMb").toDouble(4096.0);
+    bool okStorage = true;
+    const QString storageText = payload.value("appDataBytesAvailable").toString();
+    if (!storageText.isEmpty()) {
+        bool ok = false;
+        const qlonglong available = storageText.toLongLong(&ok);
+        okStorage = !ok || available > 512ll * 1024ll * 1024ll;
+    }
+    return memLoad >= 94.0 || privateMb >= 2500.0 || availMb <= 256.0 || !okStorage;
+}
+
+static void submitPreviousLaunchCrashIfAny()
+{
+    if (!remoteDiagnosticsEnabled()) return;
+    const QString path = diagnosticsLaunchLogPath();
+    const QByteArray tail = readFileTailCapped(path, 8192);
+    if (tail.isEmpty()) return;
+    const QString text = QString::fromUtf8(tail);
+    const bool hasCrashMarker =
+        text.contains("seh-unhandled", Qt::CaseInsensitive) ||
+        text.contains("std-exception", Qt::CaseInsensitive) ||
+        text.contains("unknown-exception", Qt::CaseInsensitive);
+    if (!hasCrashMarker) return;
+
+    const QString signature = diagnosticsBytesHash(tail, 32);
+    QSettings settings;
+    if (settings.value("remoteDiagnostics/lastLaunchCrashSignature").toString() == signature) return;
+    settings.setValue("remoteDiagnostics/lastLaunchCrashSignature", signature);
+
+    QJsonObject payload;
+    payload["stage"] = "previous-launch";
+    payload["message"] = "Previous launch log contains crash/exception marker";
+    payload["launchLogTail"] = text.left(7000);
+    payload["launchLogTailHash"] = signature;
+    payload["system"] = diagnosticsSystemHealthPayload();
+    payload["devices"] = diagnosticsDeviceInventory(true);
+    remoteDiagnosticsSubmit("app.crash", "error", payload);
+}
+
 static std::string startupLowerArg(const char* raw)
 {
     std::string out = raw ? std::string(raw) : std::string();
@@ -11539,7 +11747,7 @@ static void printStartupUsage()
         << "GUI automation examples:\n"
         << "  SDR_Town.exe --p25-cc 420.350 --gui-auto-follow --gui-default-audio\n"
         << "  SDR_Town.exe --freq 476.4625 --start-device --default-audio\n\n"
-        << "Remote diagnostics, opt-in compact JSON only:\n"
+        << "Remote diagnostics, automatic in alpha builds when configured, compact JSON only:\n"
         << "  SDR_Town.exe --diag-url http://host:8787/ingest --diag-token <token>\n"
         << "  env: SDR_TOWN_DIAG_URL, SDR_TOWN_DIAG_TOKEN, SDR_TOWN_DIAG_MAX_BYTES_PER_MIN\n\n"
         << "Safety:\n"
@@ -17576,6 +17784,13 @@ public:
         QTimer::singleShot(5500, this, [this]() {
             checkRemoteIssueFixStatus();
         });
+        QTimer::singleShot(1200, this, [this]() {
+            maybeShowAlphaDiagnosticsDisclosure();
+        });
+        QTimer::singleShot(2500, this, [this]() {
+            submitDiagnosticsStartupSnapshot();
+            startDiagnosticsHealthMonitors();
+        });
 
         // Allow deferred audio open only after show()+event-loop entry.  The DSP
         // worker is already running; keeping guiStartupSettled false through ctor
@@ -17655,6 +17870,362 @@ private slots:
         });
     }
 
+    QJsonObject diagnosticsRuntimeSnapshot(const QString& reason)
+    {
+        QJsonObject payload;
+        payload["reason"] = reason.left(80);
+        payload["clientId"] = remoteDiagnosticsClientId();
+        payload["timeUtc"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+        payload["system"] = diagnosticsSystemHealthPayload();
+        payload["devices"] = diagnosticsDeviceInventory(true);
+        payload["signalRmsDb"] = gLastRmsDb.load(std::memory_order_relaxed);
+        payload["noiseFloorDb"] = gLastNoiseFloorDb.load(std::memory_order_relaxed);
+        payload["snrDb"] = gLastSnrDb.load(std::memory_order_relaxed);
+        payload["afcOffsetHz"] = gLastAfcOffsetHz.load(std::memory_order_relaxed);
+        payload["afcPpmDelta"] = gLastAfcPpmDelta.load(std::memory_order_relaxed);
+
+        double monitorHz = 0.0;
+        double monitorBw = 0.0;
+        double lpfHz = 0.0;
+        double squelch = 0.0;
+        double rfGain = 0.0;
+        bool lpfEnabled = false;
+        DemodMode mode = DemodMode::AUTO;
+        {
+            std::lock_guard<std::mutex> lk(monitorParamsMutex);
+            monitorHz = currentMonitorFreq;
+            monitorBw = monitorChannelBwHz;
+            lpfHz = monitorLpfHz;
+            squelch = monitorSquelchDb;
+            rfGain = monitorRfGainDb;
+            lpfEnabled = monitorAudioLpfEnabled;
+            mode = currentMonitorMode;
+        }
+        QJsonObject monitor;
+        monitor["frequencyHz"] = monitorHz;
+        monitor["mode"] = modeToQString(mode);
+        monitor["channelBwHz"] = monitorBw;
+        monitor["audioLpfHz"] = lpfHz;
+        monitor["audioLpfEnabled"] = lpfEnabled;
+        monitor["squelchDb"] = squelch;
+        monitor["rfGainDb"] = rfGain;
+        payload["monitor"] = monitor;
+
+        QJsonObject p25;
+        p25["controlHz"] = p25MonitoredControlFreqHz;
+        p25["autoFollowEnabled"] = p25AutoFollowEnabled;
+        p25["independentTrafficEnabled"] = p25IndependentTrafficEnabled;
+        p25["independentTrafficActive"] = p25IndependentTrafficActive;
+        p25["followEnabled"] = p25FollowEnabled;
+        p25["followAutoActive"] = p25FollowAutoActive;
+        p25["followTalkgroupId"] = static_cast<int>(p25FollowTalkgroupId);
+        p25["voiceHz"] = p25AutoFollowVoiceFreqHz;
+        p25["returnControlHz"] = p25AutoFollowReturnControlFreqHz;
+        p25["lastGrantAgeMs"] = p25AutoFollowLastGrantMs > 0
+            ? QDateTime::currentMSecsSinceEpoch() - p25AutoFollowLastGrantMs
+            : -1;
+        p25["lastAudioAgeMs"] = guiP25AudioLastOutputMs.load(std::memory_order_relaxed) > 0
+            ? QDateTime::currentMSecsSinceEpoch() - guiP25AudioLastOutputMs.load(std::memory_order_relaxed)
+            : -1;
+        p25["audioOutputEvents"] = QString::number(guiP25AudioOutputEvents.load(std::memory_order_relaxed));
+        p25["audioOutputSamples"] = QString::number(guiP25AudioOutputSamples.load(std::memory_order_relaxed));
+        p25["voiceDroppedJobs"] = QString::number(p25VoiceDroppedJobs.load(std::memory_order_relaxed));
+        p25["voiceDroppedResults"] = QString::number(p25VoiceDroppedResults.load(std::memory_order_relaxed));
+        p25["controlDroppedResults"] = QString::number(p25ControlDroppedResults.load(std::memory_order_relaxed));
+        payload["p25"] = p25;
+
+        QJsonObject audio;
+        AudioEngine* eng = peekAudioEngineIfReady();
+        audio["engineCreated"] = engineForAudio != nullptr;
+        audio["activeOutputCount"] = eng ? static_cast<int>(eng->activeOutputCount()) : 0;
+        audio["activeOutputNames"] = eng ? QString::fromStdString(eng->getActiveDeviceNames()).left(240) : QString();
+        payload["audio"] = audio;
+        return payload;
+    }
+
+    void maybeShowAlphaDiagnosticsDisclosure()
+    {
+        if (!remoteDiagnosticsEnabled()) return;
+        QSettings settings;
+        const QString key = QStringLiteral("alpha-auto-diagnostics-v1");
+        if (settings.value("remoteDiagnostics/alphaDisclosureKey").toString() == key) return;
+
+        QMessageBox box(this);
+        box.setIcon(QMessageBox::Warning);
+        box.setWindowTitle("Alpha Diagnostics Notice");
+        box.setText(
+            "This alpha tester build sends compact diagnostics automatically.\n\n"
+            "Reports may include crash markers, exception summaries, device/open state, "
+            "performance stalls, hardware class, hashed install/hardware identifiers, "
+            "and any issue reports or capped file snippets you manually attach.\n\n"
+            "Full IQ/audio files are not uploaded automatically. Manual attachments are capped.\n\n"
+            "If you do not agree during alpha testing, block SDR Town from internet access "
+            "or discontinue use until a later build has full diagnostics controls.");
+        QPushButton* continueBtn = box.addButton("Continue Alpha Testing", QMessageBox::AcceptRole);
+        QPushButton* exitBtn = box.addButton("Exit SDR Town", QMessageBox::RejectRole);
+        box.setDefaultButton(continueBtn);
+        box.exec();
+        if (box.clickedButton() == exitBtn) {
+            qApp->quit();
+            return;
+        }
+        settings.setValue("remoteDiagnostics/alphaDisclosureKey", key);
+        QJsonObject payload;
+        payload["stage"] = "alpha-disclosure";
+        payload["acceptedNoticeKey"] = key;
+        remoteDiagnosticsSubmit("diagnostics.disclosure", "info", payload);
+    }
+
+    void submitDiagnosticsStartupSnapshot()
+    {
+        if (!remoteDiagnosticsEnabled()) return;
+        QJsonObject payload = diagnosticsRuntimeSnapshot("startup");
+        remoteDiagnosticsSubmit("diagnostics.snapshot", "info", payload);
+
+        const QJsonArray devices = payload.value("devices").toArray();
+        bool anyOpening = false;
+        for (const QJsonValue& value : devices) {
+            const QString state = value.toObject().value("runtimeState").toString();
+            if (state.contains("opening", Qt::CaseInsensitive)) {
+                anyOpening = true;
+                break;
+            }
+        }
+        if (anyOpening) {
+            payload["stage"] = "startup-hardware-opening";
+            remoteDiagnosticsSubmit("hardware.open", "warn", payload);
+        }
+    }
+
+    void startDiagnosticsHealthMonitors()
+    {
+        if (!remoteDiagnosticsEnabled()) return;
+        if (!diagnosticsHeartbeatTimer) {
+            diagnosticsLastHeartbeatMs = QDateTime::currentMSecsSinceEpoch();
+            diagnosticsHeartbeatTimer = new QTimer(this);
+            diagnosticsHeartbeatTimer->setInterval(1000);
+            connect(diagnosticsHeartbeatTimer, &QTimer::timeout, this, [this]() {
+                const qint64 now = QDateTime::currentMSecsSinceEpoch();
+                const qint64 drift = diagnosticsLastHeartbeatMs > 0 ? now - diagnosticsLastHeartbeatMs : 1000;
+                diagnosticsLastHeartbeatMs = now;
+                if (drift < 8000) return;
+                if (now - diagnosticsLastUiStallReportMs < 60000) return;
+                diagnosticsLastUiStallReportMs = now;
+                QJsonObject payload = diagnosticsRuntimeSnapshot("ui-stall");
+                payload["stage"] = "gui-heartbeat";
+                payload["stallMs"] = static_cast<int>(std::min<qint64>(drift, 600000));
+                remoteDiagnosticsSubmit("app.performance.ui_stall", "warn", payload);
+            });
+            diagnosticsHeartbeatTimer->start();
+        }
+        if (!diagnosticsResourceTimer) {
+            diagnosticsResourceTimer = new QTimer(this);
+            diagnosticsResourceTimer->setInterval(60000);
+            connect(diagnosticsResourceTimer, &QTimer::timeout, this, [this]() {
+                const qint64 now = QDateTime::currentMSecsSinceEpoch();
+                if (now - diagnosticsLastResourceReportMs < 300000) return;
+                QJsonObject system = diagnosticsSystemHealthPayload();
+                if (!diagnosticsSystemHealthLooksBad(system)) return;
+                diagnosticsLastResourceReportMs = now;
+                QJsonObject payload = diagnosticsRuntimeSnapshot("resource-pressure");
+                payload["stage"] = "resource-monitor";
+                payload["system"] = system;
+                remoteDiagnosticsSubmit("app.performance.resource_pressure", "warn", payload);
+            });
+            diagnosticsResourceTimer->start();
+        }
+    }
+
+    void showDiagnosticsReportDialog()
+    {
+        if (!remoteDiagnosticsEnabled()) {
+            QMessageBox::warning(this, "Remote Diagnostics",
+                "Remote diagnostics are not configured, so reports cannot be uploaded from this build.");
+            return;
+        }
+
+        QDialog dlg(this);
+        dlg.setWindowTitle("Report Issue");
+        dlg.resize(720, 620);
+        QVBoxLayout* lay = new QVBoxLayout(&dlg);
+        lay->setContentsMargins(10, 10, 10, 10);
+        lay->setSpacing(8);
+
+        QLabel* idLabel = new QLabel(QString("Diagnostics ID: %1").arg(remoteDiagnosticsClientId()), &dlg);
+        idLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        lay->addWidget(idLabel);
+
+        QFormLayout* form = new QFormLayout();
+        QLineEdit* titleEdit = new QLineEdit(&dlg);
+        titleEdit->setMaxLength(140);
+        titleEdit->setPlaceholderText("Short summary");
+        QComboBox* areaCombo = new QComboBox(&dlg);
+        areaCombo->addItems({"P25 audio", "P25 follow/grants", "Hardware/device open", "WFM/NFM/AM demod", "Waterfall/spectrum", "Crash/freeze", "Performance", "Updater", "Other"});
+        QComboBox* severityCombo = new QComboBox(&dlg);
+        severityCombo->addItem("Problem / bug", "warn");
+        severityCombo->addItem("Crash / data loss", "error");
+        severityCombo->addItem("Performance / freeze", "warn");
+        severityCombo->addItem("Question / feedback", "warn");
+        form->addRow("Title", titleEdit);
+        form->addRow("Area", areaCombo);
+        form->addRow("Severity", severityCombo);
+        lay->addLayout(form);
+
+        QTextEdit* detailsEdit = new QTextEdit(&dlg);
+        detailsEdit->setPlaceholderText("What happened, what you expected, frequency/mode, and whether it repeats.");
+        detailsEdit->setMinimumHeight(150);
+        lay->addWidget(detailsEdit);
+
+        QCheckBox* includeAppLog = new QCheckBox("Include latest app log tail (4 KB)", &dlg);
+        includeAppLog->setChecked(true);
+        QCheckBox* includeP25Log = new QCheckBox("Include visible P25 log tail (2 KB)", &dlg);
+        includeP25Log->setChecked(true);
+        lay->addWidget(includeAppLog);
+        lay->addWidget(includeP25Log);
+
+        QHBoxLayout* fileLay = new QHBoxLayout();
+        QLineEdit* fileEdit = new QLineEdit(&dlg);
+        fileEdit->setPlaceholderText("Optional log or IQ/capture file. Only a tiny capped snippet is uploaded.");
+        QPushButton* browseBtn = new QPushButton("Browse...", &dlg);
+        fileLay->addWidget(fileEdit);
+        fileLay->addWidget(browseBtn);
+        lay->addLayout(fileLay);
+        QLabel* capLabel = new QLabel("Attachment cap: 8 KB raw sample plus file size/hash metadata. Large IQ captures are never uploaded whole.", &dlg);
+        capLabel->setWordWrap(true);
+        lay->addWidget(capLabel);
+
+        QHBoxLayout* btns = new QHBoxLayout();
+        QPushButton* submitBtn = new QPushButton("Submit Report", &dlg);
+        QPushButton* cancelBtn = new QPushButton("Cancel", &dlg);
+        btns->addStretch();
+        btns->addWidget(submitBtn);
+        btns->addWidget(cancelBtn);
+        lay->addLayout(btns);
+
+        connect(browseBtn, &QPushButton::clicked, &dlg, [fileEdit, &dlg]() {
+            const QString path = QFileDialog::getOpenFileName(&dlg, "Attach Capped Diagnostic Snippet");
+            if (!path.isEmpty()) fileEdit->setText(path);
+        });
+        connect(cancelBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
+        connect(submitBtn, &QPushButton::clicked, &dlg, [this, &dlg, titleEdit, areaCombo, severityCombo, detailsEdit, includeAppLog, includeP25Log, fileEdit]() {
+            const QString title = titleEdit->text().trimmed();
+            const QString details = detailsEdit->toPlainText().trimmed();
+            if (title.isEmpty() || details.isEmpty()) {
+                QMessageBox::warning(&dlg, "Report Issue", "Add a short title and details before submitting.");
+                return;
+            }
+
+            QJsonObject payload = diagnosticsRuntimeSnapshot("manual-user-report");
+            payload["userReportId"] = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            payload["title"] = title.left(140);
+            payload["area"] = areaCombo->currentText().left(80);
+            payload["details"] = details.left(4000);
+            payload["submittedAtUtc"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+
+            if (includeAppLog->isChecked()) {
+                const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+                const QString logPath = appData + "/logs/sdr_town.log";
+                payload["appLogTail"] = QString::fromUtf8(readFileTailCapped(logPath, 4096)).left(4096);
+                payload["appLogTailHash"] = diagnosticsBytesHash(readFileTailCapped(logPath, 4096), 24);
+            }
+            if (includeP25Log->isChecked()) {
+                payload["p25VisibleLogTail"] = p25LogLines.join('\n').right(2048);
+            }
+            const QString attachmentPath = fileEdit->text().trimmed();
+            if (!attachmentPath.isEmpty()) {
+                payload["attachment"] = diagnosticsAttachmentSummary(attachmentPath, 8192);
+            }
+
+            QString severity = severityCombo->currentData().toString().trimmed();
+            if (severity.isEmpty()) severity = "warn";
+            remoteDiagnosticsSubmit("user.report", severity, payload);
+            QMessageBox::information(&dlg, "Report Queued",
+                "Your report has been queued for upload. It will appear under Help > My Submitted Issues after the server receives it.");
+            dlg.accept();
+        });
+
+        dlg.exec();
+    }
+
+    void showMyDiagnosticsReports()
+    {
+        if (!remoteDiagnosticsEnabled()) {
+            QMessageBox::warning(this, "My Submitted Issues",
+                "Remote diagnostics are not configured, so there is no server issue list to show.");
+            return;
+        }
+
+        QDialog dlg(this);
+        dlg.setWindowTitle("My Submitted Issues");
+        dlg.resize(920, 520);
+        QVBoxLayout* lay = new QVBoxLayout(&dlg);
+        QLabel* idLabel = new QLabel(QString("Diagnostics ID: %1").arg(remoteDiagnosticsClientId()), &dlg);
+        idLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        lay->addWidget(idLabel);
+        QTableWidget* table = new QTableWidget(0, 7, &dlg);
+        table->setHorizontalHeaderLabels({"Issue ID", "Title", "Status", "Fixed In", "Last Seen", "Reports", "Note"});
+        table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        table->setSelectionBehavior(QAbstractItemView::SelectRows);
+        table->horizontalHeader()->setStretchLastSection(true);
+        lay->addWidget(table);
+
+        QHBoxLayout* btns = new QHBoxLayout();
+        QPushButton* refreshBtn = new QPushButton("Refresh", &dlg);
+        QPushButton* closeBtn = new QPushButton("Close", &dlg);
+        btns->addStretch();
+        btns->addWidget(refreshBtn);
+        btns->addWidget(closeBtn);
+        lay->addLayout(btns);
+
+        auto refresh = [this, table, refreshBtn]() {
+            refreshBtn->setEnabled(false);
+            table->setRowCount(0);
+            remoteDiagnosticsCheckClientStatus(table, [table, refreshBtn](const QJsonObject& status) {
+                refreshBtn->setEnabled(true);
+                const QJsonArray issues = status.value("issues").toArray();
+                table->setRowCount(issues.size());
+                int row = 0;
+                for (const QJsonValue& value : issues) {
+                    const QJsonObject issue = value.toObject();
+                    const QStringList cells = {
+                        issue.value("issue_id").toString(),
+                        issue.value("title").toString(),
+                        issue.value("status").toString(),
+                        issue.value("fixed_version").toString(),
+                        issue.value("client_last_seen").toString(issue.value("last_seen").toString()),
+                        QString::number(issue.value("client_report_count").toInt(issue.value("report_count").toInt())),
+                        issue.value("fix_note").toString()
+                    };
+                    for (int col = 0; col < cells.size(); ++col) {
+                        QTableWidgetItem* item = new QTableWidgetItem(cells[col]);
+                        if (col == 2) {
+                            const QString statusText = cells[col].toLower();
+                            if (statusText == "fixed") item->setForeground(QColor(120, 220, 150));
+                            else if (statusText == "unrequired") item->setForeground(QColor(180, 180, 180));
+                            else item->setForeground(QColor(255, 210, 120));
+                        }
+                        table->setItem(row, col, item);
+                    }
+                    ++row;
+                }
+                if (!status.value("ok").toBool(false)) {
+                    table->setRowCount(1);
+                    table->setItem(0, 0, new QTableWidgetItem("status-error"));
+                    table->setItem(0, 1, new QTableWidgetItem(status.value("error").toString("Could not load issue status.")));
+                } else if (issues.isEmpty()) {
+                    table->setRowCount(1);
+                    table->setItem(0, 0, new QTableWidgetItem("none"));
+                    table->setItem(0, 1, new QTableWidgetItem("No issues recorded for this installation yet."));
+                }
+                table->resizeColumnsToContents();
+            });
+        };
+        connect(refreshBtn, &QPushButton::clicked, &dlg, refresh);
+        connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
+        refresh();
+        dlg.exec();
+    }
+
     void showAbout()
     {
         QMessageBox box(this);
@@ -17665,6 +18236,9 @@ private slots:
             "This software is for <b>receiving only</b>. You are solely responsible for compliance "
             "with all applicable laws in your jurisdiction regarding radio reception, recording, "
             "and use of data.<br><br>"
+            "<b>Alpha diagnostics:</b> Tester builds may send compact automatic diagnostics "
+            "and user-submitted capped snippets to the configured SDR Town diagnostics service. "
+            "Full IQ/audio files are not uploaded automatically.<br><br>"
             "<b>Important:</b> All decoding and analysis features are intended exclusively for "
             "<b>unencrypted / clear signals</b>. No decryption, cryptoanalysis, or attempts to "
             "access encrypted communications are implemented or supported. If a signal is encrypted, "
@@ -17980,6 +18554,12 @@ private slots:
                 });
             } catch (const std::exception& ex) {
                 spdlog::error("Exception during Device Manager Apply: {}", ex.what());
+                if (remoteDiagnosticsEnabled()) {
+                    QJsonObject payload = diagnosticsRuntimeSnapshot("device-manager-apply-exception");
+                    payload["stage"] = "device-manager-apply";
+                    payload["message"] = QString::fromLocal8Bit(ex.what()).left(500);
+                    remoteDiagnosticsSubmit("hardware.open", "error", payload);
+                }
                 statusBar()->showMessage("Apply error (see log). Device left in safe/stub state if possible.", 6000);
                 QMessageBox::warning(&dlg, "Device Start Error",
                     QString("An error occurred while starting the device (RTL-SDR or other).\n\n%1\n\nCheck the log for details (sdr_town.log). "
@@ -17987,6 +18567,12 @@ private slots:
                             "Verify Zadig WinUSB driver is installed for the RTL device and that no other SDR app has it open.").arg(ex.what()));
             } catch (...) {
                 spdlog::error("Unknown exception during Device Manager Apply (possible driver/USB SEH).");
+                if (remoteDiagnosticsEnabled()) {
+                    QJsonObject payload = diagnosticsRuntimeSnapshot("device-manager-apply-unknown-exception");
+                    payload["stage"] = "device-manager-apply";
+                    payload["message"] = "Unknown exception during device apply";
+                    remoteDiagnosticsSubmit("hardware.open", "error", payload);
+                }
                 statusBar()->showMessage("Apply error (unknown). See log. Using safe fallback.", 6000);
                 QMessageBox::warning(&dlg, "Device Start Error",
                     "Unknown error while starting device.\n\nSee sdr_town.log. Ensure proper driver (Zadig) and that the dongle is not in use by another program.");
@@ -18992,6 +19578,11 @@ private:
     QCheckBox* p25AutoFollowCheckBox = nullptr;
     QCheckBox* p25IndependentTrafficCheckBox = nullptr;
     QLabel* p25StatusLabel = nullptr;
+    QTimer* diagnosticsHeartbeatTimer = nullptr;
+    QTimer* diagnosticsResourceTimer = nullptr;
+    qint64 diagnosticsLastHeartbeatMs = 0;
+    qint64 diagnosticsLastUiStallReportMs = 0;
+    qint64 diagnosticsLastResourceReportMs = 0;
     QStringList p25LogLines;
     QStringList p25VisibleLogPending;
     bool p25VisibleLogFlushQueued = false;
@@ -19139,6 +19730,12 @@ private:
         guiRuntimeStartupErrors << message;
         spdlog::warn("GUI runtime startup: {}", message.toStdString());
         appendP25LogLine("GUI startup: " + message);
+        if (remoteDiagnosticsEnabled()) {
+            QJsonObject payload = diagnosticsRuntimeSnapshot("gui-runtime-startup-error");
+            payload["stage"] = "gui-runtime-startup";
+            payload["message"] = message.left(500);
+            remoteDiagnosticsSubmit("app.problem", "warn", payload);
+        }
     }
 
     bool selectDefaultAudioOutputForGuiStartup(const char* reason)
@@ -20634,6 +21231,10 @@ private:
         // Help
         QMenu* helpMenu = menuBar()->addMenu("&Help");
         helpMenu->addAction("&About SDR Town", this, &MainWindow::showAbout);
+        helpMenu->addSeparator();
+        helpMenu->addAction("&Report Issue...", this, &MainWindow::showDiagnosticsReportDialog);
+        helpMenu->addAction("&My Submitted Issues...", this, &MainWindow::showMyDiagnosticsReports);
+        helpMenu->addSeparator();
         helpMenu->addAction("Check for &Updates...", [this]() {
             if (m_updateManager) {
                 // Manual check — will show "up to date" or the update dialog
@@ -24194,6 +24795,7 @@ int main(int argc, char *argv[])
             payload["p25GrantTest"] = guiConfig.p25GrantTest;
             payload["defaultAudio"] = guiConfig.defaultAudio;
             remoteDiagnosticsSubmit("app.start", "info", payload);
+            submitPreviousLaunchCrashIfAny();
         }
         spdlog::default_logger()->flush();
         writeEarlyCrashLog("before-mainwindow");

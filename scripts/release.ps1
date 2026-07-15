@@ -57,7 +57,7 @@ if (-not [string]::IsNullOrWhiteSpace($RemoteDiagnosticsUrl)) {
         url = $RemoteDiagnosticsUrl
         token = $diagToken
         maxBytesPerMinute = 65536
-        maxPayloadBytes = 16384
+        maxPayloadBytes = 49152
         minIntervalMs = 1000
         maxQueue = 128
     }

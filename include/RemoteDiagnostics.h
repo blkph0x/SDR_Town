@@ -17,7 +17,7 @@ struct RemoteDiagnosticsConfig {
     QString sessionId;
     QString configSource;
     int maxBytesPerMinute = 64 * 1024;
-    int maxPayloadBytes = 16 * 1024;
+    int maxPayloadBytes = 48 * 1024;
     int minIntervalMs = 1000;
     int maxQueue = 128;
 };

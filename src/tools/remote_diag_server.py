@@ -74,7 +74,7 @@ def version_gt(candidate: str, current: str) -> bool:
     return parse_version(candidate) > parse_version(current)
 
 
-def compact_json(value: Any, limit: int = 4096) -> str:
+def compact_json(value: Any, limit: int = 32768) -> str:
     try:
         text = json.dumps(value, ensure_ascii=True, separators=(",", ":"))
     except Exception:
@@ -235,13 +235,31 @@ class DiagnosticsState:
         event_type = str(event.get("type") or "").lower()
         if severity in ISSUE_SEVERITIES:
             return True
-        if event_type in {"app.exception", "app.crash", "app.problem", "diagnostics.problem"}:
+        if event_type in {
+            "app.exception",
+            "app.crash",
+            "app.problem",
+            "diagnostics.problem",
+            "user.report",
+            "hardware.open",
+            "hardware.problem",
+            "app.performance.ui_stall",
+            "app.performance.resource_pressure",
+        }:
             return True
         return False
 
     def _issue_key_and_title(self, event: dict[str, Any], payload: dict[str, Any]) -> tuple[str, str]:
         event_type = normalize_text(event.get("type"))
         severity = normalize_text(event.get("severity")).lower()
+        if event_type == "user.report":
+            report_id = normalize_text(payload.get("userReportId"))
+            title = normalize_text(payload.get("title") or payload.get("summary") or "User submitted issue")
+            area = normalize_text(payload.get("area"))
+            key = "|".join([event_type, report_id, area, title])
+            label = " - ".join(p for p in [event_type, area, title] if p)
+            return key, label[:180] or "User submitted issue"
+
         stage = normalize_text(payload.get("stage"))
         exception_type = normalize_text(payload.get("exceptionType"))
         message = normalize_text(payload.get("message") or payload.get("error") or payload.get("line"))
@@ -272,7 +290,7 @@ class DiagnosticsState:
             rows = con.execute(
                 """
                 SELECT issue_id, title, event_type, severity, first_seen, last_seen, first_version, last_version,
-                       status, fixed_version, fix_note, report_count
+                       status, fixed_version, fix_note, report_count, last_payload
                 FROM issues
                 ORDER BY
                     CASE status WHEN 'outstanding' THEN 0 WHEN 'fixed' THEN 1 ELSE 2 END,
@@ -330,6 +348,19 @@ class DiagnosticsState:
                 """,
                 (client_id,),
             ).fetchone()
+            issue_rows = con.execute(
+                """
+                SELECT i.issue_id, i.title, i.event_type, i.severity, i.status, i.fixed_version,
+                       i.fix_note, i.first_seen, i.last_seen, i.first_version, i.last_version,
+                       i.report_count, r.count AS client_report_count, r.last_seen AS client_last_seen
+                FROM issues i
+                JOIN issue_reports r ON r.issue_id = i.issue_id
+                WHERE r.client_id=?
+                ORDER BY r.last_seen DESC
+                LIMIT 100
+                """,
+                (client_id,),
+            ).fetchall()
 
         fixed: list[dict[str, Any]] = []
         recommended = ""
@@ -347,6 +378,7 @@ class DiagnosticsState:
             "bugFixUpdateAvailable": bool(fixed),
             "recommendedVersion": recommended,
             "fixedIssues": fixed[:20],
+            "issues": [dict(row) for row in issue_rows],
             "outstandingIssueCount": int(outstanding["n"] if outstanding else 0),
         }
 
@@ -541,6 +573,9 @@ class Handler(BaseHTTPRequestHandler):
             status = str(issue.get("status") or "outstanding")
             fixed_version = html.escape(str(issue.get("fixed_version") or ""))
             fix_note = html.escape(str(issue.get("fix_note") or ""))
+            payload_preview = html.escape(str(issue.get("last_payload") or "")[:2500])
+            if payload_preview:
+                payload_preview = f"<details><summary>payload</summary><pre>{payload_preview}</pre></details>"
             options = "".join(
                 f'<option value="{s}" {"selected" if s == status else ""}>{s}</option>'
                 for s in sorted(ISSUE_STATUSES)
@@ -548,7 +583,7 @@ class Handler(BaseHTTPRequestHandler):
             issue_rows.append(f"""
 <tr>
   <td><code>{issue_id}</code><br><small>{html.escape(str(issue.get('event_type') or ''))} / {html.escape(str(issue.get('severity') or ''))}</small></td>
-  <td>{html.escape(str(issue.get('title') or ''))}<br><small>first {html.escape(str(issue.get('first_seen') or ''))} / last {html.escape(str(issue.get('last_seen') or ''))}</small></td>
+  <td>{html.escape(str(issue.get('title') or ''))}<br><small>first {html.escape(str(issue.get('first_seen') or ''))} / last {html.escape(str(issue.get('last_seen') or ''))}</small>{payload_preview}</td>
   <td>{int(issue.get('report_count') or 0)}</td>
   <td>
     <form method="post" action="/admin/issue">
@@ -585,6 +620,7 @@ input, select, button {{ margin: 2px; padding: 5px; background: #17212b; color: 
 button {{ cursor: pointer; background: #245b91; }}
 code {{ color: #9ee493; }}
 small {{ color: #a9b7c6; }}
+pre {{ white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow: auto; background: #0c1014; padding: 8px; border: 1px solid #2b3540; }}
 .summary span {{ margin-right: 16px; }}
 </style>
 <h1>SDR Town Diagnostics Admin</h1>

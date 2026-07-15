@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.32 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.33 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -114,6 +114,7 @@ if(WIN32)
         NOMINMAX
         WIN32_LEAN_AND_MEAN
     )
+    target_link_libraries(${PROJECT_NAME} PRIVATE Psapi)
     if(MSVC)
         # /EHa allows catch(...) to catch SEH (access violations etc from native drivers like rtlsdr/libusb)
         # This helps turn hard crashes during RTL open into caught errors + stub fallback.

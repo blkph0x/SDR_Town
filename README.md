@@ -168,11 +168,18 @@ redacted so raw symbols/AMBE bits and ESS key identifiers are not exported.
 
 ## Remote Live Diagnostics
 
-Remote diagnostics are opt-in and are designed for tester debugging, not bulk
-capture upload. The app sends compact JSON events for startup, P25 follow/log
-state, voice-gate decisions, MAC/ESS state, AMBE counters, audio metrics, and
-drop counters. It does not upload IQ samples, PCM audio, raw dibits, raw
-symbols, or large log files.
+Remote diagnostics are automatic in alpha tester builds when a
+`remote_diagnostics.json` config is present. On first GUI run the app shows an
+alpha diagnostics disclosure. If a tester does not agree during alpha testing,
+they should block SDR Town from internet access or discontinue use until a later
+build has full diagnostics controls.
+
+Diagnostics are designed for tester debugging, not bulk capture upload. The app
+sends compact JSON events for startup, crash markers, hardware/open state, UI
+stalls, resource pressure, P25 follow/log state, voice-gate decisions, MAC/ESS
+state, AMBE counters, audio metrics, and drop counters. It does not
+automatically upload full IQ samples, PCM audio, raw dibits, raw symbols, or
+large log files.
 
 Start a collector on the machine that will receive tester events:
 
@@ -225,18 +232,26 @@ Then browse to:
 http://127.0.0.1:8787/admin?token=<admin-token>
 ```
 
-Each issue can be marked `outstanding`, `fixed`, or `unrequired`. When marked
-`fixed`, set the fixed version, such as `0.2.32`. On startup, the app checks the
-collector for issues reported by its pseudonymous client ID; if a newer release
-fixes one of that install's reports, it prompts the user to check for updates.
-The app sends a generated client/install ID and a hashed hardware fingerprint,
-not raw serial numbers or raw machine IDs.
+Each issue can be marked `outstanding`, `fixed`, or `unrequired`. Manual reports
+from **Help > Report Issue...** become tracked issues with a unique report ID.
+The report dialog can include a short app-log tail, visible P25-log tail, and an
+optional capped file snippet. Attachments are limited client-side to a tiny
+sample plus filename, size, and sample hash metadata; full IQ captures are never
+uploaded whole by the report form.
+
+Users can open **Help > My Submitted Issues...** to see the issues attached to
+their current installation and the latest status from the collector. When an
+issue is marked `fixed`, set the fixed version, such as `0.2.33`. On startup,
+the app checks the collector for issues reported by its pseudonymous client ID;
+if a newer release fixes one of that install's reports, it prompts the user to
+check for updates. The app sends a generated client/install ID and a hashed
+hardware fingerprint, not raw serial numbers or raw machine IDs.
 
 Maintainer release builds can also inject the collector endpoint into the
 portable ZIP and installer without committing the token to git:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\release.ps1 -Version 0.2.30 -Channel experimental -RemoteDiagnosticsUrl http://your-public-ip:8787/ingest
+powershell -ExecutionPolicy Bypass -File scripts\release.ps1 -Version 0.2.33 -Channel experimental -RemoteDiagnosticsUrl http://your-public-ip:8787/ingest
 ```
 
 That reads the bearer token from
