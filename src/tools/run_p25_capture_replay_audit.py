@@ -19,8 +19,7 @@ def latest_capture_dir(root: Path) -> Path | None:
 
 def run_cli_replay(exe: Path, command: str, timeout_s: float) -> tuple[int, str]:
     proc = subprocess.run(
-        [str(exe), '--cli', '--allow-multiple'],
-        input=f'{command}\nexit\n',
+        [str(exe), '--cli', '--allow-multiple', '--cmd', command],
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

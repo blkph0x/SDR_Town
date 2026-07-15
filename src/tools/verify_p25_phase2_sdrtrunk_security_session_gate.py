@@ -14,6 +14,7 @@ checks = {
     'encrypted call drops pending queue': 'trustedEncrypted' in main and 'p25ClearPhase2PendingAudio(rx)' in main,
     'MAC_IDLE resets session': 'case 3: // MAC_IDLE' in p25 and 'phase2ClearCallSession(*session);' in p25,
     'MAC_HANGTIME resets session': 'case 6: // MAC_HANGTIME' in p25 and 'phase2ClearCallSession(*session);' in p25 and 'MAC_HANGTIME' in ctrl,
+    'MAC_HANGTIME still promotes target encryption evidence': 'pduType != 4 && pduType != 6' in p25 and 'session->hangtimeSeen = true;' in p25 and 'session->trafficSecurityKnown = true;' in p25,
 }
 missing=[name for name,ok in checks.items() if not ok]
 if missing:

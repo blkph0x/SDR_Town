@@ -29,14 +29,12 @@ def safe_name(text: str) -> str:
 def run_cli_command(exe: Path, command: str, timeout_s: float, deep_trace: bool) -> dict:
     if " trace" not in command.lower().split("\n", 1)[0].lower():
         command = f"{command} trace"
-    stdin = f"{command}\nexit\n"
     env = os.environ.copy()
     if deep_trace:
         env.setdefault("SDR_TOWN_P25_DEEP_TRACE", "1")
     try:
         proc = subprocess.run(
-            [str(exe), "--cli", "--allow-multiple"],
-            input=stdin,
+            [str(exe), "--cli", "--allow-multiple", "--cmd", command],
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -62,10 +60,16 @@ def run_cli_command(exe: Path, command: str, timeout_s: float, deep_trace: bool)
 def classify_output(output: str, timed_out: bool) -> str:
     if timed_out:
         return "TIMEOUT"
+    if "PASS_CONTINUOUS_AUDIO" in output:
+        return "PASS_CONTINUOUS_AUDIO"
     if "PASS_CLEAR_AUDIO" in output:
         return "PASS_CLEAR_AUDIO"
+    if "PASS_PARTIAL_AUDIO" in output:
+        return "PASS_PARTIAL_AUDIO"
     if "PASS_ENCRYPTED_GATED" in output:
         return "PASS_ENCRYPTED_GATED"
+    if "FAIL_RAW_AUDIO_GATED" in output:
+        return "FAIL_RAW_AUDIO_GATED"
     if "FAIL_NO_AUDIO" in output:
         if re.search(r"\bp2bursts=0\b", output) and not re.search(r"\bp2bursts=[1-9]\d*\b", output):
             return "FAIL_NO_TRAFFIC_BURSTS"

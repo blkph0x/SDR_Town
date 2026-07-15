@@ -356,6 +356,23 @@ P25SlotProbeDecision evaluateP25SlotProbe(const P25SlotProbeSnapshot& snapshot)
     decision.noMacEssYet =
         snapshot.phase2MacCrcValid == 0 &&
         !snapshot.phase2EssKnown;
+    decision.selectedSlotAudioHold =
+        snapshot.recentSelectedSlotAudio ||
+        (snapshot.lastSelectedSlotAudioMs > 0 &&
+         snapshot.nowMs >= snapshot.lastSelectedSlotAudioMs &&
+         snapshot.nowMs - snapshot.lastSelectedSlotAudioMs <=
+             std::max<int64_t>(0, snapshot.selectedSlotAudioHoldMs));
+
+    const int minVoiceCodewords = std::max(1, snapshot.minVoiceCodewords);
+    const int unknownEpochVoiceCodewords =
+        (snapshot.grantClearStateUnknown && decision.tdmaEpochLocked)
+            ? std::min(minVoiceCodewords, 2)
+            : minVoiceCodewords;
+    const bool oppositeSlotDominates =
+        snapshot.phase2TargetVoiceCodewords == 0 &&
+        snapshot.phase2OppositeVoiceCodewords >= minVoiceCodewords &&
+        snapshot.phase2OppositeVoiceCodewords >=
+            snapshot.phase2TargetVoiceCodewords + minVoiceCodewords;
 
     decision.wrongSlotEligible =
         // Main/CLI callers deliberately downgrade the diagnostic to Decoding
@@ -363,13 +380,16 @@ P25SlotProbeDecision evaluateP25SlotProbe(const P25SlotProbeSnapshot& snapshot)
         // a pure wrong-slot window with no decoded audio reaches this point.
         diagIs(snapshot.diag, P25FollowDiagCode::Phase2WrongSlot) &&
         snapshot.inPassband &&
-        snapshot.phase2VoiceCodewords >= snapshot.minVoiceCodewords &&
-        decision.noMacEssYet;
+        snapshot.phase2VoiceCodewords >= minVoiceCodewords &&
+        oppositeSlotDominates &&
+        decision.noMacEssYet &&
+        !decision.selectedSlotAudioHold;
 
     decision.resetWrongSlot =
         !diagIs(snapshot.diag, P25FollowDiagCode::Phase2WrongSlot) ||
         snapshot.phase2MacPdus > 0 ||
-        snapshot.phase2EssKnown;
+        snapshot.phase2EssKnown ||
+        decision.selectedSlotAudioHold;
 
     decision.wrongSlotChecksAfterObservation = baseWrongSlotChecks;
     if (decision.wrongSlotEligible) {
@@ -382,48 +402,64 @@ P25SlotProbeDecision evaluateP25SlotProbe(const P25SlotProbeSnapshot& snapshot)
     decision.probeRateOk =
         baseLastFlipMs == 0 ||
         snapshot.nowMs - baseLastFlipMs > snapshot.minFlipIntervalMs;
+    // SDRTrunk keeps the TDMA timeslot from the control-channel grant
+    // authoritative.  A busy Phase-2 RF carrier can carry an unrelated call on
+    // the opposite slot; unlabelled VCWs there are not proof that the grant slot
+    // is wrong.  Only allow this recovery for manual/late-entry follows that do
+    // not yet have enough control-channel mask/grant metadata to trust a slot.
+    const bool untrustedSlotAssignment = !snapshot.grantMaskParamsKnown;
     const bool maskedOppositeDominant =
         snapshot.grantClearStateUnknown &&
+        untrustedSlotAssignment &&
         snapshot.inPassband &&
         snapshot.phase2TargetVoiceCodewords == 0 &&
-        snapshot.phase2OppositeVoiceCodewords >= snapshot.minVoiceCodewords &&
+        snapshot.phase2OppositeVoiceCodewords >= unknownEpochVoiceCodewords &&
         snapshot.phase2MaskedBursts >= 1 &&
-        decision.noMacEssYet;
+        decision.noMacEssYet &&
+        !decision.selectedSlotAudioHold;
     decision.maskedOppositeDominantFlip =
         maskedOppositeDominant &&
         decision.flipCountAfterObservation < snapshot.maxFlips &&
         decision.probeRateOk;
 
+    const bool sustainedWrongSlot =
+        decision.wrongSlotEligible &&
+        decision.wrongSlotChecksAfterObservation >= snapshot.wrongSlotThreshold;
     decision.shouldFlip =
-        (decision.wrongSlotChecksAfterObservation >= snapshot.wrongSlotThreshold ||
-         decision.maskedOppositeDominantFlip) &&
+        (sustainedWrongSlot || decision.maskedOppositeDominantFlip) &&
         decision.flipCountAfterObservation < snapshot.maxFlips &&
         decision.probeRateOk;
 
     const bool earlyOppositeVcw =
         snapshot.grantClearStateUnknown &&
+        untrustedSlotAssignment &&
         snapshot.inPassband &&
         snapshot.phase2TargetVoiceCodewords == 0 &&
         snapshot.phase2VoiceCodewords == 0 &&
-        snapshot.phase2OppositeVoiceCodewords >= snapshot.minVoiceCodewords &&
-        decision.noMacEssYet;
+        snapshot.phase2OppositeVoiceCodewords >= unknownEpochVoiceCodewords &&
+        decision.noMacEssYet &&
+        !decision.selectedSlotAudioHold;
     const bool clearGrantBurstNoTargetVcw =
         snapshot.grantClearKnown &&
+        untrustedSlotAssignment &&
         snapshot.inPassband &&
         snapshot.phase2TargetVoiceCodewords == 0 &&
         snapshot.phase2VoiceCodewords == 0 &&
         snapshot.phase2Bursts > 0 &&
         snapshot.tunedAtMs > 0 &&
         snapshot.nowMs - snapshot.tunedAtMs >= 6000 &&
-        decision.noMacEssYet;
+        decision.noMacEssYet &&
+        !decision.selectedSlotAudioHold;
     const bool unknownGrantAggregateVcw =
         snapshot.grantClearStateUnknown &&
         snapshot.inPassband &&
+        !snapshot.grantMaskParamsKnown &&
         snapshot.phase2TargetVoiceCodewords == 0 &&
-        snapshot.phase2VoiceCodewords >= snapshot.minVoiceCodewords &&
+        snapshot.phase2VoiceCodewords >= unknownEpochVoiceCodewords &&
         snapshot.tunedAtMs > 0 &&
-        snapshot.nowMs - snapshot.tunedAtMs >= 4000 &&
-        decision.noMacEssYet;
+        snapshot.nowMs - snapshot.tunedAtMs >= (decision.tdmaEpochLocked ? 2200 : 4000) &&
+        decision.noMacEssYet &&
+        !decision.selectedSlotAudioHold;
     const bool earlyNoSync =
         snapshot.grantClearStateUnknown &&
         !snapshot.grantMaskParamsKnown &&
@@ -436,7 +472,8 @@ P25SlotProbeDecision evaluateP25SlotProbe(const P25SlotProbeSnapshot& snapshot)
         snapshot.nowMs - snapshot.tunedAtMs >= snapshot.earlyNoSyncFlipMs &&
         (diagIs(snapshot.diag, P25FollowDiagCode::WaitingForClearGrant) ||
          diagIs(snapshot.diag, P25FollowDiagCode::NoSync) ||
-         diagIs(snapshot.diag, P25FollowDiagCode::Phase2AudioLockMissing));
+         diagIs(snapshot.diag, P25FollowDiagCode::Phase2AudioLockMissing)) &&
+        !decision.selectedSlotAudioHold;
     decision.earlyNoSyncFlip =
         (earlyOppositeVcw || earlyNoSync || clearGrantBurstNoTargetVcw || unknownGrantAggregateVcw) &&
         decision.flipCountAfterObservation == 0 &&

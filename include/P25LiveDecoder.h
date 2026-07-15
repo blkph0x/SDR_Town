@@ -71,6 +71,13 @@ struct P25LiveDecoderConfig {
     // only (no RRC); leave false for Phase-2 traffic parity.  P1 LSM may enable.
     bool cqpskUseMatchedRrcFilter = false;
     double cqpskRrcAlpha = 0.20;
+    // When an external/trusted clear Phase-2 grant already proves the call is
+    // safe to release, allow repeated low-error AMBE voice evidence to lock the
+    // XOR mask phase/superframe lattice. Unknown/encrypted calls keep this off
+    // and still require MAC/ESS/ISCH standards proof before speaker release.
+    bool allowPhase2SoftAmbeMaskPhaseLock = false;
+    bool phase2PreferredTdmaSlotKnown = false;
+    uint8_t phase2PreferredTdmaSlot = 0;
     // Phase 2 burst/MAC decode is enabled by default so realtime control
     // monitoring and offline diagnostics share the same grant evidence path.
     // Low-power views may opt out explicitly when they only need Phase 1 TSBK.
@@ -120,6 +127,9 @@ struct P25Phase2MacPdu {
     uint8_t offset = 0;
     bool fecDecoded = false;
     bool crcValid = false;
+    bool directCrcOk = false;
+    bool directCrcParseable = false;
+    bool rsDecoded = false;
     int correctedSymbols = 0;
     bool acchHypothesisKnown = false;
     bool acchBitOrderSwapped = false;
@@ -230,6 +240,10 @@ struct P25LiveDecoderStats {
     size_t phase2MaskedBursts = 0;
     size_t phase2MacPdus = 0;
     size_t phase2MacCrcValid = 0;
+    size_t phase2MacFecDecoded = 0;
+    size_t phase2MacDirectCrcValid = 0;
+    size_t phase2MacDirectCrcRejected = 0;
+    size_t phase2MacRsDecoded = 0;
     size_t phase1PduHeaders = 0;
     size_t phase1PduCrcValid = 0;
     size_t phase1AmbtcPdus = 0;
@@ -312,6 +326,10 @@ struct P25Phase2Burst {
     bool macEndPttSeen = false;
     bool macIdleSeen = false;
     bool macHangtimeSeen = false;
+    bool trafficSecurityKnown = false;
+    bool trafficEncrypted = false;
+    bool trafficTalkgroupKnown = false;
+    uint32_t trafficTalkgroupId = 0;
     bool superframeBurstIndexKnown = false;
     uint8_t superframeBurstIndex = 0;
     bool syncOffsetAdjusted = false;
@@ -417,6 +435,11 @@ public:
     const P25LiveDecoderConfig& config() const { return m_config; }
     void setRealtimeDecodeBudgetMs(int budgetMs) { m_config.realtimeDecodeBudgetMs = std::max(0, budgetMs); }
     void setMaxCqpskSearchCandidates(size_t maxCandidates) { m_config.maxCqpskSearchCandidates = maxCandidates; }
+    void setAllowPhase2SoftAmbeMaskPhaseLock(bool allow) { m_config.allowPhase2SoftAmbeMaskPhaseLock = allow; }
+    void setPhase2PreferredTdmaSlot(bool known, uint8_t slot) {
+        m_config.phase2PreferredTdmaSlotKnown = known;
+        m_config.phase2PreferredTdmaSlot = static_cast<uint8_t>(slot & 0x01u);
+    }
     bool cqpskLockValid() const noexcept { return m_cqpskLock.valid; }
 
     // Align the internal Phase-2 dibit stream counter to an absolute ring

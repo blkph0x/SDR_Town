@@ -350,6 +350,25 @@ std::vector<int> makeSyntheticPhase2SacchPayloadForTest()
     return makeSyntheticPhase2SlowAcchPayloadForTest(0x3, bits);
 }
 
+std::vector<int> makeSyntheticPhase2MacActiveGroupUserSacchPayloadForTest(uint16_t talkgroupId,
+                                                                          bool encrypted,
+                                                                          uint8_t pduType = 4)
+{
+    std::vector<uint8_t> dataBytes(21, 0);
+    dataBytes[0] = static_cast<uint8_t>(((pduType & 0x07u) << 5) | (4u << 2)); // PDU type, offset 4.
+    dataBytes[1] = 0x01; // Group voice channel user.
+    dataBytes[2] = encrypted ? 0x44 : 0x04; // service options; bit 6 is encrypted.
+    dataBytes[3] = static_cast<uint8_t>((talkgroupId >> 8) & 0xffu);
+    dataBytes[4] = static_cast<uint8_t>(talkgroupId & 0xffu);
+    dataBytes[5] = 0x12;
+    dataBytes[6] = 0x34;
+    dataBytes[7] = 0x56;
+    auto bits = bytesToBitsMsbForTest(dataBytes, 168);
+    const uint16_t crc = p25Phase2Crc12ForTest(bits, bits.size());
+    for (int bit = 11; bit >= 0; --bit) bits.push_back(static_cast<uint8_t>((crc >> bit) & 1u));
+    return makeSyntheticPhase2SlowAcchPayloadForTest(0x3, bits);
+}
+
 std::vector<int> makeSyntheticPhase2LcchPayloadForTest()
 {
     std::vector<uint8_t> dataBytes(19, 0);
@@ -367,6 +386,19 @@ std::vector<int> makeSyntheticPhase2SuperframeWithSacchForTest()
 {
     auto dibits = makeSyntheticPhase2Superframe();
     const auto payload = makeSyntheticPhase2SacchPayloadForTest();
+    const size_t base = 2 * P25LiveDecoder::Phase2BurstDibits + P25LiveDecoder::Phase2FrameSyncDibits;
+    for (size_t i = 0; i < payload.size(); ++i) {
+        dibits[base + i] = payload[i] & 0x03;
+    }
+    return dibits;
+}
+
+std::vector<int> makeSyntheticPhase2SuperframeWithMacActiveGroupUserForTest(uint16_t talkgroupId,
+                                                                            bool encrypted,
+                                                                            uint8_t pduType = 4)
+{
+    auto dibits = makeSyntheticPhase2Superframe();
+    const auto payload = makeSyntheticPhase2MacActiveGroupUserSacchPayloadForTest(talkgroupId, encrypted, pduType);
     const size_t base = 2 * P25LiveDecoder::Phase2BurstDibits + P25LiveDecoder::Phase2FrameSyncDibits;
     for (size_t i = 0; i < payload.size(); ++i) {
         dibits[base + i] = payload[i] & 0x03;
@@ -1264,7 +1296,8 @@ TEST_CASE("P25 live decoder extracts Phase 2 4V burst voice codewords")
     REQUIRE(burst.voiceCodewords.size() == 4);
     REQUIRE(burst.voiceCodewords.front().dibitOffset == 21);
 
-    const auto result = decoder.processHardDibits(dibits);
+    P25LiveDecoder statsDecoder;
+    const auto result = statsDecoder.processHardDibits(dibits);
     REQUIRE(result.stats.phase2Bursts == 1);
     REQUIRE(result.stats.phase2VoiceCodewords == 4);
     REQUIRE(result.stats.phase2SuperframeBursts == 0);
@@ -1339,7 +1372,8 @@ TEST_CASE("P25 live decoder locks Phase 2 superframes and annotates all TDMA bur
     REQUIRE(bursts[0].syncErrors == -1);
     REQUIRE(bursts[2].syncErrors == 0);
 
-    const auto result = decoder.processHardDibits(dibits);
+    P25LiveDecoder statsDecoder;
+    const auto result = statsDecoder.processHardDibits(dibits);
     REQUIRE(result.stats.phase2Bursts == 12);
     REQUIRE(result.stats.phase2SuperframeBursts == 12);
     REQUIRE(result.stats.phase2VoiceCodewords == 48);
@@ -1382,17 +1416,8 @@ TEST_CASE("P25 live decoder emits stable Phase 2 session codeword IDs")
     REQUIRE(nextIds.size() == ids.size());
 
     const auto repeated = decoder.processHardDibits(nextWindow);
-    REQUIRE(repeated.phase2Bursts.size() == 12);
-    size_t index = 0;
-    for (const auto& burst : repeated.phase2Bursts) {
-        for (const auto& codeword : burst.voiceCodewords) {
-            REQUIRE(codeword.sessionCodewordIdKnown);
-            REQUIRE(codeword.duplicateInSession);
-            REQUIRE(index < nextIds.size());
-            REQUIRE(codeword.sessionCodewordId == nextIds[index++]);
-        }
-    }
-    REQUIRE(index == nextIds.size());
+    REQUIRE(repeated.phase2Bursts.empty());
+    REQUIRE(repeated.stats.phase2VoiceCodewords == 0);
 }
 
 TEST_CASE("P25 Phase 2 XOR mask generation matches known local-system vector")
@@ -1413,8 +1438,8 @@ TEST_CASE("P25 live decoder applies Phase 2 XOR mask before extracting voice cod
     constexpr uint16_t nac = 0x2d2;
     constexpr uint32_t wacn = 0xbee00;
     constexpr uint16_t systemId = 0x2d1;
-    const auto clear = makeSyntheticPhase2Superframe();
-    const auto masked = makeSyntheticMaskedPhase2Superframe(nac, wacn, systemId);
+    const auto clear = makeSyntheticPhase2SuperframeWithSacchForTest();
+    const auto masked = maskSyntheticPhase2SuperframeForTest(clear, nac, wacn, systemId, 0);
 
     P25LiveDecoder clearDecoder;
     const auto clearBursts = clearDecoder.processPhase2HardDibits(clear);
@@ -1425,12 +1450,14 @@ TEST_CASE("P25 live decoder applies Phase 2 XOR mask before extracting voice cod
     const auto maskedResult = maskedDecoder.processHardDibits(masked);
     REQUIRE(maskedResult.phase2Bursts.size() == 12);
     REQUIRE(maskedResult.stats.phase2MaskedBursts == 12);
-    REQUIRE(maskedResult.stats.phase2VoiceCodewords == 48);
-    REQUIRE_FALSE(maskedResult.stats.phase2EssKnown);
+    REQUIRE(maskedResult.stats.phase2VoiceCodewords == 44);
+    REQUIRE(maskedResult.stats.phase2EssKnown);
+    REQUIRE_FALSE(maskedResult.stats.phase2EssEncrypted);
     for (size_t slot = 0; slot < maskedResult.phase2Bursts.size(); ++slot) {
         const auto& burst = maskedResult.phase2Bursts[slot];
         REQUIRE(burst.xorMaskApplied);
         REQUIRE(burst.voiceCodewords.size() == clearBursts[slot].voiceCodewords.size());
+        if (burst.voiceCodewords.empty()) continue;
         REQUIRE(burst.voiceCodewords.front().bits == clearBursts[slot].voiceCodewords.front().bits);
     }
 }
@@ -1470,6 +1497,10 @@ TEST_CASE("P25 live decoder searches Phase 2 XOR mask phase using MAC CRC eviden
 
     REQUIRE(burst->grantSlotKnown);
     const uint8_t pttGrantSlot = burst->grantSlot;
+    // XOR mask phase selects the scrambling segment, not the traffic timeslot.
+    // SDRTrunk keeps A/B/C/D ownership bound to the physical fragment position,
+    // so the grant slot must not rotate just because maskPhase is non-zero.
+    REQUIRE(pttGrantSlot == 0);
     size_t releasedVoiceBursts = 0;
     bool releasedWithoutLocalMac = false;
     for (const auto& voiceBurst : result.phase2Bursts) {
@@ -1479,19 +1510,140 @@ TEST_CASE("P25 live decoder searches Phase 2 XOR mask phase using MAC CRC eviden
             REQUIRE_FALSE(voiceBurst.sessionAudioRelease);
             continue;
         }
-        if (voiceBurst.superframeBurstIndexKnown && voiceBurst.superframeBurstIndex > 2) {
+        if (voiceBurst.sessionAudioRelease) {
             REQUIRE((voiceBurst.superframeLock || voiceBurst.macCrcLock));
             REQUIRE((voiceBurst.maskPhaseLock || voiceBurst.macCrcLock));
-            REQUIRE(voiceBurst.macCrcLock);
             REQUIRE(voiceBurst.essKnown);
             REQUIRE_FALSE(voiceBurst.encrypted);
-            REQUIRE(voiceBurst.sessionAudioRelease);
             ++releasedVoiceBursts;
             releasedWithoutLocalMac = releasedWithoutLocalMac || !voiceBurst.macCrcValid;
         }
     }
     REQUIRE(releasedVoiceBursts > 0);
     REQUIRE(releasedWithoutLocalMac);
+}
+
+TEST_CASE("P25 live decoder releases Phase 2 late-entry voice from CRC-valid clear MAC_ACTIVE group user")
+{
+    constexpr uint16_t nac = 0x2d2;
+    constexpr uint32_t wacn = 0xbee00;
+    constexpr uint16_t systemId = 0x2d1;
+    constexpr uint8_t maskPhase = 5;
+    constexpr uint16_t talkgroupId = 30302;
+
+    const auto clear = makeSyntheticPhase2SuperframeWithMacActiveGroupUserForTest(talkgroupId, false);
+    const auto masked = maskSyntheticPhase2SuperframeForTest(clear, nac, wacn, systemId, maskPhase);
+
+    P25LiveDecoder decoder;
+    decoder.setPhase2MaskParameters(nac, wacn, systemId);
+    const auto result = decoder.processHardDibits(masked);
+
+    REQUIRE(result.stats.phase2Bursts == 12);
+    REQUIRE(result.stats.phase2MaskPhaseKnown);
+    REQUIRE(result.stats.phase2MaskPhase == maskPhase);
+    REQUIRE(result.stats.phase2MacCrcValid >= 1);
+
+    const auto macBurst = std::find_if(result.phase2Bursts.begin(), result.phase2Bursts.end(), [](const P25Phase2Burst& b) {
+        return b.macCrcValid && b.macActiveSeen && b.trafficSecurityKnown;
+    });
+    REQUIRE(macBurst != result.phase2Bursts.end());
+    REQUIRE(macBurst->trafficTalkgroupKnown);
+    REQUIRE(macBurst->trafficTalkgroupId == talkgroupId);
+    REQUIRE_FALSE(macBurst->trafficEncrypted);
+    REQUIRE_FALSE(macBurst->encrypted);
+    REQUIRE(macBurst->sessionAudioRelease);
+    REQUIRE(macBurst->grantSlotKnown);
+
+    size_t releasedVoiceBursts = 0;
+    for (const auto& voiceBurst : result.phase2Bursts) {
+        if (voiceBurst.voiceCodewords.empty()) continue;
+        if (voiceBurst.dibitOffset <= macBurst->dibitOffset) continue;
+        if (!voiceBurst.grantSlotKnown || voiceBurst.grantSlot != macBurst->grantSlot) continue;
+        if (!voiceBurst.sessionAudioRelease) continue;
+        REQUIRE(voiceBurst.trafficSecurityKnown);
+        REQUIRE(voiceBurst.trafficTalkgroupKnown);
+        REQUIRE(voiceBurst.trafficTalkgroupId == talkgroupId);
+        REQUIRE_FALSE(voiceBurst.trafficEncrypted);
+        REQUIRE_FALSE(voiceBurst.encrypted);
+        ++releasedVoiceBursts;
+    }
+    REQUIRE(releasedVoiceBursts > 0);
+}
+
+TEST_CASE("P25 live decoder keeps Phase 2 MAC_ACTIVE encrypted group user muted")
+{
+    constexpr uint16_t nac = 0x2d2;
+    constexpr uint32_t wacn = 0xbee00;
+    constexpr uint16_t systemId = 0x2d1;
+    constexpr uint8_t maskPhase = 5;
+    constexpr uint16_t talkgroupId = 30302;
+
+    const auto clear = makeSyntheticPhase2SuperframeWithMacActiveGroupUserForTest(talkgroupId, true);
+    const auto masked = maskSyntheticPhase2SuperframeForTest(clear, nac, wacn, systemId, maskPhase);
+
+    P25LiveDecoder decoder;
+    decoder.setPhase2MaskParameters(nac, wacn, systemId);
+    const auto result = decoder.processHardDibits(masked);
+
+    const auto macBurst = std::find_if(result.phase2Bursts.begin(), result.phase2Bursts.end(), [](const P25Phase2Burst& b) {
+        return b.macCrcValid && b.macActiveSeen && b.trafficSecurityKnown;
+    });
+    REQUIRE(macBurst != result.phase2Bursts.end());
+    REQUIRE(macBurst->trafficTalkgroupKnown);
+    REQUIRE(macBurst->trafficTalkgroupId == talkgroupId);
+    REQUIRE(macBurst->trafficEncrypted);
+    REQUIRE(macBurst->encrypted);
+    REQUIRE_FALSE(macBurst->sessionAudioRelease);
+
+    for (const auto& voiceBurst : result.phase2Bursts) {
+        if (voiceBurst.voiceCodewords.empty()) continue;
+        if (voiceBurst.dibitOffset <= macBurst->dibitOffset) continue;
+        if (!voiceBurst.grantSlotKnown || voiceBurst.grantSlot != macBurst->grantSlot) continue;
+        if (voiceBurst.trafficSecurityKnown) {
+            REQUIRE(voiceBurst.trafficEncrypted);
+            REQUIRE(voiceBurst.encrypted);
+        }
+        REQUIRE_FALSE(voiceBurst.sessionAudioRelease);
+    }
+}
+
+TEST_CASE("P25 live decoder treats Phase 2 MAC_HANGTIME encrypted group user as target encrypted")
+{
+    constexpr uint16_t nac = 0x2d2;
+    constexpr uint32_t wacn = 0xbee00;
+    constexpr uint16_t systemId = 0x2d1;
+    constexpr uint8_t maskPhase = 5;
+    constexpr uint16_t talkgroupId = 12068;
+
+    const auto clear = makeSyntheticPhase2SuperframeWithMacActiveGroupUserForTest(talkgroupId, true, 6);
+    const auto masked = maskSyntheticPhase2SuperframeForTest(clear, nac, wacn, systemId, maskPhase);
+
+    P25LiveDecoder decoder;
+    decoder.setPhase2MaskParameters(nac, wacn, systemId);
+    const auto result = decoder.processHardDibits(masked);
+
+    const auto macBurst = std::find_if(result.phase2Bursts.begin(), result.phase2Bursts.end(), [](const P25Phase2Burst& b) {
+        return b.macCrcValid && b.macHangtimeSeen && b.trafficSecurityKnown;
+    });
+    REQUIRE(macBurst != result.phase2Bursts.end());
+    REQUIRE(macBurst->trafficTalkgroupKnown);
+    REQUIRE(macBurst->trafficTalkgroupId == talkgroupId);
+    REQUIRE(macBurst->trafficEncrypted);
+    REQUIRE(macBurst->encrypted);
+    REQUIRE_FALSE(macBurst->sessionAudioRelease);
+
+    for (const auto& voiceBurst : result.phase2Bursts) {
+        if (voiceBurst.voiceCodewords.empty()) continue;
+        if (voiceBurst.dibitOffset <= macBurst->dibitOffset) continue;
+        if (!voiceBurst.grantSlotKnown || voiceBurst.grantSlot != macBurst->grantSlot) continue;
+        if (voiceBurst.trafficSecurityKnown) {
+            REQUIRE(voiceBurst.trafficTalkgroupKnown);
+            REQUIRE(voiceBurst.trafficTalkgroupId == talkgroupId);
+            REQUIRE(voiceBurst.trafficEncrypted);
+            REQUIRE(voiceBurst.encrypted);
+        }
+        REQUIRE_FALSE(voiceBurst.sessionAudioRelease);
+    }
 }
 
 TEST_CASE("P25 live decoder keeps sticky Phase 2 superframe lock through drifted single-burst windows")

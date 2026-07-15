@@ -39,7 +39,43 @@ CHANNEL_RE = re.compile(r"\bch=0X(?P<ch>[0-9A-Fa-f]+)\b", re.IGNORECASE)
 CARRIER_RE = re.compile(r"\bcarrier=(?P<carrier>\d+)\b", re.IGNORECASE)
 SLOT_RE = re.compile(r"\bslot=(?P<slot>[01])\b", re.IGNORECASE)
 VOICE_RE = re.compile(r"\bvoice=(?P<voice>[0-9.]+)MHz\b", re.IGNORECASE)
-NAC_RE = re.compile(r"nac=0X(?P<nac>[0-9A-Fa-f]+).*?wacn=0X(?P<wacn>[0-9A-Fa-f]+).*?sys=0X(?P<sys>[0-9A-Fa-f]+)")
+NAC_FIELD_RE = re.compile(r"\bnac=0x(?P<nac>[0-9A-Fa-f]+)\b", re.IGNORECASE)
+WACN_FIELD_RE = re.compile(r"\bwacn=0x(?P<wacn>[0-9A-Fa-f]+)\b", re.IGNORECASE)
+SYSTEM_FIELD_RE = re.compile(r"\b(?:sys|system|systemid)=0x(?P<sys>[0-9A-Fa-f]+)\b", re.IGNORECASE)
+
+
+def parse_mask_params_from_text(text: str) -> dict | None:
+    nac_match = NAC_FIELD_RE.search(text)
+    wacn_match = WACN_FIELD_RE.search(text)
+    system_match = SYSTEM_FIELD_RE.search(text)
+    if not (nac_match and wacn_match and system_match):
+        return None
+    return {
+        "nac": int(nac_match.group("nac"), 16),
+        "wacn": int(wacn_match.group("wacn"), 16),
+        "system": int(system_match.group("sys"), 16),
+    }
+
+
+def parse_partial_mask_params_from_text(text: str) -> dict:
+    out: dict = {}
+    if nac_match := NAC_FIELD_RE.search(text):
+        out["nac"] = int(nac_match.group("nac"), 16)
+    if wacn_match := WACN_FIELD_RE.search(text):
+        out["wacn"] = int(wacn_match.group("wacn"), 16)
+    if system_match := SYSTEM_FIELD_RE.search(text):
+        out["system"] = int(system_match.group("sys"), 16)
+    return out
+
+
+def extract_default_mask_params(lines: list[str]) -> dict | None:
+    for line in lines:
+        if "mask_params_known" not in line and "wacn=" not in line.lower():
+            continue
+        parsed = parse_mask_params_from_text(line)
+        if parsed and parsed["nac"] > 0 and parsed["wacn"] > 0 and parsed["system"] > 0:
+            return parsed
+    return None
 
 
 def parse_utc_from_line(line: str) -> datetime | None:
@@ -80,7 +116,12 @@ def load_summary(capture_dir: Path) -> dict:
 def parse_grants(lines: list[str], started_utc: datetime | None) -> list[dict]:
     grants: list[dict] = []
     for idx, line in enumerate(lines):
-        if "Instruction: Group" not in line:
+        if not (
+            "Instruction: Group" in line
+            or "selected_grant_event=" in line
+            or "Group voice channel grant" in line
+            or "Group voice channel grant update" in line
+        ):
             continue
         tg_match = TG_RE.search(line)
         channel_match = CHANNEL_RE.search(line)
@@ -93,7 +134,7 @@ def parse_grants(lines: list[str], started_utc: datetime | None) -> list[dict]:
         rel_ms = None
         if when and started_utc:
             rel_ms = max(0.0, (when - started_utc).total_seconds() * 1000.0)
-        nac_match = NAC_RE.search(line)
+        mask_params = parse_mask_params_from_text(line)
         grant = {
             "line": idx + 1,
             "utc": when.isoformat().replace("+00:00", "Z") if when else None,
@@ -105,12 +146,63 @@ def parse_grants(lines: list[str], started_utc: datetime | None) -> list[dict]:
             "voice_mhz": float(voice_match.group("voice")),
             "phase2": "Phase 2" in line or "phase2-candidate" in line,
         }
-        if nac_match:
-            grant["nac"] = int(nac_match.group("nac"), 16)
-            grant["wacn"] = int(nac_match.group("wacn"), 16)
-            grant["system"] = int(nac_match.group("sys"), 16)
+        lower_line = line.lower()
+        if re.search(r"\|\s*clear\s*(?:\||$)", lower_line) or " enc=clear" in lower_line:
+            grant["arm_clear"] = "yes"
+            grant["arm_encrypted"] = "no"
+        elif re.search(r"\|\s*encrypted\s*(?:\||$)", lower_line) or " enc=encrypted" in lower_line or " enc=enc" in lower_line:
+            grant["arm_clear"] = "no"
+            grant["arm_encrypted"] = "yes"
+        if mask_params:
+            grant.update(mask_params)
+        else:
+            grant.update(parse_partial_mask_params_from_text(line))
         grants.append(grant)
     return grants
+
+
+def cached_mask_params_for_grant(capture_dir: Path, grant: dict) -> dict | None:
+    app_dir = capture_dir.parent.parent
+    talkgroups_path = app_dir / "p25_talkgroups.json"
+    if not talkgroups_path.is_file():
+        return None
+    try:
+        rows = json.loads(talkgroups_path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return None
+    if not isinstance(rows, list):
+        return None
+
+    best: tuple[int, dict] | None = None
+    grant_tg = int(grant.get("tg") or 0)
+    grant_voice_hz = float(grant.get("voice_mhz") or 0.0) * 1e6
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if int(row.get("talkgroupId") or 0) != grant_tg:
+            continue
+        if not row.get("p25MaskParamsKnown"):
+            continue
+        nac = int(row.get("nac") or 0)
+        wacn = int(row.get("wacn") or 0)
+        system = int(row.get("systemId") or row.get("system") or 0)
+        if nac <= 0 or wacn <= 0 or system <= 0:
+            continue
+        score = 10
+        if int(grant.get("nac") or nac) == nac:
+            score += 3
+        if int(grant.get("system") or system) == system:
+            score += 3
+        row_voice_hz = float(row.get("lastVoiceFreqHz") or 0.0)
+        if row_voice_hz > 0.0 and grant_voice_hz > 0.0:
+            if abs(row_voice_hz - grant_voice_hz) <= 250.0:
+                score += 10
+            elif abs(row_voice_hz - grant_voice_hz) <= 25000.0:
+                score += 2
+        candidate = {"nac": nac, "wacn": wacn, "system": system}
+        if best is None or score > best[0]:
+            best = (score, candidate)
+    return best[1] if best else None
 
 
 def annotate_grants(grants: list[dict], lines: list[str]) -> None:
@@ -192,6 +284,28 @@ def recommended_commands(capture_dir: Path, summary: dict, grants: list[dict]) -
 
 def audit_capture(capture_dir: Path) -> dict:
     summary = load_summary(capture_dir)
+    if not summary:
+        meta_path = find_capture_file(capture_dir, ".sigmf-meta")
+        if meta_path:
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8", errors="replace"))
+                global_meta = meta.get("global") if isinstance(meta, dict) else {}
+                captures = meta.get("captures") if isinstance(meta, dict) else []
+                first_capture = captures[0] if isinstance(captures, list) and captures else {}
+                summary = {
+                    "sample_rate_hz": global_meta.get("core:sample_rate"),
+                    "center_freq_hz": first_capture.get("core:frequency"),
+                    "started_utc": first_capture.get("core:datetime"),
+                    "actual_seconds": global_meta.get("sdrtown:actual_seconds"),
+                    "snr_db": global_meta.get("sdrtown:snr_db"),
+                    "signal_level_db": global_meta.get("sdrtown:signal_level_db"),
+                    "noise_floor_db": global_meta.get("sdrtown:noise_floor_db"),
+                    "ring_overrun_samples": global_meta.get("sdrtown:ring_overrun_samples"),
+                    "max_single_gap_samples": global_meta.get("sdrtown:max_single_gap_samples"),
+                    "ring_epoch_resets": global_meta.get("sdrtown:ring_epoch_resets"),
+                }
+            except Exception:
+                summary = {}
     log_path = find_capture_file(capture_dir, "_p25_log.txt")
     if not log_path:
         raise FileNotFoundError(f"no *_p25_log.txt in {capture_dir}")
@@ -206,6 +320,17 @@ def audit_capture(capture_dir: Path) -> dict:
     if isinstance(started, str):
         started_utc = datetime.fromisoformat(started.replace("Z", "+00:00")).astimezone(timezone.utc)
     grants = parse_grants(lines, started_utc)
+    default_mask_params = extract_default_mask_params(lines)
+    if default_mask_params:
+        for grant in grants:
+            if grant.get("phase2") and not {"nac", "wacn", "system"}.issubset(grant):
+                grant.update(default_mask_params)
+    for grant in grants:
+        if grant.get("phase2") and not {"nac", "wacn", "system"}.issubset(grant):
+            cached_mask = cached_mask_params_for_grant(capture_dir, grant)
+            if cached_mask:
+                for key, value in cached_mask.items():
+                    grant.setdefault(key, value)
     annotate_grants(grants, lines)
     health = {
         "health": summary.get("health"),

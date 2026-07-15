@@ -55,14 +55,13 @@ $cmd = @(
     "windowms=$WindowMs",
     "wav=`"$Wav`"",
     "minframes=$MinFrames",
-    "minaudio=$MinAudio",
-    "quit"
+    "minaudio=$MinAudio"
 ) -join " "
 
-Write-Host "Running: $Exe --cli"
+Write-Host "Running: $Exe --cli --cmd"
 Write-Host $cmd
 
-$out = $cmd | & $Exe --cli 2>&1
+$out = & $Exe --cli --allow-multiple --cmd $cmd 2>&1
 $out | ForEach-Object { $_ }
 
 $resultLine = $out | Where-Object { $_ -match "P25 voicetest result=" } | Select-Object -Last 1

@@ -91,9 +91,14 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
     const uint8_t targetSlot = static_cast<uint8_t>(m_grantedSlot & 0x01);
     for (const auto& burst : result.phase2Bursts) {
         burstVoiceCodewords += burst.voiceCodewords.size();
-        const bool burstTargetsCall = !targetSlotKnown ||
+        const bool trafficTalkgroupMatches =
+            !burst.trafficTalkgroupKnown ||
+            m_talkgroup == 0 ||
+            burst.trafficTalkgroupId == m_talkgroup;
+        const bool slotMatches = !targetSlotKnown ||
             (burst.grantSlotKnown &&
              static_cast<uint8_t>(burst.grantSlot & 0x01u) == targetSlot);
+        const bool burstTargetsCall = slotMatches && trafficTalkgroupMatches;
         if (!burstTargetsCall) continue;
         targetVoiceCodewords += burst.voiceCodewords.size();
         // Only count as meaningful voice activity (for lifetime / "active" tracking) if it has
@@ -107,9 +112,11 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
         if (goodVoiceEvidence) {
             meaningfulVoiceCodewords += burst.voiceCodewords.size();
         }
-        sessionAudioRelease = sessionAudioRelease || burst.sessionAudioRelease;
-        burstEssKnown = burstEssKnown || burst.essKnown;
-        burstEncrypted = burstEncrypted || (burst.essKnown && burst.encrypted);
+        sessionAudioRelease = sessionAudioRelease || (burst.sessionAudioRelease && trafficTalkgroupMatches);
+        burstEssKnown = burstEssKnown || burst.essKnown || burst.trafficSecurityKnown;
+        burstEncrypted = burstEncrypted ||
+            (burst.essKnown && burst.encrypted) ||
+            (burst.trafficSecurityKnown && burst.trafficEncrypted);
         macPttSeen = macPttSeen || burst.macPttSeen;
         macActiveSeen = macActiveSeen || burst.macActiveSeen;
         macEndPttSeen = macEndPttSeen || burst.macEndPttSeen;

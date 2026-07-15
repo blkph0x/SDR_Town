@@ -348,6 +348,8 @@ TEST_CASE("P25 slot probe flips on repeated wrong-slot VCWs while MAC/ESS is abs
     snapshot.inPassband = true;
     snapshot.diag = diag(P25FollowDiagCode::Phase2WrongSlot);
     snapshot.phase2VoiceCodewords = 4;
+    snapshot.phase2TargetVoiceCodewords = 0;
+    snapshot.phase2OppositeVoiceCodewords = 4;
     snapshot.phase2SuperframeBursts = 6;
     snapshot.phase2MaskedBursts = 6;
     snapshot.phase2MacCrcValid = 0;
@@ -377,6 +379,8 @@ TEST_CASE("P25 slot probe resets tracking on new grants and refuses proven MAC o
     changed.inPassband = true;
     changed.diag = diag(P25FollowDiagCode::Phase2WrongSlot);
     changed.phase2VoiceCodewords = 4;
+    changed.phase2TargetVoiceCodewords = 0;
+    changed.phase2OppositeVoiceCodewords = 4;
 
     auto decision = evaluateP25SlotProbe(changed);
     REQUIRE(decision.resetTracking);
@@ -638,7 +642,7 @@ TEST_CASE("P25 slot probe does not early no-sync flip when grant mask params are
     REQUIRE_FALSE(decision.shouldFlip);
 }
 
-TEST_CASE("P25 slot probe flips early on unknown grant with aggregate VCWs but no target VCWs", "[p25][follow]")
+TEST_CASE("P25 slot probe refuses aggregate-only VCWs when mask params are known", "[p25][follow]")
 {
     P25SlotProbeSnapshot snapshot;
     snapshot.nowMs = 6'000;
@@ -654,7 +658,88 @@ TEST_CASE("P25 slot probe flips early on unknown grant with aggregate VCWs but n
     snapshot.phase2OppositeVoiceCodewords = 0;
 
     const auto decision = evaluateP25SlotProbe(snapshot);
-    REQUIRE(decision.earlyNoSyncFlip);
+    REQUIRE_FALSE(decision.earlyNoSyncFlip);
+    REQUIRE_FALSE(decision.shouldFlip);
+}
+
+TEST_CASE("P25 slot probe refuses aggregate wrong-slot flip when target VCWs are present", "[p25][follow]")
+{
+    P25SlotProbeSnapshot snapshot;
+    snapshot.nowMs = 12'000;
+    snapshot.tunedAtMs = 1'000;
+    snapshot.trackedArmMs = 1'000;
+    snapshot.talkgroupId = 30302;
+    snapshot.trackedTalkgroupId = 30302;
+    snapshot.voiceHz = 421'850'000.0;
+    snapshot.trackedVoiceHz = 421'850'000.0;
+    snapshot.inPassband = true;
+    snapshot.diag = diag(P25FollowDiagCode::Phase2WrongSlot);
+    snapshot.phase2VoiceCodewords = 12;
+    snapshot.phase2TargetVoiceCodewords = 8;
+    snapshot.phase2OppositeVoiceCodewords = 4;
+    snapshot.phase2MaskedBursts = 6;
+    snapshot.phase2SuperframeBursts = 6;
+    snapshot.wrongSlotChecks = 3;
+
+    const auto decision = evaluateP25SlotProbe(snapshot);
+    REQUIRE_FALSE(decision.wrongSlotEligible);
+    REQUIRE_FALSE(decision.shouldFlip);
+}
+
+TEST_CASE("P25 slot probe holds selected slot after fresh decoded audio", "[p25][follow]")
+{
+    P25SlotProbeSnapshot snapshot;
+    snapshot.nowMs = 18'000;
+    snapshot.tunedAtMs = 1'000;
+    snapshot.trackedArmMs = 1'000;
+    snapshot.talkgroupId = 12068;
+    snapshot.trackedTalkgroupId = 12068;
+    snapshot.voiceHz = 420'600'000.0;
+    snapshot.trackedVoiceHz = 420'600'000.0;
+    snapshot.inPassband = true;
+    snapshot.grantClearStateUnknown = true;
+    snapshot.diag = diag(P25FollowDiagCode::Phase2WrongSlot);
+    snapshot.phase2VoiceCodewords = 4;
+    snapshot.phase2TargetVoiceCodewords = 0;
+    snapshot.phase2OppositeVoiceCodewords = 4;
+    snapshot.phase2MaskedBursts = 12;
+    snapshot.phase2SuperframeBursts = 12;
+    snapshot.wrongSlotChecks = 3;
+    snapshot.recentSelectedSlotAudio = true;
+
+    const auto decision = evaluateP25SlotProbe(snapshot);
+    REQUIRE(decision.selectedSlotAudioHold);
+    REQUIRE_FALSE(decision.wrongSlotEligible);
+    REQUIRE(decision.resetWrongSlot);
+    REQUIRE(decision.wrongSlotChecksAfterObservation == 0);
+    REQUIRE_FALSE(decision.maskedOppositeDominantFlip);
+    REQUIRE_FALSE(decision.shouldFlip);
+}
+
+TEST_CASE("P25 slot probe holds selected slot for a short time after decoded audio", "[p25][follow]")
+{
+    P25SlotProbeSnapshot snapshot;
+    snapshot.nowMs = 23'000;
+    snapshot.tunedAtMs = 1'000;
+    snapshot.trackedArmMs = 1'000;
+    snapshot.talkgroupId = 12068;
+    snapshot.trackedTalkgroupId = 12068;
+    snapshot.voiceHz = 420'600'000.0;
+    snapshot.trackedVoiceHz = 420'600'000.0;
+    snapshot.inPassband = true;
+    snapshot.grantClearStateUnknown = true;
+    snapshot.diag = diag(P25FollowDiagCode::WaitingForClearGrant);
+    snapshot.phase2TargetVoiceCodewords = 0;
+    snapshot.phase2OppositeVoiceCodewords = 4;
+    snapshot.phase2MaskedBursts = 1;
+    snapshot.phase2SuperframeBursts = 1;
+    snapshot.lastSelectedSlotAudioMs = 18'000;
+    snapshot.selectedSlotAudioHoldMs = 12'000;
+
+    const auto decision = evaluateP25SlotProbe(snapshot);
+    REQUIRE(decision.selectedSlotAudioHold);
+    REQUIRE_FALSE(decision.maskedOppositeDominantFlip);
+    REQUIRE_FALSE(decision.shouldFlip);
 }
 
 TEST_CASE("P25 follow does not return on brief carrier dip during clear-grant acquisition", "[p25][follow]")
@@ -679,7 +764,26 @@ TEST_CASE("P25 follow does not return on brief carrier dip during clear-grant ac
     REQUIRE(decision.action == P25FollowAction::None);
 }
 
-TEST_CASE("P25 slot probe flips early on clear grant with bursts but no target VCWs", "[p25][follow]")
+TEST_CASE("P25 slot probe flips early on untrusted clear grant with bursts but no target VCWs", "[p25][follow]")
+{
+    P25SlotProbeSnapshot snapshot;
+    snapshot.nowMs = 8'000;
+    snapshot.tunedAtMs = 1'000;
+    snapshot.inPassband = true;
+    snapshot.grantClearKnown = true;
+    snapshot.grantClearStateUnknown = false;
+    snapshot.grantMaskParamsKnown = false;
+    snapshot.diag = diag(P25FollowDiagCode::Phase2AudioLockMissing);
+    snapshot.phase2Bursts = 3;
+    snapshot.phase2VoiceCodewords = 0;
+    snapshot.phase2TargetVoiceCodewords = 0;
+    snapshot.phase2OppositeVoiceCodewords = 0;
+
+    const auto decision = evaluateP25SlotProbe(snapshot);
+    REQUIRE(decision.earlyNoSyncFlip);
+}
+
+TEST_CASE("P25 slot probe keeps control-channel clear grant slot authoritative", "[p25][follow]")
 {
     P25SlotProbeSnapshot snapshot;
     snapshot.nowMs = 8'000;
@@ -692,10 +796,13 @@ TEST_CASE("P25 slot probe flips early on clear grant with bursts but no target V
     snapshot.phase2Bursts = 3;
     snapshot.phase2VoiceCodewords = 0;
     snapshot.phase2TargetVoiceCodewords = 0;
-    snapshot.phase2OppositeVoiceCodewords = 0;
+    snapshot.phase2OppositeVoiceCodewords = 4;
+    snapshot.phase2MaskedBursts = 2;
 
     const auto decision = evaluateP25SlotProbe(snapshot);
-    REQUIRE(decision.earlyNoSyncFlip);
+    REQUIRE_FALSE(decision.earlyNoSyncFlip);
+    REQUIRE_FALSE(decision.maskedOppositeDominantFlip);
+    REQUIRE_FALSE(decision.shouldFlip);
 }
 
 TEST_CASE("P25 follow holds after brief Phase 2 speaker output before hard timeout", "[p25][follow]")
@@ -767,6 +874,58 @@ TEST_CASE("P25 slot probe flips on masked opposite-slot VCWs with no target voic
     snapshot.phase2SuperframeBursts = 1;
 
     const auto decision = evaluateP25SlotProbe(snapshot);
+    REQUIRE(decision.maskedOppositeDominantFlip);
+    REQUIRE(decision.shouldFlip);
+    REQUIRE_FALSE(decision.earlyNoSyncFlip);
+}
+
+TEST_CASE("P25 slot probe refuses opposite-slot proof for known control-channel grant", "[p25][follow]")
+{
+    P25SlotProbeSnapshot snapshot;
+    snapshot.nowMs = 3'000;
+    snapshot.tunedAtMs = 1'000;
+    snapshot.trackedArmMs = 1'000;
+    snapshot.talkgroupId = 30302;
+    snapshot.trackedTalkgroupId = 30302;
+    snapshot.voiceHz = 417'675'000.0;
+    snapshot.trackedVoiceHz = 417'675'000.0;
+    snapshot.inPassband = true;
+    snapshot.grantClearStateUnknown = true;
+    snapshot.grantMaskParamsKnown = true;
+    snapshot.diag = diag(P25FollowDiagCode::WaitingForClearGrant);
+    snapshot.phase2TargetVoiceCodewords = 0;
+    snapshot.phase2OppositeVoiceCodewords = 2;
+    snapshot.phase2MaskedBursts = 6;
+    snapshot.phase2SuperframeBursts = 6;
+
+    const auto decision = evaluateP25SlotProbe(snapshot);
+    REQUIRE(decision.tdmaEpochLocked);
+    REQUIRE_FALSE(decision.maskedOppositeDominantFlip);
+    REQUIRE_FALSE(decision.shouldFlip);
+    REQUIRE_FALSE(decision.earlyNoSyncFlip);
+}
+
+TEST_CASE("P25 slot probe uses faster opposite-slot proof after untrusted unknown grant epoch lock", "[p25][follow]")
+{
+    P25SlotProbeSnapshot snapshot;
+    snapshot.nowMs = 3'000;
+    snapshot.tunedAtMs = 1'000;
+    snapshot.trackedArmMs = 1'000;
+    snapshot.talkgroupId = 30302;
+    snapshot.trackedTalkgroupId = 30302;
+    snapshot.voiceHz = 417'675'000.0;
+    snapshot.trackedVoiceHz = 417'675'000.0;
+    snapshot.inPassband = true;
+    snapshot.grantClearStateUnknown = true;
+    snapshot.grantMaskParamsKnown = false;
+    snapshot.diag = diag(P25FollowDiagCode::WaitingForClearGrant);
+    snapshot.phase2TargetVoiceCodewords = 0;
+    snapshot.phase2OppositeVoiceCodewords = 2;
+    snapshot.phase2MaskedBursts = 6;
+    snapshot.phase2SuperframeBursts = 6;
+
+    const auto decision = evaluateP25SlotProbe(snapshot);
+    REQUIRE(decision.tdmaEpochLocked);
     REQUIRE(decision.maskedOppositeDominantFlip);
     REQUIRE(decision.shouldFlip);
     REQUIRE_FALSE(decision.earlyNoSyncFlip);

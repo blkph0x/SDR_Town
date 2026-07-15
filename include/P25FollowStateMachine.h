@@ -120,10 +120,14 @@ struct P25SlotProbeSnapshot {
     long long phase2MacPdus = 0;
     long long phase2MacCrcValid = 0;
     bool phase2EssKnown = false;
+    bool recentSelectedSlotAudio = false;
+    int64_t lastSelectedSlotAudioMs = 0;
+    int64_t selectedSlotAudioHoldMs = 12000;
 };
 
 struct P25SlotProbeDecision {
     bool resetTracking = false;
+    bool selectedSlotAudioHold = false;
     bool wrongSlotEligible = false;
     bool resetWrongSlot = false;
     bool tdmaEpochLocked = false;

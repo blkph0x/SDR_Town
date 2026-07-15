@@ -13,7 +13,9 @@ needles = [
     'targetVoiceForLateEntryProbe',
     'macEvidenceForLateEntryProbe',
     'superframeMaskEvidenceForLateEntryProbe',
-    'kP25Phase2AllowUnknownGrantFieldAudioProbe = true',
+    'kP25Phase2AllowUnknownGrantFieldAudioProbe = false',
+    'args.fieldAudioProbe = true;',
+    'args.fieldAudioProbe = false;',
     'late-entry-audio-probe-diagnostic-only',
 ]
 missing = [n for n in needles if n not in text]

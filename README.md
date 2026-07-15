@@ -120,7 +120,8 @@ CLI:
 ```powershell
 .\SDR_Town.exe --cli
 p25 monitor 420.250
-p25 waitgrant 420.350 0 60 follow record=8
+p25 waitgrant 420.350 0 60 follow record=8 wav
+p25 clearaudio 420.350 0 180
 p25 followtest "C:\path\to\capture.sigmf-meta" 420.350 10000 followms=5000 tg=10609
 p25 tgs
 p25 follow 0
@@ -131,13 +132,28 @@ Phase 2 clear voice release is intentionally gated. Audio is released only when
 the decoder has enough TDMA mask, MAC/ESS clear-state, and AMBE validation
 evidence. Late entry into a call may show voice bursts before MAC/ESS state is
 confirmed; the log will say that it is waiting rather than silently failing.
-Grant updates without service options are still followed/probed even when old
-talkgroup history says encrypted; the traffic-channel MAC/ESS path makes the
-final clear/encrypted decision. Encrypted ESS is treated as final only when
-MAC CRC backs it or the voice decoder explicitly marks the call encrypted.
+Grant updates without service options are still followed and queued even when
+old talkgroup history says encrypted; the traffic-channel MAC/ESS path makes
+the final clear/encrypted speaker decision. The unknown-grant AMBE probe is a
+default-off lab diagnostic (`p25 voicetest ... probe`) and normal GUI/CLI audio
+release stays muted until MAC/ESS/PTT proves clear. Encrypted ESS is treated as
+final only when MAC CRC backs it or the voice decoder explicitly marks the call
+encrypted.
 For tester reports, add `record=8` to `p25 waitgrant`; the CLI saves a SigMF IQ
 slice plus the final P25 voice-gate diagnostics under the app data
 `iq_test_captures` folder before retuning back to the control channel.
+
+One-command clear-audio field diagnostic:
+
+```powershell
+python src\tools\run_p25_live_clear_audio_diag.py --cc 420.350 --seconds 180 --record-seconds 8
+```
+
+That wrapper runs `p25 waitgrant` with follow, IQ capture, WAV capture,
+validation logging, and then replays the saved IQ through the continuous Phase 2
+voice harness. It writes `clear_audio_diag_summary.json`, the CLI transcript,
+capture audit, replay transcripts, and decoded WAV files under
+`build\p25_live_clear_audio_diag`.
 
 Optional Phase 2 validation logging:
 
@@ -194,9 +210,11 @@ p25 deltg <index>
 p25 follow <talkgroup-index> [rx]
 p25 tsbk <cc_mhz> <10-or-12-byte-hex-block>
 p25 sync [device] [target_mhz] [ms]
-p25 waitgrant <cc_mhz> [device] [seconds] [follow] [record[=seconds]]
+p25 waitgrant <cc_mhz> [device] [seconds] [follow] [record[=seconds]] [wav] [tg=<id>]
+p25 clearaudio <cc_mhz> [device] [seconds] [record=<seconds>] [tg=<id>]
 p25 replay <sigmf-meta|sigmf-data|capture_dir> [target_mhz] [ms] [phase2] [skip=<ms>] [center=<mhz>] [nac=<id> wacn=<id> system=<id>]
 p25 followtest <sigmf-meta|sigmf-data|capture_dir> <cc_mhz> [ms] [skip=<ms>] [center=<mhz>] [followms=<ms>] [tg=<id>]
+p25 voicetest <capture_dir> <voice_mhz> [ms] [skip=<ms>] [slot=0|1] [tg=<id>] [clear|enc] [stream] [probe|noprobe] [wav=out.wav]
 p25 voice
 audio list
 audio enable <output0> [output1 ...]

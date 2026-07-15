@@ -42,6 +42,10 @@ struct P25VoiceDiagSnapshot {
     long long phase2MaskedBursts = 0;
     long long phase2MacPdus = 0;
     long long phase2MacCrcValid = 0;
+    long long phase2MacFecDecoded = 0;
+    long long phase2MacDirectCrcValid = 0;
+    long long phase2MacDirectCrcRejected = 0;
+    long long phase2MacRsDecoded = 0;
     long long phase2MacNominalCrcValid = 0;
     long long phase2MacAltKindCrcValid = 0;
     long long phase2MacBitSwapCrcValid = 0;

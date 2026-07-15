@@ -11,6 +11,7 @@
 
 namespace {
 constexpr size_t kOutputRingFrames = 1u << 19; // storage capacity; queued depth is capped below for jitter buffering.
+constexpr double kDigitalVoiceJitterSeconds = 0.65;
 static_assert((kOutputRingFrames & (kOutputRingFrames - 1)) == 0,
               "Audio output ring capacity must stay a power of two for the fast wrap path.");
 
@@ -476,7 +477,7 @@ std::string AudioEngine::getActiveDeviceNames() const
 
 size_t AudioEngine::getJitterQueueCapFrames() const {
     const size_t sampleRate = std::max<size_t>(8000, (size_t)getSampleRate());
-    return std::max<size_t>(4096, (size_t)(sampleRate * 0.90));
+    return std::max<size_t>(4096, (size_t)(sampleRate * kDigitalVoiceJitterSeconds));
 }
 
 size_t AudioEngine::getRingQueuedSamples() const {

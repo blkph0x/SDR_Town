@@ -13,11 +13,18 @@ assert 'm_phase2SlotSessionMacCrcSeen[ts]' in dec
 assert 'm_phase2SlotFirst4vSlot[ts]' in dec
 assert 'const bool grantMayReleaseVoice =' in main
 assert 'sdrtrunkLateEntryVoiceRelease' in main
+assert 'p25Phase2UnknownGrantProbeVoiceReleaseEvidence' in main
+assert 'releasePendingRawVoiceFromValidatedUnknownGrantProbe' in main
+assert 'unknown-grant-probe-validated-release' in main
 assert 'targetVoiceForLateEntryProbe' in main
 assert 'macEvidenceForLateEntryProbe' in main
 assert 'superframeMaskEvidenceForLateEntryProbe' in main
-assert 'kP25Phase2AllowUnknownGrantFieldAudioProbe = true' in main
-assert 'burst.sessionAudioRelease || grantMayReleaseVoice' in main
+assert 'kP25Phase2AllowUnknownGrantFieldAudioProbe = false' in main
+assert 'args.fieldAudioProbe = true;' in main
+assert 'args.fieldAudioProbe = false;' in main
+assert 'probe|noprobe' in main
+assert 'burst.sessionAudioRelease ||' in main
+assert 'grantMayReleaseVoice ||' in main
 assert 'raw scrambled AMBE must' in main
 assert 'if (!burst.xorMaskApplied)' in main
 assert 'acceptedReleaseVoice' in main
