@@ -12583,19 +12583,22 @@ public:
         auto tryApplyP25RetuneReceiverState = [this](double hz) -> bool {
             if (!std::isfinite(hz) || hz <= 0.0) return false;
 
-            // Retune/traffic-source selection is part of the grant handoff.  Use a
-            // blocking receiver-list commit here so an active TX on the waterfall
-            // cannot be missed because a short UI/DSP update held the lock.
-            std::unique_lock<std::mutex> listLock(receiversMutex);
+            // NEVER block the Qt GUI thread on receivers/state locks.  The voice
+            // worker can hold stateMutex for hundreds of ms during Phase-2 decode;
+            // a blocking lock here freezes the whole UI (Windows: "not responding").
+            // Caller retries via QTimer when we return false.
+            std::unique_lock<std::mutex> listLock(receiversMutex, std::try_to_lock);
+            if (!listLock.owns_lock()) return false;
             ensureReceiver();
             if (receivers.empty() || !receivers[0]) return true;
 
             auto& rx = *receivers[0];
-            std::unique_lock<std::mutex> rxLock(rx.stateMutex);
+            std::unique_lock<std::mutex> rxLock(rx.stateMutex, std::try_to_lock);
+            if (!rxLock.owns_lock()) return false;
             double liveMonitorHz = 0.0;
             {
-                std::lock_guard<std::mutex> monLock(monitorParamsMutex);
-                liveMonitorHz = currentMonitorFreq;
+                std::unique_lock<std::mutex> monLock(monitorParamsMutex, std::try_to_lock);
+                if (monLock.owns_lock()) liveMonitorHz = currentMonitorFreq;
             }
             if (std::isfinite(liveMonitorHz) && liveMonitorHz > 0.0 &&
                 std::abs(liveMonitorHz - hz) > 50.0) {
@@ -12713,13 +12716,15 @@ public:
             return true;
         };
 
-        auto setP25ControlChannelMute = [this](bool muted) {
+        auto setP25ControlChannelMute = [this](bool muted) -> bool {
             {
-                std::lock_guard<std::mutex> lk(receiversMutex);
+                std::unique_lock<std::mutex> lk(receiversMutex, std::try_to_lock);
+                if (!lk.owns_lock()) return false;
                 ensureReceiver();
-                if (receivers.empty() || !receivers[0]) return;
+                if (receivers.empty() || !receivers[0]) return true;
                 auto& rx = *receivers[0];
-                std::lock_guard<std::mutex> rxLock(rx.stateMutex);
+                std::unique_lock<std::mutex> rxLock(rx.stateMutex, std::try_to_lock);
+                if (!rxLock.owns_lock()) return false;
                 rx.p25ControlChannelMute = muted;
                 if (muted) {
                     p25ClearPhase2PendingAudio(rx);
@@ -12732,10 +12737,13 @@ public:
             if (muted && engineForAudio) {
                 engineForAudio->clearBuffers();
             }
+            return true;
         };
 
-        auto clearP25VoiceFollowState = [this](bool controlMuteAfterClear = false) {
-            std::lock_guard<std::mutex> lk(receiversMutex);
+        // Returns false if receiver locks were busy (caller should retry). Never blocks the GUI.
+        auto clearP25VoiceFollowState = [this](bool controlMuteAfterClear = false) -> bool {
+            std::unique_lock<std::mutex> lk(receiversMutex, std::try_to_lock);
+            if (!lk.owns_lock()) return false;
             ensureReceiver();
 
             // sdrtrunk-style traffic-channel sources are separate receivers.
@@ -12743,7 +12751,8 @@ public:
             // not disturb the primary muted control-channel receiver.
             for (auto& oldTraffic : receivers) {
                 if (!oldTraffic || !oldTraffic->p25IndependentTrafficSource) continue;
-                std::lock_guard<std::mutex> oldLock(oldTraffic->stateMutex);
+                std::unique_lock<std::mutex> oldLock(oldTraffic->stateMutex, std::try_to_lock);
+                if (!oldLock.owns_lock()) return false;
                 oldTraffic->active = false;
                 oldTraffic->p25VoiceDecodeEnabled = false;
                 oldTraffic->p25TrafficGeneration = 0;
@@ -12759,14 +12768,16 @@ public:
                 p25PendingAudioFlushSeq.fetch_add(1, std::memory_order_release);
             }
 
-            if (receivers.empty() || !receivers[0]) return;
+            if (receivers.empty() || !receivers[0]) return true;
             auto& rx = *receivers[0];
-            std::lock_guard<std::mutex> rxLock(rx.stateMutex);
+            std::unique_lock<std::mutex> rxLock(rx.stateMutex, std::try_to_lock);
+            if (!rxLock.owns_lock()) return false;
             clearP25VoiceFollowFieldsLocked(rx, controlMuteAfterClear);
             tryApplyP25VoiceResetLocked(rx);
             if (controlMuteAfterClear && engineForAudio) {
                 engineForAudio->clearBuffers();
             }
+            return true;
         };
 
         auto returnP25AutoFollowToControl = [this, p25Status, p25TgFollowBtn, tuneP25Path, clearP25VoiceFollowState, setP25ControlChannelMute]() {
@@ -12776,16 +12787,14 @@ public:
             p25PendingAudioFlushSeq.fetch_add(1, std::memory_order_release);
             p25AutoFollowLastReturnMs = returnNowMs;
             p25AutoFollowLastReturnVoiceHz = releasedVoiceHz;
-            // Cancel any in-flight or queued Phase-2 voice decode jobs and drop completed results for the
-            // just-ended traffic follow. This prevents the DSP/voice worker from later publishing or
-            // processing results against a Receiver* that has been removed (and possibly destroyed) by
-            // clearP25VoiceFollowState. Repeated follow/return cycles without this could leave stale
-            // results leading to use-after-free on rx.stateMutex or other state during publish/drain
-            // (manifesting as freeze after a few returns).
+            // Cancel queued Phase-2 voice jobs without blocking the GUI if the
+            // worker briefly holds the queue mutex.
             {
-                std::lock_guard<std::mutex> lock(p25VoiceWorkerMutex);
-                p25VoicePendingJobs.clear();
-                p25VoiceCompletedResults.clear();
+                std::unique_lock<std::mutex> lock(p25VoiceWorkerMutex, std::try_to_lock);
+                if (lock.owns_lock()) {
+                    p25VoicePendingJobs.clear();
+                    p25VoiceCompletedResults.clear();
+                }
             }
             p25VoiceWorkerCv.notify_all();
 
@@ -12806,13 +12815,40 @@ public:
             const bool trafficRetunedPrimary = p25IndependentTrafficRetunedPrimary;
             if (p25TgFollowBtn) p25TgFollowBtn->setChecked(false);
             if (engineForAudio) engineForAudio->clearBuffers();
-            clearP25VoiceFollowState(true);
+            if (!clearP25VoiceFollowState(true)) {
+                appendP25LogLineKeyed("p25-return-clear-busy",
+                    "P25 return-to-control deferred clear (receiver locks busy); will retry without freezing UI.",
+                    1500);
+                QTimer::singleShot(25, this, [this, clearP25VoiceFollowState]() {
+                    if (!clearP25VoiceFollowState(true)) {
+                        appendP25LogLineKeyed("p25-return-clear-busy",
+                            "P25 return-to-control clear still busy; retrying.",
+                            1500);
+                        QTimer::singleShot(40, this, [clearP25VoiceFollowState]() {
+                            (void)clearP25VoiceFollowState(true);
+                        });
+                    }
+                });
+            }
+            auto ensureMute = [setP25ControlChannelMute]() {
+                if (setP25ControlChannelMute(true)) return;
+                QTimer::singleShot(20, [setP25ControlChannelMute]() {
+                    if (!setP25ControlChannelMute(true)) {
+                        QTimer::singleShot(40, [setP25ControlChannelMute]() {
+                            (void)setP25ControlChannelMute(true);
+                        });
+                    }
+                });
+            };
             if (wasIndependentTraffic) {
                 p25IndependentTrafficActive = false;
                 p25IndependentTrafficRetunedPrimary = false;
                 p25LiveDecoder.reset();
                 p25ControlWorkerResetPending.store(true, std::memory_order_release);
-                { std::lock_guard<std::mutex> pendingLock(p25ControlPendingMutex); p25ControlPendingResult.reset(); }
+                {
+                    std::unique_lock<std::mutex> pendingLock(p25ControlPendingMutex, std::try_to_lock);
+                    if (pendingLock.owns_lock()) p25ControlPendingResult.reset();
+                }
                 p25LastDiagSignature.clear();
                 if (ccHz > 0.0) {
                     p25MonitoredControlFreqHz = ccHz;
@@ -12822,7 +12858,7 @@ public:
                             p25AutoFollowWarmStandbyVoiceHz = releasedVoiceHz;
                             p25AutoFollowWarmStandbyUntilMs =
                                 returnNowMs + kP25Phase2WarmStandbyMs;
-                            setP25ControlChannelMute(true);
+                            ensureMute();
                             appendP25LogLine(QString("P25 warm standby: tuner held on voice=%1MHz for %2ms rapid same-carrier re-grant (control=%3MHz decode muted).")
                                 .arg(releasedVoiceHz / 1e6, 0, 'f', 5)
                                 .arg(kP25Phase2WarmStandbyMs)
@@ -12830,7 +12866,7 @@ public:
                         } else if (tuneP25Path(ccHz)) {
                             appendP25LogLine(QString("P25 one-RTL traffic source released; RF retuned back to control channel %1MHz.")
                                 .arg(ccHz / 1e6, 0, 'f', 5));
-                            setP25ControlChannelMute(true);
+                            ensureMute();
                         } else {
                             appendP25LogLine(QString("P25 one-RTL traffic source released, but RF retune back to control channel %1MHz failed; not claiming CC monitor is active.")
                                 .arg(ccHz / 1e6, 0, 'f', 5));
@@ -12840,7 +12876,7 @@ public:
                     } else {
                         appendP25LogLine(QString("P25 independent traffic source released; continuing muted control-channel monitor on %1MHz without RF retune.")
                             .arg(ccHz / 1e6, 0, 'f', 5));
-                        setP25ControlChannelMute(true);
+                        ensureMute();
                     }
                     if (p25Status) {
                         if (p25AutoFollowWarmStandbyUntilMs > returnNowMs) {
@@ -12857,12 +12893,15 @@ public:
             }
             if (ccHz > 0.0 && tuneP25Path(ccHz)) {
                 p25MonitoredControlFreqHz = ccHz;
-                setP25ControlChannelMute(true);
+                ensureMute();
                 p25LiveDecoder.reset();
                 // Do not block the Qt/UI thread behind an in-flight P25 control decode.
                 // Request a reset and let the worker apply it when it next owns the decoder.
                 p25ControlWorkerResetPending.store(true, std::memory_order_release);
-                { std::lock_guard<std::mutex> pendingLock(p25ControlPendingMutex); p25ControlPendingResult.reset(); }
+                {
+                    std::unique_lock<std::mutex> pendingLock(p25ControlPendingMutex, std::try_to_lock);
+                    if (pendingLock.owns_lock()) p25ControlPendingResult.reset();
+                }
                 p25LastDiagSignature.clear();
                 appendP25LogLine(QString("P25 follow returned to muted control channel %1MHz.").arg(ccHz / 1e6, 0, 'f', 5));
                 appendP25LogLine("AFC unlock: returned to control channel; live AFC adaptation resumed.");
@@ -13167,15 +13206,16 @@ public:
                 lpfEnableCheck->blockSignals(false);
                 if (lpfSpin) lpfSpin->setEnabled(false);
             }
-            // Commit the visible voice target synchronously.  The RF is already known
-            // from the grant; do not allow transient state-lock contention to leave the
-            // decoder watching the old control-channel target while the waterfall shows
-            // the traffic TX.
-            std::unique_lock<std::mutex> lk(receiversMutex);
+            // Commit the visible voice target without blocking the Qt thread.  If
+            // DSP owns stateMutex mid Phase-2 decode, return false and let the
+            // grant path retry rather than freezing the UI.
+            std::unique_lock<std::mutex> lk(receiversMutex, std::try_to_lock);
+            if (!lk.owns_lock()) return false;
             ensureReceiver();
             if (receivers.empty() || !receivers[0]) return true;
             auto& rx = *receivers[0];
-            std::unique_lock<std::mutex> rxLock(rx.stateMutex);
+            std::unique_lock<std::mutex> rxLock(rx.stateMutex, std::try_to_lock);
+            if (!rxLock.owns_lock()) return false;
             rx.freqHz = voiceHz;
             rx.mode = DemodMode::NFM;
             rx.channelBwHz = 12500.0;
@@ -13581,10 +13621,14 @@ public:
                 }
 
                 auto& mgr = DeviceManager::instance();
+                // Never sleep on the Qt GUI thread waiting for Soapy retune (was up to
+                // 650 ms via waitForCenterTuneApplied). That freezes the UI until Windows
+                // reports "Not Responding". Stream thread applies center async; pre-roll
+                // absorbs the gap.
                 if (source.retunesPrimary && primaryRetuneSeq != 0) {
-                    const bool tuneApplied = mgr.waitForCenterTuneApplied(source.deviceIndex, primaryRetuneSeq, 650);
+                    const bool tuneApplied = mgr.waitForCenterTuneApplied(source.deviceIndex, primaryRetuneSeq, 0);
                     if (!tuneApplied) {
-                        appendP25LogLine(QString("P25 one-RTL traffic source tune pending (seq=%1); arming cursor with bounded pre-roll.")
+                        appendP25LogLine(QString("P25 one-RTL traffic source tune pending (seq=%1); arming cursor with bounded pre-roll (non-blocking).")
                             .arg(static_cast<qulonglong>(primaryRetuneSeq)));
                     }
                 }
@@ -13601,18 +13645,22 @@ public:
 
                 // Keep the primary control-channel receiver muted and alive.
                 if (!receivers.empty() && receivers[0]) {
-                    std::lock_guard<std::mutex> primaryLock(receivers[0]->stateMutex);
-                    receivers[0]->p25ControlChannelMute = true;
-                    receivers[0]->p25VoiceDecodeEnabled = false;
+                    std::unique_lock<std::mutex> primaryLock(receivers[0]->stateMutex, std::try_to_lock);
+                    if (primaryLock.owns_lock()) {
+                        receivers[0]->p25ControlChannelMute = true;
+                        receivers[0]->p25VoiceDecodeEnabled = false;
+                    }
                 }
             }
 
             p25IndependentTrafficActive = true;
             p25IndependentTrafficRetunedPrimary = source.retunesPrimary;
             {
-                std::lock_guard<std::mutex> lock(p25VoiceWorkerMutex);
-                p25VoicePendingJobs.clear();
-                p25VoiceCompletedResults.clear();
+                std::unique_lock<std::mutex> lock(p25VoiceWorkerMutex, std::try_to_lock);
+                if (lock.owns_lock()) {
+                    p25VoicePendingJobs.clear();
+                    p25VoiceCompletedResults.clear();
+                }
             }
             p25VoiceWorkerCv.notify_all();
             p25AutoFollowReturnControlFreqHz = ccHz;
@@ -14383,11 +14431,24 @@ public:
                     }
                     if (retuned) {
                         auto& mgr = DeviceManager::instance();
-                        if (retuneSeq != 0) {
-                            mgr.waitForCenterTuneApplied(trafficDeviceIndex, retuneSeq, 650);
+                        // Non-blocking: do not park the GUI event loop on retune apply.
+                        if (retuneSeq != 0 &&
+                            !mgr.waitForCenterTuneApplied(trafficDeviceIndex, retuneSeq, 0)) {
+                            appendP25LogLineKeyed(
+                                QString("p25-same-call-tune-pending:%1").arg(followTg.talkgroupId),
+                                QString("P25 same-call hop tune pending (seq=%1) for TG %2; continuing without GUI sleep.")
+                                    .arg(static_cast<qulonglong>(retuneSeq))
+                                    .arg(followTg.talkgroupId),
+                                3000);
                         }
                         {
-                            std::lock_guard<std::mutex> rxLock(activeRx->stateMutex);
+                            std::unique_lock<std::mutex> rxLock(activeRx->stateMutex, std::try_to_lock);
+                            if (!rxLock.owns_lock()) {
+                                appendP25LogLineKeyed("p25-same-call-hop-state-busy",
+                                    "P25 same-call hop metadata update deferred (rx state busy); GUI did not block.",
+                                    2000);
+                                return false;
+                            }
                             activeRx->freqHz = sameCallFollowVoiceHz;
                             activeRx->p25TrafficVoiceFreqHz = sameCallFollowVoiceHz;
                             activeRx->p25TrafficLastGrantMs = nowMs;

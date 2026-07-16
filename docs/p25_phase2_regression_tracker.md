@@ -13,6 +13,21 @@ Track intentional policy and cadence changes so field regressions are easy to bi
 
 ## Changes
 
+### 2026-07-16 — GUI freeze / "Not Responding" on follow
+
+**Problem:** After follow for a while the UI froze; Windows reported the app unresponsive.
+
+**Root causes:**
+1. GUI thread called `waitForCenterTuneApplied(..., 650)` (busy-sleep up to 650 ms) on one-RTL traffic retune and same-call hops.
+2. GUI paths used **blocking** `lock_guard` on `receiversMutex` / `stateMutex` while the Phase-2 voice worker held those locks for long decodes (retune apply, return-to-control clear, control mute, in-band target commit).
+
+**Fix:**
+- All GUI Soapy retune waits are **non-blocking** (`timeoutMs=0`); pre-roll absorbs pending tune.
+- Retune / clear / mute / return-to-control / in-band target use **try_to_lock** + QTimer retry; never block the Qt event loop on DSP/state locks.
+- Voice worker queue clear on return also try_to_lock.
+
+**Log keys:** `p25-return-clear-busy`, `p25-same-call-tune-pending`, `p25-same-call-hop-state-busy`, `p25-retune-state-deferred` (existing).
+
 ### 2026-07-16 — OP=0x02 unknown retune (no hard defer)
 
 **Problem:** Hard defer of all new follows on OP=0x02 until OP=0x00 made live clear voice rare.
