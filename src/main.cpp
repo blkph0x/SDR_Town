@@ -426,9 +426,32 @@ struct P25VoiceDiagMirror {
     std::atomic<long long> phase2MacCrcValid{0};
     std::atomic<long long> phase2MacPdus{0};
     std::atomic<long long> decodedFrames{0};
+    std::atomic<long long> phase2ExpectedVoiceCodewords{0};
+    std::atomic<long long> phase2FedToMbelib{0};
+    std::atomic<long long> phase2EmittedPcmFrames{0};
+    std::atomic<long long> phase2DuplicateSuppressed{0};
+    std::atomic<long long> phase2FeedGaps{0};
     std::atomic<int> tdmaSlot{-1};
 };
 static P25VoiceDiagMirror gP25VoiceDiagMirror;
+
+// Low-overhead session cadence rollup (relaxed atomics; logged at most ~1 Hz).
+struct P25Phase2CadenceRollup {
+    std::atomic<long long> windows{0};
+    std::atomic<long long> vcw{0};
+    std::atomic<long long> targetVcw{0};
+    std::atomic<long long> fed{0};
+    std::atomic<long long> emitted{0};
+    std::atomic<long long> dups{0};
+    std::atomic<long long> gaps{0};
+    std::atomic<long long> reject{0};
+    std::atomic<long long> lastLogMs{0};
+};
+static P25Phase2CadenceRollup gP25Phase2Cadence;
+
+// Defined after P25VoiceAudioBlock (see p25Phase2NoteCadenceWindow below).
+struct P25VoiceAudioBlock;
+static void p25Phase2NoteCadenceWindow(const P25VoiceAudioBlock& out) noexcept;
 
 static void publishP25VoiceDiagMirror(const P25VoiceDiagSnapshot& diag, uint8_t tdmaSlot, bool slotKnown)
 {
@@ -442,6 +465,11 @@ static void publishP25VoiceDiagMirror(const P25VoiceDiagSnapshot& diag, uint8_t 
     gP25VoiceDiagMirror.phase2MacCrcValid.store(diag.phase2MacCrcValid, std::memory_order_release);
     gP25VoiceDiagMirror.phase2MacPdus.store(diag.phase2MacPdus, std::memory_order_release);
     gP25VoiceDiagMirror.decodedFrames.store(diag.decodedFrames, std::memory_order_release);
+    gP25VoiceDiagMirror.phase2ExpectedVoiceCodewords.store(diag.phase2ExpectedVoiceCodewords, std::memory_order_release);
+    gP25VoiceDiagMirror.phase2FedToMbelib.store(diag.phase2FedToMbelib, std::memory_order_release);
+    gP25VoiceDiagMirror.phase2EmittedPcmFrames.store(diag.phase2EmittedPcmFrames, std::memory_order_release);
+    gP25VoiceDiagMirror.phase2DuplicateSuppressed.store(diag.phase2DuplicateSuppressedVoiceCodewords, std::memory_order_release);
+    gP25VoiceDiagMirror.phase2FeedGaps.store(diag.phase2FeedGaps, std::memory_order_release);
     gP25VoiceDiagMirror.tdmaSlot.store(slotKnown ? static_cast<int>(tdmaSlot & 0x01u) : -1,
         std::memory_order_release);
 }
@@ -5534,6 +5562,18 @@ struct P25VoiceAudioBlock {
     std::vector<std::string> decoderWarnings;
 };
 
+static void p25Phase2NoteCadenceWindow(const P25VoiceAudioBlock& out) noexcept
+{
+    gP25Phase2Cadence.windows.fetch_add(1, std::memory_order_relaxed);
+    gP25Phase2Cadence.vcw.fetch_add(static_cast<long long>(out.phase2VoiceCodewords), std::memory_order_relaxed);
+    gP25Phase2Cadence.targetVcw.fetch_add(static_cast<long long>(out.phase2TargetVoiceCodewords), std::memory_order_relaxed);
+    gP25Phase2Cadence.fed.fetch_add(static_cast<long long>(out.phase2FedToMbelib), std::memory_order_relaxed);
+    gP25Phase2Cadence.emitted.fetch_add(static_cast<long long>(out.phase2EmittedPcmFrames), std::memory_order_relaxed);
+    gP25Phase2Cadence.dups.fetch_add(static_cast<long long>(out.phase2DuplicateSuppressedVoiceCodewords), std::memory_order_relaxed);
+    gP25Phase2Cadence.gaps.fetch_add(static_cast<long long>(out.phase2FeedGaps), std::memory_order_relaxed);
+    gP25Phase2Cadence.reject.fetch_add(static_cast<long long>(out.phase2RejectedVoiceCodewords), std::memory_order_relaxed);
+}
+
 static uint64_t p25MakeCurrentCallSessionId(uint32_t talkgroupId, int64_t grantEpochMs) noexcept
 {
     return (static_cast<uint64_t>(talkgroupId) << 32) |
@@ -6801,6 +6841,9 @@ static void publishP25VoiceDiagnostics(Receiver& rx, const P25VoiceAudioBlock& o
     rx.p25VoiceDiagnostics = makeP25VoiceDiagnostics(out);
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
     rx.p25VoiceDiagnostics.updatedMs = static_cast<long long>(nowMs);
+    if (rx.p25VoicePhase2) {
+        p25Phase2NoteCadenceWindow(out);
+    }
     if (rx.p25VoicePhase2 &&
         (out.phase2Bursts > 0 ||
          out.phase2VoiceCodewords > 0 ||
@@ -12911,8 +12954,13 @@ public:
                 rx.p25VoiceDecodeEnabled = true;
                 rx.p25VoiceClearKnown = p25TalkgroupGrantProvesSpeakerClear(armTg);
                 rx.p25VoiceEncrypted = p25TalkgroupGrantProvesSpeakerEncrypted(armTg);
+                // Phase 2: do not promote sticky TG clear into speaker-clear on arm
+                // without a current-grant service option proof.  OP=0x02 updates force
+                // encryptionKnown=false before arm so audio waits for traffic PTT/ESS.
+                // Phase 1 may still inherit sticky clear for follow continuity.
                 if (!rx.p25VoiceClearKnown && !rx.p25VoiceEncrypted &&
-                    armTg.talkgroupId != 0 && armTg.encryptionKnown && !armTg.encrypted) {
+                    armTg.talkgroupId != 0 && armTg.encryptionKnown && !armTg.encrypted &&
+                    !phase2Voice) {
                     rx.p25VoiceClearKnown = true;
                 }
                 rx.p25VoiceTalkgroupId = armTg.talkgroupId;
@@ -13789,26 +13837,31 @@ public:
                         .arg(followTg.talkgroupId),
                     8000);
             }
-            // OP=0x02 GroupVoiceUpdate has no service options.  Sticky clear from a
-            // prior call must not start a *new* follow onto a fresh RF allocation —
-            // capture 080701 chased TG30302 sticky-clear OP=0x02 onto 420.225
-            // (dead/encrypted opposite energy) before the true OP=0x00 clear on
-            // 420.725.  Same-call updates while already following this TG still
-            // retune (MHz hop path below).
+            // OP=0x02 GroupVoiceUpdate has no service options.  Field systems often
+            // re-issue OP=0x02 for the entire call and rarely re-send OP=0x00; deferring
+            // all new follows until OP=0x00 caused "far and few" retunes (capture logs:
+            // repeated "deferred OP=0x02 unknown update" with no voice arm).
+            // sdrtrunk retunes on Group Voice Channel Grant Updates and keeps audio
+            // muted until the *current* traffic call's PTT/ESS proves clear/encrypted.
+            // Do not inherit sticky clear onto a new RF allocation (080701 wrong-channel
+            // chase). Same-call updates while already following still retune below.
             if (grantLooksPhase2 &&
                 event.type == P25ControlEventType::GroupVoiceUpdate &&
                 !event.encryptionKnown) {
                 const bool alreadyFollowingThisTg =
                     p25FollowAutoActive && p25FollowTalkgroupId == followTg.talkgroupId;
                 if (!alreadyFollowingThisTg) {
-                    appendP25LogLineKeyed(QString("auto-defer-p2-op02-unknown:%1:%2")
+                    // Force unknown security for this allocation so sticky TG clear
+                    // cannot open the speaker before traffic-channel MAC/ESS proof.
+                    followTg.encryptionKnown = false;
+                    followTg.encrypted = false;
+                    appendP25LogLineKeyed(QString("auto-follow-p2-op02-unknown:%1:%2")
                             .arg(followTg.talkgroupId)
                             .arg(static_cast<qlonglong>(std::llround(followTg.lastVoiceFreqHz))),
-                        QString("Auto-follow deferred Phase 2 TG %1 OP=0x02 unknown update on %2MHz; waiting for OP=0x00 clear/encrypted grant before retune (sticky history alone must not chase a new channel).")
+                        QString("Auto-follow Phase 2 TG %1 OP=0x02 on %2MHz with unknown encryption; retuning, speaker waits for traffic-channel PTT/ESS (not deferred for OP=0x00).")
                             .arg(followTg.talkgroupId)
                             .arg(followTg.lastVoiceFreqHz / 1e6, 0, 'f', 5),
                         5000);
-                    return false;
                 }
             }
             if (!followReady) {
@@ -16640,6 +16693,33 @@ public:
                                             .arg(macTrustedDiag ? "yes" : "no")
                                             .arg(essTrustedDiag ? "yes" : "no")
                                             .arg(blockReason));
+                                        // ~1 Hz cadence rollup (relaxed atomics; no DSP cost).
+                                        {
+                                            const long long lastCadMs =
+                                                gP25Phase2Cadence.lastLogMs.load(std::memory_order_relaxed);
+                                            if (lastCadMs == 0 || acqNowMs - lastCadMs >= 1000) {
+                                                gP25Phase2Cadence.lastLogMs.store(acqNowMs, std::memory_order_relaxed);
+                                                const long long w = gP25Phase2Cadence.windows.exchange(0, std::memory_order_relaxed);
+                                                const long long v = gP25Phase2Cadence.vcw.exchange(0, std::memory_order_relaxed);
+                                                const long long tv = gP25Phase2Cadence.targetVcw.exchange(0, std::memory_order_relaxed);
+                                                const long long f = gP25Phase2Cadence.fed.exchange(0, std::memory_order_relaxed);
+                                                const long long e = gP25Phase2Cadence.emitted.exchange(0, std::memory_order_relaxed);
+                                                const long long d = gP25Phase2Cadence.dups.exchange(0, std::memory_order_relaxed);
+                                                const long long g = gP25Phase2Cadence.gaps.exchange(0, std::memory_order_relaxed);
+                                                const long long r = gP25Phase2Cadence.reject.exchange(0, std::memory_order_relaxed);
+                                                const double duty = e > 0 ? (static_cast<double>(e) * 0.020) : 0.0;
+                                                const double feedRatio = (tv > 0) ? (static_cast<double>(f) / static_cast<double>(tv)) : 0.0;
+                                                appendP25LogLineKeyed(
+                                                    QString("p25-cadence:%1").arg(statusTg),
+                                                    QString("P25 CADENCE 1s: TG=%1 windows=%2 vcw=%3 targetVcw=%4 fed=%5 emit=%6 dups=%7 gaps=%8 reject=%9 feedRatio=%10 dutySec=%11 block=%12")
+                                                        .arg(statusTg)
+                                                        .arg(w).arg(v).arg(tv).arg(f).arg(e).arg(d).arg(g).arg(r)
+                                                        .arg(feedRatio, 0, 'f', 3)
+                                                        .arg(duty, 0, 'f', 3)
+                                                        .arg(blockReason),
+                                                    900);
+                                            }
+                                        }
                                         if (p25Status && p25FollowAutoActive && voiceStateDecodeEnabled &&
                                             decoded == 0 && !recentSpeakerDiag) {
                                             p25Status->setText(QString("TG %1 acquiring (%2)")
