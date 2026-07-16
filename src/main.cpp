@@ -13433,7 +13433,16 @@ public:
 
             std::shared_ptr<Receiver> trafficRx;
             {
-                std::lock_guard<std::mutex> lk(receiversMutex);
+                // Never block the Qt GUI thread on receivers/state locks. DSP and
+                // the voice worker can hold stateMutex across IQ/decode windows;
+                // a blocking lock here freezes the UI (Windows: Not Responding).
+                std::unique_lock<std::mutex> lk(receiversMutex, std::try_to_lock);
+                if (!lk.owns_lock()) {
+                    appendP25LogLineKeyed("p25-traffic-source-receivers-busy",
+                        "P25 traffic source start deferred (receivers busy); GUI did not block.",
+                        500);
+                    return false;
+                }
                 ensureReceiver();
 
                 for (auto& existing : receivers) {
@@ -13449,7 +13458,13 @@ public:
 
                     trafficRx = existing;
                     {
-                        std::lock_guard<std::mutex> rxLock(trafficRx->stateMutex);
+                        std::unique_lock<std::mutex> rxLock(trafficRx->stateMutex, std::try_to_lock);
+                        if (!rxLock.owns_lock()) {
+                            appendP25LogLineKeyed("p25-traffic-source-state-busy",
+                                "P25 traffic source reuse deferred (rx state busy); GUI did not block.",
+                                500);
+                            return false;
+                        }
                         p25CommitPhase2TrafficMetadataFollow(*trafficRx, tg, ccHz, nowMs);
                         trafficRx->active = true;
                         trafficRx->p25TrafficRetunesPrimary = source.retunesPrimary;
@@ -13486,9 +13501,11 @@ public:
                     p25FollowTalkgroupId = tg.talkgroupId;
                     p25MonitoredControlFreqHz = ccHz;
                     if (!receivers.empty() && receivers[0]) {
-                        std::lock_guard<std::mutex> primaryLock(receivers[0]->stateMutex);
-                        receivers[0]->p25ControlChannelMute = true;
-                        receivers[0]->p25VoiceDecodeEnabled = false;
+                        std::unique_lock<std::mutex> primaryLock(receivers[0]->stateMutex, std::try_to_lock);
+                        if (primaryLock.owns_lock()) {
+                            receivers[0]->p25ControlChannelMute = true;
+                            receivers[0]->p25VoiceDecodeEnabled = false;
+                        }
                     }
                     appendP25LogLine(QString("P25 traffic source reused at same MHz: TG=%1 voice=%2MHz slot=%3 control=%4MHz dev=%5 generation=%6. Rolling decoder/IQ preserved for faster audio.")
                         .arg(tg.talkgroupId)
@@ -13506,7 +13523,13 @@ public:
                 // pool of demod traffic sources for DMR/NXDN/etc.
                 for (auto& oldTraffic : receivers) {
                     if (!oldTraffic || !oldTraffic->p25IndependentTrafficSource) continue;
-                    std::lock_guard<std::mutex> oldLock(oldTraffic->stateMutex);
+                    std::unique_lock<std::mutex> oldLock(oldTraffic->stateMutex, std::try_to_lock);
+                    if (!oldLock.owns_lock()) {
+                        appendP25LogLineKeyed("p25-traffic-source-old-busy",
+                            "P25 traffic source replace deferred (old traffic state busy); GUI did not block.",
+                            500);
+                        return false;
+                    }
                     oldTraffic->active = false;
                     oldTraffic->p25VoiceDecodeEnabled = false;
                     oldTraffic->p25TrafficGeneration = 0;
@@ -13948,10 +13971,25 @@ public:
                 uint32_t maskWacn = 0;
                 uint16_t maskSystemId = 0;
                 {
-                    std::lock_guard<std::mutex> lk(receiversMutex);
+                    // Same-call OP=0x02 metadata updates used to block on these locks
+                    // while the DSP worker held stateMutex across rolling IQ pulls —
+                    // field freeze at 2026-07-16 18:52:55 ended mid OP=0x02 grant.
+                    std::unique_lock<std::mutex> lk(receiversMutex, std::try_to_lock);
+                    if (!lk.owns_lock()) {
+                        appendP25LogLineKeyed("auto-follow-same-call-receivers-busy",
+                            "P25 same-call metadata update deferred (receivers busy); GUI did not block.",
+                            500);
+                        return false;
+                    }
                     auto activeRx = findActiveP25FollowReceiverLocked();
                     if (activeRx) {
-                        std::lock_guard<std::mutex> rxLock(activeRx->stateMutex);
+                        std::unique_lock<std::mutex> rxLock(activeRx->stateMutex, std::try_to_lock);
+                        if (!rxLock.owns_lock()) {
+                            appendP25LogLineKeyed("auto-follow-same-call-state-busy",
+                                "P25 same-call metadata update deferred (rx state busy); GUI did not block.",
+                                500);
+                            return false;
+                        }
                         liveTrafficVoiceFreqHz = activeRx->p25TrafficVoiceFreqHz > 0.0
                             ? activeRx->p25TrafficVoiceFreqHz
                             : activeRx->freqHz;
@@ -14551,7 +14589,13 @@ public:
                 if (source.valid && !source.retunesPrimary && p25IndependentTrafficActive) {
                     std::shared_ptr<Receiver> activeRx;
                     {
-                        std::lock_guard<std::mutex> lk(receiversMutex);
+                        std::unique_lock<std::mutex> lk(receiversMutex, std::try_to_lock);
+                        if (!lk.owns_lock()) {
+                            appendP25LogLineKeyed("auto-follow-same-mhz-receivers-busy",
+                                "P25 same-MHz follow deferred (receivers busy); GUI did not block.",
+                                500);
+                            return false;
+                        }
                         const uint64_t liveGen = p25TrafficSourceGeneration.load(std::memory_order_acquire);
                         for (auto& rxPtr : receivers) {
                             if (rxPtr && rxPtr->p25IndependentTrafficSource &&
@@ -14569,7 +14613,13 @@ public:
                         if (std::isfinite(activeVoiceHz) &&
                             std::abs(activeVoiceHz - followTg.lastVoiceFreqHz) <= 50.0) {
                             {
-                                std::lock_guard<std::mutex> rxLock(activeRx->stateMutex);
+                                std::unique_lock<std::mutex> rxLock(activeRx->stateMutex, std::try_to_lock);
+                                if (!rxLock.owns_lock()) {
+                                    appendP25LogLineKeyed("auto-follow-same-mhz-state-busy",
+                                        "P25 same-MHz follow deferred (rx state busy); GUI did not block.",
+                                        500);
+                                    return false;
+                                }
                                 p25CommitPhase2TrafficMetadataFollow(*activeRx, followTg, ccHz, nowMs);
                                 activeRx->active = true;
                             }
@@ -15633,9 +15683,11 @@ public:
                                             const double workerCf = cf;
                                             const double workerTarget = p25MonitoredControlFreqHz;
                                             if (p25ControlWorkerThread.joinable()) {
-                                                // At this point busy was false, so the previous worker has completed;
-                                                // join it before replacing the std::thread object.
-                                                p25ControlWorkerThread.join();
+                                                // Previous worker already cleared busy before exit. Never join()
+                                                // on the Qt timer thread — a slow teardown races with the next
+                                                // control window and freezes the UI. Detach is safe: decoder
+                                                // access is guarded by p25ControlWorkerDecoderMutex + busy flag.
+                                                p25ControlWorkerThread.detach();
                                             }
                                             p25ControlWorkerThread = std::thread([this, iq = std::move(iq), workerSr, workerCf, workerTarget]() mutable {
                                                 P25LiveDecodeResult result;
@@ -17103,7 +17155,11 @@ public:
                     // deref of freed Receiver in the flush block below even if publish early-returns).
                     bool rxStillValid = true;
                     if (result.rx) {
-                        std::lock_guard<std::mutex> lk(receiversMutex);
+                        std::unique_lock<std::mutex> lk(receiversMutex, std::try_to_lock);
+                        if (!lk.owns_lock()) {
+                            // Defer publish until list lock is free; do not block DSP.
+                            continue;
+                        }
                         rxStillValid = false;
                         for (auto& r : receivers) if (r && r.get() == result.rx.get()) { rxStillValid = true; break; }
                     }
@@ -17129,8 +17185,8 @@ public:
                         size_t devIndex = 0;
                         bool haveDev = false;
                         {
-                            std::lock_guard<std::mutex> rxLock(rx.stateMutex);
-                            if (rx.active) {
+                            std::unique_lock<std::mutex> rxLock(rx.stateMutex, std::try_to_lock);
+                            if (rxLock.owns_lock() && rx.active) {
                                 devIndex = rx.deviceIndex;
                                 haveDev = true;
                             }
@@ -17168,10 +17224,18 @@ public:
                 // Then process without holding lock. shared_ptr keeps the Demodulator alive even if vector reallocates.
                 std::vector<std::shared_ptr<Receiver>> rxSnapshot;
                 {
-                    std::lock_guard<std::mutex> lk(receiversMutex);
-                    ensureReceiver();
-                    rxSnapshot.reserve(receivers.size());
-                    for (auto& r : receivers) if (r && r->active) rxSnapshot.push_back(r);
+                    // try_to_lock: never stall the DSP worker behind a GUI grant path
+                    // that (historically) held receiversMutex while waiting on stateMutex.
+                    std::unique_lock<std::mutex> lk(receiversMutex, std::try_to_lock);
+                    if (lk.owns_lock()) {
+                        ensureReceiver();
+                        rxSnapshot.reserve(receivers.size());
+                        for (auto& r : receivers) if (r && r->active) rxSnapshot.push_back(r);
+                    }
+                }
+                if (rxSnapshot.empty()) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                    continue;
                 }
                 auto receiverSessionStillActive = [&rxSnapshot](const ReceiverSessionKey& key) {
                     return std::any_of(rxSnapshot.begin(), rxSnapshot.end(),
@@ -17455,9 +17519,13 @@ public:
                             didWork = true;
                             continue;
                         }
-                        if (!phase2BufferedDecode) {
-                            phase2IqByRx.erase(p25ReceiverSessionKey(rx));
-                        }
+                    } // release stateMutex before ring/IQ work — holding it across
+                      // getNewIQWindow/takeUndecoded freezes GUI auto-follow (lock_guard).
+
+                    if (!phase2BufferedDecode) {
+                        phase2IqByRx.erase(p25ReceiverSessionKey(rx));
+                    }
+                    {
                         size_t tgt = (sr > 0)
                             ? static_cast<size_t>(sr * (phase2BufferedDecode ? kP25Phase2VoiceDecodeWindowSeconds : 0.025))
                             : 8192;
@@ -17497,8 +17565,13 @@ public:
                                         1000);
                                     pendingAudioByRx[p25ReceiverSessionKey(rx)].clear();
                                     lastPhase2DecodeByRx.erase(p25ReceiverSessionKey(rx));
-                                    rx.resetP25TrafficSession("iq-stream-retune-handoff", true);
-                                    clearP25SessionScopedState(rx);
+                                    {
+                                        std::unique_lock<std::mutex> resetLock(rx.stateMutex, std::try_to_lock);
+                                        if (resetLock.owns_lock()) {
+                                            rx.resetP25TrafficSession("iq-stream-retune-handoff", true);
+                                            clearP25SessionScopedState(rx);
+                                        }
+                                    }
                                 }
                             }
                             if (newWin.cursorDiscontinuity) {
@@ -17510,8 +17583,13 @@ public:
                                 rolling.clear();
                                 pendingAudioByRx[p25ReceiverSessionKey(rx)].clear();
                                 lastPhase2DecodeByRx.erase(p25ReceiverSessionKey(rx));
-                                rx.resetP25TrafficSession("iq-cursor-discontinuity", true);
-                                clearP25SessionScopedState(rx);
+                                {
+                                    std::unique_lock<std::mutex> resetLock(rx.stateMutex, std::try_to_lock);
+                                    if (resetLock.owns_lock()) {
+                                        rx.resetP25TrafficSession("iq-cursor-discontinuity", true);
+                                        clearP25SessionScopedState(rx);
+                                    }
+                                }
                                 didWork = true;
                                 continue;
                             }
@@ -19517,7 +19595,8 @@ private:
         // a now-invalid Receiver* (e.g. rx.stateMutex). This eliminates a source of freezes after
         // repeated follow/return cycles.
         {
-            std::lock_guard<std::mutex> lk(receiversMutex);
+            std::unique_lock<std::mutex> lk(receiversMutex, std::try_to_lock);
+            if (!lk.owns_lock()) return; // publish next tick; never block DSP on list lock
             bool stillActive = false;
             for (auto& r : receivers) {
                 if (r && r.get() == result.rx.get()) { stillActive = true; break; }
@@ -19551,7 +19630,8 @@ private:
         bool publishVoiceDiag = result.publishVoiceDiag;
         if (!result.hasAudioBlock && !stale) return;
         {
-            std::lock_guard<std::mutex> rxLock(rx.stateMutex);
+            std::unique_lock<std::mutex> rxLock(rx.stateMutex, std::try_to_lock);
+            if (!rxLock.owns_lock()) return;
             if (!rx.active || !rx.p25VoiceDecodeEnabled || !rx.p25VoicePhase2) {
                 stale = true;
                 pendingAudioByRx[p25ReceiverSessionKey(rx)].clear();
