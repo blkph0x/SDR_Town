@@ -42,6 +42,10 @@ struct Phase2VoiceFrameKey {
     uint64_t sessionCodewordId = 0;
     bool streamDibitKnown = false;
     uint64_t streamDibit = 0;
+    bool streamBurstStartDibitKnown = false;
+    uint64_t streamBurstStartDibit = 0;
+    bool sessionBurstIdKnown = false;
+    uint64_t sessionBurstId = 0;
     uint64_t superframeAnchor = 0;
     uint8_t burstIndex = 0xffu;
     uint8_t slot = 0xffu;
@@ -55,6 +59,12 @@ struct Phase2VoiceFrameKey {
         }
         if (streamDibitKnown && other.streamDibitKnown &&
             streamDibit == other.streamDibit &&
+            slot == other.slot &&
+            voiceIndex == other.voiceIndex) {
+            return true;
+        }
+        if (sessionBurstIdKnown && other.sessionBurstIdKnown &&
+            sessionBurstId == other.sessionBurstId &&
             slot == other.slot &&
             voiceIndex == other.voiceIndex) {
             return true;
@@ -85,6 +95,30 @@ inline int p25Phase2CompareVoiceFrameKeys(const Phase2VoiceFrameKey& a,
     if (a.slot > b.slot) return 1;
     return 0;
 }
+
+inline bool p25Phase2VoiceFrameKeysSameBurst(const Phase2VoiceFrameKey& a,
+                                             const Phase2VoiceFrameKey& b) noexcept
+{
+    if (a.sessionBurstIdKnown && b.sessionBurstIdKnown) {
+        return a.sessionBurstId == b.sessionBurstId && a.slot == b.slot;
+    }
+    if (a.streamBurstStartDibitKnown && b.streamBurstStartDibitKnown) {
+        return a.streamBurstStartDibit == b.streamBurstStartDibit && a.slot == b.slot;
+    }
+    if (a.superframeAnchor != b.superframeAnchor) return false;
+    return a.burstIndex == b.burstIndex && a.slot == b.slot;
+}
+
+struct P25Phase2SequencerSpeechInput {
+    Phase2VoiceFrameKey key{};
+    std::array<uint8_t, 96> ambe96{};
+    bool haveAmbe = false;
+    bool grantSlotKnown = false;
+    uint8_t grantSlot = 0xffu;
+    bool haveAbsoluteDibits = false;
+    uint64_t codewordAbsDibit = 0;
+    uint64_t codewordEndAbsDibit = 0;
+};
 
 struct P25P2PendingAmbeFrame {
     std::array<uint8_t, 96> ambe96{};
@@ -150,10 +184,15 @@ struct P25Phase2FrameSequencer {
     uint8_t expectedVoiceIndex = 0;
     uint8_t activeBurstVoiceCount = 0;
     bool haveActiveBurst = false;
-    uint64_t activeBurstStableId = 0;
-    bool activeBurstStableIdKnown = false;
-    std::array<std::optional<Phase2VoiceFrameKey>, 4> heldFutureKeys{};
+    uint64_t activeSessionBurstId = 0;
+    bool activeSessionBurstIdKnown = false;
+    uint64_t activeStreamBurstStartDibit = 0;
+    bool activeStreamBurstStartKnown = false;
+    uint8_t activeBurstSlot = 0xffu;
+    std::array<std::optional<P25Phase2SequencerSpeechInput>, 4> heldFutureFrames{};
     uint64_t reorderHeld = 0;
+    uint64_t reorderReleased = 0;
+    uint64_t reorderExpired = 0;
 };
 
 // Producer-side speaker PCM bound to one call session.

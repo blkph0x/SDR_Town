@@ -1001,6 +1001,33 @@ TEST_CASE("P25 stream dibit keys order across overlapping windows", "[p25][follo
     REQUIRE_FALSE(windowA == windowB);
 }
 
+TEST_CASE("Voice4 codewords share decoder sessionBurstId", "[p25][follow][continuity]")
+{
+    Phase2VoiceFrameKey k0;
+    k0.sessionBurstIdKnown = true;
+    k0.sessionBurstId = 42;
+    k0.slot = 0;
+    k0.voiceIndex = 0;
+    k0.streamDibit = 10001;
+
+    Phase2VoiceFrameKey k1 = k0;
+    k1.voiceIndex = 1;
+    k1.streamDibit = 10038;
+
+    Phase2VoiceFrameKey k2 = k0;
+    k2.voiceIndex = 2;
+    k2.streamDibit = 10086;
+
+    Phase2VoiceFrameKey k3 = k0;
+    k3.voiceIndex = 3;
+    k3.streamDibit = 10123;
+
+    REQUIRE(p25Phase2VoiceFrameKeysSameBurst(k0, k1));
+    REQUIRE(p25Phase2VoiceFrameKeysSameBurst(k0, k2));
+    REQUIRE(p25Phase2VoiceFrameKeysSameBurst(k0, k3));
+    REQUIRE_FALSE((k0.streamDibit - k0.voiceIndex) == (k1.streamDibit - k1.voiceIndex));
+}
+
 TEST_CASE("P25 frame keys with mixed stable coordinates are unorderable", "[p25][follow][continuity]")
 {
     Phase2VoiceFrameKey stable;

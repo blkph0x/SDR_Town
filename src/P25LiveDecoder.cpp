@@ -5518,6 +5518,7 @@ P25LiveDecoder::P25LiveDecoder(const P25LiveDecoder& other)
       m_phase2RecentAcchDecodeBurstDibits(other.m_phase2RecentAcchDecodeBurstDibits),
       m_phase2DibitTail(other.m_phase2DibitTail),
       m_phase2NextCodewordId(other.m_phase2NextCodewordId),
+      m_phase2NextSessionBurstId(other.m_phase2NextSessionBurstId),
       m_phase2DecodeGeneration(other.m_phase2DecodeGeneration),
       m_phase2StreamDibits(other.m_phase2StreamDibits),
       m_cqpskLock(other.m_cqpskLock),
@@ -5570,6 +5571,7 @@ P25LiveDecoder& P25LiveDecoder::operator=(const P25LiveDecoder& other)
     m_phase2RecentAcchDecodeBurstDibits = other.m_phase2RecentAcchDecodeBurstDibits;
     m_phase2DibitTail = other.m_phase2DibitTail;
     m_phase2NextCodewordId = other.m_phase2NextCodewordId;
+    m_phase2NextSessionBurstId = other.m_phase2NextSessionBurstId;
     m_phase2DecodeGeneration = other.m_phase2DecodeGeneration;
     m_phase2StreamDibits = other.m_phase2StreamDibits;
     m_cqpskLock = other.m_cqpskLock;
@@ -5622,6 +5624,7 @@ P25LiveDecoder::P25LiveDecoder(P25LiveDecoder&& other) noexcept
       m_phase2RecentAcchDecodeBurstDibits(std::move(other.m_phase2RecentAcchDecodeBurstDibits)),
       m_phase2DibitTail(std::move(other.m_phase2DibitTail)),
       m_phase2NextCodewordId(other.m_phase2NextCodewordId),
+      m_phase2NextSessionBurstId(other.m_phase2NextSessionBurstId),
       m_phase2DecodeGeneration(other.m_phase2DecodeGeneration),
       m_phase2StreamDibits(other.m_phase2StreamDibits),
       m_cqpskLock(other.m_cqpskLock),
@@ -5678,6 +5681,7 @@ P25LiveDecoder& P25LiveDecoder::operator=(P25LiveDecoder&& other) noexcept
     m_phase2RecentAcchDecodeBurstDibits = std::move(other.m_phase2RecentAcchDecodeBurstDibits);
     m_phase2DibitTail = std::move(other.m_phase2DibitTail);
     m_phase2NextCodewordId = other.m_phase2NextCodewordId;
+    m_phase2NextSessionBurstId = other.m_phase2NextSessionBurstId;
     m_phase2DecodeGeneration = other.m_phase2DecodeGeneration;
     m_phase2StreamDibits = other.m_phase2StreamDibits;
     m_cqpskLock = other.m_cqpskLock;
@@ -5739,6 +5743,7 @@ void P25LiveDecoder::reset()
     m_phase2RecentAcchDecodeBurstDibits.clear();
     m_phase2DibitTail.clear();
     m_phase2NextCodewordId = 1;
+    m_phase2NextSessionBurstId = 1;
     m_phase2DecodeGeneration = 0;
     m_phase2StreamDibits = 0;
     m_cqpskLock = {};
@@ -6716,6 +6721,9 @@ void P25LiveDecoder::annotatePhase2SessionCodewords(P25Phase2DecodeResult& out,
         : m_phase2StreamDibits;
 
     for (auto& burst : out.bursts) {
+        if (burst.voiceCodewords.empty()) continue;
+        const uint64_t streamBurstStart = streamStart + static_cast<uint64_t>(burst.dibitOffset);
+        const uint64_t sessionBurstId = m_phase2NextSessionBurstId++;
         for (auto& codeword : burst.voiceCodewords) {
             const uint64_t fp = fingerprintFor(burst, codeword);
             // codeword.dibitOffset is already an absolute dibit offset within
@@ -6737,6 +6745,10 @@ void P25LiveDecoder::annotatePhase2SessionCodewords(P25Phase2DecodeResult& out,
             codeword.sessionCodewordIdKnown = true;
             codeword.streamDibitKnown = true;
             codeword.streamDibit = streamDibit;
+            codeword.streamBurstStartDibitKnown = true;
+            codeword.streamBurstStartDibit = streamBurstStart;
+            codeword.sessionBurstIdKnown = true;
+            codeword.sessionBurstId = sessionBurstId;
             if (it != m_phase2RecentCodewords.end()) {
                 codeword.sessionCodewordId = it->id;
                 codeword.duplicateInSession = true;

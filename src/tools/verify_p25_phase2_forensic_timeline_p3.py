@@ -27,7 +27,7 @@ required = {
     "burst tail emits pcm silence": "p25Phase2InsertSequencerGapSilence" in close_burst,
     "stale clear uses captured session key": "p25Phase2ClearStaleResultSpeakerPending" in main,
     "result captures receiver session key": "result.receiverSessionKey = job.receiverSessionKey" in main,
-    "stable burst identity fields": "activeBurstStableId" in session_h,
+    "stable burst identity fields": "activeSessionBurstId" in session_h,
     "unorderable frame compare": "return 2" in session_h and "Unorderable" in main,
 }
 

@@ -304,6 +304,10 @@ struct P25Phase2VoiceCodeword {
     uint64_t sessionCodewordId = 0;
     bool streamDibitKnown = false;
     uint64_t streamDibit = 0;
+    bool streamBurstStartDibitKnown = false;
+    uint64_t streamBurstStartDibit = 0;
+    bool sessionBurstIdKnown = false;
+    uint64_t sessionBurstId = 0;
     bool duplicateInSession = false;
     std::array<uint8_t, 72> bits{};
 };
@@ -565,6 +569,7 @@ private:
     std::deque<uint64_t> m_phase2RecentAcchDecodeBurstDibits;
     std::deque<int> m_phase2DibitTail;
     uint64_t m_phase2NextCodewordId = 1;
+    uint64_t m_phase2NextSessionBurstId = 1;
     uint64_t m_phase2DecodeGeneration = 0;
     uint64_t m_phase2StreamDibits = 0;
     CqpskDemodLock m_cqpskLock;

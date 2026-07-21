@@ -24,7 +24,7 @@ required = {
     "non-destructive slot probe keeps decoder": "P25LiveDecoder(p25VoiceDecoderConfigForReceiver" not in slot_probe_fn,
     "slot probe retargets preferred slot": "setPhase2PreferredTdmaSlot(true, requested)" in slot_probe_fn,
     "slot probe continues decode": 'return false;\n                };' in main.split("slot-probe-applied-before-decode", 1)[1][:400],
-    "playout bridge frame cap": "consecutivePlayoutBridgeFrames >= 20" in main,
+    "playout bridge frame cap": "consecutivePlayoutBridgeFrames >= 8" in main,
 }
 
 missing = [name for name, ok in required.items() if not ok]
