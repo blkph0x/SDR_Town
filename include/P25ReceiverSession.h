@@ -14,11 +14,9 @@ struct P25P2CallAudioKey {
     uint32_t wacn = 0;
     uint16_t systemId = 0;
     uint32_t talkgroupId = 0;
-    uint32_t sourceId = 0;
     uint64_t callSessionId = 0;
     uint8_t slot = 0xffu;
     int64_t frequencyHz = 0;
-    int64_t grantEpochMs = 0;
 
     bool valid() const noexcept
     {
@@ -31,16 +29,47 @@ struct P25P2CallAudioKey {
             wacn == other.wacn &&
             systemId == other.systemId &&
             talkgroupId == other.talkgroupId &&
-            sourceId == other.sourceId &&
             callSessionId == other.callSessionId &&
             slot == other.slot &&
-            frequencyHz == other.frequencyHz &&
-            grantEpochMs == other.grantEpochMs;
+            frequencyHz == other.frequencyHz;
     }
 };
 
+// Protocol-derived speech-frame identity (SDRTrunk/OP25 ordering).  Absolute
+// dibit position is for duplicate detection only — not 20 ms timeline.
+struct Phase2VoiceFrameKey {
+    uint64_t superframeAnchor = 0;
+    uint8_t burstIndex = 0xffu;
+    uint8_t slot = 0xffu;
+    uint8_t voiceIndex = 0xffu;
+
+    bool operator==(const Phase2VoiceFrameKey& other) const noexcept
+    {
+        return superframeAnchor == other.superframeAnchor &&
+            burstIndex == other.burstIndex &&
+            slot == other.slot &&
+            voiceIndex == other.voiceIndex;
+    }
+};
+
+inline int p25Phase2CompareVoiceFrameKeys(const Phase2VoiceFrameKey& a,
+                                          const Phase2VoiceFrameKey& b) noexcept
+{
+    if (a.superframeAnchor < b.superframeAnchor) return -1;
+    if (a.superframeAnchor > b.superframeAnchor) return 1;
+    if (a.burstIndex < b.burstIndex) return -1;
+    if (a.burstIndex > b.burstIndex) return 1;
+    if (a.voiceIndex < b.voiceIndex) return -1;
+    if (a.voiceIndex > b.voiceIndex) return 1;
+    if (a.slot < b.slot) return -1;
+    if (a.slot > b.slot) return 1;
+    return 0;
+}
+
 struct P25P2PendingAmbeFrame {
     std::array<uint8_t, 96> ambe96{};
+    Phase2VoiceFrameKey frameKey{};
+    bool frameKeyValid = false;
     uint8_t voiceIndex = 0;
     bool grantSlotKnown = false;
     uint8_t grantSlot = 0xffu;
@@ -80,23 +109,6 @@ struct P25Phase2AmbeEmitDedupeState {
     std::vector<uint64_t> recentAbsDibits;
 };
 
-// Protocol-derived speech-frame identity (SDRTrunk/OP25 ordering).  Absolute
-// dibit position is for duplicate detection only — not 20 ms timeline.
-struct Phase2VoiceFrameKey {
-    uint64_t superframeAnchor = 0;
-    uint8_t burstIndex = 0xffu;
-    uint8_t slot = 0xffu;
-    uint8_t voiceIndex = 0xffu;
-
-    bool operator==(const Phase2VoiceFrameKey& other) const noexcept
-    {
-        return superframeAnchor == other.superframeAnchor &&
-            burstIndex == other.burstIndex &&
-            slot == other.slot &&
-            voiceIndex == other.voiceIndex;
-    }
-};
-
 // Per-call speech-frame sequencer.  Ordinals advance one per accepted
 // protocol-position frame in burst order; RF dibit distance must not insert
 // artificial 20 ms silence gaps.
@@ -104,11 +116,13 @@ struct P25Phase2FrameSequencer {
     uint64_t callSessionId = 0;
     uint32_t talkgroupId = 0;
     uint8_t slot = 0xffu;
-    int64_t grantEpochMs = 0;
     bool armed = false;
     int64_t nextSpeechOrdinal = 0;
     uint64_t acceptedFrames = 0;
     uint64_t duplicateOrLateDrops = 0;
+    uint64_t outOfOrderDrops = 0;
+    Phase2VoiceFrameKey lastAcceptedKey{};
+    bool haveLastAcceptedKey = false;
     std::vector<Phase2VoiceFrameKey> recentKeys;
 };
 

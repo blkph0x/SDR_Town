@@ -949,6 +949,25 @@ TEST_CASE("P25 call security latch is monotonic Unknown to Clear or Encrypted", 
     REQUIRE(session.callSecurityLatch == P25CallSecurityLatch::Unknown);
 }
 
+TEST_CASE("P25 protocol frame keys sort in burst order", "[p25][follow][continuity]")
+{
+    Phase2VoiceFrameKey a;
+    a.superframeAnchor = 1000;
+    a.burstIndex = 4;
+    a.voiceIndex = 0;
+    a.slot = 1;
+
+    Phase2VoiceFrameKey b = a;
+    b.voiceIndex = 3;
+
+    Phase2VoiceFrameKey c = a;
+    c.burstIndex = 5;
+
+    REQUIRE(p25Phase2CompareVoiceFrameKeys(a, b) < 0);
+    REQUIRE(p25Phase2CompareVoiceFrameKeys(b, c) < 0);
+    REQUIRE(p25Phase2CompareVoiceFrameKeys(c, a) > 0);
+}
+
 TEST_CASE("P25 frame sequencer resets only on clearAll call boundary", "[p25][follow][continuity]")
 {
     P25ReceiverSessionState session;

@@ -139,6 +139,8 @@ struct Receiver {
     uint64_t p25DiagRingOverflow = 0;
     uint64_t p25DiagSequencerGapSilence = 0;
     uint64_t p25DiagSequencerLateDrops = 0;
+    uint64_t p25DiagSequencerOutOfOrderDrops = 0;
+    uint64_t p25DiagSpeakerPlaybackCleared = 0;
     bool p25VoiceMaskParamsKnown = false;
     uint16_t p25VoiceNac = 0;
     uint32_t p25VoiceWacn = 0;
@@ -304,6 +306,8 @@ struct Receiver {
         p25DiagRingOverflow = 0;
         p25DiagSequencerGapSilence = 0;
         p25DiagSequencerLateDrops = 0;
+        p25DiagSequencerOutOfOrderDrops = 0;
+        p25DiagSpeakerPlaybackCleared = 0;
         p25Phase2PendingAudio.clear();
         p25Phase2PendingTalkgroupId = 0;
         p25Phase2PendingAudioArmed = false;

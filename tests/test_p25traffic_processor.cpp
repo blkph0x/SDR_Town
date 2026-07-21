@@ -3,33 +3,27 @@
 #include "P25ReceiverSession.h"
 #include "P25TrafficChannelProcessor.h"
 
-TEST_CASE("P25 Phase 2 audio call key binds source grant and session", "[p25][traffic][session]")
+TEST_CASE("P25 Phase 2 audio call key binds session slot and frequency only", "[p25][traffic][session]")
 {
     P25P2CallAudioKey first;
     first.nac = 0x2df;
     first.wacn = 0xbee00;
     first.systemId = 0x2d1;
     first.talkgroupId = 30302;
-    first.sourceId = 1001;
     first.callSessionId = 0x30302abcdULL;
     first.slot = 1;
     first.frequencyHz = 418875000;
-    first.grantEpochMs = 100000;
 
     auto second = first;
     REQUIRE(first.valid());
     REQUIRE(second.valid());
     REQUIRE(first == second);
 
-    second.grantEpochMs = first.grantEpochMs + 1;
-    REQUIRE_FALSE(first == second);
-
-    second = first;
-    second.sourceId = first.sourceId + 1;
-    REQUIRE_FALSE(first == second);
-
-    second = first;
     second.callSessionId = first.callSessionId + 1;
+    REQUIRE_FALSE(first == second);
+
+    second = first;
+    second.slot = static_cast<uint8_t>(first.slot ^ 0x01u);
     REQUIRE_FALSE(first == second);
 }
 

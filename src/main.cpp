@@ -5809,11 +5809,9 @@ static P25P2CallAudioKey p25CurrentPhase2AudioKey(const Receiver& rx, double tar
     key.wacn = rx.p25VoiceWacn;
     key.systemId = rx.p25VoiceSystemId;
     key.talkgroupId = rx.p25VoiceTalkgroupId;
-    key.sourceId = rx.p25VoiceSourceId;
     key.callSessionId = rx.p25CurrentCallSessionId;
     key.slot = rx.p25VoiceTdmaSlotKnown ? static_cast<uint8_t>(rx.p25VoiceTdmaSlot & 0x01u) : 0xffu;
     key.frequencyHz = p25RoundFrequencyHz(targetFreqHz);
-    key.grantEpochMs = rx.p25VoiceGrantEpochMs;
     return key;
 }
 
@@ -5840,11 +5838,9 @@ static bool p25Phase2RecentSecurityEvidenceMatches(const Receiver& rx,
 {
     if (!key.valid()) return false;
     return rx.p25Phase2RecentSecurityTalkgroupId == key.talkgroupId &&
-        rx.p25Phase2RecentSecuritySourceId == key.sourceId &&
         rx.p25Phase2RecentSecurityCallSessionId == key.callSessionId &&
         rx.p25Phase2RecentSecuritySlot == key.slot &&
-        rx.p25Phase2RecentSecurityFrequencyHz == key.frequencyHz &&
-        rx.p25Phase2RecentSecurityGrantEpochMs == key.grantEpochMs;
+        rx.p25Phase2RecentSecurityFrequencyHz == key.frequencyHz;
 }
 
 static bool p25Phase2RecentSecurityEvidenceUsable(const Receiver& rx,
@@ -5871,11 +5867,9 @@ static void p25RefreshPhase2RecentSecurityEvidence(Receiver& rx,
     if (!p25Phase2RecentSecurityEvidenceMatches(rx, key)) {
         p25ClearPhase2RecentSecurityEvidence(rx);
         rx.p25Phase2RecentSecurityTalkgroupId = key.talkgroupId;
-        rx.p25Phase2RecentSecuritySourceId = key.sourceId;
         rx.p25Phase2RecentSecurityCallSessionId = key.callSessionId;
         rx.p25Phase2RecentSecuritySlot = key.slot;
         rx.p25Phase2RecentSecurityFrequencyHz = key.frequencyHz;
-        rx.p25Phase2RecentSecurityGrantEpochMs = key.grantEpochMs;
     }
     rx.p25Phase2RecentSecurityEvidenceMs = nowMs;
     rx.p25Phase2RecentTargetMacCrcValid = rx.p25Phase2RecentTargetMacCrcValid || targetMacCrc;
@@ -5920,6 +5914,32 @@ static const char* p25PendingClearReasonName(P25PendingClearReason reason) noexc
     case P25PendingClearReason::PttStartReset: return "ptt-start";
     }
     return "unknown";
+}
+
+static bool p25Phase2SpeakerPlaybackClearAllowed(P25PendingClearReason reason) noexcept
+{
+    switch (reason) {
+    case P25PendingClearReason::CallIdentityChanged:
+    case P25PendingClearReason::EncryptedState:
+    case P25PendingClearReason::CallEnded:
+    case P25PendingClearReason::RetuneOrGeneration:
+    case P25PendingClearReason::UserStop:
+    case P25PendingClearReason::SlotProbeDestructive:
+        return true;
+    case P25PendingClearReason::PttStartReset:
+        return false;
+    }
+    return false;
+}
+
+static void p25Phase2ClearSpeakerPlaybackQueue(Receiver& rx,
+                                               std::vector<float>& pendingSpeaker,
+                                               P25PendingClearReason reason)
+{
+    if (pendingSpeaker.empty()) return;
+    if (!p25Phase2SpeakerPlaybackClearAllowed(reason)) return;
+    pendingSpeaker.clear();
+    ++rx.p25DiagSpeakerPlaybackCleared;
 }
 
 static bool p25Phase2GrantedSlotIsImmutable(const Receiver& rx) noexcept
@@ -6068,6 +6088,9 @@ static Phase2VoiceFrameKey p25Phase2VoiceFrameKeyFromBurst(const P25Phase2Burst&
 
 static Phase2VoiceFrameKey p25Phase2VoiceFrameKeyFromPending(const P25P2PendingAmbeFrame& pending)
 {
+    if (pending.frameKeyValid) {
+        return pending.frameKey;
+    }
     Phase2VoiceFrameKey key;
     key.slot = pending.grantSlotKnown
         ? static_cast<uint8_t>(pending.grantSlot & 0x01u)
@@ -6084,8 +6107,7 @@ static void p25Phase2ArmFrameSequencerForCall(Receiver& rx) noexcept
     if (seq.armed &&
         seq.callSessionId == rx.p25CurrentCallSessionId &&
         seq.talkgroupId == rx.p25VoiceTalkgroupId &&
-        seq.slot == static_cast<uint8_t>(rx.p25VoiceTdmaSlot & 0x01u) &&
-        seq.grantEpochMs == rx.p25VoiceGrantEpochMs) {
+        seq.slot == static_cast<uint8_t>(rx.p25VoiceTdmaSlot & 0x01u)) {
         return;
     }
     seq = {};
@@ -6093,22 +6115,55 @@ static void p25Phase2ArmFrameSequencerForCall(Receiver& rx) noexcept
     seq.callSessionId = rx.p25CurrentCallSessionId;
     seq.talkgroupId = rx.p25VoiceTalkgroupId;
     seq.slot = static_cast<uint8_t>(rx.p25VoiceTdmaSlot & 0x01u);
-    seq.grantEpochMs = rx.p25VoiceGrantEpochMs;
 }
 
-// Accept one protocol-position speech frame in burst order.  Does not derive
-// 20 ms timeline from absolute RF dibit spacing (that produced blocky gaps).
+enum class FrameOrderResult : uint8_t {
+    Expected = 0,
+    Future,
+    Duplicate,
+    Late
+};
+
+static FrameOrderResult p25Phase2ClassifySpeechFrameOrder(const P25Phase2FrameSequencer& seq,
+                                                            const Phase2VoiceFrameKey& key)
+{
+    for (const auto& seen : seq.recentKeys) {
+        if (seen == key) {
+            return FrameOrderResult::Duplicate;
+        }
+    }
+    if (!seq.haveLastAcceptedKey) {
+        return FrameOrderResult::Expected;
+    }
+    const int cmp = p25Phase2CompareVoiceFrameKeys(key, seq.lastAcceptedKey);
+    if (cmp == 0) {
+        return FrameOrderResult::Duplicate;
+    }
+    if (cmp < 0) {
+        return FrameOrderResult::Late;
+    }
+    return FrameOrderResult::Expected;
+}
+
+// Accept one protocol-position speech frame in burst order.  Rejects duplicates
+// and frames older than the last accepted protocol position.
 static bool p25Phase2SequencerAcceptSpeechFrame(Receiver& rx,
                                                 const Phase2VoiceFrameKey& key)
 {
     p25Phase2ArmFrameSequencerForCall(rx);
     auto& seq = rx.p25SessionState.frameSequencer;
-    for (const auto& seen : seq.recentKeys) {
-        if (seen == key) {
-            ++seq.duplicateOrLateDrops;
-            ++rx.p25DiagSequencerLateDrops;
-            return false;
-        }
+    const FrameOrderResult order = p25Phase2ClassifySpeechFrameOrder(seq, key);
+    if (order == FrameOrderResult::Duplicate) {
+        ++seq.duplicateOrLateDrops;
+        ++rx.p25DiagSequencerLateDrops;
+        return false;
+    }
+    if (order == FrameOrderResult::Late) {
+        ++seq.duplicateOrLateDrops;
+        ++seq.outOfOrderDrops;
+        ++rx.p25DiagSequencerOutOfOrderDrops;
+        ++rx.p25DiagSequencerLateDrops;
+        return false;
     }
     constexpr size_t kMaxRecentKeys = 256;
     if (seq.recentKeys.size() >= kMaxRecentKeys) {
@@ -6116,6 +6171,8 @@ static bool p25Phase2SequencerAcceptSpeechFrame(Receiver& rx,
             seq.recentKeys.begin() + static_cast<std::ptrdiff_t>(seq.recentKeys.size() / 2));
     }
     seq.recentKeys.push_back(key);
+    seq.lastAcceptedKey = key;
+    seq.haveLastAcceptedKey = true;
     ++seq.acceptedFrames;
     ++seq.nextSpeechOrdinal;
     return true;
@@ -6177,6 +6234,15 @@ static bool p25Phase2PendingAudioMatches(Receiver& rx, const P25P2CallAudioKey& 
 {
     const auto& queue = rx.p25SessionState.pendingAudio;
     return queue.armed && queue.key == key;
+}
+
+static void p25Phase2HandlePttStartForPendingQueue(Receiver& rx, const P25P2CallAudioKey& audioKey)
+{
+    if (p25Phase2PendingAudioMatches(rx, audioKey) &&
+        !rx.p25SessionState.pendingAudio.ambeFrames.empty()) {
+        return;
+    }
+    p25ClearPhase2PendingAudioOnly(rx, P25PendingClearReason::PttStartReset);
 }
 
 static size_t p25Phase2PendingAmbeFrameCount(Receiver& rx, const P25P2CallAudioKey& key)
@@ -6249,6 +6315,10 @@ static std::vector<P25P2PendingAmbeFrame> p25TakePhase2PendingAmbeFrames(
     std::vector<P25P2PendingAmbeFrame> sorted(queue.ambeFrames.begin(), queue.ambeFrames.end());
     std::sort(sorted.begin(), sorted.end(), [](const P25P2PendingAmbeFrame& a,
                                                const P25P2PendingAmbeFrame& b) {
+        if (a.frameKeyValid != b.frameKeyValid) return a.frameKeyValid;
+        if (a.frameKeyValid && b.frameKeyValid) {
+            return p25Phase2CompareVoiceFrameKeys(a.frameKey, b.frameKey) < 0;
+        }
         if (a.haveAbsoluteDibits != b.haveAbsoluteDibits) return a.haveAbsoluteDibits;
         if (a.codewordAbsDibit != b.codewordAbsDibit) return a.codewordAbsDibit < b.codewordAbsDibit;
         return a.voiceIndex < b.voiceIndex;
@@ -7534,15 +7604,7 @@ static void syncP25Phase2MaskParametersToLiveDecoder(Receiver& rx)
 
 static uint64_t p25TrafficProcessorSessionId(const Receiver& rx)
 {
-    uint64_t h = static_cast<uint64_t>(std::max<int64_t>(0, rx.p25VoiceGrantEpochMs));
-    h ^= static_cast<uint64_t>(rx.p25VoiceTalkgroupId) << 32;
-    h ^= static_cast<uint64_t>(rx.p25VoiceSourceId) << 16;
-    h ^= static_cast<uint64_t>(rx.p25VoiceTdmaSlot & 0x01u) << 8;
-    const double voiceHz = rx.p25TrafficVoiceFreqHz > 0.0 ? rx.p25TrafficVoiceFreqHz : rx.freqHz;
-    if (std::isfinite(voiceHz) && voiceHz > 0.0) {
-        h ^= static_cast<uint64_t>(std::llround(voiceHz));
-    }
-    return h != 0 ? h : 1;
+    return rx.p25CurrentCallSessionId != 0 ? rx.p25CurrentCallSessionId : 1;
 }
 
 static P25TrafficChannelProcessor* ensureP25TrafficProcessor(Receiver& rx)
@@ -7624,6 +7686,7 @@ struct P25FollowGuiStatusCache {
     uint64_t voiceStateCurrentCallSessionId = 0;
     bool voiceStateClearKnown = false;
     bool voiceStateEncrypted = false;
+    P25CallSecurityLatch voiceStateCallSecurityLatch = P25CallSecurityLatch::Unknown;
     bool voiceStateSlotKnown = false;
     uint8_t voiceStateSlot = 0;
     bool voiceStateMaskKnown = false;
@@ -10532,8 +10595,12 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
         // call and clears any stale queued voice; a later valid clear ESS drains
         // queued voice even if the current decoder tick has no fresh VCWs.
         if (out.phase2TargetSessionAudioRelease && out.phase2TargetSecurityStateFromPtt) {
-            // sdrtrunk PTT starts/resets the call and clears stale queued voice.
-            p25ClearPhase2PendingAudioOnly(rx, P25PendingClearReason::PttStartReset);
+            if (!p25Phase2PendingAudioMatches(rx, audioKey) ||
+                rx.p25SessionState.pendingAudio.ambeFrames.empty()) {
+                p25ClearPhase2PendingAudioOnly(rx, P25PendingClearReason::PttStartReset);
+            } else {
+                drainPendingRawVoice();
+            }
             drainedPendingRawVoice = true;
             return;
         }
@@ -10976,11 +11043,10 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
 
         if (immediateAmbeDecodeAllowed && !drainedPendingRawVoice) {
             if (burst.securityStateFromPtt) {
-                p25ClearPhase2PendingAudioOnly(rx, P25PendingClearReason::PttStartReset);
-                drainedPendingRawVoice = true;
-            } else {
-                drainPendingRawVoice();
+                p25Phase2HandlePttStartForPendingQueue(rx, audioKey);
             }
+            drainPendingRawVoice();
+            drainedPendingRawVoice = true;
         }
 
         for (const auto& codeword : burst.voiceCodewords) {
@@ -11053,6 +11119,8 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
                     // after target-slot PTT/ESS or retained clear traffic proof.
                     P25P2PendingAmbeFrame pending;
                     pending.ambe96 = ambeFrame;
+                    pending.frameKey = p25Phase2VoiceFrameKeyFromBurst(burst, codeword, effectiveBurstSlot);
+                    pending.frameKeyValid = true;
                     pending.voiceIndex = codeword.voiceIndex;
                     pending.grantSlotKnown = true;
                     pending.grantSlot = effectiveBurstSlot;
@@ -11110,11 +11178,10 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
 
             if (!drainedPendingRawVoice) {
                 if (burst.securityStateFromPtt) {
-                    p25ClearPhase2PendingAudioOnly(rx, P25PendingClearReason::PttStartReset);
-                    drainedPendingRawVoice = true;
-                } else {
-                    drainPendingRawVoice();
+                    p25Phase2HandlePttStartForPendingQueue(rx, audioKey);
                 }
+                drainPendingRawVoice();
+                drainedPendingRawVoice = true;
             }
         }
     }
@@ -17617,6 +17684,7 @@ public:
                                 uint64_t voiceStateCurrentCallSessionId = 0;
                                 bool voiceStateClearKnown = false;
                                 bool voiceStateEncrypted = false;
+                                P25CallSecurityLatch voiceStateCallSecurityLatch = P25CallSecurityLatch::Unknown;
                                 bool voiceStateSlotKnown = false;
                                 uint8_t voiceStateSlot = 0;
                                 bool voiceStateMaskKnown = false;
@@ -17679,6 +17747,7 @@ public:
                                                     voiceStateCurrentCallSessionId = cached.voiceStateCurrentCallSessionId;
                                                     voiceStateClearKnown = cached.voiceStateClearKnown;
                                                     voiceStateEncrypted = cached.voiceStateEncrypted;
+                                                    voiceStateCallSecurityLatch = cached.voiceStateCallSecurityLatch;
                                                     voiceStateSlotKnown = cached.voiceStateSlotKnown || voiceStateSlotKnown;
                                                     if (!voiceStateSlotKnown && cached.voiceStateSlotKnown) {
                                                         voiceStateSlot = cached.voiceStateSlot;
@@ -17702,6 +17771,7 @@ public:
                                                 voiceStateCurrentCallSessionId = rxState.p25CurrentCallSessionId;
                                                 voiceStateClearKnown = rxState.p25VoiceClearKnown;
                                                 voiceStateEncrypted = rxState.p25VoiceEncrypted;
+                                                voiceStateCallSecurityLatch = rxState.p25SessionState.callSecurityLatch;
                                                 voiceStateSlotKnown = rxState.p25VoiceTdmaSlotKnown;
                                                 voiceStateSlot = static_cast<uint8_t>(rxState.p25VoiceTdmaSlot & 0x01u);
                                                 voiceStateMaskKnown = rxState.p25VoiceMaskParamsKnown;
@@ -17731,6 +17801,7 @@ public:
                                                 cacheSnapshot.voiceStateCurrentCallSessionId = voiceStateCurrentCallSessionId;
                                                 cacheSnapshot.voiceStateClearKnown = voiceStateClearKnown;
                                                 cacheSnapshot.voiceStateEncrypted = voiceStateEncrypted;
+                                                cacheSnapshot.voiceStateCallSecurityLatch = voiceStateCallSecurityLatch;
                                                 cacheSnapshot.voiceStateSlotKnown = voiceStateSlotKnown;
                                                 cacheSnapshot.voiceStateSlot = voiceStateSlot;
                                                 cacheSnapshot.voiceStateMaskKnown = voiceStateMaskKnown;
@@ -17765,6 +17836,7 @@ public:
                                             voiceStateCurrentCallSessionId = cached.voiceStateCurrentCallSessionId;
                                             voiceStateClearKnown = cached.voiceStateClearKnown;
                                             voiceStateEncrypted = cached.voiceStateEncrypted;
+                                            voiceStateCallSecurityLatch = cached.voiceStateCallSecurityLatch;
                                             voiceStateSlotKnown = cached.voiceStateSlotKnown;
                                             voiceStateSlot = cached.voiceStateSlot;
                                             voiceStateMaskKnown = cached.voiceStateMaskKnown;
@@ -17924,8 +17996,12 @@ public:
                                     followSnapshot.phase2EssEncrypted = p2EssEncrypted;
                                     followSnapshot.phase2TrafficProcessorActive = trafficStatus.present;
                                     followSnapshot.phase2TrafficCallActive = trafficStatus.callActive;
-                                    followSnapshot.phase2TrafficAudioOpen = trafficStatus.present && trafficStatus.diag.audioOpen;
-                                    followSnapshot.phase2TrafficEncrypted = trafficStatus.present && trafficStatus.diag.encrypted;
+                                    followSnapshot.phase2TrafficAudioOpen =
+                                        voiceStateCallSecurityLatch == P25CallSecurityLatch::Clear &&
+                                        trafficStatus.callActive;
+                                    followSnapshot.phase2TrafficEncrypted =
+                                        voiceStateCallSecurityLatch == P25CallSecurityLatch::Encrypted ||
+                                        (trafficStatus.present && trafficStatus.diag.encrypted);
                                     followSnapshot.grantEncryptionKnown =
                                         voiceStateClearKnown || voiceStateEncrypted;
                                     followSnapshot.grantEncrypted = voiceStateEncrypted;
@@ -17945,9 +18021,9 @@ public:
                                     const bool freshFollowVoiceEvidence =
                                         p2vcw > 0 ||
                                         decoded > 0 ||
-                                        (trafficStatus.present &&
-                                         (trafficStatus.diag.p2vcw > 0 ||
-                                          (trafficStatus.diag.audioOpen && p2vcw > 0)));
+                                        (voiceStateCallSecurityLatch == P25CallSecurityLatch::Clear &&
+                                         trafficStatus.callActive &&
+                                         trafficStatus.diag.p2vcw > 0);
                                     if (followDecision.voiceStillLooksActive &&
                                         freshFollowVoiceEvidence) {
                                         p25AutoFollowLastActiveMs = nowMs;
@@ -19488,11 +19564,9 @@ public:
                                         p25Audio.audio,
                                         rxAudioOutputs,
                                         audioOutputEngine->getRingFillPercent());
-                                } else if (!gateEmit &&
-                                           !p25Phase2SessionSpeakerSustainActive(rx) &&
-                                           !p25Phase2ShouldPreserveLivePlaybackBuffers(rx, pendingNowMs)) {
-                                    pendingSpeaker.clear();
                                 }
+                                // Never clear accepted speaker PCM on transient gate failure.
+                                // Playback queue is cleared only on explicit call boundaries.
                                 if (pushedSamples > 0) {
                                     p25Phase2ResetPlayoutBridge(rx);
                                     p25Phase2RememberLastEmittedSample(rx, ch);
@@ -21428,13 +21502,8 @@ private:
                         result.speakerAudio,
                         result.audioOutputIndices,
                         audioRingFillPercent);
-                } else if (!gateEmit &&
-                           !p25Phase2SessionSpeakerSustainActive(rx)) {
-                    const qint64 pendingNowMs = QDateTime::currentMSecsSinceEpoch();
-                    if (!p25Phase2ShouldPreserveLivePlaybackBuffers(rx, pendingNowMs)) {
-                        pendingSpeaker.clear();
-                    }
                 }
+                // Never clear accepted speaker PCM on transient gate failure.
                 if (pushedSamples > 0) {
                 p25Phase2ResetPlayoutBridge(rx);
                 p25Phase2RememberLastEmittedSample(rx, result.speakerAudio);
@@ -21546,9 +21615,12 @@ private:
                 });
             }
         } else if (result.hasAudioBlock &&
-                   (!result.speakerMayEmit || result.audio.phase2StaleAudioTail) &&
+                   result.speakerGateReason != "emit" &&
+                   rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Encrypted &&
                    !p25Phase2SessionSpeakerSustainActive(rx)) {
-            pendingAudioByRx[p25ReceiverSessionKey(rx)].clear();
+            p25Phase2ClearSpeakerPlaybackQueue(rx,
+                pendingAudioByRx[p25ReceiverSessionKey(rx)],
+                P25PendingClearReason::EncryptedState);
         }
     }
 
@@ -25773,6 +25845,7 @@ int runCLI(int argc, char* argv[]) {
                 while (QDateTime::currentMSecsSinceEpoch() < voiceDeadlineMs) {
                     P25VoiceDiagSnapshot diag;
                     P25TrafficProcessorStatusSnapshot trafficStatus;
+                    P25CallSecurityLatch cliCallSecurityLatch = P25CallSecurityLatch::Unknown;
                     bool haveVoiceDiag = false;
                     {
                         std::unique_lock<std::mutex> lk(cliRxMutex, std::try_to_lock);
@@ -25783,6 +25856,7 @@ int runCLI(int argc, char* argv[]) {
                             if (rxLock.owns_lock()) {
                                 diag = rx.p25VoiceDiagnostics;
                                 trafficStatus = snapshotP25TrafficProcessorStatus(rx);
+                                cliCallSecurityLatch = rx.p25SessionState.callSecurityLatch;
                                 haveVoiceDiag = true;
                             }
                         }
@@ -26021,8 +26095,12 @@ int runCLI(int argc, char* argv[]) {
                     followSnapshot.phase2EssEncrypted = p2EssEncrypted;
                     followSnapshot.phase2TrafficProcessorActive = trafficStatus.present;
                     followSnapshot.phase2TrafficCallActive = trafficStatus.callActive;
-                    followSnapshot.phase2TrafficAudioOpen = trafficStatus.present && trafficStatus.diag.audioOpen;
-                    followSnapshot.phase2TrafficEncrypted = trafficStatus.present && trafficStatus.diag.encrypted;
+                    followSnapshot.phase2TrafficAudioOpen =
+                        cliCallSecurityLatch == P25CallSecurityLatch::Clear &&
+                        trafficStatus.callActive;
+                    followSnapshot.phase2TrafficEncrypted =
+                        cliCallSecurityLatch == P25CallSecurityLatch::Encrypted ||
+                        (trafficStatus.present && trafficStatus.diag.encrypted);
                     followSnapshot.grantEncryptionKnown =
                         p25TalkgroupGrantProvesSpeakerClear(tg) || p25TalkgroupGrantProvesSpeakerEncrypted(tg);
                     followSnapshot.grantEncrypted = p25TalkgroupGrantProvesSpeakerEncrypted(tg);
