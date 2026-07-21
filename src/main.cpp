@@ -6212,50 +6212,81 @@ static size_t p25Phase2InsertSequencerGapSilence(Receiver& rx,
                                                    double outputRateHz,
                                                    size_t gapFrames);
 
+static void p25Phase2SequencerCommitAcceptedKey(P25Phase2FrameSequencer& seq,
+                                                  const Phase2VoiceFrameKey& key);
+
 static bool p25Phase2SameVoiceBurst(const P25Phase2FrameSequencer& seq,
                                     const Phase2VoiceFrameKey& key) noexcept
 {
     if (!seq.haveActiveBurst) return false;
-    if (key.sessionBurstIdKnown && seq.activeSessionBurstIdKnown) {
-        return key.sessionBurstId == seq.activeSessionBurstId &&
-               key.slot == seq.activeBurstSlot;
-    }
     if (key.streamBurstStartDibitKnown && seq.activeStreamBurstStartKnown) {
         return key.streamBurstStartDibit == seq.activeStreamBurstStartDibit &&
+               key.slot == seq.activeBurstSlot;
+    }
+    if (key.sessionBurstIdKnown && seq.activeSessionBurstIdKnown) {
+        return key.sessionBurstId == seq.activeSessionBurstId &&
                key.slot == seq.activeBurstSlot;
     }
     if (key.superframeAnchor != seq.activeBurstAnchor) return false;
     return key.burstIndex == seq.activeBurstIndex;
 }
 
-static void p25Phase2SequencerExpireHeldFrames(P25Phase2FrameSequencer& seq) noexcept
-{
-    for (auto& held : seq.heldFutureFrames) {
-        if (held.has_value()) {
-            held.reset();
-            ++seq.reorderExpired;
-        }
-    }
-}
-
 static void p25Phase2CloseActiveVoiceBurst(Receiver& rx,
                                            P25Phase2FrameSequencer& seq,
+                                           std::vector<P25Phase2SequencerSpeechInput>* decodeQueueOut = nullptr,
                                            P25VoiceAudioBlock* gapSilenceOut = nullptr,
                                            double gapSilenceOutputRateHz = 48000.0) noexcept
 {
     if (!seq.haveActiveBurst) return;
-    p25Phase2SequencerExpireHeldFrames(seq);
-    if (seq.expectedVoiceIndex < seq.activeBurstVoiceCount) {
-        const size_t tailGaps = seq.activeBurstVoiceCount - seq.expectedVoiceIndex;
-        seq.protocolOrderIssues += tailGaps;
-        seq.nextSpeechOrdinal += static_cast<int64_t>(tailGaps);
+    const auto emitOneGap = [&]() {
+        ++seq.protocolOrderIssues;
+        ++seq.nextSpeechOrdinal;
         if (gapSilenceOut != nullptr &&
             (seq.armed ||
              rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Clear)) {
-            p25Phase2InsertSequencerGapSilence(rx, *gapSilenceOut, gapSilenceOutputRateHz, tailGaps);
+            p25Phase2InsertSequencerGapSilence(rx, *gapSilenceOut, gapSilenceOutputRateHz, 1);
         } else {
-            seq.gapSilenceOrdinals += tailGaps;
-            rx.p25DiagSequencerGapSilence += tailGaps;
+            ++seq.gapSilenceOrdinals;
+            ++rx.p25DiagSequencerGapSilence;
+        }
+    };
+    if (seq.activeBurstVoiceCount > 0) {
+        while (seq.expectedVoiceIndex < seq.activeBurstVoiceCount) {
+            auto& held = seq.heldFutureFrames[seq.expectedVoiceIndex];
+            if (held.has_value() && held->haveAmbe) {
+                if (decodeQueueOut != nullptr) {
+                    decodeQueueOut->push_back(*held);
+                    p25Phase2SequencerCommitAcceptedKey(seq, decodeQueueOut->back().key);
+                } else {
+                    ++seq.nextSpeechOrdinal;
+                }
+                held.reset();
+                ++seq.reorderReleased;
+            } else {
+                if (held.has_value()) {
+                    held.reset();
+                    ++seq.reorderExpired;
+                }
+                emitOneGap();
+            }
+            seq.expectedVoiceIndex = static_cast<uint8_t>(seq.expectedVoiceIndex + 1u);
+        }
+    } else {
+        for (uint8_t i = seq.expectedVoiceIndex; i < seq.heldFutureFrames.size(); ++i) {
+            auto& held = seq.heldFutureFrames[i];
+            if (!held.has_value()) continue;
+            if (held->haveAmbe) {
+                if (decodeQueueOut != nullptr) {
+                    decodeQueueOut->push_back(*held);
+                    p25Phase2SequencerCommitAcceptedKey(seq, decodeQueueOut->back().key);
+                } else {
+                    ++seq.nextSpeechOrdinal;
+                }
+                ++seq.reorderReleased;
+            } else {
+                ++seq.reorderExpired;
+            }
+            held.reset();
         }
     }
     seq.haveActiveBurst = false;
@@ -6272,14 +6303,15 @@ static void p25Phase2CloseActiveVoiceBurst(Receiver& rx,
 static void p25Phase2BeginVoiceBurst(Receiver& rx,
                                      P25Phase2FrameSequencer& seq,
                                      const Phase2VoiceFrameKey& key,
+                                     std::vector<P25Phase2SequencerSpeechInput>* decodeQueueOut = nullptr,
                                      P25VoiceAudioBlock* gapSilenceOut = nullptr,
                                      double gapSilenceOutputRateHz = 48000.0) noexcept
 {
-    p25Phase2CloseActiveVoiceBurst(rx, seq, gapSilenceOut, gapSilenceOutputRateHz);
+    p25Phase2CloseActiveVoiceBurst(rx, seq, decodeQueueOut, gapSilenceOut, gapSilenceOutputRateHz);
     seq.haveActiveBurst = true;
     seq.activeBurstAnchor = key.superframeAnchor;
     seq.activeBurstIndex = key.burstIndex;
-    seq.activeBurstVoiceCount = key.burstVoiceCount > 0 ? key.burstVoiceCount : 4;
+    seq.activeBurstVoiceCount = key.burstVoiceCount;
     seq.expectedVoiceIndex = 0;
     seq.activeSessionBurstId = key.sessionBurstId;
     seq.activeSessionBurstIdKnown = key.sessionBurstIdKnown;
@@ -6350,7 +6382,8 @@ static void p25Phase2SequencerFlushHeldIntoQueue(P25Phase2FrameSequencer& seq,
                                                  std::vector<P25Phase2SequencerSpeechInput>& decodeQueue)
 {
     while (seq.haveActiveBurst &&
-           seq.expectedVoiceIndex < seq.activeBurstVoiceCount &&
+           (seq.activeBurstVoiceCount == 0 ||
+            seq.expectedVoiceIndex < seq.activeBurstVoiceCount) &&
            seq.expectedVoiceIndex < seq.heldFutureFrames.size()) {
         auto& held = seq.heldFutureFrames[seq.expectedVoiceIndex];
         if (!held.has_value() || !held->haveAmbe) break;
@@ -6360,7 +6393,8 @@ static void p25Phase2SequencerFlushHeldIntoQueue(P25Phase2FrameSequencer& seq,
         p25Phase2SequencerCommitAcceptedKey(seq, decodeQueue.back().key);
         seq.expectedVoiceIndex = static_cast<uint8_t>(seq.expectedVoiceIndex + 1u);
     }
-    if (seq.haveActiveBurst && seq.expectedVoiceIndex >= seq.activeBurstVoiceCount) {
+    if (seq.haveActiveBurst && seq.activeBurstVoiceCount > 0 &&
+        seq.expectedVoiceIndex >= seq.activeBurstVoiceCount) {
         seq.haveActiveBurst = false;
         seq.expectedVoiceIndex = 0;
         seq.heldFutureFrames = {};
@@ -6380,6 +6414,12 @@ static std::vector<P25Phase2SequencerSpeechInput> p25Phase2SequencerProcessSpeec
     auto& seq = rx.p25SessionState.frameSequencer;
     const Phase2VoiceFrameKey& key = incoming.key;
 
+    if (!key.streamDibitKnown || !key.streamBurstStartDibitKnown ||
+        !key.sessionCodewordIdKnown || !key.sessionBurstIdKnown) {
+        ++seq.protocolOrderIssues;
+        return decodeQueue;
+    }
+
     const FrameOrderResult order = p25Phase2ClassifySpeechFrameOrder(seq, key);
     if (order == FrameOrderResult::Duplicate) {
         ++seq.duplicateOrLateDrops;
@@ -6387,7 +6427,8 @@ static std::vector<P25Phase2SequencerSpeechInput> p25Phase2SequencerProcessSpeec
         return decodeQueue;
     }
     if (order == FrameOrderResult::Unorderable) {
-        ++seq.reorderHeld;
+        ++seq.outOfOrderDrops;
+        ++rx.p25DiagSequencerOutOfOrderDrops;
         return decodeQueue;
     }
     if (order == FrameOrderResult::Late) {
@@ -6400,7 +6441,9 @@ static std::vector<P25Phase2SequencerSpeechInput> p25Phase2SequencerProcessSpeec
 
     const bool sameBurst = p25Phase2SameVoiceBurst(seq, key);
     if (!sameBurst) {
-        p25Phase2BeginVoiceBurst(rx, seq, key, gapSilenceOut, gapSilenceOutputRateHz);
+        p25Phase2BeginVoiceBurst(rx, seq, key, &decodeQueue, gapSilenceOut, gapSilenceOutputRateHz);
+    } else if (key.burstVoiceCount > seq.activeBurstVoiceCount) {
+        seq.activeBurstVoiceCount = key.burstVoiceCount;
     }
 
     if (sameBurst && key.voiceIndex > seq.expectedVoiceIndex) {
@@ -6425,7 +6468,8 @@ static std::vector<P25Phase2SequencerSpeechInput> p25Phase2SequencerProcessSpeec
     seq.expectedVoiceIndex = static_cast<uint8_t>(key.voiceIndex + 1u);
     p25Phase2SequencerFlushHeldIntoQueue(seq, decodeQueue);
 
-    if (seq.haveActiveBurst && seq.expectedVoiceIndex >= seq.activeBurstVoiceCount) {
+    if (seq.haveActiveBurst && seq.activeBurstVoiceCount > 0 &&
+        seq.expectedVoiceIndex >= seq.activeBurstVoiceCount) {
         seq.haveActiveBurst = false;
         seq.expectedVoiceIndex = 0;
         seq.heldFutureFrames = {};
@@ -8217,10 +8261,10 @@ static size_t pushP25LiveStreamingAudio(AudioEngine* engine,
     const size_t jitterSoftCap = (jitterCap > frameSize * 4)
         ? std::max(coldPrimeSamples, (jitterCap * 7) / 8)
         : std::max(coldPrimeSamples, static_cast<size_t>(outRate * 0.720));
-    // Hold ~500 ms of real selected-slot PCM so opposite-slot dwell (~30 ms)
-    // and short worker holes cannot drain the ring to underrun between hops.
+    // Hold ~120 ms of real selected-slot PCM so opposite-slot dwell and short
+    // worker holes cannot drain the ring to underrun between hops.
     const size_t targetQueuedSamples = std::min(jitterSoftCap, std::max(minPrimeSamples,
-        static_cast<size_t>(outRate * 0.500)));
+        static_cast<size_t>(outRate * 0.120)));
     const size_t pushCeilingSamples = std::min(jitterSoftCap, std::max(targetQueuedSamples + frameSize * 2,
         static_cast<size_t>(outRate * 0.720)));
     const size_t ringLowWaterSamples = std::max(frameSize * 3,

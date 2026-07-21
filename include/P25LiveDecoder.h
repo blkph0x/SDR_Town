@@ -495,6 +495,13 @@ private:
         uint64_t id = 0;
         uint64_t generation = 0;
     };
+    struct RecentPhase2Burst {
+        uint64_t streamBurstStartDibit = 0;
+        uint8_t slot = 0xffu;
+        P25Phase2BurstKind kind = P25Phase2BurstKind::Unknown;
+        uint64_t sessionBurstId = 0;
+        uint64_t generation = 0;
+    };
 
     P25BlockTimingState streamTimingStateSnapshot() const;
     void storeStreamTimingState(const P25BlockTimingState& timing);
@@ -566,6 +573,7 @@ private:
     P25Phase2MaskParameters m_phase2SuperframeAnchorMaskParams{};
     uint8_t m_phase2SuperframeAnchorMaskPhase = 0;
     std::deque<RecentPhase2Codeword> m_phase2RecentCodewords;
+    std::deque<RecentPhase2Burst> m_phase2RecentBursts;
     std::deque<uint64_t> m_phase2RecentAcchDecodeBurstDibits;
     std::deque<int> m_phase2DibitTail;
     uint64_t m_phase2NextCodewordId = 1;

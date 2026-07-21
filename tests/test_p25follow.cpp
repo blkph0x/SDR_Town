@@ -1006,6 +1006,8 @@ TEST_CASE("Voice4 codewords share decoder sessionBurstId", "[p25][follow][contin
     Phase2VoiceFrameKey k0;
     k0.sessionBurstIdKnown = true;
     k0.sessionBurstId = 42;
+    k0.streamBurstStartDibitKnown = true;
+    k0.streamBurstStartDibit = 10000;
     k0.slot = 0;
     k0.voiceIndex = 0;
     k0.streamDibit = 10001;
@@ -1013,6 +1015,7 @@ TEST_CASE("Voice4 codewords share decoder sessionBurstId", "[p25][follow][contin
     Phase2VoiceFrameKey k1 = k0;
     k1.voiceIndex = 1;
     k1.streamDibit = 10038;
+    k1.sessionBurstId = 99;
 
     Phase2VoiceFrameKey k2 = k0;
     k2.voiceIndex = 2;

@@ -6670,6 +6670,7 @@ void P25LiveDecoder::annotatePhase2SessionCodewords(P25Phase2DecodeResult& out,
     const uint64_t generation = ++m_phase2DecodeGeneration;
     constexpr uint64_t kRetentionGenerations = 8;
     constexpr size_t kMaxRecentCodewords = 512;
+    constexpr size_t kMaxRecentBursts = 256;
     constexpr size_t kMaxDibitTail = 8192;
     constexpr size_t kMinTrustedOverlap = Phase2BurstDibits / 2;
     constexpr uint64_t kDibitTolerance = 8;
@@ -6723,7 +6724,27 @@ void P25LiveDecoder::annotatePhase2SessionCodewords(P25Phase2DecodeResult& out,
     for (auto& burst : out.bursts) {
         if (burst.voiceCodewords.empty()) continue;
         const uint64_t streamBurstStart = streamStart + static_cast<uint64_t>(burst.dibitOffset);
-        const uint64_t sessionBurstId = m_phase2NextSessionBurstId++;
+        const uint8_t burstSlot = burst.grantSlotKnown ? burst.grantSlot : 0xffu;
+        auto burstIt = std::find_if(m_phase2RecentBursts.begin(), m_phase2RecentBursts.end(),
+            [&](const RecentPhase2Burst& seen) {
+                const uint64_t distance = streamBurstStart > seen.streamBurstStartDibit
+                    ? streamBurstStart - seen.streamBurstStartDibit
+                    : seen.streamBurstStartDibit - streamBurstStart;
+                return seen.kind == burst.kind &&
+                       seen.slot == burstSlot &&
+                       distance <= kDibitTolerance &&
+                       generation >= seen.generation &&
+                       generation - seen.generation <= kRetentionGenerations;
+            });
+        uint64_t sessionBurstId = 0;
+        if (burstIt != m_phase2RecentBursts.end()) {
+            sessionBurstId = burstIt->sessionBurstId;
+            burstIt->generation = generation;
+        } else {
+            sessionBurstId = m_phase2NextSessionBurstId++;
+            m_phase2RecentBursts.push_back(
+                {streamBurstStart, burstSlot, burst.kind, sessionBurstId, generation});
+        }
         for (auto& codeword : burst.voiceCodewords) {
             const uint64_t fp = fingerprintFor(burst, codeword);
             // codeword.dibitOffset is already an absolute dibit offset within
@@ -6780,6 +6801,11 @@ void P25LiveDecoder::annotatePhase2SessionCodewords(P25Phase2DecodeResult& out,
            (generation > m_phase2RecentCodewords.front().generation + kRetentionGenerations ||
             m_phase2RecentCodewords.size() > kMaxRecentCodewords)) {
         m_phase2RecentCodewords.pop_front();
+    }
+    while (!m_phase2RecentBursts.empty() &&
+           (generation > m_phase2RecentBursts.front().generation + kRetentionGenerations ||
+            m_phase2RecentBursts.size() > kMaxRecentBursts)) {
+        m_phase2RecentBursts.pop_front();
     }
 }
 
@@ -7046,15 +7072,10 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
     auto normalizePhase2BurstOffsets = [&](P25Phase2Burst& burst) {
         if (phase2PrefixDibits == 0) return;
         for (auto& cw : burst.voiceCodewords) {
-            cw.duplicateInSession = cw.duplicateInSession || cw.dibitOffset < phase2PrefixDibits;
             cw.dibitOffset = cw.dibitOffset >= phase2PrefixDibits
                 ? cw.dibitOffset - phase2PrefixDibits + phase2InputOverlapDibits
                 : 0;
         }
-        burst.voiceCodewords.erase(
-            std::remove_if(burst.voiceCodewords.begin(), burst.voiceCodewords.end(),
-                [](const P25Phase2VoiceCodeword& cw) { return cw.duplicateInSession && cw.dibitOffset == 0; }),
-            burst.voiceCodewords.end());
         burst.dibitOffset = burst.dibitOffset >= phase2PrefixDibits
             ? burst.dibitOffset - phase2PrefixDibits + phase2InputOverlapDibits
             : 0;

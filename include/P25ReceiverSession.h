@@ -99,11 +99,11 @@ inline int p25Phase2CompareVoiceFrameKeys(const Phase2VoiceFrameKey& a,
 inline bool p25Phase2VoiceFrameKeysSameBurst(const Phase2VoiceFrameKey& a,
                                              const Phase2VoiceFrameKey& b) noexcept
 {
-    if (a.sessionBurstIdKnown && b.sessionBurstIdKnown) {
-        return a.sessionBurstId == b.sessionBurstId && a.slot == b.slot;
-    }
     if (a.streamBurstStartDibitKnown && b.streamBurstStartDibitKnown) {
         return a.streamBurstStartDibit == b.streamBurstStartDibit && a.slot == b.slot;
+    }
+    if (a.sessionBurstIdKnown && b.sessionBurstIdKnown) {
+        return a.sessionBurstId == b.sessionBurstId && a.slot == b.slot;
     }
     if (a.superframeAnchor != b.superframeAnchor) return false;
     return a.burstIndex == b.burstIndex && a.slot == b.slot;
