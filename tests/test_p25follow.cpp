@@ -952,6 +952,8 @@ TEST_CASE("P25 call security latch is monotonic Unknown to Clear or Encrypted", 
 TEST_CASE("P25 protocol frame keys sort in burst order", "[p25][follow][continuity]")
 {
     Phase2VoiceFrameKey a;
+    a.streamDibitKnown = true;
+    a.streamDibit = 1000;
     a.superframeAnchor = 1000;
     a.burstIndex = 4;
     a.voiceIndex = 0;
@@ -966,6 +968,37 @@ TEST_CASE("P25 protocol frame keys sort in burst order", "[p25][follow][continui
     REQUIRE(p25Phase2CompareVoiceFrameKeys(a, b) < 0);
     REQUIRE(p25Phase2CompareVoiceFrameKeys(b, c) < 0);
     REQUIRE(p25Phase2CompareVoiceFrameKeys(c, a) > 0);
+}
+
+TEST_CASE("P25 stream dibit keys order across overlapping windows", "[p25][follow][continuity]")
+{
+    Phase2VoiceFrameKey windowA;
+    windowA.streamDibitKnown = true;
+    windowA.streamDibit = 1'000'900;
+    windowA.sessionCodewordIdKnown = true;
+    windowA.sessionCodewordId = 42;
+    windowA.superframeAnchor = 900;
+    windowA.burstIndex = 4;
+    windowA.voiceIndex = 0;
+    windowA.slot = 1;
+
+    Phase2VoiceFrameKey windowB;
+    windowB.streamDibitKnown = true;
+    windowB.streamDibit = 1'006'420;
+    windowB.sessionCodewordIdKnown = true;
+    windowB.sessionCodewordId = 43;
+    windowB.superframeAnchor = 420;
+    windowB.burstIndex = 5;
+    windowB.voiceIndex = 0;
+    windowB.slot = 1;
+
+    REQUIRE(p25Phase2CompareVoiceFrameKeys(windowA, windowB) < 0);
+    REQUIRE(p25Phase2CompareVoiceFrameKeys(windowB, windowA) > 0);
+
+    Phase2VoiceFrameKey duplicateB = windowB;
+    duplicateB.sessionCodewordId = windowB.sessionCodewordId;
+    REQUIRE(duplicateB == windowB);
+    REQUIRE_FALSE(windowA == windowB);
 }
 
 TEST_CASE("P25 frame sequencer resets only on clearAll call boundary", "[p25][follow][continuity]")

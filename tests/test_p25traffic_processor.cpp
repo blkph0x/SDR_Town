@@ -2,6 +2,7 @@
 
 #include "P25ReceiverSession.h"
 #include "P25TrafficChannelProcessor.h"
+#include "Receiver.h"
 
 TEST_CASE("P25 Phase 2 audio call key binds session slot and frequency only", "[p25][traffic][session]")
 {
@@ -25,6 +26,31 @@ TEST_CASE("P25 Phase 2 audio call key binds session slot and frequency only", "[
     second = first;
     second.slot = static_cast<uint8_t>(first.slot ^ 0x01u);
     REQUIRE_FALSE(first == second);
+
+    second = first;
+    second.nac = static_cast<uint16_t>(first.nac + 1);
+    second.wacn = first.wacn + 1;
+    second.systemId = static_cast<uint16_t>(first.systemId + 1);
+    REQUIRE(first == second);
+}
+
+TEST_CASE("P25 grant refresh preserves PTT generation and call session", "[p25][traffic][session]")
+{
+    Receiver rx;
+    rx.p25VoiceTalkgroupId = 30302;
+    p25Phase2BeginNewPtt(rx, 1'000'000);
+    const uint64_t firstSession = rx.p25CurrentCallSessionId;
+    const uint64_t firstPtt = rx.p25PttGeneration;
+    REQUIRE(firstSession != 0);
+    REQUIRE(firstPtt == 1);
+
+    p25Phase2RefreshGrantEpoch(rx, 1'000'500);
+    REQUIRE(rx.p25CurrentCallSessionId == firstSession);
+    REQUIRE(rx.p25PttGeneration == firstPtt);
+
+    p25Phase2BeginNewPtt(rx, 1'001'000);
+    REQUIRE(rx.p25PttGeneration == firstPtt + 1);
+    REQUIRE(rx.p25CurrentCallSessionId != firstSession);
 }
 
 TEST_CASE("P25 traffic processor advances dibit cursor without internal decode", "[p25][traffic]")

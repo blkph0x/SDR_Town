@@ -25,26 +25,39 @@ struct P25P2CallAudioKey {
 
     bool operator==(const P25P2CallAudioKey& other) const noexcept
     {
-        return nac == other.nac &&
-            wacn == other.wacn &&
-            systemId == other.systemId &&
-            talkgroupId == other.talkgroupId &&
+        // NAC/WACN/system are late-arriving metadata — not audio-stream identity.
+        return talkgroupId == other.talkgroupId &&
             callSessionId == other.callSessionId &&
             slot == other.slot &&
             frequencyHz == other.frequencyHz;
     }
 };
 
-// Protocol-derived speech-frame identity (SDRTrunk/OP25 ordering).  Absolute
-// dibit position is for duplicate detection only — not 20 ms timeline.
+// Protocol-derived speech-frame identity (SDRTrunk/OP25 ordering).
+// streamDibit is the call-global chronological coordinate; window-local
+// superframe anchors must not be used for cross-window ordering.
 struct Phase2VoiceFrameKey {
+    bool sessionCodewordIdKnown = false;
+    uint64_t sessionCodewordId = 0;
+    bool streamDibitKnown = false;
+    uint64_t streamDibit = 0;
     uint64_t superframeAnchor = 0;
     uint8_t burstIndex = 0xffu;
     uint8_t slot = 0xffu;
     uint8_t voiceIndex = 0xffu;
+    uint8_t burstVoiceCount = 0;
 
     bool operator==(const Phase2VoiceFrameKey& other) const noexcept
     {
+        if (sessionCodewordIdKnown && other.sessionCodewordIdKnown) {
+            return sessionCodewordId == other.sessionCodewordId;
+        }
+        if (streamDibitKnown && other.streamDibitKnown &&
+            streamDibit == other.streamDibit &&
+            slot == other.slot &&
+            voiceIndex == other.voiceIndex) {
+            return true;
+        }
         return superframeAnchor == other.superframeAnchor &&
             burstIndex == other.burstIndex &&
             slot == other.slot &&
@@ -55,6 +68,10 @@ struct Phase2VoiceFrameKey {
 inline int p25Phase2CompareVoiceFrameKeys(const Phase2VoiceFrameKey& a,
                                           const Phase2VoiceFrameKey& b) noexcept
 {
+    if (a.streamDibitKnown && b.streamDibitKnown) {
+        if (a.streamDibit < b.streamDibit) return -1;
+        if (a.streamDibit > b.streamDibit) return 1;
+    }
     if (a.superframeAnchor < b.superframeAnchor) return -1;
     if (a.superframeAnchor > b.superframeAnchor) return 1;
     if (a.burstIndex < b.burstIndex) return -1;
@@ -109,9 +126,8 @@ struct P25Phase2AmbeEmitDedupeState {
     std::vector<uint64_t> recentAbsDibits;
 };
 
-// Per-call speech-frame sequencer.  Ordinals advance one per accepted
-// protocol-position frame in burst order; RF dibit distance must not insert
-// artificial 20 ms silence gaps.
+// Per-call speech-frame sequencer.  Tracks Voice2/Voice4 burst cadence and
+// assigns monotonic speech ordinals (one per 20 ms position).
 struct P25Phase2FrameSequencer {
     uint64_t callSessionId = 0;
     uint32_t talkgroupId = 0;
@@ -121,9 +137,23 @@ struct P25Phase2FrameSequencer {
     uint64_t acceptedFrames = 0;
     uint64_t duplicateOrLateDrops = 0;
     uint64_t outOfOrderDrops = 0;
+    uint64_t protocolOrderIssues = 0;
+    uint64_t gapSilenceOrdinals = 0;
     Phase2VoiceFrameKey lastAcceptedKey{};
     bool haveLastAcceptedKey = false;
     std::vector<Phase2VoiceFrameKey> recentKeys;
+    uint64_t activeBurstAnchor = 0;
+    uint8_t activeBurstIndex = 0xffu;
+    uint8_t expectedVoiceIndex = 0;
+    uint8_t activeBurstVoiceCount = 0;
+    bool haveActiveBurst = false;
+};
+
+// Producer-side speaker PCM bound to one call session.
+struct P25Phase2SpeakerPendingQueue {
+    uint64_t callSessionId = 0;
+    int64_t nextSpeechOrdinal = 0;
+    std::vector<float> samples;
 };
 
 // Monotonic per-call security latch: Unknown -> Clear or Unknown -> Encrypted

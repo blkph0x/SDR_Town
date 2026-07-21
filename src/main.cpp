@@ -2530,7 +2530,8 @@ static constexpr int kP25Phase2VoiceDecodeMaxCadenceMs = 40;
 // next slice so 20 ms hops are not stalled into worker-busy droughts.  The
 // rolling IQ cursor still commits only after a non-stale result.
 static constexpr size_t kP25VoiceDecodeMaxPendingJobs = 1;
-static constexpr size_t kP25VoiceDecodeMaxPendingJobsSpeaker = 2;
+static constexpr size_t kP25VoiceDecodeMaxPendingJobsSpeaker = 3;
+static constexpr size_t kP25VoiceDecodeMaxCompletedResults = 16;
 // Keep the one-RTL Phase-2 target-offset recovery bounded.  Field logs after
 // the slot/queue fixes showed DSP passes taking 440ms while only emitting 40ms
 // of audio; most of that cost came from cloning the live decoder through several
@@ -5760,10 +5761,11 @@ static void p25Phase2NoteCadenceWindow(const P25VoiceAudioBlock& out) noexcept
     gP25Phase2Cadence.reject.fetch_add(static_cast<long long>(out.phase2RejectedVoiceCodewords), std::memory_order_relaxed);
 }
 
-static uint64_t p25MakeCurrentCallSessionId(uint32_t talkgroupId, int64_t grantEpochMs) noexcept
+static uint8_t p25Phase2BurstVoiceCount(P25Phase2BurstKind kind) noexcept
 {
-    return (static_cast<uint64_t>(talkgroupId) << 32) |
-        static_cast<uint64_t>(grantEpochMs & 0xffffffffll);
+    if (kind == P25Phase2BurstKind::Voice2) return 2;
+    if (kind == P25Phase2BurstKind::Voice4) return 4;
+    return 0;
 }
 
 struct ReceiverSessionKey {
@@ -5796,6 +5798,8 @@ static ReceiverSessionKey p25ReceiverSessionKey(const Receiver& rx)
 {
     return {&rx, rx.p25TrafficSessionGeneration.load(std::memory_order_acquire)};
 }
+
+using P25SpeakerPendingMap = std::map<ReceiverSessionKey, P25Phase2SpeakerPendingQueue>;
 
 static int64_t p25RoundFrequencyHz(double hz) noexcept
 {
@@ -5932,14 +5936,67 @@ static bool p25Phase2SpeakerPlaybackClearAllowed(P25PendingClearReason reason) n
     return false;
 }
 
+static P25Phase2SpeakerPendingQueue& p25SpeakerPendingFor(P25SpeakerPendingMap& map,
+                                                            const Receiver& rx)
+{
+    auto& queue = map[p25ReceiverSessionKey(rx)];
+    if (queue.callSessionId == 0 && rx.p25CurrentCallSessionId != 0) {
+        queue.callSessionId = rx.p25CurrentCallSessionId;
+    }
+    return queue;
+}
+
+static void p25Phase2BindSpeakerPendingToCall(P25Phase2SpeakerPendingQueue& queue,
+                                              const Receiver& rx)
+{
+    if (rx.p25CurrentCallSessionId == 0) return;
+    if (queue.callSessionId != 0 && queue.callSessionId != rx.p25CurrentCallSessionId) {
+        queue.samples.clear();
+        queue.nextSpeechOrdinal = 0;
+    }
+    queue.callSessionId = rx.p25CurrentCallSessionId;
+}
+
+static void p25Phase2EndCallSpeakerTimeline(Receiver& rx,
+                                            P25Phase2SpeakerPendingQueue& queue,
+                                            AudioEngine* engine,
+                                            P25PendingClearReason reason)
+{
+    if (!p25Phase2SpeakerPlaybackClearAllowed(reason)) return;
+    if (!queue.samples.empty()) {
+        queue.samples.clear();
+        ++rx.p25DiagSpeakerPlaybackCleared;
+    }
+    queue.callSessionId = 0;
+    queue.nextSpeechOrdinal = 0;
+    if (engine) {
+        engine->clearBuffers();
+    }
+}
+
+static void p25Phase2ClearSpeakerPendingQueue(Receiver& rx,
+                                              P25Phase2SpeakerPendingQueue& queue,
+                                              P25PendingClearReason reason)
+{
+    if (!p25Phase2SpeakerPlaybackClearAllowed(reason)) return;
+    if (!queue.samples.empty()) {
+        queue.samples.clear();
+        ++rx.p25DiagSpeakerPlaybackCleared;
+    }
+    if (reason == P25PendingClearReason::CallIdentityChanged ||
+        reason == P25PendingClearReason::CallEnded ||
+        reason == P25PendingClearReason::RetuneOrGeneration ||
+        reason == P25PendingClearReason::UserStop) {
+        queue.callSessionId = 0;
+        queue.nextSpeechOrdinal = 0;
+    }
+}
+
 static void p25Phase2ClearSpeakerPlaybackQueue(Receiver& rx,
-                                               std::vector<float>& pendingSpeaker,
+                                               P25Phase2SpeakerPendingQueue& pendingSpeaker,
                                                P25PendingClearReason reason)
 {
-    if (pendingSpeaker.empty()) return;
-    if (!p25Phase2SpeakerPlaybackClearAllowed(reason)) return;
-    pendingSpeaker.clear();
-    ++rx.p25DiagSpeakerPlaybackCleared;
+    p25Phase2ClearSpeakerPendingQueue(rx, pendingSpeaker, reason);
 }
 
 static bool p25Phase2GrantedSlotIsImmutable(const Receiver& rx) noexcept
@@ -6076,6 +6133,10 @@ static Phase2VoiceFrameKey p25Phase2VoiceFrameKeyFromBurst(const P25Phase2Burst&
     Phase2VoiceFrameKey key;
     key.slot = grantSlot;
     key.voiceIndex = cw.voiceIndex;
+    key.sessionCodewordIdKnown = cw.sessionCodewordIdKnown;
+    key.sessionCodewordId = cw.sessionCodewordId;
+    key.streamDibitKnown = cw.streamDibitKnown;
+    key.streamDibit = cw.streamDibit;
     if (burst.superframeLocked) {
         key.superframeAnchor = burst.superframeDibitOffset;
         key.burstIndex = burst.superframeBurstIndex;
@@ -6083,6 +6144,7 @@ static Phase2VoiceFrameKey p25Phase2VoiceFrameKeyFromBurst(const P25Phase2Burst&
         key.superframeAnchor = cw.dibitOffset;
         key.burstIndex = 0xffu;
     }
+    key.burstVoiceCount = p25Phase2BurstVoiceCount(burst.kind);
     return key;
 }
 
@@ -6124,6 +6186,57 @@ enum class FrameOrderResult : uint8_t {
     Late
 };
 
+static bool p25Phase2SameVoiceBurst(const P25Phase2FrameSequencer& seq,
+                                    const Phase2VoiceFrameKey& key) noexcept
+{
+    if (!seq.haveActiveBurst) return false;
+    if (key.superframeAnchor != seq.activeBurstAnchor) return false;
+    return key.burstIndex == seq.activeBurstIndex;
+}
+
+static void p25Phase2CloseActiveVoiceBurst(P25Phase2FrameSequencer& seq) noexcept
+{
+    if (!seq.haveActiveBurst) return;
+    if (seq.expectedVoiceIndex < seq.activeBurstVoiceCount) {
+        const uint64_t tailGaps = seq.activeBurstVoiceCount - seq.expectedVoiceIndex;
+        seq.gapSilenceOrdinals += tailGaps;
+        seq.nextSpeechOrdinal += static_cast<int64_t>(tailGaps);
+        seq.protocolOrderIssues += tailGaps;
+    }
+    seq.haveActiveBurst = false;
+    seq.expectedVoiceIndex = 0;
+    seq.activeBurstVoiceCount = 0;
+}
+
+static void p25Phase2BeginVoiceBurst(P25Phase2FrameSequencer& seq,
+                                     const Phase2VoiceFrameKey& key) noexcept
+{
+    p25Phase2CloseActiveVoiceBurst(seq);
+    seq.haveActiveBurst = true;
+    seq.activeBurstAnchor = key.superframeAnchor;
+    seq.activeBurstIndex = key.burstIndex;
+    seq.activeBurstVoiceCount = key.burstVoiceCount > 0 ? key.burstVoiceCount : 4;
+    seq.expectedVoiceIndex = 0;
+}
+
+static size_t p25Phase2InsertSequencerGapSilence(Receiver& rx,
+                                                   P25VoiceAudioBlock& out,
+                                                   double outputRateHz,
+                                                   size_t gapFrames)
+{
+    if (gapFrames == 0) return 0;
+    const size_t samplesPerFrame = static_cast<size_t>(
+        std::max(160.0, 160.0 * (outputRateHz / 8000.0) + 0.5));
+    for (size_t i = 0; i < gapFrames; ++i) {
+        out.audio.insert(out.audio.end(), samplesPerFrame, 0.0f);
+        ++out.phase2EmittedPcmFrames;
+        ++out.phase2ConcealmentFrames;
+    }
+    rx.p25SessionState.frameSequencer.gapSilenceOrdinals += gapFrames;
+    rx.p25DiagSequencerGapSilence += gapFrames;
+    return gapFrames * samplesPerFrame;
+}
+
 static FrameOrderResult p25Phase2ClassifySpeechFrameOrder(const P25Phase2FrameSequencer& seq,
                                                             const Phase2VoiceFrameKey& key)
 {
@@ -6145,10 +6258,11 @@ static FrameOrderResult p25Phase2ClassifySpeechFrameOrder(const P25Phase2FrameSe
     return FrameOrderResult::Expected;
 }
 
-// Accept one protocol-position speech frame in burst order.  Rejects duplicates
-// and frames older than the last accepted protocol position.
+// Accept one protocol-position speech frame in Voice2/Voice4 burst order.
 static bool p25Phase2SequencerAcceptSpeechFrame(Receiver& rx,
-                                                const Phase2VoiceFrameKey& key)
+                                                const Phase2VoiceFrameKey& key,
+                                                P25VoiceAudioBlock* gapSilenceOut = nullptr,
+                                                double gapSilenceOutputRateHz = 48000.0)
 {
     p25Phase2ArmFrameSequencerForCall(rx);
     auto& seq = rx.p25SessionState.frameSequencer;
@@ -6165,6 +6279,33 @@ static bool p25Phase2SequencerAcceptSpeechFrame(Receiver& rx,
         ++rx.p25DiagSequencerLateDrops;
         return false;
     }
+
+    const bool sameBurst = p25Phase2SameVoiceBurst(seq, key);
+    if (!sameBurst) {
+        p25Phase2BeginVoiceBurst(seq, key);
+    }
+
+    size_t gapFrames = 0;
+    if (key.voiceIndex > seq.expectedVoiceIndex) {
+        gapFrames = static_cast<size_t>(key.voiceIndex - seq.expectedVoiceIndex);
+        seq.protocolOrderIssues += gapFrames;
+        seq.nextSpeechOrdinal += static_cast<int64_t>(gapFrames);
+    } else if (key.voiceIndex < seq.expectedVoiceIndex) {
+        ++seq.protocolOrderIssues;
+        ++seq.outOfOrderDrops;
+        ++rx.p25DiagSequencerOutOfOrderDrops;
+        return false;
+    }
+
+    if (gapSilenceOut != nullptr && gapFrames > 0 &&
+        (seq.armed ||
+         rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Clear)) {
+        p25Phase2InsertSequencerGapSilence(rx, *gapSilenceOut, gapSilenceOutputRateHz, gapFrames);
+    } else if (gapFrames > 0) {
+        seq.gapSilenceOrdinals += gapFrames;
+        rx.p25DiagSequencerGapSilence += gapFrames;
+    }
+
     constexpr size_t kMaxRecentKeys = 256;
     if (seq.recentKeys.size() >= kMaxRecentKeys) {
         seq.recentKeys.erase(seq.recentKeys.begin(),
@@ -6175,6 +6316,11 @@ static bool p25Phase2SequencerAcceptSpeechFrame(Receiver& rx,
     seq.haveLastAcceptedKey = true;
     ++seq.acceptedFrames;
     ++seq.nextSpeechOrdinal;
+    seq.expectedVoiceIndex = static_cast<uint8_t>(key.voiceIndex + 1u);
+    if (seq.expectedVoiceIndex >= seq.activeBurstVoiceCount) {
+        seq.haveActiveBurst = false;
+        seq.expectedVoiceIndex = 0;
+    }
     return true;
 }
 
@@ -7767,8 +7913,7 @@ static void p25CommitPhase2TrafficMetadataFollow(Receiver& rx,
         p25ClearPhase2PendingAudio(rx);
         rx.p25SessionState.ambeDedupe = {};
         rx.p25SessionState.audioTail = {};
-        rx.p25VoiceGrantEpochMs = nowMs;
-        rx.p25CurrentCallSessionId = p25MakeCurrentCallSessionId(rx.p25VoiceTalkgroupId, nowMs);
+        p25Phase2BeginNewPtt(rx, nowMs);
         rx.p25Phase2GrantedSlotImmutable = false;
     }
     rx.p25VoiceDecodeEnabled = true;
@@ -7820,6 +7965,15 @@ static void p25CommitPhase2TrafficMetadataFollow(Receiver& rx,
     }
 }
 
+static bool p25Phase2ShouldFreezeCqpskDiscrete(const Receiver& rx) noexcept
+{
+    return rx.p25SessionState.sustain.hadSuccessfulEmit ||
+           rx.p25SessionState.frameSequencer.acceptedFrames > 0 ||
+           rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Clear;
+}
+
+static void p25Phase2ResetPlayoutBridge(Receiver& rx) noexcept;
+
 static bool applyP25Phase2SlotProbeLocked(Receiver& rx, uint8_t newSlot, qint64 nowMs)
 {
     // Architectural rule (SDRTrunk P25P2AudioModule): once the grant slot is
@@ -7840,11 +7994,9 @@ static bool applyP25Phase2SlotProbeLocked(Receiver& rx, uint8_t newSlot, qint64 
         return false;
     }
 
-    // Preserve the traffic-follow session metadata across a slot-probe decoder
-    // reset.  The previous implementation called resetP25VoiceState() and only
-    // restored a small subset of fields; that dropped grant epoch/source/voice
-    // frequency/traffic generation and could make already-queued worker jobs or
-    // follow watchdogs see an inconsistent traffic session.
+    // Non-destructive acquisition probe: retarget the granted TDMA slot and
+    // reset receiver-side audio/sequencer state, but keep the live decoder,
+    // CQPSK lock, and per-slot Phase-2 sessions intact (SDRTrunk parity).
     const uint8_t oldSlot = static_cast<uint8_t>(rx.p25VoiceTdmaSlot & 0x01u);
     ++rx.p25DiagSlotProbe;
     if (rx.p25VoiceTdmaSlotKnown && oldSlot != requested) {
@@ -7856,86 +8008,31 @@ static bool applyP25Phase2SlotProbeLocked(Receiver& rx, uint8_t newSlot, qint64 
                          rx.p25VoiceTalkgroupId);
         }
     }
-    const bool decodeEnabled = rx.p25VoiceDecodeEnabled;
-    const bool clearKnown = rx.p25VoiceClearKnown;
-    const bool encrypted = rx.p25VoiceEncrypted;
-    const uint32_t talkgroupId = rx.p25VoiceTalkgroupId;
-    const uint32_t sourceId = rx.p25VoiceSourceId;
-    const int64_t grantEpochMs = rx.p25VoiceGrantEpochMs;
-    const uint64_t callSessionId = rx.p25CurrentCallSessionId;
-    const bool maskKnown = rx.p25VoiceMaskParamsKnown;
-    const uint16_t nac = rx.p25VoiceNac;
-    const uint32_t wacn = rx.p25VoiceWacn;
-    const uint16_t systemId = rx.p25VoiceSystemId;
-    const bool lateEntryAudioProbe = rx.p25Phase2AllowLateEntryAudioProbe;
-    const bool independentTrafficSource = rx.p25IndependentTrafficSource;
-    const bool trafficRetunesPrimary = rx.p25TrafficRetunesPrimary;
-    const uint64_t trafficGeneration = rx.p25TrafficGeneration;
-    const double trafficControlFreqHz = rx.p25TrafficControlFreqHz;
-    const double trafficSourceCenterFreqHz = rx.p25TrafficSourceCenterFreqHz;
-    const double trafficVoiceFreqHz = rx.p25TrafficVoiceFreqHz;
-    const int64_t trafficLastGrantMs = rx.p25TrafficLastGrantMs;
-    const bool targetOffsetKnown = rx.p25Phase2TrafficTargetOffsetKnown;
-    const double targetOffsetHz = rx.p25Phase2TrafficTargetOffsetHz;
-    const int targetOffsetTrust = rx.p25Phase2TrafficTargetOffsetTrust;
-    const int targetOffsetMisses = rx.p25Phase2TrafficTargetOffsetMisses;
-    const uint64_t lastConsumed = rx.lastConsumedAbsolute.load(std::memory_order_acquire);
-    const uint64_t lastEpoch = rx.lastSeenStreamEpoch.load(std::memory_order_acquire);
 
     p25ClearPhase2PendingAudioOnly(rx, P25PendingClearReason::SlotProbeDestructive);
     p25ClearPhase2RecentSecurityEvidence(rx);
-    // Acquisition probe is a call-boundary reset for decoder/IQ/pending; the
-    // session reset below zeroes mid-call continuity counters.
-    rx.resetP25TrafficSession("phase2-slot-probe", true);
-    rx.p25VoiceResetPending = false;
-    rx.p25VoiceDecodeEnabled = decodeEnabled;
-    rx.p25VoiceClearKnown = clearKnown;
-    rx.p25VoiceEncrypted = encrypted;
-    rx.p25VoiceTalkgroupId = talkgroupId;
-    rx.p25VoiceSourceId = sourceId;
-    rx.p25VoiceGrantEpochMs = grantEpochMs;
-    rx.p25CurrentCallSessionId = callSessionId;
-    rx.p25VoicePhase2 = true;
+    rx.p25SessionState.frameSequencer = {};
+    rx.p25SessionState.ambeDedupe = {};
+    p25Phase2ResetPlayoutBridge(rx);
+    rx.p25Phase2OppositeOnlyWindows = 0;
+    rx.p25Phase2StickySlotLabelInvert = false;
+
     rx.p25VoiceTdmaSlotKnown = true;
     rx.p25VoiceTdmaSlot = requested;
-    rx.p25Phase2GrantedSlotImmutable = false; // re-lock after acquisition settles
+    rx.p25TrafficSlot = requested;
     rx.p25VoiceSlotProbePending = false;
     rx.p25VoiceSlotProbeRequested = 0;
-    rx.p25VoiceMaskParamsKnown = maskKnown;
-    rx.p25VoiceNac = nac;
-    rx.p25VoiceWacn = wacn;
-    rx.p25VoiceSystemId = systemId;
     rx.p25VoiceSettleUntilMs = nowMs + kP25Phase2SlotProbeSettleMs;
     rx.p25VoiceDiscardWindows = std::max<int>(rx.p25VoiceDiscardWindows, kP25Phase2SlotProbeDiscardWindows);
     rx.p25ControlChannelMute = false;
-    rx.p25Phase2AllowLateEntryAudioProbe = lateEntryAudioProbe;
-    rx.p25IndependentTrafficSource = independentTrafficSource;
-    rx.p25TrafficRetunesPrimary = trafficRetunesPrimary;
-    rx.p25TrafficGeneration = trafficGeneration;
-    rx.p25TrafficControlFreqHz = trafficControlFreqHz;
-    rx.p25TrafficSourceCenterFreqHz = trafficSourceCenterFreqHz;
-    rx.p25TrafficVoiceFreqHz = trafficVoiceFreqHz;
-    rx.p25TrafficSlot = requested;
-    rx.p25TrafficLastGrantMs = trafficLastGrantMs;
-    rx.p25Phase2TrafficTargetOffsetKnown = targetOffsetKnown;
-    rx.p25Phase2TrafficTargetOffsetHz = targetOffsetHz;
-    rx.p25Phase2TrafficTargetOffsetTrust = targetOffsetTrust;
-    rx.p25Phase2TrafficTargetOffsetMisses = targetOffsetMisses;
-    rx.lastConsumedAbsolute.store(lastConsumed, std::memory_order_release);
-    rx.lastSeenStreamEpoch.store(lastEpoch, std::memory_order_release);
+    rx.p25VoiceLiveDecoder.setPhase2PreferredTdmaSlot(true, requested);
 
-    rx.p25VoiceLiveDecoder = P25LiveDecoder(p25VoiceDecoderConfigForReceiver(rx));
-    if (maskKnown) {
-        rx.p25VoiceLiveDecoder.setPhase2MaskParameters(nac, wacn, systemId);
-    } else {
-        rx.p25VoiceLiveDecoder.clearPhase2MaskParameters();
-    }
-    // After an acquisition probe, if mask/grant identity is known, lock the
-    // new slot immediately so we do not thrash again mid-call.
+    const bool maskKnown = rx.p25VoiceMaskParamsKnown;
+    const bool clearKnown = rx.p25VoiceClearKnown;
+    const bool encrypted = rx.p25VoiceEncrypted;
     if (maskKnown || clearKnown || encrypted) {
         p25Phase2MarkGrantedSlotImmutable(rx);
     }
-    clearP25VoiceDiagnostics(rx);
     return true;
 }
 
@@ -8122,6 +8219,7 @@ static bool p25Phase2PlayoutBridgeAllowed(const Receiver& rx, qint64 nowMs) noex
     // made speech sound disconnected.  Keep bridging through those holes; the
     // since-last-real-emit cap still ends the bridge after PTT.
     const auto& tail = rx.p25SessionState.audioTail;
+    if (tail.consecutivePlayoutBridgeFrames >= 20) return false;
     if (sinceLastEmitMs > 1100 &&
         (tail.consecutiveEmptyFeedWindows >= 32 ||
          tail.consecutiveNoForwardFedWindows >= 32)) {
@@ -8210,13 +8308,13 @@ static size_t pushP25Phase2PlayoutBridge(AudioEngine* engine,
             static_cast<double>(std::max<size_t>(1, jitterCap)));
     }
 
-    const size_t bridgeTargetSamples = std::max(effectiveFrameSize * 12,
-        static_cast<size_t>(outRate * 0.380)); // cover p90 hop gaps + worker crumbs
+    const size_t bridgeTargetSamples = std::max(effectiveFrameSize * 8,
+        static_cast<size_t>(outRate * 0.280)); // cover p90 hop gaps without over-bridging
     if (queuedNow + pending.size() >= bridgeTargetSamples) return 0;
 
     const size_t deficit = bridgeTargetSamples - queuedNow - pending.size();
-    const size_t maxBridgeSamples = std::max(effectiveFrameSize * 4,
-        static_cast<size_t>(outRate * 0.120)); // refill faster than a drained ring
+    const size_t maxBridgeSamples = std::max(effectiveFrameSize * 3,
+        static_cast<size_t>(outRate * 0.090)); // refill faster than a drained ring
     size_t bridgeSamples = std::min(deficit, maxBridgeSamples);
     bridgeSamples = (bridgeSamples / effectiveFrameSize) * effectiveFrameSize;
     if (bridgeSamples < effectiveFrameSize) return 0;
@@ -8239,7 +8337,7 @@ static size_t pushP25Phase2PlayoutBridge(AudioEngine* engine,
 }
 
 static void p25TopUpSpeakerPlaybackRing(AudioEngine* engine,
-                                        std::map<ReceiverSessionKey, std::vector<float>>& pendingByRx,
+                                        P25SpeakerPendingMap& pendingByRx,
                                         const std::function<bool(const ReceiverSessionKey&)>& sessionActive)
 {
     if (!engine || engine->activeOutputCount() == 0) return;
@@ -8253,9 +8351,9 @@ static void p25TopUpSpeakerPlaybackRing(AudioEngine* engine,
         if (!sessionActive(it->first)) continue;
         auto* rx = const_cast<Receiver*>(it->first.receiver);
         if (!rx) continue;
-        if (it->second.size() >= phase2FrameSamples) {
+        if (it->second.samples.size() >= phase2FrameSamples) {
             pushP25LiveStreamingAudio(engine,
-                                      it->second,
+                                      it->second.samples,
                                       {},
                                       rx->audioOutputIndices,
                                       phase2FrameSamples,
@@ -8263,7 +8361,7 @@ static void p25TopUpSpeakerPlaybackRing(AudioEngine* engine,
         }
         pushP25Phase2PlayoutBridge(engine,
                                    *rx,
-                                   it->second,
+                                   it->second.samples,
                                    rx->audioOutputIndices,
                                    -1.0,
                                    phase2FrameSamples);
@@ -9055,14 +9153,19 @@ static bool p25DecodePhase2AmbeFrameToAudio(Receiver& rx,
     if (!emitAsSpeaker) {
         ++out.phase2RejectedVoiceCodewords;
         out.phase2AmbeRejected = true;
-        // Preserve 20 ms stream cadence with silence (not invent-PLC) when an
-        // established clear window already emitted real PCM and this frame is
-        // only an E/M spike.  Cutting the frame entirely left island tails with
-        // abrupt splices on field 20260720_070533.
-        if (erasureOrMute && out.phase2EmittedPcmFrames > 0 && !out.audio.empty()) {
+        const bool timelineActive =
+            rx.p25SessionState.frameSequencer.armed ||
+            rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Clear ||
+            out.phase2FedToMbelib > 0 ||
+            out.phase2EmittedPcmFrames > 0;
+        // Every accepted AMBE feed position must occupy one 20 ms slot on the
+        // clear-call timeline — including the first frame in a worker result.
+        if (erasureOrMute && timelineActive) {
             const size_t samplesPerFrame = static_cast<size_t>(
                 std::max(160.0, 160.0 * (outputRateHz / 8000.0) + 0.5));
             out.audio.insert(out.audio.end(), samplesPerFrame, 0.0f);
+            ++out.phase2EmittedPcmFrames;
+            ++out.phase2ConcealmentFrames;
         }
         return false;
     }
@@ -11140,7 +11243,7 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
 
             const Phase2VoiceFrameKey frameKey =
                 p25Phase2VoiceFrameKeyFromBurst(burst, codeword, effectiveBurstSlot);
-            if (!p25Phase2SequencerAcceptSpeechFrame(rx, frameKey)) {
+            if (!p25Phase2SequencerAcceptSpeechFrame(rx, frameKey, &out, outputRateHz)) {
                 skippedDuplicateVoice = true;
                 ++out.phase2DuplicateSuppressedVoiceCodewords;
                 frame.duplicateSuppressed = true;
@@ -12100,7 +12203,7 @@ static void runP25ReplayFollowTest(const P25ReplayCliArgs& args)
     rx.p25VoiceTalkgroupId = tg.talkgroupId;
     rx.p25VoiceSourceId = tg.lastSourceId;
     rx.p25VoiceGrantEpochMs = QDateTime::currentMSecsSinceEpoch();
-    rx.p25CurrentCallSessionId = p25MakeCurrentCallSessionId(rx.p25VoiceTalkgroupId, rx.p25VoiceGrantEpochMs);
+    p25Phase2BeginNewPtt(rx, rx.p25VoiceGrantEpochMs);
     rx.p25VoicePhase2 = phase2Voice;
     rx.p25VoiceTdmaSlotKnown = tg.tdmaSlotKnown;
     rx.p25VoiceTdmaSlot = tg.tdmaSlot;
@@ -12303,7 +12406,7 @@ static void runP25ReplayVoiceTest(const P25ReplayCliArgs& argsIn)
     rx.p25VoiceTalkgroupId = args.followTalkgroupId != 0 ? args.followTalkgroupId : 1u;
     rx.p25VoiceSourceId = 0;
     rx.p25VoiceGrantEpochMs = QDateTime::currentMSecsSinceEpoch() - 1000;
-    rx.p25CurrentCallSessionId = p25MakeCurrentCallSessionId(rx.p25VoiceTalkgroupId, rx.p25VoiceGrantEpochMs);
+    p25Phase2BeginNewPtt(rx, rx.p25VoiceGrantEpochMs);
     rx.p25VoicePhase2 = true;
     rx.p25TrafficRetunesPrimary = true;
     rx.p25IndependentTrafficSource = true;
@@ -14230,8 +14333,7 @@ public:
                 rx.p25VoiceTalkgroupId = armTg.talkgroupId;
                 rx.p25VoiceSourceId = armTg.lastSourceId;
                 const qint64 armNowMs = QDateTime::currentMSecsSinceEpoch();
-                rx.p25VoiceGrantEpochMs = armNowMs;
-                rx.p25CurrentCallSessionId = p25MakeCurrentCallSessionId(rx.p25VoiceTalkgroupId, armNowMs);
+                p25Phase2BeginNewPtt(rx, armNowMs);
                 rx.p25VoicePhase2 = phase2Voice;
                 rx.p25VoiceTdmaSlotKnown = armTg.tdmaSlotKnown;
                 rx.p25VoiceTdmaSlot = armTg.tdmaSlot;
@@ -14259,6 +14361,7 @@ public:
                     const uint32_t armedSourceId = rx.p25VoiceSourceId;
                     const int64_t armedGrantEpochMs = rx.p25VoiceGrantEpochMs;
                     const uint64_t armedCallSessionId = rx.p25CurrentCallSessionId;
+                    const uint64_t armedPttGeneration = rx.p25PttGeneration;
                     const bool armedTargetOffsetKnown = rx.p25Phase2TrafficTargetOffsetKnown;
                     const double armedTargetOffsetHz = rx.p25Phase2TrafficTargetOffsetHz;
                     const int armedTargetOffsetTrust = rx.p25Phase2TrafficTargetOffsetTrust;
@@ -14269,9 +14372,10 @@ public:
                     clearP25SessionScopedState(rx);
                     rx.p25VoiceSourceId = armedSourceId;
                     rx.p25VoiceGrantEpochMs = armedGrantEpochMs;
+                    rx.p25PttGeneration = armedPttGeneration;
                     rx.p25CurrentCallSessionId = armedCallSessionId != 0
                         ? armedCallSessionId
-                        : p25MakeCurrentCallSessionId(rx.p25VoiceTalkgroupId, armedGrantEpochMs);
+                        : p25MakeCurrentCallSessionId(rx.p25VoiceTalkgroupId, rx.p25PttGeneration);
                     rx.p25Phase2TrafficTargetOffsetKnown = armedTargetOffsetKnown;
                     rx.p25Phase2TrafficTargetOffsetHz = armedTargetOffsetHz;
                     rx.p25Phase2TrafficTargetOffsetTrust = armedTargetOffsetTrust;
@@ -14805,9 +14909,7 @@ public:
                     trafficRx->p25VoiceEncrypted = p25TalkgroupGrantProvesSpeakerEncrypted(tg);
                     trafficRx->p25VoiceTalkgroupId = tg.talkgroupId;
                     trafficRx->p25VoiceSourceId = tg.lastSourceId;
-                    trafficRx->p25VoiceGrantEpochMs = nowMs;
-                    trafficRx->p25CurrentCallSessionId =
-                        p25MakeCurrentCallSessionId(trafficRx->p25VoiceTalkgroupId, nowMs);
+                    p25Phase2BeginNewPtt(*trafficRx, nowMs);
                     trafficRx->p25VoicePhase2 = phase2Traffic;
                     trafficRx->p25VoiceTdmaSlotKnown = tg.tdmaSlotKnown;
                     trafficRx->p25VoiceTdmaSlot = tg.tdmaSlot;
@@ -15292,9 +15394,9 @@ public:
                         activeRx->p25VoiceTalkgroupId = followTg.talkgroupId;
                         if (!commitSameCallMetadataInPlace ||
                             activeRx->p25CurrentCallSessionId == 0) {
-                            activeRx->p25VoiceGrantEpochMs = nowMs;
-                            activeRx->p25CurrentCallSessionId =
-                                p25MakeCurrentCallSessionId(activeRx->p25VoiceTalkgroupId, nowMs);
+                            p25Phase2BeginNewPtt(*activeRx, nowMs);
+                        } else {
+                            p25Phase2RefreshGrantEpoch(*activeRx, nowMs);
                         }
                         if (activeRx->p25IndependentTrafficSource) {
                             activeRx->p25TrafficLastGrantMs = nowMs;
@@ -15864,9 +15966,7 @@ public:
                             activeRx->p25VoiceDecodeEnabled = true;
                             activeRx->p25VoicePhase2 = true;
                             activeRx->p25VoiceTalkgroupId = followTg.talkgroupId;
-                            activeRx->p25VoiceGrantEpochMs = nowMs;
-                            activeRx->p25CurrentCallSessionId =
-                                p25MakeCurrentCallSessionId(activeRx->p25VoiceTalkgroupId, nowMs);
+                            p25Phase2RefreshGrantEpoch(*activeRx, nowMs);
                             if (p25TalkgroupGrantProvesSpeakerEncrypted(followTg) &&
                                 !p25ActiveFollowTrafficDisprovesEncryption(*activeRx)) {
                                 activeRx->p25VoiceClearKnown = false;
@@ -18600,27 +18700,50 @@ public:
         guiDspWorker = std::thread([this]() {
             auto& mgr = DeviceManager::instance();
             std::map<ReceiverSessionKey, std::chrono::steady_clock::time_point> lastPhase2DecodeByRx;
-            std::map<ReceiverSessionKey, std::vector<float>> pendingAudioByRx;
+            P25SpeakerPendingMap pendingAudioByRx;
             std::map<ReceiverSessionKey, RollingIqWindow> phase2IqByRx;
             uint64_t lastTrafficGenerationSeen = 0;
             uint64_t lastPendingAudioFlushSeq = 0;
+            std::deque<P25VoiceDecodeResult> pendingVoicePublishResults;
             auto drainP25VoiceResults = [&]() {
+                for (auto& result : takeP25VoiceDecodeResults()) {
+                    if (result.rx && result.rollingDecode && result.iqDecodeEndAbsoluteKnown) {
+                        auto rollingIt = phase2IqByRx.find(p25ReceiverSessionKey(*result.rx));
+                        if (rollingIt != phase2IqByRx.end()) {
+                            if (result.hasAudioBlock && !result.stale) {
+                                rollingIt->second.commitDecodeAbsolute(result.iqDecodeEndAbsolute);
+                            } else {
+                                rollingIt->second.rollbackSubmittedDecode();
+                            }
+                        }
+                    }
+                    pendingVoicePublishResults.push_back(std::move(result));
+                }
                 bool drained = false;
-                for (const auto& result : takeP25VoiceDecodeResults()) {
-                    // Guard against results for rxs removed by a recent return-to-control (prevents
-                    // deref of freed Receiver in the flush block below even if publish early-returns).
-                    bool rxStillValid = true;
+                while (!pendingVoicePublishResults.empty()) {
+                    auto& result = pendingVoicePublishResults.front();
                     if (result.rx) {
                         std::unique_lock<std::mutex> lk(receiversMutex, std::try_to_lock);
                         if (!lk.owns_lock()) {
-                            // Defer publish until list lock is free; do not block DSP.
+                            p25VoicePublicationLockMisses.fetch_add(1, std::memory_order_relaxed);
+                            break;
+                        }
+                        bool rxStillValid = false;
+                        for (auto& r : receivers) {
+                            if (r && r.get() == result.rx.get()) {
+                                rxStillValid = true;
+                                break;
+                            }
+                        }
+                        if (!rxStillValid) {
+                            pendingVoicePublishResults.pop_front();
+                            drained = true;
                             continue;
                         }
-                        rxStillValid = false;
-                        for (auto& r : receivers) if (r && r.get() == result.rx.get()) { rxStillValid = true; break; }
                     }
-                    if (!rxStillValid) continue;
-                    publishP25VoiceDecodeResult(result, pendingAudioByRx);
+                    if (!publishP25VoiceDecodeResult(result, pendingAudioByRx)) {
+                        break;
+                    }
                     if (result.rx && result.rollingDecode && result.iqDecodeEndAbsoluteKnown) {
                         auto rollingIt = phase2IqByRx.find(p25ReceiverSessionKey(*result.rx));
                         if (rollingIt != phase2IqByRx.end()) {
@@ -18636,7 +18759,9 @@ public:
                          p25Phase2ShouldFlushAudioTail(result.audio))) {
                         Receiver& rx = *result.rx;
                         phase2IqByRx.erase(p25ReceiverSessionKey(rx));
-                        pendingAudioByRx[p25ReceiverSessionKey(rx)].clear();
+                        p25Phase2ClearSpeakerPendingQueue(rx,
+                                                          p25SpeakerPendingFor(pendingAudioByRx, rx),
+                                                          P25PendingClearReason::RetuneOrGeneration);
                         lastPhase2DecodeByRx.erase(p25ReceiverSessionKey(rx));
                         size_t devIndex = 0;
                         bool haveDev = false;
@@ -18651,6 +18776,7 @@ public:
                             DeviceManager::instance().setReceiverCursorToLiveEdge(devIndex, rx);
                         }
                     }
+                    pendingVoicePublishResults.pop_front();
                     drained = true;
                 }
                 return drained;
@@ -18897,7 +19023,9 @@ public:
                                 monP25VoiceDecode = rx.p25VoiceDecodeEnabled;
                                 monP25VoicePhase2 = rx.p25VoicePhase2;
                                 phase2IqByRx.erase(p25ReceiverSessionKey(rx));
-                                pendingAudioByRx[p25ReceiverSessionKey(rx)].clear();
+                                p25Phase2ClearSpeakerPendingQueue(rx,
+                                                          p25SpeakerPendingFor(pendingAudioByRx, rx),
+                                                          P25PendingClearReason::RetuneOrGeneration);
                                 appliedQueuedVoiceReset = true;
                             }
                         }
@@ -18919,7 +19047,9 @@ public:
                                         skipP25VoiceWindow = true;
                                         mgr.setReceiverCursorToLiveEdge(i, rx);
                                         phase2IqByRx.erase(p25ReceiverSessionKey(rx));
-                                        pendingAudioByRx[p25ReceiverSessionKey(rx)].clear();
+                                        p25Phase2ClearSpeakerPendingQueue(rx,
+                                                          p25SpeakerPendingFor(pendingAudioByRx, rx),
+                                                          P25PendingClearReason::RetuneOrGeneration);
                                         appliedQueuedSlotProbe = true;
                                     }
                                 }
@@ -19048,7 +19178,9 @@ public:
                                             .arg(static_cast<qulonglong>(newWin.samples.size())),
                                         1000);
                                     rolling.clear();
-                                    pendingAudioByRx[sessionKey].clear();
+                                    p25Phase2ClearSpeakerPendingQueue(rx,
+                                        pendingAudioByRx[sessionKey],
+                                        P25PendingClearReason::RetuneOrGeneration);
                                     lastPhase2DecodeByRx.erase(sessionKey);
                                     bool resetQueuedOrApplied = false;
                                     {
@@ -19078,7 +19210,9 @@ public:
                                         .arg(static_cast<qulonglong>(rolling.samples.size())),
                                     1000);
                                 rolling.clear();
-                                pendingAudioByRx[sessionKey].clear();
+                                p25Phase2ClearSpeakerPendingQueue(rx,
+                                    pendingAudioByRx[sessionKey],
+                                    P25PendingClearReason::RetuneOrGeneration);
                                 lastPhase2DecodeByRx.erase(sessionKey);
                                 {
                                     std::unique_lock<std::mutex> resetLock(rx.stateMutex, std::try_to_lock);
@@ -19554,13 +19688,14 @@ public:
                                     p25Audio.phase2SpeakerGateReason == "emit" &&
                                     p25VoiceBlockMayEmitAudio(p25Audio) &&
                                     !p25Audio.phase2StaleAudioTail;
-                                auto& pendingSpeaker = pendingAudioByRx[p25ReceiverSessionKey(rx)];
+                                auto& pendingSpeaker = p25SpeakerPendingFor(pendingAudioByRx, rx);
+                                p25Phase2BindSpeakerPendingToCall(pendingSpeaker, rx);
                                 const bool hasNewPcm =
                                     p25Audio.decodedFrames > 0 &&
                                     p25Audio.phase2EmittedPcmFrames > 0;
-                                if (gateEmit && (hasNewPcm || !pendingSpeaker.empty())) {
+                                if (gateEmit && (hasNewPcm || !pendingSpeaker.samples.empty())) {
                                     pushedSamples = pushP25SpeakerAudio(audioOutputEngine,
-                                        pendingSpeaker,
+                                        pendingSpeaker.samples,
                                         p25Audio.audio,
                                         rxAudioOutputs,
                                         audioOutputEngine->getRingFillPercent());
@@ -19655,7 +19790,7 @@ public:
                                 // P25 jitter-buffer path.  GUI regression: demod ran but audio never
                                 // reached the speakers because only the P25 branch pushed PCM.
                                 pushAudioFrames(audioOutputEngine,
-                                    pendingAudioByRx[p25ReceiverSessionKey(rx)],
+                                    p25SpeakerPendingFor(pendingAudioByRx, rx).samples,
                                     ch,
                                     rxAudioOutputs);
                             }
@@ -20625,6 +20760,8 @@ private:
         uint64_t nextSequence = 0;
         long long droppedJobs = 0;
         long long droppedResults = 0;
+        size_t completedResults = 0;
+        long long publicationLockMisses = 0;
     };
 
     QTimer* updateTimer = nullptr;
@@ -20650,6 +20787,7 @@ private:
     std::atomic<uint64_t> p25VoiceJobSequence{0};
     std::atomic<long long> p25VoiceDroppedJobs{0};
     std::atomic<long long> p25VoiceDroppedResults{0};
+    std::atomic<long long> p25VoicePublicationLockMisses{0};
     std::mutex p25VoiceWorkerMutex;
     std::condition_variable p25VoiceWorkerCv;
     std::deque<P25VoiceDecodeJob> p25VoicePendingJobs;
@@ -20870,7 +21008,7 @@ private:
                     if (reason) {
                         *reason = "slot-probe-applied-before-decode";
                     }
-                    return true;
+                    return false;
                 };
 
                 auto stillCurrent = [&](std::string* reason) -> bool {
@@ -21031,10 +21169,15 @@ private:
                                 rx.p25VoiceLiveDecoder.setMaxPhase2SuperframeLocks(
                                     boundedConfigValue(priorPhase2Locks, kP25VoiceWorkerHotMaxPhase2SuperframeLocks));
                             }
+                            rx.p25VoiceLiveDecoder.setCqpskDiscreteFrozen(
+                                p25Phase2ShouldFreezeCqpskDiscrete(rx));
                             result.audio = decodeP25VoiceAudioBlock(rx, job.iq, job.sampleRateHz,
                                 job.centerFreqHz, job.targetFreqHz, job.outputRateHz,
                                 job.iqStartAbsolute, job.iqStartAbsoluteKnown,
                                 job.contextIqSamples);
+                            rx.p25DiagCqpskHypothesisChanges = std::max(
+                                rx.p25DiagCqpskHypothesisChanges,
+                                rx.p25VoiceLiveDecoder.cqpskDiscreteChangesBlocked());
                             if (coldAcquireJob || streamingCqpskJob || hotPhase2TrafficJob) {
                                 rx.p25VoiceLiveDecoder.setRealtimeDecodeBudgetMs(priorDecodeBudgetMs);
                                 rx.p25VoiceLiveDecoder.setMaxCqpskSearchCandidates(priorCqpskCandidates);
@@ -21108,11 +21251,15 @@ private:
                 }
 
                 if (publishResult) {
-                    std::lock_guard<std::mutex> lock(p25VoiceWorkerMutex);
-                    constexpr size_t kMaxCompletedVoiceResults = 16;
-                    if (p25VoiceCompletedResults.size() >= kMaxCompletedVoiceResults) {
-                        p25VoiceCompletedResults.pop_front();
-                        p25VoiceDroppedResults.fetch_add(1, std::memory_order_relaxed);
+                    std::unique_lock<std::mutex> lock(p25VoiceWorkerMutex);
+                    // Block until the GUI DSP worker drains completed voice
+                    // results.  Never evict decoded PCM after state mutation.
+                    p25VoiceWorkerCv.wait(lock, [this]() {
+                        return p25VoiceWorkerStop.load(std::memory_order_acquire) ||
+                               p25VoiceCompletedResults.size() < kP25VoiceDecodeMaxCompletedResults;
+                    });
+                    if (p25VoiceWorkerStop.load(std::memory_order_acquire)) {
+                        continue;
                     }
                     p25VoiceCompletedResults.push_back(std::move(result));
                 }
@@ -21177,7 +21324,8 @@ private:
         // losing IQ if the current decode later proves stale.
         return !p25VoiceWorkerStop.load(std::memory_order_acquire) &&
                p25VoiceWorkerThread.joinable() &&
-               p25VoicePendingJobs.size() < p25VoiceDecodeMaxPendingJobsNow();
+               p25VoicePendingJobs.size() < p25VoiceDecodeMaxPendingJobsNow() &&
+               p25VoiceCompletedResults.size() < kP25VoiceDecodeMaxCompletedResults;
     }
 
     P25VoiceWorkerQueueSnapshot p25VoiceWorkerQueueSnapshot()
@@ -21187,12 +21335,14 @@ private:
             std::lock_guard<std::mutex> lock(p25VoiceWorkerMutex);
             snap.pending = !p25VoicePendingJobs.empty();
             snap.threadRunning = p25VoiceWorkerThread.joinable();
+            snap.completedResults = p25VoiceCompletedResults.size();
         }
         snap.stopping = p25VoiceWorkerStop.load(std::memory_order_acquire);
         snap.busy = p25VoiceWorkerBusy.load(std::memory_order_acquire);
         snap.nextSequence = p25VoiceJobSequence.load(std::memory_order_relaxed) + 1;
         snap.droppedJobs = p25VoiceDroppedJobs.load(std::memory_order_relaxed);
         snap.droppedResults = p25VoiceDroppedResults.load(std::memory_order_relaxed);
+        snap.publicationLockMisses = p25VoicePublicationLockMisses.load(std::memory_order_relaxed);
         return snap;
     }
 
@@ -21202,6 +21352,9 @@ private:
         {
             std::lock_guard<std::mutex> lock(p25VoiceWorkerMutex);
             local.swap(p25VoiceCompletedResults);
+            if (!local.empty()) {
+                p25VoiceWorkerCv.notify_one();
+            }
         }
         std::vector<P25VoiceDecodeResult> out;
         out.reserve(local.size());
@@ -21212,17 +21365,20 @@ private:
         return out;
     }
 
-    void publishP25VoiceDecodeResult(const P25VoiceDecodeResult& result,
-                                     std::map<ReceiverSessionKey, std::vector<float>>& pendingAudioByRx)
+    bool publishP25VoiceDecodeResult(const P25VoiceDecodeResult& result,
+                                     P25SpeakerPendingMap& pendingAudioByRx)
     {
-        if (!result.rx) return;
+        if (!result.rx) return true;
         // After return-to-control, the traffic Receiver may have been removed from the receivers list
         // (and its storage released). Guard against publishing stale results that would dereference
         // a now-invalid Receiver* (e.g. rx.stateMutex). This eliminates a source of freezes after
         // repeated follow/return cycles.
         {
             std::unique_lock<std::mutex> lk(receiversMutex, std::try_to_lock);
-            if (!lk.owns_lock()) return; // publish next tick; never block DSP on list lock
+            if (!lk.owns_lock()) {
+                p25VoicePublicationLockMisses.fetch_add(1, std::memory_order_relaxed);
+                return false;
+            }
             bool stillActive = false;
             for (auto& r : receivers) {
                 if (r && r.get() == result.rx.get()) { stillActive = true; break; }
@@ -21239,7 +21395,7 @@ private:
                             .arg(reason),
                         1000);
                 });
-                return;
+                return true;
             }
         }
         Receiver& rx = *result.rx;
@@ -21250,17 +21406,22 @@ private:
                     QString("P25 voice worker decode error: %1").arg(err),
                     2500);
             });
-            return;
+            return true;
         }
         bool stale = result.stale;
         bool publishVoiceDiag = result.publishVoiceDiag;
-        if (!result.hasAudioBlock && !stale) return;
+        if (!result.hasAudioBlock && !stale) return true;
         {
             std::unique_lock<std::mutex> rxLock(rx.stateMutex, std::try_to_lock);
-            if (!rxLock.owns_lock()) return;
+            if (!rxLock.owns_lock()) {
+                p25VoicePublicationLockMisses.fetch_add(1, std::memory_order_relaxed);
+                return false;
+            }
             if (!rx.active || !rx.p25VoiceDecodeEnabled || !rx.p25VoicePhase2) {
                 stale = true;
-                pendingAudioByRx[p25ReceiverSessionKey(rx)].clear();
+                p25Phase2ClearSpeakerPendingQueue(rx,
+                    p25SpeakerPendingFor(pendingAudioByRx, rx),
+                    P25PendingClearReason::RetuneOrGeneration);
             } else if (result.talkgroupId != 0 && rx.p25VoiceTalkgroupId != result.talkgroupId) {
                 stale = true;
             } else if (result.tdmaSlotKnown &&
@@ -21292,7 +21453,9 @@ private:
                  result.audio.decodedFrames > 0 ||
                  !result.audio.audio.empty());
             if (!keepWallTimeoutEvidence) {
-                pendingAudioByRx[p25ReceiverSessionKey(rx)].clear();
+                p25Phase2ClearSpeakerPendingQueue(rx,
+                    p25SpeakerPendingFor(pendingAudioByRx, rx),
+                    P25PendingClearReason::RetuneOrGeneration);
                 const uintptr_t rxKey = reinterpret_cast<uintptr_t>(&rx);
                 const uint64_t seqLog = result.sequence;
                 const QString reason = QString::fromStdString(
@@ -21311,7 +21474,7 @@ private:
                             .arg(genLog),
                         1000);
                 });
-                return;
+                return true;
             }
             stale = false;
             publishVoiceDiag = true;
@@ -21366,9 +21529,11 @@ private:
                 hasActiveP25VoiceCall ||
                 p25Phase2ShouldPreserveLivePlaybackBuffers(rx, emptyWindowNowMs) ||
                 (audioOutputEngine->getRingQueuedSamples() > 0) ||
-                !pendingAudioByRx[p25ReceiverSessionKey(rx)].empty();
+                !p25SpeakerPendingFor(pendingAudioByRx, rx).samples.empty();
             if (!preserveLivePlayback) {
-                pendingAudioByRx[p25ReceiverSessionKey(rx)].clear();
+                p25Phase2ClearSpeakerPendingQueue(rx,
+                    p25SpeakerPendingFor(pendingAudioByRx, rx),
+                    P25PendingClearReason::UserStop);
                 // Only flush when playback is truly idle. Clearing a non-empty
                 // ring here races just-pushed clear PCM and the silence bridge
                 // (20260720_080118 total live silence / offline WAV PASS).
@@ -21492,13 +21657,14 @@ private:
                     result.speakerGateReason == "emit" &&
                     p25VoiceBlockMayEmitAudio(result.audio) &&
                     !result.audio.phase2StaleAudioTail;
-                auto& pendingSpeaker = pendingAudioByRx[p25ReceiverSessionKey(rx)];
+                auto& pendingSpeaker = p25SpeakerPendingFor(pendingAudioByRx, rx);
+                p25Phase2BindSpeakerPendingToCall(pendingSpeaker, rx);
                 const bool hasNewPcm =
                     result.audio.decodedFrames > 0 &&
                     result.audio.phase2EmittedPcmFrames > 0;
-                if (carrierOk && gateEmit && (hasNewPcm || !pendingSpeaker.empty())) {
+                if (carrierOk && gateEmit && (hasNewPcm || !pendingSpeaker.samples.empty())) {
                     pushedSamples = pushP25SpeakerAudio(audioOutputEngine,
-                        pendingSpeaker,
+                        pendingSpeaker.samples,
                         result.speakerAudio,
                         result.audioOutputIndices,
                         audioRingFillPercent);
@@ -21619,9 +21785,10 @@ private:
                    rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Encrypted &&
                    !p25Phase2SessionSpeakerSustainActive(rx)) {
             p25Phase2ClearSpeakerPlaybackQueue(rx,
-                pendingAudioByRx[p25ReceiverSessionKey(rx)],
+                p25SpeakerPendingFor(pendingAudioByRx, rx),
                 P25PendingClearReason::EncryptedState);
         }
+        return true;
     }
 
     // Phase 0 / S0-2: per-receiver foundation using shared_ptr so that vector reallocation (Add) never
@@ -23592,7 +23759,7 @@ int runCLI(int argc, char* argv[]) {
     // CLI DSP monitor thread (mirrors guiDspWorker but standalone, uses Receiver vector + own demod instances)
     std::thread cliMonThread([&]() {
         std::map<ReceiverSessionKey, std::chrono::steady_clock::time_point> lastPhase2DecodeByRx;
-        std::map<ReceiverSessionKey, std::vector<float>> pendingAudioByRx;
+        P25SpeakerPendingMap pendingAudioByRx;
         std::map<ReceiverSessionKey, RollingIqWindow> phase2IqByRx;
         while (!cliStop) {
             bool did = false;
@@ -23725,7 +23892,9 @@ int runCLI(int argc, char* argv[]) {
                             rxP25VoiceDecode = rx.p25VoiceDecodeEnabled;
                             rxP25VoicePhase2 = rx.p25VoicePhase2;
                             phase2IqByRx.erase(p25ReceiverSessionKey(rx));
-                            pendingAudioByRx[p25ReceiverSessionKey(rx)].clear();
+                            p25Phase2ClearSpeakerPendingQueue(rx,
+                                                          p25SpeakerPendingFor(pendingAudioByRx, rx),
+                                                          P25PendingClearReason::RetuneOrGeneration);
                             appliedQueuedVoiceReset = true;
                         }
                     }
@@ -23788,7 +23957,9 @@ int runCLI(int argc, char* argv[]) {
                                 newWin.cursorDiscontinuity = true;
                             } else {
                                 rolling.clear();
-                                pendingAudioByRx[sessionKey].clear();
+                                p25Phase2ClearSpeakerPendingQueue(rx,
+                                    pendingAudioByRx[sessionKey],
+                                    P25PendingClearReason::RetuneOrGeneration);
                                 lastPhase2DecodeByRx.erase(sessionKey);
                                 (void)tryResetP25TrafficSessionNonBlocking(rx, "iq-stream-retune-handoff", true);
                                 did = true;
@@ -23797,7 +23968,9 @@ int runCLI(int argc, char* argv[]) {
                         }
                         if (newWin.cursorDiscontinuity) {
                             rolling.clear();
-                            pendingAudioByRx[sessionKey].clear();
+                            p25Phase2ClearSpeakerPendingQueue(rx,
+                                pendingAudioByRx[sessionKey],
+                                P25PendingClearReason::RetuneOrGeneration);
                             lastPhase2DecodeByRx.erase(sessionKey);
                             (void)tryResetP25TrafficSessionNonBlocking(rx, "iq-cursor-discontinuity", true);
                             did = true;
@@ -24034,7 +24207,9 @@ int runCLI(int argc, char* argv[]) {
                     if (p25Phase2ShouldFlushStaleVoicePipeline(p25Audio) ||
                         p25Phase2ShouldFlushAudioTail(p25Audio)) {
                         phase2IqByRx.erase(p25ReceiverSessionKey(rx));
-                        pendingAudioByRx[p25ReceiverSessionKey(rx)].clear();
+                        p25Phase2ClearSpeakerPendingQueue(rx,
+                                                          p25SpeakerPendingFor(pendingAudioByRx, rx),
+                                                          P25PendingClearReason::RetuneOrGeneration);
                         lastPhase2DecodeByRx.erase(p25ReceiverSessionKey(rx));
                         mgr.setReceiverCursorToLiveEdge(di, rx);
                     }
@@ -24052,7 +24227,9 @@ int runCLI(int argc, char* argv[]) {
                     gLastRmsDb.store(rms);
                 }
                 if (!ch.empty() && cliAudio && cliAudioEnabled) {
-                    pushAudioFrames(cliAudio.get(), pendingAudioByRx[p25ReceiverSessionKey(rx)], ch, rxAudioOutputs);
+                    pushAudioFrames(cliAudio.get(),
+                        p25SpeakerPendingFor(pendingAudioByRx, rx).samples,
+                        ch, rxAudioOutputs);
                 }
                 did = true;
             }
@@ -25676,8 +25853,7 @@ int runCLI(int argc, char* argv[]) {
                     rx.p25VoiceTalkgroupId = tg.talkgroupId;
                     rx.p25VoiceSourceId = tg.lastSourceId;
                     const qint64 armNowMs = QDateTime::currentMSecsSinceEpoch();
-                    rx.p25VoiceGrantEpochMs = armNowMs;
-                    rx.p25CurrentCallSessionId = p25MakeCurrentCallSessionId(rx.p25VoiceTalkgroupId, armNowMs);
+                    p25Phase2BeginNewPtt(rx, armNowMs);
                     rx.p25VoicePhase2 = phase2Voice;
                     rx.p25VoiceTdmaSlotKnown = tg.tdmaSlotKnown;
                     rx.p25VoiceTdmaSlot = tg.tdmaSlot;
@@ -26845,8 +27021,7 @@ int runCLI(int argc, char* argv[]) {
                     rx.p25VoiceTalkgroupId = tg.talkgroupId;
                     rx.p25VoiceSourceId = tg.lastSourceId;
                     const qint64 armNowMs = QDateTime::currentMSecsSinceEpoch();
-                    rx.p25VoiceGrantEpochMs = armNowMs;
-                    rx.p25CurrentCallSessionId = p25MakeCurrentCallSessionId(rx.p25VoiceTalkgroupId, armNowMs);
+                    p25Phase2BeginNewPtt(rx, armNowMs);
                     rx.p25VoicePhase2 = phase2Voice;
                     rx.p25VoiceTdmaSlotKnown = tg.tdmaSlotKnown;
                     rx.p25VoiceTdmaSlot = tg.tdmaSlot;

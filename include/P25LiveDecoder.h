@@ -302,6 +302,8 @@ struct P25Phase2VoiceCodeword {
     uint8_t voiceIndex = 0;
     bool sessionCodewordIdKnown = false;
     uint64_t sessionCodewordId = 0;
+    bool streamDibitKnown = false;
+    uint64_t streamDibit = 0;
     bool duplicateInSession = false;
     std::array<uint8_t, 72> bits{};
 };
@@ -446,6 +448,9 @@ public:
         m_config.phase2PreferredTdmaSlot = static_cast<uint8_t>(slot & 0x01u);
     }
     bool cqpskLockValid() const noexcept { return m_cqpskLock.valid; }
+    void setCqpskDiscreteFrozen(bool frozen) noexcept { m_cqpskDiscreteFrozen = frozen; }
+    bool cqpskDiscreteFrozen() const noexcept { return m_cqpskDiscreteFrozen; }
+    uint64_t cqpskDiscreteChangesBlocked() const noexcept { return m_cqpskDiscreteChangesBlocked; }
 
     // Align the internal Phase-2 dibit stream counter to an absolute ring
     // cursor before processing a new traffic-channel chunk.
@@ -563,6 +568,8 @@ private:
     uint64_t m_phase2DecodeGeneration = 0;
     uint64_t m_phase2StreamDibits = 0;
     CqpskDemodLock m_cqpskLock;
+    bool m_cqpskDiscreteFrozen = false;
+    uint64_t m_cqpskDiscreteChangesBlocked = 0;
     bool m_frontEndDcEstimateValid = false;
     double m_frontEndDcSampleRate = 0.0;
     std::complex<double> m_frontEndDcEstimate{0.0, 0.0};

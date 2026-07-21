@@ -109,8 +109,9 @@ struct Receiver {
     uint32_t p25VoiceSourceId = 0;
     int64_t p25VoiceGrantEpochMs = 0;
     // Binds pending audio, ESS security, and emit gates to one call instance.
-    // Generated at grant arm from talkgroup + grant epoch (SDRTrunk current-call session).
+    // Generated at PTT start from talkgroup + monotonic pttGeneration.
     uint64_t p25CurrentCallSessionId = 0;
+    uint64_t p25PttGeneration = 0;
     bool p25VoicePhase2 = false;
     bool p25VoiceTdmaSlotKnown = false;
     uint8_t p25VoiceTdmaSlot = 0;
@@ -141,6 +142,7 @@ struct Receiver {
     uint64_t p25DiagSequencerLateDrops = 0;
     uint64_t p25DiagSequencerOutOfOrderDrops = 0;
     uint64_t p25DiagSpeakerPlaybackCleared = 0;
+    uint64_t p25DiagCqpskHypothesisChanges = 0;
     bool p25VoiceMaskParamsKnown = false;
     uint16_t p25VoiceNac = 0;
     uint32_t p25VoiceWacn = 0;
@@ -308,6 +310,7 @@ struct Receiver {
         p25DiagSequencerLateDrops = 0;
         p25DiagSequencerOutOfOrderDrops = 0;
         p25DiagSpeakerPlaybackCleared = 0;
+        p25DiagCqpskHypothesisChanges = 0;
         p25Phase2PendingAudio.clear();
         p25Phase2PendingTalkgroupId = 0;
         p25Phase2PendingAudioArmed = false;
@@ -329,6 +332,7 @@ struct Receiver {
         p25VoiceSourceId = 0;
         p25VoiceGrantEpochMs = 0;
         p25CurrentCallSessionId = 0;
+        p25PttGeneration = 0;
     }
 
     void resetP25TrafficSession(const char* /*reason*/ = nullptr, bool fullClear = true)
@@ -358,6 +362,10 @@ struct Receiver {
         demod.resetSquelchGate();
     }
 };
+
+uint64_t p25MakeCurrentCallSessionId(uint32_t talkgroupId, uint64_t pttGeneration) noexcept;
+void p25Phase2BeginNewPtt(Receiver& rx, int64_t grantEpochMs) noexcept;
+void p25Phase2RefreshGrantEpoch(Receiver& rx, int64_t grantEpochMs) noexcept;
 
 // Placeholder for future per-receiver audio push (currently falls back to global engine)
 // void pushReceiverAudio(Receiver& rx, const float* samples, size_t count);

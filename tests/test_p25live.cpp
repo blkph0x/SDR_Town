@@ -1613,6 +1613,7 @@ TEST_CASE("P25 live decoder emits stable Phase 2 session codeword IDs")
     for (const auto& burst : first.phase2Bursts) {
         for (const auto& codeword : burst.voiceCodewords) {
             REQUIRE(codeword.sessionCodewordIdKnown);
+            REQUIRE(codeword.streamDibitKnown);
             REQUIRE_FALSE(codeword.duplicateInSession);
             ids.push_back(codeword.sessionCodewordId);
         }

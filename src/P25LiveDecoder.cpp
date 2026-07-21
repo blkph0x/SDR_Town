@@ -5521,6 +5521,8 @@ P25LiveDecoder::P25LiveDecoder(const P25LiveDecoder& other)
       m_phase2DecodeGeneration(other.m_phase2DecodeGeneration),
       m_phase2StreamDibits(other.m_phase2StreamDibits),
       m_cqpskLock(other.m_cqpskLock),
+      m_cqpskDiscreteFrozen(other.m_cqpskDiscreteFrozen),
+      m_cqpskDiscreteChangesBlocked(other.m_cqpskDiscreteChangesBlocked),
       m_frontEndDcEstimateValid(other.m_frontEndDcEstimateValid),
       m_frontEndDcSampleRate(other.m_frontEndDcSampleRate),
       m_frontEndDcEstimate(other.m_frontEndDcEstimate)
@@ -5571,6 +5573,8 @@ P25LiveDecoder& P25LiveDecoder::operator=(const P25LiveDecoder& other)
     m_phase2DecodeGeneration = other.m_phase2DecodeGeneration;
     m_phase2StreamDibits = other.m_phase2StreamDibits;
     m_cqpskLock = other.m_cqpskLock;
+    m_cqpskDiscreteFrozen = other.m_cqpskDiscreteFrozen;
+    m_cqpskDiscreteChangesBlocked = other.m_cqpskDiscreteChangesBlocked;
     m_frontEndDcEstimateValid = other.m_frontEndDcEstimateValid;
     m_frontEndDcSampleRate = other.m_frontEndDcSampleRate;
     m_frontEndDcEstimate = other.m_frontEndDcEstimate;
@@ -5621,6 +5625,8 @@ P25LiveDecoder::P25LiveDecoder(P25LiveDecoder&& other) noexcept
       m_phase2DecodeGeneration(other.m_phase2DecodeGeneration),
       m_phase2StreamDibits(other.m_phase2StreamDibits),
       m_cqpskLock(other.m_cqpskLock),
+      m_cqpskDiscreteFrozen(other.m_cqpskDiscreteFrozen),
+      m_cqpskDiscreteChangesBlocked(other.m_cqpskDiscreteChangesBlocked),
       m_frontEndDcEstimateValid(other.m_frontEndDcEstimateValid),
       m_frontEndDcSampleRate(other.m_frontEndDcSampleRate),
       m_frontEndDcEstimate(other.m_frontEndDcEstimate)
@@ -5675,6 +5681,8 @@ P25LiveDecoder& P25LiveDecoder::operator=(P25LiveDecoder&& other) noexcept
     m_phase2DecodeGeneration = other.m_phase2DecodeGeneration;
     m_phase2StreamDibits = other.m_phase2StreamDibits;
     m_cqpskLock = other.m_cqpskLock;
+    m_cqpskDiscreteFrozen = other.m_cqpskDiscreteFrozen;
+    m_cqpskDiscreteChangesBlocked = other.m_cqpskDiscreteChangesBlocked;
     other.m_phase2MaskPhaseStarveWindows = 0;
     other.m_phase2LastFullMaskPhaseHuntGeneration = 0;
     m_frontEndDcEstimateValid = other.m_frontEndDcEstimateValid;
@@ -5734,6 +5742,8 @@ void P25LiveDecoder::reset()
     m_phase2DecodeGeneration = 0;
     m_phase2StreamDibits = 0;
     m_cqpskLock = {};
+    m_cqpskDiscreteFrozen = false;
+    m_cqpskDiscreteChangesBlocked = 0;
     m_frontEndDcEstimateValid = false;
     m_frontEndDcSampleRate = 0.0;
     m_frontEndDcEstimate = {};
@@ -6201,6 +6211,9 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
          (isCqpskPath(best.stats.demodPath) && hasPhase2SoftCqpskLockEvidence(best)))) {
         stopCqpskSearch = true;
     }
+    if (m_cqpskDiscreteFrozen && m_cqpskLock.valid) {
+        stopCqpskSearch = true;
+    }
     size_t cqpskCandidatesEvaluated = 0;
     const auto cqpskSearchStarted = std::chrono::steady_clock::now();
     auto cqpskBudgetReached = [&]() {
@@ -6360,6 +6373,46 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
             !selectedHardCqpskLock &&
             !selectedSoftPhase2CqpskLock &&
             !hasPhase2TrafficTelemetry(best);
+        const auto discreteParamsMatch = [&](const CqpskCandidateParams& params) {
+            return params.differential == m_cqpskLock.differential &&
+                params.conjugate == m_cqpskLock.conjugate &&
+                params.rotation == m_cqpskLock.rotation &&
+                params.permutation == m_cqpskLock.permutation &&
+                params.symbolPhaseFraction == m_cqpskLock.symbolPhaseFraction;
+        };
+        const bool freezeDiscrete =
+            m_cqpskDiscreteFrozen &&
+            m_cqpskLock.valid &&
+            !discreteParamsMatch(*selectedCqpskParams);
+        if (freezeDiscrete) {
+            ++m_cqpskDiscreteChangesBlocked;
+            m_cqpskLock.fineRotation = selectedCqpskParams->fineRotation;
+            m_cqpskLock.residualCarrierHz = selectedCqpskParams->residualCarrierHz;
+            m_cqpskLock.phaseErrorRmsRad = selectedCqpskParams->phaseErrorRmsRad;
+            m_cqpskLock.fineCorrectionSymbols = selectedCqpskParams->fineCorrectionSymbols;
+            if (selectedHardCqpskLock || selectedSoftPhase2CqpskLock) {
+                m_cqpskLock.misses = 0;
+            } else if (selectedLockOnlyWithNoPhase2) {
+                m_cqpskLock.misses = std::min(cqpskMissLimit, m_cqpskLock.misses + 1);
+            }
+            best.stats.cqpskLockUpdated = false;
+            best.stats.cqpskLockActive = true;
+            best.stats.cqpskLockUsed = true;
+            best.stats.cqpskLockTrustScore = m_cqpskLock.trustScore;
+            best.stats.cqpskLockMisses = m_cqpskLock.misses;
+            best.stats.cqpskSymbolPhaseFraction = m_cqpskLock.symbolPhaseFraction;
+            best.stats.cqpskFineCorrectionApplied = std::abs(m_cqpskLock.fineRotation) > 0.01;
+            best.stats.cqpskFineRotationRad = m_cqpskLock.fineRotation;
+            best.stats.cqpskResidualCarrierHz = m_cqpskLock.residualCarrierHz;
+            best.stats.cqpskPhaseErrorRmsRad = m_cqpskLock.phaseErrorRmsRad;
+            best.stats.cqpskFineCorrectionSymbols = m_cqpskLock.fineCorrectionSymbols;
+            if (realtimeSoftHoldSelected || realtimeLockOnlyHoldSelected) {
+                best.stats.cqpskStickyOverride = true;
+            }
+            if (selectedLockOnlyWithNoPhase2 && m_cqpskLock.misses >= cqpskMissLimit) {
+                m_cqpskLock = {};
+            }
+        } else {
         m_cqpskLock.valid = true;
         m_cqpskLock.differential = selectedCqpskParams->differential;
         m_cqpskLock.conjugate = selectedCqpskParams->conjugate;
@@ -6390,6 +6443,7 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         best.stats.cqpskFineCorrectionSymbols = m_cqpskLock.fineCorrectionSymbols;
         if (realtimeSoftHoldSelected || realtimeLockOnlyHoldSelected) best.stats.cqpskStickyOverride = true;
         if (selectedLockOnlyWithNoPhase2 && m_cqpskLock.misses >= cqpskMissLimit) m_cqpskLock = {};
+        }
     } else if (m_cqpskLock.valid && cqpskWarmHoldSelected) {
         const int retainedTrust = m_cqpskLock.trustScore;
         const int retainedMisses = std::min(cqpskMissLimit, m_cqpskLock.misses + 1);
@@ -6681,6 +6735,8 @@ void P25LiveDecoder::annotatePhase2SessionCodewords(P25Phase2DecodeResult& out,
                            generation - seen.generation <= kRetentionGenerations;
                 });
             codeword.sessionCodewordIdKnown = true;
+            codeword.streamDibitKnown = true;
+            codeword.streamDibit = streamDibit;
             if (it != m_phase2RecentCodewords.end()) {
                 codeword.sessionCodewordId = it->id;
                 codeword.duplicateInSession = true;
