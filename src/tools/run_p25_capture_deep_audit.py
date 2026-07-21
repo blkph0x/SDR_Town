@@ -102,7 +102,7 @@ def parse_voicetest_metrics(output: str) -> dict:
     duty = [float(x) for x in re.findall(r"\bduty=([0-9.]+)\b", output)]
     ambe_probe = [tuple(map(int, m)) for m in re.findall(r"\bambeProbe=(\d+)/(\d+)\b", output)]
     gate_emit = len(re.findall(r"\bgate=emit\b", output))
-    explicit_release = len(re.findall(r"\bexplicit-clear-grant-validated-release\b", output))
+    explicit_release = len(re.findall(r"\bexplicit-clear-grant-(?:traffic-clear|validated)-release\b", output))
     wav_match = re.search(r'P25 voicetest wav="([^"]+)"', output)
     return {
         "best_p2bursts": max(bursts) if bursts else 0,
@@ -196,9 +196,15 @@ def build_voicetest_command(
     wav_path: Path | None,
 ) -> str:
     center_mhz = float(summary.get("center_freq_hz") or summary.get("freq_hz") or 0.0) / 1e6
+    sample_rate_hz = summary.get("sample_rate_hz")
     voice_mhz = float(grant["voice_mhz"])
     voice_center_arg = ""
-    if abs(voice_mhz - center_mhz) > 0.10:
+    in_capture_passband = p25_capture_audit.grant_in_capture_passband(
+        grant,
+        center_mhz,
+        sample_rate_hz,
+    )
+    if not in_capture_passband and abs(voice_mhz - center_mhz) > 0.10:
         voice_center_arg = f" voicecenter={voice_mhz:.5f}"
     masks = ""
     if {"nac", "wacn", "system"}.issubset(grant):
@@ -376,6 +382,15 @@ def main(argv: list[str]) -> int:
     if sweep_results and any(r["best_target_vcw"] == 0 and r["best_opp_vcw"] > 0 for r in sweep_results):
         findings.append("opposite_slot_voice_seen_without_target_voice")
 
+    if sweep_results and any(r["status"] in {"PASS_CONTINUOUS_AUDIO", "PASS_CLEAR_AUDIO", "PASS_PARTIAL_AUDIO"} for r in sweep_results):
+        snapshot_only = {"no_speaker_audio_pushed", "live_zero_phase2_bursts"}
+        findings = [finding for finding in findings if finding not in snapshot_only]
+
+    deduped_findings: list[str] = []
+    for finding in findings:
+        if finding not in deduped_findings:
+            deduped_findings.append(finding)
+
     summary = {
         "capture_dir": str(capture),
         "exe": str(exe),
@@ -391,7 +406,7 @@ def main(argv: list[str]) -> int:
         "health": report["health"],
         "counts": report["counts"],
         "live_log_analysis": live,
-        "findings": findings,
+        "findings": deduped_findings,
         "grants": grants,
         "sweep_results": sweep_results,
     }

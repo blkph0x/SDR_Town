@@ -14,7 +14,7 @@ checks = {
     'rolling window tracks submitted decode end': 'markDecodeSubmitted' in main,
     'worker result commits rolling cursor': 'commitDecodeAbsolute(result.iqDecodeEndAbsolute)' in main,
     'single pending voice job': 'kP25VoiceDecodeMaxPendingJobs = 1' in main,
-    'single speaker pending voice job': 'kP25VoiceDecodeMaxPendingJobsSpeaker = 1' in main,
+    'speaker pending allows one prestage': 'kP25VoiceDecodeMaxPendingJobsSpeaker = 2' in main,
     'backlog catch-up disables tiny speaker chunks': 'backlogCatchUp' in main and 'speakerSustainDecode' in main,
     'iq pull pauses during decode backlog': 'syncAbsolute = rolling.lastDecodeAbsolute' in main,
 }

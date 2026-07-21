@@ -924,6 +924,40 @@ TEST_CASE("P25 control analyzer uses SDRTrunk MAC lengths to continue after hous
     REQUIRE(p25ControlEventIsVoiceGrant(events[1]));
 }
 
+TEST_CASE("P25 control analyzer honors SDRTrunk SACCH MAC structure scan limit")
+{
+    P25ControlChannelAnalyzer analyzer;
+    P25ChannelIdentifier identifier;
+    identifier.valid = true;
+    identifier.id = 6;
+    identifier.channelType = 3;
+    identifier.baseHz = 410000000.0;
+    identifier.spacingHz = 12500.0;
+    identifier.bandwidthHz = 12500.0;
+    identifier.slotsPerCarrier = 2;
+    identifier.phase2Capable = true;
+    analyzer.setChannelIdentifier(identifier);
+
+    std::vector<uint8_t> pdu(21, 0);
+    pdu[0] = static_cast<uint8_t>(4u << 5);
+    pdu[1] = 0x30; // Power Control Signal Quality, fixed 5-byte MAC structure.
+    pdu[6] = 0x40; // Group voice grant starts before SACCH's maxIndex=99.
+    writeBitsMsb(pdu, 8 * 8, 16, 0x6002);
+    writeBitsMsb(pdu, 10 * 8, 16, 3210);
+    writeBitsMsb(pdu, 12 * 8, 24, 0x112233);
+    pdu[15] = 0x40; // Would be a false third structure if we scanned past bit 99.
+    writeBitsMsb(pdu, 17 * 8, 16, 0x6004);
+    writeBitsMsb(pdu, 19 * 8, 16, 6543);
+
+    const auto events = analyzer.ingestPhase2MacPdu(4, 0, pdu, true, 99);
+    REQUIRE(events.size() == 2);
+    REQUIRE(events[0].type == P25ControlEventType::ControlMessage);
+    REQUIRE(events[0].macMessageOpcode == 0x30);
+    REQUIRE(events[1].type == P25ControlEventType::GroupVoiceGrant);
+    REQUIRE(events[1].talkgroupId == 3210);
+    REQUIRE(events[1].channel == 0x6002);
+}
+
 TEST_CASE("P25 control analyzer consumes full MAC release before later structures")
 {
     P25ControlChannelAnalyzer analyzer;

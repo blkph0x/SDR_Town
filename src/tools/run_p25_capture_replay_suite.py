@@ -81,6 +81,15 @@ def classify_output(output: str, timed_out: bool) -> str:
         probe_accepted = max((a for a, _ in ambe_probe), default=0)
         probe_attempts = max((b for _, b in ambe_probe), default=0)
         if target_vcw > 0 and "p2ess=unknown" in output and re.search(r"\bp2mac=0/\d+\b", output):
+            if (
+                re.search(r"\baudioSamples=0\b", output)
+                and re.search(r"\bspeakerSamples=0\b", output)
+                and (
+                    "gate=unknown-raw-queued-waiting-clear" in output
+                    or "gate=unknown-waiting-clear" in output
+                )
+            ):
+                return "PASS_UNKNOWN_GATED"
             return "FAIL_SECURITY_UNKNOWN_TARGET_VOICE_PROBED" if probe_attempts > 0 else "FAIL_SECURITY_UNKNOWN_TARGET_VOICE"
         if target_vcw == 0 and opp_vcw > 0:
             return "FAIL_OPPOSITE_SLOT_ONLY"

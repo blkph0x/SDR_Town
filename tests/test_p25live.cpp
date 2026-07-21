@@ -163,6 +163,16 @@ std::vector<int> makeSyntheticPhase2Burst(int duid, bool flipDuidBit = false)
     return dibits;
 }
 
+std::array<int, P25LiveDecoder::Phase2FrameSyncDibits> phase2DibitsFromWordForTest(uint64_t word)
+{
+    std::array<int, P25LiveDecoder::Phase2FrameSyncDibits> out{};
+    for (size_t i = 0; i < out.size(); ++i) {
+        const size_t shift = (out.size() - 1u - i) * 2u;
+        out[i] = static_cast<int>((word >> shift) & 0x03ull);
+    }
+    return out;
+}
+
 std::vector<int> makeSyntheticPhase2Superframe()
 {
     std::vector<int> dibits(P25LiveDecoder::Phase2BurstDibits * 12, 0);
@@ -220,26 +230,128 @@ uint8_t gf64MulForTest(uint8_t a, uint8_t b)
     return static_cast<uint8_t>(product & 0x3fu);
 }
 
+uint8_t gf64PowForTest(uint8_t a, int power)
+{
+    uint8_t out = 1;
+    while (power-- > 0) out = gf64MulForTest(out, a);
+    return out;
+}
+
+uint8_t gf64InvForTest(uint8_t a)
+{
+    if ((a & 0x3fu) == 0) return 0;
+    return gf64PowForTest(a, 62);
+}
+
 std::array<uint8_t, 28> rs63RemainderForTest(const std::array<uint8_t, 63>& codeword)
 {
-    static constexpr std::array<uint8_t, 29> generator = {
-        001, 026, 055, 072, 075, 010, 026, 027, 056, 036,
-        004, 045, 073, 045, 016, 063, 033, 055, 007, 023,
-        002, 031, 036, 040, 007, 022, 001, 027, 034,
+    struct Tables {
+        std::array<int, 64> alphaTo{};
+        std::array<int, 64> indexOf{};
     };
-    std::array<uint8_t, 63> work{};
-    for (size_t i = 0; i < work.size(); ++i) work[i] = static_cast<uint8_t>(codeword[i] & 0x3fu);
-    for (size_t i = 0; i < 35; ++i) {
-        const uint8_t coef = work[i] & 0x3fu;
-        if (coef == 0) continue;
-        work[i] = 0;
-        for (size_t j = 1; j < generator.size(); ++j) {
-            work[i + j] ^= gf64MulForTest(coef, generator[j]);
+    static const Tables tables = [] {
+        Tables t;
+        t.indexOf.fill(-1);
+        constexpr int MM = 6;
+        constexpr int NN = 63;
+        constexpr std::array<int, 7> generatorPolynomial{1, 1, 0, 0, 0, 0, 1};
+        int mask = 1;
+        t.alphaTo[MM] = 0;
+        for (int i = 0; i < MM; ++i) {
+            t.alphaTo[static_cast<size_t>(i)] = mask;
+            t.indexOf[static_cast<size_t>(t.alphaTo[static_cast<size_t>(i)])] = i;
+            if (generatorPolynomial[static_cast<size_t>(i)] != 0) t.alphaTo[MM] ^= mask;
+            mask <<= 1;
         }
-    }
+        t.indexOf[static_cast<size_t>(t.alphaTo[MM])] = MM;
+        mask >>= 1;
+        for (int i = MM + 1; i < NN; ++i) {
+            if (t.alphaTo[static_cast<size_t>(i - 1)] >= mask) {
+                t.alphaTo[static_cast<size_t>(i)] = t.alphaTo[MM] ^
+                    ((t.alphaTo[static_cast<size_t>(i - 1)] ^ mask) << 1);
+            } else {
+                t.alphaTo[static_cast<size_t>(i)] = t.alphaTo[static_cast<size_t>(i - 1)] << 1;
+            }
+            t.indexOf[static_cast<size_t>(t.alphaTo[static_cast<size_t>(i)])] = i;
+        }
+        t.indexOf[0] = -1;
+        return t;
+    }();
+
     std::array<uint8_t, 28> rem{};
-    for (size_t i = 0; i < rem.size(); ++i) rem[i] = static_cast<uint8_t>(work[35 + i] & 0x3fu);
+    for (int root = 1; root <= 28; ++root) {
+        int syndrome = 0;
+        for (int symbol = 0; symbol < 63; ++symbol) {
+            const int value = static_cast<int>(codeword[static_cast<size_t>(symbol)] & 0x3fu);
+            const int index = tables.indexOf[static_cast<size_t>(value)];
+            if (index != -1) {
+                syndrome ^= tables.alphaTo[static_cast<size_t>((index + root * symbol) % 63)];
+            }
+        }
+        rem[static_cast<size_t>(root - 1)] = static_cast<uint8_t>(syndrome & 0x3f);
+    }
     return rem;
+}
+
+std::array<uint8_t, 63> rs63SolveErasuresForTest(std::array<uint8_t, 63> symbols,
+                                                 const std::vector<int>& erasures)
+{
+    REQUIRE(erasures.size() <= 28);
+
+    for (int pos : erasures) {
+        REQUIRE(pos >= 0);
+        REQUIRE(pos < static_cast<int>(symbols.size()));
+        symbols[static_cast<size_t>(pos)] = 0;
+    }
+
+    const auto base = rs63RemainderForTest(symbols);
+    std::vector<std::vector<uint8_t>> matrix(28, std::vector<uint8_t>(erasures.size() + 1, 0));
+    for (size_t c = 0; c < erasures.size(); ++c) {
+        std::array<uint8_t, 63> unit{};
+        unit[static_cast<size_t>(erasures[c])] = 1;
+        const auto rem = rs63RemainderForTest(unit);
+        for (size_t r = 0; r < rem.size(); ++r) matrix[r][c] = rem[r] & 0x3fu;
+    }
+    for (size_t r = 0; r < base.size(); ++r) matrix[r][erasures.size()] = base[r] & 0x3fu;
+
+    size_t rank = 0;
+    std::vector<size_t> pivotCol;
+    for (size_t col = 0; col < erasures.size() && rank < matrix.size(); ++col) {
+        size_t pivot = rank;
+        while (pivot < matrix.size() && matrix[pivot][col] == 0) ++pivot;
+        REQUIRE(pivot < matrix.size());
+        if (pivot != rank) std::swap(matrix[pivot], matrix[rank]);
+
+        const uint8_t inv = gf64InvForTest(matrix[rank][col]);
+        REQUIRE(inv != 0);
+        for (size_t j = col; j <= erasures.size(); ++j) {
+            matrix[rank][j] = gf64MulForTest(matrix[rank][j], inv);
+        }
+        for (size_t r = 0; r < matrix.size(); ++r) {
+            if (r == rank || matrix[r][col] == 0) continue;
+            const uint8_t scale = matrix[r][col];
+            for (size_t j = col; j <= erasures.size(); ++j) {
+                matrix[r][j] ^= gf64MulForTest(scale, matrix[rank][j]);
+            }
+        }
+        pivotCol.push_back(col);
+        ++rank;
+    }
+
+    for (const auto& row : matrix) {
+        bool anyCoeff = false;
+        for (size_t c = 0; c < erasures.size(); ++c) anyCoeff = anyCoeff || row[c] != 0;
+        REQUIRE((anyCoeff || row[erasures.size()] == 0));
+    }
+    REQUIRE(rank == erasures.size());
+
+    for (size_t r = 0; r < pivotCol.size(); ++r) {
+        const size_t c = pivotCol[r];
+        symbols[static_cast<size_t>(erasures[c])] = matrix[r][erasures.size()] & 0x3fu;
+    }
+    const auto check = rs63RemainderForTest(symbols);
+    for (uint8_t v : check) REQUIRE((v & 0x3fu) == 0);
+    return symbols;
 }
 
 uint16_t p25Phase2Crc12ForTest(const std::vector<uint8_t>& bits, size_t len)
@@ -305,22 +417,25 @@ std::vector<int> makeSyntheticPhase2SlowAcchPayloadForTest(uint8_t duid, const s
     REQUIRE(bits.size() == 180);
 
     std::array<uint8_t, 63> symbols{};
-    for (size_t sym = 5, bit = 0; sym < 35 && bit + 5 < bits.size(); ++sym, bit += 6) {
-        symbols[sym] = static_cast<uint8_t>((bits[bit] << 5) |
-                                            (bits[bit + 1] << 4) |
-                                            (bits[bit + 2] << 3) |
-                                            (bits[bit + 3] << 2) |
-                                            (bits[bit + 4] << 1) |
-                                            bits[bit + 5]);
+    for (size_t i = 0, bit = 0; i < 30 && bit + 5 < bits.size(); ++i, bit += 6) {
+        symbols[57u - i] = static_cast<uint8_t>((bits[bit] << 5) |
+                                                (bits[bit + 1] << 4) |
+                                                (bits[bit + 2] << 3) |
+                                                (bits[bit + 3] << 2) |
+                                                (bits[bit + 4] << 1) |
+                                                bits[bit + 5]);
     }
-    const auto parity = rs63RemainderForTest(symbols);
-    for (size_t i = 0; i < parity.size(); ++i) symbols[35 + i] = parity[i];
-    const auto parityCheck = rs63RemainderForTest(symbols);
-    for (uint8_t v : parityCheck) REQUIRE((v & 0x3fu) == 0);
+    std::vector<int> parityPositions;
+    parityPositions.reserve(28);
+    for (int pos = 0; pos <= 27; ++pos) parityPositions.push_back(pos);
+    symbols = rs63SolveErasuresForTest(symbols, parityPositions);
 
     std::vector<uint8_t> codedBits;
     codedBits.reserve(312);
-    for (size_t sym = 5; sym <= 56; ++sym) appendSymbolBitsForTest(codedBits, symbols[sym]);
+    // Match sdrtrunk SacchTimeslot/LcchTimeslot exactly:
+    // INFO_1..30 are output[x=57..28], PARITY_1..22 are input[x=27..6].
+    for (int sym = 57; sym >= 28; --sym) appendSymbolBitsForTest(codedBits, symbols[static_cast<size_t>(sym)]);
+    for (int sym = 27; sym >= 6; --sym) appendSymbolBitsForTest(codedBits, symbols[static_cast<size_t>(sym)]);
     REQUIRE(codedBits.size() == 312);
 
     std::vector<int> payload(160, 0);
@@ -1066,6 +1181,37 @@ TEST_CASE("P25 live decoder locks offset RTL-rate synthetic C4FM IQ")
     REQUIRE(result.rawTsbkBlocks.front().crcValid);
 }
 
+TEST_CASE("P25 live decoder skips CQPSK fallback after trusted C4FM control payload")
+{
+    auto tsbk = makeTsbk(0x02);
+    writeBitsMsb(tsbk, 16, 16, 0x1001);
+    writeBitsMsb(tsbk, 32, 16, 2001);
+    finishTsbkCrc(tsbk);
+    const auto bits = makeSyntheticTsduFrameBits(0x456, tsbk);
+
+    constexpr double sampleRate = 2048000.0;
+    constexpr double centerHz = 419112500.0;
+    constexpr double carrierOffsetHz = 13250.0;
+    const auto iq = makeC4fmIq(bits, sampleRate, carrierOffsetHz, 600.0, 0.37);
+
+    P25LiveDecoderConfig cfg;
+    cfg.enableC4fmFixedPhaseSearch = true;
+    cfg.maxC4fmFixedPhaseCandidates = 10;
+    cfg.enableCqpskSearch = true;
+    cfg.enablePhase2Decode = false;
+    cfg.stopC4fmSearchOnHardLock = true;
+    cfg.maxCqpskSearchCandidates = 32;
+    P25LiveDecoder decoder(cfg);
+
+    const auto result = decoder.processIq(iq, sampleRate, centerHz, centerHz + carrierOffsetHz);
+
+    REQUIRE(result.stats.c4fmHardLockSkippedCqpsk);
+    REQUIRE(result.stats.cqpskCandidatesEvaluated == 0);
+    REQUIRE(result.stats.demodPath.find("C4FM") != std::string::npos);
+    REQUIRE_FALSE(result.rawTsbkBlocks.empty());
+    REQUIRE(result.rawTsbkBlocks.front().crcValid);
+}
+
 TEST_CASE("P25 live decoder locks offset RTL-rate synthetic CQPSK LSM IQ")
 {
     auto tsbk = makeTsbk(0x02);
@@ -1094,6 +1240,37 @@ TEST_CASE("P25 live decoder locks offset RTL-rate synthetic CQPSK LSM IQ")
     REQUIRE(result.stats.softDecisionQuality > 0.10);
     REQUIRE(result.stats.softBitLlrMean > 0.10);
     REQUIRE(std::abs(result.stats.cqpskResidualCarrierHz) < 120.0);
+}
+
+TEST_CASE("P25 live decoder keeps CQPSK fallback when C4FM has no trusted control payload")
+{
+    constexpr double sampleRate = 2048000.0;
+    constexpr double centerHz = 419112500.0;
+    constexpr double carrierOffsetHz = -7250.0;
+    std::vector<std::complex<float>> iq(static_cast<size_t>(sampleRate * 0.025), {});
+    double phase = 0.0;
+    const double step = 2.0 * kTestPi * carrierOffsetHz / sampleRate;
+    for (auto& sample : iq) {
+        sample = std::complex<float>(
+            static_cast<float>(0.25 * std::cos(phase)),
+            static_cast<float>(0.25 * std::sin(phase)));
+        phase += step;
+    }
+
+    P25LiveDecoderConfig cfg;
+    cfg.enableC4fmFixedPhaseSearch = true;
+    cfg.maxC4fmFixedPhaseCandidates = 10;
+    cfg.enableCqpskSearch = true;
+    cfg.enablePhase2Decode = false;
+    cfg.stopC4fmSearchOnHardLock = true;
+    cfg.maxCqpskSearchCandidates = 32;
+    P25LiveDecoder decoder(cfg);
+
+    const auto result = decoder.processIq(iq, sampleRate, centerHz, centerHz + carrierOffsetHz);
+
+    REQUIRE_FALSE(result.stats.c4fmHardLockSkippedCqpsk);
+    REQUIRE(result.stats.cqpskCandidatesEvaluated > 0);
+    REQUIRE(result.rawTsbkBlocks.empty());
 }
 
 TEST_CASE("P25 live decoder removes persistent front-end DC from C4FM IQ")
@@ -1304,6 +1481,26 @@ TEST_CASE("P25 live decoder extracts Phase 2 4V burst voice codewords")
     REQUIRE(result.stats.bestPhase2SyncErrors == 0);
 }
 
+TEST_CASE("P25 Phase 2 hard framer rejects uncorrected rotated sync patterns", "[p25]")
+{
+    // SDRTrunk uses rotated Phase-2 sync words as constellation/PLL correction
+    // evidence, not as valid message-frame starts.  The demod candidate layer
+    // must correct the dibit mapping first; otherwise the timeslot payload is
+    // still rotated and MAC/ESS/AMBE extraction becomes plausible-looking noise.
+    constexpr uint64_t sdrtrunkPhase2Error180 = 0xA8A2A80800ull;
+    auto dibits = makeSyntheticPhase2Burst(0x0);
+    const auto rotated = phase2DibitsFromWordForTest(sdrtrunkPhase2Error180);
+    std::copy(rotated.begin(), rotated.end(), dibits.begin());
+
+    P25LiveDecoder decoder;
+    const auto bursts = decoder.processPhase2HardDibits(dibits);
+    REQUIRE(bursts.empty());
+
+    const auto result = decoder.processHardDibits(dibits);
+    REQUIRE(result.stats.phase2Bursts == 0);
+    REQUIRE(result.stats.phase2VoiceCodewords == 0);
+}
+
 TEST_CASE("P25 live decoder corrects Phase 2 DUID and extracts 2V bursts")
 {
     P25LiveDecoder decoder;
@@ -1379,6 +1576,28 @@ TEST_CASE("P25 live decoder locks Phase 2 superframes and annotates all TDMA bur
     REQUIRE(result.stats.phase2VoiceCodewords == 48);
     REQUIRE(result.stats.phase2MaskedBursts == 0);
     REQUIRE(result.stats.phase2IschSync == 6);
+}
+
+TEST_CASE("P25 live decoder preserves final-fragment slot order when I-ISCH is unavailable", "[p25]")
+{
+    P25LiveDecoder decoder;
+    auto dibits = makeSyntheticPhase2Superframe();
+    const auto sync = P25LiveDecoder::phase2FrameSyncDibits();
+
+    // Force the final fragment's A/B words to S-ISCH-style sync so the decoder
+    // cannot derive a reliable I-ISCH location. The fallback must stay on the
+    // standards 0..11 superframe order, where final-fragment C/D are swapped.
+    for (size_t slot : {size_t{8}, size_t{9}}) {
+        const size_t base = slot * P25LiveDecoder::Phase2BurstDibits;
+        std::copy(sync.begin(), sync.end(), dibits.begin() + static_cast<std::ptrdiff_t>(base));
+    }
+
+    const auto bursts = decoder.processPhase2HardDibits(dibits);
+    REQUIRE(bursts.size() == 12);
+    REQUIRE(bursts[10].grantSlotKnown);
+    REQUIRE(bursts[11].grantSlotKnown);
+    REQUIRE(bursts[10].grantSlot == 1);
+    REQUIRE(bursts[11].grantSlot == 0);
 }
 
 TEST_CASE("P25 live decoder emits stable Phase 2 session codeword IDs")
@@ -1523,7 +1742,7 @@ TEST_CASE("P25 live decoder searches Phase 2 XOR mask phase using MAC CRC eviden
     REQUIRE(releasedWithoutLocalMac);
 }
 
-TEST_CASE("P25 live decoder releases Phase 2 late-entry voice from CRC-valid clear MAC_ACTIVE group user")
+TEST_CASE("P25 live decoder tracks clear MAC_ACTIVE group user without releasing Phase 2 audio")
 {
     constexpr uint16_t nac = 0x2d2;
     constexpr uint32_t wacn = 0xbee00;
@@ -1551,23 +1770,23 @@ TEST_CASE("P25 live decoder releases Phase 2 late-entry voice from CRC-valid cle
     REQUIRE(macBurst->trafficTalkgroupId == talkgroupId);
     REQUIRE_FALSE(macBurst->trafficEncrypted);
     REQUIRE_FALSE(macBurst->encrypted);
-    REQUIRE(macBurst->sessionAudioRelease);
+    REQUIRE_FALSE(macBurst->sessionAudioRelease);
     REQUIRE(macBurst->grantSlotKnown);
 
-    size_t releasedVoiceBursts = 0;
+    size_t trackedVoiceBursts = 0;
     for (const auto& voiceBurst : result.phase2Bursts) {
         if (voiceBurst.voiceCodewords.empty()) continue;
         if (voiceBurst.dibitOffset <= macBurst->dibitOffset) continue;
         if (!voiceBurst.grantSlotKnown || voiceBurst.grantSlot != macBurst->grantSlot) continue;
-        if (!voiceBurst.sessionAudioRelease) continue;
         REQUIRE(voiceBurst.trafficSecurityKnown);
         REQUIRE(voiceBurst.trafficTalkgroupKnown);
         REQUIRE(voiceBurst.trafficTalkgroupId == talkgroupId);
         REQUIRE_FALSE(voiceBurst.trafficEncrypted);
         REQUIRE_FALSE(voiceBurst.encrypted);
-        ++releasedVoiceBursts;
+        REQUIRE_FALSE(voiceBurst.sessionAudioRelease);
+        ++trackedVoiceBursts;
     }
-    REQUIRE(releasedVoiceBursts > 0);
+    REQUIRE(trackedVoiceBursts > 0);
 }
 
 TEST_CASE("P25 live decoder keeps Phase 2 MAC_ACTIVE encrypted group user muted")
@@ -1778,6 +1997,31 @@ TEST_CASE("P25 live decoder decodes clear Phase 2 LCCH without XOR mask")
     REQUIRE(pdu->detectedKind == pdu->source);
 }
 
+TEST_CASE("P25 live decoder repairs SDRTrunk-layout Phase 2 ACCH RS symbol errors", "[p25]")
+{
+    auto dibits = makeSyntheticPhase2SuperframeWithLcchForTest();
+    const size_t payloadBase =
+        2 * P25LiveDecoder::Phase2BurstDibits + P25LiveDecoder::Phase2FrameSyncDibits;
+    REQUIRE(payloadBase + 1 < dibits.size());
+    dibits[payloadBase + 1] ^= 0x02; // One INFO_1 symbol bit error; DUID bits stay intact.
+
+    P25LiveDecoder decoder;
+    const auto result = decoder.processHardDibits(dibits);
+
+    REQUIRE(result.stats.phase2Bursts == 12);
+    REQUIRE(result.stats.phase2MacCrcValid >= 1);
+    REQUIRE(result.stats.phase2MacRsDecoded >= 1);
+
+    const auto pdu = std::find_if(result.phase2MacPdus.begin(), result.phase2MacPdus.end(), [](const P25Phase2MacPdu& p) {
+        return p.source == P25Phase2BurstKind::LcchClear && p.crcValid;
+    });
+    REQUIRE(pdu != result.phase2MacPdus.end());
+    REQUIRE(pdu->rsDecoded);
+    REQUIRE_FALSE(pdu->directCrcOk);
+    REQUIRE(pdu->opcode == 0);
+    REQUIRE(pdu->bytes.size() == 19);
+}
+
 TEST_CASE("P25 live decoder decodes informational Phase 2 ISCH fields")
 {
     auto dibits = makeSyntheticPhase2Superframe();
@@ -1877,20 +2121,32 @@ TEST_CASE("P25 IMBE voice decoder reports backend availability explicitly")
 
 TEST_CASE("P25 live decoder aligns absolute dibit cursor on traffic chunks")
 {
+    auto chunk = [](int dibit) {
+        return std::vector<int>(180, dibit);
+    };
+
     P25LiveDecoder decoder;
     decoder.alignPhase2AbsoluteDibitCursor(1000, 180);
-    decoder.processHardDibits(std::vector<int>(180, 0));
+    REQUIRE(decoder.phase2StreamDibitCursorForDiagnostics() == 1000);
+    decoder.processHardDibits(chunk(0));
+    REQUIRE(decoder.phase2StreamDibitCursorForDiagnostics() == 1180);
+
     decoder.alignPhase2AbsoluteDibitCursor(1180, 180);
-    decoder.processHardDibits(std::vector<int>(180, 0));
+    REQUIRE(decoder.phase2StreamDibitCursorForDiagnostics() == 1180);
+    decoder.processHardDibits(chunk(1));
+    REQUIRE(decoder.phase2StreamDibitCursorForDiagnostics() == 1360);
 
     // Large gap should drop sticky tail without crashing.
     decoder.alignPhase2AbsoluteDibitCursor(5000, 180);
-    decoder.processHardDibits(std::vector<int>(180, 0));
+    REQUIRE(decoder.phase2StreamDibitCursorForDiagnostics() == 5000);
+    decoder.processHardDibits(chunk(2));
+    REQUIRE(decoder.phase2StreamDibitCursorForDiagnostics() == 5180);
 
     // Rewind should force stream discontinuity without crashing.
     decoder.alignPhase2AbsoluteDibitCursor(500, 180);
-    decoder.processHardDibits(std::vector<int>(180, 0));
-    SUCCEED("gap and rewind handled without crash");
+    REQUIRE(decoder.phase2StreamDibitCursorForDiagnostics() == 500);
+    decoder.processHardDibits(chunk(3));
+    REQUIRE(decoder.phase2StreamDibitCursorForDiagnostics() == 680);
 }
 
 TEST_CASE("P25 live decoder independent probe copy starts fresh without parent session state")

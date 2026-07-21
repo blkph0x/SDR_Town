@@ -150,7 +150,8 @@ public:
     std::vector<P25ControlEvent> ingestPhase2MacPdu(uint8_t pduType,
                                                     uint8_t pduOffset,
                                                     const std::vector<uint8_t>& bytes,
-                                                    bool crcValid = true);
+                                                    bool crcValid = true,
+                                                    size_t macStructureMaxBits = 0);
 
     // Ingest one decoded Phase 1 packet data unit.  AMBTC grants are normalized
     // into the same control events as TSBK and Phase 2 MAC grants.
@@ -189,7 +190,8 @@ private:
     std::vector<P25ControlEvent> parseGrantBlock(const std::vector<uint8_t>& b);
     std::vector<P25ControlEvent> parsePhase2MacMessages(uint8_t pduType,
                                                         uint8_t pduOffset,
-                                                        const std::vector<uint8_t>& bytes);
+                                                        const std::vector<uint8_t>& bytes,
+                                                        size_t macStructureMaxBits);
     void applyExplicitChannel(P25ControlEvent& event, uint16_t downlinkChannel, uint16_t uplinkChannel) const;
     void annotateVoiceChannel(P25ControlEvent& event, uint16_t channel) const;
     void annotateSystemMetadata(P25ControlEvent& event) const;

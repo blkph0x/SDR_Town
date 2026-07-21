@@ -15,13 +15,14 @@ struct P25P2CallAudioKey {
     uint16_t systemId = 0;
     uint32_t talkgroupId = 0;
     uint32_t sourceId = 0;
+    uint64_t callSessionId = 0;
     uint8_t slot = 0xffu;
     int64_t frequencyHz = 0;
     int64_t grantEpochMs = 0;
 
     bool valid() const noexcept
     {
-        return talkgroupId != 0 && slot < 2 && frequencyHz > 0;
+        return talkgroupId != 0 && slot < 2 && frequencyHz > 0 && callSessionId != 0;
     }
 
     bool operator==(const P25P2CallAudioKey& other) const noexcept
@@ -30,14 +31,19 @@ struct P25P2CallAudioKey {
             wacn == other.wacn &&
             systemId == other.systemId &&
             talkgroupId == other.talkgroupId &&
+            sourceId == other.sourceId &&
+            callSessionId == other.callSessionId &&
             slot == other.slot &&
-            frequencyHz == other.frequencyHz;
+            frequencyHz == other.frequencyHz &&
+            grantEpochMs == other.grantEpochMs;
     }
 };
 
 struct P25P2PendingAmbeFrame {
     std::array<uint8_t, 96> ambe96{};
     uint8_t voiceIndex = 0;
+    bool grantSlotKnown = false;
+    uint8_t grantSlot = 0xffu;
     bool haveAbsoluteDibits = false;
     uint64_t codewordAbsDibit = 0;
     uint64_t codewordEndAbsDibit = 0;
@@ -58,10 +64,15 @@ struct P25AudioResamplerState {
     float histY0 = 0.0f;
     bool haveHist = false;
     float longTermPeak = 0.5f;
+    float dcBlockX1 = 0.0f;
+    float dcBlockY1 = 0.0f;
 };
 
 struct P25Phase2AmbeEmitDedupeState {
     uint32_t talkgroupId = 0;
+    uint32_t sourceId = 0;
+    uint64_t callSessionId = 0;
+    int64_t grantEpochMs = 0;
     bool slotKnown = false;
     uint8_t slot = 0xffu;
     double voiceFreqHz = 0.0;
@@ -69,11 +80,43 @@ struct P25Phase2AmbeEmitDedupeState {
     std::vector<uint64_t> recentAbsDibits;
 };
 
+// Per-call 20 ms speech-frame sequencer (SDRTrunk/OP25 cadence).
+// Ordinal advances by one for each accepted/clear speech position; gaps emit
+// silence (not invent-PLC opposite-slot speech); duplicates/late frames drop.
+struct P25Phase2FrameSequencer {
+    uint64_t callSessionId = 0;
+    uint32_t talkgroupId = 0;
+    uint8_t slot = 0xffu;
+    int64_t grantEpochMs = 0;
+    bool armed = false;
+    bool haveBase = false;
+    uint64_t baseAbsDibit = 0;
+    int64_t nextOrdinal = 0;
+    int64_t lastAcceptedOrdinal = -1;
+    uint64_t gapSilenceFrames = 0;
+    uint64_t duplicateOrLateDrops = 0;
+    uint64_t acceptedFrames = 0;
+};
+
+// Monotonic per-call security latch: Unknown -> Clear or Unknown -> Encrypted
+// only. Never returns to Unknown until call/session reset.
+enum class P25CallSecurityLatch : uint8_t {
+    Unknown = 0,
+    Clear = 1,
+    Encrypted = 2
+};
+
 struct P25Phase2AudioTailState {
     int64_t lastFreshTargetVoiceMs = 0;
+    int64_t lastPlayoutBridgeMs = 0;
     uint64_t lastForwardedFedAbsDibit = 0;
     int consecutiveNoForwardFedWindows = 0;
     int consecutiveEmptyFeedWindows = 0;
+    int consecutivePlayoutBridgeFrames = 0;
+    // Last real speaker sample — used only to ramp clock-only silence bridges
+    // so island tails do not click when the ring switches to zeros.
+    float lastEmittedSample = 0.0f;
+    bool haveLastEmittedSample = false;
 };
 
 // Session-level sustain peaks survive per-window diagnostic resets.  sdrtrunk's
@@ -100,15 +143,19 @@ struct P25ReceiverSessionState {
     P25P2PendingAudioQueue pendingAudio;
     P25AudioResamplerState resampler;
     P25Phase2AmbeEmitDedupeState ambeDedupe;
+    P25Phase2FrameSequencer frameSequencer;
     P25Phase2AudioTailState audioTail;
     P25Phase2SessionSustainState sustain;
+    P25CallSecurityLatch callSecurityLatch = P25CallSecurityLatch::Unknown;
 
     void clearAll() noexcept
     {
         pendingAudio = {};
         resampler = {};
         ambeDedupe = {};
+        frameSequencer = {};
         audioTail = {};
         sustain = {};
+        callSecurityLatch = P25CallSecurityLatch::Unknown;
     }
 };

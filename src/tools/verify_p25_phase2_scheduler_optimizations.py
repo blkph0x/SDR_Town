@@ -17,7 +17,8 @@ checks = {
     'narrow decode-cadence-gap block': 'veryRecentSpeakerGap' in main,
     'lower minFresh floor': 'minDecodeFreshFloor = speakerSustainDecode ? 8192.0 : 16384.0' in main,
     'waiting-fresh logs effective minFresh': 'effMinFresh' in main,
-    '60ms playback prime': '0.060' in main.split('pushP25LiveStreamingAudio', 1)[1][:1200],
+    '120ms playback prime': '0.120' in main.split('pushP25LiveStreamingAudio', 1)[1][:2200],
+    '500ms p25 live target': '0.500' in main.split('pushP25LiveStreamingAudio', 1)[1][:3200],
     'ring already primed bypass': 'ringAlreadyPrimed' in main,
     'trust emitted pcm for carrier gate': (
         'phase2EmittedPcmFrames > 0 && p25Audio.decodedFrames > 0' in main

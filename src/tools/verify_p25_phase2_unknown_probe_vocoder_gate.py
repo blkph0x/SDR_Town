@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""Static regression for Phase 2 unknown-grant vocoder gate.
+"""Static regression for the Phase-2 unknown-grant vocoder gate.
 
-Unknown Phase 2 grants may be followed and queued into a bounded pending
-queue. Plain AMBE plausibility must not mark the call permanently clear.
-Target-slot PTT/ESS may release audio. Explicit clear control grants may tune
-and queue, but release only after the followed traffic slot proves clear; AMBE
-validation remains diagnostic until then. Unknown-grant field probing is a
-default-off lab diagnostic:
-it can be enabled for capture analysis, but normal GUI/CLI audio release
-remains fail-closed until MAC/ESS/PTT proves clear. Encrypted evidence still
-wins and mutes.
+Unknown Phase-2 grants may be followed, queued, and decoded through a throwaway
+AMBE probe for diagnostics. Probe plausibility must never mark a call clear or
+release speaker audio. Explicit clear control grants may select/follow a traffic
+slot, but queued pending AMBE still waits for target-slot PTT/session, ESS, or
+retained late-entry proof before speaker release. Encrypted evidence still wins
+and mutes.
 """
+
 from pathlib import Path
+
 src = Path(__file__).resolve().parents[1] / "main.cpp"
 text = src.read_text(encoding="utf-8", errors="replace")
+
 required = [
     "const bool grantUnknownProbe =",
     "const bool grantMayReleaseVoice =",
@@ -31,21 +31,14 @@ required = [
     "sdrtrunkLateEntryVoiceRelease",
     "p25Phase2ExplicitClearGrantVoiceReleaseEvidence",
     "p25Phase2UnknownGrantProbeVoiceReleaseEvidence",
-    "p25Phase2StrictLateEntryTargetVoiceEvidence",
-    "const bool strictLateEntryEvidence =",
-    "p25Phase2StrictLateEntryTargetVoiceEvidence(rx, out)",
-    "releasePendingRawVoiceFromValidatedUnknownGrantProbe",
-    "unknown-grant-probe-validated-release",
-    "out.phase2DiagnosticAmbeProbeAccepted >= kP25Phase2UnknownGrantAudioProbeMinFrames",
-    "out.decodedFrames >= static_cast<long long>(kP25Phase2ExplicitClearGrantProbeMinFrames)",
-    "releasePendingRawVoiceFromValidatedExplicitClearGrant",
-    "const bool validatedExplicitClearGrant =",
-    "const bool decodedExplicitClearPcm =",
-    "out.decodedFrames >= static_cast<long long>(kP25Phase2ExplicitClearGrantProbeMinFrames)",
+    "keepUnknownGrantProbeDiagnosticOnly",
+    "unknown-grant-probe-diagnostic-only",
+    "releasePendingRawVoiceFromExplicitClearTrafficProof",
+    "explicit-clear-grant-traffic-clear-release",
     "const bool targetTrafficClearEvidence =",
-    "out.phase2TargetSessionAudioRelease ||",
-    "(out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted)",
-    "!out.phase2TargetEssEncrypted",
+    "p25Phase2TargetHardClearEvidence(out)",
+    "p25Phase2TargetPttSessionClear",
+    "p25Phase2SdrtrunkLateEntryVoiceReleaseEvidence(rx, out)",
     "late-entry-audio-probe-diagnostic-only",
     "Unknown-security AMBE is queued first",
 ]
@@ -55,13 +48,13 @@ if missing:
     for item in missing:
         print("missing:", item)
     raise SystemExit(1)
-forbidden = "const bool voiceReleaseTrusted = burst.sessionAudioRelease || grantClearTrusted || grantUnknownProbe;"
-if forbidden in text:
-    print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
-    print("unknown probe still releases voice")
-    raise SystemExit(1)
+
 forbidden_fragments = [
     "explicit-clear-grant-target-release",
+    "explicit-clear-grant-validated-release",
+    "unknown-grant-probe-validated-release",
+    "releasePendingRawVoiceFromValidatedExplicitClearGrant",
+    "releasePendingRawVoiceFromValidatedUnknownGrantProbe",
     "fieldProbeClear ||",
     "voiceReleaseTrusted || burstSdrtrunkLateEntryVoiceRelease || lateEntryAudioProbeAllowed",
     "late-entry-field-audio-probe-release",
@@ -69,48 +62,67 @@ forbidden_fragments = [
     "const bool immediateAmbeDecodeAllowed =\n            grantClearTrusted",
     "clearGrantTargetReleaseAllowed",
     "bootstrappedMaskImmediateFeed",
+    "validatedExplicitClearGrantSeed",
+    "validatedControlClearSeed",
+    "boundedProbeAccepted",
+    "decodedExplicitClearPcm",
+    "p25Phase2StrictLateEntryTargetVoiceEvidence",
     "rx.p25VoiceClearKnown = true;\n        rx.p25VoiceEncrypted = false;",
 ]
 for fragment in forbidden_fragments:
     if fragment in text:
         print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
-        print("unsafe unknown-probe release marker remains:", fragment)
+        print("unsafe unknown/probe release marker remains:", fragment)
         raise SystemExit(1)
-release_block = text.split("auto releasePendingRawVoiceFromValidatedExplicitClearGrant = [&]() {", 1)
+
+release_block = text.split("auto releasePendingRawVoiceFromExplicitClearTrafficProof = [&]() {", 1)
 if len(release_block) != 2 or "p25Phase2StrongVoiceTimeslotPcm(out)" in release_block[1].split("};", 1)[0]:
     print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
-    print("explicit clear release must not require a full six-burst strong PCM window")
+    print("explicit clear release must not use a PCM/probe-quality shortcut")
     raise SystemExit(1)
+
 explicit_helper = text.split("static bool p25Phase2ExplicitClearGrantVoiceReleaseEvidence", 1)
 if len(explicit_helper) != 2:
     print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
     print("missing explicit-clear release evidence helper")
     raise SystemExit(1)
 explicit_body = explicit_helper[1].split("static bool p25Phase2UnknownGrantProbeVoiceReleaseEvidence", 1)[0]
-if "targetTrafficClearEvidence &&" not in explicit_body:
+if "targetTrafficClearEvidence;" not in explicit_body:
     print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
-    print("explicit clear release must wait for target traffic clear evidence")
+    print("explicit clear pending-drain helper must end on target traffic proof")
     raise SystemExit(1)
-if "out.phase2TargetSessionAudioRelease" not in explicit_body or "(out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted)" not in explicit_body:
+if ("p25Phase2TargetHardClearEvidence(out)" not in explicit_body or
+        "p25Phase2SdrtrunkLateEntryVoiceReleaseEvidence(rx, out)" not in explicit_body or
+        "out.phase2TargetSessionAudioRelease ||" in explicit_body):
     print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
-    print("explicit clear release must be target-slot ESS/session keyed")
+    print("explicit clear release must be target-slot PTT/ESS/late-entry keyed")
     raise SystemExit(1)
-if "out.phase2OppositeVoiceCodewords > 0 &&\n            !targetTrafficClearEvidence" not in text:
+if ("phase2DiagnosticAmbeProbeAccepted" in explicit_body or
+        "phase2CurrentProbePcmUsable" in explicit_body or
+        "p25AudioSamplesLookSafe" in explicit_body):
     print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
-    print("explicit clear probe must not run through ambiguous dual-slot voice before traffic proof")
+    print("explicit clear release still depends on diagnostic AMBE/PCM quality")
     raise SystemExit(1)
-if "boundedProbeAccepted &&" not in explicit_body:
+
+if ("out.phase2OppositeVoiceCodewords > 0 &&\n            !targetTrafficClearEvidence &&" not in text or
+        "!explicitGrantTargetSlotSelected" not in text):
     print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
-    print("explicit clear release must keep bounded diagnostic AMBE validation")
+    print("explicit clear probe must block ambiguous dual-slot voice but allow a selected target slot")
     raise SystemExit(1)
+
 unknown_block = text.split("static bool p25Phase2UnknownGrantProbeVoiceReleaseEvidence", 1)
 if len(unknown_block) != 2:
     print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
     print("missing unknown-grant release evidence helper")
     raise SystemExit(1)
 unknown_body = unknown_block[1].split("static bool p25Phase2WindowHasFreshTargetEvidence", 1)[0]
+if "return false;" not in unknown_body:
+    print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
+    print("unknown-grant probe helper must be diagnostic-only")
+    raise SystemExit(1)
 if "p25Phase2BootstrappedMaskTargetVoiceEvidence" in unknown_body:
     print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
     print("unknown-grant speaker release still allows one-burst bootstrap evidence")
     raise SystemExit(1)
+
 print("P25 Phase 2 unknown-grant vocoder gate regression: PASS")

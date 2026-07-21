@@ -590,7 +590,8 @@ std::vector<P25ControlEvent> P25ControlChannelAnalyzer::ingestTsbk(const std::ve
 std::vector<P25ControlEvent> P25ControlChannelAnalyzer::ingestPhase2MacPdu(uint8_t pduType,
                                                                             uint8_t pduOffset,
                                                                             const std::vector<uint8_t>& bytes,
-                                                                            bool crcValid)
+                                                                            bool crcValid,
+                                                                            size_t macStructureMaxBits)
 {
     if (!crcValid || bytes.empty()) return {};
 
@@ -654,7 +655,7 @@ std::vector<P25ControlEvent> P25ControlChannelAnalyzer::ingestPhase2MacPdu(uint8
         return events;
     }
 
-    events = parsePhase2MacMessages(normalizedPduType, normalizedPduOffset, bytes);
+    events = parsePhase2MacMessages(normalizedPduType, normalizedPduOffset, bytes, macStructureMaxBits);
     for (auto& ev : events) annotateSystemMetadata(ev);
     return events;
 }
@@ -915,10 +916,14 @@ void P25ControlChannelAnalyzer::applySndcpDataChannel(const std::vector<uint8_t>
 
 std::vector<P25ControlEvent> P25ControlChannelAnalyzer::parsePhase2MacMessages(uint8_t pduType,
                                                                                 uint8_t pduOffset,
-                                                                                const std::vector<uint8_t>& bytes)
+                                                                                const std::vector<uint8_t>& bytes,
+                                                                                size_t macStructureMaxBits)
 {
     std::vector<P25ControlEvent> events;
     if (bytes.size() < 2) return events;
+    const size_t maxStartBit = macStructureMaxBits > 0
+        ? std::min(macStructureMaxBits, bytes.size() * 8u)
+        : bytes.size() * 8u;
 
     auto addVoiceChannel = [&](P25ControlEvent& ev, uint16_t channel) {
         ev.channel = channel;
@@ -1139,7 +1144,7 @@ std::vector<P25ControlEvent> P25ControlChannelAnalyzer::parsePhase2MacMessages(u
     };
 
     size_t pos = 1; // byte 0 is the MAC PDU header.
-    while (pos < bytes.size()) {
+    while (pos < bytes.size() && pos * 8u < maxStartBit) {
         if (allRemainingZero(bytes, pos)) break;
         const uint8_t op = bytes[pos];
         const size_t len = phase2MacMessageLength(bytes, pos);

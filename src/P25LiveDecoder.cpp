@@ -1863,6 +1863,20 @@ bool hasPhase2TrafficTelemetry(const P25LiveDecodeResult& r)
         !r.phase2Bursts.empty();
 }
 
+bool hasTrustedPhase1ControlPayload(const P25LiveDecodeResult& r)
+{
+    const bool trustedTsbk = std::any_of(r.rawTsbkBlocks.begin(), r.rawTsbkBlocks.end(),
+        [](const P25TsbkBlock& block) {
+            return block.fecDecoded && block.crcValid;
+        });
+    if (trustedTsbk) return true;
+
+    return std::any_of(r.phase1Pdus.begin(), r.phase1Pdus.end(),
+        [](const P25Phase1PduMessage& pdu) {
+            return pdu.headerFecDecoded && pdu.headerCrcValid;
+        });
+}
+
 bool hasPhase2FastStopEvidence(const P25LiveDecodeResult& r)
 {
     // Do not fast-stop candidate search on untrusted Phase-2 telemetry alone.
@@ -2319,27 +2333,28 @@ uint8_t gf64Inv(uint8_t a)
     return gf64Pow(a, 62);
 }
 
+struct Rs63P25Tables {
+    std::array<int, 64> alphaTo{};
+    std::array<int, 64> indexOf{};
+};
+
+const Rs63P25Tables& rs63P25Tables();
+
 std::array<uint8_t, 28> rs63Remainder(const std::array<uint8_t, 63>& codeword)
 {
-    static constexpr std::array<uint8_t, 29> generator = {
-        001, 026, 055, 072, 075, 010, 026, 027, 056, 036,
-        004, 045, 073, 045, 016, 063, 033, 055, 007, 023,
-        002, 031, 036, 040, 007, 022, 001, 027, 034,
-    };
-    std::array<uint8_t, 63> work{};
-    for (size_t i = 0; i < work.size(); ++i) work[i] = static_cast<uint8_t>(codeword[i] & 0x3fu);
-
-    for (size_t i = 0; i < 35; ++i) {
-        const uint8_t coef = work[i] & 0x3fu;
-        if (coef == 0) continue;
-        work[i] = 0;
-        for (size_t j = 1; j < generator.size(); ++j) {
-            work[i + j] ^= gf64Mul(coef, generator[j]);
-        }
-    }
-
+    const auto& gf = rs63P25Tables();
     std::array<uint8_t, 28> rem{};
-    for (size_t i = 0; i < rem.size(); ++i) rem[i] = static_cast<uint8_t>(work[35 + i] & 0x3fu);
+    for (int root = 1; root <= 28; ++root) {
+        int syndrome = 0;
+        for (int symbol = 0; symbol < 63; ++symbol) {
+            const int value = static_cast<int>(codeword[static_cast<size_t>(symbol)] & 0x3fu);
+            const int index = gf.indexOf[static_cast<size_t>(value)];
+            if (index != -1) {
+                syndrome ^= gf.alphaTo[static_cast<size_t>((index + root * symbol) % 63)];
+            }
+        }
+        rem[static_cast<size_t>(root - 1)] = static_cast<uint8_t>(syndrome & 0x3f);
+    }
     return rem;
 }
 
@@ -2349,11 +2364,6 @@ struct Phase2RsDecodeResult {
     int correctedSymbols = 0;
 };
 
-
-struct Rs63P25Tables {
-    std::array<int, 64> alphaTo{};
-    std::array<int, 64> indexOf{};
-};
 
 const Rs63P25Tables& rs63P25Tables()
 {
@@ -2722,7 +2732,12 @@ Phase2RsDecodeResult rs63DecodeWithUnknownSymbolErrors(std::array<uint8_t, 63> s
     // It treats shortened/punctured positions as zero-valued symbols and can
     // correct unknown symbol errors across the full RS(63,35,29) word.
     auto bm = rs63DecodeBerlekampMasseyP25(symbols);
-    if (bm.ok) return bm;
+    if (bm.ok) {
+        const auto check = rs63Remainder(bm.symbols);
+        if (std::all_of(check.begin(), check.end(), [](uint8_t v) { return (v & 0x3fu) == 0; })) {
+            return bm;
+        }
+    }
 
     auto base = rs63DecodeErasures(symbols, erasures);
     if (base.ok || maxUnknownSymbols == 0) return base;
@@ -3159,8 +3174,11 @@ Phase2TrafficMacSecurity phase2TrafficMacSecurityFromCrcPdu(const P25Phase2MacPd
     // service options are authoritative encryption evidence for the target TG.
     if (pduType != 4 && pduType != 6) return out; // PTT/ESS is handled separately.
 
+    const size_t maxStartBit = pdu.macStructureMaxBits > 0
+        ? std::min(pdu.macStructureMaxBits, pdu.bytes.size() * 8u)
+        : pdu.bytes.size() * 8u;
     size_t pos = 1;
-    while (pos < pdu.bytes.size()) {
+    while (pos < pdu.bytes.size() && pos * 8u < maxStartBit) {
         if (phase2AllRemainingZero(pdu.bytes, pos)) break;
         const uint8_t op = pdu.bytes[pos];
         if (op == 0x00) break;
@@ -3192,18 +3210,17 @@ Phase2TrafficMacSecurity phase2TrafficMacSecurityFromCrcPdu(const P25Phase2MacPd
     return out;
 }
 
-bool phase2DirectCrcMacPduLooksSdrtrunkParseable(const P25Phase2MacPdu& pdu, size_t macContentBits)
+bool phase2DirectCrcMacPduLooksSdrtrunkParseable(const P25Phase2MacPdu& pdu, size_t macStructureMaxBits)
 {
     if (pdu.bytes.empty()) return false;
     const uint8_t pduType = static_cast<uint8_t>((pdu.bytes[0] >> 5) & 0x07u);
     if (pduType == 5 || pduType == 7) return false;
 
-    const size_t maxBytes = std::min(pdu.bytes.size(), (macContentBits + 7u) / 8u);
     switch (pduType) {
         case 1: // MAC_PTT has fixed ESS/current-call fields instead of MAC structures.
-            return maxBytes >= 13u;
+            return pdu.bytes.size() >= 13u;
         case 2: // MAC_END_PTT.
-            return maxBytes >= 3u;
+            return pdu.bytes.size() >= 3u;
         case 0:
         case 3:
         case 4:
@@ -3213,14 +3230,17 @@ bool phase2DirectCrcMacPduLooksSdrtrunkParseable(const P25Phase2MacPdu& pdu, siz
             return false;
     }
 
+    const size_t maxStartBit = macStructureMaxBits > 0
+        ? std::min(macStructureMaxBits, pdu.bytes.size() * 8u)
+        : pdu.bytes.size() * 8u;
     size_t pos = 1;
     size_t structures = 0;
-    while (pos < maxBytes) {
+    while (pos < pdu.bytes.size() && pos * 8u < maxStartBit) {
         if (phase2AllRemainingZero(pdu.bytes, pos)) return true;
         const uint8_t op = pdu.bytes[pos];
         if (op == 0x00) return true;
         const size_t len = phase2MacStructureLengthForLiveValidation(pdu.bytes, pos);
-        if (len == 0 || pos + len > maxBytes) return false;
+        if (len == 0 || pos + len > pdu.bytes.size()) return false;
         ++structures;
         if (structures >= 3) return true;
         pos += len;
@@ -3312,6 +3332,7 @@ std::optional<P25Phase2MacPdu> decodePhase2Acch(const std::vector<int>& payloadD
         if (codedBits.size() != expectedBits) return std::nullopt;
 
         const size_t macContentBits = fast ? 144u : (lcch ? 152u : 168u);
+        const size_t macStructureMaxBits = fast ? 144u : (lcch ? 152u : 99u);
         const size_t crcProtectedBits = fast ? 144u : (lcch ? 164u : 168u);
         const size_t totalPayloadBits = fast ? 156u : 180u;
 
@@ -3331,6 +3352,7 @@ std::optional<P25Phase2MacPdu> decodePhase2Acch(const std::vector<int>& payloadD
             pdu.acchBitOrderSwapped = swapBitOrder;
             pdu.acchDibitInverted = invertDibit;
             pdu.acchSlipDibits = acchSlipDibits;
+            pdu.macStructureMaxBits = macStructureMaxBits;
             pdu.bytes = packBitsToBytes(messageBits, macContentBits);
             if (!pdu.bytes.empty()) {
                 pdu.opcode = static_cast<uint8_t>((pdu.bytes[0] >> 5) & 0x07u);
@@ -3363,7 +3385,7 @@ std::optional<P25Phase2MacPdu> decodePhase2Acch(const std::vector<int>& payloadD
             auto directPdu = makePduFromBits(directBits, false, directCrcOk, 0);
             directPdu.directCrcOk = directCrcOk;
             directPdu.directCrcParseable =
-                directCrcOk && phase2DirectCrcMacPduLooksSdrtrunkParseable(directPdu, macContentBits);
+                directCrcOk && phase2DirectCrcMacPduLooksSdrtrunkParseable(directPdu, macStructureMaxBits);
             directDiagnosticPdu = directPdu;
             if (directPdu.directCrcParseable) {
                 directPdu.valid = true;
@@ -3815,6 +3837,60 @@ uint8_t phase2TrafficSlotFromSuperframeBurstIndex(size_t superframeBurstIndex) n
     }
 }
 
+std::optional<uint8_t> phase2FragmentLocationFromIisch(const std::vector<int>& dibits,
+                                                       size_t fragmentStartDibit)
+{
+    std::optional<uint8_t> location;
+
+    // A and B are the I-ISCH-bearing bursts in each 720-dibit fragment.
+    // C/D carry S-ISCH, so use the A/B location when the whole fragment is in
+    // the rolling buffer. If neither A nor B is usable, fall back to the
+    // physical 0..11 mapping below.
+    for (size_t local = 0; local < 2; ++local) {
+        const size_t ischDibit = fragmentStartDibit + local * P25LiveDecoder::Phase2BurstDibits;
+        if (ischDibit + P25LiveDecoder::Phase2FrameSyncDibits > dibits.size()) continue;
+
+        const auto isch = decodePhase2IschAt(dibits, ischDibit);
+        if (!isch.valid || isch.sync || isch.location > 2) continue;
+        if (isch.errors >= 0 && isch.errors >= 3) continue;
+
+        if (location && *location != isch.location) {
+            return std::nullopt;
+        }
+        location = isch.location;
+    }
+
+    return location;
+}
+
+uint8_t phase2TrafficSlotFromFragmentLocalIndex(size_t fragmentLocalIndex,
+                                                std::optional<uint8_t> fragmentLocation) noexcept
+{
+    const bool finalFragment = fragmentLocation && *fragmentLocation == 2u;
+    switch (fragmentLocalIndex & 0x03u) {
+        case 0: return 0;                  // A
+        case 1: return 1;                  // B
+        case 2: return finalFragment ? 1u : 0u; // C
+        case 3:
+        default: return finalFragment ? 0u : 1u; // D
+    }
+}
+
+uint8_t phase2TrafficSlotForSuperframeBurst(const std::vector<int>& dibits,
+                                            size_t superframeOffset,
+                                            size_t superframeBurstIndex)
+{
+    // SDRTrunk binds A/B/C/D timeslot ownership to the physical fragment position.
+    // I-ISCH fragment location is used for epoch scoring / scrambling-segment
+    // selection — not for re-labeling grant slots.  Field 20260720_063846 showed
+    // I-ISCH override flipping C/D ownership on a clear slot-0 call: target VCWs
+    // were counted as oppVcw/wrongSlot, invent-PLC was correctly disabled, and
+    // the speaker got empty-audio holes.  Keep physical mapping here.
+    (void)dibits;
+    (void)superframeOffset;
+    return phase2TrafficSlotFromSuperframeBurstIndex(superframeBurstIndex);
+}
+
 // Per logical traffic slot, voice ESS fragments progress in channel order.
 // This is the sequence order used by sdrtrunk's getChannel1Timeslots()/
 // getChannel2Timeslots(), including the final-fragment C/D inversion.
@@ -3829,6 +3905,18 @@ int phase2LogicalVoiceSequenceIndex(size_t superframeBurstIndex) noexcept
         case 10: case 11: return 5;
         default: return 0;
     }
+}
+
+int phase2LogicalVoiceSequenceIndexForSuperframeBurst(const std::vector<int>& dibits,
+                                                      size_t superframeOffset,
+                                                      size_t superframeBurstIndex)
+{
+    // Same rule as grant-slot labeling: ESS voice sequencing follows physical
+    // channel order (including final-fragment C/D inversion in the 0..11 map).
+    // Do not let a noisy I-ISCH location rewrite ESS assembly order mid-call.
+    (void)dibits;
+    (void)superframeOffset;
+    return phase2LogicalVoiceSequenceIndex(superframeBurstIndex);
 }
 
 std::optional<Phase2SyncHit> phase2SyncHitAt(const std::vector<Phase2SyncHit>& hits, size_t offset)
@@ -4045,7 +4133,8 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
                                    Phase2SessionState* session,
                                    std::vector<P25Phase2MacPdu>* macPdus,
                                    bool deepAcchSearch = true,
-                                   bool alternateAcchHypotheses = true)
+                                   bool alternateAcchHypotheses = true,
+                                   bool decodeAcch = true)
 {
     P25DecoderTraceScope trace("decodePhase2BurstAt");
     P25Phase2Burst burst;
@@ -4069,9 +4158,10 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
     const size_t trafficSuperframeBurstIndex = superframeBurstIndex % 12u;
     const size_t maskSuperframeBurstIndex =
         (superframeBurstIndex + (canApplyMask ? static_cast<size_t>(xorMaskPhase) : 0u)) % 12u;
-    burst.grantSlotKnown = superframeLocked;
-    burst.grantSlot = phase2TrafficSlotFromSuperframeBurstIndex(trafficSuperframeBurstIndex);
     burst.isch = decodePhase2IschAt(dibits, pos);
+    burst.grantSlotKnown = superframeLocked;
+    // Physical A/B/C/D map only (see phase2TrafficSlotForSuperframeBurst).
+    burst.grantSlot = phase2TrafficSlotFromSuperframeBurstIndex(trafficSuperframeBurstIndex);
 
     // sdrtrunk SuperFrameFragment separates each 360-bit Phase-2 burst into a
     // 40-bit I/S-ISCH word followed by a contiguous 320-bit timeslot.  This
@@ -4134,6 +4224,8 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
 
     {
         auto selectMacPdu = [&]() -> std::optional<P25Phase2MacPdu> {
+            if (!decodeAcch) return std::nullopt;
+
             // Prefer the decoded DUID/kind, but do not let a single DUID error
             // suppress MAC acquisition.  Different vendors and weak simulcast
             // conditions can produce stable TDMA superframe/mask hypotheses with noisy
@@ -4163,6 +4255,9 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
                 P25Phase2BurstKind::FacchClear,
                 P25Phase2BurstKind::LcchClear,
             };
+            const bool allowAlternateKindFanout =
+                alternateAcchHypotheses &&
+                (deepAcchSearch || !superframeLocked || xorMask == nullptr);
             std::array<int, 16> seen{};
             size_t seenCount = 0;
             auto tryKind = [&](P25Phase2BurstKind k, bool deep) -> std::optional<P25Phase2MacPdu> {
@@ -4183,6 +4278,11 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
                 return std::nullopt;
             };
             for (P25Phase2BurstKind k : candidates) {
+                // Match SDRTrunk/OP25 on the realtime hot path: the decoded
+                // DUID selects the timeslot type. Alternate-kind ACCH fanout is
+                // a bounded rescue/forensic operation only; doing it for every
+                // rolling GUI window can burn hundreds of ms and starve audio.
+                if (!allowAlternateKindFanout && k != burst.kind) break;
                 const int key = static_cast<int>(k);
                 bool duplicate = false;
                 for (size_t i = 0; i < seenCount; ++i) duplicate = duplicate || seen[i] == key;
@@ -4235,7 +4335,10 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
                         session->trafficTalkgroupId = 0;
                         session->ess = pdu->ess;
                         session->essTrusted = pdu->ess.known && pdu->ess.fecValidated;
-                        session->first4vSlot = static_cast<int>((phase2LogicalVoiceSequenceIndex(trafficSuperframeBurstIndex) + pdu->offset + 1) % 5);
+                        session->first4vSlot = static_cast<int>(
+                            (phase2LogicalVoiceSequenceIndexForSuperframeBurst(
+                                 dibits, superframeOffset, trafficSuperframeBurstIndex) +
+                             pdu->offset + 1) % 5);
                         phase2ResetEssFragments(*session);
                         break;
                     case 2: // MAC_END_PTT
@@ -4285,7 +4388,8 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
     if (hardVoice) {
         const auto& voicePayloadDibits = canApplyMask ? descrambledPayloadDibits : rawPayloadDibits;
         if (session && burst.xorMaskApplied && superframeLocked) {
-            const int logicalVoiceIndex = phase2LogicalVoiceSequenceIndex(trafficSuperframeBurstIndex);
+            const int logicalVoiceIndex = phase2LogicalVoiceSequenceIndexForSuperframeBurst(
+                dibits, superframeOffset, trafficSuperframeBurstIndex);
             std::optional<P25Phase2EssState> ess;
             if (session->first4vSlot >= 0) {
                 ess = decodePhase2VoiceEssWithCallEpoch(voicePayloadDibits, burst.kind, logicalVoiceIndex, *session);
@@ -4356,8 +4460,8 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
         burst.xorMaskApplied &&
         !burst.encrypted &&
         (session &&
-         ((burst.essKnown && (session->pttSeen || (session->essTrusted && session->ess.fecValidated))) ||
-          trafficClearRelease));
+         (burst.essKnown &&
+          (session->pttSeen || (session->essTrusted && session->ess.fecValidated))));
 
     return burst;
 }
@@ -4400,7 +4504,9 @@ Phase2MaskPhaseWindow scorePhase2MaskPhaseWindow(const std::vector<int>& dibits,
         const auto hit = phase2SyncHitNear(hits, expectedPos, 2);
         const size_t pos = hit ? hit->dibitOffset : expectedPos;
         if (pos + P25LiveDecoder::Phase2BurstDibits > dibits.size()) continue;
-        auto& slotSession = window.sessions[phase2TrafficSlotFromSuperframeBurstIndex(slot) & 0x01u];
+        const uint8_t trafficSlot =
+            phase2TrafficSlotForSuperframeBurst(dibits, lock.dibitOffset, slot);
+        auto& slotSession = window.sessions[trafficSlot & 0x01u];
         // Mask-phase scoring normally stays shallow.  Realtime late-entry can
         // optionally enable a bounded standards-only ACCH rescue pass when soft
         // AMBE evidence exists but no MAC/ESS phase has been proven yet.
@@ -5402,12 +5508,14 @@ P25LiveDecoder::P25LiveDecoder(const P25LiveDecoder& other)
       m_phase2MaskPhase(other.m_phase2MaskPhase),
       m_phase2MaskPhaseScore(other.m_phase2MaskPhaseScore),
       m_phase2MaskPhaseStarveWindows(other.m_phase2MaskPhaseStarveWindows),
+      m_phase2LastFullMaskPhaseHuntGeneration(other.m_phase2LastFullMaskPhaseHuntGeneration),
       m_phase2SuperframeAnchorKnown(other.m_phase2SuperframeAnchorKnown),
       m_phase2SuperframeAnchorDibit(other.m_phase2SuperframeAnchorDibit),
       m_phase2SuperframeAnchorGeneration(other.m_phase2SuperframeAnchorGeneration),
       m_phase2SuperframeAnchorMaskParams(other.m_phase2SuperframeAnchorMaskParams),
       m_phase2SuperframeAnchorMaskPhase(other.m_phase2SuperframeAnchorMaskPhase),
       m_phase2RecentCodewords(other.m_phase2RecentCodewords),
+      m_phase2RecentAcchDecodeBurstDibits(other.m_phase2RecentAcchDecodeBurstDibits),
       m_phase2DibitTail(other.m_phase2DibitTail),
       m_phase2NextCodewordId(other.m_phase2NextCodewordId),
       m_phase2DecodeGeneration(other.m_phase2DecodeGeneration),
@@ -5450,12 +5558,14 @@ P25LiveDecoder& P25LiveDecoder::operator=(const P25LiveDecoder& other)
     m_phase2MaskPhase = other.m_phase2MaskPhase;
     m_phase2MaskPhaseScore = other.m_phase2MaskPhaseScore;
     m_phase2MaskPhaseStarveWindows = other.m_phase2MaskPhaseStarveWindows;
+    m_phase2LastFullMaskPhaseHuntGeneration = other.m_phase2LastFullMaskPhaseHuntGeneration;
     m_phase2SuperframeAnchorKnown = other.m_phase2SuperframeAnchorKnown;
     m_phase2SuperframeAnchorDibit = other.m_phase2SuperframeAnchorDibit;
     m_phase2SuperframeAnchorGeneration = other.m_phase2SuperframeAnchorGeneration;
     m_phase2SuperframeAnchorMaskParams = other.m_phase2SuperframeAnchorMaskParams;
     m_phase2SuperframeAnchorMaskPhase = other.m_phase2SuperframeAnchorMaskPhase;
     m_phase2RecentCodewords = other.m_phase2RecentCodewords;
+    m_phase2RecentAcchDecodeBurstDibits = other.m_phase2RecentAcchDecodeBurstDibits;
     m_phase2DibitTail = other.m_phase2DibitTail;
     m_phase2NextCodewordId = other.m_phase2NextCodewordId;
     m_phase2DecodeGeneration = other.m_phase2DecodeGeneration;
@@ -5498,12 +5608,14 @@ P25LiveDecoder::P25LiveDecoder(P25LiveDecoder&& other) noexcept
       m_phase2MaskPhase(other.m_phase2MaskPhase),
       m_phase2MaskPhaseScore(other.m_phase2MaskPhaseScore),
       m_phase2MaskPhaseStarveWindows(other.m_phase2MaskPhaseStarveWindows),
+      m_phase2LastFullMaskPhaseHuntGeneration(other.m_phase2LastFullMaskPhaseHuntGeneration),
       m_phase2SuperframeAnchorKnown(other.m_phase2SuperframeAnchorKnown),
       m_phase2SuperframeAnchorDibit(other.m_phase2SuperframeAnchorDibit),
       m_phase2SuperframeAnchorGeneration(other.m_phase2SuperframeAnchorGeneration),
       m_phase2SuperframeAnchorMaskParams(other.m_phase2SuperframeAnchorMaskParams),
       m_phase2SuperframeAnchorMaskPhase(other.m_phase2SuperframeAnchorMaskPhase),
       m_phase2RecentCodewords(std::move(other.m_phase2RecentCodewords)),
+      m_phase2RecentAcchDecodeBurstDibits(std::move(other.m_phase2RecentAcchDecodeBurstDibits)),
       m_phase2DibitTail(std::move(other.m_phase2DibitTail)),
       m_phase2NextCodewordId(other.m_phase2NextCodewordId),
       m_phase2DecodeGeneration(other.m_phase2DecodeGeneration),
@@ -5519,6 +5631,7 @@ P25LiveDecoder::P25LiveDecoder(P25LiveDecoder&& other) noexcept
     other.m_streamTimingState = {};
     other.m_phase1BitTail.clear();
     other.m_phase2MaskPhaseStarveWindows = 0;
+    other.m_phase2LastFullMaskPhaseHuntGeneration = 0;
 }
 
 P25LiveDecoder& P25LiveDecoder::operator=(P25LiveDecoder&& other) noexcept
@@ -5549,18 +5662,21 @@ P25LiveDecoder& P25LiveDecoder::operator=(P25LiveDecoder&& other) noexcept
     m_phase2MaskPhase = other.m_phase2MaskPhase;
     m_phase2MaskPhaseScore = other.m_phase2MaskPhaseScore;
     m_phase2MaskPhaseStarveWindows = other.m_phase2MaskPhaseStarveWindows;
+    m_phase2LastFullMaskPhaseHuntGeneration = other.m_phase2LastFullMaskPhaseHuntGeneration;
     m_phase2SuperframeAnchorKnown = other.m_phase2SuperframeAnchorKnown;
     m_phase2SuperframeAnchorDibit = other.m_phase2SuperframeAnchorDibit;
     m_phase2SuperframeAnchorGeneration = other.m_phase2SuperframeAnchorGeneration;
     m_phase2SuperframeAnchorMaskParams = other.m_phase2SuperframeAnchorMaskParams;
     m_phase2SuperframeAnchorMaskPhase = other.m_phase2SuperframeAnchorMaskPhase;
     m_phase2RecentCodewords = std::move(other.m_phase2RecentCodewords);
+    m_phase2RecentAcchDecodeBurstDibits = std::move(other.m_phase2RecentAcchDecodeBurstDibits);
     m_phase2DibitTail = std::move(other.m_phase2DibitTail);
     m_phase2NextCodewordId = other.m_phase2NextCodewordId;
     m_phase2DecodeGeneration = other.m_phase2DecodeGeneration;
     m_phase2StreamDibits = other.m_phase2StreamDibits;
     m_cqpskLock = other.m_cqpskLock;
     other.m_phase2MaskPhaseStarveWindows = 0;
+    other.m_phase2LastFullMaskPhaseHuntGeneration = 0;
     m_frontEndDcEstimateValid = other.m_frontEndDcEstimateValid;
     m_frontEndDcSampleRate = other.m_frontEndDcSampleRate;
     m_frontEndDcEstimate = other.m_frontEndDcEstimate;
@@ -5605,12 +5721,14 @@ void P25LiveDecoder::reset()
     m_phase2MaskPhase = 0;
     m_phase2MaskPhaseScore = 0;
     m_phase2MaskPhaseStarveWindows = 0;
+    m_phase2LastFullMaskPhaseHuntGeneration = 0;
     m_phase2SuperframeAnchorKnown = false;
     m_phase2SuperframeAnchorDibit = 0;
     m_phase2SuperframeAnchorGeneration = 0;
     m_phase2SuperframeAnchorMaskParams = {};
     m_phase2SuperframeAnchorMaskPhase = 0;
     m_phase2RecentCodewords.clear();
+    m_phase2RecentAcchDecodeBurstDibits.clear();
     m_phase2DibitTail.clear();
     m_phase2NextCodewordId = 1;
     m_phase2DecodeGeneration = 0;
@@ -5641,19 +5759,27 @@ void P25LiveDecoder::alignPhase2AbsoluteDibitCursor(uint64_t chunkStartAbsolute,
 {
     if (chunkDibitCount == 0) return;
     const uint64_t chunkEnd = chunkStartAbsolute + static_cast<uint64_t>(chunkDibitCount);
-    if (chunkStartAbsolute > m_phase2StreamDibits + Phase2BurstDibits) {
+
+    auto clearTrafficContinuity = [&]() {
+        m_phase2DibitTail.clear();
+        m_phase2RecentAcchDecodeBurstDibits.clear();
+        m_phase2SuperframeAnchorKnown = false;
+    };
+
+    // This method is called before processHardDibits().  m_phase2StreamDibits
+    // must therefore be aligned to the start of the chunk; annotateSessionCodewords()
+    // advances it to the end after the chunk is actually consumed.
+    if (chunkStartAbsolute > m_phase2StreamDibits) {
         // Gap in the traffic feed: drop sticky tail so the next lock re-acquires cleanly.
-        m_phase2DibitTail.clear();
-        m_phase2SuperframeAnchorKnown = false;
-    } else if (chunkStartAbsolute + Phase2BurstDibits < m_phase2StreamDibits) {
+        clearTrafficContinuity();
+        m_phase2StreamDibits = chunkStartAbsolute;
+    } else if (chunkEnd < m_phase2StreamDibits &&
+               m_phase2StreamDibits - chunkEnd > Phase2BurstDibits) {
         // Cursor moved backward (ring reset / retune): force stream discontinuity.
-        m_phase2DibitTail.clear();
+        clearTrafficContinuity();
         m_phase2RecentCodewords.clear();
-        m_phase2SuperframeAnchorKnown = false;
         m_phase2DecodeGeneration++;
-    }
-    if (chunkEnd > m_phase2StreamDibits) {
-        m_phase2StreamDibits = chunkEnd;
+        m_phase2StreamDibits = chunkStartAbsolute;
     }
 }
 
@@ -5813,7 +5939,11 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         best.stats.demodPath = "CQPSK-search";
     }
 
-    if (!m_config.enableCqpskSearch) {
+    const bool c4fmControlHardLock =
+        !phase2TrafficDecoder &&
+        m_config.stopC4fmSearchOnHardLock &&
+        hasTrustedPhase1ControlPayload(best);
+    if (!m_config.enableCqpskSearch || c4fmControlHardLock) {
         if (!best.dibits.empty()) {
             const auto selectedStats = best.stats;
             restorePhase1BitTail(phase1TailSnapshot);
@@ -5823,6 +5953,8 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         } else {
             restorePhase1BitTail(phase1TailSnapshot);
         }
+        best.stats.cqpskCandidatesEvaluated = 0;
+        best.stats.c4fmHardLockSkippedCqpsk = c4fmControlHardLock;
         return best;
     }
 
@@ -5984,11 +6116,18 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         std::any_of(m_phase2SlotEss.begin(),
                     m_phase2SlotEss.end(),
                     [](const P25Phase2EssState& ess) { return ess.known; });
+    const bool allowRealtimeLockOnlyCandidate =
+        m_config.realtimeVoiceSearch &&
+        m_config.phase2CqpskTrafficDemod &&
+        m_config.maxCqpskSearchCandidates > 0 &&
+        m_config.maxCqpskSearchCandidates <= 1;
     const bool allowRealtimePhase2SoftDemodHold =
         m_config.realtimeVoiceSearch &&
         m_config.phase2CqpskTrafficDemod &&
         m_config.stopCqpskSearchOnHardLock &&
-        (phase2StandardsStateSeen || m_config.allowPhase2SoftAmbeMaskPhaseLock);
+        (phase2StandardsStateSeen ||
+         m_config.allowPhase2SoftAmbeMaskPhaseLock ||
+         allowRealtimeLockOnlyCandidate);
     const bool allowSoftCqpskStop =
         !m_config.realtimeVoiceSearch ||
         !m_config.phase2CqpskTrafficDemod ||
@@ -5997,6 +6136,10 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
     const bool allowCurrentWindowSoftCqpskStop =
         allowSoftCqpskStop &&
         (phase2StandardsStateSeen || m_cqpskLock.valid);
+    const int cqpskMissLimit = static_cast<int>(std::clamp<size_t>(
+        m_config.cqpskLockMissTolerance,
+        8,
+        96));
     bool stopCqpskSearch = m_config.stopCqpskSearchOnHardLock &&
         isCqpskPath(best.stats.demodPath) &&
         (hasCqpskHardLockEvidence(best) ||
@@ -6004,6 +6147,7 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
           m_config.realtimeVoiceSearch &&
           hasPhase2SoftCqpskLockEvidence(best)));
     bool realtimeSoftHoldSelected = false;
+    bool realtimeLockOnlyHoldSelected = false;
     if (!stopCqpskSearch &&
         allowSoftCqpskStop &&
         m_config.realtimeVoiceSearch &&
@@ -6022,6 +6166,29 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
             best.stats.cqpskStickyOverride = true;
             best.stats.cqpskLockMisses = m_cqpskLock.misses;
         }
+    }
+    if (!stopCqpskSearch &&
+        allowRealtimePhase2SoftDemodHold &&
+        lockedCqpskCandidate &&
+        lockedCqpskParams &&
+        lockedCqpskTimingState &&
+        m_cqpskLock.valid &&
+        m_cqpskLock.misses < cqpskMissLimit &&
+        isCqpskPath(lockedCqpskCandidate->stats.demodPath) &&
+        hasCqpskSoftContinuityEvidence(*lockedCqpskCandidate)) {
+        // SDRTrunk keeps one live H-DQPSK/CQPSK traffic-channel processor per
+        // call and lets the framer/audio gate decide whether the current
+        // timeslot contains usable voice.  After a clear grant has already
+        // acquired a CQPSK lock, do the same bounded lock-only pass instead of
+        // reopening the full permutation grid on every 40 ms GUI/CLI hop.
+        selectedCqpskParams = *lockedCqpskParams;
+        selectedCqpskTiming = *lockedCqpskTimingState;
+        selectedCqpskTrust = lockedCqpskTrust;
+        best = *lockedCqpskCandidate;
+        best.stats.cqpskStickyOverride = true;
+        best.stats.cqpskLockMisses = m_cqpskLock.misses;
+        stopCqpskSearch = true;
+        realtimeLockOnlyHoldSelected = true;
     }
     // Soft-locked streaming: never reopen the permutation grid.  Misses are
     // aged below when the locked candidate fails; a full re-search only happens
@@ -6151,10 +6318,6 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         best = *bestCqpskCandidate;
         best.warnings.push_back("Phase 2 traffic selected CQPSK demod over C4FM without hard MAC/ESS evidence.");
     }
-    const int cqpskMissLimit = static_cast<int>(std::clamp<size_t>(
-        m_config.cqpskLockMissTolerance,
-        8,
-        96));
     bool cqpskWarmHoldSelected = false;
     if (m_cqpskLock.valid &&
         lockedCqpskCandidate &&
@@ -6191,7 +6354,12 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         (phase2StandardsStateSeen || m_config.allowPhase2SoftAmbeMaskPhaseLock) &&
         hasPhase2SoftCqpskLockEvidence(best);
     if (selectedCqpskParams && isCqpskPath(best.stats.demodPath) &&
-        (selectedHardCqpskLock || selectedSoftPhase2CqpskLock)) {
+        (selectedHardCqpskLock || selectedSoftPhase2CqpskLock || realtimeLockOnlyHoldSelected)) {
+        const bool selectedLockOnlyWithNoPhase2 =
+            realtimeLockOnlyHoldSelected &&
+            !selectedHardCqpskLock &&
+            !selectedSoftPhase2CqpskLock &&
+            !hasPhase2TrafficTelemetry(best);
         m_cqpskLock.valid = true;
         m_cqpskLock.differential = selectedCqpskParams->differential;
         m_cqpskLock.conjugate = selectedCqpskParams->conjugate;
@@ -6203,9 +6371,13 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         m_cqpskLock.phaseErrorRmsRad = selectedCqpskParams->phaseErrorRmsRad;
         m_cqpskLock.fineCorrectionSymbols = selectedCqpskParams->fineCorrectionSymbols;
         m_cqpskLock.trustScore = selectedHardCqpskLock ? selectedCqpskTrust : std::max(selectedCqpskTrust, 20);
-        m_cqpskLock.misses = selectedHardCqpskLock
-            ? 0
-            : (cqpskCandidatesEvaluated > 0 ? 0 : m_cqpskLock.misses);
+        if (selectedHardCqpskLock || selectedSoftPhase2CqpskLock) {
+            m_cqpskLock.misses = 0;
+        } else if (selectedLockOnlyWithNoPhase2) {
+            m_cqpskLock.misses = std::min(cqpskMissLimit, m_cqpskLock.misses + 1);
+        } else if (cqpskCandidatesEvaluated > 0) {
+            m_cqpskLock.misses = 0;
+        }
         best.stats.cqpskLockUpdated = true;
         best.stats.cqpskLockActive = true;
         best.stats.cqpskLockTrustScore = m_cqpskLock.trustScore;
@@ -6216,7 +6388,8 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         best.stats.cqpskResidualCarrierHz = m_cqpskLock.residualCarrierHz;
         best.stats.cqpskPhaseErrorRmsRad = m_cqpskLock.phaseErrorRmsRad;
         best.stats.cqpskFineCorrectionSymbols = m_cqpskLock.fineCorrectionSymbols;
-        if (realtimeSoftHoldSelected) best.stats.cqpskStickyOverride = true;
+        if (realtimeSoftHoldSelected || realtimeLockOnlyHoldSelected) best.stats.cqpskStickyOverride = true;
+        if (selectedLockOnlyWithNoPhase2 && m_cqpskLock.misses >= cqpskMissLimit) m_cqpskLock = {};
     } else if (m_cqpskLock.valid && cqpskWarmHoldSelected) {
         const int retainedTrust = m_cqpskLock.trustScore;
         const int retainedMisses = std::min(cqpskMissLimit, m_cqpskLock.misses + 1);
@@ -6278,6 +6451,7 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
     }
     storeStreamTimingState(timingStateStorage);
     const long long totalMs = elapsedMsSince(realtimeStarted);
+    best.stats.cqpskCandidatesEvaluated = cqpskCandidatesEvaluated;
     if (m_config.realtimeVoiceSearch || totalMs >= 200) {
         best.warnings.push_back(
             "decodeProfile channelizeMs=" + std::to_string(channelizeMs) +
@@ -6286,6 +6460,7 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
             " commitMs=" + std::to_string(commitMs) +
             " totalMs=" + std::to_string(totalMs) +
             " softHold=" + std::string(realtimeSoftHoldSelected ? "1" : "0") +
+            " lockOnlyHold=" + std::string(realtimeLockOnlyHoldSelected ? "1" : "0") +
             " lock=" + std::string(m_cqpskLock.valid ? "1" : "0"));
     }
     return best;
@@ -6643,10 +6818,15 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
 {
     P25Phase2DecodeResult out;
 
-    constexpr size_t kPhase2SyncTailDibits = Phase2BurstDibits * 12;
+    // Realtime traffic follows a retained superframe/mask lattice, so only keep
+    // enough dibit tail to bridge partial timeslots. Forensic/cold paths still
+    // keep a full superframe for acquisition and MAC/ESS recovery.
+    const size_t phase2SyncTailDibits = m_config.realtimeVoiceSearch
+        ? Phase2BurstDibits * 4
+        : Phase2BurstDibits * 12;
     constexpr size_t kMinTrustedPhase2OverlapDibits = Phase2BurstDibits / 2;
     auto longestTailPrefixOverlap = [&]() -> size_t {
-        const size_t n = std::min({m_phase2DibitTail.size(), dibits.size(), kPhase2SyncTailDibits * 4});
+        const size_t n = std::min({m_phase2DibitTail.size(), dibits.size(), phase2SyncTailDibits * 4});
         if (n == 0) return 0;
 
         std::vector<int> combined;
@@ -6672,7 +6852,7 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
         ? longestTailPrefixOverlap()
         : 0u;
     std::vector<int> scanDibits;
-    size_t phase2PrefixDibits = std::min(m_phase2DibitTail.size(), kPhase2SyncTailDibits);
+    size_t phase2PrefixDibits = std::min(m_phase2DibitTail.size(), phase2SyncTailDibits);
     if (phase2PrefixDibits > 0) {
         scanDibits.reserve(phase2PrefixDibits + dibits.size());
         scanDibits.insert(scanDibits.end(),
@@ -6691,12 +6871,12 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
         return out;
     }
 
-    static constexpr std::array<uint64_t, 5> kSyncWords = {
+    // Match sdrtrunk's hard-dibit Phase-2 framer: this layer accepts only the
+    // normal 40-bit Phase-2 sync. Rotated/180-degree sync patterns are
+    // constellation/PLL correction evidence for the demodulator, not valid
+    // frame boundaries for an unrotated payload.
+    static constexpr std::array<uint64_t, 1> kSyncWords = {
         Phase2FrameSyncWord,
-        Phase2FrameSyncWord ^ 0xAAAAAAAAAAull,
-        0x0104015155ull,
-        0xA8A2A8D800ull,
-        0xFEFBFEAEAAull,
     };
     const int phase2SyncMaxErrors = std::clamp(std::max(3, static_cast<int>(m_config.maxFrameSyncBitErrors)), 0, 6);
     // CQPSK grid probes call this with annotateSessionCodewords=false for every
@@ -6847,20 +7027,154 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
         session.essBSeenHypotheses = slotHasRetainedState ? m_phase2SlotEssBSeenHypotheses[ts] : m_phase2EssBSeenHypotheses;
     }
     Phase2SessionState& session = slotSessions[0];
+    auto recentlyDecodedAcchBurst = [&](uint64_t streamDibit) {
+        constexpr uint64_t kAcchDecodeDibitTolerance = 12;
+        for (uint64_t prior : m_phase2RecentAcchDecodeBurstDibits) {
+            const uint64_t distance = streamDibit > prior ? streamDibit - prior : prior - streamDibit;
+            if (distance <= kAcchDecodeDibitTolerance) return true;
+        }
+        return false;
+    };
+    auto rememberAcchBurst = [&](uint64_t streamDibit) {
+        m_phase2RecentAcchDecodeBurstDibits.push_back(streamDibit);
+        constexpr size_t kMaxRecentAcchBursts = 128;
+        while (m_phase2RecentAcchDecodeBurstDibits.size() > kMaxRecentAcchBursts) {
+            m_phase2RecentAcchDecodeBurstDibits.pop_front();
+        }
+    };
+
+    auto retainPhase2SlotSessions = [&]() {
+        Phase2SessionState* retainedSession = &slotSessions[0];
+        for (auto& candidate : slotSessions) {
+            if (candidate.ess.known && candidate.essTrusted &&
+                (!retainedSession->ess.known || candidate.ess.fecValidated)) {
+                retainedSession = &candidate;
+            }
+        }
+        out.ess = retainedSession->ess;
+        for (size_t ts = 0; ts < slotSessions.size(); ++ts) {
+            m_phase2SlotEss[ts] = slotSessions[ts].ess;
+            m_phase2SlotEssB[ts] = slotSessions[ts].essB;
+            m_phase2SlotEssBSeen[ts] = slotSessions[ts].essBSeen;
+            m_phase2SlotEssBNext[ts] = slotSessions[ts].essBNext;
+            m_phase2SlotSessionMacCrcSeen[ts] = slotSessions[ts].pttSeen;
+            m_phase2SlotFirst4vSlot[ts] = slotSessions[ts].first4vSlot;
+            m_phase2SlotEssHypotheses[ts] = slotSessions[ts].essHypotheses;
+            m_phase2SlotEssBHypotheses[ts] = slotSessions[ts].essBHypotheses;
+            m_phase2SlotEssBSeenHypotheses[ts] = slotSessions[ts].essBSeenHypotheses;
+        }
+        m_phase2Ess = retainedSession->ess;
+        m_phase2EssB = retainedSession->essB;
+        m_phase2EssBSeen = retainedSession->essBSeen;
+        m_phase2EssBNext = retainedSession->essBNext;
+        m_phase2SessionMacCrcSeen = retainedSession->pttSeen;
+        m_phase2First4vSlot = retainedSession->first4vSlot;
+        m_phase2EssHypotheses = retainedSession->essHypotheses;
+        m_phase2EssBHypotheses = retainedSession->essBHypotheses;
+        m_phase2EssBSeenHypotheses = retainedSession->essBSeenHypotheses;
+    };
+
+    // Hot Phase-2 traffic path: after MAC/ESS/ISCH has already established the
+    // superframe lattice and XOR phase, keep walking that lattice directly.
+    // This mirrors sdrtrunk's continuous P25P2SuperFrameDetector model and
+    // avoids re-running full lock/mask/ACCH hunts over overlapped historical
+    // context on every 40 ms GUI hop.
+    if (annotateSessionCodewords &&
+        m_config.realtimeVoiceSearch &&
+        stickyAnchorMaskMatches &&
+        stickyAnchorFreshForLocks &&
+        mask &&
+        workingDibits.size() >= Phase2BurstDibits) {
+        const uint64_t workStartStream = phase2WorkingStreamStart;
+        const uint64_t workEndStream = phase2WorkingStreamStart +
+            static_cast<uint64_t>(workingDibits.size());
+        const uint64_t freshStartStream = phase2WorkingStreamStart +
+            static_cast<uint64_t>(phase2PrefixDibits);
+        const uint64_t anchor = m_phase2SuperframeAnchorDibit;
+        constexpr uint64_t kBurst = static_cast<uint64_t>(Phase2BurstDibits);
+        constexpr size_t kMaxRealtimeStickyBursts = 18; // 540 ms cap; GUI chunks are smaller.
+        uint64_t firstBurstNum = 0;
+        if (workStartStream > anchor) {
+            const uint64_t delta = workStartStream - anchor;
+            firstBurstNum = (delta + kBurst - 1ull) / kBurst;
+        }
+        size_t fastBursts = 0;
+        for (uint64_t burstNum = firstBurstNum;
+             fastBursts < kMaxRealtimeStickyBursts;
+             ++burstNum) {
+            const uint64_t streamPos = anchor + burstNum * kBurst;
+            if (streamPos + kBurst > workEndStream) break;
+            if (streamPos < workStartStream) continue;
+            if (streamPos + kBurst <= freshStartStream) continue;
+            const size_t workPos = static_cast<size_t>(streamPos - workStartStream);
+            if (workPos + Phase2BurstDibits > workingDibits.size()) break;
+
+            const size_t superframeIndex = static_cast<size_t>(burstNum % 12ull);
+            const size_t syntheticLockOffset = workPos >= superframeIndex * Phase2BurstDibits
+                ? workPos - superframeIndex * Phase2BurstDibits
+                : 0;
+            constexpr size_t kMaxRealtimeStickySyncSlipDibits = 12;
+            const auto hit = phase2SyncHitNear(hits, workPos, kMaxRealtimeStickySyncSlipDibits);
+            const uint8_t trafficSlot =
+                phase2TrafficSlotForSuperframeBurst(workingDibits, syntheticLockOffset, superframeIndex);
+            auto& burstSession = slotSessions[trafficSlot & 0x01u];
+            const uint64_t burstStreamDibit =
+                phase2WorkingStreamStart + static_cast<uint64_t>(hit ? hit->dibitOffset : workPos);
+            const bool duplicateRealtimeAcch = recentlyDecodedAcchBurst(burstStreamDibit);
+            auto burst = decodePhase2BurstAt(
+                workingDibits,
+                hit ? hit->dibitOffset : workPos,
+                hit ? hit->errors : -1,
+                true,
+                syntheticLockOffset,
+                superframeIndex,
+                4,
+                hit ? hit->errors : 0,
+                mask,
+                m_phase2MaskPhase,
+                std::max(1, m_phase2MaskPhaseScore),
+                &burstSession,
+                &out.macPdus,
+                false,
+                false,
+                !duplicateRealtimeAcch);
+            if (!burst.valid) continue;
+            if (!duplicateRealtimeAcch && phase2BurstKindCarriesAcch(burst.kind)) {
+                rememberAcchBurst(burstStreamDibit);
+            }
+            burst.stickySuperframe = true;
+            burst.superframeLock = true;
+            burst.maskPhaseLock = burst.xorMaskApplied && burst.xorMaskPhaseKnown;
+            if (hit && hit->dibitOffset != workPos) {
+                burst.syncOffsetAdjusted = true;
+                burst.syncOffsetDibits = phase2SignedSyncSlipDibits(hit->dibitOffset, workPos);
+            }
+            normalizePhase2BurstOffsets(burst);
+            out.bursts.push_back(std::move(burst));
+            ++fastBursts;
+        }
+        if (!out.bursts.empty()) {
+            m_phase2SuperframeAnchorGeneration = m_phase2DecodeGeneration + 1;
+            retainPhase2SlotSessions();
+            annotatePhase2SessionCodewords(out, dibits);
+            return out;
+        }
+    }
+
     for (const auto& lock : locks) {
         lockedWindows.push_back({lock.dibitOffset, P25LiveDecoder::Phase2BurstDibits * 12});
 
         uint8_t selectedMaskPhase = m_phase2MaskPhaseKnown ? m_phase2MaskPhase : 0;
         int selectedMaskScore = m_phase2MaskPhaseKnown ? m_phase2MaskPhaseScore : 0;
         size_t selectedMacCrc = 0;
+        bool realtimeMaskHuntThrottledForLock = false;
         if (mask) {
-            // If a sticky phase has produced several voice/superframe windows with
-            // zero MAC CRC and no ESS, it is almost certainly wrong.  Re-open the
-            // 12-phase hunt instead of permanently descrambling with garbage.
-            // One starve window is enough to re-hunt: with hard-voice-only VCWs,
-            // a wrong sticky phase produces masked voice + zero MAC immediately.
-            // Waiting 3 windows left ~1s of scrambled audio on clear grants.
-            constexpr uint8_t kMaskPhaseStarveLimit = 1;
+            // If a sticky phase repeatedly contradicts ISCH/ACCH evidence, re-open
+            // the 12-phase hunt instead of permanently descrambling with garbage.
+            // Do not re-hunt on a single voice window with no MAC CRC: live SACCH/
+            // FACCH CRCs are sparse under fading, and thrashing the XOR phase is
+            // worse than holding a proven sdrtrunk-style superframe lattice.
+            constexpr uint8_t kMaskPhaseStarveLimit = 4;
             const bool forceMaskPhaseRehunt =
                 annotateSessionCodewords &&
                 m_phase2MaskPhaseKnown &&
@@ -6886,14 +7200,29 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
                     m_phase2SuperframeAnchorMaskPhase = selectedMaskPhase;
                 }
             } else {
-            Phase2MaskPhaseWindow bestWindow;
-            std::vector<Phase2MaskPhaseWindow> phaseWindows;
-            bool haveWindow = false;
-            // Probe path: one phase only. Full 12-phase hunt is late-entry.
-            const bool cheapProbeMask = !annotateSessionCodewords;
-            // Cold hunt scores 6 slots/phase; early-exit on MAC/ISCH. Keep all 12 phases.
-            const uint8_t phaseBegin = 0;
-            const uint8_t phaseEnd = cheapProbeMask ? uint8_t{1} : uint8_t{12};
+                Phase2MaskPhaseWindow bestWindow;
+                std::vector<Phase2MaskPhaseWindow> phaseWindows;
+                bool haveWindow = false;
+                // SDRTrunk/OP25 keep a continuous TDMA framer. In the rolling-window
+                // live path, an unknown-security late entry must not redo a 12-phase
+                // mask hunt on every hot slice; wait for MAC/ESS/ISCH evidence unless
+                // enough stream generations have elapsed to justify another broad hunt.
+                constexpr uint64_t kRealtimeFullMaskPhaseHuntSpacingGenerations = 24;
+                realtimeMaskHuntThrottledForLock =
+                    annotateSessionCodewords &&
+                    m_config.realtimeVoiceSearch &&
+                    !m_config.allowPhase2SoftAmbeMaskPhaseLock &&
+                    m_phase2LastFullMaskPhaseHuntGeneration != 0 &&
+                    m_phase2DecodeGeneration > m_phase2LastFullMaskPhaseHuntGeneration &&
+                    (m_phase2DecodeGeneration - m_phase2LastFullMaskPhaseHuntGeneration) <
+                        kRealtimeFullMaskPhaseHuntSpacingGenerations;
+                const bool cheapProbeMask = !annotateSessionCodewords || realtimeMaskHuntThrottledForLock;
+                if (!cheapProbeMask && annotateSessionCodewords && m_config.realtimeVoiceSearch) {
+                    m_phase2LastFullMaskPhaseHuntGeneration = m_phase2DecodeGeneration;
+                }
+                // Cold hunt scores 6 slots/phase; early-exit on MAC/ISCH. Keep all 12 phases.
+                const uint8_t phaseBegin = 0;
+                const uint8_t phaseEnd = cheapProbeMask ? uint8_t{1} : uint8_t{12};
             phaseWindows.reserve(phaseEnd - phaseBegin);
             for (uint8_t phaseIdx = phaseBegin; phaseIdx < phaseEnd; ++phaseIdx) {
                 const uint8_t phase = cheapProbeMask ? uint8_t{0} : phaseIdx;
@@ -6950,8 +7279,8 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
                     const size_t maxRescueCandidates =
                         m_config.realtimeVoiceSearch ? std::min<size_t>(phaseWindows.size(), 1u)
                                                      : phaseWindows.size();
-                    const size_t rescueScoreSlots = m_config.realtimeVoiceSearch ? 6u : 12u;
-                    const size_t rescueDeepBudget = m_config.realtimeVoiceSearch ? 4u : 8u;
+                    const size_t rescueScoreSlots = m_config.realtimeVoiceSearch ? 3u : 12u;
+                    const size_t rescueDeepBudget = m_config.realtimeVoiceSearch ? 1u : 8u;
                     size_t rescueCandidates = 0;
                     for (const auto& candidate : phaseWindows) {
                         if (rescueCandidates++ >= maxRescueCandidates) break;
@@ -7031,8 +7360,13 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
             }
         }
 
+        const bool throttleRealtimeUnknownSecurityAcchRescue =
+            realtimeMaskHuntThrottledForLock &&
+            !m_config.allowPhase2SoftAmbeMaskPhaseLock &&
+            !m_phase2MaskPhaseKnown;
         size_t realtimeAcchRescueBudget =
-            annotateSessionCodewords && m_config.realtimeVoiceSearch && mask
+            annotateSessionCodewords && m_config.realtimeVoiceSearch && mask &&
+            !throttleRealtimeUnknownSecurityAcchRescue
             ? size_t{2}
             : size_t{0};
         for (size_t slot = 0; slot < 12; ++slot) {
@@ -7041,7 +7375,16 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
             const auto hit = phase2SyncHitNear(hits, expectedPos, 2);
             const size_t pos = hit ? hit->dibitOffset : expectedPos;
             if (pos + Phase2BurstDibits > workingDibits.size()) continue;
-            auto& burstSession = slotSessions[phase2TrafficSlotFromSuperframeBurstIndex(slot) & 0x01u];
+            const uint8_t trafficSlot =
+                phase2TrafficSlotForSuperframeBurst(workingDibits, lock.dibitOffset, slot);
+            auto& burstSession = slotSessions[trafficSlot & 0x01u];
+            const uint64_t burstStreamDibit =
+                phase2WorkingStreamStart + static_cast<uint64_t>(pos);
+            const bool duplicateRealtimeAcch =
+                annotateSessionCodewords &&
+                m_config.realtimeVoiceSearch &&
+                mask &&
+                recentlyDecodedAcchBurst(burstStreamDibit);
             // Shallow ACCH on the hot lock path.  Deep alt-layout RS fan-out was
             // ~3s/burst × 12 slots once 6000 baud produced real locks (39s windows)
             // while TG30003 clear audio still emitted with p2mac=0 via grant gate.
@@ -7051,7 +7394,12 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
                                              lock.syncScore, lock.syncErrors,
                                              mask, selectedMaskPhase, selectedMaskScore,
                                              &burstSession, &out.macPdus,
-                                             false);
+                                             false,
+                                             true,
+                                             !duplicateRealtimeAcch);
+            if (!duplicateRealtimeAcch && burst.valid && phase2BurstKindCarriesAcch(burst.kind)) {
+                rememberAcchBurst(burstStreamDibit);
+            }
             if (burst.valid &&
                 !burst.macCrcValid &&
                 realtimeAcchRescueBudget > 0 &&
@@ -7072,7 +7420,8 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
                                                        mask, selectedMaskPhase, selectedMaskScore,
                                                        &rescueSession, &rescueMacPdus,
                                                        true,
-                                                       false);
+                                                       false,
+                                                       true);
                 const bool nominalRescueCrc = std::any_of(
                     rescueMacPdus.begin(),
                     rescueMacPdus.end(),
@@ -7183,8 +7532,16 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
                     : 0;
                 constexpr size_t kMaxContinuousSyncSlipDibits = 12;
                 const auto hit = phase2SyncHitNear(hits, workPos, kMaxContinuousSyncSlipDibits);
-                auto& contSession =
-                    slotSessions[phase2TrafficSlotFromSuperframeBurstIndex(superframeIndex) & 0x01u];
+                const uint8_t trafficSlot =
+                    phase2TrafficSlotForSuperframeBurst(workingDibits, syntheticLockOffset, superframeIndex);
+                auto& contSession = slotSessions[trafficSlot & 0x01u];
+                const uint64_t contBurstStreamDibit =
+                    phase2WorkingStreamStart + static_cast<uint64_t>(hit ? hit->dibitOffset : workPos);
+                const bool duplicateRealtimeAcch =
+                    annotateSessionCodewords &&
+                    m_config.realtimeVoiceSearch &&
+                    mask &&
+                    recentlyDecodedAcchBurst(contBurstStreamDibit);
                 auto contBurst = decodePhase2BurstAt(
                     workingDibits,
                     hit ? hit->dibitOffset : workPos,
@@ -7199,7 +7556,12 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
                     std::max(1, m_phase2MaskPhaseScore),
                     &contSession,
                     &out.macPdus,
-                    false);
+                    false,
+                    true,
+                    !duplicateRealtimeAcch);
+                if (!duplicateRealtimeAcch && contBurst.valid && phase2BurstKindCarriesAcch(contBurst.kind)) {
+                    rememberAcchBurst(contBurstStreamDibit);
+                }
                 if (!contBurst.valid) continue;
                 contBurst.stickySuperframe = true;
                 contBurst.superframeLock = true;
@@ -7262,7 +7624,11 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
         } else {
             const bool ischSaysWrong = ischMisses >= 2 && ischMisses > ischHits;
             const bool acchFailedWithVoice =
-                hardVoiceHits > 0 && acchLikeBursts >= 2 && macCrcHits == 0;
+                hardVoiceHits > 0 &&
+                acchLikeBursts >= 3 &&
+                macCrcHits == 0 &&
+                ischMisses >= 1 &&
+                ischMisses > ischHits;
             if (ischSaysWrong || acchFailedWithVoice) {
                 m_phase2MaskPhaseStarveWindows = static_cast<uint8_t>(
                     std::min<int>(255, static_cast<int>(m_phase2MaskPhaseStarveWindows) + 1));
@@ -7340,19 +7706,32 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
                     const size_t syntheticLockOffset = hit.dibitOffset >= superframeIndex * Phase2BurstDibits
                         ? hit.dibitOffset - superframeIndex * Phase2BurstDibits
                         : 0;
-                    auto& stickySession = slotSessions[phase2TrafficSlotFromSuperframeBurstIndex(superframeIndex) & 0x01u];
+                    const uint8_t trafficSlot =
+                        phase2TrafficSlotForSuperframeBurst(workingDibits, syntheticLockOffset, superframeIndex);
+                    auto& stickySession = slotSessions[trafficSlot & 0x01u];
                     // Hot sticky path is shallow ACCH only.  Deep alt-layout /
                     // maxUnknown=2 was ~seconds per hit after 6000 baud lock and
                     // starved one-RTL follow.  Allow at most one deep repair when
                     // we still have no session MAC CRC.
                     const bool deepSticky = stickyDeepAcchBudget > 0;
                     if (deepSticky) --stickyDeepAcchBudget;
+                    const bool duplicateRealtimeAcch =
+                        annotateSessionCodewords &&
+                        m_config.realtimeVoiceSearch &&
+                        mask &&
+                        !deepSticky &&
+                        recentlyDecodedAcchBurst(hitStreamDibit);
                     auto stickyBurst = decodePhase2BurstAt(workingDibits, hit.dibitOffset, hit.errors,
                                                             true, syntheticLockOffset, superframeIndex,
                                                             4, static_cast<int>(wrappedErr),
                                                             mask, m_phase2MaskPhase, m_phase2MaskPhaseScore,
                                                             &stickySession, &out.macPdus,
-                                                            deepSticky);
+                                                            deepSticky,
+                                                            true,
+                                                            !duplicateRealtimeAcch);
+                    if (!duplicateRealtimeAcch && stickyBurst.valid && phase2BurstKindCarriesAcch(stickyBurst.kind)) {
+                        rememberAcchBurst(hitStreamDibit);
+                    }
                     if (stickyBurst.valid) {
                         stickyBurst.stickySuperframe = true;
                         stickyBurst.superframeLock = true;
@@ -7395,8 +7774,8 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
                 const int syncErr = hit.errors >= 0 ? hit.errors : 0;
                 for (uint8_t phase = 0; phase < 12u && bootstrapTrials < kMaxBootstrapTrials; ++phase) {
                     ++bootstrapTrials;
-                    const size_t probeSessionSlot =
-                        static_cast<size_t>(phase2TrafficSlotFromSuperframeBurstIndex(slotIndex) & 0x01u);
+                    const size_t probeSessionSlot = static_cast<size_t>(
+                        phase2TrafficSlotForSuperframeBurst(workingDibits, lockOffset, slotIndex) & 0x01u);
                     auto probeSession = slotSessions[probeSessionSlot];
                     std::vector<P25Phase2MacPdu> probeMacPdus;
                     auto trial = decodePhase2BurstAt(workingDibits, hit.dibitOffset, hit.errors,
@@ -7468,39 +7847,28 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
                                          &session, &out.macPdus,
                                          false);
         if (burst.valid) {
+            if (annotateSessionCodewords &&
+                m_config.realtimeVoiceSearch &&
+                mask &&
+                phase2BurstKindHasVoice(burst.kind)) {
+                burst.voiceCodewords.clear();
+            }
             normalizePhase2BurstOffsets(burst);
             out.bursts.push_back(std::move(burst));
         }
     }
-    Phase2SessionState* retainedSession = &slotSessions[0];
-    for (auto& candidate : slotSessions) {
-        if (candidate.ess.known && candidate.essTrusted && (!retainedSession->ess.known || candidate.ess.fecValidated)) {
-            retainedSession = &candidate;
-        }
-    }
-    out.ess = retainedSession->ess;
     if (annotateSessionCodewords) {
-        for (size_t ts = 0; ts < slotSessions.size(); ++ts) {
-            m_phase2SlotEss[ts] = slotSessions[ts].ess;
-            m_phase2SlotEssB[ts] = slotSessions[ts].essB;
-            m_phase2SlotEssBSeen[ts] = slotSessions[ts].essBSeen;
-            m_phase2SlotEssBNext[ts] = slotSessions[ts].essBNext;
-            m_phase2SlotSessionMacCrcSeen[ts] = slotSessions[ts].pttSeen;
-            m_phase2SlotFirst4vSlot[ts] = slotSessions[ts].first4vSlot;
-            m_phase2SlotEssHypotheses[ts] = slotSessions[ts].essHypotheses;
-            m_phase2SlotEssBHypotheses[ts] = slotSessions[ts].essBHypotheses;
-            m_phase2SlotEssBSeenHypotheses[ts] = slotSessions[ts].essBSeenHypotheses;
-        }
-        m_phase2Ess = retainedSession->ess;
-        m_phase2EssB = retainedSession->essB;
-        m_phase2EssBSeen = retainedSession->essBSeen;
-        m_phase2EssBNext = retainedSession->essBNext;
-        m_phase2SessionMacCrcSeen = retainedSession->pttSeen;
-        m_phase2First4vSlot = retainedSession->first4vSlot;
-        m_phase2EssHypotheses = retainedSession->essHypotheses;
-        m_phase2EssBHypotheses = retainedSession->essBHypotheses;
-        m_phase2EssBSeenHypotheses = retainedSession->essBSeenHypotheses;
+        retainPhase2SlotSessions();
         annotatePhase2SessionCodewords(out, dibits);
+    } else {
+        Phase2SessionState* retainedSession = &slotSessions[0];
+        for (auto& candidate : slotSessions) {
+            if (candidate.ess.known && candidate.essTrusted &&
+                (!retainedSession->ess.known || candidate.ess.fecValidated)) {
+                retainedSession = &candidate;
+            }
+        }
+        out.ess = retainedSession->ess;
     }
     return out;
 }

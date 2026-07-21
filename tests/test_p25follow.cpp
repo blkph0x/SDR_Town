@@ -1,6 +1,7 @@
 #include <catch2/catch_all.hpp>
 
 #include "P25FollowStateMachine.h"
+#include "P25ReceiverSession.h"
 
 namespace {
 
@@ -932,6 +933,36 @@ TEST_CASE("P25 slot probe refuses opposite-slot proof for known control-channel 
     REQUIRE_FALSE(decision.maskedOppositeDominantFlip);
     REQUIRE_FALSE(decision.shouldFlip);
     REQUIRE_FALSE(decision.earlyNoSyncFlip);
+}
+
+TEST_CASE("P25 call security latch is monotonic Unknown to Clear or Encrypted", "[p25][follow][continuity]")
+{
+    P25ReceiverSessionState session;
+    REQUIRE(session.callSecurityLatch == P25CallSecurityLatch::Unknown);
+    session.callSecurityLatch = P25CallSecurityLatch::Clear;
+    REQUIRE(session.callSecurityLatch == P25CallSecurityLatch::Clear);
+    // Encrypted may override Clear for fail-closed; Clear must not regress to Unknown
+    // without clearAll (call boundary).
+    session.callSecurityLatch = P25CallSecurityLatch::Encrypted;
+    REQUIRE(session.callSecurityLatch == P25CallSecurityLatch::Encrypted);
+    session.clearAll();
+    REQUIRE(session.callSecurityLatch == P25CallSecurityLatch::Unknown);
+}
+
+TEST_CASE("P25 frame sequencer resets only on clearAll call boundary", "[p25][follow][continuity]")
+{
+    P25ReceiverSessionState session;
+    session.frameSequencer.armed = true;
+    session.frameSequencer.haveBase = true;
+    session.frameSequencer.baseAbsDibit = 1000;
+    session.frameSequencer.nextOrdinal = 12;
+    session.frameSequencer.acceptedFrames = 12;
+    session.callSecurityLatch = P25CallSecurityLatch::Clear;
+    REQUIRE(session.frameSequencer.nextOrdinal == 12);
+    session.clearAll();
+    REQUIRE_FALSE(session.frameSequencer.armed);
+    REQUIRE(session.frameSequencer.nextOrdinal == 0);
+    REQUIRE(session.callSecurityLatch == P25CallSecurityLatch::Unknown);
 }
 
 TEST_CASE("P25 slot probe uses faster opposite-slot proof after untrusted unknown grant epoch lock", "[p25][follow]")

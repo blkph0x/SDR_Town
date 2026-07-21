@@ -23,11 +23,36 @@ checks = {
     ),
     'bounded p25 speaker push helper': (
         'pushP25SpeakerAudio' in main and
-        'return pushP25LiveStreamingAudio(engine, pending, audio, activeOutputIndices, 240, ringFillPercent);' in
-            main.split('pushP25SpeakerAudio', 1)[1][:900] and
+        'phase2FrameSamples' in main.split('pushP25SpeakerAudio', 1)[1][:900] and
+        'pushP25LiveStreamingAudio(engine, pending, audio, activeOutputIndices,' in
+            main.split('pushP25SpeakerAudio', 1)[1][:1200] and
+        'phase2FrameSamples, ringFillPercent);' in
+            main.split('pushP25SpeakerAudio', 1)[1][:1200] and
         'pushAudioFrames(engine, pending, audio' not in main.split('pushP25SpeakerAudio', 1)[1][:900]
     ),
     'sustain decode on successful emit': 'sustain.hadSuccessfulEmit' in main.split('p25Phase2UseSustainDecodeWindowLocked', 1)[1][:3500],
+    'selected clear streaming before first pcm': (
+        'selectedClearTrafficStreaming' in main and
+        'targetClearEvidence' in main.split('p25Phase2EstablishedClearVoiceStreamingLocked', 1)[1][:1800] and
+        'selectedClearStreamingEye' in main
+    ),
+    'same-call clear sustain feeds target voice': (
+        'sameCallClearSustainFeed' in main and
+        'targetTrafficClearEvidence ||' in main.split('sameCallClearSustainFeed', 1)[1][:1200] and
+        'p25Phase2AudioTailGraceActive(rx)' in main.split('sameCallClearSustainFeed', 1)[1][:1200] and
+        'sameCallClearSustainFeed ||' in main.split('securityProvedClearForFeed', 1)[1][:500]
+    ),
+    'explicit clear grant queues until target traffic proof': (
+        'explicitClearGrantHardVoiceRelease' in main and
+        'explicitClearGrantSelectedVoiceRelease' not in main and
+        '(targetTrafficClearEvidence || explicitClearGrantSelectedVoiceRelease)' not in main and
+        'targetTrafficClearEvidence &&' in main.split('const bool explicitClearGrantHardVoiceRelease', 1)[1].split(';', 1)[0] and
+        'clear control grant may choose/follow a slot' in main
+    ),
+    'hot cqpsk search bounded for live voice': (
+        'kP25VoiceWorkerHotRealtimeBudgetMs = 70' in main and
+        'kP25VoiceWorkerHotMaxCqpskCandidates = 12' in main
+    ),
     'deep acch when mask applied': 'mask != nullptr' in p25 or '&& mask' in p25,
     'soft cqpsk hold before mac ess': (
         'allowRealtimePhase2SoftDemodHold' in p25 and
@@ -38,13 +63,41 @@ checks = {
         'lockedSoftPhase2Evidence' in p25 and
         '(trust > 0 || lockedSoftPhase2Evidence) && betterLiveResult(candidate, best' in p25
     ),
+    'lock-only cqpsk can hold before fresh mac ess': (
+        'allowRealtimeLockOnlyCandidate' in p25 and
+        'm_config.maxCqpskSearchCandidates <= 1' in p25 and
+        'allowRealtimeLockOnlyCandidate);' in p25
+    ),
     'bounded realtime mask rescue': (
         'maxRescueCandidates' in p25 and
         'm_config.realtimeVoiceSearch ? std::min<size_t>(phaseWindows.size(), 1u)' in p25 and
-        'rescueScoreSlots = m_config.realtimeVoiceSearch ? 6u : 12u' in p25 and
-        'rescueDeepBudget = m_config.realtimeVoiceSearch ? 4u : 8u' in p25 and
+        'rescueScoreSlots = m_config.realtimeVoiceSearch ? 3u : 12u' in p25 and
+        'rescueDeepBudget = m_config.realtimeVoiceSearch ? 1u : 8u' in p25 and
         'm_config.realtimeVoiceSearch ? 3u : 12u' in p25 and
         '? size_t{2}' in p25
+    ),
+    'throttled unknown-security realtime mask hunt': (
+        'm_phase2LastFullMaskPhaseHuntGeneration' in p25 and
+        'kRealtimeFullMaskPhaseHuntSpacingGenerations = 24' in p25 and
+        '!m_config.allowPhase2SoftAmbeMaskPhaseLock' in p25 and
+        'realtimeMaskHuntThrottledForLock' in p25 and
+        'const bool cheapProbeMask = !annotateSessionCodewords || realtimeMaskHuntThrottledForLock;' in p25 and
+        'throttleRealtimeUnknownSecurityAcchRescue' in p25 and
+        '!throttleRealtimeUnknownSecurityAcchRescue' in p25
+    ),
+    'realtime acch uses exact duid before rescue fanout': (
+        '(deepAcchSearch || !superframeLocked || xorMask == nullptr)' in p25 and
+        'if (!allowAlternateKindFanout && k != burst.kind) break;' in p25 and
+        'Alternate-kind ACCH fanout is' in p25
+    ),
+    'realtime acch de-dupes overlapping bursts': (
+        'm_phase2RecentAcchDecodeBurstDibits' in p25 and
+        'decodeAcch = true' in p25 and
+        'recentlyDecodedAcchBurst' in p25 and
+        'rememberAcchBurst' in p25 and
+        '!duplicateRealtimeAcch' in p25 and
+        p25.count('recentlyDecodedAcchBurst(') >= 3 and
+        p25.count('rememberAcchBurst(') >= 3
     ),
     'contiguous phase2 timeslot payload': (
         'Phase 2 TDMA does not' in p25 and

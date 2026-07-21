@@ -135,6 +135,7 @@ struct P25Phase2MacPdu {
     bool acchBitOrderSwapped = false;
     bool acchDibitInverted = false;
     int acchSlipDibits = 0;
+    size_t macStructureMaxBits = 0;
     std::vector<uint8_t> bytes;
     bool essPresent = false;
     P25Phase2EssState ess;
@@ -277,6 +278,8 @@ struct P25LiveDecoderStats {
     double cqpskCarrierLoopCorrectionHz = 0.0;
     double cqpskCarrierLoopPhaseErrorRmsRad = 0.0;
     size_t cqpskCarrierLoopSymbols = 0;
+    size_t cqpskCandidatesEvaluated = 0;
+    bool c4fmHardLockSkippedCqpsk = false;
     size_t phase2IschDecoded = 0;
     size_t phase2IschSync = 0;
     size_t phase2SyncOffsetCorrections = 0;
@@ -435,6 +438,8 @@ public:
     const P25LiveDecoderConfig& config() const { return m_config; }
     void setRealtimeDecodeBudgetMs(int budgetMs) { m_config.realtimeDecodeBudgetMs = std::max(0, budgetMs); }
     void setMaxCqpskSearchCandidates(size_t maxCandidates) { m_config.maxCqpskSearchCandidates = maxCandidates; }
+    void setMaxPhase2SyncHits(size_t maxSyncHits) { m_config.maxPhase2SyncHits = maxSyncHits; }
+    void setMaxPhase2SuperframeLocks(size_t maxLocks) { m_config.maxPhase2SuperframeLocks = maxLocks; }
     void setAllowPhase2SoftAmbeMaskPhaseLock(bool allow) { m_config.allowPhase2SoftAmbeMaskPhaseLock = allow; }
     void setPhase2PreferredTdmaSlot(bool known, uint8_t slot) {
         m_config.phase2PreferredTdmaSlotKnown = known;
@@ -445,6 +450,7 @@ public:
     // Align the internal Phase-2 dibit stream counter to an absolute ring
     // cursor before processing a new traffic-channel chunk.
     void alignPhase2AbsoluteDibitCursor(uint64_t chunkStartAbsolute, size_t chunkDibitCount);
+    uint64_t phase2StreamDibitCursorForDiagnostics() const noexcept { return m_phase2StreamDibits; }
 
     static std::array<uint8_t, FrameSyncBits> frameSyncBits();
     static std::array<int, Phase2FrameSyncDibits> phase2FrameSyncDibits();
@@ -537,6 +543,7 @@ private:
     // After a short starve streak, re-open the 12-phase hunt (SDRTrunk never sticks to a
     // wrong scrambling segment because its continuous framer re-validates continuously).
     uint8_t m_phase2MaskPhaseStarveWindows = 0;
+    uint64_t m_phase2LastFullMaskPhaseHuntGeneration = 0;
     // Sticky Phase-2 superframe epoch used for late-entry/live scanner follow.
     // sdrtrunk's traffic decoder is a continuous stream, so a single voice
     // timeslot after acquisition still has a known superframe index and XOR
@@ -550,6 +557,7 @@ private:
     P25Phase2MaskParameters m_phase2SuperframeAnchorMaskParams{};
     uint8_t m_phase2SuperframeAnchorMaskPhase = 0;
     std::deque<RecentPhase2Codeword> m_phase2RecentCodewords;
+    std::deque<uint64_t> m_phase2RecentAcchDecodeBurstDibits;
     std::deque<int> m_phase2DibitTail;
     uint64_t m_phase2NextCodewordId = 1;
     uint64_t m_phase2DecodeGeneration = 0;

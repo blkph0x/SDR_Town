@@ -14,7 +14,10 @@ checks = {
     'sanitized same-call voice Hz helper': 'p25SanitizedSameCallFollowVoiceHz' in text,
     'MHz hop authorization helper': 'p25GrantAuthorizesSameCallVoiceMHzHop' in text,
     'ignore bogus grant MHz jump log': 'P25 auto-follow ignored same-call grant MHz jump' in text,
-    'channel hop decoder reset log': 'with decoder/cursor reset for TDMA re-acquisition' in text,
+    'resolved grant wide MHz hop limit': 'kP25SameCallResolvedGrantMaxMHzHopHz' in text,
+    'out-of-source retune guard': 'sameCallCarrierNeedsRetune' in text,
+    'defer target until retune commit log': 'not updating traffic target until retune commits' in text,
+    'channel hop decoder reset log': 'decoder/cursor reset for TDMA re-acquisition' in text,
     'MHz hop debounce dwell': 'kP25SameCallMinMHzHopDwellMs' in text,
 }
 missing = [name for name, ok in checks.items() if not ok]

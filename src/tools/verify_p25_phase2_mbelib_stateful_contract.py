@@ -10,6 +10,19 @@ assert "for (int v = 0; v < 8" not in main, (
 assert "kP25Phase2AmbeProbeVariants" in main
 assert "p25ResolvePhase2AmbeFrame" in main
 assert "p25ProbeSinglePhase2AmbeVariant" in main
+call_changed = main[main.index("if (callChanged) {"):main.index("state.talkgroupId = currentTg;", main.index("if (callChanged) {"))]
+assert "rx.p25AmbeVoiceDecoder = P25AmbeVoiceDecoder();" in call_changed, (
+    "new Phase 2 calls must reset the persistent mbelib decoder"
+)
+assert "rx.p25SessionState.resampler = {};" in call_changed, (
+    "new Phase 2 calls must reset P25 resampler history"
+)
+assert "rx.p25Phase2LastGoodPcm.clear();" in call_changed, (
+    "new Phase 2 calls must clear PLC tail audio"
+)
+assert "rx.p25Phase2PreferredAmbeVariantByVoiceIndex.fill(-1);" in call_changed, (
+    "new Phase 2 calls must clear AMBE variant history"
+)
 
 loop_start = main.index("for (const auto& codeword : burst.voiceCodewords)")
 loop_end = main.index("if (!drainedPendingRawVoice)", loop_start)

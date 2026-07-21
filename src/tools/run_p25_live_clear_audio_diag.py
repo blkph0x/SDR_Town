@@ -70,10 +70,12 @@ def parse_waitgrant_output(output: str) -> dict:
                     pending_record["capture_dir"] = candidate
 
     reason_match = re.search(r"P25 waitgrant continuing scan after\s+([a-z0-9_]+)\s+on TG", output, re.IGNORECASE)
+    wav_pcm_opened = any(float(row.get("wav_seconds") or 0.0) > 0.0 for row in follow_records)
     audio_opened = (
         "P25 speaker-gated audio opened" in output or
         "P25 decoded audio opened" in output or
-        "followCaptureReason=audio_opened" in output
+        "followCaptureReason=audio_opened" in output or
+        wav_pcm_opened
     )
     grant_tgs = sorted({int(x) for x in re.findall(r"\bTG[ =](\d+)\b", output, re.IGNORECASE)})
     best_record = None
@@ -250,8 +252,15 @@ def diagnose_summary(waitgrant: dict, replay: dict | None) -> list[str]:
     if waitgrant.get("capture_dir") is None:
         findings.append("no_follow_iq_capture_saved")
     if replay:
-        findings.extend(str(x) for x in replay.get("findings", []))
         status = str(replay.get("best_status") or "")
+        suppress_snapshot_only = set()
+        if status in {"PASS_CONTINUOUS_AUDIO", "PASS_CLEAR_AUDIO", "PASS_PARTIAL_AUDIO"}:
+            suppress_snapshot_only.update({"no_speaker_audio_pushed", "live_zero_phase2_bursts"})
+        findings.extend(
+            str(x)
+            for x in replay.get("findings", [])
+            if str(x) not in suppress_snapshot_only
+        )
         if status == "PASS_CONTINUOUS_AUDIO":
             findings.append("replay_continuous_audio_confirmed")
         elif status == "PASS_PARTIAL_AUDIO":

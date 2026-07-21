@@ -9,7 +9,11 @@ ctrl = (root / 'P25Control.cpp').read_text(errors='ignore')
 checks = {
     'receiver owns pending Phase 2 PCM queue': 'p25Phase2PendingAudio' in recv and 'p25Phase2PendingAudioArmed' in recv,
     'unknown Phase 2 PCM is queued not emitted': 'applyP25Phase2SecurityAudioGate' in main and 'waitingForClearGrant = true' in main and 'out.audio.clear();' in main,
-    'pending queue is capped to sub-second audio': 'kMaxPendingSamples = 11520' in main,
+    'pending queue is capped to sub-second audio': (
+        'kP25Phase2PendingQueueMaxFrames = 20' in main and
+        'queue.ambeFrames.size() > kP25Phase2PendingQueueMaxFrames' in main and
+        'queue.ambeFrames.size() * 960u' in main
+    ),
     'clear call flushes pending queue': 'trustedClear && key.valid() && p25Phase2PendingAudioMatches' in main and 'p25TakePhase2PendingAudio' in main,
     'encrypted call drops pending queue': 'trustedEncrypted' in main and 'p25ClearPhase2PendingAudio(rx)' in main,
     'MAC_IDLE resets session': 'case 3: // MAC_IDLE' in p25 and 'phase2ClearCallSession(*session);' in p25,

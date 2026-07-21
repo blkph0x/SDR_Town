@@ -15,7 +15,8 @@ required_main = [
     'P25 traffic source unavailable',
     'single-rtl-retune-traffic-source',
     'retunesPrimary',
-    '(!p25FollowEnabled || p25IndependentTrafficActive) && p25CcInPassband',
+    'const bool decodeControlFromThisDevice',
+    '!oneRtlTrafficTunerAwayFromCc',
     '&& !p25IndependentTrafficActive',
 ]
 required_receiver = [

@@ -15,7 +15,7 @@ This pass checked the Phase 2 voice path against public implementations/docs rat
 - Switched Phase 1 hard-bit sync scanning to the reusable `P25Phase1StreamingSync` wrapper while preserving separate best-sync tracking.
 - Added short tail carry-over for C4FM and CQPSK symbol recovery so Gardner early/late interpolation has real adjacent samples at block boundaries instead of relying only on edge clamping.
 - Updated AMBE comments to reflect the verified mbelib behaviour: the project must provide correctly deinterleaved C0/C1/C2/C3 hard bits, while mbelib performs the inner AMBE Golay correction and PRNG demodulation.
-- Added a post-mbelib AMBE error gate for Phase 2 3600x2450 frames. Frames with excessive corrected/remaining errors are rejected instead of being pushed into the audio queue as artifact-heavy PCM.
+- Split Phase 2 AMBE quality into two decisions: strict low-error frames can prove fresh clear speech, while already-unlocked hard voice emits any finite, bounded mbelib PCM so codec erasure/repeat cadence is preserved like SDRTrunk/OP25.
 
 ## Remaining integration notes
 

@@ -261,6 +261,19 @@ class DiagnosticsState:
             return key, label[:180] or "User submitted issue"
 
         stage = normalize_text(payload.get("stage"))
+        if event_type == "app.performance.resource_pressure":
+            system = payload.get("system") if isinstance(payload.get("system"), dict) else {}
+            pressure_summary = normalize_text(
+                payload.get("pressureSummary")
+                or system.get("pressureSummary")
+                or ",".join(str(x) for x in system.get("pressureReasons", []) if x)
+            )
+            key = "|".join([event_type, severity, stage, pressure_summary])
+            label = " - ".join(
+                p for p in [event_type, stage, pressure_summary or "resource pressure"] if p
+            )
+            return key, label[:180] or "Remote diagnostic issue"
+
         exception_type = normalize_text(payload.get("exceptionType"))
         message = normalize_text(payload.get("message") or payload.get("error") or payload.get("line"))
         diag = normalize_text(payload.get("diag"))

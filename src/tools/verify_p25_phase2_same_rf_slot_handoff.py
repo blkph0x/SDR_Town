@@ -7,7 +7,7 @@ checks = {
     'unacquired requires no decoded frames': 'activeDiag.decodedFrames == 0' in text,
     'unacquired requires no MAC': 'activeDiag.phase2MacCrcValid == 0' in text,
     'unacquired requires no ESS': 'activeDiag.phase2EssKnown == false' in text,
-    'same RF frequency guard': 'std::abs(p25AutoFollowVoiceFreqHz - followTg.lastVoiceFreqHz) <= 50.0' in text,
+    'same RF carrier guard': 'sameRfPhase2Carrier' in text and 'std::abs(liveFollowCarrierHz - followTg.lastVoiceFreqHz) <= 50.0' in text,
     'quiet call dwell steal': 'allowPhase2DwellSteal' in text,
     'handoff log': 'P25 Phase 2 same-RF slot handoff' in text,
     'phase2 post arm discard disabled': 'static constexpr int kP25Phase2PostArmDiscardWindows = 0;' in text,

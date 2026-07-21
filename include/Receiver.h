@@ -57,6 +57,7 @@ struct P25VoiceDiagSnapshot {
     bool phase2TargetEssEncrypted = false;
     bool phase2TargetMacCrcValid = false;
     bool phase2TargetSessionAudioRelease = false;
+    bool phase2TargetSecurityStateFromPtt = false;
     bool backendAvailable = false;
     bool nidLock = false;
     double phase2CenterFreqHz = 0.0;
@@ -113,15 +114,31 @@ struct Receiver {
     bool p25VoicePhase2 = false;
     bool p25VoiceTdmaSlotKnown = false;
     uint8_t p25VoiceTdmaSlot = 0;
-    // Sticky Phase-2 slot-label invert for the current call.  When the superframe
-    // epoch is one burst early/late, grant slot labels flip and all VCWs land on
-    // the opposite slot.  Once a clear-grant window proves that pattern, keep
-    // the invert active for the rest of the call (SDRTrunk never flips mid-call;
-    // it binds the traffic channel timeslot once and stays continuous).
+    // Sticky Phase-2 slot-label invert is retired from the live audio path.
+    // SDRTrunk binds TIMESLOT once from the grant; mid-call invert mixes the
+    // companion call into the vocoder and produces blocky/disconnected audio.
+    // Kept as a diagnostic flag only (always false on emit path).
     bool p25Phase2StickySlotLabelInvert = false;
     int p25Phase2OppositeOnlyWindows = 0;
+    // Once freq+tg+granted slot+call generation are locked, the slot is
+    // immutable until call end / new grant / retune / new generation.
+    bool p25Phase2GrantedSlotImmutable = false;
     bool p25VoiceSlotProbePending = false;
     uint8_t p25VoiceSlotProbeRequested = 0;
+    // Architectural continuity diagnostics (healthy clear call => all zero
+    // mid-call destructive events).
+    uint64_t p25DiagSlotChanged = 0;
+    uint64_t p25DiagStickyInvert = 0;
+    uint64_t p25DiagSlotProbe = 0;
+    uint64_t p25DiagSlotProbeBlocked = 0;
+    uint64_t p25DiagSecurityChanged = 0;
+    uint64_t p25DiagVocoderReset = 0;
+    uint64_t p25DiagPendingAudioCleared = 0;
+    uint64_t p25DiagVariantChanged = 0;
+    uint64_t p25DiagRingUnderrun = 0;
+    uint64_t p25DiagRingOverflow = 0;
+    uint64_t p25DiagSequencerGapSilence = 0;
+    uint64_t p25DiagSequencerLateDrops = 0;
     bool p25VoiceMaskParamsKnown = false;
     uint16_t p25VoiceNac = 0;
     uint32_t p25VoiceWacn = 0;
@@ -145,6 +162,9 @@ struct Receiver {
     // demodulating an old grant after a newer grant/source has replaced it.
     uint64_t p25TrafficGeneration = 0;
     double p25TrafficControlFreqHz = 0.0;
+    // Actual RF/source center for the traffic receiver.  This can differ from
+    // p25TrafficVoiceFreqHz in one-RTL low-IF follow mode.
+    double p25TrafficSourceCenterFreqHz = 0.0;
     double p25TrafficVoiceFreqHz = 0.0;
     uint8_t p25TrafficSlot = 0;
     int64_t p25TrafficLastGrantMs = 0;
@@ -165,14 +185,18 @@ struct Receiver {
     // often arrive in different DSP windows, so the audio gate must remember
     // current-call MAC/ESS context without promoting it across calls.
     uint32_t p25Phase2RecentSecurityTalkgroupId = 0;
+    uint32_t p25Phase2RecentSecuritySourceId = 0;
+    uint64_t p25Phase2RecentSecurityCallSessionId = 0;
     uint8_t p25Phase2RecentSecuritySlot = 0xffu;
     int64_t p25Phase2RecentSecurityFrequencyHz = 0;
+    int64_t p25Phase2RecentSecurityGrantEpochMs = 0;
     int64_t p25Phase2RecentSecurityEvidenceMs = 0;
     bool p25Phase2RecentTargetMacCrcValid = false;
     bool p25Phase2RecentAnyMacCrcValid = false;
     bool p25Phase2RecentTargetEssKnown = false;
     bool p25Phase2RecentTargetEssEncrypted = false;
     bool p25Phase2RecentTargetSessionAudioRelease = false;
+    bool p25Phase2RecentTargetSecurityStateFromPtt = false;
     bool p25Phase2RecentSuperframeMaskLock = false;
     // Guarded Phase-2 field recovery. Explicit encrypted grants/ESS still mute
     // immediately, while late-entry unknown calls queue audio until target-slot
@@ -239,9 +263,8 @@ struct Receiver {
         p25Phase2TrafficTargetOffsetMisses = 0;
         p25Phase2RecentTrafficEvidenceMs = 0;
     }
-    void resetP25TrafficSession(const char* /*reason*/ = nullptr, bool fullClear = true)
+    void resetP25TrafficSessionFieldsLocked(bool fullClear = true)
     {
-        std::lock_guard<std::recursive_mutex> dspLock(dspMutex);
         p25TrafficSessionGeneration.fetch_add(1, std::memory_order_acq_rel);
         p25VoiceLiveDecoder.reset();
         if (fullClear) {
@@ -264,23 +287,58 @@ struct Receiver {
         p25Phase2LastEmittedAbsDibit = 0;
         p25Phase2StickySlotLabelInvert = false;
         p25Phase2OppositeOnlyWindows = 0;
+        p25Phase2GrantedSlotImmutable = false;
+        p25VoiceSlotProbePending = false;
+        p25VoiceSlotProbeRequested = 0;
+        // Call-boundary reset: zero mid-call continuity counters so a healthy
+        // call reports 0 slot/invert/vocoder/variant/pending-clear events.
+        p25DiagSlotChanged = 0;
+        p25DiagStickyInvert = 0;
+        p25DiagSlotProbe = 0;
+        p25DiagSlotProbeBlocked = 0;
+        p25DiagSecurityChanged = 0;
+        p25DiagVocoderReset = 0;
+        p25DiagPendingAudioCleared = 0;
+        p25DiagVariantChanged = 0;
+        p25DiagRingUnderrun = 0;
+        p25DiagRingOverflow = 0;
+        p25DiagSequencerGapSilence = 0;
+        p25DiagSequencerLateDrops = 0;
         p25Phase2PendingAudio.clear();
         p25Phase2PendingTalkgroupId = 0;
         p25Phase2PendingAudioArmed = false;
         p25Phase2RecentSecurityTalkgroupId = 0;
+        p25Phase2RecentSecuritySourceId = 0;
+        p25Phase2RecentSecurityCallSessionId = 0;
         p25Phase2RecentSecuritySlot = 0xffu;
         p25Phase2RecentSecurityFrequencyHz = 0;
+        p25Phase2RecentSecurityGrantEpochMs = 0;
         p25Phase2RecentSecurityEvidenceMs = 0;
         p25Phase2RecentTargetMacCrcValid = false;
         p25Phase2RecentAnyMacCrcValid = false;
         p25Phase2RecentTargetEssKnown = false;
         p25Phase2RecentTargetEssEncrypted = false;
         p25Phase2RecentTargetSessionAudioRelease = false;
+        p25Phase2RecentTargetSecurityStateFromPtt = false;
         p25Phase2RecentSuperframeMaskLock = false;
         p25SessionState.clearAll();
         p25VoiceSourceId = 0;
         p25VoiceGrantEpochMs = 0;
         p25CurrentCallSessionId = 0;
+    }
+
+    void resetP25TrafficSession(const char* /*reason*/ = nullptr, bool fullClear = true)
+    {
+        std::lock_guard<std::recursive_mutex> dspLock(dspMutex);
+        resetP25TrafficSessionFieldsLocked(fullClear);
+    }
+
+    bool tryResetP25TrafficSession(const char* /*reason*/ = nullptr, bool fullClear = true)
+    {
+        std::unique_lock<std::recursive_mutex> dspLock(dspMutex, std::try_to_lock);
+        if (!dspLock.owns_lock()) return false;
+        resetP25TrafficSessionFieldsLocked(fullClear);
+        return true;
     }
 
     void resetP25VoiceState()

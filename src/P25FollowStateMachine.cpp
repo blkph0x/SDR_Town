@@ -438,6 +438,8 @@ P25SlotProbeDecision evaluateP25SlotProbe(const P25SlotProbeSnapshot& snapshot)
     // the opposite slot; unlabelled VCWs there are not proof that the grant slot
     // is wrong.  Only allow this recovery for manual/late-entry follows that do
     // not yet have enough control-channel mask/grant metadata to trust a slot.
+    // Destructive apply is separately blocked once the live receiver marks the
+    // grant slot immutable (clear/encrypted/mask + call session).
     const bool untrustedSlotAssignment = !snapshot.grantMaskParamsKnown;
     const bool maskedOppositeDominant =
         snapshot.grantClearStateUnknown &&

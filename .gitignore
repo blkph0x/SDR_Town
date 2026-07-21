@@ -114,3 +114,7 @@ build/**/*_tests
 # Misc
 *.bak
 *.backup
+
+# Local LIVE STT venv
+.venv-stt/
+

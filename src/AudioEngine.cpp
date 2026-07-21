@@ -11,7 +11,11 @@
 
 namespace {
 constexpr size_t kOutputRingFrames = 1u << 19; // storage capacity; queued depth is capped below for jitter buffering.
-constexpr double kDigitalVoiceJitterSeconds = 0.65;
+// Field 20260720_070533: 220 ms silence-bridge floor was still drained by
+// selected-slot emit droughts (p90 gap ~160 ms, outliers 0.5–3.6 s). Keep a
+// deeper digital-voice jitter cap so pending→push can pre-buffer real AMBE
+// without inventing opposite-slot PLC.
+constexpr double kDigitalVoiceJitterSeconds = 0.85;
 static_assert((kOutputRingFrames & (kOutputRingFrames - 1)) == 0,
               "Audio output ring capacity must stay a power of two for the fast wrap path.");
 

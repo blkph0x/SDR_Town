@@ -14,8 +14,8 @@ assert 'm_phase2SlotFirst4vSlot[ts]' in dec
 assert 'const bool grantMayReleaseVoice =' in main
 assert 'sdrtrunkLateEntryVoiceRelease' in main
 assert 'p25Phase2UnknownGrantProbeVoiceReleaseEvidence' in main
-assert 'releasePendingRawVoiceFromValidatedUnknownGrantProbe' in main
-assert 'unknown-grant-probe-validated-release' in main
+assert 'keepUnknownGrantProbeDiagnosticOnly' in main
+assert 'unknown-grant-probe-diagnostic-only' in main
 assert 'targetVoiceForLateEntryProbe' in main
 assert 'macEvidenceForLateEntryProbe' in main
 assert 'superframeMaskEvidenceForLateEntryProbe' in main
@@ -32,6 +32,8 @@ assert 'late-entry-audio-probe-diagnostic-only' in main
 assert 'rx.p25VoiceClearKnown = false;' in main
 assert 'rx.p25VoiceEncrypted = true;' in main
 assert 'fieldProbeClear ||' not in main
+assert 'releasePendingRawVoiceFromValidatedUnknownGrantProbe' not in main
+assert 'unknown-grant-probe-validated-release' not in main
 assert 'voiceReleaseTrusted || burstSdrtrunkLateEntryVoiceRelease || lateEntryAudioProbeAllowed' not in main
 assert 'late-entry-field-audio-probe-release' not in main
 print('P25 Phase 2 hard sdrtrunk parity regression: PASS')
