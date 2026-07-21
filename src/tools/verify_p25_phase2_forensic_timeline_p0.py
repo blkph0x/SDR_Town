@@ -14,12 +14,13 @@ session_h = (root / ".." / "include" / "P25ReceiverSession.h").resolve().read_te
 )
 
 completed_section = main.split("p25VoiceCompletedResults", 1)[1]
+worker_fn = main.split("bool p25VoiceWorkerCanAcceptJob()", 1)[1].split("P25VoiceWorkerQueueSnapshot", 1)[0]
 required = {
     "lossless publish queue": "pendingVoicePublishResults" in main,
-    "publish returns bool": "bool publishP25VoiceDecodeResult(" in main,
+    "publish returns terminal outcome": "P25VoicePublishOutcome publishP25VoiceDecodeResult(" in main,
     "publication lock miss counter": "p25VoicePublicationLockMisses" in main,
     "no completed-result eviction": "p25VoiceDroppedResults.fetch_add" not in completed_section,
-    "worker blocks on full completed queue": "p25VoiceCompletedResults.size() < kP25VoiceDecodeMaxCompletedResults" in main,
+    "worker blocks on full result backlog": "p25VoicePendingPublishDepth.load" in worker_fn,
     "stream dibit on codeword": "streamDibitKnown" in decoder_h and "codeword.streamDibit = streamDibit" in decoder_cpp,
     "frame key uses stream dibit": "key.streamDibitKnown = cw.streamDibitKnown" in main,
     "first-frame erasure timeline": "Every accepted AMBE feed position must occupy one 20 ms slot" in main,

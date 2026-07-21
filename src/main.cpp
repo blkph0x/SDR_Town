@@ -5999,6 +5999,22 @@ static void p25Phase2ClearSpeakerPlaybackQueue(Receiver& rx,
     p25Phase2ClearSpeakerPendingQueue(rx, pendingSpeaker, reason);
 }
 
+static void p25Phase2ClearStaleResultSpeakerPending(P25SpeakerPendingMap& map,
+                                                    const ReceiverSessionKey& sessionKey,
+                                                    uint64_t callSessionId,
+                                                    Receiver& rx,
+                                                    P25PendingClearReason reason)
+{
+    auto it = map.find(sessionKey);
+    if (it == map.end()) return;
+    if (callSessionId != 0 && it->second.callSessionId != 0 &&
+        it->second.callSessionId != callSessionId) {
+        return;
+    }
+    p25Phase2ClearSpeakerPendingQueue(rx, it->second, reason);
+    map.erase(it);
+}
+
 static bool p25Phase2GrantedSlotIsImmutable(const Receiver& rx) noexcept
 {
     return rx.p25VoiceDecodeEnabled &&
@@ -6183,40 +6199,81 @@ enum class FrameOrderResult : uint8_t {
     Expected = 0,
     Future,
     Duplicate,
-    Late
+    Late,
+    Unorderable
 };
+
+static size_t p25Phase2InsertSequencerGapSilence(Receiver& rx,
+                                                   P25VoiceAudioBlock& out,
+                                                   double outputRateHz,
+                                                   size_t gapFrames);
+
+static uint64_t p25Phase2StableBurstId(const Phase2VoiceFrameKey& key) noexcept
+{
+    if (key.streamDibitKnown && key.voiceIndex != 0xffu) {
+        return key.streamDibit - static_cast<uint64_t>(key.voiceIndex);
+    }
+    if (key.sessionCodewordIdKnown && key.voiceIndex != 0xffu) {
+        return key.sessionCodewordId - static_cast<uint64_t>(key.voiceIndex);
+    }
+    return (key.superframeAnchor << 8) | static_cast<uint64_t>(key.burstIndex);
+}
 
 static bool p25Phase2SameVoiceBurst(const P25Phase2FrameSequencer& seq,
                                     const Phase2VoiceFrameKey& key) noexcept
 {
     if (!seq.haveActiveBurst) return false;
+    if (seq.activeBurstStableIdKnown &&
+        (key.streamDibitKnown || key.sessionCodewordIdKnown)) {
+        return p25Phase2StableBurstId(key) == seq.activeBurstStableId;
+    }
     if (key.superframeAnchor != seq.activeBurstAnchor) return false;
     return key.burstIndex == seq.activeBurstIndex;
 }
 
-static void p25Phase2CloseActiveVoiceBurst(P25Phase2FrameSequencer& seq) noexcept
+static void p25Phase2CloseActiveVoiceBurst(Receiver& rx,
+                                           P25Phase2FrameSequencer& seq,
+                                           P25VoiceAudioBlock* gapSilenceOut = nullptr,
+                                           double gapSilenceOutputRateHz = 48000.0) noexcept
 {
     if (!seq.haveActiveBurst) return;
     if (seq.expectedVoiceIndex < seq.activeBurstVoiceCount) {
-        const uint64_t tailGaps = seq.activeBurstVoiceCount - seq.expectedVoiceIndex;
-        seq.gapSilenceOrdinals += tailGaps;
-        seq.nextSpeechOrdinal += static_cast<int64_t>(tailGaps);
+        const size_t tailGaps = seq.activeBurstVoiceCount - seq.expectedVoiceIndex;
         seq.protocolOrderIssues += tailGaps;
+        seq.nextSpeechOrdinal += static_cast<int64_t>(tailGaps);
+        if (gapSilenceOut != nullptr &&
+            (seq.armed ||
+             rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Clear)) {
+            p25Phase2InsertSequencerGapSilence(rx, *gapSilenceOut, gapSilenceOutputRateHz, tailGaps);
+        } else {
+            seq.gapSilenceOrdinals += tailGaps;
+            rx.p25DiagSequencerGapSilence += tailGaps;
+        }
     }
     seq.haveActiveBurst = false;
     seq.expectedVoiceIndex = 0;
     seq.activeBurstVoiceCount = 0;
+    seq.activeBurstStableIdKnown = false;
+    seq.activeBurstStableId = 0;
+    seq.heldFutureKeys = {};
 }
 
-static void p25Phase2BeginVoiceBurst(P25Phase2FrameSequencer& seq,
-                                     const Phase2VoiceFrameKey& key) noexcept
+static void p25Phase2BeginVoiceBurst(Receiver& rx,
+                                     P25Phase2FrameSequencer& seq,
+                                     const Phase2VoiceFrameKey& key,
+                                     P25VoiceAudioBlock* gapSilenceOut = nullptr,
+                                     double gapSilenceOutputRateHz = 48000.0) noexcept
 {
-    p25Phase2CloseActiveVoiceBurst(seq);
+    p25Phase2CloseActiveVoiceBurst(rx, seq, gapSilenceOut, gapSilenceOutputRateHz);
     seq.haveActiveBurst = true;
     seq.activeBurstAnchor = key.superframeAnchor;
     seq.activeBurstIndex = key.burstIndex;
     seq.activeBurstVoiceCount = key.burstVoiceCount > 0 ? key.burstVoiceCount : 4;
     seq.expectedVoiceIndex = 0;
+    seq.activeBurstStableId = p25Phase2StableBurstId(key);
+    seq.activeBurstStableIdKnown =
+        key.streamDibitKnown || key.sessionCodewordIdKnown;
+    seq.heldFutureKeys = {};
 }
 
 static size_t p25Phase2InsertSequencerGapSilence(Receiver& rx,
@@ -6249,6 +6306,9 @@ static FrameOrderResult p25Phase2ClassifySpeechFrameOrder(const P25Phase2FrameSe
         return FrameOrderResult::Expected;
     }
     const int cmp = p25Phase2CompareVoiceFrameKeys(key, seq.lastAcceptedKey);
+    if (cmp == 2) {
+        return FrameOrderResult::Unorderable;
+    }
     if (cmp == 0) {
         return FrameOrderResult::Duplicate;
     }
@@ -6272,6 +6332,10 @@ static bool p25Phase2SequencerAcceptSpeechFrame(Receiver& rx,
         ++rx.p25DiagSequencerLateDrops;
         return false;
     }
+    if (order == FrameOrderResult::Unorderable) {
+        ++seq.reorderHeld;
+        return false;
+    }
     if (order == FrameOrderResult::Late) {
         ++seq.duplicateOrLateDrops;
         ++seq.outOfOrderDrops;
@@ -6282,7 +6346,21 @@ static bool p25Phase2SequencerAcceptSpeechFrame(Receiver& rx,
 
     const bool sameBurst = p25Phase2SameVoiceBurst(seq, key);
     if (!sameBurst) {
-        p25Phase2BeginVoiceBurst(seq, key);
+        p25Phase2BeginVoiceBurst(rx, seq, key, gapSilenceOut, gapSilenceOutputRateHz);
+    }
+
+    if (sameBurst && key.voiceIndex > seq.expectedVoiceIndex + 1 &&
+        key.voiceIndex < seq.heldFutureKeys.size()) {
+        seq.heldFutureKeys[key.voiceIndex] = key;
+        ++seq.reorderHeld;
+        return false;
+    }
+    if (order == FrameOrderResult::Future) {
+        if (key.voiceIndex < seq.heldFutureKeys.size()) {
+            seq.heldFutureKeys[key.voiceIndex] = key;
+            ++seq.reorderHeld;
+        }
+        return false;
     }
 
     size_t gapFrames = 0;
@@ -13314,6 +13392,13 @@ void applyDarkTheme(QApplication& app)
     );
 }
 
+enum class P25VoicePublishOutcome : uint8_t {
+    Deferred = 0,
+    Published,
+    DiscardedStale,
+    ReceiverGone
+};
+
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -18707,17 +18792,9 @@ public:
             std::deque<P25VoiceDecodeResult> pendingVoicePublishResults;
             auto drainP25VoiceResults = [&]() {
                 for (auto& result : takeP25VoiceDecodeResults()) {
-                    if (result.rx && result.rollingDecode && result.iqDecodeEndAbsoluteKnown) {
-                        auto rollingIt = phase2IqByRx.find(p25ReceiverSessionKey(*result.rx));
-                        if (rollingIt != phase2IqByRx.end()) {
-                            if (result.hasAudioBlock && !result.stale) {
-                                rollingIt->second.commitDecodeAbsolute(result.iqDecodeEndAbsolute);
-                            } else {
-                                rollingIt->second.rollbackSubmittedDecode();
-                            }
-                        }
-                    }
                     pendingVoicePublishResults.push_back(std::move(result));
+                    p25VoicePendingPublishDepth.store(pendingVoicePublishResults.size(),
+                        std::memory_order_release);
                 }
                 bool drained = false;
                 while (!pendingVoicePublishResults.empty()) {
@@ -18736,25 +18813,37 @@ public:
                             }
                         }
                         if (!rxStillValid) {
+                            if (result.rx && result.rollingDecode && result.iqDecodeEndAbsoluteKnown) {
+                                auto rollingIt = phase2IqByRx.find(result.receiverSessionKey);
+                                if (rollingIt != phase2IqByRx.end()) {
+                                    rollingIt->second.rollbackSubmittedDecode();
+                                }
+                            }
                             pendingVoicePublishResults.pop_front();
+                            p25VoicePendingPublishDepth.store(pendingVoicePublishResults.size(),
+                                std::memory_order_release);
                             drained = true;
                             continue;
                         }
                     }
-                    if (!publishP25VoiceDecodeResult(result, pendingAudioByRx)) {
+                    const P25VoicePublishOutcome outcome =
+                        publishP25VoiceDecodeResult(result, pendingAudioByRx);
+                    if (outcome == P25VoicePublishOutcome::Deferred) {
                         break;
                     }
                     if (result.rx && result.rollingDecode && result.iqDecodeEndAbsoluteKnown) {
-                        auto rollingIt = phase2IqByRx.find(p25ReceiverSessionKey(*result.rx));
+                        auto rollingIt = phase2IqByRx.find(result.receiverSessionKey);
                         if (rollingIt != phase2IqByRx.end()) {
-                            if (result.hasAudioBlock && !result.stale) {
+                            if (outcome == P25VoicePublishOutcome::Published &&
+                                result.hasAudioBlock) {
                                 rollingIt->second.commitDecodeAbsolute(result.iqDecodeEndAbsolute);
-                            } else {
+                            } else if (outcome == P25VoicePublishOutcome::DiscardedStale) {
                                 rollingIt->second.rollbackSubmittedDecode();
                             }
                         }
                     }
-                    if (result.rx && result.hasAudioBlock &&
+                    if (outcome == P25VoicePublishOutcome::Published &&
+                        result.rx && result.hasAudioBlock &&
                         (p25Phase2ShouldFlushStaleVoicePipeline(result.audio) ||
                          p25Phase2ShouldFlushAudioTail(result.audio))) {
                         Receiver& rx = *result.rx;
@@ -18777,6 +18866,8 @@ public:
                         }
                     }
                     pendingVoicePublishResults.pop_front();
+                    p25VoicePendingPublishDepth.store(pendingVoicePublishResults.size(),
+                        std::memory_order_release);
                     drained = true;
                 }
                 return drained;
@@ -19451,6 +19542,10 @@ public:
                         job.tdmaSlotKnown = monP25VoiceTdmaSlotKnown;
                         job.tdmaSlot = monP25VoiceTdmaSlot;
                         job.voiceFreqHz = monP25TrafficVoiceFreqHz;
+                        if (rxPtr) {
+                            job.receiverSessionKey = p25ReceiverSessionKey(*rxPtr);
+                            job.callSessionId = rxPtr->p25CurrentCallSessionId;
+                        }
                         if (!submitP25VoiceDecodeJob(std::move(job))) {
                             const auto workerState = p25VoiceWorkerQueueSnapshot();
                             const QString submitDetail = QString("pending=%1 busy=%2 stopping=%3 thread=%4 nextSeq=%5 qDrop=%6 rDrop=%7.")
@@ -20715,6 +20810,8 @@ private:
         uint8_t tdmaSlot = 0;
         double voiceFreqHz = 0.0;
         uint64_t sequence = 0;
+        ReceiverSessionKey receiverSessionKey{};
+        uint64_t callSessionId = 0;
     };
 
     struct P25VoiceDecodeResult {
@@ -20747,6 +20844,8 @@ private:
         uint8_t tdmaSlot = 0;
         double voiceFreqHz = 0.0;
         uint64_t sequence = 0;
+        ReceiverSessionKey receiverSessionKey{};
+        uint64_t callSessionId = 0;
         std::string speakerGateReason;
         std::string staleReason;
         std::string error;
@@ -20762,6 +20861,7 @@ private:
         long long droppedResults = 0;
         size_t completedResults = 0;
         long long publicationLockMisses = 0;
+        size_t pendingPublishResults = 0;
     };
 
     QTimer* updateTimer = nullptr;
@@ -20788,6 +20888,7 @@ private:
     std::atomic<long long> p25VoiceDroppedJobs{0};
     std::atomic<long long> p25VoiceDroppedResults{0};
     std::atomic<long long> p25VoicePublicationLockMisses{0};
+    std::atomic<size_t> p25VoicePendingPublishDepth{0};
     std::mutex p25VoiceWorkerMutex;
     std::condition_variable p25VoiceWorkerCv;
     std::deque<P25VoiceDecodeJob> p25VoicePendingJobs;
@@ -20920,6 +21021,8 @@ private:
                 result.tdmaSlot = job.tdmaSlot;
                 result.voiceFreqHz = job.voiceFreqHz;
                 result.sequence = job.sequence;
+                result.receiverSessionKey = job.receiverSessionKey;
+                result.callSessionId = job.callSessionId;
 
                 const uintptr_t workerRxKey = reinterpret_cast<uintptr_t>(job.rx.get());
                 const uint64_t workerSeq = job.sequence;
@@ -21256,7 +21359,9 @@ private:
                     // results.  Never evict decoded PCM after state mutation.
                     p25VoiceWorkerCv.wait(lock, [this]() {
                         return p25VoiceWorkerStop.load(std::memory_order_acquire) ||
-                               p25VoiceCompletedResults.size() < kP25VoiceDecodeMaxCompletedResults;
+                               (p25VoiceCompletedResults.size() +
+                                p25VoicePendingPublishDepth.load(std::memory_order_acquire)) <
+                                   kP25VoiceDecodeMaxCompletedResults;
                     });
                     if (p25VoiceWorkerStop.load(std::memory_order_acquire)) {
                         continue;
@@ -21325,7 +21430,9 @@ private:
         return !p25VoiceWorkerStop.load(std::memory_order_acquire) &&
                p25VoiceWorkerThread.joinable() &&
                p25VoicePendingJobs.size() < p25VoiceDecodeMaxPendingJobsNow() &&
-               p25VoiceCompletedResults.size() < kP25VoiceDecodeMaxCompletedResults;
+               (p25VoiceCompletedResults.size() +
+                p25VoicePendingPublishDepth.load(std::memory_order_acquire)) <
+                   kP25VoiceDecodeMaxCompletedResults;
     }
 
     P25VoiceWorkerQueueSnapshot p25VoiceWorkerQueueSnapshot()
@@ -21343,6 +21450,7 @@ private:
         snap.droppedJobs = p25VoiceDroppedJobs.load(std::memory_order_relaxed);
         snap.droppedResults = p25VoiceDroppedResults.load(std::memory_order_relaxed);
         snap.publicationLockMisses = p25VoicePublicationLockMisses.load(std::memory_order_relaxed);
+        snap.pendingPublishResults = p25VoicePendingPublishDepth.load(std::memory_order_acquire);
         return snap;
     }
 
@@ -21365,10 +21473,10 @@ private:
         return out;
     }
 
-    bool publishP25VoiceDecodeResult(const P25VoiceDecodeResult& result,
-                                     P25SpeakerPendingMap& pendingAudioByRx)
+    P25VoicePublishOutcome publishP25VoiceDecodeResult(const P25VoiceDecodeResult& result,
+                                                       P25SpeakerPendingMap& pendingAudioByRx)
     {
-        if (!result.rx) return true;
+        if (!result.rx) return P25VoicePublishOutcome::ReceiverGone;
         // After return-to-control, the traffic Receiver may have been removed from the receivers list
         // (and its storage released). Guard against publishing stale results that would dereference
         // a now-invalid Receiver* (e.g. rx.stateMutex). This eliminates a source of freezes after
@@ -21377,7 +21485,7 @@ private:
             std::unique_lock<std::mutex> lk(receiversMutex, std::try_to_lock);
             if (!lk.owns_lock()) {
                 p25VoicePublicationLockMisses.fetch_add(1, std::memory_order_relaxed);
-                return false;
+                return P25VoicePublishOutcome::Deferred;
             }
             bool stillActive = false;
             for (auto& r : receivers) {
@@ -21395,7 +21503,7 @@ private:
                             .arg(reason),
                         1000);
                 });
-                return true;
+                return P25VoicePublishOutcome::ReceiverGone;
             }
         }
         Receiver& rx = *result.rx;
@@ -21406,21 +21514,23 @@ private:
                     QString("P25 voice worker decode error: %1").arg(err),
                     2500);
             });
-            return true;
+            return P25VoicePublishOutcome::DiscardedStale;
         }
         bool stale = result.stale;
         bool publishVoiceDiag = result.publishVoiceDiag;
-        if (!result.hasAudioBlock && !stale) return true;
+        if (!result.hasAudioBlock && !stale) return P25VoicePublishOutcome::Published;
         {
             std::unique_lock<std::mutex> rxLock(rx.stateMutex, std::try_to_lock);
             if (!rxLock.owns_lock()) {
                 p25VoicePublicationLockMisses.fetch_add(1, std::memory_order_relaxed);
-                return false;
+                return P25VoicePublishOutcome::Deferred;
             }
             if (!rx.active || !rx.p25VoiceDecodeEnabled || !rx.p25VoicePhase2) {
                 stale = true;
-                p25Phase2ClearSpeakerPendingQueue(rx,
-                    p25SpeakerPendingFor(pendingAudioByRx, rx),
+                p25Phase2ClearStaleResultSpeakerPending(pendingAudioByRx,
+                    result.receiverSessionKey,
+                    result.callSessionId,
+                    rx,
                     P25PendingClearReason::RetuneOrGeneration);
             } else if (result.talkgroupId != 0 && rx.p25VoiceTalkgroupId != result.talkgroupId) {
                 stale = true;
@@ -21453,8 +21563,10 @@ private:
                  result.audio.decodedFrames > 0 ||
                  !result.audio.audio.empty());
             if (!keepWallTimeoutEvidence) {
-                p25Phase2ClearSpeakerPendingQueue(rx,
-                    p25SpeakerPendingFor(pendingAudioByRx, rx),
+                p25Phase2ClearStaleResultSpeakerPending(pendingAudioByRx,
+                    result.receiverSessionKey,
+                    result.callSessionId,
+                    rx,
                     P25PendingClearReason::RetuneOrGeneration);
                 const uintptr_t rxKey = reinterpret_cast<uintptr_t>(&rx);
                 const uint64_t seqLog = result.sequence;
@@ -21474,7 +21586,7 @@ private:
                             .arg(genLog),
                         1000);
                 });
-                return true;
+                return P25VoicePublishOutcome::DiscardedStale;
             }
             stale = false;
             publishVoiceDiag = true;
@@ -21788,7 +21900,7 @@ private:
                 p25SpeakerPendingFor(pendingAudioByRx, rx),
                 P25PendingClearReason::EncryptedState);
         }
-        return true;
+        return P25VoicePublishOutcome::Published;
     }
 
     // Phase 0 / S0-2: per-receiver foundation using shared_ptr so that vector reallocation (Add) never

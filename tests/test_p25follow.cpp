@@ -1001,6 +1001,24 @@ TEST_CASE("P25 stream dibit keys order across overlapping windows", "[p25][follo
     REQUIRE_FALSE(windowA == windowB);
 }
 
+TEST_CASE("P25 frame keys with mixed stable coordinates are unorderable", "[p25][follow][continuity]")
+{
+    Phase2VoiceFrameKey stable;
+    stable.streamDibitKnown = true;
+    stable.streamDibit = 5000;
+    stable.voiceIndex = 1;
+    stable.slot = 0;
+
+    Phase2VoiceFrameKey fallback;
+    fallback.superframeAnchor = 100;
+    fallback.burstIndex = 2;
+    fallback.voiceIndex = 1;
+    fallback.slot = 0;
+
+    REQUIRE(p25Phase2CompareVoiceFrameKeys(stable, fallback) == 2);
+    REQUIRE(p25Phase2CompareVoiceFrameKeys(fallback, stable) == 2);
+}
+
 TEST_CASE("P25 frame sequencer resets only on clearAll call boundary", "[p25][follow][continuity]")
 {
     P25ReceiverSessionState session;

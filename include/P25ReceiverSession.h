@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <optional>
 #include <vector>
 
 // Per-receiver P25 audio/session state.  Replaces the former main.cpp globals
@@ -71,6 +72,8 @@ inline int p25Phase2CompareVoiceFrameKeys(const Phase2VoiceFrameKey& a,
     if (a.streamDibitKnown && b.streamDibitKnown) {
         if (a.streamDibit < b.streamDibit) return -1;
         if (a.streamDibit > b.streamDibit) return 1;
+    } else if (a.streamDibitKnown != b.streamDibitKnown) {
+        return 2;
     }
     if (a.superframeAnchor < b.superframeAnchor) return -1;
     if (a.superframeAnchor > b.superframeAnchor) return 1;
@@ -147,6 +150,10 @@ struct P25Phase2FrameSequencer {
     uint8_t expectedVoiceIndex = 0;
     uint8_t activeBurstVoiceCount = 0;
     bool haveActiveBurst = false;
+    uint64_t activeBurstStableId = 0;
+    bool activeBurstStableIdKnown = false;
+    std::array<std::optional<Phase2VoiceFrameKey>, 4> heldFutureKeys{};
+    uint64_t reorderHeld = 0;
 };
 
 // Producer-side speaker PCM bound to one call session.

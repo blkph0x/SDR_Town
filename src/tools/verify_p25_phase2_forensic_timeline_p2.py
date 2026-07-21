@@ -16,9 +16,7 @@ receiver_h = (root / ".." / "include" / "Receiver.h").resolve().read_text(
 slot_probe_fn = main.split("static bool applyP25Phase2SlotProbeLocked", 1)[1].split("static void pushAudioFrames", 1)[0]
 
 required = {
-    "durable cursor commit on result ingest": "commitDecodeAbsolute(result.iqDecodeEndAbsolute)" in main.split(
-        "for (auto& result : takeP25VoiceDecodeResults())", 1
-    )[1].split("pendingVoicePublishResults.push_back", 1)[0],
+    "single cursor settlement after publish": "outcome == P25VoicePublishOutcome::Published" in main,
     "speaker pipeline depth 3": "kP25VoiceDecodeMaxPendingJobsSpeaker = 3" in main,
     "cqpsk discrete freeze api": "setCqpskDiscreteFrozen" in decoder_h and "m_cqpskDiscreteFrozen" in decoder_cpp,
     "cqpsk hypothesis blocked counter": "m_cqpskDiscreteChangesBlocked" in decoder_cpp and "p25DiagCqpskHypothesisChanges" in receiver_h,
