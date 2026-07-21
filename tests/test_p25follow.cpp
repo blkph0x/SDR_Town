@@ -953,15 +953,13 @@ TEST_CASE("P25 frame sequencer resets only on clearAll call boundary", "[p25][fo
 {
     P25ReceiverSessionState session;
     session.frameSequencer.armed = true;
-    session.frameSequencer.haveBase = true;
-    session.frameSequencer.baseAbsDibit = 1000;
-    session.frameSequencer.nextOrdinal = 12;
+    session.frameSequencer.nextSpeechOrdinal = 12;
     session.frameSequencer.acceptedFrames = 12;
     session.callSecurityLatch = P25CallSecurityLatch::Clear;
-    REQUIRE(session.frameSequencer.nextOrdinal == 12);
+    REQUIRE(session.frameSequencer.nextSpeechOrdinal == 12);
     session.clearAll();
     REQUIRE_FALSE(session.frameSequencer.armed);
-    REQUIRE(session.frameSequencer.nextOrdinal == 0);
+    REQUIRE(session.frameSequencer.nextSpeechOrdinal == 0);
     REQUIRE(session.callSecurityLatch == P25CallSecurityLatch::Unknown);
 }
 

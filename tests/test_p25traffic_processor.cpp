@@ -33,7 +33,7 @@ TEST_CASE("P25 Phase 2 audio call key binds source grant and session", "[p25][tr
     REQUIRE_FALSE(first == second);
 }
 
-TEST_CASE("P25 traffic processor feeds hard dibits through internal decoder", "[p25][traffic]")
+TEST_CASE("P25 traffic processor advances dibit cursor without internal decode", "[p25][traffic]")
 {
     P25TrafficChannelProcessor processor(99, 30003, 416550000, 0);
 

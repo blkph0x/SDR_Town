@@ -105,8 +105,6 @@ private:
     std::atomic<uint64_t> m_lastAbsoluteDibit{0};
 
     mutable std::mutex m_mutex;
-    mutable std::mutex m_decoderMutex;
-    P25LiveDecoder m_decoder;
     std::string m_teardownReason;
     std::string m_endReason;
 

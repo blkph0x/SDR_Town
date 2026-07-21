@@ -80,22 +80,36 @@ struct P25Phase2AmbeEmitDedupeState {
     std::vector<uint64_t> recentAbsDibits;
 };
 
-// Per-call 20 ms speech-frame sequencer (SDRTrunk/OP25 cadence).
-// Ordinal advances by one for each accepted/clear speech position; gaps emit
-// silence (not invent-PLC opposite-slot speech); duplicates/late frames drop.
+// Protocol-derived speech-frame identity (SDRTrunk/OP25 ordering).  Absolute
+// dibit position is for duplicate detection only — not 20 ms timeline.
+struct Phase2VoiceFrameKey {
+    uint64_t superframeAnchor = 0;
+    uint8_t burstIndex = 0xffu;
+    uint8_t slot = 0xffu;
+    uint8_t voiceIndex = 0xffu;
+
+    bool operator==(const Phase2VoiceFrameKey& other) const noexcept
+    {
+        return superframeAnchor == other.superframeAnchor &&
+            burstIndex == other.burstIndex &&
+            slot == other.slot &&
+            voiceIndex == other.voiceIndex;
+    }
+};
+
+// Per-call speech-frame sequencer.  Ordinals advance one per accepted
+// protocol-position frame in burst order; RF dibit distance must not insert
+// artificial 20 ms silence gaps.
 struct P25Phase2FrameSequencer {
     uint64_t callSessionId = 0;
     uint32_t talkgroupId = 0;
     uint8_t slot = 0xffu;
     int64_t grantEpochMs = 0;
     bool armed = false;
-    bool haveBase = false;
-    uint64_t baseAbsDibit = 0;
-    int64_t nextOrdinal = 0;
-    int64_t lastAcceptedOrdinal = -1;
-    uint64_t gapSilenceFrames = 0;
-    uint64_t duplicateOrLateDrops = 0;
+    int64_t nextSpeechOrdinal = 0;
     uint64_t acceptedFrames = 0;
+    uint64_t duplicateOrLateDrops = 0;
+    std::vector<Phase2VoiceFrameKey> recentKeys;
 };
 
 // Monotonic per-call security latch: Unknown -> Clear or Unknown -> Encrypted
