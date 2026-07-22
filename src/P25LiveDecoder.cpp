@@ -1,5 +1,10 @@
 #include "P25LiveDecoder.h"
 
+#include "dsp/P25CqpskStagedScorer.h"
+#include "dsp/P25DemodStateMachine.h"
+#include "dsp/P25Phase2Framer.h"
+#include "dsp/P25StreamingChannelDdc.h"
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -5524,6 +5529,11 @@ P25LiveDecoder::P25LiveDecoder(const P25LiveDecoder& other)
       m_cqpskLock(other.m_cqpskLock),
       m_cqpskDiscreteFrozen(other.m_cqpskDiscreteFrozen),
       m_cqpskDiscreteChangesBlocked(other.m_cqpskDiscreteChangesBlocked),
+      m_streamingDdc(other.m_streamingDdc),
+      m_filterCache(other.m_filterCache),
+      m_phase2Framer(other.m_phase2Framer),
+      m_demodStateMachine(other.m_demodStateMachine),
+      m_dspProfile(other.m_dspProfile),
       m_frontEndDcEstimateValid(other.m_frontEndDcEstimateValid),
       m_frontEndDcSampleRate(other.m_frontEndDcSampleRate),
       m_frontEndDcEstimate(other.m_frontEndDcEstimate)
@@ -5577,6 +5587,11 @@ P25LiveDecoder& P25LiveDecoder::operator=(const P25LiveDecoder& other)
     m_cqpskLock = other.m_cqpskLock;
     m_cqpskDiscreteFrozen = other.m_cqpskDiscreteFrozen;
     m_cqpskDiscreteChangesBlocked = other.m_cqpskDiscreteChangesBlocked;
+    m_streamingDdc = other.m_streamingDdc;
+    m_filterCache = other.m_filterCache;
+    m_phase2Framer = other.m_phase2Framer;
+    m_demodStateMachine = other.m_demodStateMachine;
+    m_dspProfile = other.m_dspProfile;
     m_frontEndDcEstimateValid = other.m_frontEndDcEstimateValid;
     m_frontEndDcSampleRate = other.m_frontEndDcSampleRate;
     m_frontEndDcEstimate = other.m_frontEndDcEstimate;
@@ -5630,6 +5645,11 @@ P25LiveDecoder::P25LiveDecoder(P25LiveDecoder&& other) noexcept
       m_cqpskLock(other.m_cqpskLock),
       m_cqpskDiscreteFrozen(other.m_cqpskDiscreteFrozen),
       m_cqpskDiscreteChangesBlocked(other.m_cqpskDiscreteChangesBlocked),
+      m_streamingDdc(other.m_streamingDdc),
+      m_filterCache(other.m_filterCache),
+      m_phase2Framer(other.m_phase2Framer),
+      m_demodStateMachine(other.m_demodStateMachine),
+      m_dspProfile(other.m_dspProfile),
       m_frontEndDcEstimateValid(other.m_frontEndDcEstimateValid),
       m_frontEndDcSampleRate(other.m_frontEndDcSampleRate),
       m_frontEndDcEstimate(other.m_frontEndDcEstimate)
@@ -5687,6 +5707,11 @@ P25LiveDecoder& P25LiveDecoder::operator=(P25LiveDecoder&& other) noexcept
     m_cqpskLock = other.m_cqpskLock;
     m_cqpskDiscreteFrozen = other.m_cqpskDiscreteFrozen;
     m_cqpskDiscreteChangesBlocked = other.m_cqpskDiscreteChangesBlocked;
+    m_streamingDdc = std::move(other.m_streamingDdc);
+    m_filterCache = std::move(other.m_filterCache);
+    m_phase2Framer = std::move(other.m_phase2Framer);
+    m_demodStateMachine = std::move(other.m_demodStateMachine);
+    m_dspProfile = other.m_dspProfile;
     other.m_phase2MaskPhaseStarveWindows = 0;
     other.m_phase2LastFullMaskPhaseHuntGeneration = 0;
     m_frontEndDcEstimateValid = other.m_frontEndDcEstimateValid;
@@ -5749,6 +5774,10 @@ void P25LiveDecoder::reset()
     m_cqpskLock = {};
     m_cqpskDiscreteFrozen = false;
     m_cqpskDiscreteChangesBlocked = 0;
+    m_streamingDdc.reset();
+    m_phase2Framer.reset();
+    m_demodStateMachine.reset();
+    m_dspProfile = {};
     m_frontEndDcEstimateValid = false;
     m_frontEndDcSampleRate = 0.0;
     m_frontEndDcEstimate = {};
@@ -5918,7 +5947,23 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         channelInput = &dcBlockedIq;
     }
     const auto channelizeStarted = std::chrono::steady_clock::now();
-    auto channel = channelizeP25Iq(*channelInput, sampleRate, centerFreqHz, targetFreqHz, m_config);
+    ChannelizedIqBlock channel;
+    if (m_config.enableStreamingChannelDdc) {
+        const auto ddc = m_streamingDdc.process(*channelInput,
+                                              sampleRate,
+                                              centerFreqHz,
+                                              targetFreqHz,
+                                              m_config,
+                                              m_filterCache);
+        channel.samples = std::move(ddc.samples);
+        channel.sampleRate = ddc.sampleRate;
+        m_dspProfile.inputSamplesProcessed += iq.size();
+        m_dspProfile.channelOutputSamples += channel.samples.size();
+        m_dspProfile.bytesCopiedPerBlock += ddc.bytesCopied;
+        m_dspProfile.filterDesignCalls = m_filterCache.designCalls();
+    } else {
+        channel = channelizeP25Iq(*channelInput, sampleRate, centerFreqHz, targetFreqHz, m_config);
+    }
     const long long channelizeMs = elapsedMsSince(channelizeStarted);
     if (channel.samples.empty() && !iq.empty()) {
         best.stats.inputSamples = iq.size();
@@ -6002,6 +6047,12 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         addCqpskPhase(0);
     }
     for (int p = 0; p < phaseSteps; ++p) addCqpskPhase(p);
+    if (!m_demodStateMachine.allowFullGridSearch()) {
+        const size_t maxTimingPhases = m_demodStateMachine.maxTimingPhases();
+        if (maxTimingPhases > 0 && cqpskPhaseOrder.size() > maxTimingPhases) {
+            cqpskPhaseOrder.resize(maxTimingPhases);
+        }
+    }
     const std::array<double, 2> rotations{0.0, kPi * 0.25};
     std::optional<CqpskCandidateParams> selectedCqpskParams;
     std::optional<P25BlockTimingState> selectedCqpskTiming;
@@ -6266,12 +6317,34 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
                             params.phaseErrorRmsRad = correction.phaseErrorRmsRad;
                             params.fineCorrectionSymbols = correction.symbols;
                         }
-                        const auto soft = cqpskSymbolsToSoftDibits(
+                        const double effectiveRotation = wrapPhase(rotation + params.fineRotation);
+                        SoftDibitSequence soft;
+                        if (m_config.enableStagedCqpskScoring &&
+                            !m_demodStateMachine.allowFullGridSearch()) {
+                            const auto quadrants = p25dsp::buildDifferentialQuadrants(
+                                complexSymbols.symbols, differential, conjugate, effectiveRotation);
+                            p25dsp::P25CqpskMappingParams mapping;
+                            mapping.differential = differential;
+                            mapping.conjugate = conjugate;
+                            mapping.rotationRad = effectiveRotation;
+                            mapping.permutation = perm;
+                            const auto mappedDibits = p25dsp::mapQuadrantsToDibits(quadrants, mapping);
+                            const auto preview = p25dsp::scorePhase2SyncPreview(
+                                mappedDibits, m_phase2Framer.synchronized());
+                            if (!p25dsp::passesStagedCqpskGate(
+                                    preview, m_demodStateMachine.state(), false)) {
+                                ++m_dspProfile.stagedSyncRejections;
+                                continue;
+                            }
+                            ++m_dspProfile.syncCorrelations;
+                        }
+                        soft = cqpskSymbolsToSoftDibits(
                             complexSymbols.symbols,
                             differential,
                             conjugate,
-                            wrapPhase(rotation + params.fineRotation),
+                            effectiveRotation,
                             perm);
+                        ++m_dspProfile.fullProtocolDecodes;
                         restorePhase1BitTail(phase1TailSnapshot);
                         auto candidate = processHardDibitsInternal(soft.dibits, false);
                         restorePhase1BitTail(phase1TailSnapshot);
@@ -6511,6 +6584,41 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
     storeStreamTimingState(timingStateStorage);
     const long long totalMs = elapsedMsSince(realtimeStarted);
     best.stats.cqpskCandidatesEvaluated = cqpskCandidatesEvaluated;
+    best.stats.dspFilterDesignCalls = m_dspProfile.filterDesignCalls;
+    best.stats.dspStagedSyncRejections = m_dspProfile.stagedSyncRejections;
+    best.stats.dspFullProtocolDecodes = m_dspProfile.fullProtocolDecodes;
+    m_demodStateMachine.noteCarrierStable(best.stats.cqpskCarrierLoopApplied);
+    m_demodStateMachine.noteTimingStable(best.stats.symbolConfidence > 0.35);
+    if (best.stats.bestPhase2SyncErrors >= 0) {
+        m_demodStateMachine.noteSyncHit(
+            best.stats.bestPhase2SyncErrors,
+            m_phase2Framer.synchronized() ? p25dsp::kSyncThresholdSynchronized
+                                          : p25dsp::kSyncThresholdUnsynchronized);
+    }
+    m_demodStateMachine.noteProtocolEvidence(
+        best.stats.phase2MacCrcValid > 0,
+        best.stats.phase2IschSync > 0,
+        best.stats.phase2VoiceCodewords > 0);
+    switch (m_demodStateMachine.state()) {
+    case p25dsp::P25DemodState::Cold: best.stats.demodState = "Cold"; break;
+    case p25dsp::P25DemodState::AcquiringTiming: best.stats.demodState = "AcquiringTiming"; break;
+    case p25dsp::P25DemodState::AcquiringMapping: best.stats.demodState = "AcquiringMapping"; break;
+    case p25dsp::P25DemodState::TrackingSoft: best.stats.demodState = "TrackingSoft"; break;
+    case p25dsp::P25DemodState::TrackingHard: best.stats.demodState = "TrackingHard"; break;
+    case p25dsp::P25DemodState::Recovering: best.stats.demodState = "Recovering"; break;
+    }
+    if (m_config.enablePersistentPhase2Framer && !best.dibits.empty()) {
+        m_phase2Framer.consumeDibits(best.dibits);
+        best.stats.dspFramerBurstsEmitted =
+            m_dspProfile.framerBurstsEmitted + m_phase2Framer.takeBursts().size();
+        best.stats.dspFramerSuperframesEmitted =
+            m_dspProfile.framerSuperframesEmitted + m_phase2Framer.takeSuperframes().size();
+        m_dspProfile.framerBurstsEmitted = best.stats.dspFramerBurstsEmitted;
+        m_dspProfile.framerSuperframesEmitted = best.stats.dspFramerSuperframesEmitted;
+    } else {
+        best.stats.dspFramerBurstsEmitted = m_dspProfile.framerBurstsEmitted;
+        best.stats.dspFramerSuperframesEmitted = m_dspProfile.framerSuperframesEmitted;
+    }
     if (m_config.realtimeVoiceSearch || totalMs >= 200) {
         best.warnings.push_back(
             "decodeProfile channelizeMs=" + std::to_string(channelizeMs) +
@@ -6520,7 +6628,11 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
             " totalMs=" + std::to_string(totalMs) +
             " softHold=" + std::string(realtimeSoftHoldSelected ? "1" : "0") +
             " lockOnlyHold=" + std::string(realtimeLockOnlyHoldSelected ? "1" : "0") +
-            " lock=" + std::string(m_cqpskLock.valid ? "1" : "0"));
+            " lock=" + std::string(m_cqpskLock.valid ? "1" : "0") +
+            " demodState=" + best.stats.demodState +
+            " stagedReject=" + std::to_string(best.stats.dspStagedSyncRejections) +
+            " fullDecode=" + std::to_string(best.stats.dspFullProtocolDecodes) +
+            " filterDesignCalls=" + std::to_string(best.stats.dspFilterDesignCalls));
     }
     return best;
 }

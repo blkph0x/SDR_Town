@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.43 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.44 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -42,6 +42,28 @@ else()
 endif()
 
 # Sources (will grow)
+set(SDR_TOWN_DSP_SOURCES
+    src/dsp/P25FilterCache.cpp
+    src/dsp/DspKernels.cpp
+    src/dsp/P25StreamingChannelDdc.cpp
+    src/dsp/P25CqpskStagedScorer.cpp
+    src/dsp/P25Phase2Framer.cpp
+    src/dsp/P25DemodStateMachine.cpp
+)
+
+add_library(sdr_town_dsp STATIC ${SDR_TOWN_DSP_SOURCES})
+target_include_directories(sdr_town_dsp PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+if(MSVC)
+    target_compile_options(sdr_town_dsp PRIVATE /O2 /EHsc /utf-8)
+endif()
+include(CheckIPOSupported)
+check_ipo_supported(RESULT SDR_TOWN_IPO_SUPPORTED)
+if(SDR_TOWN_IPO_SUPPORTED)
+    set_property(TARGET sdr_town_dsp PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
 set(SDR_TOWN_SOURCES
     src/main.cpp
     src/DeviceManager.cpp
@@ -93,6 +115,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Network
     spdlog::spdlog
     nlohmann_json::nlohmann_json
+    sdr_town_dsp
 )
 target_compile_definitions(${PROJECT_NAME} PRIVATE SDR_TOWN_VERSION=\"${PROJECT_VERSION}\")
 
@@ -196,6 +219,7 @@ if(BUILD_TESTS)
     tests/test_p25live.cpp
     tests/test_p25follow.cpp
     tests/test_p25traffic_processor.cpp
+    tests/test_p25dsp.cpp
     src/DeviceManager.cpp
     src/AudioEngine.cpp
     src/Demod.cpp
@@ -214,6 +238,7 @@ if(BUILD_TESTS)
     Qt6::Network
     spdlog::spdlog
     nlohmann_json::nlohmann_json
+    sdr_town_dsp
   )
   if(SoapySDR_FOUND)
     target_link_libraries(sdr_town_tests PRIVATE SoapySDR)

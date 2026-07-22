@@ -82,6 +82,11 @@ struct P25LiveDecoderConfig {
     // monitoring and offline diagnostics share the same grant evidence path.
     // Low-power views may opt out explicitly when they only need Phase 1 TSBK.
     bool enablePhase2Decode = true;
+    // Persistent streaming DSP path (OP25/SDRTrunk-aligned): fused DDC, staged CQPSK
+    // scoring, and dibit framer.  Enabled by default for Phase-2 traffic demod.
+    bool enableStreamingChannelDdc = true;
+    bool enableStagedCqpskScoring = true;
+    bool enablePersistentPhase2Framer = true;
 };
 
 
@@ -279,6 +284,12 @@ struct P25LiveDecoderStats {
     double cqpskCarrierLoopPhaseErrorRmsRad = 0.0;
     size_t cqpskCarrierLoopSymbols = 0;
     size_t cqpskCandidatesEvaluated = 0;
+    uint64_t dspFilterDesignCalls = 0;
+    uint64_t dspStagedSyncRejections = 0;
+    uint64_t dspFullProtocolDecodes = 0;
+    uint64_t dspFramerBurstsEmitted = 0;
+    uint64_t dspFramerSuperframesEmitted = 0;
+    std::string demodState;
     bool c4fmHardLockSkippedCqpsk = false;
     size_t phase2IschDecoded = 0;
     size_t phase2IschSync = 0;
@@ -398,6 +409,12 @@ std::array<uint8_t, 96> p25Phase2VoiceCodewordToAmbe3600x2450Frame(const P25Phas
 std::array<uint8_t, 96> p25Phase2VoiceCodewordToAmbe3600x2450FrameVariant(const P25Phase2VoiceCodeword& codeword, int variant);
 int p25Phase2AmbeFrameVariantCount();
 uint64_t p25EncodeNidBch(uint16_t nac, P25DataUnitId duid);
+
+#include "dsp/P25DemodStateMachine.h"
+#include "dsp/P25DspTypes.h"
+#include "dsp/P25FilterCache.h"
+#include "dsp/P25Phase2Framer.h"
+#include "dsp/P25StreamingChannelDdc.h"
 
 class P25LiveDecoder {
 public:
@@ -583,6 +600,11 @@ private:
     CqpskDemodLock m_cqpskLock;
     bool m_cqpskDiscreteFrozen = false;
     uint64_t m_cqpskDiscreteChangesBlocked = 0;
+    p25dsp::P25StreamingChannelDdc m_streamingDdc;
+    p25dsp::P25FilterCache m_filterCache;
+    p25dsp::P25Phase2Framer m_phase2Framer;
+    p25dsp::P25DemodStateMachine m_demodStateMachine;
+    p25dsp::P25DspProfileCounters m_dspProfile;
     bool m_frontEndDcEstimateValid = false;
     double m_frontEndDcSampleRate = 0.0;
     std::complex<double> m_frontEndDcEstimate{0.0, 0.0};
