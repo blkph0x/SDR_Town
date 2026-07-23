@@ -75,6 +75,16 @@ bool endpointLooksUsable(const QUrl& url)
         !url.host().isEmpty();
 }
 
+bool diagnosticsConfigUsable(const RemoteDiagnosticsConfig& cfg)
+{
+    if (!endpointLooksUsable(cfg.endpoint)) return false;
+    if (!cfg.bearerToken.trimmed().isEmpty() &&
+        cfg.endpoint.scheme().compare("https", Qt::CaseInsensitive) != 0) {
+        return false;
+    }
+    return true;
+}
+
 bool jsonBool(const QJsonObject& obj, const QString& key, bool fallback)
 {
     const QJsonValue value = obj.value(key);
@@ -234,7 +244,7 @@ void RemoteDiagnosticsClient::configure(const RemoteDiagnosticsConfig& cfg)
 
 bool RemoteDiagnosticsClient::enabled() const
 {
-    return m_cfg.enabled && endpointLooksUsable(m_cfg.endpoint);
+    return m_cfg.enabled && diagnosticsConfigUsable(m_cfg);
 }
 
 QString RemoteDiagnosticsClient::sessionId() const
@@ -497,7 +507,7 @@ RemoteDiagnosticsConfig remoteDiagnosticsConfigFromProcess(int argc, char* argv[
         }
     }
 
-    cfg.enabled = !forcedOff && requested && endpointLooksUsable(cfg.endpoint);
+    cfg.enabled = !forcedOff && requested && diagnosticsConfigUsable(cfg);
     return cfg;
 }
 

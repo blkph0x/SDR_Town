@@ -5776,6 +5776,7 @@ void P25LiveDecoder::reset()
     m_cqpskDiscreteChangesBlocked = 0;
     m_streamingDdc.reset();
     m_phase2Framer.reset();
+    m_pendingFramerBursts.clear();
     m_demodStateMachine.reset();
     m_dspProfile = {};
     m_frontEndDcEstimateValid = false;
@@ -6561,8 +6562,22 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
             noteRealtimeBudget(best);
         } else {
             restorePhase1BitTail(phase1TailSnapshot);
+            if (m_config.enablePersistentPhase2Framer && !best.dibits.empty()) {
+                m_phase2Framer.consumeDibits(best.dibits);
+                auto framerBursts = m_phase2Framer.takeBursts();
+                m_dspProfile.framerSuperframesEmitted += m_phase2Framer.takeSuperframes().size();
+                m_dspProfile.framerBurstsEmitted += framerBursts.size();
+                if (m_demodStateMachine.state() >= p25dsp::P25DemodState::TrackingSoft ||
+                    hasPhase2SoftCqpskLockEvidence(best) ||
+                    hasCqpskHardLockEvidence(best)) {
+                    m_pendingFramerBursts.insert(m_pendingFramerBursts.end(),
+                                                 std::make_move_iterator(framerBursts.begin()),
+                                                 std::make_move_iterator(framerBursts.end()));
+                }
+            }
             const auto commitStarted = std::chrono::steady_clock::now();
             auto committed = processHardDibitsInternal(best.dibits, true);
+            m_pendingFramerBursts.clear();
             commitMs = elapsedMsSince(commitStarted);
             restoreSelectedDemodStats(committed, selectedStats);
             best = std::move(committed);
@@ -6607,18 +6622,8 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
     case p25dsp::P25DemodState::TrackingHard: best.stats.demodState = "TrackingHard"; break;
     case p25dsp::P25DemodState::Recovering: best.stats.demodState = "Recovering"; break;
     }
-    if (m_config.enablePersistentPhase2Framer && !best.dibits.empty()) {
-        m_phase2Framer.consumeDibits(best.dibits);
-        best.stats.dspFramerBurstsEmitted =
-            m_dspProfile.framerBurstsEmitted + m_phase2Framer.takeBursts().size();
-        best.stats.dspFramerSuperframesEmitted =
-            m_dspProfile.framerSuperframesEmitted + m_phase2Framer.takeSuperframes().size();
-        m_dspProfile.framerBurstsEmitted = best.stats.dspFramerBurstsEmitted;
-        m_dspProfile.framerSuperframesEmitted = best.stats.dspFramerSuperframesEmitted;
-    } else {
-        best.stats.dspFramerBurstsEmitted = m_dspProfile.framerBurstsEmitted;
-        best.stats.dspFramerSuperframesEmitted = m_dspProfile.framerSuperframesEmitted;
-    }
+    best.stats.dspFramerBurstsEmitted = m_dspProfile.framerBurstsEmitted;
+    best.stats.dspFramerSuperframesEmitted = m_dspProfile.framerSuperframesEmitted;
     if (m_config.realtimeVoiceSearch || totalMs >= 200) {
         best.warnings.push_back(
             "decodeProfile channelizeMs=" + std::to_string(channelizeMs) +
@@ -7019,9 +7024,130 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailed(const std:
     return processPhase2HardDibitsDetailedInternal(dibits, true);
 }
 
+P25Phase2DecodeResult P25LiveDecoder::processPhase2FromFramerBurstsInternal(
+    std::vector<p25dsp::P25Phase2FramerBurst> framerBursts,
+    bool annotateSessionCodewords)
+{
+    P25Phase2DecodeResult out;
+    if (framerBursts.empty() || !annotateSessionCodewords) return out;
+
+    const auto* mask = m_phase2MaskParams.valid ? &m_phase2XorMask : nullptr;
+    std::array<Phase2SessionState, 2> slotSessions{};
+    for (size_t ts = 0; ts < slotSessions.size(); ++ts) {
+        auto& session = slotSessions[ts];
+        const bool slotHasRetainedState = m_phase2SlotEss[ts].known ||
+            m_phase2SlotSessionMacCrcSeen[ts] ||
+            m_phase2SlotFirst4vSlot[ts] >= 0 ||
+            m_phase2SlotEssBNext[ts] != 0 ||
+            std::any_of(m_phase2SlotEssBSeen[ts].begin(), m_phase2SlotEssBSeen[ts].end(), [](bool seen) { return seen; });
+        session.ess = slotHasRetainedState ? m_phase2SlotEss[ts] : m_phase2Ess;
+        session.essTrusted = session.ess.known && session.ess.fecValidated;
+        session.essB = slotHasRetainedState ? m_phase2SlotEssB[ts] : m_phase2EssB;
+        session.essBSeen = slotHasRetainedState ? m_phase2SlotEssBSeen[ts] : m_phase2EssBSeen;
+        session.essBNext = slotHasRetainedState ? m_phase2SlotEssBNext[ts] : m_phase2EssBNext;
+        session.macCrcSeen = slotHasRetainedState ? m_phase2SlotSessionMacCrcSeen[ts] : m_phase2SessionMacCrcSeen;
+        session.pttSeen = session.macCrcSeen;
+        session.first4vSlot = slotHasRetainedState ? m_phase2SlotFirst4vSlot[ts] : m_phase2First4vSlot;
+        session.essHypotheses = slotHasRetainedState ? m_phase2SlotEssHypotheses[ts] : m_phase2EssHypotheses;
+        session.essBHypotheses = slotHasRetainedState ? m_phase2SlotEssBHypotheses[ts] : m_phase2EssBHypotheses;
+        session.essBSeenHypotheses = slotHasRetainedState ? m_phase2SlotEssBSeenHypotheses[ts] : m_phase2EssBSeenHypotheses;
+    }
+
+    constexpr size_t kMaxFramerBurstsPerCommit = 24;
+    size_t decoded = 0;
+    std::vector<int> annotateDibits;
+    annotateDibits.reserve(p25dsp::kPhase2BurstDibits);
+
+    for (const auto& fb : framerBursts) {
+        if (decoded >= kMaxFramerBurstsPerCommit) break;
+        std::vector<int> dibits(fb.dibits.begin(), fb.dibits.end());
+        const uint64_t burstNum = fb.absoluteStartDibit / p25dsp::kPhase2BurstDibits;
+        const size_t superframeIndex = static_cast<size_t>(burstNum % 12ull);
+        const uint8_t trafficSlot = phase2TrafficSlotForSuperframeBurst(dibits, 0, superframeIndex);
+        auto& burstSession = slotSessions[trafficSlot & 0x01u];
+        const bool superframeLocked = m_phase2SuperframeAnchorKnown ||
+            (fb.syncErrors >= 0 && fb.syncErrors <= p25dsp::kSyncThresholdSynchronized);
+
+        auto burst = decodePhase2BurstAt(
+            dibits,
+            0,
+            fb.syncErrors,
+            superframeLocked,
+            0,
+            superframeIndex,
+            superframeLocked ? 4 : 0,
+            fb.syncErrors,
+            mask,
+            m_phase2MaskPhaseKnown ? m_phase2MaskPhase : uint8_t{0},
+            std::max(1, m_phase2MaskPhaseScore),
+            &burstSession,
+            &out.macPdus,
+            false,
+            false,
+            true);
+        if (!burst.valid) continue;
+        burst.stickySuperframe = superframeLocked;
+        burst.superframeLock = superframeLocked;
+        if (fb.dibitOffsetCorrection != 0) {
+            burst.syncOffsetAdjusted = true;
+            burst.syncOffsetDibits = fb.dibitOffsetCorrection;
+        }
+        annotateDibits = std::move(dibits);
+        out.bursts.push_back(std::move(burst));
+        ++decoded;
+    }
+
+    Phase2SessionState* retainedSession = &slotSessions[0];
+    for (auto& candidate : slotSessions) {
+        if (candidate.ess.known && candidate.essTrusted &&
+            (!retainedSession->ess.known || candidate.ess.fecValidated)) {
+            retainedSession = &candidate;
+        }
+    }
+    out.ess = retainedSession->ess;
+    for (size_t ts = 0; ts < slotSessions.size(); ++ts) {
+        m_phase2SlotEss[ts] = slotSessions[ts].ess;
+        m_phase2SlotEssB[ts] = slotSessions[ts].essB;
+        m_phase2SlotEssBSeen[ts] = slotSessions[ts].essBSeen;
+        m_phase2SlotEssBNext[ts] = slotSessions[ts].essBNext;
+        m_phase2SlotSessionMacCrcSeen[ts] = slotSessions[ts].pttSeen;
+        m_phase2SlotFirst4vSlot[ts] = slotSessions[ts].first4vSlot;
+        m_phase2SlotEssHypotheses[ts] = slotSessions[ts].essHypotheses;
+        m_phase2SlotEssBHypotheses[ts] = slotSessions[ts].essBHypotheses;
+        m_phase2SlotEssBSeenHypotheses[ts] = slotSessions[ts].essBSeenHypotheses;
+    }
+    m_phase2Ess = retainedSession->ess;
+    m_phase2EssB = retainedSession->essB;
+    m_phase2EssBSeen = retainedSession->essBSeen;
+    m_phase2EssBNext = retainedSession->essBNext;
+    m_phase2SessionMacCrcSeen = retainedSession->pttSeen;
+    m_phase2First4vSlot = retainedSession->first4vSlot;
+    m_phase2EssHypotheses = retainedSession->essHypotheses;
+    m_phase2EssBHypotheses = retainedSession->essBHypotheses;
+    m_phase2EssBSeenHypotheses = retainedSession->essBSeenHypotheses;
+
+    if (!annotateDibits.empty()) {
+        annotatePhase2SessionCodewords(out, annotateDibits);
+    }
+    return out;
+}
+
 P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(const std::vector<int>& dibits,
                                                                               bool annotateSessionCodewords)
 {
+    if (annotateSessionCodewords &&
+        m_config.enablePersistentPhase2Framer &&
+        m_config.phase2CqpskTrafficDemod &&
+        !m_pendingFramerBursts.empty() &&
+        m_demodStateMachine.state() >= p25dsp::P25DemodState::TrackingSoft) {
+        auto pending = std::move(m_pendingFramerBursts);
+        m_pendingFramerBursts.clear();
+        auto framerOut = processPhase2FromFramerBurstsInternal(std::move(pending), annotateSessionCodewords);
+        if (!framerOut.bursts.empty()) {
+            return framerOut;
+        }
+    }
+
     P25Phase2DecodeResult out;
 
     // Realtime traffic follows a retained superframe/mask lattice, so only keep

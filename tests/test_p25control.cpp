@@ -260,7 +260,7 @@ TEST_CASE("P25 control analyzer maps TDMA identifiers to slot-aware channel freq
     REQUIRE(*nextSlot1Freq == Catch::Approx(450012500.0).margin(1.0));
 }
 
-TEST_CASE("P25 control analyzer uses channel-type bandwidth for TDMA transmit offsets")
+TEST_CASE("P25 control analyzer uses channel spacing for TDMA transmit offsets")
 {
     P25ControlChannelAnalyzer analyzer;
     auto iden = makeTsbk(0x33);
@@ -284,7 +284,7 @@ TEST_CASE("P25 control analyzer uses channel-type bandwidth for TDMA transmit of
     REQUIRE(ev.slotsPerCarrier == 4);
     REQUIRE(ev.bandwidthHz == Catch::Approx(25000.0).margin(1.0));
     REQUIRE(ev.channelSpacingHz == Catch::Approx(12500.0).margin(1.0));
-    REQUIRE(ev.transmitOffsetHz == Catch::Approx(50000.0).margin(1.0));
+    REQUIRE(ev.transmitOffsetHz == Catch::Approx(25000.0).margin(1.0));
 }
 
 TEST_CASE("P25 control analyzer treats TDMA channel type 5 as a known two-slot plan")

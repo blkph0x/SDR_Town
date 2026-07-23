@@ -401,7 +401,8 @@ P25ChannelIdentifier makeTdmaIdentifierPlan(uint8_t id,
     plan.channelType = channelType;
     plan.baseHz = baseHz;
     plan.spacingHz = spacingHz;
-    plan.txOffsetHz = static_cast<double>(offsetMagnitude) * profile.bandwidthHz * (positiveOffset ? 1.0 : -1.0);
+    // OP25 trunking: TX offset = toff * spac * 125 Hz (spacing field, not carrier bandwidth).
+    plan.txOffsetHz = static_cast<double>(offsetMagnitude) * spacingHz * (positiveOffset ? 1.0 : -1.0);
     plan.bandwidthHz = profile.bandwidthHz;
     plan.slotsPerCarrier = profile.slotsPerCarrier;
     plan.phase2Capable = profile.tdma;

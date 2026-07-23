@@ -1,4 +1,5 @@
 #include "UpdateManager.h"
+#include "UpdateManifestSignature.h"
 
 #include <QCoreApplication>
 #include <QStandardPaths>
@@ -15,7 +16,7 @@
 #include <QNetworkRequest>
 #include <QDesktopServices>
 #include <QUrl>
-#include <QDebug>
+#include <QEventLoop>
 #include <QStringList>
 #include <QVector>
 #include <QRegularExpression>
@@ -128,6 +129,26 @@ void UpdateManager::onManifestReply(QNetworkReply* reply)
     }
 
     QByteArray data = reply->readAll();
+
+    const QString sigUrl = updateManifestSignatureUrlFor(MANIFEST_URL);
+    QByteArray signature;
+    if (!sigUrl.isEmpty()) {
+        QNetworkRequest sigReq(sigUrl);
+        sigReq.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+        QNetworkReply* sigReply = m_nam->get(sigReq);
+        QEventLoop loop;
+        connect(sigReply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+        loop.exec();
+        if (sigReply->error() == QNetworkReply::NoError) {
+            signature = sigReply->readAll().trimmed();
+        }
+        sigReply->deleteLater();
+    }
+    if (!verifyUpdateManifestSignature(data, signature)) {
+        emit error("Update manifest signature verification failed.");
+        return;
+    }
+
     UpdateInfo info;
     if (!parseUpdateJson(data, info)) {
         emit error("Update manifest was invalid or empty.");

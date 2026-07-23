@@ -535,6 +535,9 @@ private:
                                                        bool annotateSessionCodewords);
     P25Phase2DecodeResult processPhase2HardDibitsDetailedInternal(const std::vector<int>& dibits,
                                                                   bool annotateSessionCodewords);
+    P25Phase2DecodeResult processPhase2FromFramerBurstsInternal(
+        std::vector<p25dsp::P25Phase2FramerBurst> framerBursts,
+        bool annotateSessionCodewords);
     void annotatePhase2SessionCodewords(P25Phase2DecodeResult& out,
                                         const std::vector<int>& dibits);
 
@@ -603,6 +606,7 @@ private:
     p25dsp::P25StreamingChannelDdc m_streamingDdc;
     p25dsp::P25FilterCache m_filterCache;
     p25dsp::P25Phase2Framer m_phase2Framer;
+    std::vector<p25dsp::P25Phase2FramerBurst> m_pendingFramerBursts;
     p25dsp::P25DemodStateMachine m_demodStateMachine;
     p25dsp::P25DspProfileCounters m_dspProfile;
     bool m_frontEndDcEstimateValid = false;

@@ -111,6 +111,8 @@ $manifest.installer.sha256 = $setupHash
 $manifest.installer.size = $setupSize
 $manifest | ConvertTo-Json -Depth 10 | Set-Content update.json -Encoding utf8
 
+& "$PSScriptRoot\sign_update_manifest.ps1" -ManifestPath (Join-Path $root "update.json")
+
 # Update SHA256SUMS.txt
 @"
 $setupHash  SDR_Town-$Version-win64-setup.exe
@@ -140,7 +142,7 @@ if (-not $SkipAssets) {
         $gh = (Get-Command gh -ErrorAction SilentlyContinue).Source
     }
     if ($gh -and (Test-Path $gh)) {
-        $assets = @($setup, $setupShaFile, $portableZip, "update.json", "SHA256SUMS.txt") | Where-Object { Test-Path $_ }
+        $assets = @($setup, $setupShaFile, $portableZip, "update.json", "update.json.sig", "SHA256SUMS.txt") | Where-Object { Test-Path $_ }
         $notes = if ($Channel -eq "experimental") { "Experimental tester build. Fresh installer, portable ZIP, manifest, and hashes for the in-app updater." } else { "Stable build. Fresh installer, portable ZIP, manifest, and hashes for the in-app updater." }
         $ghArgs = @("release", "create", "v$Version") + $assets + @("--title", "SDR Town $Version ($Channel)", "--notes", $notes, "--repo", "Blkph0x/SDR_Town", "--verify-tag", "--latest")
         & $gh @ghArgs | Out-Null
