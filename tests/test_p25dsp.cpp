@@ -295,3 +295,96 @@ TEST_CASE("Streaming DDC output is partition invariant across block boundaries",
     }
     REQUIRE(maxAbsDiff < 0.02);
 }
+
+TEST_CASE("Streaming resampler is partition invariant at 2.4 MHz to 96 kHz", "[p25][dsp][ddc]")
+{
+    p25dsp::P25FilterCache cacheA;
+    p25dsp::P25FilterCache cacheB;
+    p25dsp::P25StreamingChannelDdc wholeDdc;
+    p25dsp::P25StreamingChannelDdc splitDdc;
+
+    P25LiveDecoderConfig config;
+    config.workSampleRate = 96000.0;
+    config.symbolRate = 6000.0;
+    config.channelBandwidthHz = 12500.0;
+
+    constexpr double kInputRate = 2400000.0;
+    std::vector<std::complex<float>> iq(65536);
+    for (size_t i = 0; i < iq.size(); ++i) {
+        const float phase = static_cast<float>(i) * 0.00037f;
+        iq[i] = {std::cos(phase), std::sin(phase)};
+    }
+
+    const auto whole = wholeDdc.process(iq, kInputRate, 850000000.0, 850006250.0, config, cacheA);
+
+    const std::array<size_t, 5> chunks = {193, 4096, 701, 8192, 4096};
+    std::vector<std::complex<float>> split;
+    size_t offset = 0;
+    for (size_t chunk : chunks) {
+        if (offset >= iq.size()) break;
+        const size_t take = std::min(chunk, iq.size() - offset);
+        std::vector<std::complex<float>> block(iq.begin() + static_cast<std::ptrdiff_t>(offset),
+                                               iq.begin() + static_cast<std::ptrdiff_t>(offset + take));
+        const auto out = splitDdc.process(block, kInputRate, 850000000.0, 850006250.0, config, cacheB);
+        split.insert(split.end(), out.samples.begin(), out.samples.end());
+        offset += take;
+    }
+    if (offset < iq.size()) {
+        std::vector<std::complex<float>> tail(iq.begin() + static_cast<std::ptrdiff_t>(offset), iq.end());
+        const auto out = splitDdc.process(tail, kInputRate, 850000000.0, 850006250.0, config, cacheB);
+        split.insert(split.end(), out.samples.begin(), out.samples.end());
+    }
+
+    REQUIRE(whole.samples.size() >= 64);
+    REQUIRE(split.size() >= 64);
+    REQUIRE(std::abs(static_cast<long>(whole.samples.size()) - static_cast<long>(split.size())) <= 4);
+
+    const size_t compareStart = 120;
+    const size_t compareCount = std::min(whole.samples.size(), split.size()) - compareStart;
+    REQUIRE(compareCount >= 32);
+
+    double maxAbsDiff = 0.0;
+    for (size_t i = 0; i < compareCount; ++i) {
+        maxAbsDiff = std::max(maxAbsDiff,
+                              static_cast<double>(std::abs(whole.samples[compareStart + i] - split[compareStart + i])));
+    }
+    REQUIRE(maxAbsDiff < 0.05);
+}
+
+TEST_CASE("Phase-2 framer preserves cadence after negative sync2 realignment", "[p25][dsp][framer]")
+{
+    p25dsp::P25Phase2Framer framer;
+    std::vector<int> stream;
+    stream.reserve(p25dsp::kPhase2SuperframeDibits * 2);
+    const auto sync = P25LiveDecoder::phase2FrameSyncDibits();
+
+    for (size_t block = 0; block < 8; ++block) {
+        if (block == 2 || block == 3 || block == 6 || block == 7) {
+            for (int dib : sync) stream.push_back(dib & 0x03);
+        }
+        while (stream.size() < (block + 1) * 180) {
+            stream.push_back(static_cast<int>((stream.size() + 3) & 0x03));
+        }
+    }
+
+    framer.consumeDibits(stream);
+    REQUIRE(framer.takeSuperframes().size() >= 1);
+    REQUIRE(framer.inSyncAllowance() >= 0);
+}
+
+TEST_CASE("DDC rejects out-of-Nyquist center offsets and low sample rates", "[p25][dsp][ddc]")
+{
+    p25dsp::P25FilterCache cache;
+    p25dsp::P25StreamingChannelDdc ddc;
+    P25LiveDecoderConfig config;
+    config.workSampleRate = 96000.0;
+    config.symbolRate = 6000.0;
+    config.channelBandwidthHz = 12500.0;
+
+    std::vector<std::complex<float>> iq(1024, {1.0f, 0.0f});
+    const auto aliased = ddc.process(iq, 96000.0, 850000000.0, 850060000.0, config, cache);
+    REQUIRE(aliased.samples.empty());
+
+    const auto tooLow = ddc.process(iq, 32000.0, 850000000.0, 850006250.0, config, cache);
+    REQUIRE(tooLow.samples.empty());
+}

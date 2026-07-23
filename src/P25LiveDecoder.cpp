@@ -5526,6 +5526,7 @@ P25LiveDecoder::P25LiveDecoder(const P25LiveDecoder& other)
       m_phase2NextSessionBurstId(other.m_phase2NextSessionBurstId),
       m_phase2DecodeGeneration(other.m_phase2DecodeGeneration),
       m_phase2StreamDibits(other.m_phase2StreamDibits),
+      m_phase2FramerOriginStreamDibit(other.m_phase2FramerOriginStreamDibit),
       m_cqpskLock(other.m_cqpskLock),
       m_cqpskDiscreteFrozen(other.m_cqpskDiscreteFrozen),
       m_cqpskDiscreteChangesBlocked(other.m_cqpskDiscreteChangesBlocked),
@@ -5584,6 +5585,7 @@ P25LiveDecoder& P25LiveDecoder::operator=(const P25LiveDecoder& other)
     m_phase2NextSessionBurstId = other.m_phase2NextSessionBurstId;
     m_phase2DecodeGeneration = other.m_phase2DecodeGeneration;
     m_phase2StreamDibits = other.m_phase2StreamDibits;
+    m_phase2FramerOriginStreamDibit = other.m_phase2FramerOriginStreamDibit;
     m_cqpskLock = other.m_cqpskLock;
     m_cqpskDiscreteFrozen = other.m_cqpskDiscreteFrozen;
     m_cqpskDiscreteChangesBlocked = other.m_cqpskDiscreteChangesBlocked;
@@ -5642,6 +5644,7 @@ P25LiveDecoder::P25LiveDecoder(P25LiveDecoder&& other) noexcept
       m_phase2NextSessionBurstId(other.m_phase2NextSessionBurstId),
       m_phase2DecodeGeneration(other.m_phase2DecodeGeneration),
       m_phase2StreamDibits(other.m_phase2StreamDibits),
+      m_phase2FramerOriginStreamDibit(other.m_phase2FramerOriginStreamDibit),
       m_cqpskLock(other.m_cqpskLock),
       m_cqpskDiscreteFrozen(other.m_cqpskDiscreteFrozen),
       m_cqpskDiscreteChangesBlocked(other.m_cqpskDiscreteChangesBlocked),
@@ -5704,6 +5707,7 @@ P25LiveDecoder& P25LiveDecoder::operator=(P25LiveDecoder&& other) noexcept
     m_phase2NextSessionBurstId = other.m_phase2NextSessionBurstId;
     m_phase2DecodeGeneration = other.m_phase2DecodeGeneration;
     m_phase2StreamDibits = other.m_phase2StreamDibits;
+    m_phase2FramerOriginStreamDibit = other.m_phase2FramerOriginStreamDibit;
     m_cqpskLock = other.m_cqpskLock;
     m_cqpskDiscreteFrozen = other.m_cqpskDiscreteFrozen;
     m_cqpskDiscreteChangesBlocked = other.m_cqpskDiscreteChangesBlocked;
@@ -5771,6 +5775,7 @@ void P25LiveDecoder::reset()
     m_phase2NextSessionBurstId = 1;
     m_phase2DecodeGeneration = 0;
     m_phase2StreamDibits = 0;
+    m_phase2FramerOriginStreamDibit = 0;
     m_cqpskLock = {};
     m_cqpskDiscreteFrozen = false;
     m_cqpskDiscreteChangesBlocked = 0;
@@ -5809,6 +5814,9 @@ void P25LiveDecoder::alignPhase2AbsoluteDibitCursor(uint64_t chunkStartAbsolute,
         m_phase2DibitTail.clear();
         m_phase2RecentAcchDecodeBurstDibits.clear();
         m_phase2SuperframeAnchorKnown = false;
+        m_phase2Framer.reset();
+        m_phase2FramerOriginStreamDibit = chunkStartAbsolute;
+        m_pendingFramerBursts.clear();
     };
 
     // This method is called before processHardDibits().  m_phase2StreamDibits
@@ -6840,7 +6848,9 @@ void P25LiveDecoder::annotatePhase2SessionCodewords(P25Phase2DecodeResult& out,
 
     for (auto& burst : out.bursts) {
         if (burst.voiceCodewords.empty()) continue;
-        const uint64_t streamBurstStart = streamStart + static_cast<uint64_t>(burst.dibitOffset);
+        const uint64_t streamBurstStart = burst.streamBurstStartDibitKnown
+            ? burst.streamBurstStartDibit
+            : streamStart + static_cast<uint64_t>(burst.dibitOffset);
         const uint8_t burstSlot = burst.grantSlotKnown ? burst.grantSlot : 0xffu;
         auto burstIt = std::find_if(m_phase2RecentBursts.begin(), m_phase2RecentBursts.end(),
             [&](const RecentPhase2Burst& seen) {
@@ -6868,8 +6878,9 @@ void P25LiveDecoder::annotatePhase2SessionCodewords(P25Phase2DecodeResult& out,
             // the decoder input window.  Do not add burst.dibitOffset again; doing
             // so double-counts the burst position and makes the overlap de-dupe
             // randomly drop or replay AMBE frames.
-            const uint64_t streamDibit = streamStart +
-                static_cast<uint64_t>(codeword.dibitOffset);
+            const uint64_t streamDibit = burst.streamBurstStartDibitKnown
+                ? streamBurstStart + static_cast<uint64_t>(codeword.dibitOffset)
+                : streamStart + static_cast<uint64_t>(codeword.dibitOffset);
             auto it = std::find_if(m_phase2RecentCodewords.begin(), m_phase2RecentCodewords.end(),
                 [&](const RecentPhase2Codeword& seen) {
                     const uint64_t distance = streamDibit > seen.streamDibit
@@ -6899,7 +6910,13 @@ void P25LiveDecoder::annotatePhase2SessionCodewords(P25Phase2DecodeResult& out,
         }
     }
 
-    const uint64_t streamEnd = streamStart + static_cast<uint64_t>(dibits.size());
+    uint64_t streamEnd = streamStart + static_cast<uint64_t>(dibits.size());
+    for (const auto& burst : out.bursts) {
+        if (burst.streamBurstStartDibitKnown) {
+            streamEnd = std::max(streamEnd,
+                                 burst.streamBurstStartDibit + static_cast<uint64_t>(Phase2BurstDibits));
+        }
+    }
     if (streamEnd > m_phase2StreamDibits) {
         const uint64_t alreadyCovered = m_phase2StreamDibits > streamStart
             ? m_phase2StreamDibits - streamStart
@@ -7055,18 +7072,27 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2FromFramerBurstsInternal(
 
     constexpr size_t kMaxFramerBurstsPerCommit = 24;
     size_t decoded = 0;
-    std::vector<int> annotateDibits;
-    annotateDibits.reserve(p25dsp::kPhase2BurstDibits);
 
     for (const auto& fb : framerBursts) {
         if (decoded >= kMaxFramerBurstsPerCommit) break;
+        if (!m_phase2SuperframeAnchorKnown) continue;
+
+        const uint64_t streamBurstStart =
+            m_phase2FramerOriginStreamDibit + fb.absoluteStartDibit;
+        const int64_t delta = static_cast<int64_t>(streamBurstStart) -
+            static_cast<int64_t>(m_phase2SuperframeAnchorDibit);
+        if (delta < 0 ||
+            (delta % static_cast<int64_t>(p25dsp::kPhase2BurstDibits)) != 0) {
+            m_phase2SuperframeAnchorKnown = false;
+            continue;
+        }
+
         std::vector<int> dibits(fb.dibits.begin(), fb.dibits.end());
-        const uint64_t burstNum = fb.absoluteStartDibit / p25dsp::kPhase2BurstDibits;
-        const size_t superframeIndex = static_cast<size_t>(burstNum % 12ull);
+        const size_t superframeIndex = static_cast<size_t>(
+            (static_cast<uint64_t>(delta) / p25dsp::kPhase2BurstDibits) % 12ull);
         const uint8_t trafficSlot = phase2TrafficSlotForSuperframeBurst(dibits, 0, superframeIndex);
         auto& burstSession = slotSessions[trafficSlot & 0x01u];
-        const bool superframeLocked = m_phase2SuperframeAnchorKnown ||
-            (fb.syncErrors >= 0 && fb.syncErrors <= p25dsp::kSyncThresholdSynchronized);
+        const bool superframeLocked = true;
 
         auto burst = decodePhase2BurstAt(
             dibits,
@@ -7088,11 +7114,14 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2FromFramerBurstsInternal(
         if (!burst.valid) continue;
         burst.stickySuperframe = superframeLocked;
         burst.superframeLock = superframeLocked;
+        burst.superframeBurstIndexKnown = true;
+        burst.superframeBurstIndex = static_cast<uint8_t>(superframeIndex);
+        burst.streamBurstStartDibitKnown = true;
+        burst.streamBurstStartDibit = streamBurstStart;
         if (fb.dibitOffsetCorrection != 0) {
             burst.syncOffsetAdjusted = true;
             burst.syncOffsetDibits = fb.dibitOffsetCorrection;
         }
-        annotateDibits = std::move(dibits);
         out.bursts.push_back(std::move(burst));
         ++decoded;
     }
@@ -7126,8 +7155,8 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2FromFramerBurstsInternal(
     m_phase2EssBHypotheses = retainedSession->essBHypotheses;
     m_phase2EssBSeenHypotheses = retainedSession->essBSeenHypotheses;
 
-    if (!annotateDibits.empty()) {
-        annotatePhase2SessionCodewords(out, annotateDibits);
+    if (!out.bursts.empty()) {
+        annotatePhase2SessionCodewords(out, {});
     }
     return out;
 }

@@ -58,7 +58,7 @@ private:
     std::array<int, kSuperframeRingCapacity> m_superframeRing{};
     size_t m_ringWriteIndex = 0;
     uint64_t m_ringTotalDibits = 0;
-    uint64_t m_superframeDibitsSinceEmit = 0;
+    int64_t m_superframeDibitsSinceEmit = 0;
 
     std::vector<P25Phase2FramerBurst> m_pendingBursts;
     std::vector<P25Phase2FramerSuperframe> m_pendingSuperframes;

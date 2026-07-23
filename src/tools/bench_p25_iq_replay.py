@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""IQ replay / DSP benchmark guard for v0.2.46 audit closure."""
+"""IQ replay / DSP benchmark guard."""
 
 from pathlib import Path
 import subprocess
@@ -23,8 +23,9 @@ if missing:
     raise SystemExit("Benchmark prerequisites missing: " + ", ".join(missing))
 
 if not build.is_file():
-    print("Benchmark runner not built; source guards PASS (build sdr_town_tests to execute runtime bench).")
-    sys.exit(0)
+    raise SystemExit(
+        "SKIP: sdr_town_tests executable not built (build Release target sdr_town_tests first)"
+    )
 
 filters = [
     "[p25][dsp]",
@@ -39,9 +40,14 @@ for tag in filters:
 
 decoder = (root / "src" / "P25LiveDecoder.cpp").read_text(encoding="utf-8", errors="ignore")
 checks = {
-    "framer-driven decode path": "processPhase2FromFramerBurstsInternal" in decoder,
-    "pending framer bursts": "m_pendingFramerBursts" in decoder,
-    "manifest signature verify": "verifyUpdateManifestSignature" in (root / "src" / "UpdateManager.cpp").read_text(encoding="utf-8"),
+    "anchor-gated framer decode": "m_phase2SuperframeAnchorKnown" in decoder and
+        "m_phase2FramerOriginStreamDibit" in decoder,
+    "resampler lookahead guard": "kResamplerRadius" in (
+        root / "src" / "dsp" / "P25StreamingChannelDdc.cpp"
+    ).read_text(encoding="utf-8"),
+    "ed25519 manifest verify": "crypto_sign_ed25519_verify_detached" in (
+        root / "src" / "UpdateManifestSignature.cpp"
+    ).read_text(encoding="utf-8"),
 }
 failed = [name for name, ok in checks.items() if not ok]
 if failed:

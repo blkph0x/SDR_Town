@@ -352,6 +352,8 @@ struct P25Phase2Burst {
     uint32_t trafficTalkgroupId = 0;
     bool superframeBurstIndexKnown = false;
     uint8_t superframeBurstIndex = 0;
+    bool streamBurstStartDibitKnown = false;
+    uint64_t streamBurstStartDibit = 0;
     bool syncOffsetAdjusted = false;
     int syncOffsetDibits = 0;
     bool grantSlotKnown = false;
@@ -600,6 +602,7 @@ private:
     uint64_t m_phase2NextSessionBurstId = 1;
     uint64_t m_phase2DecodeGeneration = 0;
     uint64_t m_phase2StreamDibits = 0;
+    uint64_t m_phase2FramerOriginStreamDibit = 0;
     CqpskDemodLock m_cqpskLock;
     bool m_cqpskDiscreteFrozen = false;
     uint64_t m_cqpskDiscreteChangesBlocked = 0;

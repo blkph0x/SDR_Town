@@ -23,8 +23,19 @@ struct P25ComplexNco {
 
 struct P25StreamingFirState {
     std::vector<std::complex<float>> delay;
+    size_t writeIndex = 0;
+    size_t fill = 0;
 
-    void reset() noexcept { delay.clear(); }
+    void reset() noexcept
+    {
+        delay.clear();
+        writeIndex = 0;
+        fill = 0;
+    }
+
+    void ensureCapacity(size_t tapCount);
+    void pushSample(std::complex<float> sample) noexcept;
+    std::complex<float> convolve(const std::vector<double>& taps) const;
     void processInPlace(std::vector<std::complex<float>>& samples, const std::vector<double>& taps);
 };
 
@@ -66,6 +77,8 @@ struct P25StreamingResamplerState {
                   std::vector<std::complex<float>>& output,
                   double inputRateHz,
                   double outputRateHz);
+
+    void flush(std::vector<std::complex<float>>& output);
 };
 
 struct P25StreamingChannelDdcResult {

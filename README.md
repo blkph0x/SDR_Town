@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Current version** | **0.2.34** (experimental channel) |
+| **Current version** | **0.2.47** (stable channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
@@ -29,12 +29,12 @@ This is **active experimental software**. It is useful for real RF testing and d
 | **Audio** | miniaudio multi-output (speakers + virtual cable), per-output enable/volume, ring-fill and underrun counters. Master volume in GUI. |
 | **P25 Phase 1** | Control-channel C4FM path: frame sync, NID, TSDU/TSBK trust, grants, talkgroup list. Clear IMBE backend via mbelib when frames validate. |
 | **P25 Phase 2** | Full experimental TDMA pipeline: superframe/ISCH, XOR mask (NAC/WACN/SysID), ACCH/MAC/ESS hypotheses, Voice2/Voice4 → AMBE 3600×2450 (mbelib), one-RTL traffic retune + return-to-control, security gate (encrypted mute, clear only with proof). |
-| **Updater** | Fetches `update.json` from GitHub **latest** release, SHA-256 verifies installer, user consent only—no silent install. |
+| **Updater** | Fetches `update.json` + `update.json.sig` from GitHub **latest** release, verifies Ed25519 signature (when a release public key is configured) and SHA-256 of the installer, user consent only—no silent install. |
 | **CLI** | Full interactive shell + one-shot `--cli --cmd "..."`. Replay/voicetest/followtest/waitgrant for lab and field diagnostics. |
 
 ### P25 Phase 2 clear audio — about ~50% of the time
 
-As of **v0.2.34**, field testing reports **clear Phase 2 voice roughly half the time** on live systems (good enough to understand speech when it works; still often blocky, intermittent, wrong-slot, or gated when it does not).
+As of **v0.2.47**, field testing reports **clear Phase 2 voice roughly half the time** on live systems (good enough to understand speech when it works; still often blocky, intermittent, wrong-slot, or gated when it does not).
 
 What that means in practice:
 
@@ -49,7 +49,7 @@ Do **not** treat Phase 2 as production-ready. Treat it as a working experimental
 - **ONNX classifier backend** is a placeholder; the **deterministic** classifier is what runs.
 - **Smart Scan** button is present (PR6-era foundation)—not a full production scanner (no priority lists, lockout, hold, multi-TG routing product yet).
 - **DMR / NXDN / DRM / pager / satellite** modules are roadmap only—not implemented as working decoders.
-- **Updater** trusts GitHub release path + SHA-256 only; Authenticode / signed manifest not done.
+- **Updater** verifies Ed25519 manifest signatures (when configured) plus installer SHA-256; Authenticode not done yet.
 - **SDR open/stream** is in-process (no separate helper process yet)—wedged USB/Soapy can still affect the app process.
 - **SSB/CW** are functional basics, not contest-grade AGC/filtering chains.
 
@@ -63,7 +63,7 @@ Tester builds: https://github.com/Blkph0x/SDR_Town/releases
 |-------|---------|
 | `SDR_Town-X.Y.Z-win64-setup.exe` | NSIS installer (silent `/S` supported) |
 | `SDR_Town-X.Y.Z-win64-portable.zip` | Portable folder |
-| `update.json` | In-app updater manifest (version, URL, sha256, size) |
+| `update.json` / `update.json.sig` | In-app updater manifest + Ed25519 signature |
 | `SHA256SUMS.txt` | Release hashes |
 | `*.exe.sha256` | Per-installer hash file |
 
@@ -73,7 +73,7 @@ Tester builds: https://github.com/Blkph0x/SDR_Town/releases
 2. `scripts/release.ps1 -Version X.Y.Z -Channel experimental` builds deploy + windeployqt + CPack NSIS + portable zip, rewrites `update.json` / `SHA256SUMS.txt`, commits, tags `vX.Y.Z`, pushes, uploads assets with `gh release create`.
 3. App `UpdateManager` fetches  
    `https://github.com/Blkph0x/SDR_Town/releases/latest/download/update.json`  
-   then downloads only HTTPS GitHub release installer URLs and verifies SHA-256 before launch.
+   then downloads only HTTPS GitHub release installer URLs, verifies `update.json.sig` (Ed25519) when a release public key is configured, and verifies installer SHA-256 before launch.
 
 ---
 
@@ -280,7 +280,7 @@ When `remote_diagnostics.json` is present (or `--diag-url` / env), the app can s
 powershell -ExecutionPolicy Bypass -File scripts\start_remote_diag_server.ps1 -Port 8787 -Host 0.0.0.0
 
 # App
-.\SDR_Town.exe --diag-url http://host:8787/ingest --diag-token <token>
+.\SDR_Town.exe --diag-url https://host:8787/ingest --diag-token <token>
 # or: SDR_TOWN_DIAG_URL / SDR_TOWN_DIAG_TOKEN
 # disable: --diag-off
 ```
@@ -324,7 +324,7 @@ C:\Qt\6.11.1\msvc2022_64\bin\windeployqt.exe SDR_Town.exe --no-compiler-runtime 
 .\scripts\release.ps1 -Version X.Y.Z -Channel experimental
 ```
 
-Produces and uploads: NSIS setup, portable ZIP, `update.json`, SHA files. Optional: `-RemoteDiagnosticsUrl http://…` injects packaged diag config without committing tokens.
+Produces and uploads: NSIS setup, portable ZIP, `update.json`, `update.json.sig`, SHA files. Generate signing keys once with `scripts/sign_update_manifest.ps1 -GenerateKeyPair` (private key stays local). Optional: `-RemoteDiagnosticsUrl https://…` injects packaged diag config without committing tokens.
 
 ---
 
@@ -362,7 +362,7 @@ Useful docs (may be denser than this README):
    Split mega-`main.cpp` into GUI / CLI / P25 / settings modules; SDR helper process isolation; reduce freeze/retune edge cases on one-RTL follow.
 
 3. **Trust & packaging**  
-   Authenticode or signed update manifests beyond raw SHA-256.
+   Authenticode for binaries; release signing key rotation for Ed25519 manifests.
 
 4. **Classifier**  
    Real ONNX contract + training pipeline; keep deterministic path until then.

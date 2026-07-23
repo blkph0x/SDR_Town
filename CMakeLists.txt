@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.46 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.47 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -24,6 +24,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
 # Optional: spdlog & nlohmann via vcpkg / find
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(unofficial-sodium CONFIG REQUIRED)
 
 # SoapySDR for device support (PR 2+). vcpkg "soapy" port or system install.
 # After vcpkg install, it should be discoverable when using the vcpkg toolchain.
@@ -117,6 +118,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Network
     spdlog::spdlog
     nlohmann_json::nlohmann_json
+    unofficial-sodium::sodium
     sdr_town_dsp
 )
 target_compile_definitions(${PROJECT_NAME} PRIVATE SDR_TOWN_VERSION=\"${PROJECT_VERSION}\")

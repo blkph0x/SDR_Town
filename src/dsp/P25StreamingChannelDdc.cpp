@@ -13,12 +13,22 @@ namespace {
 constexpr double kPi = std::numbers::pi;
 constexpr int kResamplerRadius = 10;
 
+bool hasFullSincSupport(const std::vector<std::complex<float>>& samples, double pos) noexcept
+{
+    if (samples.empty()) return false;
+    const long center = static_cast<long>(std::floor(pos));
+    const long minIdx = center - kResamplerRadius;
+    const long maxIdx = center + kResamplerRadius;
+    return minIdx >= 0 && maxIdx < static_cast<long>(samples.size());
+}
+
 std::complex<float> interpolateSinc(const std::vector<std::complex<float>>& samples,
                                     double pos,
                                     double cutoff)
 {
     if (samples.empty()) return {};
     if (samples.size() == 1) return samples.front();
+    if (!hasFullSincSupport(samples, pos)) return {};
 
     const long center = static_cast<long>(std::floor(pos));
     double accI = 0.0;
@@ -26,7 +36,6 @@ std::complex<float> interpolateSinc(const std::vector<std::complex<float>>& samp
     double wsum = 0.0;
     for (int n = -kResamplerRadius; n <= kResamplerRadius; ++n) {
         const long idx = center + n;
-        if (idx < 0 || idx >= static_cast<long>(samples.size())) continue;
         const double d = pos - static_cast<double>(idx);
         const double sincArg = 2.0 * cutoff * d;
         const double sinc = std::abs(sincArg) < 1e-12
@@ -41,7 +50,7 @@ std::complex<float> interpolateSinc(const std::vector<std::complex<float>>& samp
         accQ += static_cast<double>(samples[static_cast<size_t>(idx)].imag()) * w;
         wsum += w;
     }
-    if (wsum <= 1e-12) return samples[static_cast<size_t>(std::clamp(center, 0L, static_cast<long>(samples.size()) - 1))];
+    if (wsum <= 1e-12) return {};
     return {static_cast<float>(accI / wsum), static_cast<float>(accQ / wsum)};
 }
 
@@ -73,37 +82,50 @@ void P25ComplexNco::mixSample(float inI, float inQ, float& outI, float& outQ) no
     }
 }
 
+void P25StreamingFirState::ensureCapacity(size_t tapCount)
+{
+    if (delay.size() != tapCount) {
+        delay.assign(tapCount, {0.0f, 0.0f});
+        writeIndex = 0;
+        fill = 0;
+    }
+}
+
+void P25StreamingFirState::pushSample(std::complex<float> sample) noexcept
+{
+    delay[writeIndex] = sample;
+    writeIndex = (writeIndex + 1) % delay.size();
+    if (fill < delay.size()) ++fill;
+}
+
+std::complex<float> P25StreamingFirState::convolve(const std::vector<double>& taps) const
+{
+    if (fill < taps.size()) return {0.0f, 0.0f};
+
+    double accI = 0.0;
+    double accQ = 0.0;
+    const size_t tapCount = taps.size();
+    size_t idx = (writeIndex + delay.size() - tapCount) % delay.size();
+    for (size_t k = 0; k < tapCount; ++k) {
+        const double w = taps[k];
+        const auto& tapSample = delay[idx];
+        accI += static_cast<double>(tapSample.real()) * w;
+        accQ += static_cast<double>(tapSample.imag()) * w;
+        idx = (idx + 1) % delay.size();
+    }
+    return {static_cast<float>(accI), static_cast<float>(accQ)};
+}
+
 void P25StreamingFirState::processInPlace(std::vector<std::complex<float>>& samples,
                                           const std::vector<double>& taps)
 {
     if (samples.empty() || taps.empty()) return;
 
-    const size_t tapCount = taps.size();
-    std::vector<std::complex<float>> output;
-    output.reserve(samples.size());
-
-    for (const auto& sample : samples) {
-        delay.push_back(sample);
-        if (delay.size() > tapCount) {
-            delay.erase(delay.begin());
-        }
-        if (delay.size() < tapCount) {
-            output.push_back({0.0f, 0.0f});
-            continue;
-        }
-
-        double accI = 0.0;
-        double accQ = 0.0;
-        for (size_t k = 0; k < tapCount; ++k) {
-            const double w = taps[k];
-            const auto& tapSample = delay[k];
-            accI += static_cast<double>(tapSample.real()) * w;
-            accQ += static_cast<double>(tapSample.imag()) * w;
-        }
-        output.emplace_back(static_cast<float>(accI), static_cast<float>(accQ));
+    ensureCapacity(taps.size());
+    for (size_t i = 0; i < samples.size(); ++i) {
+        pushSample(samples[i]);
+        samples[i] = convolve(taps);
     }
-
-    samples = std::move(output);
 }
 
 void P25StreamingDecimatorState::process(const std::vector<std::complex<float>>& input,
@@ -119,25 +141,13 @@ void P25StreamingDecimatorState::process(const std::vector<std::complex<float>>&
     }
 
     decimation = decimationFactor;
-    const size_t tapCount = taps.size();
+    fir.ensureCapacity(taps.size());
 
     for (const auto& sample : input) {
-        fir.delay.push_back(sample);
-        if (fir.delay.size() > tapCount) {
-            fir.delay.erase(fir.delay.begin());
-        }
-
+        fir.pushSample(sample);
         if (inputSamplesProcessed % static_cast<uint64_t>(decimation) == 0 &&
-            fir.delay.size() >= tapCount) {
-            double accI = 0.0;
-            double accQ = 0.0;
-            for (size_t k = 0; k < tapCount; ++k) {
-                const double w = taps[k];
-                const auto& tapSample = fir.delay[k];
-                accI += static_cast<double>(tapSample.real()) * w;
-                accQ += static_cast<double>(tapSample.imag()) * w;
-            }
-            output.emplace_back(static_cast<float>(accI), static_cast<float>(accQ));
+            fir.fill >= taps.size()) {
+            output.push_back(fir.convolve(taps));
         }
         ++inputSamplesProcessed;
     }
@@ -176,15 +186,20 @@ void P25StreamingResamplerState::resample(const std::vector<std::complex<float>>
     const double step = inputRate / outputRate;
     const double cutoff = std::min(0.46, 0.46 * outputRate / inputRate);
 
-    while (nextOutAbsolutePos + 1.0 < static_cast<double>(streamEndAbsolute)) {
-        if (nextOutAbsolutePos + 1.0 < static_cast<double>(streamStartAbsolute)) {
+    while (nextOutAbsolutePos + static_cast<double>(kResamplerRadius) <
+           static_cast<double>(streamEndAbsolute)) {
+        if (nextOutAbsolutePos + static_cast<double>(kResamplerRadius) <
+            static_cast<double>(streamStartAbsolute)) {
             nextOutAbsolutePos += step;
             continue;
         }
         const double localPos = static_cast<double>(nextOutAbsolutePos) -
             static_cast<double>(streamStartAbsolute);
-        if (localPos >= 0.0 && localPos < static_cast<double>(stream.size()) - 1.0) {
-            output.push_back(interpolateSinc(stream, localPos, cutoff));
+        if (hasFullSincSupport(stream, localPos)) {
+            const auto sample = interpolateSinc(stream, localPos, cutoff);
+            if (sample != std::complex<float>{}) {
+                output.push_back(sample);
+            }
         }
         nextOutAbsolutePos += step;
     }
@@ -192,6 +207,31 @@ void P25StreamingResamplerState::resample(const std::vector<std::complex<float>>
     const size_t keep = std::min(static_cast<size_t>(2 * kResamplerRadius + 2), stream.size());
     prefix.assign(stream.end() - static_cast<std::ptrdiff_t>(keep), stream.end());
     totalInputSamples += input.size();
+}
+
+void P25StreamingResamplerState::flush(std::vector<std::complex<float>>& output)
+{
+    output.clear();
+    if (prefix.size() < 2 || inputRate <= 0.0 || outputRate <= 0.0) return;
+
+    const double step = inputRate / outputRate;
+    const double cutoff = std::min(0.46, 0.46 * outputRate / inputRate);
+    const uint64_t streamEndAbsolute = totalInputSamples;
+    const uint64_t streamStartAbsolute = totalInputSamples - prefix.size();
+
+    while (nextOutAbsolutePos + static_cast<double>(kResamplerRadius) <=
+           static_cast<double>(streamEndAbsolute)) {
+        const double localPos = static_cast<double>(nextOutAbsolutePos) -
+            static_cast<double>(streamStartAbsolute);
+        if (localPos >= 0.0 && hasFullSincSupport(prefix, localPos)) {
+            const auto sample = interpolateSinc(prefix, localPos, cutoff);
+            if (sample != std::complex<float>{}) {
+                output.push_back(sample);
+            }
+        }
+        nextOutAbsolutePos += step;
+    }
+    prefix.clear();
 }
 
 void P25StreamingChannelDdc::resetFilterChain() noexcept
@@ -225,9 +265,12 @@ P25StreamingChannelDdcResult P25StreamingChannelDdc::process(
 {
     P25StreamingChannelDdcResult out;
     if (iq.size() < 2 || !std::isfinite(sampleRate) || sampleRate <= 0.0) return out;
+    if (!std::isfinite(config.symbolRate) || config.symbolRate <= 0.0) return out;
+    if (sampleRate < config.symbolRate * 8.0) return out;
 
     const double offsetHz = targetFreqHz - centerFreqHz;
-    if (std::abs(offsetHz) > sampleRate * 0.55) return out;
+    const double occupiedHalfWidth = config.channelBandwidthHz * 0.5;
+    if (std::abs(offsetHz) + occupiedHalfWidth >= sampleRate * 0.5) return out;
 
     if (std::abs(offsetHz - m_lastOffsetHz) > 0.5 || std::abs(sampleRate - m_lastSampleRate) > 1.0) {
         m_nco.setFrequencyHz(offsetHz, sampleRate);
@@ -245,14 +288,22 @@ P25StreamingChannelDdcResult P25StreamingChannelDdc::process(
     }
     out.bytesCopied += iq.size() * sizeof(std::complex<float>) * 2;
 
+    const double outputRateLo = config.symbolRate * 8.0;
+    const double outputRateHi = std::min(sampleRate, 96000.0);
+    if (outputRateLo > outputRateHi) return out;
     const double outputRate = std::clamp(
         std::max(config.workSampleRate, config.symbolRate * 10.0),
-        config.symbolRate * 8.0,
-        std::min(sampleRate, 96000.0));
+        outputRateLo,
+        outputRateHi);
+
+    const double intermediateLo = outputRate;
+    const double intermediateHi = std::min(sampleRate, 240000.0);
+    if (intermediateLo > intermediateHi) return out;
     const double intermediateTarget = std::clamp(
         std::max({outputRate * 4.0, config.channelBandwidthHz * 14.0, config.symbolRate * 24.0}),
-        outputRate,
-        std::min(sampleRate, 240000.0));
+        intermediateLo,
+        intermediateHi);
+
     const int decim = sampleRate > intermediateTarget * 1.25
         ? std::max(1, static_cast<int>(std::llround(sampleRate / intermediateTarget)))
         : 1;

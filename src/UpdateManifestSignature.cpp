@@ -1,16 +1,44 @@
 #include "UpdateManifestSignature.h"
 
-#include <QMessageAuthenticationCode>
 #include <QUrl>
+
+#include <sodium.h>
+
+#include <array>
 
 namespace {
 
-QByteArray embeddedUpdateManifestHmacKey()
+constexpr const char* kPlaceholderPublicKeyHex =
+    "0000000000000000000000000000000000000000000000000000000000000000";
+
+constexpr const char* kEmbeddedPublicKeyHex =
+#include "../resources/update_manifest_ed25519_pub.inc"
+    ;
+
+std::array<unsigned char, 32> parseHexKey(const char* hex)
 {
-    // Release pipeline rotates this via scripts/sign_update_manifest.ps1 + resources/update_manifest_hmac.key
-    static const char kHex[] =
-        "a4f2c91e8b7d603548e1f9a2b6c3d0e7f5a8192c4e6b0d3f7a9281c5e0b4d6f8";
-    return QByteArray::fromHex(kHex);
+    std::array<unsigned char, 32> out{};
+    for (size_t i = 0; i < out.size(); ++i) {
+        const char hi = hex[i * 2];
+        const char lo = hex[i * 2 + 1];
+        auto nibble = [](char c) -> int {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+            return -1;
+        };
+        const int hiVal = nibble(hi);
+        const int loVal = nibble(lo);
+        if (hiVal < 0 || loVal < 0) return {};
+        out[i] = static_cast<unsigned char>((hiVal << 4) | loVal);
+    }
+    return out;
+}
+
+bool publicKeyConfigured(const std::array<unsigned char, 32>& key)
+{
+    const auto placeholder = parseHexKey(kPlaceholderPublicKeyHex);
+    return key != placeholder;
 }
 
 } // namespace
@@ -18,12 +46,19 @@ QByteArray embeddedUpdateManifestHmacKey()
 bool verifyUpdateManifestSignature(const QByteArray& manifestBytes, const QByteArray& signatureBytes)
 {
     if (manifestBytes.isEmpty() || signatureBytes.isEmpty()) return false;
-    const QByteArray key = embeddedUpdateManifestHmacKey();
-    if (key.isEmpty()) return false;
-    const QByteArray mac = QMessageAuthenticationCode::hash(
-        manifestBytes, key, QCryptographicHash::Sha256);
-    const QByteArray provided = QByteArray::fromBase64(signatureBytes.trimmed());
-    return !provided.isEmpty() && mac == provided;
+    if (sodium_init() < 0) return false;
+
+    const auto publicKey = parseHexKey(kEmbeddedPublicKeyHex);
+    if (!publicKeyConfigured(publicKey)) return false;
+
+    const QByteArray signature = QByteArray::fromBase64(signatureBytes.trimmed());
+    if (signature.size() != crypto_sign_BYTES) return false;
+
+    return crypto_sign_ed25519_verify_detached(
+               reinterpret_cast<const unsigned char*>(signature.constData()),
+               reinterpret_cast<const unsigned char*>(manifestBytes.constData()),
+               static_cast<unsigned long long>(manifestBytes.size()),
+               publicKey.data()) == 0;
 }
 
 QString updateManifestSignatureUrlFor(const QString& manifestUrl)

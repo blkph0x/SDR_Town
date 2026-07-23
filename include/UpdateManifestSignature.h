@@ -3,8 +3,8 @@
 #include <QByteArray>
 #include <QString>
 
-// Verify ECDSA-P256-SHA256 signature over the raw update.json bytes.
-// Public key is embedded from resources/update_manifest_public.pem.
-bool verifyUpdateManifestSignature(const QByteArray& manifestBytes, const QByteArray& signatureDer);
+// Verify Ed25519 detached signature over raw update.json bytes.
+// Only the public key is embedded; the private key stays on the release machine.
+bool verifyUpdateManifestSignature(const QByteArray& manifestBytes, const QByteArray& signatureBytes);
 
 QString updateManifestSignatureUrlFor(const QString& manifestUrl);

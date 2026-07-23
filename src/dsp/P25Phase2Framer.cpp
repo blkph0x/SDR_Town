@@ -176,7 +176,7 @@ void P25Phase2Framer::tryEmitSuperframe()
                 emitSuperframeFragment(sync1, sync2, 0, sync2Offset, true);
                 m_synchronized = false;
                 m_inSyncAllowance = 0;
-                m_superframeDibitsSinceEmit = static_cast<uint64_t>(sync2Offset);
+                m_superframeDibitsSinceEmit = sync2Offset;
                 return;
             }
 
@@ -193,7 +193,7 @@ void P25Phase2Framer::tryEmitSuperframe()
                 emitSuperframeFragment(sync1, sync2, sync1Offset, sync1Offset, false);
                 m_synchronized = false;
                 m_inSyncAllowance = 0;
-                m_superframeDibitsSinceEmit = static_cast<uint64_t>(sync1Offset);
+                m_superframeDibitsSinceEmit = sync1Offset;
                 return;
             }
 
@@ -205,7 +205,7 @@ void P25Phase2Framer::tryEmitSuperframe()
                     emitSuperframeFragment(sync1, sync2, sync1Offset, sync2Offset, true);
                     m_synchronized = false;
                     m_inSyncAllowance = 0;
-                    m_superframeDibitsSinceEmit = static_cast<uint64_t>(sync2Offset);
+                    m_superframeDibitsSinceEmit = sync2Offset;
                     return;
                 }
             }
