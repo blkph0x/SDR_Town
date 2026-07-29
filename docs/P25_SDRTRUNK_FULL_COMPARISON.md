@@ -17,7 +17,7 @@ Purpose: Diagnose why P25 workflow does not produce clear audio; align our C++/Q
 - Voice extraction: both pull 72-bit AMBE frames from known bit offsets in descrambled voice timeslots.
   - SDRTrunk: Voice4Timeslot: bit offsets 2,76,172,246 (72 bits ea).
   - OP25 (boatbod): fixed dibit starts at 11,48,96,133 (and symmetric) within the 180-dibit burst for the voice segments, then vf deinterleave to mbelib.
-  - Our: defaulted to OP25 offsets {11,48,96,133} (payload view) to match the proven on-air extraction + mbelib feed workflow. Previous SDRTrunk-derived {1,38,86,123} (after +20 ISCH) was a 10-dibit shift that commonly produced bad bits for mbelib even with good p2vcw/mask counts. Safe pull + both layouts kept for testing.
+  - Our: SDRTrunk Voice4Timeslot bit offsets 2/76/172/246 → dibit starts `{1,38,86,123}` inside the 160-dibit descrambled payload (after 20-dibit ISCH). OP25's `{11,48,96,133}` is the same absolute positions measured from an `xored_burst` pointer already shifted 10 dibits; do not treat those as alternative defaults.
 - Both feed a MBE codec (SDRTrunk: primarily JMBE interface; ours: native mbelib with stateful mbe_parms).
 
 ### Our Low-Level (P25LiveDecoder)
@@ -29,7 +29,7 @@ Purpose: Diagnose why P25 workflow does not produce clear audio; align our C++/Q
 - Symbol -> dibit: sliceC4fmSymbol with 4 levels (+3,+1,-1,-3), optional invert + bit reverse in dibit.
 - Dibit stream -> streaming correlator for sync (bit or dibit), then NID BCH, TSBK decode, MAC PDU parse, voice burst classification (DUID).
 - Phase2: superframe lock, mask phase search (multiple candidates, sticky), descrambled payload, ISCH, ESS decode variants.
-- Voice CW packing: bitsFromDibit (MSB first in pair) into 72-bit array, then to mbelib 4x24 via p25Phase2AmbeBitsToMbelibFrame (with row/col schedule + variants 0-5 for order/invert/reverse).
+- Voice CW packing: bitsFromDibit (MSB first in pair) into 72-bit array, then to mbelib 4x24 via p25Phase2AmbeBitsToMbelibFrame (live variant count **4**; cases 0–3).
 - Multiple candidate results + arbiter (trust scores, voice counts, MAC/ESS, cqpsk preference).
 
 ### SDRTrunk Low-Level
@@ -125,7 +125,7 @@ Extensive prior work (see P25_*_SDRTRUNK_*_PATCH_NOTES.md and SDRTRUNK_PARITY_*)
 
 ## Fixes Applied 2026-07-01 (this session)
 - Added lightweight running level normalization (percentile 80% AGC-like gain 0.6-1.8x) on recovered C4FM symbols after timing loop. Improves slice reliability -> cleaner dibits for voice frames (closer to SDRTrunk equalizer/gain compensation). See P25LiveDecoder.cpp.
-- Added modest post-normalize *1.35 boost (clamped) in resampleDecodedP25Pcm for P25 voice PCM before cubic upsample. Ensures louder/clearer output while preserving headroom (SDRTrunk NonClippingGain philosophy). See main.cpp.
+- Added modest post-normalize *1.2 boost (clamped) in resampleDecodedP25Pcm for P25 voice PCM before cubic upsample. Ensures louder/clearer output while preserving headroom (SDRTrunk NonClippingGain philosophy). See main.cpp.
 - Tightened post-discriminator FIR LPF (cutoff ~0.62 * symbolRate, 121 taps) in prepareC4fmDiscriminatorForSymbols before symbol timing / slicing. Reduces noise while preserving main FSK lobes for better eye opening and fewer bit errors in voice frames.
 - Removed per-frame mbe state reset on "not accepted but PCM usable" AMBE frames in the decode path. State and mbelib internal concealment now persist across marginal frames for continuous natural speech (key SDRTrunk/JMBE principle: feed the frames, let the codec handle erasures/repeats). Resets remain only at call boundaries / variant lock / security changes.
 - Added magnitude normalization (AGC) on CQPSK symbols after carrier/timing loop (P25LiveDecoder.cpp recoverComplexSymbols) for stable decisions, matching C4FM path and SDRTrunk equalizer/gain spirit.

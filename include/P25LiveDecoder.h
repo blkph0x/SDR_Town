@@ -82,9 +82,11 @@ struct P25LiveDecoderConfig {
     // monitoring and offline diagnostics share the same grant evidence path.
     // Low-power views may opt out explicitly when they only need Phase 1 TSBK.
     bool enablePhase2Decode = true;
-    // Persistent streaming DSP path (OP25/SDRTrunk-aligned): fused DDC, staged CQPSK
-    // scoring, and dibit framer.  Enabled by default for Phase-2 traffic demod.
-    bool enableStreamingChannelDdc = true;
+    // Persistent streaming DSP path for callers that feed strictly contiguous
+    // RF chunks. processIq() is also used with overlapping/offline windows, so
+    // the safe default is stateless channelization; windowed callers must not
+    // reuse a stateful DDC across non-contiguous slices.
+    bool enableStreamingChannelDdc = false;
     bool enableStagedCqpskScoring = true;
     bool enablePersistentPhase2Framer = true;
 };
@@ -479,6 +481,23 @@ public:
     // cursor before processing a new traffic-channel chunk.
     void alignPhase2AbsoluteDibitCursor(uint64_t chunkStartAbsolute, size_t chunkDibitCount);
     uint64_t phase2StreamDibitCursorForDiagnostics() const noexcept { return m_phase2StreamDibits; }
+    // Maps framer-local absoluteStartDibit into decoder stream space:
+    // streamPos = origin + framer.absoluteStartDibit. Latched on framer reset /
+    // first contiguous feed so epoch math never uses process-lifetime alone.
+    uint64_t phase2FramerOriginStreamDibitForDiagnostics() const noexcept
+    {
+        return m_phase2FramerOriginStreamDibit;
+    }
+    bool phase2FramerOriginLatchedForDiagnostics() const noexcept
+    {
+        return m_phase2FramerOriginLatched;
+    }
+    uint64_t phase2FramerAbsoluteDibitForDiagnostics() const noexcept
+    {
+        return m_phase2Framer.absoluteDibitCursor();
+    }
+    // Test/diagnostic: same latch+consume used by processIq before commit.
+    void feedPhase2FramerDibitsForDiagnostics(const std::vector<int>& dibits);
 
     static std::array<uint8_t, FrameSyncBits> frameSyncBits();
     static std::array<int, Phase2FrameSyncDibits> phase2FrameSyncDibits();
@@ -603,6 +622,10 @@ private:
     uint64_t m_phase2DecodeGeneration = 0;
     uint64_t m_phase2StreamDibits = 0;
     uint64_t m_phase2FramerOriginStreamDibit = 0;
+    bool m_phase2FramerOriginLatched = false;
+
+    void latchPhase2FramerOriginIfNeeded() noexcept;
+    void feedPhase2FramerDibits(const std::vector<int>& dibits);
     CqpskDemodLock m_cqpskLock;
     bool m_cqpskDiscreteFrozen = false;
     uint64_t m_cqpskDiscreteChangesBlocked = 0;

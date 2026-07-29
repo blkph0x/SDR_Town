@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Current version** | **0.2.47** (stable channel) |
+| **Current version** | **0.2.48** (stable channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
@@ -34,7 +34,7 @@ This is **active experimental software**. It is useful for real RF testing and d
 
 ### P25 Phase 2 clear audio — about ~50% of the time
 
-As of **v0.2.47**, field testing reports **clear Phase 2 voice roughly half the time** on live systems (good enough to understand speech when it works; still often blocky, intermittent, wrong-slot, or gated when it does not).
+As of **v0.2.48**, field testing reports **clear Phase 2 voice roughly half the time** on live systems (good enough to understand speech when it works; still often blocky, intermittent, wrong-slot, or gated when it does not).
 
 What that means in practice:
 

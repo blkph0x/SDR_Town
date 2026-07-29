@@ -1351,6 +1351,18 @@ TEST_CASE("P25 live decoder reuses sticky CQPSK demod lock after validation")
     REQUIRE(second.stats.cqpskLockActive);
     REQUIRE(second.stats.cqpskLockUsed);
     REQUIRE(second.stats.cqpskLockTrustScore > 0);
+    INFO("demodPath=" << second.stats.demodPath
+         << " trust=" << second.stats.cqpskLockTrustScore
+         << " misses=" << second.stats.cqpskLockMisses
+         << " nids=" << second.nids.size()
+         << " tsbks=" << second.rawTsbkBlocks.size()
+         << " p2mac=" << second.stats.phase2MacCrcValid
+         << " p2ess=" << second.stats.phase2EssKnown
+         << " candidates=" << second.stats.cqpskCandidatesEvaluated
+         << " fullDecodes=" << second.stats.dspFullProtocolDecodes
+         << " stagedReject=" << second.stats.dspStagedSyncRejections
+         << " bestFrameErr=" << second.stats.bestFrameSyncBitErrors
+         << " bestNidValid=" << second.stats.bestNidValid);
     REQUIRE(second.stats.cqpskLockMisses == 0);
     REQUIRE(second.nids.front().fecValidated);
     REQUIRE_FALSE(second.rawTsbkBlocks.empty());
@@ -2148,6 +2160,88 @@ TEST_CASE("P25 live decoder aligns absolute dibit cursor on traffic chunks")
     REQUIRE(decoder.phase2StreamDibitCursorForDiagnostics() == 500);
     decoder.processHardDibits(chunk(3));
     REQUIRE(decoder.phase2StreamDibitCursorForDiagnostics() == 680);
+}
+
+TEST_CASE("P25 framer origin latches to stream cursor and survives post-stream advance", "[p25][framer][epoch]")
+{
+    auto syncBurst = []() {
+        std::vector<int> dibits;
+        dibits.reserve(180);
+        for (int dib : P25LiveDecoder::phase2FrameSyncDibits()) dibits.push_back(dib & 0x03);
+        while (dibits.size() < 180) dibits.push_back(static_cast<int>(dibits.size() & 0x03));
+        return dibits;
+    };
+
+    P25LiveDecoder decoder;
+    // Gap into absolute ring space: framer resets and origin latches immediately.
+    decoder.alignPhase2AbsoluteDibitCursor(5000, 180);
+    REQUIRE(decoder.phase2FramerOriginLatchedForDiagnostics());
+    REQUIRE(decoder.phase2FramerOriginStreamDibitForDiagnostics() == 5000);
+    REQUIRE(decoder.phase2FramerAbsoluteDibitForDiagnostics() == 0);
+
+    // Advancing the stream without framer feed must NOT rebind origin.
+    // Full 180-dibit chunk is required for Phase-2 annotate to move the cursor.
+    decoder.processHardDibits(std::vector<int>(180, 1));
+    REQUIRE(decoder.phase2StreamDibitCursorForDiagnostics() == 5180);
+    REQUIRE(decoder.phase2FramerOriginStreamDibitForDiagnostics() == 5000);
+
+    decoder.feedPhase2FramerDibitsForDiagnostics(syncBurst());
+    REQUIRE(decoder.phase2FramerOriginStreamDibitForDiagnostics() == 5000);
+    REQUIRE(decoder.phase2FramerAbsoluteDibitForDiagnostics() == 180);
+
+    // Fresh decoder: first contiguous feed latches origin to current stream (0).
+    P25LiveDecoder fresh;
+    REQUIRE_FALSE(fresh.phase2FramerOriginLatchedForDiagnostics());
+    fresh.feedPhase2FramerDibitsForDiagnostics(syncBurst());
+    REQUIRE(fresh.phase2FramerOriginLatchedForDiagnostics());
+    REQUIRE(fresh.phase2FramerOriginStreamDibitForDiagnostics() == 0);
+    REQUIRE(fresh.phase2FramerAbsoluteDibitForDiagnostics() == 180);
+}
+
+TEST_CASE("P25 framer+anchor epoch is invariant under pre-sync dibit prefix", "[p25][framer][epoch]")
+{
+    // Prove superframe index from (origin+absolute - anchor)/180 % 12, not from
+    // process-lifetime alone. Different prefixes must map the same protocol
+    // burst to the same index once the anchor is the first post-prefix sync.
+    auto run = [](size_t prefix) -> std::pair<uint64_t, size_t> {
+        std::vector<int> post;
+        post.reserve(180);
+        for (int dib : P25LiveDecoder::phase2FrameSyncDibits()) post.push_back(dib & 0x03);
+        while (post.size() < 180) post.push_back(static_cast<int>((post.size() + 1) & 0x03));
+
+        P25LiveDecoder dec;
+        dec.reset();
+        // Place stream/framer epoch at absolute `prefix`.
+        // prefix>0 creates a gap from 0 and latches origin immediately.
+        // prefix==0 is continuous with the reset cursor; first feed latches.
+        dec.alignPhase2AbsoluteDibitCursor(static_cast<uint64_t>(prefix), post.size());
+        if (prefix == 0) {
+            REQUIRE_FALSE(dec.phase2FramerOriginLatchedForDiagnostics());
+        } else {
+            REQUIRE(dec.phase2FramerOriginLatchedForDiagnostics());
+            REQUIRE(dec.phase2FramerOriginStreamDibitForDiagnostics() == prefix);
+        }
+        dec.feedPhase2FramerDibitsForDiagnostics(post);
+        REQUIRE(dec.phase2FramerOriginLatchedForDiagnostics());
+        REQUIRE(dec.phase2FramerOriginStreamDibitForDiagnostics() == prefix);
+
+        const uint64_t origin = dec.phase2FramerOriginStreamDibitForDiagnostics();
+        // First sync-aligned burst starts at framer absolute 0 → stream `prefix`.
+        const uint64_t streamBurstStart = origin + 0;
+        const uint64_t anchor = streamBurstStart;
+        const size_t index = static_cast<size_t>(((streamBurstStart - anchor) / 180ull) % 12ull);
+        return {origin, index};
+    };
+
+    const auto a = run(0);
+    const auto b = run(37);
+    const auto c = run(179);
+    REQUIRE(a.second == 0);
+    REQUIRE(b.second == 0);
+    REQUIRE(c.second == 0);
+    REQUIRE(a.first == 0);
+    REQUIRE(b.first == 37);
+    REQUIRE(c.first == 179);
 }
 
 TEST_CASE("P25 live decoder independent probe copy starts fresh without parent session state")

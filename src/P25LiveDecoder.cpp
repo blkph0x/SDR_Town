@@ -442,11 +442,15 @@ std::vector<std::complex<float>> resampleWindowedSinc(const std::vector<std::com
     std::vector<std::complex<float>> out;
     out.reserve(outCount);
     const double step = inputRate / outputRate;
-    const int radius = 10;
+    constexpr int radius = 10;
     const double cutoff = std::min(0.46, 0.46 * outputRate / inputRate);
     for (size_t i = 0; i < outCount; ++i) {
         const double pos = static_cast<double>(i) * step;
-        if (pos > static_cast<double>(x.size() - 1)) break;
+        // Same rule as P25StreamingResamplerState: do not emit until the full
+        // non-causal ±radius kernel exists. Truncating the right-hand taps at
+        // the vector end silently warps the RF waveform at every block edge.
+        if (pos < static_cast<double>(radius)) continue;
+        if (pos + static_cast<double>(radius) >= static_cast<double>(x.size())) break;
         const long center = static_cast<long>(std::floor(pos));
         std::complex<double> acc(0.0, 0.0);
         double wsum = 0.0;
@@ -4049,9 +4053,6 @@ std::vector<Phase2SuperframeLock> findPhase2SuperframeLocks(const std::vector<in
         });
         if (!overlaps) filtered.push_back(lock);
     }
-    std::sort(filtered.begin(), filtered.end(), [](const Phase2SuperframeLock& a, const Phase2SuperframeLock& b) {
-        return a.dibitOffset < b.dibitOffset;
-    });
     return filtered;
 }
 
@@ -5527,6 +5528,7 @@ P25LiveDecoder::P25LiveDecoder(const P25LiveDecoder& other)
       m_phase2DecodeGeneration(other.m_phase2DecodeGeneration),
       m_phase2StreamDibits(other.m_phase2StreamDibits),
       m_phase2FramerOriginStreamDibit(other.m_phase2FramerOriginStreamDibit),
+      m_phase2FramerOriginLatched(other.m_phase2FramerOriginLatched),
       m_cqpskLock(other.m_cqpskLock),
       m_cqpskDiscreteFrozen(other.m_cqpskDiscreteFrozen),
       m_cqpskDiscreteChangesBlocked(other.m_cqpskDiscreteChangesBlocked),
@@ -5586,6 +5588,7 @@ P25LiveDecoder& P25LiveDecoder::operator=(const P25LiveDecoder& other)
     m_phase2DecodeGeneration = other.m_phase2DecodeGeneration;
     m_phase2StreamDibits = other.m_phase2StreamDibits;
     m_phase2FramerOriginStreamDibit = other.m_phase2FramerOriginStreamDibit;
+    m_phase2FramerOriginLatched = other.m_phase2FramerOriginLatched;
     m_cqpskLock = other.m_cqpskLock;
     m_cqpskDiscreteFrozen = other.m_cqpskDiscreteFrozen;
     m_cqpskDiscreteChangesBlocked = other.m_cqpskDiscreteChangesBlocked;
@@ -5645,6 +5648,7 @@ P25LiveDecoder::P25LiveDecoder(P25LiveDecoder&& other) noexcept
       m_phase2DecodeGeneration(other.m_phase2DecodeGeneration),
       m_phase2StreamDibits(other.m_phase2StreamDibits),
       m_phase2FramerOriginStreamDibit(other.m_phase2FramerOriginStreamDibit),
+      m_phase2FramerOriginLatched(other.m_phase2FramerOriginLatched),
       m_cqpskLock(other.m_cqpskLock),
       m_cqpskDiscreteFrozen(other.m_cqpskDiscreteFrozen),
       m_cqpskDiscreteChangesBlocked(other.m_cqpskDiscreteChangesBlocked),
@@ -5708,6 +5712,7 @@ P25LiveDecoder& P25LiveDecoder::operator=(P25LiveDecoder&& other) noexcept
     m_phase2DecodeGeneration = other.m_phase2DecodeGeneration;
     m_phase2StreamDibits = other.m_phase2StreamDibits;
     m_phase2FramerOriginStreamDibit = other.m_phase2FramerOriginStreamDibit;
+    m_phase2FramerOriginLatched = other.m_phase2FramerOriginLatched;
     m_cqpskLock = other.m_cqpskLock;
     m_cqpskDiscreteFrozen = other.m_cqpskDiscreteFrozen;
     m_cqpskDiscreteChangesBlocked = other.m_cqpskDiscreteChangesBlocked;
@@ -5776,6 +5781,7 @@ void P25LiveDecoder::reset()
     m_phase2DecodeGeneration = 0;
     m_phase2StreamDibits = 0;
     m_phase2FramerOriginStreamDibit = 0;
+    m_phase2FramerOriginLatched = false;
     m_cqpskLock = {};
     m_cqpskDiscreteFrozen = false;
     m_cqpskDiscreteChangesBlocked = 0;
@@ -5805,6 +5811,40 @@ P25LiveDecoder P25LiveDecoder::createIndependentProbeCopy(bool retainPhase2MaskP
     return copy;
 }
 
+void P25LiveDecoder::latchPhase2FramerOriginIfNeeded() noexcept
+{
+    // Framer absoluteStartDibit is local to the framer instance (0 after reset).
+    // Stream cursor is absolute ring/time. Bind them once per framer epoch so
+    // streamPos = origin + framerAbsolute never mixes coordinate spaces.
+    // Gap/rewind already latches via alignPhase2AbsoluteDibitCursor; do not
+    // re-bind after the stream has advanced without a framer reset.
+    if (m_phase2FramerOriginLatched) return;
+    if (m_phase2Framer.absoluteDibitCursor() != 0) {
+        // Framer already consumed dibits without an origin — bind to stream
+        // minus framer absolute so existing local counts stay coherent.
+        const uint64_t abs = m_phase2Framer.absoluteDibitCursor();
+        m_phase2FramerOriginStreamDibit = m_phase2StreamDibits >= abs
+            ? m_phase2StreamDibits - abs
+            : 0;
+        m_phase2FramerOriginLatched = true;
+        return;
+    }
+    m_phase2FramerOriginStreamDibit = m_phase2StreamDibits;
+    m_phase2FramerOriginLatched = true;
+}
+
+void P25LiveDecoder::feedPhase2FramerDibits(const std::vector<int>& dibits)
+{
+    if (dibits.empty()) return;
+    latchPhase2FramerOriginIfNeeded();
+    m_phase2Framer.consumeDibits(dibits);
+}
+
+void P25LiveDecoder::feedPhase2FramerDibitsForDiagnostics(const std::vector<int>& dibits)
+{
+    feedPhase2FramerDibits(dibits);
+}
+
 void P25LiveDecoder::alignPhase2AbsoluteDibitCursor(uint64_t chunkStartAbsolute, size_t chunkDibitCount)
 {
     if (chunkDibitCount == 0) return;
@@ -5816,6 +5856,7 @@ void P25LiveDecoder::alignPhase2AbsoluteDibitCursor(uint64_t chunkStartAbsolute,
         m_phase2SuperframeAnchorKnown = false;
         m_phase2Framer.reset();
         m_phase2FramerOriginStreamDibit = chunkStartAbsolute;
+        m_phase2FramerOriginLatched = true;
         m_pendingFramerBursts.clear();
     };
 
@@ -6109,6 +6150,14 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
             effectiveParams.permutation);
         restorePhase1BitTail(phase1TailSnapshot);
         candidate = processHardDibitsInternal(soft.dibits, false);
+        if (fromLock && !hasCqpskHardLockEvidence(candidate)) {
+            restorePhase1BitTail({});
+            auto cleanTailCandidate = processHardDibitsInternal(soft.dibits, false);
+            if (hasCqpskHardLockEvidence(cleanTailCandidate) ||
+                betterLiveResult(cleanTailCandidate, candidate, &m_config)) {
+                candidate = std::move(cleanTailCandidate);
+            }
+        }
         restorePhase1BitTail(phase1TailSnapshot);
         stampSoftDibitStats(candidate, soft);
         stampCommonStats(candidate);
@@ -6356,6 +6405,15 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
                         ++m_dspProfile.fullProtocolDecodes;
                         restorePhase1BitTail(phase1TailSnapshot);
                         auto candidate = processHardDibitsInternal(soft.dibits, false);
+                        if ((!m_config.realtimeVoiceSearch || !phase2TrafficDecoder) &&
+                            !hasCqpskHardLockEvidence(candidate)) {
+                            restorePhase1BitTail({});
+                            auto cleanTailCandidate = processHardDibitsInternal(soft.dibits, false);
+                            if (hasCqpskHardLockEvidence(cleanTailCandidate) ||
+                                betterLiveResult(cleanTailCandidate, candidate, &m_config)) {
+                                candidate = std::move(cleanTailCandidate);
+                            }
+                        }
                         restorePhase1BitTail(phase1TailSnapshot);
                         stampSoftDibitStats(candidate, soft);
                         stampCommonStats(candidate);
@@ -6571,7 +6629,7 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         } else {
             restorePhase1BitTail(phase1TailSnapshot);
             if (m_config.enablePersistentPhase2Framer && !best.dibits.empty()) {
-                m_phase2Framer.consumeDibits(best.dibits);
+                feedPhase2FramerDibits(best.dibits);
                 auto framerBursts = m_phase2Framer.takeBursts();
                 m_dspProfile.framerSuperframesEmitted += m_phase2Framer.takeSuperframes().size();
                 m_dspProfile.framerBurstsEmitted += framerBursts.size();
@@ -6585,6 +6643,17 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
             }
             const auto commitStarted = std::chrono::steady_clock::now();
             auto committed = processHardDibitsInternal(best.dibits, true);
+            auto normalTailAfterCommit = snapshotPhase1BitTail();
+            if (isCqpskPath(selectedStats.demodPath) && !hasCqpskHardLockEvidence(committed)) {
+                restorePhase1BitTail({});
+                auto cleanTailCommitted = processHardDibitsInternal(best.dibits, true);
+                if (hasCqpskHardLockEvidence(cleanTailCommitted) ||
+                    betterLiveResult(cleanTailCommitted, committed, &m_config)) {
+                    committed = std::move(cleanTailCommitted);
+                } else {
+                    restorePhase1BitTail(normalTailAfterCommit);
+                }
+            }
             m_pendingFramerBursts.clear();
             commitMs = elapsedMsSince(commitStarted);
             restoreSelectedDemodStats(committed, selectedStats);
@@ -6593,6 +6662,19 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         }
     } else {
         restorePhase1BitTail(phase1TailSnapshot);
+    }
+    if (m_cqpskLock.valid &&
+        isCqpskPath(best.stats.demodPath) &&
+        hasCqpskHardLockEvidence(best)) {
+        // The commit pass can recover the trusted NID/TSBK/MAC evidence after
+        // the demod-selection stage.  Treat that as a successful locked CQPSK
+        // reuse; otherwise a perfectly decoded control window ages the lock and
+        // live LSM traffic reopens the expensive search grid.
+        m_cqpskLock.misses = 0;
+        m_cqpskLock.trustScore = std::max(m_cqpskLock.trustScore, liveResultTrustScore(best));
+        best.stats.cqpskLockActive = true;
+        best.stats.cqpskLockTrustScore = m_cqpskLock.trustScore;
+        best.stats.cqpskLockMisses = 0;
     }
     if (selectedCqpskTiming && isCqpskPath(best.stats.demodPath)) {
         timingStateStorage.cqpskValid = selectedCqpskTiming->cqpskValid;
@@ -7072,6 +7154,11 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2FromFramerBurstsInternal(
 
     constexpr size_t kMaxFramerBurstsPerCommit = 24;
     size_t decoded = 0;
+    // Match the realtime lock hot path: shallow ACCH first (Voice4/2 skip ACCH
+    // body by design — SDRTrunk does not RS every voice timeslot). Alternate
+    // kind fan-out enabled for SACCH/FACCH. Bounded deep rescue only for
+    // ACCH-bearing bursts that still lack CRC (same budget model as lock path).
+    size_t framerAcchRescueBudget = 2;
 
     for (const auto& fb : framerBursts) {
         if (decoded >= kMaxFramerBurstsPerCommit) break;
@@ -7094,6 +7181,17 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2FromFramerBurstsInternal(
         auto& burstSession = slotSessions[trafficSlot & 0x01u];
         const bool superframeLocked = true;
 
+        constexpr uint64_t kAcchDecodeDibitTolerance = 12;
+        const bool duplicateRealtimeAcch = std::any_of(
+            m_phase2RecentAcchDecodeBurstDibits.begin(),
+            m_phase2RecentAcchDecodeBurstDibits.end(),
+            [&](uint64_t prior) {
+                const uint64_t distance = streamBurstStart > prior
+                    ? streamBurstStart - prior
+                    : prior - streamBurstStart;
+                return distance <= kAcchDecodeDibitTolerance;
+            });
+
         auto burst = decodePhase2BurstAt(
             dibits,
             0,
@@ -7109,9 +7207,67 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2FromFramerBurstsInternal(
             &burstSession,
             &out.macPdus,
             false,
-            false,
-            true);
+            true,
+            !duplicateRealtimeAcch);
         if (!burst.valid) continue;
+
+        if (!duplicateRealtimeAcch && phase2BurstKindCarriesAcch(burst.kind)) {
+            m_phase2RecentAcchDecodeBurstDibits.push_back(streamBurstStart);
+            while (m_phase2RecentAcchDecodeBurstDibits.size() > 128) {
+                m_phase2RecentAcchDecodeBurstDibits.pop_front();
+            }
+        }
+
+        if (!burst.macCrcValid &&
+            framerAcchRescueBudget > 0 &&
+            phase2BurstKindCarriesAcch(burst.kind) &&
+            burst.voiceCodewords.empty()) {
+            --framerAcchRescueBudget;
+            Phase2SessionState rescueSession = burstSession;
+            std::vector<P25Phase2MacPdu> rescueMacPdus;
+            auto rescueBurst = decodePhase2BurstAt(
+                dibits,
+                0,
+                fb.syncErrors,
+                superframeLocked,
+                0,
+                superframeIndex,
+                superframeLocked ? 4 : 0,
+                fb.syncErrors,
+                mask,
+                m_phase2MaskPhaseKnown ? m_phase2MaskPhase : uint8_t{0},
+                std::max(1, m_phase2MaskPhaseScore),
+                &rescueSession,
+                &rescueMacPdus,
+                true,
+                false,
+                true);
+            const bool nominalRescueCrc = std::any_of(
+                rescueMacPdus.begin(),
+                rescueMacPdus.end(),
+                [](const P25Phase2MacPdu& pdu) {
+                    const bool nominalKind =
+                        pdu.detectedKind == P25Phase2BurstKind::Unknown ||
+                        pdu.detectedKind == pdu.source;
+                    return pdu.crcValid &&
+                        nominalKind &&
+                        !pdu.acchBitOrderSwapped &&
+                        !pdu.acchDibitInverted &&
+                        pdu.acchSlipDibits == 0;
+                });
+            if (rescueBurst.valid && nominalRescueCrc &&
+                (rescueBurst.macCrcValid ||
+                 rescueBurst.sessionAudioRelease ||
+                 rescueBurst.essKnown ||
+                 rescueBurst.trafficSecurityKnown)) {
+                burstSession = rescueSession;
+                out.macPdus.insert(out.macPdus.end(),
+                                   std::make_move_iterator(rescueMacPdus.begin()),
+                                   std::make_move_iterator(rescueMacPdus.end()));
+                burst = std::move(rescueBurst);
+            }
+        }
+
         burst.stickySuperframe = superframeLocked;
         burst.superframeLock = superframeLocked;
         burst.superframeBurstIndexKnown = true;
@@ -7266,6 +7422,30 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
     }
 
     const auto* mask = m_phase2MaskParams.valid ? &m_phase2XorMask : nullptr;
+    const bool retainedPhase2HardSecurityState =
+        m_phase2SessionMacCrcSeen ||
+        m_phase2Ess.known ||
+        std::any_of(m_phase2SlotSessionMacCrcSeen.begin(),
+                    m_phase2SlotSessionMacCrcSeen.end(),
+                    [](bool seen) { return seen; }) ||
+        std::any_of(m_phase2SlotEss.begin(),
+                    m_phase2SlotEss.end(),
+                    [](const P25Phase2EssState& ess) { return ess.known; });
+    if (annotateSessionCodewords &&
+        m_phase2MaskPhaseKnown &&
+        m_phase2MaskPhaseScore <= 0 &&
+        !retainedPhase2HardSecurityState) {
+        // A zero-score phase can only come from soft/I-ISCH-only acquisition.
+        // It is useful telemetry, but it is not a standards-level sticky epoch:
+        // holding it lets a late-entry replay keep p2vcw high while p2mac/ESS
+        // stay at zero. Re-open the full MAC/ESS hunt instead.
+        m_phase2MaskPhaseKnown = false;
+        m_phase2MaskPhaseScore = 0;
+        m_phase2MaskPhaseStarveWindows = 0;
+        m_phase2SuperframeAnchorKnown = false;
+        m_phase2SuperframeAnchorGeneration = 0;
+        m_phase2SuperframeAnchorMaskParams = {};
+    }
     auto locks = findPhase2SuperframeLocks(workingDibits, hits, workingDibits.size());
 
     // If we already have a validated Phase-2 superframe epoch, keep later rolling
@@ -7304,6 +7484,9 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
     if (lockCap > 0 && locks.size() > lockCap) {
         locks.resize(lockCap);
     }
+    std::sort(locks.begin(), locks.end(), [](const Phase2SuperframeLock& a, const Phase2SuperframeLock& b) {
+        return a.dibitOffset < b.dibitOffset;
+    });
 
     // CQPSK candidate probes: sync-hit telemetry only.  Full lock/mask/MAC work
     // runs on the annotate/commit pass.  Without this, a correct 6000 baud eye
@@ -7586,7 +7769,12 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
                 // Realtime follows need bounded work per rolling hop.  Score a
                 // partial superframe first and let the next hop continue the
                 // stream; forensic mode still scores the full 12-slot epoch.
-                const size_t scoreSlots = cheapProbeMask ? 6u : (m_config.realtimeVoiceSearch ? 3u : 12u);
+                // Acquisition must inspect a complete 12-burst superframe
+                // candidate. SDRTrunk's streaming framer processes full
+                // 720-dibit fragments continuously; scoring only the first
+                // three bursts lets a wrong AMBE-looking phase stick before the
+                // later SACCH/FACCH/ESS-bearing bursts can validate it.
+                const size_t scoreSlots = cheapProbeMask ? 6u : 12u;
                 auto window = scorePhase2MaskPhaseWindow(workingDibits, hits, lock, mask, phase, slotSessions, sticky, scoreSlots);
                 if (!haveWindow || betterPhase2MaskPhaseWindow(window, bestWindow)) {
                     bestWindow = std::move(window);
@@ -7635,7 +7823,7 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
                     const size_t maxRescueCandidates =
                         m_config.realtimeVoiceSearch ? std::min<size_t>(phaseWindows.size(), 1u)
                                                      : phaseWindows.size();
-                    const size_t rescueScoreSlots = m_config.realtimeVoiceSearch ? 3u : 12u;
+                    const size_t rescueScoreSlots = 12u;
                     const size_t rescueDeepBudget = m_config.realtimeVoiceSearch ? 1u : 8u;
                     size_t rescueCandidates = 0;
                     for (const auto& candidate : phaseWindows) {
@@ -7686,9 +7874,12 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
                 // Stick with MAC CRC, ESS, or confirmed I-ISCH. AMBE/Golay score
                 // remains useful telemetry, but is not standards-level evidence
                 // for choosing the XOR segment on a cold voice-only window.
+                const bool ischPhaseEvidence =
+                    ischAnchoredMaskPhase ||
+                    (ischPhaseConfirmed && candidateMaskScore > 0);
                 const bool standardsPhaseEvidence =
                     candidateMacCrc > 0 || bestWindow.essKnown ||
-                    ischAnchoredMaskPhase || ischPhaseConfirmed;
+                    ischPhaseEvidence;
                 const bool softAmbePhaseEvidence =
                     !standardsPhaseEvidence &&
                     bestWindow.ambeSamples >= 2 &&
