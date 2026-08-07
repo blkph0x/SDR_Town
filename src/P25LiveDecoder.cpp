@@ -1785,7 +1785,24 @@ bool hasCqpskHardLockEvidence(const P25LiveDecodeResult& r)
     });
     if (trustedNid) return true;
 
-    if (r.stats.phase2MacCrcValid > 0 || r.stats.phase2EssKnown) return true;
+    // Session ESS is retained across windows and stamped onto every
+    // processHardDibits result even when this candidate did not decode ESS.
+    // Treating (any bursts + stamped ESS) as CQPSK hard-lock evidence stops
+    // the permutation grid on the first crumb eye after block-channelize
+    // clears Gardner/Costas — hop@4240 then keeps oppVcw=36/targetVcw=4 while
+    // the same RF alone locks targetVcw=36 (20260729_114627 skip=2800→4240).
+    // Only this-window MAC CRC is trustworthy demod proof here; soft-lock
+    // paths may still use structure without claiming hard lock.
+    const bool thisWindowPhase2Structure =
+        r.stats.phase2Bursts > 0 ||
+        r.stats.phase2MacPdus > 0 ||
+        r.stats.phase2VoiceCodewords > 0 ||
+        r.stats.phase2SuperframeBursts > 0 ||
+        r.stats.phase2MaskedBursts > 0 ||
+        r.stats.phase2IschDecoded > 0;
+    if (thisWindowPhase2Structure && r.stats.phase2MacCrcValid > 0) {
+        return true;
+    }
 
     return std::any_of(r.imbeFrames.begin(), r.imbeFrames.end(), [](const P25ImbeFrame& frame) {
         return frame.valid;
@@ -4313,9 +4330,13 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
         if (auto pdu = selectMacPdu()) {
             burst.macFecDecoded = pdu->fecDecoded;
             burst.macCrcValid = pdu->crcValid;
-            burst.macCrcLock = burst.macCrcValid || (burst.macFecDecoded && pdu->correctedSymbols < 10);
-            if (burst.macCrcValid || (burst.macFecDecoded && pdu->correctedSymbols < 10)) burst.phase2AudioLock = true;
-            if (session && (pdu->crcValid || (pdu->fecDecoded && pdu->correctedSymbols < 10))) {
+            // FEC-quality MAC counts as lock (sdrtrunk accepts low-correction MAC
+            // for state).  Must not be overwritten later by a session-only mask.
+            const bool fecMacLock =
+                burst.macCrcValid || (burst.macFecDecoded && pdu->correctedSymbols < 10);
+            burst.macCrcLock = fecMacLock;
+            if (fecMacLock) burst.phase2AudioLock = true;
+            if (session && fecMacLock) {
                 // Match sdrtrunk's Phase 2 message processor session semantics:
                 // MAC_PTT starts a current-call ESS context; END_PTT, IDLE, and
                 // HANGTIME terminate/clear it.  Keeping old ESS across MAC_IDLE or
@@ -4447,14 +4468,20 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
         burst.encrypted =
             (burst.essKnown && session->ess.encrypted) ||
             (session->trafficSecurityKnown && session->trafficEncrypted);
-        burst.macCrcLock = session->pttSeen || session->activeSeen || burst.macCrcValid;
+        // OR session activity into lock — never clear an earlier FEC/CRC lock.
+        burst.macCrcLock =
+            burst.macCrcLock ||
+            session->pttSeen ||
+            session->activeSeen ||
+            burst.macCrcValid;
         const bool trafficClearRelease =
             session->trafficSecurityKnown &&
             !session->trafficEncrypted &&
             session->activeSeen;
         burst.phase2AudioLock = session->pttSeen || session->activeSeen ||
             trafficClearRelease ||
-            (burst.essKnown && session->ess.fecValidated);
+            (burst.essKnown && session->ess.fecValidated) ||
+            burst.macCrcLock;
         burst.securityStateFromPtt = session->securityStateFromPtt;
     }
     const bool trafficClearRelease =
@@ -4462,12 +4489,17 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
         session->trafficSecurityKnown &&
         !session->trafficEncrypted &&
         session->activeSeen;
+    // ESS/PTT hard clear (sdrtrunk ESS/PTT), or MAC_ACTIVE with clear traffic SO
+    // once the mask is applied — trafficClearRelease was previously dead for
+    // sessionAudioRelease and only fed phase2AudioLock.
+    const bool essOrPttClearRelease =
+        session &&
+        burst.essKnown &&
+        (session->pttSeen || (session->essTrusted && session->ess.fecValidated));
     burst.sessionAudioRelease =
         burst.xorMaskApplied &&
         !burst.encrypted &&
-        (session &&
-         (burst.essKnown &&
-          (session->pttSeen || (session->essTrusted && session->ess.fecValidated))));
+        (essOrPttClearRelease || trafficClearRelease);
 
     return burst;
 }
@@ -5514,6 +5546,7 @@ P25LiveDecoder::P25LiveDecoder(const P25LiveDecoder& other)
       m_phase2MaskPhase(other.m_phase2MaskPhase),
       m_phase2MaskPhaseScore(other.m_phase2MaskPhaseScore),
       m_phase2MaskPhaseStarveWindows(other.m_phase2MaskPhaseStarveWindows),
+      m_phase2ExtraDeepAcchBudget(other.m_phase2ExtraDeepAcchBudget),
       m_phase2LastFullMaskPhaseHuntGeneration(other.m_phase2LastFullMaskPhaseHuntGeneration),
       m_phase2SuperframeAnchorKnown(other.m_phase2SuperframeAnchorKnown),
       m_phase2SuperframeAnchorDibit(other.m_phase2SuperframeAnchorDibit),
@@ -5574,6 +5607,7 @@ P25LiveDecoder& P25LiveDecoder::operator=(const P25LiveDecoder& other)
     m_phase2MaskPhase = other.m_phase2MaskPhase;
     m_phase2MaskPhaseScore = other.m_phase2MaskPhaseScore;
     m_phase2MaskPhaseStarveWindows = other.m_phase2MaskPhaseStarveWindows;
+    m_phase2ExtraDeepAcchBudget = other.m_phase2ExtraDeepAcchBudget;
     m_phase2LastFullMaskPhaseHuntGeneration = other.m_phase2LastFullMaskPhaseHuntGeneration;
     m_phase2SuperframeAnchorKnown = other.m_phase2SuperframeAnchorKnown;
     m_phase2SuperframeAnchorDibit = other.m_phase2SuperframeAnchorDibit;
@@ -5634,6 +5668,7 @@ P25LiveDecoder::P25LiveDecoder(P25LiveDecoder&& other) noexcept
       m_phase2MaskPhase(other.m_phase2MaskPhase),
       m_phase2MaskPhaseScore(other.m_phase2MaskPhaseScore),
       m_phase2MaskPhaseStarveWindows(other.m_phase2MaskPhaseStarveWindows),
+      m_phase2ExtraDeepAcchBudget(other.m_phase2ExtraDeepAcchBudget),
       m_phase2LastFullMaskPhaseHuntGeneration(other.m_phase2LastFullMaskPhaseHuntGeneration),
       m_phase2SuperframeAnchorKnown(other.m_phase2SuperframeAnchorKnown),
       m_phase2SuperframeAnchorDibit(other.m_phase2SuperframeAnchorDibit),
@@ -5698,6 +5733,7 @@ P25LiveDecoder& P25LiveDecoder::operator=(P25LiveDecoder&& other) noexcept
     m_phase2MaskPhase = other.m_phase2MaskPhase;
     m_phase2MaskPhaseScore = other.m_phase2MaskPhaseScore;
     m_phase2MaskPhaseStarveWindows = other.m_phase2MaskPhaseStarveWindows;
+    m_phase2ExtraDeepAcchBudget = other.m_phase2ExtraDeepAcchBudget;
     m_phase2LastFullMaskPhaseHuntGeneration = other.m_phase2LastFullMaskPhaseHuntGeneration;
     m_phase2SuperframeAnchorKnown = other.m_phase2SuperframeAnchorKnown;
     m_phase2SuperframeAnchorDibit = other.m_phase2SuperframeAnchorDibit;
@@ -5864,9 +5900,19 @@ void P25LiveDecoder::alignPhase2AbsoluteDibitCursor(uint64_t chunkStartAbsolute,
     // must therefore be aligned to the start of the chunk; annotateSessionCodewords()
     // advances it to the end after the chunk is actually consumed.
     if (chunkStartAbsolute > m_phase2StreamDibits) {
-        // Gap in the traffic feed: drop sticky tail so the next lock re-acquires cleanly.
-        clearTrafficContinuity();
-        m_phase2StreamDibits = chunkStartAbsolute;
+        const uint64_t forwardGap = chunkStartAbsolute - m_phase2StreamDibits;
+        // Streaming DDC/FIR/resampler output can lag the RF input cursor by a
+        // small bounded amount at chunk boundaries. That is not a dropped
+        // traffic burst and must not clear the persistent Phase-2 framer. The
+        // live scheduler still reports true cursor discontinuities separately.
+        if (m_config.enableStreamingChannelDdc &&
+            forwardGap <= static_cast<uint64_t>(Phase2BurstDibits * 8u)) {
+            m_phase2StreamDibits = chunkStartAbsolute;
+        } else {
+            // Gap in the traffic feed: drop sticky tail so the next lock re-acquires cleanly.
+            clearTrafficContinuity();
+            m_phase2StreamDibits = chunkStartAbsolute;
+        }
     } else if (chunkEnd < m_phase2StreamDibits &&
                m_phase2StreamDibits - chunkEnd > Phase2BurstDibits) {
         // Cursor moved backward (ring reset / retune): force stream discontinuity.
@@ -5900,6 +5946,23 @@ void P25LiveDecoder::clearPhase2MaskParameters()
     m_phase2MaskParams = {};
     m_phase2XorMask = {};
     reset();
+}
+
+void P25LiveDecoder::invalidatePhase2StickyMaskEpoch()
+{
+    // Keep CQPSK lock, dibit stream cursor, and framer origin. Only reopen the
+    // XOR-phase / superframe-epoch hypotheses that produce SF+VCW with p2mac=0.
+    m_phase2MaskPhaseKnown = false;
+    m_phase2MaskPhase = 0;
+    m_phase2MaskPhaseScore = 0;
+    m_phase2MaskPhaseStarveWindows = 0;
+    m_phase2LastFullMaskPhaseHuntGeneration = 0;
+    m_phase2SuperframeAnchorKnown = false;
+    m_phase2SuperframeAnchorDibit = 0;
+    m_phase2SuperframeAnchorGeneration = 0;
+    m_phase2SuperframeAnchorMaskParams = {};
+    m_phase2SuperframeAnchorMaskPhase = 0;
+    m_phase2ExtraDeepAcchBudget = 3;
 }
 
 bool P25LiveDecoder::phase2MaskParametersKnown() const
@@ -6013,6 +6076,42 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         m_dspProfile.filterDesignCalls = m_filterCache.designCalls();
     } else {
         channel = channelizeP25Iq(*channelInput, sampleRate, centerFreqHz, targetFreqHz, m_config);
+        // Block channelize produces an independent baseband eye every window.
+        // Carrying Gardner/Costas discrete lock + demod-state lock-only budgets
+        // across those windows is what made sequential hops go p2bursts=0 while
+        // the same RF alone decoded continuously (capture 20260729_114627 @
+        // skip=2800 then 3520). Sticky CQPSK/demod is only valid with streaming DDC.
+        // Also drop Phase-1 bit-tail + Phase-2 framer/dibit-tail: those are
+        // baseband-phase-coupled and poison the next independent eye into
+        // budget-exhausted crumbs (duty ~0.47 vs alone ~1.0 on the same RF).
+        // Mask phase + superframe dibit anchors are likewise eye-coupled: after
+        // hop1@2800, hop2@4240 kept prior xorMaskPhase and swapped slots
+        // (oppVcw=36/targetVcw=4 vs alone targetVcw=36/oppVcw=0). Keep
+        // m_phase2MaskParams (NAC XOR table); only forget the phase offset.
+        if (m_cqpskLock.valid || m_cqpskDiscreteFrozen) {
+            m_cqpskLock = {};
+            m_cqpskDiscreteFrozen = false;
+        }
+        m_streamTimingState = {};
+        m_demodStateMachine.reset();
+        m_phase2Framer.reset();
+        m_phase2FramerOriginLatched = false;
+        m_pendingFramerBursts.clear();
+        m_phase2DibitTail.clear();
+        m_phase2RecentAcchDecodeBurstDibits.clear();
+        m_phase2MaskPhaseKnown = false;
+        m_phase2MaskPhase = 0;
+        m_phase2MaskPhaseScore = 0;
+        m_phase2MaskPhaseStarveWindows = 0;
+        m_phase2LastFullMaskPhaseHuntGeneration = 0;
+        m_phase2SuperframeAnchorKnown = false;
+        m_phase2SuperframeAnchorDibit = 0;
+        m_phase2SuperframeAnchorGeneration = 0;
+        m_phase2SuperframeAnchorMaskPhase = 0;
+        {
+            std::lock_guard<std::mutex> lock(m_streamingStateMutex);
+            m_phase1BitTail.clear();
+        }
     }
     const long long channelizeMs = elapsedMsSince(channelizeStarted);
     if (channel.samples.empty() && !iq.empty()) {
@@ -6240,6 +6339,11 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         std::any_of(m_phase2SlotEss.begin(),
                     m_phase2SlotEss.end(),
                     [](const P25Phase2EssState& ess) { return ess.known; });
+    // Soft lock-only / early-stop is only valid while CQPSK is still locked on a
+    // continuous eye. After block-channelize clears Gardner/Costas, prior-window
+    // MAC/ESS must not shrink the fresh-eye search (20260729_114627 duty gap).
+    const bool standardsStateMayHoldDemod =
+        phase2StandardsStateSeen && m_cqpskLock.valid;
     const bool allowRealtimeLockOnlyCandidate =
         m_config.realtimeVoiceSearch &&
         m_config.phase2CqpskTrafficDemod &&
@@ -6249,17 +6353,17 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         m_config.realtimeVoiceSearch &&
         m_config.phase2CqpskTrafficDemod &&
         m_config.stopCqpskSearchOnHardLock &&
-        (phase2StandardsStateSeen ||
+        (standardsStateMayHoldDemod ||
          m_config.allowPhase2SoftAmbeMaskPhaseLock ||
          allowRealtimeLockOnlyCandidate);
     const bool allowSoftCqpskStop =
         !m_config.realtimeVoiceSearch ||
         !m_config.phase2CqpskTrafficDemod ||
-        phase2StandardsStateSeen ||
+        standardsStateMayHoldDemod ||
         allowRealtimePhase2SoftDemodHold;
     const bool allowCurrentWindowSoftCqpskStop =
         allowSoftCqpskStop &&
-        (phase2StandardsStateSeen || m_cqpskLock.valid);
+        (standardsStateMayHoldDemod || m_cqpskLock.valid);
     const int cqpskMissLimit = static_cast<int>(std::clamp<size_t>(
         m_config.cqpskLockMissTolerance,
         8,
@@ -6673,6 +6777,7 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         m_cqpskLock.misses = 0;
         m_cqpskLock.trustScore = std::max(m_cqpskLock.trustScore, liveResultTrustScore(best));
         best.stats.cqpskLockActive = true;
+        best.stats.cqpskLockUsed = true;
         best.stats.cqpskLockTrustScore = m_cqpskLock.trustScore;
         best.stats.cqpskLockMisses = 0;
     }
@@ -7824,7 +7929,11 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
                         m_config.realtimeVoiceSearch ? std::min<size_t>(phaseWindows.size(), 1u)
                                                      : phaseWindows.size();
                     const size_t rescueScoreSlots = 12u;
-                    const size_t rescueDeepBudget = m_config.realtimeVoiceSearch ? 1u : 8u;
+                    size_t rescueDeepBudget = m_config.realtimeVoiceSearch ? 1u : 8u;
+                    if (m_phase2ExtraDeepAcchBudget > 0) {
+                        rescueDeepBudget += static_cast<size_t>(m_phase2ExtraDeepAcchBudget);
+                        m_phase2ExtraDeepAcchBudget = 0;
+                    }
                     size_t rescueCandidates = 0;
                     for (const auto& candidate : phaseWindows) {
                         if (rescueCandidates++ >= maxRescueCandidates) break;
@@ -8191,11 +8300,17 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(co
     const size_t uncoveredHitCap = m_config.realtimeVoiceSearch
         ? kMaxUncoveredHitsRealtime
         : kMaxUncoveredHitsForensic;
-    // At most one deep sticky ACCH repair per annotate window (late-entry MAC).
+    // At most one deep sticky ACCH repair per annotate window (late-entry MAC),
+    // plus any budget granted by invalidatePhase2StickyMaskEpoch() after MAC
+    // starve (capture 20260729_114627: p2sf/p2mask/targetVcw with p2mac=0/N).
     size_t stickyDeepAcchBudget = (annotateSessionCodewords &&
                                    m_phase2MaskPhaseKnown &&
                                    mask &&
                                    !m_phase2SessionMacCrcSeen) ? 1u : 0u;
+    if (m_phase2ExtraDeepAcchBudget > 0) {
+        stickyDeepAcchBudget += static_cast<size_t>(m_phase2ExtraDeepAcchBudget);
+        m_phase2ExtraDeepAcchBudget = 0;
+    }
     for (const auto& hit : hits) {
         const bool alreadyCovered = std::any_of(lockedWindows.begin(), lockedWindows.end(), [&](const auto& window) {
             return phase2OffsetInWindow(hit.dibitOffset, window.first, window.second);

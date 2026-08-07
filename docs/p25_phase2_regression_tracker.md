@@ -13,6 +13,28 @@ Track intentional policy and cadence changes so field regressions are easy to bi
 
 ## Changes
 
+### 2026-08-01 — Streaming continuity + MAC lock + security sticky (P0/P1 audit)
+
+**Field:** capture `20260801_100006_265` — clear `gate=emit` islands then drought; **417x** `waiting-fresh-iq` with `minFresh=1474560` (== full rolling 720 ms); `p2mac=0` dominant; worker-busy with mega `dsp=656ms` jobs.
+
+**Root causes (confirmed):**
+1. After first job advanced the decode cursor via `markDecodeSubmitted`, firstColdEye / wide-reacquire still demanded **minFresh = 720 ms**, so small RF advances never met the bar.
+2. Speaker backlog catch-up threshold was **720 ms**, producing monolith jobs then starvation.
+3. `macCrcLock` FEC/CRC set was **overwritten** by session-only mask (`ptt|active|crc`), dropping FEC lock.
+4. `trafficClearRelease` computed but unused for `sessionAudioRelease`.
+5. Sticky security TTL refreshed on superframe/mask lock alone (no new MAC/ESS/PTT).
+
+**Fixes:**
+- Shared `p25Phase2PlanVoiceDecodeChunk`: after cursor advances, minFresh is sustain/acquire (20-120 ms), never full-window.
+- Wide reacquire: large max context, **small** minFresh; post-cursor demotes cold eye.
+- Backlog catch-up threshold **80 ms** speaker / **180 ms** otherwise; catch-up chunk **120 ms** max.
+- Pending jobs floor **2** (3 when speaker live).
+- `macCrcLock` ORs session activity; never clears FEC lock.
+- `sessionAudioRelease` includes MAC_ACTIVE clear traffic SO (`trafficClearRelease`).
+- Recent security TTL only on MAC/ESS/PTT evidence.
+
+**Watch:** `waiting-fresh-iq` minFresh ~40-160k samples post-arm (not full rolling); CADENCE `dutySec` continuous during talk.
+
 ### 2026-07-16 — GUI freeze / "Not Responding" on follow
 
 **Problem:** After follow for a while the UI froze; Windows reported the app unresponsive.
