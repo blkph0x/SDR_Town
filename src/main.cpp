@@ -6981,6 +6981,10 @@ static bool p25Phase2DualSlotPendingDrainUnsafeWindow(const P25VoiceAudioBlock& 
 static bool p25Phase2CurrentSelectedBurstFeedTrusted(const P25Phase2Burst& burst) noexcept
 {
     if (!burst.xorMaskApplied || burst.encrypted || burst.voiceCodewords.empty()) return false;
+    // sdrtrunk always owns a timeslot label on the traffic audio module.  An
+    // unlabelled burst must never feed the live vocoder — that is the dual-call
+    // mix path (field multi-talker with oppVcw=0 when epoch mislabels).
+    if (!burst.grantSlotKnown) return false;
     const bool currentSecurityLock =
         burst.macCrcValid ||
         burst.macCrcLock ||
@@ -6989,10 +6993,6 @@ static bool p25Phase2CurrentSelectedBurstFeedTrusted(const P25Phase2Burst& burst
         burst.maskPhaseLock ||
         currentSecurityLock;
     if (!currentMaskOrSecurityLock) return false;
-    // A plain mask-phase lock is only feedable when the current burst also
-    // carries current slot ownership. Session/MAC evidence can identify the
-    // target slot during late entry before a full superframe slot label exists.
-    if (!burst.grantSlotKnown && !currentSecurityLock) return false;
     return true;
 }
 
@@ -8943,9 +8943,18 @@ struct RollingIqWindow {
 
     void markDecodeSubmitted(uint64_t decodeEndAbsolute)
     {
-        if (!absoluteKnown || !decodeAbsoluteKnown) return;
+        // Stream-absolute path: need absoluteKnown.  Sample-index path (no
+        // hardware absolute): still advance the submitted cursor so we never
+        // re-decode the whole buffer every tick (multi-voice / echo symptom).
+        if (absoluteKnown) {
+            if (!decodeAbsoluteKnown) return;
+            submittedDecodeEndAbsolute = decodeEndAbsolute;
+            submittedDecodeEndKnown = true;
+            return;
+        }
         submittedDecodeEndAbsolute = decodeEndAbsolute;
         submittedDecodeEndKnown = true;
+        decodeAbsoluteKnown = true;
     }
 
     void commitDecodeAbsolute(uint64_t decodeEndAbsolute)
@@ -8956,8 +8965,11 @@ struct RollingIqWindow {
                 decodeAbsoluteKnown = true;
             }
         } else {
-            lastDecodeAbsolute = decodeEndAbsolute;
-            decodeAbsoluteKnown = false;
+            // Sample-index cursor: end offset into the rolling buffer.
+            if (!decodeAbsoluteKnown || decodeEndAbsolute > lastDecodeAbsolute) {
+                lastDecodeAbsolute = decodeEndAbsolute;
+            }
+            decodeAbsoluteKnown = true;
         }
         submittedDecodeEndKnown = false;
     }
@@ -8989,13 +9001,45 @@ struct RollingIqWindow {
             win.endAbsolute >= win.startAbsolute &&
             (win.endAbsolute - win.startAbsolute) == static_cast<uint64_t>(win.samples.size());
 
-        if (samples.empty() || !absoluteKnown || !validAbsolute) {
+        // Never let a non-absolute / corrupt window wipe a live absolute stream.
+        // Field 20260807: absKnown flipped mid-call → full-buffer re-decode →
+        // multi-talker / echo / chop while oppVcw stayed 0 (same buffer replayed).
+        if (!samples.empty() && absoluteKnown && !validAbsolute) {
+            return false;
+        }
+
+        if (samples.empty()) {
             samples = win.samples;
             startAbsolute = validAbsolute ? win.startAbsolute : 0;
             endAbsolute = validAbsolute ? win.endAbsolute : static_cast<uint64_t>(samples.size());
             absoluteKnown = validAbsolute;
             lastDecodeAbsolute = startAbsolute;
-            decodeAbsoluteKnown = validAbsolute;
+            decodeAbsoluteKnown = validAbsolute || !samples.empty();
+            if (!absoluteKnown) {
+                // Sample-index mode: cursor at 0 so the first take is the full fill.
+                lastDecodeAbsolute = 0;
+            }
+        } else if (!absoluteKnown && !validAbsolute) {
+            // Stay in sample-index mode: append only.
+            samples.insert(samples.end(), win.samples.begin(), win.samples.end());
+            endAbsolute = static_cast<uint64_t>(samples.size());
+        } else if (!absoluteKnown && validAbsolute) {
+            // Promote to absolute stream once the device reports valid cursors.
+            const size_t priorSize = samples.size();
+            samples.insert(samples.end(), win.samples.begin(), win.samples.end());
+            // Anchor so prior sample-index cursor maps into absolute space.
+            startAbsolute = win.startAbsolute > priorSize
+                ? win.startAbsolute - static_cast<uint64_t>(priorSize)
+                : 0;
+            endAbsolute = startAbsolute + static_cast<uint64_t>(samples.size());
+            absoluteKnown = true;
+            if (decodeAbsoluteKnown) {
+                lastDecodeAbsolute = startAbsolute + std::min<uint64_t>(
+                    lastDecodeAbsolute, static_cast<uint64_t>(samples.size()));
+            } else {
+                lastDecodeAbsolute = startAbsolute;
+                decodeAbsoluteKnown = true;
+            }
         } else if (win.endAbsolute <= startAbsolute) {
             return false;
         } else if (win.startAbsolute > endAbsolute) {
@@ -9066,13 +9110,37 @@ struct RollingIqWindow {
                             lastDecodeAbsolute = startAbsolute;
                             decodeAbsoluteKnown = true;
                         }
+                    } else if (decodeAbsoluteKnown) {
+                        if (lastDecodeAbsolute > drop) lastDecodeAbsolute -= static_cast<uint64_t>(drop);
+                        else lastDecodeAbsolute = 0;
+                        if (submittedDecodeEndKnown) {
+                            if (submittedDecodeEndAbsolute > drop) {
+                                submittedDecodeEndAbsolute -= static_cast<uint64_t>(drop);
+                            } else {
+                                submittedDecodeEndAbsolute = 0;
+                            }
+                        }
                     }
+                    endAbsolute = absoluteKnown
+                        ? endAbsolute
+                        : static_cast<uint64_t>(samples.size());
                 }
                 return true;
             }
             samples.erase(samples.begin(), samples.begin() + static_cast<std::ptrdiff_t>(drop));
             if (absoluteKnown) {
                 startAbsolute += static_cast<uint64_t>(drop);
+            } else if (decodeAbsoluteKnown) {
+                if (lastDecodeAbsolute > drop) lastDecodeAbsolute -= static_cast<uint64_t>(drop);
+                else lastDecodeAbsolute = 0;
+                if (submittedDecodeEndKnown) {
+                    if (submittedDecodeEndAbsolute > drop) {
+                        submittedDecodeEndAbsolute -= static_cast<uint64_t>(drop);
+                    } else {
+                        submittedDecodeEndAbsolute = 0;
+                    }
+                }
+                endAbsolute = static_cast<uint64_t>(samples.size());
             }
         }
         return true;
@@ -9103,6 +9171,9 @@ struct RollingIqWindow {
             if (decodeCursor > startAbsolute) {
                 firstNew = static_cast<size_t>(std::min<uint64_t>(decodeCursor - startAbsolute, samples.size()));
             }
+        } else if (!absoluteKnown && decodeAbsoluteKnown) {
+            // Sample-index cursor: lastDecode/submitted are offsets into samples[].
+            firstNew = static_cast<size_t>(std::min<uint64_t>(decodeCursor, static_cast<uint64_t>(samples.size())));
         }
 
         if (firstNew >= samples.size()) return {};
@@ -9156,11 +9227,14 @@ struct RollingIqWindow {
                 *outDecodeEndAbsoluteKnown = true;
             }
         } else {
+            // Sample-index mode still reports a stable end cursor for submit/commit.
+            outStartAbsolute = static_cast<uint64_t>(first);
+            outAbsoluteKnown = false;
             if (outDecodeEndAbsolute) {
                 *outDecodeEndAbsolute = static_cast<uint64_t>(returnedEnd);
             }
             if (outDecodeEndAbsoluteKnown) {
-                *outDecodeEndAbsoluteKnown = false;
+                *outDecodeEndAbsoluteKnown = true;
             }
         }
         return out;
@@ -11537,6 +11611,15 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             out.phase2MetadataMissing = true;
             continue;
         }
+        // Hard slot ownership (sdrtrunk one AudioModule per timeslot).  Unlabelled
+        // bursts previously fell through grantMayProbeVoice and were treated as
+        // slot 0 — dual-call mix with oppVcw=0 in logs.
+        if (!burst.grantSlotKnown) {
+            out.phase2RejectedVoiceCodewords += burst.voiceCodewords.size();
+            out.phase2AudioLockMissing = true;
+            out.phase2MetadataMissing = true;
+            continue;
+        }
         const bool forceEstablishedFeed = establishedClearCall &&
             p25Phase2EstablishedClearNoiseFeedAllowed(rx, out, burst, recentMacEvidenceForCall);
         const bool epochTrusted = burst.superframeLock || burst.macCrcLock || burst.sessionAudioRelease;
@@ -11547,26 +11630,19 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             continue;
         }
         if (!epochTrusted && grantMayProbeVoice) {
-            // Late-entry Phase-2 grants frequently expose a standalone 2V/4V burst
-            // before our superframe epoch and mask phase have locked.  Do not drop
-            // that burst before AMBE; use the known control-channel grant slot as
-            // the slot guard and let AMBE/FEC decide whether it is usable.
             out.phase2AudioLockMissing = true;
             out.phase2MetadataMissing = true;
         }
         const uint8_t followedGrantSlot = static_cast<uint8_t>(rx.p25VoiceTdmaSlot & 0x01u);
-        const uint8_t effectiveBurstSlot = burst.grantSlotKnown
-            ? static_cast<uint8_t>((burst.grantSlot ^ (phase2InvertSlotLabelsForWindow ? 0x01u : 0x00u)) & 0x01u)
-            : 0u;
-        if (burst.grantSlotKnown && effectiveBurstSlot != followedGrantSlot) {
+        // Invert remains forced false; keep the xor for clarity only.
+        const uint8_t effectiveBurstSlot =
+            static_cast<uint8_t>((burst.grantSlot ^ (phase2InvertSlotLabelsForWindow ? 0x01u : 0x00u)) & 0x01u);
+        if (effectiveBurstSlot != followedGrantSlot) {
             out.phase2RejectedVoiceCodewords += burst.voiceCodewords.size();
             out.phase2WrongSlotVoiceCodewords += burst.voiceCodewords.size();
             // A Phase-2 RF carrier carries both TDMA slots (often two different TGs).
             // sdrtrunk binds each call to one TIMESLOT audio module and never feeds
-            // the other.  Reject known-opposite-slot VCWs unconditionally — even
-            // for established clear grants / sticky invert windows.
-            // Only call it wrong-slot when this window has no selected-slot voice;
-            // the opposite slot's VCWs alone must not thrash slot probing.
+            // the other.  Reject known-opposite-slot VCWs unconditionally.
             if (!selectedSlotHasVoiceCodewords && oppositeSlotHasVoiceCodewords) {
                 out.phase2WrongSlot = true;
             }
@@ -11579,36 +11655,6 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             out.phase2WrongSlotVoiceCodewords += burst.voiceCodewords.size();
             continue;
         }
-        // Dual-call guard: if this window has significant opposite-slot voice AND
-        // we are not in a pure epoch-slip invert, never treat unlabelled bursts as
-        // target.  Prevents mixing the other TG into the followed call.
-        if (!burst.grantSlotKnown &&
-            bothSlotsHaveVoiceInWindow &&
-            !phase2InvertSlotLabelsForWindow) {
-            out.phase2RejectedVoiceCodewords += burst.voiceCodewords.size();
-            out.phase2WrongSlotVoiceCodewords += burst.voiceCodewords.size();
-            continue;
-        }
-        if (!burst.grantSlotKnown &&
-            out.phase2OppositeVoiceCodewords > 0 &&
-            out.phase2TargetVoiceCodewords > 0 &&
-            !phase2InvertSlotLabelsForWindow) {
-            out.phase2RejectedVoiceCodewords += burst.voiceCodewords.size();
-            continue;
-        }
-        if (!burst.grantSlotKnown && !grantMayProbeVoice && !forceEstablishedFeed) {
-            // Do not label pre-superframe/late-entry VCWs as "wrong slot".
-            // Without a superframe epoch there is no reliable slot decision yet,
-            // and using this as wrong-slot evidence causes useless slot thrash.
-            out.phase2RejectedVoiceCodewords += burst.voiceCodewords.size();
-            out.phase2AudioLockMissing = true;
-            out.phase2MetadataMissing = true;
-            continue;
-        }
-        if (!burst.grantSlotKnown && grantMayProbeVoice) {
-            out.phase2AudioLockMissing = true;
-            out.phase2MetadataMissing = true;
-        }
         // OP25 and sdrtrunk both descramble Phase-2 traffic before extracting
         // voice frames.  Clear call state can only preserve an already-established
         // speaker release; it cannot make a scrambled AMBE payload decodable.
@@ -11619,14 +11665,21 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             continue;
         }
         const bool maskPhaseTrusted = burst.maskPhaseLock || burst.macCrcLock || burst.sessionAudioRelease;
-        // Equivalent strict gate for non-probe traffic: if (!maskPhaseTrusted && !grantMayProbeVoice).
-        if (!maskPhaseTrusted && !(grantMayProbeVoice || (rx.p25VoicePhase2 && rx.p25VoiceTdmaSlotKnown && burst.xorMaskApplied) || forceEstablishedFeed)) {
-            // For followed target slot with descrambled burst, proceed even without per-burst maskPhaseTrusted/lock.
-            // This prevents choppy on/off audio; once on the followed voice channel, decode all masked VCW.
-            out.phase2RejectedVoiceCodewords += burst.voiceCodewords.size();
-            out.phase2AudioLockMissing = true;
-            out.phase2MetadataMissing = true;
-            continue;
+        // Require real mask/security lock before live vocoder feed.  The old
+        // "phase2+slot+xor" bypass fed every descrambled VCW (including wrong
+        // superframe-epoch labels) and produced multi-talker garble.
+        if (!maskPhaseTrusted && !forceEstablishedFeed) {
+            if (grantMayProbeVoice) {
+                // Diagnostic / queue path only — do not fall through to live feed
+                // without trust; queueUnknownAmbe still needs the flags below.
+                out.phase2AudioLockMissing = true;
+                out.phase2MetadataMissing = true;
+            } else {
+                out.phase2RejectedVoiceCodewords += burst.voiceCodewords.size();
+                out.phase2AudioLockMissing = true;
+                out.phase2MetadataMissing = true;
+                continue;
+            }
         }
         if (!maskPhaseTrusted) {
             out.phase2MetadataMissing = true;
@@ -11819,21 +11872,25 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             sameCallClearSustainFeed ||
             p25Phase2TargetHardClearEvidence(out) ||
             (burst.essKnown && !burst.encrypted && burst.sessionAudioRelease);
+        // currentBurstFeedTrusted already requires grantSlotKnown + mask/security.
+        // Do not allow macCrcLock alone to open the live path without that trust.
         const bool immediateAmbeDecodeAllowed =
             currentBurstFeedTrusted &&
             securityProvedClearForFeed &&
+            maskPhaseTrusted &&
             (effectiveVoiceReleaseTrusted ||
              (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted) ||
              (burst.essKnown && !burst.encrypted && burst.sessionAudioRelease) ||
              sameCallClearSustainFeed ||
-             burst.macCrcLock ||
              p25Phase2EstablishedClearNoiseFeedAllowed(rx, out, burst, recentMacEvidenceForCall));
         const bool queueUnknownAmbe =
             !immediateAmbeDecodeAllowed &&
             grantMayProbeVoice &&
             audioKey.valid() &&
+            burst.grantSlotKnown &&
             burst.xorMaskApplied &&
-            !burst.encrypted;
+            !burst.encrypted &&
+            effectiveBurstSlot == followedGrantSlot;
 
         if (immediateAmbeDecodeAllowed && !drainedPendingRawVoice) {
             if (burst.securityStateFromPtt) {
