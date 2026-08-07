@@ -19,7 +19,7 @@ required = {
     "180 dibit burst constant": "kPhase2BurstDibits = 180" in (root / "include" / "dsp" / "P25DspTypes.h").read_text(encoding="utf-8"),
     "720 dibit superframe constant": "kPhase2SuperframeDibits = 720" in (root / "include" / "dsp" / "P25DspTypes.h").read_text(encoding="utf-8"),
     "sdrtrunk sync threshold 7": "kSyncThresholdSynchronized = 7" in (root / "include" / "dsp" / "P25DspTypes.h").read_text(encoding="utf-8"),
-    "config enables streaming ddc": "enableStreamingChannelDdc = true" in decoder_h,
+    "streaming ddc remains opt-in by default": "enableStreamingChannelDdc = false" in decoder_h,
     "processIq uses streaming ddc": "m_streamingDdc.process" in decoder_cpp,
     "staged sync gate before full decode": "passesStagedCqpskGate" in decoder_cpp,
     "quadrant lut mapping path": "mapQuadrantsToDibits" in decoder_cpp,

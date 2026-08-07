@@ -460,6 +460,10 @@ public:
 
     void setPhase2MaskParameters(uint16_t nac, uint32_t wacn, uint16_t systemId);
     void clearPhase2MaskParameters();
+    // Soft repair for MAC/ESS starvation: drop sticky XOR phase + superframe
+    // epoch so the next annotate can re-hunt, without wiping CQPSK lock / dibit
+    // stream continuity. Full reset() is reserved for true eye-loss reacquire.
+    void invalidatePhase2StickyMaskEpoch();
     bool phase2MaskParametersKnown() const;
     bool phase2MaskParametersMatch(uint16_t nac, uint32_t wacn, uint16_t systemId) const;
     const P25LiveDecoderConfig& config() const { return m_config; }
@@ -600,6 +604,8 @@ private:
     // After a short starve streak, re-open the 12-phase hunt (SDRTrunk never sticks to a
     // wrong scrambling segment because its continuous framer re-validates continuously).
     uint8_t m_phase2MaskPhaseStarveWindows = 0;
+    // Extra deep ACCH repair budget granted by invalidatePhase2StickyMaskEpoch().
+    uint8_t m_phase2ExtraDeepAcchBudget = 0;
     uint64_t m_phase2LastFullMaskPhaseHuntGeneration = 0;
     // Sticky Phase-2 superframe epoch used for late-entry/live scanner follow.
     // sdrtrunk's traffic decoder is a continuous stream, so a single voice

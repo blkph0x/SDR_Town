@@ -1755,7 +1755,7 @@ TEST_CASE("P25 live decoder searches Phase 2 XOR mask phase using MAC CRC eviden
     REQUIRE(releasedWithoutLocalMac);
 }
 
-TEST_CASE("P25 live decoder tracks clear MAC_ACTIVE group user without releasing Phase 2 audio")
+TEST_CASE("P25 live decoder releases clear MAC_ACTIVE group user for continuous selected-slot feed")
 {
     constexpr uint16_t nac = 0x2d2;
     constexpr uint32_t wacn = 0xbee00;
@@ -1783,7 +1783,9 @@ TEST_CASE("P25 live decoder tracks clear MAC_ACTIVE group user without releasing
     REQUIRE(macBurst->trafficTalkgroupId == talkgroupId);
     REQUIRE_FALSE(macBurst->trafficEncrypted);
     REQUIRE_FALSE(macBurst->encrypted);
-    REQUIRE_FALSE(macBurst->sessionAudioRelease);
+    // Clear traffic SO + MAC_ACTIVE with xor mask applied opens continuous
+    // selected-slot feed (sessionAudioRelease). Encrypted SO still stays closed.
+    REQUIRE(macBurst->sessionAudioRelease);
     REQUIRE(macBurst->grantSlotKnown);
 
     size_t trackedVoiceBursts = 0;
@@ -1796,7 +1798,7 @@ TEST_CASE("P25 live decoder tracks clear MAC_ACTIVE group user without releasing
         REQUIRE(voiceBurst.trafficTalkgroupId == talkgroupId);
         REQUIRE_FALSE(voiceBurst.trafficEncrypted);
         REQUIRE_FALSE(voiceBurst.encrypted);
-        REQUIRE_FALSE(voiceBurst.sessionAudioRelease);
+        REQUIRE(voiceBurst.sessionAudioRelease);
         ++trackedVoiceBursts;
     }
     REQUIRE(trackedVoiceBursts > 0);

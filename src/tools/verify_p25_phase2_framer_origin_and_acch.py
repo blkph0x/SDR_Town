@@ -19,14 +19,20 @@ checks = {
     "block resample full sinc support": (
         "pos + static_cast<double>(radius) >= static_cast<double>(x.size())" in decoder
     ),
-    "voice config keeps streaming DDC off": "cfg.enableStreamingChannelDdc = false" in main_cpp
-        and "rolling/overlapping" in main_cpp,
+    "realtime phase2 enables streaming DDC": (
+        "cfg.enableStreamingChannelDdc =" in main_cpp
+        and "phase2 && profile == P25VoiceDecodeProfile::Realtime" in main_cpp
+    ),
 }
 
 idx = decoder.find("burst.sessionAudioRelease")
-snippet = decoder[idx : idx + 350] if idx >= 0 else ""
-checks["sessionAudioRelease still requires essKnown"] = (
-    "sessionAudioRelease" in snippet and "essKnown" in snippet
+snippet = decoder[idx : idx + 450] if idx >= 0 else ""
+# Clear MAC_ACTIVE (trafficClearRelease) or ESS/PTT may open continuous feed;
+# encrypted remains closed via !burst.encrypted && xorMaskApplied.
+checks["sessionAudioRelease clear path uses traffic or ESS"] = (
+    "sessionAudioRelease" in snippet
+    and ("trafficClearRelease" in snippet or "essOrPttClearRelease" in snippet)
+    and "xorMaskApplied" in snippet
 )
 
 failed = [name for name, ok in checks.items() if not ok]
@@ -47,13 +53,13 @@ for tag in ("[p25][framer][epoch]", "[p25][dsp][ddc]", "[p25][dsp][framer]"):
         raise SystemExit(f"Regression filter failed: {tag}")
 
 proc = subprocess.run(
-    [str(exe), "*MAC_ACTIVE group user without releasing*"],
+    [str(exe), "*MAC_ACTIVE group user*"],
     capture_output=True,
     text=True,
 )
 if proc.returncode != 0:
     sys.stderr.write(proc.stdout)
     sys.stderr.write(proc.stderr)
-    raise SystemExit("MAC_ACTIVE no-release regression failed")
+    raise SystemExit("MAC_ACTIVE clear/encrypted release regression failed")
 
 print("verify_p25_phase2_framer_origin_and_acch: PASS")

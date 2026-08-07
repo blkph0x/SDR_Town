@@ -13,6 +13,29 @@ Track intentional policy and cadence changes so field regressions are easy to bi
 
 ## Changes
 
+### 2026-08-08 — Streaming DDC on realtime Phase-2 + backlog catch-up (chop/fast)
+
+**Field:** capture `20260807_232020_926` — feedRatio≈1.0 on TG30302 but dutySec≈0.24–0.48;
+audio islands of 80 ms every 200–350 ms (“faster” but broken/choppy). Worker logs:
+`iq≈106k fresh≈65k` (~32 ms RF), `cqpskCandidates=32`, `demodState=Cold`,
+`totalMs=200–400`.
+
+**Root causes (confirmed):**
+1. `enableStreamingChannelDdc=false` forced **block channelize**, which clears CQPSK/
+   framer/mask-phase every `processIq` hop and re-runs a 32-candidate cold search.
+2. Speaker sustain only advanced ~32–60 ms RF per hop → at most one Voice4 when lucky.
+3. `p25Phase2UndecodedBacklogSamples` returned 0 without absolute cursor → catch-up never ran.
+
+**Fixes:**
+- Realtime Phase-2 voice config enables **streaming channel DDC** (forensic stays off).
+- GUI/CLI chunk planner uses streaming plan (overlap=0 contiguous fresh) when DDC on.
+- Speaker sustain 120 ms / catch-up 200 ms; backlog threshold ~40–50 ms on clear path.
+- Backlog helper uses `effectiveDecodeAbsolute()` for absolute and sample-index modes.
+- CLI `activeSpeakerClearPath` includes `phase2SessionHadBurstEye` (GUI parity).
+
+**Watch:** CADENCE `dutySec` → talk-time (near 1.0 while speaking); `decodeProfile`
+`demodState` not stuck Cold; worker `context=0` after first eye; sticky CQPSK logs.
+
 ### 2026-08-01 — Streaming continuity + MAC lock + security sticky (P0/P1 audit)
 
 **Field:** capture `20260801_100006_265` — clear `gate=emit` islands then drought; **417x** `waiting-fresh-iq` with `minFresh=1474560` (== full rolling 720 ms); `p2mac=0` dominant; worker-busy with mega `dsp=656ms` jobs.

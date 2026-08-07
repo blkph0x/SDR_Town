@@ -2471,7 +2471,9 @@ static constexpr int kP25ControlDecodeCadenceMs = 70;
 // adjacent ACCH/ESS recovery on real captures. Two superframes keep MAC/ESS and
 // voice in view while absolute-dibit de-duplication prevents repeated PCM.
 static constexpr double kP25Phase2VoiceDecodeWindowSeconds = 0.720;
-static constexpr double kP25Phase2VoiceDecodeActiveRollingSeconds = 0.720;
+// Keep ≥1.2 s of traffic IQ while the speaker is live so catch-up can drain
+// lag without hard-cap skipping unprocessed voice RF.
+static constexpr double kP25Phase2VoiceDecodeActiveRollingSeconds = 1.250;
 static constexpr double kP25Phase2VoiceDecodeMinFreshSeconds = 0.020;
 static constexpr double kP25Phase2VoiceDecodeAcquireChunkSeconds = 0.050;
 // First post-retune eye keeps two superframes of traffic context so late-entry
@@ -2509,14 +2511,19 @@ static constexpr double kP25Phase2VoiceDecodeAcquireOverlapSeconds = 0.160;
 static constexpr double kP25Phase2VoiceDecodeSustainChunkSeconds = 0.080;
 static constexpr double kP25Phase2VoiceDecodeSustainMinFreshSeconds = 0.040;
 static constexpr double kP25Phase2VoiceDecodeSustainOverlapSeconds = 0.080;
-// Speaker-live sustain: advance mostly-fresh RF so unique target VCWs dominate.
-// Capture 20260807_231232 had feedRatio≈0.25 (dups 70%+) with heavy overlap —
-// only ~4 AMBE frames every hop and worker-busy, so dutySec stayed 0.08–0.32.
-// Prefer 60 ms fresh / 20 ms overlap; sticky superframe walk keeps lock.
+// Speaker-live sustain: need enough fresh RF to cover multiple selected-slot
+// Voice4 bursts (slot airtime ≈ every 60 ms). Capture 20260807_232020 with
+// ~60 ms fresh only ever saw targetVcw=4 (one Voice4) per hop and dutySec≈0.3.
+// 120 ms fresh ≈ 2 selected-slot opportunities; short overlap for lock only.
 // Slot isolation remains hard (only followed grantSlot is fed).
-static constexpr double kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.060;
-static constexpr double kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.030;
-static constexpr double kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.020;
+static constexpr double kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.120;
+static constexpr double kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.050;
+static constexpr double kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.030;
+// When undecoded backlog builds, drain up to this much RF per hop so we do not
+// permanently lag live speech (and hard-cap skip it).
+static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.200;
+static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.080;
+static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpOverlapSeconds = 0.030;
 // If the voice worker falls behind live RF, decode a larger near-live chunk
 // with short context so one worker pass can refill the speaker ring.
 // Cap catch-up at ~180 ms so a single job cannot monopolize the worker for
@@ -3031,11 +3038,15 @@ static P25LiveDecoderConfig p25VoiceDecoderConfig(bool phase2,
     P25LiveDecoderConfig cfg = profile == P25VoiceDecodeProfile::Forensic
         ? p25DiagnosticDecoderConfig()
         : p25RealtimeVoiceDecoderConfig();
-    // Voice workers currently process rolling/overlapping IQ eyes from the ring.
-    // The persistent streaming DDC path is only safe after its real-capture
-    // channelizer parity is proven for retuned traffic offsets; keep realtime
-    // speaker traffic on the validated stateless channelizer until then.
-    cfg.enableStreamingChannelDdc = false;
+    // Capture 20260807_232020: block channelize cleared CQPSK/framer/mask-phase
+    // on every hop (processIq), then cold-searched 32 CQPSK candidates for
+    // ~200–400 ms on only ~32–60 ms of RF. Result: one Voice4 island (~80 ms PCM)
+    // every 200–350 ms, dutySec≈0.24–0.48, speech “faster” and choppy.
+    // Realtime Phase-2 traffic uses contiguous rolling takeUndecoded (overlap=0
+    // once streaming plan is selected) so the stateful DDC + sticky CQPSK/framer
+    // walk is valid. Forensic/diagnostic stays on stateless block channelize.
+    cfg.enableStreamingChannelDdc =
+        phase2 && profile == P25VoiceDecodeProfile::Realtime;
     // Phase 1 C4FM/control-channel symbols are 4800 sps.
     // Phase 2 H-DQPSK air rate is 6000 sps (TIA-102 / SDRTrunk P25P2DecoderHDQPSK
     // `super(6000.0)`).  The old "same air symbol rate" 4800 override was a
@@ -8852,6 +8863,8 @@ static P25Phase2VoiceChunkPlan p25Phase2PlanVoiceDecodeChunk(
     const bool coldEye = firstColdEyeChunk && !decodeCursorAdvancedPastStart;
 
     if (streamingDdc) {
+        // Contiguous fresh-only (overlap=0): stateful DDC + sticky CQPSK/framer.
+        // Never re-feed prior samples — that would desync FIR/NCO state.
         if (coldEye) {
             plan.maxChunkSeconds = kP25Phase2VoiceDecodeFirstColdEyeSeconds;
             plan.overlapSeconds = 0.0;
@@ -8859,9 +8872,18 @@ static P25Phase2VoiceChunkPlan p25Phase2PlanVoiceDecodeChunk(
             plan.treatAsContextFreeFresh = true;
         } else if (backlogCatchUp || wideReacquireWindow || maskEpochRepairWindow ||
                    unacquiredAcquireWindow) {
-            plan.maxChunkSeconds = kP25Phase2VoiceDecodeUnacquiredAcquireFreshSeconds;
+            if (activeSpeakerClearPath || backlogCatchUp) {
+                plan.maxChunkSeconds = kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds;
+                plan.minFreshSeconds = kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds;
+            } else {
+                plan.maxChunkSeconds = kP25Phase2VoiceDecodeUnacquiredAcquireFreshSeconds;
+                plan.minFreshSeconds = kP25Phase2VoiceDecodeUnacquiredAcquireMinFreshSeconds;
+            }
             plan.overlapSeconds = 0.0;
-            plan.minFreshSeconds = kP25Phase2VoiceDecodeUnacquiredAcquireMinFreshSeconds;
+        } else if (speakerSustainDecode || activeSpeakerClearPath) {
+            plan.maxChunkSeconds = kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds;
+            plan.overlapSeconds = 0.0;
+            plan.minFreshSeconds = kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds;
         } else {
             plan.maxChunkSeconds = kP25Phase2VoiceDecodeSustainChunkSeconds;
             plan.overlapSeconds = 0.0;
@@ -8873,9 +8895,9 @@ static P25Phase2VoiceChunkPlan p25Phase2PlanVoiceDecodeChunk(
 
     if (backlogCatchUp) {
         if (activeSpeakerClearPath) {
-            plan.maxChunkSeconds = kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds;
-            plan.overlapSeconds = kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds;
-            plan.minFreshSeconds = kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds;
+            plan.maxChunkSeconds = kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds;
+            plan.overlapSeconds = kP25Phase2VoiceDecodeSpeakerCatchUpOverlapSeconds;
+            plan.minFreshSeconds = kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds;
             plan.minFreshFloorSamples = 8192.0;
         } else {
             plan.maxChunkSeconds = kP25Phase2VoiceDecodeBacklogCatchUpChunkSeconds;
@@ -9285,11 +9307,26 @@ struct RollingIqWindow {
 
 static size_t p25Phase2UndecodedBacklogSamples(const RollingIqWindow& rolling) noexcept
 {
-    if (!rolling.absoluteKnown || !rolling.decodeAbsoluteKnown) return 0;
-    if (rolling.endAbsolute <= rolling.lastDecodeAbsolute) return 0;
-    return static_cast<size_t>(std::min<uint64_t>(
-        rolling.endAbsolute - rolling.lastDecodeAbsolute,
-        static_cast<uint64_t>(std::numeric_limits<size_t>::max())));
+    // Capture 20260807_232020: backlog always returned 0 when absKnown=no, so
+    // speaker-live catch-up never ran. We only decoded ~60 ms RF every ~350 ms
+    // (dutySec≈0.24–0.48) while the ring underran between 80 ms PCM islands.
+    if (rolling.samples.empty()) return 0;
+    const uint64_t cursor = rolling.effectiveDecodeAbsolute();
+    if (rolling.absoluteKnown) {
+        if (!rolling.decodeAbsoluteKnown && !rolling.submittedDecodeEndKnown) {
+            return rolling.samples.size();
+        }
+        if (rolling.endAbsolute <= cursor) return 0;
+        const uint64_t backlogAbs = rolling.endAbsolute - cursor;
+        return static_cast<size_t>(std::min<uint64_t>(
+            backlogAbs, static_cast<uint64_t>(rolling.samples.size())));
+    }
+    // Sample-index mode: cursor is an offset into samples[].
+    if (!rolling.decodeAbsoluteKnown && !rolling.submittedDecodeEndKnown) {
+        return rolling.samples.size();
+    }
+    if (cursor >= static_cast<uint64_t>(rolling.samples.size())) return 0;
+    return rolling.samples.size() - static_cast<size_t>(cursor);
 }
 
 static void p25Phase2PrepareRollingIqPull(DeviceManager& mgr,
@@ -20441,18 +20478,26 @@ public:
                             const bool wideReacquireWindow = phase2WideReacquireWindow;
                             const bool maskEpochRepairWindow = phase2MaskEpochRepairWindow;
                             const size_t undecodedBacklog = p25Phase2UndecodedBacklogSamples(rolling);
-                            // Catch up earlier so continuous sticky walk sees multi-
-                            // superframe RF instead of permanently lagging 1–2 s.
+                            // Catch up as soon as lag exceeds one sustain hop so we
+                            // never leave hundreds of ms of voice RF unprocessed
+                            // (20260807_232020: 60 ms decode / 350 ms wall → chop).
                             const bool activeSpeakerClearPath =
                                 phase2SessionSpeakerSustain ||
                                 phase2EstablishedClearStreaming ||
-                                p25Phase2SpeakerSustainDecodeActive();
-                            // Speaker path: catch up at ~80 ms lag with 40 ms hops
-                            // (was 720 ms threshold → mega-jobs then drought).
-                            const double backlogCatchUpSeconds = activeSpeakerClearPath ? 0.080 : 0.180;
+                                p25Phase2SpeakerSustainDecodeActive() ||
+                                phase2SessionHadBurstEye;
+                            // Streaming DDC path: contiguous fresh-only hops (no
+                            // overlap re-feed). Once sticky CQPSK is live, short
+                            // catch-up thresholds keep the worker on the RF edge.
+                            const bool phase2StreamingDdc =
+                                monP25VoicePhase2 &&
+                                rx.p25VoiceLiveDecoder.config().enableStreamingChannelDdc;
+                            const double backlogCatchUpSeconds = activeSpeakerClearPath
+                                ? (phase2StreamingDdc ? 0.040 : 0.050)
+                                : 0.120;
                             const size_t backlogCatchUpThreshold = (sr > 0.0)
-                                ? static_cast<size_t>(std::clamp(sr * backlogCatchUpSeconds, 40960.0, 1048576.0))
-                                : (activeSpeakerClearPath ? 163840u : 368640u);
+                                ? static_cast<size_t>(std::clamp(sr * backlogCatchUpSeconds, 32768.0, 1048576.0))
+                                : (activeSpeakerClearPath ? 102400u : 245760u);
                             const bool backlogCatchUp = undecodedBacklog > backlogCatchUpThreshold;
                             const bool speakerSustainEligible =
                                 activeSpeakerClearPath &&
@@ -20496,7 +20541,7 @@ public:
                                 (!rolling.decodeAbsoluteKnown ||
                                  rolling.lastDecodeAbsolute <= rolling.startAbsolute);
                             const P25Phase2VoiceChunkPlan chunkPlan = p25Phase2PlanVoiceDecodeChunk(
-                                false /* streamingDdc */,
+                                phase2StreamingDdc,
                                 backlogCatchUp,
                                 activeSpeakerClearPath,
                                 wideReacquireWindow,
@@ -25342,11 +25387,14 @@ int runCLI(int argc, char* argv[]) {
                         const bool activeSpeakerClearPath =
                             phase2SessionSpeakerSustain ||
                             phase2EstablishedClearStreaming ||
-                            p25Phase2SpeakerSustainDecodeActive();
-                        const double backlogCatchUpSeconds = activeSpeakerClearPath ? 0.080 : 0.180;
+                            p25Phase2SpeakerSustainDecodeActive() ||
+                            phase2SessionHadBurstEye;
+                        const double backlogCatchUpSeconds = activeSpeakerClearPath
+                            ? (phase2StreamingDdc ? 0.040 : 0.050)
+                            : 0.120;
                         const size_t backlogCatchUpThreshold = (sr > 0.0)
-                            ? static_cast<size_t>(std::clamp(sr * backlogCatchUpSeconds, 40960.0, 1048576.0))
-                            : (activeSpeakerClearPath ? 163840u : 368640u);
+                            ? static_cast<size_t>(std::clamp(sr * backlogCatchUpSeconds, 32768.0, 1048576.0))
+                            : (activeSpeakerClearPath ? 102400u : 245760u);
                         const bool backlogCatchUp = undecodedBacklog > backlogCatchUpThreshold;
                         const bool speakerSustainEligible =
                             activeSpeakerClearPath &&
