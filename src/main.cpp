@@ -2506,15 +2506,17 @@ static constexpr double kP25Phase2VoiceDecodeAcquireOverlapSeconds = 0.160;
 // still keeps two superframes above for ESS/MAC recovery; post-eye acquire and
 // locked sustain must not replay 720+ ms of RF every scheduler tick or the
 // worker falls behind live speech.
-static constexpr double kP25Phase2VoiceDecodeSustainChunkSeconds = 0.040;
-static constexpr double kP25Phase2VoiceDecodeSustainMinFreshSeconds = 0.020;
-static constexpr double kP25Phase2VoiceDecodeSustainOverlapSeconds = 0.090;
-// Speaker-live sustain uses the almost_stable short selected-slot cadence.
-// The 720 ms post-reference sustain eye improved one offline span, but field
-// GUI testing regressed into late cut-ins and word islands.
-static constexpr double kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.040;
-static constexpr double kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.020;
-static constexpr double kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.020;
+static constexpr double kP25Phase2VoiceDecodeSustainChunkSeconds = 0.080;
+static constexpr double kP25Phase2VoiceDecodeSustainMinFreshSeconds = 0.040;
+static constexpr double kP25Phase2VoiceDecodeSustainOverlapSeconds = 0.080;
+// Speaker-live sustain: capture ~2 selected-slot Voice4 bursts (≈80 ms RF at
+// 6000 baud TDMA with both slots present) so each hop yields continuous 20 ms
+// AMBE frames.  Field 20260807_230551 with 40/20 ms hops only emitted 80 ms
+// PCM every 300 ms (blocky).  Overlap keeps CQPSK lock; abs de-dupe prevents
+// replay. Slot isolation remains hard (only followed grantSlot is fed).
+static constexpr double kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.080;
+static constexpr double kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.040;
+static constexpr double kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.040;
 // If the voice worker falls behind live RF, decode a larger near-live chunk
 // with short context so one worker pass can refill the speaker ring.
 // Cap catch-up at ~180 ms so a single job cannot monopolize the worker for
@@ -2651,7 +2653,12 @@ static bool p25Phase2EstablishedClearVoiceStreamingLocked(const Receiver& rx) no
     if (!rx.p25VoiceDecodeEnabled || !rx.p25VoicePhase2 || rx.p25VoiceEncrypted) {
         return false;
     }
-    if (rx.p25Phase2WideReacquireHoldWindows > 0) return false;
+    // After successful emit, ignore wide-reacquire hold flags so short sustain
+    // hops stay selected (see NeedsWideReacquireWindowLocked).
+    if (rx.p25Phase2WideReacquireHoldWindows > 0 &&
+        !rx.p25SessionState.sustain.hadSuccessfulEmit) {
+        return false;
+    }
 
     const auto& sustain = rx.p25SessionState.sustain;
     const P25VoiceDiagSnapshot& diag = rx.p25VoiceDiagnostics;
@@ -2818,12 +2825,6 @@ static bool p25Phase2HasStableSuperframeLockLocked(const Receiver& rx) noexcept
 static bool p25Phase2NeedsWideReacquireWindowLocked(const Receiver& rx) noexcept
 {
     if (!rx.p25VoiceDecodeEnabled || !rx.p25VoicePhase2) return false;
-    if (rx.p25Phase2WideReacquireHoldWindows > 0 &&
-        !p25DiagTargetHardClear(rx.p25VoiceDiagnostics) &&
-        rx.p25VoiceDiagnostics.decodedFrames == 0) {
-        return true;
-    }
-    if (rx.p25Phase2MaskEpochRepairHoldWindows > 0) return true;
     const P25VoiceDiagSnapshot& diag = rx.p25VoiceDiagnostics;
     const auto& sustain = rx.p25SessionState.sustain;
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
@@ -2836,14 +2837,32 @@ static bool p25Phase2NeedsWideReacquireWindowLocked(const Receiver& rx) noexcept
         diag.phase2Bursts > 0 ||
         diag.phase2VoiceCodewords > 0 ||
         diag.phase2MaskedBursts > 0;
-    // A retained CQPSK soft-lock, speaker-sustain hold, or stale "recent traffic"
-    // timestamp alone is not a live Phase-2 eye. Capture 20260729_114627: after
-    // the first emit, short sustain crumbs logged p2bursts=0 while those holds
-    // blocked wide reacquire and starved the speaker.
+
+    // Capture 20260807_230551: after gate=emit, many windows have p2bursts=0
+    // (opposite TDMA slot / brief silence). The old logic treated that as
+    // "lost eye" and forced wide-reacquire with minFresh=120-160ms, producing
+    // 80ms PCM islands every 300ms+ (blocky speech) while slot isolation stayed
+    // correct. Once the speaker has opened, stay on short sustain hops.
+    if (sustain.hadSuccessfulEmit) {
+        if (recentSpeaker) return false;
+        if (currentStreamingEye) return false;
+        if (recentTraffic) return false;
+        const qint64 silenceMs = (sustain.lastEmitMs > 0) ? (nowMs - sustain.lastEmitMs) : 0;
+        // Only cold wide-reacquire after a real hang (not inter-slot silence).
+        if (silenceMs > 0 && silenceMs < 8000) return false;
+    }
+
+    if (rx.p25Phase2WideReacquireHoldWindows > 0 &&
+        !p25DiagTargetHardClear(diag) &&
+        diag.decodedFrames == 0 &&
+        !sustain.hadSuccessfulEmit) {
+        return true;
+    }
+    // Mask-epoch repair must not steal the speaker-live path after emit.
+    if (rx.p25Phase2MaskEpochRepairHoldWindows > 0 && !sustain.hadSuccessfulEmit) {
+        return true;
+    }
     if (currentStreamingEye) {
-        // SDRTrunk does not fall back to a large window search while its Phase-2
-        // traffic framer is still seeing timeslots. Keep streaming short chunks
-        // and let the selected-timeslot queue/security state recover naturally.
         return false;
     }
     const bool hadAnySync =
@@ -2853,16 +2872,25 @@ static bool p25Phase2NeedsWideReacquireWindowLocked(const Receiver& rx) noexcept
         diag.decodedFrames > 0 ||
         diag.audioSamples > 0 ||
         recentTraffic;
+    // Do not reacquire solely because we once emitted — that is the chop path.
     return hadAnySync &&
-        (recentSpeaker || sustain.hadSuccessfulEmit || diag.decodedFrames > 0 ||
-         diag.audioSamples > 0 || sustain.peakDecodedFrames > 0);
+        !sustain.hadSuccessfulEmit &&
+        (diag.decodedFrames > 0 ||
+         diag.audioSamples > 0 ||
+         sustain.peakDecodedFrames > 0);
 }
 
 static bool p25Phase2UseSustainDecodeWindowLocked(const Receiver& rx) noexcept
 {
     if (!rx.p25VoiceDecodeEnabled || !rx.p25VoicePhase2) return false;
-    if (rx.p25Phase2WideReacquireHoldWindows > 0) return false;
-    if (rx.p25Phase2MaskEpochRepairHoldWindows > 0) return false;
+    if (rx.p25Phase2WideReacquireHoldWindows > 0 &&
+        !rx.p25SessionState.sustain.hadSuccessfulEmit) {
+        return false;
+    }
+    if (rx.p25Phase2MaskEpochRepairHoldWindows > 0 &&
+        !rx.p25SessionState.sustain.hadSuccessfulEmit) {
+        return false;
+    }
     const P25VoiceDiagSnapshot& diag = rx.p25VoiceDiagnostics;
     const auto& sustain = rx.p25SessionState.sustain;
     const bool hasDecodedAudio =
@@ -20406,10 +20434,15 @@ public:
                                  phase2SessionSpeakerSustain ||
                                  phase2EstablishedClearStreaming ||
                                  p25Phase2SpeakerSustainDecodeActive());
+                            // Never stay on cold/unacquired after the first eye/emit —
+                            // that path used minFresh=120ms and blocky 80ms islands.
                             const bool unacquiredAcquireWindow =
                                 !backlogCatchUp &&
                                 !wideReacquireWindow &&
                                 !speakerSustainDecode &&
+                                !phase2SessionHadBurstEye &&
+                                !phase2SessionSpeakerSustain &&
+                                !phase2EstablishedClearStreaming &&
                                 monP25VoiceDecode &&
                                 monP25VoicePhase2 &&
                                 monP25IndependentTrafficSource &&
@@ -25299,6 +25332,9 @@ int runCLI(int argc, char* argv[]) {
                             !backlogCatchUp &&
                             !wideReacquireWindow &&
                             !speakerSustainDecode &&
+                            !phase2SessionHadBurstEye &&
+                            !phase2SessionSpeakerSustain &&
+                            !phase2EstablishedClearStreaming &&
                             rxP25VoiceDecode &&
                             rxP25VoicePhase2 &&
                             rxP25IndependentTrafficSource &&
