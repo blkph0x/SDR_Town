@@ -2509,14 +2509,14 @@ static constexpr double kP25Phase2VoiceDecodeAcquireOverlapSeconds = 0.160;
 static constexpr double kP25Phase2VoiceDecodeSustainChunkSeconds = 0.080;
 static constexpr double kP25Phase2VoiceDecodeSustainMinFreshSeconds = 0.040;
 static constexpr double kP25Phase2VoiceDecodeSustainOverlapSeconds = 0.080;
-// Speaker-live sustain: capture ~2 selected-slot Voice4 bursts (≈80 ms RF at
-// 6000 baud TDMA with both slots present) so each hop yields continuous 20 ms
-// AMBE frames.  Field 20260807_230551 with 40/20 ms hops only emitted 80 ms
-// PCM every 300 ms (blocky).  Overlap keeps CQPSK lock; abs de-dupe prevents
-// replay. Slot isolation remains hard (only followed grantSlot is fed).
-static constexpr double kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.080;
-static constexpr double kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.040;
-static constexpr double kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.040;
+// Speaker-live sustain: advance mostly-fresh RF so unique target VCWs dominate.
+// Capture 20260807_231232 had feedRatio≈0.25 (dups 70%+) with heavy overlap —
+// only ~4 AMBE frames every hop and worker-busy, so dutySec stayed 0.08–0.32.
+// Prefer 60 ms fresh / 20 ms overlap; sticky superframe walk keeps lock.
+// Slot isolation remains hard (only followed grantSlot is fed).
+static constexpr double kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.060;
+static constexpr double kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.030;
+static constexpr double kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.020;
 // If the voice worker falls behind live RF, decode a larger near-live chunk
 // with short context so one worker pass can refill the speaker ring.
 // Cap catch-up at ~180 ms so a single job cannot monopolize the worker for
@@ -2535,8 +2535,8 @@ static constexpr int kP25Phase2VoiceDecodeMaxCadenceMs = 40;
 // While the speaker is live, allow one in-flight decode plus one pre-staged
 // next slice so 20 ms hops are not stalled into worker-busy droughts.  The
 // rolling IQ cursor still commits only after a non-stale result.
-static constexpr size_t kP25VoiceDecodeMaxPendingJobs = 1;
-static constexpr size_t kP25VoiceDecodeMaxPendingJobsSpeaker = 3;
+static constexpr size_t kP25VoiceDecodeMaxPendingJobs = 2;
+static constexpr size_t kP25VoiceDecodeMaxPendingJobsSpeaker = 4;
 static constexpr size_t kP25VoiceDecodeMaxCompletedResults = 16;
 // Keep the one-RTL Phase-2 target-offset recovery bounded.  Field logs after
 // the slot/queue fixes showed DSP passes taking 440ms while only emitting 40ms
@@ -2644,8 +2644,11 @@ static bool p25Phase2SessionSpeakerSustainActive(const Receiver& rx) noexcept
 {
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
     const auto& sustain = rx.p25SessionState.sustain;
-    return sustain.hadSuccessfulEmit &&
-        p25RecentSpeakerOutputActive(nowMs, kP25Phase2SpeakerFollowHoldMs);
+    if (!sustain.hadSuccessfulEmit) return false;
+    if (p25RecentSpeakerOutputActive(nowMs, kP25Phase2SpeakerFollowHoldMs)) return true;
+    // Keep sustain streaming for several seconds after the last PCM push so
+    // inter-slot silence does not drop us back to cold/unacquired hops.
+    return sustain.lastEmitMs > 0 && (nowMs - sustain.lastEmitMs) <= 8000;
 }
 
 static bool p25Phase2EstablishedClearVoiceStreamingLocked(const Receiver& rx) noexcept
@@ -2781,8 +2784,11 @@ static int p25Phase2AdaptiveVoiceDecodeCadenceMs() noexcept
 
 static int p25Phase2AdaptiveVoiceDecodeCadenceMs(const Receiver& rx) noexcept
 {
-    if (p25RecentSpeakerOutputActive(QDateTime::currentMSecsSinceEpoch(),
-                                     kP25Phase2SpeakerFollowHoldMs)) {
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    // Keep near-live hop rate for the whole call after first emit — not only
+    // while the 2.5 s speaker-hold flag is warm (capture 20260807_231232).
+    if (p25RecentSpeakerOutputActive(nowMs, kP25Phase2SpeakerFollowHoldMs) ||
+        (rx.p25VoicePhase2 && rx.p25SessionState.sustain.hadSuccessfulEmit)) {
         return kP25Phase2VoiceDecodeSpeakerCadenceMs;
     }
     const bool coldAcquire =
@@ -2797,18 +2803,20 @@ static int p25Phase2AdaptiveVoiceDecodeCadenceMs(const Receiver& rx) noexcept
 
 static bool p25Phase2SpeakerSustainDecodeActive() noexcept
 {
+    // Global hint used for pending-job depth; prefer speaker-hold, but do not
+    // starve the pipeline the moment hold expires mid-call.
     return p25RecentSpeakerOutputActive(QDateTime::currentMSecsSinceEpoch(),
                                         kP25Phase2SpeakerFollowHoldMs);
 }
 
 static size_t p25VoiceDecodeMaxPendingJobsNow() noexcept
 {
-    // Capture 20260801_100006: pending=1 caused long worker-busy droughts while
-    // one over-budget mega-job held the worker.  Allow one in-flight + one staged
-    // slice always; three while speaker is live.
+    // Capture 20260807_231232: worker-busy starved unique VCW feed (97 busy
+    // logs, feedRatio≈0.25). Keep a short pipeline so 30–60 ms hops are not
+    // dropped while a 25–30 ms sticky decode is finishing.
     return p25Phase2SpeakerSustainDecodeActive()
         ? kP25VoiceDecodeMaxPendingJobsSpeaker
-        : std::max<size_t>(kP25VoiceDecodeMaxPendingJobs, 2);
+        : kP25VoiceDecodeMaxPendingJobs;
 }
 
 static bool p25Phase2HasStableSuperframeLockLocked(const Receiver& rx) noexcept
@@ -7017,11 +7025,17 @@ static bool p25Phase2CurrentSelectedBurstFeedTrusted(const P25Phase2Burst& burst
         burst.macCrcValid ||
         burst.macCrcLock ||
         burst.sessionAudioRelease;
-    const bool currentMaskOrSecurityLock =
-        burst.maskPhaseLock ||
-        currentSecurityLock;
-    if (!currentMaskOrSecurityLock) return false;
-    return true;
+    if (burst.maskPhaseLock || currentSecurityLock) return true;
+    // Voice2/Voice4 timeslots do not carry MAC/ACCH. Capture 20260807_231232
+    // showed targetVcw=4 ess=clear fed=0 because we required maskPhaseLock or
+    // MAC on every burst — continuous sticky descramble on a locked superframe
+    // lattice is enough for the *selected* grant slot (sdrtrunk keeps walking
+    // the traffic channel once the epoch is known).
+    if (burst.xorMaskPhaseKnown &&
+        (burst.superframeLock || burst.stickySuperframe)) {
+        return true;
+    }
+    return false;
 }
 
 static bool p25Phase2UnsafeMixedSlotAudioWindow(const P25VoiceAudioBlock& out) noexcept
@@ -11692,14 +11706,18 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             out.phase2AudioLockMissing = true;
             continue;
         }
-        const bool maskPhaseTrusted = burst.maskPhaseLock || burst.macCrcLock || burst.sessionAudioRelease;
-        // Require real mask/security lock before live vocoder feed.  The old
-        // "phase2+slot+xor" bypass fed every descrambled VCW (including wrong
-        // superframe-epoch labels) and produced multi-talker garble.
+        // Trusted descramble on the *known matching* grant slot (never unlabelled).
+        const bool maskPhaseTrusted =
+            burst.maskPhaseLock ||
+            burst.macCrcLock ||
+            burst.sessionAudioRelease ||
+            (burst.xorMaskPhaseKnown &&
+             burst.grantSlotKnown &&
+             (burst.superframeLock || burst.stickySuperframe));
+        // Live feed only when the selected-slot burst is trusted. Probe path may
+        // continue for raw AMBE queue, but not for unlabeled / wrong-epoch VCW.
         if (!maskPhaseTrusted && !forceEstablishedFeed) {
-            if (grantMayProbeVoice) {
-                // Diagnostic / queue path only — do not fall through to live feed
-                // without trust; queueUnknownAmbe still needs the flags below.
+            if (grantMayProbeVoice && burst.grantSlotKnown) {
                 out.phase2AudioLockMissing = true;
                 out.phase2MetadataMissing = true;
             } else {
@@ -11899,18 +11917,34 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             explicitClearGrantHardVoiceRelease ||
             sameCallClearSustainFeed ||
             p25Phase2TargetHardClearEvidence(out) ||
-            (burst.essKnown && !burst.encrypted && burst.sessionAudioRelease);
-        // currentBurstFeedTrusted already requires grantSlotKnown + mask/security.
-        // Do not allow macCrcLock alone to open the live path without that trust.
-        const bool immediateAmbeDecodeAllowed =
+            (burst.essKnown && !burst.encrypted && burst.sessionAudioRelease) ||
+            // Window-level ESS already clear on the followed call (log: ess=clear).
+            (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted && !out.phase2WrongSlot);
+        // Selected-slot continuous clear: once traffic ESS/PTT (or established
+        // same-call clear) is known, keep feeding descrambled Voice2/4 on the
+        // grant slot every hop — do not re-require MAC on every voice burst.
+        const bool continuousSelectedClearFeed =
             currentBurstFeedTrusted &&
             securityProvedClearForFeed &&
-            maskPhaseTrusted &&
-            (effectiveVoiceReleaseTrusted ||
-             (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted) ||
-             (burst.essKnown && !burst.encrypted && burst.sessionAudioRelease) ||
+            effectiveBurstSlot == followedGrantSlot &&
+            !out.phase2WrongSlot &&
+            !burst.encrypted &&
+            (establishedClearCall ||
              sameCallClearSustainFeed ||
-             p25Phase2EstablishedClearNoiseFeedAllowed(rx, out, burst, recentMacEvidenceForCall));
+             explicitClearGrantHardVoiceRelease ||
+             p25Phase2TargetHardClearEvidence(out) ||
+             (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted) ||
+             p25Phase2SessionSpeakerSustainActive(rx));
+        const bool immediateAmbeDecodeAllowed =
+            continuousSelectedClearFeed ||
+            (currentBurstFeedTrusted &&
+             securityProvedClearForFeed &&
+             maskPhaseTrusted &&
+             (effectiveVoiceReleaseTrusted ||
+              (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted) ||
+              (burst.essKnown && !burst.encrypted && burst.sessionAudioRelease) ||
+              sameCallClearSustainFeed ||
+              p25Phase2EstablishedClearNoiseFeedAllowed(rx, out, burst, recentMacEvidenceForCall)));
         const bool queueUnknownAmbe =
             !immediateAmbeDecodeAllowed &&
             grantMayProbeVoice &&
