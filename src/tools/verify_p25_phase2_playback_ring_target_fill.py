@@ -38,8 +38,8 @@ checks = {
     'ring already primed bypass': 'ringAlreadyPrimed' in main,
     'speaker queue depth allows prestage': 'kP25VoiceDecodeMaxPendingJobsSpeaker = 4' in main
         or 'kP25VoiceDecodeMaxPendingJobsSpeaker = 3' in main,
-    'speaker sustain multi-burst hop': 'kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.120' in main,
-    'speaker sustain short lattice overlap': 'kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.030' in main,
+    'speaker sustain multi-burst hop': 'kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.080' in main,
+    'speaker sustain short lattice overlap': 'kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.020' in main,
     'speaker backlog catch-up uses catch-up constants': 'kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds' in main
         and 'kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds' in main,
     'backlog helper uses effective decode cursor': 'p25Phase2UndecodedBacklogSamples' in main

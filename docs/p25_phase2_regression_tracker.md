@@ -13,28 +13,31 @@ Track intentional policy and cadence changes so field regressions are easy to bi
 
 ## Changes
 
-### 2026-08-08 — Streaming DDC on realtime Phase-2 + backlog catch-up (chop/fast)
+### 2026-08-08 — Streaming DDC + no live-edge RF skip (chop/blocky)
 
-**Field:** capture `20260807_232020_926` — feedRatio≈1.0 on TG30302 but dutySec≈0.24–0.48;
-audio islands of 80 ms every 200–350 ms (“faster” but broken/choppy). Worker logs:
-`iq≈106k fresh≈65k` (~32 ms RF), `cqpskCandidates=32`, `demodState=Cold`,
-`totalMs=200–400`.
+**Field:**
+- `20260807_232020`: block channelize, 32-cand Cold, dutySec≈0.3
+- `20260807_234054` (after DDC enable): context=0 / 200 ms jobs, but only **~7% RF
+  coverage** (span 88 s, ~6 s decoded); cold live-edge jump when lag>200 ms; cold
+  CQPSK until first emit; concealment-dominant muted clear PCM; dups high.
 
 **Root causes (confirmed):**
-1. `enableStreamingChannelDdc=false` forced **block channelize**, which clears CQPSK/
-   framer/mask-phase every `processIq` hop and re-runs a 32-candidate cold search.
-2. Speaker sustain only advanced ~32–60 ms RF per hop → at most one Voice4 when lucky.
-3. `p25Phase2UndecodedBacklogSamples` returned 0 without absolute cursor → catch-up never ran.
+1. Block channelize wiped sticky CQPSK every hop (fixed by streaming DDC).
+2. `maxBacklog=200 ms` + cold live-edge sync **discarded** most speech RF pre-emit.
+3. `coldAcquireJob` stayed true until emit → 32-cand searches for entire early call.
+4. 200 ms catch-up jobs at ~180 ms DSP kept lag and blocky islands.
+5. `phase2-concealment-dominant` muted trusted clear windows with any PLC.
 
 **Fixes:**
-- Realtime Phase-2 voice config enables **streaming channel DDC** (forensic stays off).
-- GUI/CLI chunk planner uses streaming plan (overlap=0 contiguous fresh) when DDC on.
-- Speaker sustain 120 ms / catch-up 200 ms; backlog threshold ~40–50 ms on clear path.
-- Backlog helper uses `effectiveDecodeAbsolute()` for absolute and sample-index modes.
-- CLI `activeSpeakerClearPath` includes `phase2SessionHadBurstEye` (GUI parity).
+- Realtime Phase-2 enables streaming DDC; contiguous fresh-only hops (overlap=0).
+- Active rolling **2.0 s**; max lag **1.2 s** once eye exists; never live-edge jump
+  after first Phase-2 burst/emit.
+- Cold acquire ends on **hadBurstEye** (not only emit); lock-only CQPSK after eye.
+- Speaker sustain **80 ms** / catch-up **100 ms** (many fast jobs).
+- Concealment gate does not mute clear-trusted selected-slot PCM.
 
-**Watch:** CADENCE `dutySec` → talk-time (near 1.0 while speaking); `decodeProfile`
-`demodState` not stuck Cold; worker `context=0` after first eye; sticky CQPSK logs.
+**Watch:** RF coverage ≈ wall time while talking; dutySec→1.0; dsp≪80 ms after lock;
+no long absStart gaps between worker hops.
 
 ### 2026-08-01 — Streaming continuity + MAC lock + security sticky (P0/P1 audit)
 

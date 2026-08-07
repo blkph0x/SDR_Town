@@ -18,12 +18,12 @@ checks = {
         )[1][:500]
     ),
     "speaker sustain multi-burst hop": (
-        "kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.120" in main
-        and "kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.030" in main
+        "kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.080" in main
+        and "kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.020" in main
     ),
     "speaker catch-up constants present": (
-        "kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.200" in main
-        and "kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.080" in main
+        "kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.100" in main
+        and "kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.050" in main
     ),
     "realtime phase2 enables streaming ddc": (
         "phase2 && profile == P25VoiceDecodeProfile::Realtime" in main
