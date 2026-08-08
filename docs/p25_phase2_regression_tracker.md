@@ -13,6 +13,21 @@ Track intentional policy and cadence changes so field regressions are easy to bi
 
 ## Changes
 
+### 2026-08-08 — Sprint 0 P25 Phase 2 clear TX shell (no RF)
+
+**Program:** Full P2 trunk clear TX (PTT) — multi-sprint. Sprint 0 only.
+
+**Delivered:**
+- `P25TxConfig` arm gates (RID/TG/NAC + device index; clear-only)
+- `P25TxSession` pure SM: Idle→Armed→Requesting→WaitGrant→Tuning→Voice→Hang
+- Encrypted grant refused; max PTT timeout path
+- DeviceManager `DeviceInfo::canTx` + TX antenna probe (no writeStream)
+- GUI: Arm + hold-PTT panel under P25 controls (logs SM only)
+- CLI: `tx status|arm|disarm|config|ptt on|off`
+- Unit tests `[p25][tx]`
+
+**Not yet:** mic, AMBE encode, superframe TX, H-CPM, writeStream, trunk request RF.
+
 ### 2026-08-08 — Garble from latch bleed + dual-slot untrusted (015254 / 021134)
 
 **Field:** two captures post-dae961e. More `gate=emit` (169 on 021134) but audio

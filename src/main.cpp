@@ -28,6 +28,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QSpinBox>
 #include <QSlider>
 #include <QHeaderView>
 #include <QGroupBox>
@@ -66,6 +67,8 @@
 #include "P25Control.h"
 #include "P25LiveDecoder.h"
 #include "P25FollowStateMachine.h"
+#include "P25TxSession.h"
+#include "P25TxConfig.h"
 #include "SignalClassifier.h"
 #include "ClassifierModelBackend.h"
 #include "Receiver.h"  // Phase 0: per-receiver foundation
@@ -15208,6 +15211,189 @@ public:
         p25Lay->addWidget(p25TgTable);
         rxLay->addWidget(p25Box);
 
+        // Sprint 0: P25 clear TX shell (no RF). Arm + hold-PTT drives stub SM only.
+        QGroupBox* p25TxBox = new QGroupBox("P25 Phase 2 Clear TX (Sprint 0 — no RF)");
+        QVBoxLayout* p25TxLay = new QVBoxLayout(p25TxBox);
+        p25TxLay->setContentsMargins(6, 8, 6, 6);
+        p25TxLay->setSpacing(4);
+        QHBoxLayout* p25TxCfgLay = new QHBoxLayout();
+        QCheckBox* p25TxArmCheck = new QCheckBox("Arm TX");
+        p25TxArmCheck->setToolTip("TX is off until armed. Requires RID, TG, NAC, and a TX-capable device (not RTL). No RF in Sprint 0.");
+        QSpinBox* p25TxRidSpin = new QSpinBox();
+        p25TxRidSpin->setRange(0, 0xFFFFFF);
+        p25TxRidSpin->setPrefix("RID ");
+        p25TxRidSpin->setToolTip("Subscriber unit ID (RID) for channel request.");
+        QSpinBox* p25TxTgSpin = new QSpinBox();
+        p25TxTgSpin->setRange(0, 0xFFFF);
+        p25TxTgSpin->setPrefix("TG ");
+        p25TxTgSpin->setToolTip("Talkgroup to request (clear only).");
+        QSpinBox* p25TxNacSpin = new QSpinBox();
+        p25TxNacSpin->setRange(0, 0xFFF);
+        p25TxNacSpin->setDisplayIntegerBase(16);
+        p25TxNacSpin->setPrefix("NAC 0x");
+        p25TxNacSpin->setToolTip("Network Access Code (hex).");
+        QSpinBox* p25TxDevSpin = new QSpinBox();
+        p25TxDevSpin->setRange(-1, 31);
+        p25TxDevSpin->setSpecialValueText("TX dev —");
+        p25TxDevSpin->setPrefix("TX dev ");
+        p25TxDevSpin->setToolTip("DeviceManager index of TX-capable SDR (HackRF/Pluto/Lime). RTL cannot TX.");
+        p25TxDevSpin->setValue(-1);
+        QPushButton* p25TxPttBtn = new QPushButton("PTT (hold)");
+        p25TxPttBtn->setCheckable(true);
+        p25TxPttBtn->setEnabled(false);
+        p25TxPttBtn->setMinimumWidth(110);
+        p25TxPttBtn->setStyleSheet("QPushButton:checked { background-color: #c0392b; color: white; font-weight: bold; }");
+        p25TxPttBtn->setToolTip("Press and hold to request/TX (stub until Sprint 6). Release to unkey.");
+        QLabel* p25TxStatus = new QLabel("Idle (disarmed)");
+        p25TxStatus->setMinimumWidth(220);
+        p25TxCfgLay->addWidget(p25TxArmCheck);
+        p25TxCfgLay->addWidget(p25TxRidSpin);
+        p25TxCfgLay->addWidget(p25TxTgSpin);
+        p25TxCfgLay->addWidget(p25TxNacSpin);
+        p25TxCfgLay->addWidget(p25TxDevSpin);
+        p25TxCfgLay->addWidget(p25TxPttBtn);
+        p25TxCfgLay->addWidget(p25TxStatus);
+        p25TxCfgLay->addStretch();
+        p25TxLay->addLayout(p25TxCfgLay);
+        QLabel* p25TxHint = new QLabel("Clear unencrypted only. No writeStream yet — PTT only advances the TX state machine and logs.");
+        p25TxHint->setWordWrap(true);
+        p25TxHint->setStyleSheet("color: #888;");
+        p25TxLay->addWidget(p25TxHint);
+        rxLay->addWidget(p25TxBox);
+
+        p25TxArmCheckBox = p25TxArmCheck;
+        p25TxPttButton = p25TxPttBtn;
+        p25TxStatusLabel = p25TxStatus;
+        p25TxRidSpinBox = p25TxRidSpin;
+        p25TxTgSpinBox = p25TxTgSpin;
+        p25TxNacSpinBox = p25TxNacSpin;
+        p25TxDevSpinBox = p25TxDevSpin;
+
+        // Restore Sprint 0 TX identity from settings (still disarmed by default).
+        {
+            QSettings s;
+            p25TxRidSpin->setValue(s.value("p25tx/rid", 0).toInt());
+            p25TxTgSpin->setValue(s.value("p25tx/tg", 0).toInt());
+            p25TxNacSpin->setValue(s.value("p25tx/nac", 0).toInt());
+            p25TxDevSpin->setValue(s.value("p25tx/device", -1).toInt());
+            p25TxSnapshot = {};
+            p25TxSnapshot.state = P25TxState::Idle;
+            p25TxSnapshot.config.armed = false;
+        }
+
+        auto syncP25TxConfigFromUi = [this]() {
+            p25TxSnapshot.config.unitId = static_cast<uint32_t>(p25TxRidSpinBox ? p25TxRidSpinBox->value() : 0);
+            p25TxSnapshot.config.talkgroupId = static_cast<uint32_t>(p25TxTgSpinBox ? p25TxTgSpinBox->value() : 0);
+            p25TxSnapshot.config.nac = static_cast<uint16_t>(p25TxNacSpinBox ? p25TxNacSpinBox->value() : 0);
+            p25TxSnapshot.config.txDeviceIndex = p25TxDevSpinBox ? p25TxDevSpinBox->value() : -1;
+            p25TxSnapshot.config.clearOnly = true;
+            p25TxSnapshot.config.armed = p25TxArmCheckBox && p25TxArmCheckBox->isChecked();
+            // Sprint 0: SM arm only needs a selected device index so the PTT shell
+            // is testable without TX hardware. Sprint 1+ writeStream still requires
+            // DeviceInfo::canTx on a real TX-capable SDR.
+            p25TxSnapshot.deviceCanTx = (p25TxSnapshot.config.txDeviceIndex >= 0);
+            QSettings s;
+            s.setValue("p25tx/rid", static_cast<int>(p25TxSnapshot.config.unitId));
+            s.setValue("p25tx/tg", static_cast<int>(p25TxSnapshot.config.talkgroupId));
+            s.setValue("p25tx/nac", static_cast<int>(p25TxSnapshot.config.nac));
+            s.setValue("p25tx/device", p25TxSnapshot.config.txDeviceIndex);
+        };
+
+        auto applyP25TxEvent = [this, syncP25TxConfigFromUi](P25TxEvent ev) {
+            syncP25TxConfigFromUi();
+            p25TxSnapshot.nowMs = QDateTime::currentMSecsSinceEpoch();
+            if (p25TxSnapshot.stateEnteredMs <= 0) {
+                p25TxSnapshot.stateEnteredMs = p25TxSnapshot.nowMs;
+            }
+            const auto decision = evaluateP25Tx(p25TxSnapshot, ev);
+            if (decision.changed) {
+                p25TxSnapshot.state = decision.nextState;
+                p25TxSnapshot.stateEnteredMs = p25TxSnapshot.nowMs;
+            }
+            if (p25TxStatusLabel) {
+                p25TxStatusLabel->setText(QString::fromStdString(decision.statusLine));
+            }
+            if (decision.changed || ev == P25TxEvent::PttPress || ev == P25TxEvent::PttRelease ||
+                ev == P25TxEvent::Arm || ev == P25TxEvent::Disarm) {
+                appendP25LogLine(QString("P25 TX SM: event=%1 state=%2 reason=%3 request=%4 startVoice=%5 stopVoice=%6")
+                    .arg(QString::fromUtf8(p25TxEventLabel(ev)))
+                    .arg(QString::fromUtf8(p25TxStateLabel(p25TxSnapshot.state)))
+                    .arg(QString::fromStdString(decision.reason))
+                    .arg(decision.emitChannelRequest ? "yes" : "no")
+                    .arg(decision.startVoiceTx ? "stub" : "no")
+                    .arg(decision.stopVoiceTx ? "yes" : "no"));
+            }
+            if (p25TxPttButton &&
+                (p25TxSnapshot.state == P25TxState::Idle ||
+                 p25TxSnapshot.state == P25TxState::Error ||
+                 p25TxSnapshot.state == P25TxState::Armed ||
+                 p25TxSnapshot.state == P25TxState::Hang)) {
+                // Keep visual press only while truly held.
+            }
+            if (p25TxArmCheckBox) {
+                const bool showArmed = p25TxSnapshot.state != P25TxState::Idle &&
+                    p25TxSnapshot.state != P25TxState::Error;
+                if (p25TxArmCheckBox->isChecked() != (showArmed || p25TxSnapshot.config.armed)) {
+                    // do not fight user checkbox mid-flow
+                }
+            }
+            if (p25TxPttButton) {
+                const bool allowPtt = p25TxSnapshot.state == P25TxState::Armed ||
+                    p25TxSnapshot.state == P25TxState::Requesting ||
+                    p25TxSnapshot.state == P25TxState::WaitGrant ||
+                    p25TxSnapshot.state == P25TxState::TuningUplink ||
+                    p25TxSnapshot.state == P25TxState::VoiceActive ||
+                    p25TxSnapshot.state == P25TxState::Hang;
+                p25TxPttButton->setEnabled(allowPtt || (p25TxArmCheckBox && p25TxArmCheckBox->isChecked()));
+            }
+        };
+
+        connect(p25TxArmCheck, &QCheckBox::toggled, this, [this, applyP25TxEvent, syncP25TxConfigFromUi](bool on) {
+            syncP25TxConfigFromUi();
+            if (on) {
+                applyP25TxEvent(P25TxEvent::Arm);
+                if (p25TxSnapshot.state == P25TxState::Error) {
+                    p25TxArmCheckBox->blockSignals(true);
+                    p25TxArmCheckBox->setChecked(false);
+                    p25TxArmCheckBox->blockSignals(false);
+                    p25TxSnapshot.config.armed = false;
+                }
+            } else {
+                applyP25TxEvent(P25TxEvent::Disarm);
+            }
+            if (p25TxPttButton) {
+                p25TxPttButton->setEnabled(p25TxSnapshot.state == P25TxState::Armed ||
+                    p25TxSnapshot.state == P25TxState::Requesting ||
+                    p25TxSnapshot.state == P25TxState::WaitGrant ||
+                    p25TxSnapshot.state == P25TxState::TuningUplink ||
+                    p25TxSnapshot.state == P25TxState::VoiceActive ||
+                    p25TxSnapshot.state == P25TxState::Hang);
+            }
+        });
+        // Hold-to-talk: press = PTT, release = unkey
+        p25TxPttBtn->setAutoRepeat(false);
+        connect(p25TxPttBtn, &QPushButton::pressed, this, [this, applyP25TxEvent]() {
+            p25TxSnapshot.pttHeld = true;
+            p25TxSnapshot.pttPressedMs = QDateTime::currentMSecsSinceEpoch();
+            applyP25TxEvent(P25TxEvent::PttPress);
+            // Sprint 0: advance Requesting → WaitGrant → (no grant) stays waiting
+            if (p25TxSnapshot.state == P25TxState::Requesting) {
+                applyP25TxEvent(P25TxEvent::None);
+            }
+        });
+        connect(p25TxPttBtn, &QPushButton::released, this, [this, applyP25TxEvent]() {
+            p25TxSnapshot.pttHeld = false;
+            applyP25TxEvent(P25TxEvent::PttRelease);
+            // Drain hang so UI returns to Armed without a timer for Sprint 0
+            if (p25TxSnapshot.state == P25TxState::Hang) {
+                p25TxSnapshot.stateEnteredMs = 0;
+                p25TxSnapshot.nowMs = QDateTime::currentMSecsSinceEpoch();
+                p25TxSnapshot.hangMs = 0;
+                applyP25TxEvent(P25TxEvent::HangComplete);
+            }
+            if (p25TxPttButton) p25TxPttButton->setChecked(false);
+        });
+
         auto refreshP25Talkgroups = [p25TgTable]() {
             populateP25TalkgroupTable(p25TgTable, loadP25Talkgroups());
         };
@@ -23488,6 +23674,15 @@ private:
     QCheckBox* p25AutoFollowCheckBox = nullptr;
     QCheckBox* p25IndependentTrafficCheckBox = nullptr;
     QLabel* p25StatusLabel = nullptr;
+    // Sprint 0 P25 clear TX shell (no RF emission).
+    P25TxSnapshot p25TxSnapshot{};
+    QCheckBox* p25TxArmCheckBox = nullptr;
+    QPushButton* p25TxPttButton = nullptr;
+    QLabel* p25TxStatusLabel = nullptr;
+    QSpinBox* p25TxRidSpinBox = nullptr;
+    QSpinBox* p25TxTgSpinBox = nullptr;
+    QSpinBox* p25TxNacSpinBox = nullptr;
+    QSpinBox* p25TxDevSpinBox = nullptr;
     QTimer* diagnosticsHeartbeatTimer = nullptr;
     QTimer* diagnosticsResourceTimer = nullptr;
     qint64 diagnosticsLastHeartbeatMs = 0;
@@ -25342,6 +25537,7 @@ int runCLI(int argc, char* argv[]) {
     std::atomic<bool> cliAudioEnabled{false};
     std::map<long long, P25ControlChannelAnalyzer> cliP25Analyzers;
     std::map<size_t, P25LiveDecoder> cliP25LiveDecoders;
+    P25TxSnapshot cliP25TxSnapshot{};
 
     // S0 / audit-followup-1: non-recursive mutex discipline.
     // ensureCliRxLocked assumes the caller already holds cliRxMutex.
@@ -26150,6 +26346,7 @@ int runCLI(int argc, char* argv[]) {
                       << "  test                      - alias for p25 test\n"
                       << "  p25 voicetest <sigmf|dir> <voice_mhz> [ms] [skip=<ms>] [slot=0|1] [tg=] [nac= wacn= system=] [clear|enc] [stream|legacy] [probe|noprobe] [windowms=720] [hopms=40] [wav=out.wav] [minframes=N] [minaudio=S] - continuous Phase 2 voice replay + automation gates\n"
                       << "  p25 voice               - show P25 voice backend status + Phase 2 validation-log path\n"
+                      << "  tx status|arm|disarm|config|ptt on|ptt off - Sprint 0 P25 clear TX shell (no RF)\n"
                       << "  audio list              - list playback devices\n"
                       << "  audio enable <out0> <out1?>\n"
                       << "  audio disable           - stop audio outputs\n"
@@ -26531,6 +26728,99 @@ int runCLI(int argc, char* argv[]) {
                 std::cout << "Deleted favorite [" << idx << "] " << removed.name << "\n";
             } else {
                 std::cout << "fav list | fav add <name> | fav tune <index> [rx] | fav del <index>\n";
+            }
+        } else if (cmd == "tx") {
+            // Sprint 0: clear TX shell — state machine only, no writeStream / RF.
+            std::string sub; iss >> sub;
+            for (auto& c : sub) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            auto printTxStatus = [&]() {
+                std::cout << "P25 TX state=" << p25TxStateLabel(cliP25TxSnapshot.state)
+                          << " armed=" << (cliP25TxSnapshot.config.armed ? "yes" : "no")
+                          << " rid=0x" << std::hex << cliP25TxSnapshot.config.unitId << std::dec
+                          << " tg=" << cliP25TxSnapshot.config.talkgroupId
+                          << " nac=0x" << std::hex << cliP25TxSnapshot.config.nac << std::dec
+                          << " txDev=" << cliP25TxSnapshot.config.txDeviceIndex
+                          << " canTxFlag=" << (cliP25TxSnapshot.deviceCanTx ? "yes" : "no")
+                          << " ambeEnc=" << (cliP25TxSnapshot.config.ambeEncoderAvailable ? "yes" : "no")
+                          << "\n";
+            };
+            auto applyCliTx = [&](P25TxEvent ev) {
+                cliP25TxSnapshot.nowMs = QDateTime::currentMSecsSinceEpoch();
+                if (cliP25TxSnapshot.stateEnteredMs <= 0)
+                    cliP25TxSnapshot.stateEnteredMs = cliP25TxSnapshot.nowMs;
+                cliP25TxSnapshot.deviceCanTx = cliP25TxSnapshot.config.txDeviceIndex >= 0;
+                const auto d = evaluateP25Tx(cliP25TxSnapshot, ev);
+                if (d.changed) {
+                    cliP25TxSnapshot.state = d.nextState;
+                    cliP25TxSnapshot.stateEnteredMs = cliP25TxSnapshot.nowMs;
+                }
+                std::cout << "TX event=" << p25TxEventLabel(ev)
+                          << " -> " << d.statusLine
+                          << " request=" << (d.emitChannelRequest ? "yes" : "no")
+                          << " startVoice=" << (d.startVoiceTx ? "stub" : "no")
+                          << " stopVoice=" << (d.stopVoiceTx ? "yes" : "no")
+                          << "\n";
+            };
+            if (sub.empty() || sub == "status") {
+                printTxStatus();
+            } else if (sub == "config") {
+                std::string key; iss >> key;
+                if (key.empty()) {
+                    printTxStatus();
+                    std::cout << "tx config rid <id> | tg <id> | nac <hex|dec> | device <i>\n";
+                } else if (key == "rid") {
+                    std::string rs; iss >> rs;
+                    const unsigned long v = std::strtoul(rs.c_str(), nullptr, 0);
+                    cliP25TxSnapshot.config.unitId = static_cast<uint32_t>(v);
+                    std::cout << "tx rid=" << cliP25TxSnapshot.config.unitId << "\n";
+                } else if (key == "tg") {
+                    unsigned v = 0; iss >> v;
+                    cliP25TxSnapshot.config.talkgroupId = v;
+                    std::cout << "tx tg=" << cliP25TxSnapshot.config.talkgroupId << "\n";
+                } else if (key == "nac") {
+                    std::string ns; iss >> ns;
+                    const unsigned long v = std::strtoul(ns.c_str(), nullptr, 0);
+                    cliP25TxSnapshot.config.nac = static_cast<uint16_t>(v & 0xFFFu);
+                    std::cout << "tx nac=0x" << std::hex << cliP25TxSnapshot.config.nac << std::dec << "\n";
+                } else if (key == "device") {
+                    int i = -1; iss >> i;
+                    cliP25TxSnapshot.config.txDeviceIndex = i;
+                    std::cout << "tx device=" << i << "\n";
+                } else {
+                    std::cout << "unknown tx config key\n";
+                }
+            } else if (sub == "arm") {
+                cliP25TxSnapshot.config.armed = true;
+                cliP25TxSnapshot.config.clearOnly = true;
+                applyCliTx(P25TxEvent::Arm);
+                printTxStatus();
+            } else if (sub == "disarm") {
+                cliP25TxSnapshot.config.armed = false;
+                applyCliTx(P25TxEvent::Disarm);
+                printTxStatus();
+            } else if (sub == "ptt") {
+                std::string onoff; iss >> onoff;
+                for (auto& c : onoff) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                if (onoff == "on" || onoff == "press" || onoff == "1") {
+                    cliP25TxSnapshot.pttHeld = true;
+                    cliP25TxSnapshot.pttPressedMs = QDateTime::currentMSecsSinceEpoch();
+                    applyCliTx(P25TxEvent::PttPress);
+                    if (cliP25TxSnapshot.state == P25TxState::Requesting)
+                        applyCliTx(P25TxEvent::None);
+                } else if (onoff == "off" || onoff == "release" || onoff == "0") {
+                    cliP25TxSnapshot.pttHeld = false;
+                    applyCliTx(P25TxEvent::PttRelease);
+                    if (cliP25TxSnapshot.state == P25TxState::Hang) {
+                        cliP25TxSnapshot.hangMs = 0;
+                        cliP25TxSnapshot.stateEnteredMs = 0;
+                        applyCliTx(P25TxEvent::HangComplete);
+                    }
+                } else {
+                    std::cout << "tx ptt on|off\n";
+                }
+                printTxStatus();
+            } else {
+                std::cout << "tx status | arm | disarm | config ... | ptt on|off\n";
             }
         } else if (cmd == "audio") {
             std::string sub; iss >> sub; for(auto& c : sub) c = (char)std::tolower((unsigned char)c);

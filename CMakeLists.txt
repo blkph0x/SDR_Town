@@ -75,6 +75,9 @@ set(SDR_TOWN_SOURCES
     src/P25Control.cpp
     src/P25LiveDecoder.cpp
     src/P25FollowStateMachine.cpp
+    src/P25TxSession.cpp
+    include/P25TxSession.h
+    include/P25TxConfig.h
     src/SignalClassifier.cpp
     src/ClassifierModelBackend.cpp
     src/P25TrafficChannelProcessor.cpp
@@ -222,6 +225,7 @@ if(BUILD_TESTS)
     tests/test_p25control.cpp
     tests/test_p25live.cpp
     tests/test_p25follow.cpp
+    tests/test_p25tx.cpp
     tests/test_p25traffic_processor.cpp
     tests/test_p25dsp.cpp
     src/DeviceManager.cpp
@@ -230,6 +234,7 @@ if(BUILD_TESTS)
     src/P25Control.cpp
     src/P25LiveDecoder.cpp
     src/P25FollowStateMachine.cpp
+    src/P25TxSession.cpp
     src/P25TrafficChannelProcessor.cpp
     src/SignalClassifier.cpp
     src/ClassifierModelBackend.cpp

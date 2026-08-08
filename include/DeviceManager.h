@@ -37,6 +37,9 @@ struct DeviceInfo {
     double frequencyCorrectionPpm = 0.0; // oscillator correction; persisted and applied live when supported
     std::string antenna;
     std::string gainName;         // for setGain with specific element (e.g. "TUNER" for RTL)
+    // TX capability (Sprint 0 probe). RTL-class RX-only sticks stay false.
+    bool canTx = false;
+    std::vector<std::string> txAntennas;
     // more per-device settings can be added
 };
 

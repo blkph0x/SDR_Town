@@ -203,6 +203,36 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
                             }
                         }
 
+                        // Sprint 0: TX capability probe (no TX stream opened).
+                        // RTL-SDR family cannot TX; others may expose SOAPY_SDR_TX.
+                        di.canTx = false;
+                        di.txAntennas.clear();
+                        if (di.driver == "rtlsdr") {
+                            di.canTx = false;
+                        } else {
+                            try {
+                                auto txAnts = dev->listAntennas(SOAPY_SDR_TX, 0);
+                                di.txAntennas.assign(txAnts.begin(), txAnts.end());
+                                if (!di.txAntennas.empty()) {
+                                    di.canTx = true;
+                                } else {
+                                    // Some drivers list empty antennas but still support TX
+                                    // (HackRF often exposes TX/RX). Conservative: known TX drivers.
+                                    if (di.driver == "hackrf" || di.driver == "plutosdr" ||
+                                        di.driver == "lime" || di.driver == "uhd" ||
+                                        di.driver == "bladerf" || di.driver == "soapyremote") {
+                                        di.canTx = true;
+                                        di.txAntennas = {"TX"};
+                                    }
+                                }
+                            } catch (...) {
+                                if (di.driver == "hackrf" || di.driver == "plutosdr" ||
+                                    di.driver == "lime" || di.driver == "uhd") {
+                                    di.canTx = true;
+                                }
+                            }
+                        }
+
                         SoapySDR::Device::unmake(dev);
                     }
                 } catch (const std::exception& ex) {

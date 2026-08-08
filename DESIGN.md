@@ -80,7 +80,7 @@ The application prioritizes **real-world usability** for monitoring, hobbyist SI
 
 ## Non-Goals (v1)
 
-- Any transmit functionality (RX-only for safety and legal clarity).
+- **Default transmit.** The product remains RX-first. Optional **P25 Phase 2 clear trunk TX** is an advanced, explicitly armed feature (see `P25TxConfig` / Sprint plan). TX stays off until the user arms with identity + TX-capable hardware; no auto-TX; encrypted TX is out of scope. Legal authority is the operator’s responsibility.
 - Decoding of encrypted or proprietary controlled signals. The Advanced Signal Analyzer will **never attempt to break or decrypt encryption**; it will clearly indicate when a signal appears encrypted or fails to produce intelligible output and will only provide tools for lawful unencrypted traffic.
 - Full blind demodulation / perfect classification of arbitrary high-order, exotic, or heavily spread-spectrum signals (we provide excellent tools and known-family support, not magic).
 - Full trunked radio system following (control channel + voice channel coordination) — this is a significant later phase.
