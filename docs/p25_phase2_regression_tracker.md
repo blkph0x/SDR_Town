@@ -13,25 +13,26 @@ Track intentional policy and cadence changes so field regressions are easy to bi
 
 ## Changes
 
-### 2026-08-08 — Abs-dedupe only on successful AMBE + faster live CQPSK
+### 2026-08-08 — Phase-2 quality passband retune (edge-of-RF miss)
 
-**Field `20260808_003647`:** still blocky. emit=21 empty=334; classic pattern
-`targetVcw=6 fed=0 absDup=6`; 1–1.5 s holes between PCM islands; DSP 150–160 ms
-on ~140 ms RF; underruns ~48k.
+**Field `20260808_005246`:** abs-dup fix worked (absDup+fed0≈1) but audio still
+sparse. Same-call hop **418.625→419.875** kept RF center **419.125** (|offset|
+**750 kHz**). Nyquist-legal (0.42·sr) but CQPSK dead after one window. TG11348
+retune to 413.375 correct but 0 VCW (late OP=0x02 / dead call). Emit≈2/session.
 
-**Root causes (confirmed):**
-1. **Failed AMBE frames still called RememberEmitted** → permanent abs burn →
-   later hops suppress all VCWs as absDup with zero feed.
-2. Hot CQPSK still ~150 ms/hop → worker lag / cadence gaps.
-3. Abs-dibit map used `live.stats.symbolRate` (jitter) while align used config 6000.
+**Root causes:**
+1. In-source hop used Nyquist passband only — Phase-2 needs a tighter quality
+   window (~≤300–350 kHz / 25% Nyquist).
+2. Initial traffic-source reuse preferred same-wideband CC for ±750 kHz offsets.
+3. OP=0x02 large hops could be deferred instead of forcing low-IF retune.
 
 **Fixes:**
-- Remember absolute dibit positions **only when AMBE decode succeeds**.
-- After successful emit: CQPSK **6 cand / 50 ms** (else 12/80).
-- Abs map uses **config symbolRate (6000)** consistently.
-- Speaker hops **100/120 ms** with **50 ms** overlap.
+- `p25Phase2TrafficInQualityPassband` for same-call Phase-2 hops + source select.
+- Quality miss forces MHz hop retune (including OP=0x02 within correction cap).
+- Abs-dedupe still success-only; hot CQPSK 6@50 ms after emit.
 
-**Watch:** near-zero `tgt>0 fed=0 absDup=tgt`; dspMs ≪ hop; dutySec → 1.0.
+**Watch:** logs show `quality passband / edge-of-RF recenter` hops; worker
+`cf` near voice (±250 kHz low-IF); continuous VCW after hop.
 
 ### 2026-08-01 — Streaming continuity + MAC lock + security sticky (P0/P1 audit)
 

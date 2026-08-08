@@ -15700,6 +15700,21 @@ public:
             // requested traffic channel cannot be sourced from the current wideband stream.
             return std::abs(trafficHz - centerHz) <= sampleRateHz * 0.42;
         };
+        // Capture 20260808_005246: same-call hop 418.625→419.875 kept RF center at
+        // 419.125 (|offset|=750 kHz). That is still inside 0.42*2.048 MHz Nyquist, but
+        // RTL edge response + Phase-2 CQPSK left p2vcw≈0 after one lucky window.
+        // Prefer a physical low-IF retune whenever Phase-2 voice sits more than
+        // ~300 kHz from the sampled center (or >25% of Nyquist).
+        auto p25Phase2TrafficInQualityPassband = [](double trafficHz, double centerHz, double sampleRateHz) noexcept -> bool {
+            if (!std::isfinite(trafficHz) || trafficHz <= 0.0 ||
+                !std::isfinite(centerHz) || centerHz <= 0.0 ||
+                !std::isfinite(sampleRateHz) || sampleRateHz <= 0.0) {
+                return false;
+            }
+            const double hardLimitHz = sampleRateHz * 0.42;
+            const double qualityLimitHz = std::min(hardLimitHz, std::max(250e3, sampleRateHz * 0.25));
+            return std::abs(trafficHz - centerHz) <= qualityLimitHz;
+        };
 
         auto prepareP25InBandVoiceTarget = [this, monFreq, modeBox](double voiceHz) -> bool {
             if (!std::isfinite(voiceHz) || voiceHz <= 0.0) return false;
@@ -15773,7 +15788,7 @@ public:
             QString sourceKind;
         };
 
-        auto selectP25IndependentTrafficSource = [this, p25TrafficInCurrentSamplePassband](double voiceHz, double ccHz, bool phase2Traffic) -> P25TrafficSourceSelection {
+        auto selectP25IndependentTrafficSource = [this, p25TrafficInCurrentSamplePassband, p25Phase2TrafficInQualityPassband](double voiceHz, double ccHz, bool phase2Traffic) -> P25TrafficSourceSelection {
             P25TrafficSourceSelection out;
             if (!std::isfinite(voiceHz) || voiceHz <= 0.0) return out;
 
@@ -15791,6 +15806,13 @@ public:
                 double sr = 0.0;
                 if (mgr.getLatestSpectrum(i, pwr, cf, sr) && sr > 0.0 &&
                     p25TrafficInCurrentSamplePassband(voiceHz, cf, sr)) {
+                    // Phase-2 CQPSK at large low-IF offsets (field 005246: 750 kHz
+                    // from CC center) is "in passband" but does not acquire. Skip
+                    // reuse and fall through to physical low-IF retune.
+                    if (phase2Traffic &&
+                        !p25Phase2TrafficInQualityPassband(voiceHz, cf, sr)) {
+                        continue;
+                    }
                     const bool centeredOnVoice = std::abs(cf - voiceHz) <= 50.0;
                     const bool phase2LowIfFriendly =
                         !phase2Traffic ||
@@ -16266,7 +16288,7 @@ public:
             }
         };
 
-        auto autoFollowP25Grant = [this, p25Status, p25TgFollowBtn, tuneP25Path, prepareP25InBandVoiceTarget, p25TrafficInCurrentSamplePassband, scheduleP25VoiceFollowArm, returnP25AutoFollowToControl, selectP25IndependentTrafficSource, startP25IndependentTrafficSource, expireP25WarmStandbyIfNeeded]
+        auto autoFollowP25Grant = [this, p25Status, p25TgFollowBtn, tuneP25Path, prepareP25InBandVoiceTarget, p25TrafficInCurrentSamplePassband, p25Phase2TrafficInQualityPassband, scheduleP25VoiceFollowArm, returnP25AutoFollowToControl, selectP25IndependentTrafficSource, startP25IndependentTrafficSource, expireP25WarmStandbyIfNeeded]
             (const P25TalkgroupEntry& tg, const P25ControlEvent& event, qint64 nowMs) -> bool {
             if (!p25AutoFollowEnabled || tg.talkgroupId == 0) return false;
             if (event.talkgroupId != 0 && event.talkgroupId != tg.talkgroupId) return false;
@@ -16568,8 +16590,12 @@ public:
                             if (!std::isfinite(sameCallTrafficSampleRateHz) || sameCallTrafficSampleRateHz <= 0.0) {
                                 sameCallTrafficSampleRateHz = 2.048e6;
                             }
-                            sameCallCarrierOutsideSourcePassband =
-                                !p25TrafficInCurrentSamplePassband(sameCallFollowVoiceHz,
+                            // Phase-2 needs quality passband (not just Nyquist-legal).
+                            // Phase-1 can stay on the looser sample passband.
+                            sameCallCarrierOutsideSourcePassband = grantLooksPhase2
+                                ? !p25Phase2TrafficInQualityPassband(sameCallFollowVoiceHz,
+                                    sameCallTrafficSourceCenterHz, sameCallTrafficSampleRateHz)
+                                : !p25TrafficInCurrentSamplePassband(sameCallFollowVoiceHz,
                                     sameCallTrafficSourceCenterHz, sameCallTrafficSampleRateHz);
                             sameCallCarrierNeedsRetune = sameCallCarrierOutsideSourcePassband;
                             if (sameCallCarrierNeedsRetune) {
@@ -16699,11 +16725,12 @@ public:
                             .arg(followTg.talkgroupId)
                             .arg(static_cast<qlonglong>(std::llround(liveTrafficVoiceFreqHz)))
                             .arg(static_cast<qlonglong>(std::llround(sameCallFollowVoiceHz))),
-                        QString("P25 same-call grant requires RF retune: TG %1 voice %2MHz -> %3MHz is outside source center %4MHz sr=%5MHz; not updating traffic target until retune commits.")
+                        QString("P25 same-call grant requires RF retune: TG %1 voice %2MHz -> %3MHz is outside Phase-2 quality passband of source center %4MHz (offset=%5kHz sr=%6MHz); not updating traffic target until retune commits.")
                             .arg(followTg.talkgroupId)
                             .arg(liveTrafficVoiceFreqHz / 1e6, 0, 'f', 5)
                             .arg(sameCallFollowVoiceHz / 1e6, 0, 'f', 5)
                             .arg(sameCallTrafficSourceCenterHz / 1e6, 0, 'f', 5)
+                            .arg((sameCallFollowVoiceHz - sameCallTrafficSourceCenterHz) / 1000.0, 0, 'f', 1)
                             .arg(sameCallTrafficSampleRateHz / 1e6, 0, 'f', 3),
                         2500);
                 }
@@ -16711,6 +16738,24 @@ public:
                 const qint64 dwellSinceLastHopMs = p25AutoFollowLastMHzHopMs > 0
                     ? nowMs - p25AutoFollowLastMHzHopMs
                     : dwellSinceTuneMs;
+                const double sameCallHopDeltaHz =
+                    (sameCallFollowVoiceHz > 0.0 && liveTrafficVoiceFreqHz > 0.0)
+                        ? std::abs(liveTrafficVoiceFreqHz - sameCallFollowVoiceHz)
+                        : 0.0;
+                const bool sameCallHopAuthorized =
+                    p25GrantAuthorizesSameCallVoiceMHzHop(
+                        event, liveTrafficVoiceFreqHz, sameCallFollowVoiceHz,
+                        dwellSinceTuneMs, dwellSinceLastHopMs, activeTrafficDecodeUnlocked);
+                // Capture 20260808_005246: OP=0x02 hop to 419.875 stayed on
+                // RF center 419.125 (750 kHz edge) because Nyquist-legal in-source
+                // hop never retuned. When quality passband fails, force a real
+                // low-IF retune even for grant updates (within correction cap).
+                const bool sameCallQualityRetuneRequired =
+                    sameCallCarrierNeedsRetune &&
+                    grantLooksPhase2 &&
+                    sameCallHopDeltaHz > 50.0 &&
+                    sameCallHopDeltaHz <= kP25SameCallGrantUpdateCorrectionMaxMHzHopHz &&
+                    dwellSinceLastHopMs >= kP25SameCallDecodeUnlockedHopMinDwellMs;
                 const bool sameCallVoiceMHzHop =
                     sameCallCarrierNeedsRetune &&
                     grantLooksPhase2 &&
@@ -16719,10 +16764,8 @@ public:
                     sameCallFollowVoiceHz > 0.0 &&
                     std::isfinite(liveTrafficVoiceFreqHz) &&
                     liveTrafficVoiceFreqHz > 0.0 &&
-                    std::abs(liveTrafficVoiceFreqHz - sameCallFollowVoiceHz) > 50.0 &&
-                    p25GrantAuthorizesSameCallVoiceMHzHop(
-                        event, liveTrafficVoiceFreqHz, sameCallFollowVoiceHz,
-                        dwellSinceTuneMs, dwellSinceLastHopMs, activeTrafficDecodeUnlocked);
+                    sameCallHopDeltaHz > 50.0 &&
+                    (sameCallHopAuthorized || sameCallQualityRetuneRequired);
                 if (sameCallVoiceMHzHop) {
                     // Same TG moved to a new voice-channel allocation (e.g. 421.225 ->
                     // 420.225).  Metadata promotion alone leaves rx.freqHz and the RTL
@@ -16733,10 +16776,13 @@ public:
                             .arg(followTg.talkgroupId)
                             .arg(static_cast<qlonglong>(std::llround(liveTrafficVoiceFreqHz)))
                             .arg(static_cast<qlonglong>(std::llround(sameCallFollowVoiceHz))),
-                        QString("P25 auto-follow same-call MHz hop pending: TG %1 voice %2MHz -> %3MHz; retuning traffic source before continuing metadata-only follow.")
+                        QString("P25 auto-follow same-call MHz hop pending: TG %1 voice %2MHz -> %3MHz; retuning traffic source%4.")
                             .arg(followTg.talkgroupId)
                             .arg(liveTrafficVoiceFreqHz / 1e6, 0, 'f', 5)
-                            .arg(sameCallFollowVoiceHz / 1e6, 0, 'f', 5),
+                            .arg(sameCallFollowVoiceHz / 1e6, 0, 'f', 5)
+                            .arg(sameCallQualityRetuneRequired && !sameCallHopAuthorized
+                                ? " (quality passband / edge-of-RF recenter)"
+                                : " before continuing metadata-only follow"),
                         2500);
                 } else {
                     if (sameCallFollowVoiceHz > 0.0 &&
