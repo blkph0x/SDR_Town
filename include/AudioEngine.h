@@ -37,6 +37,10 @@ public:
     void setMasterVolume(float vol);
     void setOutputVolume(size_t activeIndex, float vol);
 
+    // Sprint 2: mute all playback (PTT anti-feedback). Independent of master volume.
+    void setOutputMuted(bool muted);
+    bool isOutputMuted() const noexcept { return m_outputMuted.load(std::memory_order_relaxed); }
+
     // Push a block of mono float samples (will be duplicated + gained to all active devices)
     // Call from your demod/resample thread at ~10-50ms blocks for low latency.
     void pushAudio(const float* samples, size_t count);
@@ -179,6 +183,7 @@ public:
     std::shared_ptr<ActiveOutput> findActiveOutput(ma_device* pDev);
 
     std::atomic<float> m_masterVolume{0.85f};
+    std::atomic<bool> m_outputMuted{false};
 
     std::atomic<float> m_sampleRate{48000.0f};  // actual output rate; used for exact audio block sizing and bitrate reporting
     float getSampleRate() const { return m_sampleRate.load(std::memory_order_relaxed); }

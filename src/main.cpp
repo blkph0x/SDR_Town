@@ -29,6 +29,7 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QSpinBox>
+#include <QProgressBar>
 #include <QSlider>
 #include <QHeaderView>
 #include <QGroupBox>
@@ -63,6 +64,7 @@
 #include "DeviceManager.h"
 #include "SpectrumWidget.h"
 #include "AudioEngine.h"
+#include "AudioCapture.h"
 #include "Demod.h"
 #include "P25Control.h"
 #include "P25LiveDecoder.h"
@@ -15255,11 +15257,77 @@ public:
         p25TxCfgLay->addWidget(p25TxStatus);
         p25TxCfgLay->addStretch();
         p25TxLay->addLayout(p25TxCfgLay);
-        QLabel* p25TxHint = new QLabel("Clear unencrypted only. No writeStream yet — PTT only advances the TX state machine and logs.");
+
+        // Sprint 2: mic select + level meter (feeds future AMBE encode).
+        QHBoxLayout* p25TxMicLay = new QHBoxLayout();
+        QComboBox* p25TxMicCombo = new QComboBox();
+        p25TxMicCombo->setMinimumWidth(220);
+        p25TxMicCombo->setToolTip("Capture device for P25 TX mic path.");
+        QPushButton* p25TxMicRefreshBtn = new QPushButton("Mics");
+        p25TxMicRefreshBtn->setToolTip("Refresh capture device list.");
+        QProgressBar* p25TxMicMeter = new QProgressBar();
+        p25TxMicMeter->setRange(0, 100);
+        p25TxMicMeter->setValue(0);
+        p25TxMicMeter->setTextVisible(true);
+        p25TxMicMeter->setFormat("mic %p%");
+        p25TxMicMeter->setMaximumWidth(160);
+        QCheckBox* p25TxMicMuteSpk = new QCheckBox("Mute spk on PTT");
+        p25TxMicMuteSpk->setChecked(true);
+        p25TxMicMuteSpk->setToolTip("Mute speaker outputs while PTT is held (anti-feedback).");
+        p25TxMicLay->addWidget(new QLabel("Mic:"));
+        p25TxMicLay->addWidget(p25TxMicCombo, 1);
+        p25TxMicLay->addWidget(p25TxMicRefreshBtn);
+        p25TxMicLay->addWidget(p25TxMicMeter);
+        p25TxMicLay->addWidget(p25TxMicMuteSpk);
+        p25TxLay->addLayout(p25TxMicLay);
+
+        QLabel* p25TxHint = new QLabel("Clear unencrypted only. Sprint 2: mic capture + level meter. PTT still advances TX SM; RF/encode not wired.");
         p25TxHint->setWordWrap(true);
         p25TxHint->setStyleSheet("color: #888;");
         p25TxLay->addWidget(p25TxHint);
         rxLay->addWidget(p25TxBox);
+
+        p25TxMicComboBox = p25TxMicCombo;
+        p25TxMicMeterBar = p25TxMicMeter;
+        p25TxMuteSpkCheckBox = p25TxMicMuteSpk;
+
+        auto refreshP25TxMics = [this, p25TxMicCombo]() {
+            p25TxMicCombo->clear();
+            const auto mics = p25TxMic.enumerateCaptureDevices();
+            if (mics.empty()) {
+                p25TxMicCombo->addItem("(no capture devices)");
+                return;
+            }
+            int def = 0;
+            for (size_t i = 0; i < mics.size(); ++i) {
+                QString label = QString::fromStdString(mics[i].name);
+                if (mics[i].isDefault) {
+                    label += " (default)";
+                    def = static_cast<int>(i);
+                }
+                p25TxMicCombo->addItem(label, static_cast<int>(i));
+            }
+            p25TxMicCombo->setCurrentIndex(def);
+        };
+        refreshP25TxMics();
+        connect(p25TxMicRefreshBtn, &QPushButton::clicked, this, [refreshP25TxMics]() { refreshP25TxMics(); });
+
+        if (!p25TxMicMeterTimer) {
+            p25TxMicMeterTimer = new QTimer(this);
+            p25TxMicMeterTimer->setInterval(50);
+            connect(p25TxMicMeterTimer, &QTimer::timeout, this, [this]() {
+                if (!p25TxMicMeterBar) return;
+                if (!p25TxMic.isCapturing()) {
+                    p25TxMicMeterBar->setValue(0);
+                    return;
+                }
+                // Drain ring so it does not overrun while only metering.
+                float sink[1024];
+                while (p25TxMic.pull(sink, 1024) > 0) {}
+                const int pct = static_cast<int>(std::lround(std::min(1.0f, p25TxMic.levelMeter()) * 100.0f));
+                p25TxMicMeterBar->setValue(pct);
+            });
+        }
 
         p25TxArmCheckBox = p25TxArmCheck;
         p25TxPttButton = p25TxPttBtn;
@@ -15360,6 +15428,12 @@ public:
                 }
             } else {
                 applyP25TxEvent(P25TxEvent::Disarm);
+                p25TxMic.stop();
+                if (p25TxMicMeterTimer) p25TxMicMeterTimer->stop();
+                if (p25TxMicMeterBar) p25TxMicMeterBar->setValue(0);
+                if (AudioEngine* eng = getOrCreateAudioEngine()) {
+                    eng->setOutputMuted(false);
+                }
             }
             if (p25TxPttButton) {
                 p25TxPttButton->setEnabled(p25TxSnapshot.state == P25TxState::Armed ||
@@ -15375,6 +15449,20 @@ public:
         connect(p25TxPttBtn, &QPushButton::pressed, this, [this, applyP25TxEvent]() {
             p25TxSnapshot.pttHeld = true;
             p25TxSnapshot.pttPressedMs = QDateTime::currentMSecsSinceEpoch();
+            // Sprint 2: open mic + optional speaker mute while keyed.
+            int micIdx = -1;
+            if (p25TxMicComboBox && p25TxMicComboBox->currentData().isValid()) {
+                micIdx = p25TxMicComboBox->currentData().toInt();
+            }
+            if (!p25TxMic.isCapturing()) {
+                p25TxMic.start(micIdx, 48000.0);
+            }
+            if (p25TxMicMeterTimer) p25TxMicMeterTimer->start();
+            if (p25TxMuteSpkCheckBox && p25TxMuteSpkCheckBox->isChecked()) {
+                if (AudioEngine* eng = getOrCreateAudioEngine()) {
+                    eng->setOutputMuted(true);
+                }
+            }
             applyP25TxEvent(P25TxEvent::PttPress);
             // Sprint 0: advance Requesting → WaitGrant → (no grant) stays waiting
             if (p25TxSnapshot.state == P25TxState::Requesting) {
@@ -15383,6 +15471,9 @@ public:
         });
         connect(p25TxPttBtn, &QPushButton::released, this, [this, applyP25TxEvent]() {
             p25TxSnapshot.pttHeld = false;
+            if (AudioEngine* eng = getOrCreateAudioEngine()) {
+                eng->setOutputMuted(false);
+            }
             applyP25TxEvent(P25TxEvent::PttRelease);
             // Drain hang so UI returns to Armed without a timer for Sprint 0
             if (p25TxSnapshot.state == P25TxState::Hang) {
@@ -15392,6 +15483,12 @@ public:
                 applyP25TxEvent(P25TxEvent::HangComplete);
             }
             if (p25TxPttButton) p25TxPttButton->setChecked(false);
+            // Keep mic open while armed so next PTT has no open delay; stop if disarmed.
+            if (p25TxSnapshot.state == P25TxState::Idle || p25TxSnapshot.state == P25TxState::Error) {
+                p25TxMic.stop();
+                if (p25TxMicMeterTimer) p25TxMicMeterTimer->stop();
+                if (p25TxMicMeterBar) p25TxMicMeterBar->setValue(0);
+            }
         });
 
         auto refreshP25Talkgroups = [p25TgTable]() {
@@ -23674,8 +23771,9 @@ private:
     QCheckBox* p25AutoFollowCheckBox = nullptr;
     QCheckBox* p25IndependentTrafficCheckBox = nullptr;
     QLabel* p25StatusLabel = nullptr;
-    // Sprint 0 P25 clear TX shell (no RF emission).
+    // Sprint 0–2 P25 clear TX shell (mic capture; no RF encode yet).
     P25TxSnapshot p25TxSnapshot{};
+    AudioCapture p25TxMic;
     QCheckBox* p25TxArmCheckBox = nullptr;
     QPushButton* p25TxPttButton = nullptr;
     QLabel* p25TxStatusLabel = nullptr;
@@ -23683,6 +23781,10 @@ private:
     QSpinBox* p25TxTgSpinBox = nullptr;
     QSpinBox* p25TxNacSpinBox = nullptr;
     QSpinBox* p25TxDevSpinBox = nullptr;
+    QComboBox* p25TxMicComboBox = nullptr;
+    QProgressBar* p25TxMicMeterBar = nullptr;
+    QCheckBox* p25TxMuteSpkCheckBox = nullptr;
+    QTimer* p25TxMicMeterTimer = nullptr;
     QTimer* diagnosticsHeartbeatTimer = nullptr;
     QTimer* diagnosticsResourceTimer = nullptr;
     qint64 diagnosticsLastHeartbeatMs = 0;
@@ -25533,6 +25635,7 @@ int runCLI(int argc, char* argv[]) {
     std::vector<std::shared_ptr<Receiver>> cliReceivers;
     std::mutex cliRxMutex;  // S0-2 (P0): protect CLI receiver vector mutations (command thread) vs mon thread iteration
     std::unique_ptr<AudioEngine> cliAudio;
+    std::unique_ptr<AudioCapture> cliMic;
     std::atomic<bool> cliStop{false};
     std::atomic<bool> cliAudioEnabled{false};
     std::map<long long, P25ControlChannelAnalyzer> cliP25Analyzers;
@@ -26353,6 +26456,7 @@ int runCLI(int argc, char* argv[]) {
                       << "  audio list              - list playback devices\n"
                       << "  audio enable <out0> <out1?>\n"
                       << "  audio disable           - stop audio outputs\n"
+                      << "  audio mic list|start [i]|stop|level|dump <sec> [path] - Sprint 2 mic capture\n"
                       << "  rx add                  - add another receiver entry\n"
                       << "  quit / exit\n";
             } else if (cmd == "test") {
@@ -26900,6 +27004,55 @@ int runCLI(int argc, char* argv[]) {
                 auto outs = cliAudio->enumeratePlaybackDevices();
                 for (size_t i=0; i<outs.size(); ++i) {
                     std::cout << "  [" << i << "] " << outs[i].name << (outs[i].isDefault ? " (default)" : "") << "\n";
+                }
+            } else if (sub == "mic") {
+                std::string msub; iss >> msub;
+                for (auto& c : msub) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                if (!cliMic) cliMic = std::make_unique<AudioCapture>();
+                if (msub.empty() || msub == "list") {
+                    auto mics = cliMic->enumerateCaptureDevices();
+                    if (mics.empty()) std::cout << "(no capture devices)\n";
+                    for (size_t i = 0; i < mics.size(); ++i) {
+                        std::cout << "  [" << i << "] " << mics[i].name
+                                  << (mics[i].isDefault ? " (default)" : "") << "\n";
+                    }
+                } else if (msub == "start") {
+                    int idx = -1; iss >> idx;
+                    const bool ok = cliMic->start(idx, 48000.0);
+                    std::cout << "mic start ok=" << (ok ? "yes" : "no")
+                              << " device=" << cliMic->activeDeviceName()
+                              << " sr=" << cliMic->sampleRateHz() << "\n";
+                } else if (msub == "stop") {
+                    cliMic->stop();
+                    if (cliAudio) cliAudio->setOutputMuted(false);
+                    std::cout << "mic stopped\n";
+                } else if (msub == "level") {
+                    if (!cliMic->isCapturing()) {
+                        std::cout << "mic not capturing (audio mic start first)\n";
+                    } else {
+                        float sink[2048];
+                        while (cliMic->pull(sink, 2048) > 0) {}
+                        std::cout << "mic rms=" << cliMic->levelRms()
+                                  << " peak=" << cliMic->levelPeak()
+                                  << " meter=" << cliMic->levelMeter()
+                                  << " frames=" << cliMic->framesCaptured()
+                                  << " overruns=" << cliMic->overrunCount() << "\n";
+                    }
+                } else if (msub == "dump") {
+                    double sec = 2.0; iss >> sec;
+                    std::string path;
+                    iss >> path;
+                    if (path.empty()) {
+                        const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+                        QDir().mkpath(appData + "/tx_dumps");
+                        path = (appData + "/tx_dumps/mic_" +
+                            QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss") + ".wav").toStdString();
+                    }
+                    int idx = cliMic->activeDeviceIndex();
+                    const bool ok = cliMic->captureToWav(path, sec > 0.0 ? sec : 2.0, idx);
+                    std::cout << "mic dump ok=" << (ok ? "yes" : "no") << " path=" << path << "\n";
+                } else {
+                    std::cout << "audio mic list|start [i]|stop|level|dump <sec> [path]\n";
                 }
             } else if (sub == "enable") {
                 int a=-1, b=-1; iss >> a; iss >> b;

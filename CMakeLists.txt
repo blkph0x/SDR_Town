@@ -100,6 +100,8 @@ set(SDR_TOWN_SOURCES
     include/TranscriptWindow.h
     include/TranscriptTypes.h
     include/ITranscriptSource.h
+    src/AudioCapture.cpp
+    include/AudioCapture.h
 )
 
 # Resources (icons, qss, etc. later)
@@ -221,6 +223,7 @@ if(BUILD_TESTS)
   add_executable(sdr_town_tests
     tests/test_devicemanager.cpp
     tests/test_audioengine.cpp
+    tests/test_audiocapture.cpp
     tests/test_demod.cpp
     tests/test_p25control.cpp
     tests/test_p25live.cpp
@@ -230,6 +233,7 @@ if(BUILD_TESTS)
     tests/test_p25dsp.cpp
     src/DeviceManager.cpp
     src/AudioEngine.cpp
+    src/AudioCapture.cpp
     src/Demod.cpp
     src/P25Control.cpp
     src/P25LiveDecoder.cpp

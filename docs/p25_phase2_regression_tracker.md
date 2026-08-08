@@ -13,6 +13,17 @@ Track intentional policy and cadence changes so field regressions are easy to bi
 
 ## Changes
 
+### 2026-08-08 — Sprint 2 mic capture + PTT speaker mute
+
+**Delivered:**
+- `AudioCapture` (miniaudio capture, ring, AGC, soft limiter, 8 kHz pull helper)
+- `AudioEngine::setOutputMuted` for PTT anti-feedback
+- GUI: mic combo, level meter, mute-spk-on-PTT
+- CLI: `audio mic list|start|stop|level|dump`
+- Unit tests `[audio][capture]` (skips if no capture devices)
+
+**Not yet:** AMBE encode, superframe, H-CPM, trunk RF request.
+
 ### 2026-08-08 — Sprint 1 TX tone stream + CF32 dump
 
 **Delivered:**

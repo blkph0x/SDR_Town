@@ -15,7 +15,7 @@ constexpr size_t kOutputRingFrames = 1u << 19; // storage capacity; queued depth
 // selected-slot emit droughts (p90 gap ~160 ms, outliers 0.5–3.6 s). Keep a
 // deeper digital-voice jitter cap so pending→push can pre-buffer real AMBE
 // without inventing opposite-slot PLC.
-constexpr double kDigitalVoiceJitterSeconds = 0.85;
+constexpr double kDigitalVoiceJitterSeconds = 0.65;
 static_assert((kOutputRingFrames & (kOutputRingFrames - 1)) == 0,
               "Audio output ring capacity must stay a power of two for the fast wrap path.");
 
@@ -64,6 +64,7 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* /*pInpu
     }
 
     float* out = reinterpret_cast<float*>(pOutput);
+    const bool muted = engine->isOutputMuted();
 
     if (myAct && myAct->isTestTone.load()) {
         // Per-output test tone using countdown (no detached thread).
@@ -72,7 +73,7 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* /*pInpu
         float delta = 2.0f * 3.14159265f * freq / engine->getSampleRate();
 
         for (ma_uint32 i = 0; i < frameCount; ++i) {
-            out[i] = 0.6f * std::sin(phase);
+            out[i] = muted ? 0.0f : (0.6f * std::sin(phase));
             phase += delta;
             if (phase > 2.0f * 3.14159265f) phase -= 2.0f * 3.14159265f;
         }
@@ -95,7 +96,7 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* /*pInpu
         if (myAct && myAct->valid.load(std::memory_order_acquire)) {
             auto& rb = myAct->ring;
             float master = engine->getMasterVolume();
-            float v = master * myAct->volume.load();
+            float v = muted ? 0.0f : (master * myAct->volume.load());
             size_t toRead = frameCount;
             size_t read = 0;
 
@@ -311,6 +312,11 @@ void AudioEngine::stopDevice(size_t activeIdx)
     // a callback or another control path that only needs the active-output list.
     stopAndUninitOutput(actPtr);
     spdlog::info("Stopped audio output #{}", activeIdx);
+}
+
+void AudioEngine::setOutputMuted(bool muted)
+{
+    m_outputMuted.store(muted, std::memory_order_relaxed);
 }
 
 void AudioEngine::setMasterVolume(float vol)
