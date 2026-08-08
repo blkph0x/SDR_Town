@@ -13,31 +13,28 @@ Track intentional policy and cadence changes so field regressions are easy to bi
 
 ## Changes
 
-### 2026-08-08 — Streaming DDC + no live-edge RF skip (chop/blocky)
+### 2026-08-08 — Streaming DDC rollback + block-channelize recovery
 
 **Field:**
-- `20260807_232020`: block channelize, 32-cand Cold, dutySec≈0.3
-- `20260807_234054` (after DDC enable): context=0 / 200 ms jobs, but only **~7% RF
-  coverage** (span 88 s, ~6 s decoded); cold live-edge jump when lag>200 ms; cold
-  CQPSK until first emit; concealment-dominant muted clear PCM; dups high.
+- `20260807_234054`: streaming DDC on; still ~7% RF coverage
+- `20260807_235726` (short hops + aggressive lock-only): **worse** — emit=7 vs
+  empty=805, underruns~45k, dutySec near 0; p2bursts=0 with dsp~21 ms lock-only
 
 **Root causes (confirmed):**
-1. Block channelize wiped sticky CQPSK every hop (fixed by streaming DDC).
-2. `maxBacklog=200 ms` + cold live-edge sync **discarded** most speech RF pre-emit.
-3. `coldAcquireJob` stayed true until emit → 32-cand searches for entire early call.
-4. 200 ms catch-up jobs at ~180 ms DSP kept lag and blocky islands.
-5. `phase2-concealment-dominant` muted trusted clear windows with any PLC.
+1. Streaming DDC lock-only after first (possibly false) eye stuck on dead CQPSK.
+2. Device cursor rewind to `lastDecode` abandoned live RTL samples → RF holes.
+3. Sub-80 ms block/stream hops too short to re-acquire Phase-2 eye reliably.
 
-**Fixes:**
-- Realtime Phase-2 enables streaming DDC; contiguous fresh-only hops (overlap=0).
-- Active rolling **2.0 s**; max lag **1.2 s** once eye exists; never live-edge jump
-  after first Phase-2 burst/emit.
-- Cold acquire ends on **hadBurstEye** (not only emit); lock-only CQPSK after eye.
-- Speaker sustain **80 ms** / catch-up **100 ms** (many fast jobs).
-- Concealment gate does not mute clear-trusted selected-slot PCM.
+**Fixes (this revision):**
+- **Disable** realtime streaming DDC again (stateless block channelize).
+- Speaker sustain **140 ms** / catch-up **160 ms** with **40 ms** overlap.
+- Cold ends only on hard acquire **or target VCW** (not any p2burst).
+- After target eye: medium CQPSK budget (**16 cand / 100 ms**), not full cold 32.
+- Always pull device cursor at rolling live edge (no lastDecode rewind).
+- Rolling 2.0 s; concealment gate still allows clear-trusted PCM.
 
-**Watch:** RF coverage ≈ wall time while talking; dutySec→1.0; dsp≪80 ms after lock;
-no long absStart gaps between worker hops.
+**Watch:** emit≫empty during talk; underruns not climbing tens of thousands;
+dutySec back to ≥0.3 immediately, then improve.
 
 ### 2026-08-01 — Streaming continuity + MAC lock + security sticky (P0/P1 audit)
 

@@ -2512,18 +2512,17 @@ static constexpr double kP25Phase2VoiceDecodeAcquireOverlapSeconds = 0.160;
 static constexpr double kP25Phase2VoiceDecodeSustainChunkSeconds = 0.080;
 static constexpr double kP25Phase2VoiceDecodeSustainMinFreshSeconds = 0.040;
 static constexpr double kP25Phase2VoiceDecodeSustainOverlapSeconds = 0.080;
-// Speaker-live sustain: short contiguous hops so sticky CQPSK/framer can walk
-// the RF in real time. Capture 20260807_234054 used 200 ms catch-up jobs at
-// ~180 ms DSP each and only covered ~7% of the RF stream → blocky islands.
-// Prefer 60–80 ms hops; drain lag with many fast jobs, not one monolith.
+// Block-channelize speaker hops need enough eye for CQPSK re-acquire + ≥1
+// selected-slot Voice4. 80 ms fresh was too short (p2vcw=0 drought); 200 ms
+// catch-up was too slow. 140 ms max / 80 ms min fresh / 40 ms overlap balances
+// multi-burst hit rate vs worker duty (field 20260807_234054 / 235726).
 // Slot isolation remains hard (only followed grantSlot is fed).
-static constexpr double kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.080;
-static constexpr double kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.040;
-static constexpr double kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.020;
-// Catch-up stays short so one job cannot monopolize the worker while lag grows.
-static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.100;
-static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.050;
-static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpOverlapSeconds = 0.020;
+static constexpr double kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.140;
+static constexpr double kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.080;
+static constexpr double kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.040;
+static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.160;
+static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.100;
+static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpOverlapSeconds = 0.040;
 // If the voice worker falls behind live RF, decode a larger near-live chunk
 // with short context so one worker pass can refill the speaker ring.
 // Cap catch-up at ~180 ms so a single job cannot monopolize the worker for
@@ -3038,15 +3037,11 @@ static P25LiveDecoderConfig p25VoiceDecoderConfig(bool phase2,
     P25LiveDecoderConfig cfg = profile == P25VoiceDecodeProfile::Forensic
         ? p25DiagnosticDecoderConfig()
         : p25RealtimeVoiceDecoderConfig();
-    // Capture 20260807_232020: block channelize cleared CQPSK/framer/mask-phase
-    // on every hop (processIq), then cold-searched 32 CQPSK candidates for
-    // ~200–400 ms on only ~32–60 ms of RF. Result: one Voice4 island (~80 ms PCM)
-    // every 200–350 ms, dutySec≈0.24–0.48, speech “faster” and choppy.
-    // Realtime Phase-2 traffic uses contiguous rolling takeUndecoded (overlap=0
-    // once streaming plan is selected) so the stateful DDC + sticky CQPSK/framer
-    // walk is valid. Forensic/diagnostic stays on stateless block channelize.
-    cfg.enableStreamingChannelDdc =
-        phase2 && profile == P25VoiceDecodeProfile::Realtime;
+    // Capture 20260807_235726: streaming DDC + aggressive lock-only after first
+    // eye produced emit=7 vs empty=805 and ~45k ring underruns — worse than the
+    // prior block-channelize islands. Keep validated stateless channelize for
+    // windowed processIq until contiguous sticky DDC is proven end-to-end.
+    cfg.enableStreamingChannelDdc = false;
     // Phase 1 C4FM/control-channel symbols are 4800 sps.
     // Phase 2 H-DQPSK air rate is 6000 sps (TIA-102 / SDRTrunk P25P2DecoderHDQPSK
     // `super(6000.0)`).  The old "same air symbol rate" 4800 override was a
@@ -9370,19 +9365,14 @@ static void p25Phase2PrepareRollingIqPull(DeviceManager& mgr,
             const uint64_t maxBacklog = static_cast<uint64_t>(
                 std::clamp(sampleRateHz * maxBacklogSeconds, 4096.0, 4194304.0));
             if (backlog > maxBacklog) {
-                const bool coldAcquirePreferLiveEdge =
-                    rx.p25IndependentTrafficSource &&
-                    rx.p25VoicePhase2 &&
-                    !havePhase2Eye;
-                if (coldAcquirePreferLiveEdge) {
-                    // True cold only (no bursts yet): prefer live edge so brief
-                    // PTTs are not buried under stale pre-grant IQ.
-                    syncAbsolute = rolling.endAbsolute;
-                } else {
-                    // Decode is behind the rolling buffer; stop pulling live-edge
-                    // IQ until the worker drains backlog instead of skipping RF.
-                    syncAbsolute = rolling.lastDecodeAbsolute;
-                }
+                // Always keep the device cursor at the rolling live edge so the
+                // RTL ring is not left unread. Rewinding to lastDecode (older
+                // code) abandoned live samples and punched multi-second RF holes
+                // (20260807_235726). Rolling trim drops already-decoded prefix;
+                // undecoded backlog is drained by successive decode hops.
+                // True-cold still prefers live edge (same syncAbsolute).
+                syncAbsolute = rolling.endAbsolute;
+                (void)havePhase2Eye;
             }
         }
         mgr.syncReceiverCursorToAbsolute(devIndex, rx, syncAbsolute);
@@ -22317,15 +22307,16 @@ private:
                     } else {
                         Receiver& rx = *job.rx;
                         const auto t0 = std::chrono::steady_clock::now();
-                        // Cold only until the first Phase-2 eye. Waiting for
-                        // hadSuccessfulEmit kept 32-candidate CQPSK searches for
-                        // the entire pre-audio window and starved RF coverage
-                        // (20260807_234054: 32 cand / Cold while p2vcw already high).
+                        // Cold only until hard acquire OR a real target VCW eye.
+                        // Ending cold on any p2burst alone (20260807_235726) drove
+                        // lock-only/hot budgets while the eye was still wrong →
+                        // emit=7 empty=805. Require target-slot evidence or emit.
                         const bool coldAcquireJob =
                             rx.p25IndependentTrafficSource &&
                             rx.p25VoicePhase2 &&
                             !p25Phase2SessionHasHardTargetAcquire(rx) &&
-                            !p25Phase2SessionHadBurstEye(rx);
+                            rx.p25SessionState.sustain.peakPhase2TargetVoiceCodewords == 0 &&
+                            rx.p25VoiceDiagnostics.phase2TargetVoiceCodewords == 0;
                         const bool establishedClearStreaming =
                             p25Phase2EstablishedClearVoiceStreamingLocked(rx);
                         const P25VoiceDiagSnapshot& workerDiag = rx.p25VoiceDiagnostics;
@@ -22343,24 +22334,24 @@ private:
                             (p25Phase2SessionHadBurstEye(rx) ||
                              rx.p25VoiceLiveDecoder.cqpskLockValid() ||
                              rx.p25SessionState.sustain.hadBootstrapMaskLock);
-                        // Streaming DDC: lock-only as soon as CQPSK or a Phase-2
-                        // eye exists — not only after full hard-clear evidence.
+                        // Lock-only only when streaming DDC is on AND CQPSK is
+                        // actually valid with clear streaming evidence. Never
+                        // force candidates=1 from a single false p2burst.
                         const bool streamingCqpskJob =
                             rx.p25IndependentTrafficSource &&
                             rx.p25VoicePhase2 &&
                             rx.p25VoiceLiveDecoder.config().enableStreamingChannelDdc &&
+                            rx.p25VoiceLiveDecoder.cqpskLockValid() &&
                             !coldAcquireJob &&
-                            (rx.p25VoiceLiveDecoder.cqpskLockValid() ||
-                             p25Phase2SessionHadBurstEye(rx) ||
-                             establishedClearStreaming ||
+                            (establishedClearStreaming ||
                              selectedClearStreamingEye ||
-                             rx.p25SessionState.sustain.peakPhase2Bursts >= 1 ||
-                             workerDiag.phase2Bursts > 0);
+                             rx.p25SessionState.sustain.hadSuccessfulEmit);
                         const bool hotPhase2TrafficJob =
                             rx.p25IndependentTrafficSource &&
                             rx.p25VoicePhase2 &&
                             !coldAcquireJob &&
                             (streamingCqpskJob ||
+                             p25Phase2SessionHasHardTargetAcquire(rx) ||
                              p25Phase2SessionHadBurstEye(rx) ||
                              rx.p25SessionState.sustain.peakPhase2MaskedBursts >= 1 ||
                              rx.p25SessionState.sustain.peakPhase2SuperframeBursts >= 2);
@@ -22420,14 +22411,17 @@ private:
                                 rx.p25VoiceLiveDecoder.setMaxPhase2SuperframeLocks(
                                     boundedConfigValue(priorPhase2Locks, kP25VoiceWorkerHotMaxPhase2SuperframeLocks));
                             } else if (hotPhase2TrafficJob) {
-                                // Block channelize clears sticky CQPSK each window.
-                                // Keep cold-class search so post-emit hops can
-                                // reacquire the same RF eye (20260729_114627).
+                                // Block channelize still re-searches each window, but
+                                // after target VCW/emit use a medium budget (not full
+                                // cold 32@160ms) so hops stay near real-time.
                                 rx.p25VoiceLiveDecoder.setRealtimeDecodeBudgetMs(
-                                    std::min(priorDecodeBudgetMs, kP25VoiceWorkerColdRealtimeBudgetMs));
+                                    std::min(priorDecodeBudgetMs, 100));
                                 rx.p25VoiceLiveDecoder.setMaxCqpskSearchCandidates(
-                                    boundedConfigValue(priorCqpskCandidates,
-                                                       kP25VoiceWorkerColdMaxCqpskCandidates));
+                                    boundedConfigValue(priorCqpskCandidates, size_t{16}));
+                                rx.p25VoiceLiveDecoder.setMaxPhase2SyncHits(
+                                    boundedConfigValue(priorPhase2SyncHits, kP25VoiceWorkerHotMaxPhase2SyncHits));
+                                rx.p25VoiceLiveDecoder.setMaxPhase2SuperframeLocks(
+                                    boundedConfigValue(priorPhase2Locks, kP25VoiceWorkerHotMaxPhase2SuperframeLocks));
                             }
                             rx.p25VoiceLiveDecoder.setCqpskDiscreteFrozen(
                                 p25Phase2ShouldFreezeCqpskDiscrete(rx));

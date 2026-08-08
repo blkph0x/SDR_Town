@@ -18,17 +18,16 @@ checks = {
         )[1][:500]
     ),
     "speaker sustain multi-burst hop": (
-        "kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.080" in main
-        and "kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.020" in main
+        "kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.140" in main
+        and "kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.040" in main
     ),
     "speaker catch-up constants present": (
-        "kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.100" in main
-        and "kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.050" in main
+        "kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.160" in main
+        and "kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.100" in main
     ),
-    "realtime phase2 enables streaming ddc": (
-        "phase2 && profile == P25VoiceDecodeProfile::Realtime" in main
-        and "cfg.enableStreamingChannelDdc =" in main
-        and "Capture 20260807_232020" in main
+    "voice config keeps streaming ddc off": (
+        "cfg.enableStreamingChannelDdc = false" in main
+        and "Capture 20260807_235726" in main
     ),
     "empty-eye does not invalidate epoch": (
         "do NOT invalidate" in main.split("hadSuccessfulEmit &&", 1)[1][:600]
@@ -38,13 +37,11 @@ checks = {
         "enableStreamingChannelDdc" in main.split("streamingCqpskJob", 1)[1][:500]
         and "enableStreamingChannelDdc" in main.split("streamLockOnlyWindow", 1)[1][:400]
     ),
-    "block channelize keeps cold cqpsk budget": (
-        "blockChannelizeReacquire" in main
-        and "hotPhase2TrafficJob &&" in main
-        and "enableStreamingChannelDdc) {" in main.split("hotPhase2TrafficJob &&", 1)[1][:200]
-        and "kP25VoiceWorkerColdRealtimeBudgetMs" in main.split(
-            "Block channelize clears sticky CQPSK each window", 1
-        )[1][:500]
+    "block channelize hot uses medium cqpsk budget": (
+        "hotPhase2TrafficJob" in main
+        and "Block channelize still re-searches each window" in main
+        and "std::min(priorDecodeBudgetMs, 100)" in main
+        and "boundedConfigValue(priorCqpskCandidates, size_t{16})" in main
     ),
     "carried ess alone is not cqpsk hard lock": (
         "thisWindowPhase2Structure" in decoder

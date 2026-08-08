@@ -19,9 +19,8 @@ checks = {
     "block resample full sinc support": (
         "pos + static_cast<double>(radius) >= static_cast<double>(x.size())" in decoder
     ),
-    "realtime phase2 enables streaming DDC": (
-        "cfg.enableStreamingChannelDdc =" in main_cpp
-        and "phase2 && profile == P25VoiceDecodeProfile::Realtime" in main_cpp
+    "voice config keeps streaming DDC off": (
+        "cfg.enableStreamingChannelDdc = false" in main_cpp
     ),
 }
 
