@@ -3,7 +3,47 @@
 #include <QCoreApplication>
 #include <QStandardPaths>
 #include <QDir>
+#include <QFile>
 #include <fstream>
+#include <thread>
+#include <chrono>
+
+TEST_CASE("DeviceManager Sprint 1 tone TX file dump", "[devicemanager][tx]") {
+    int argc = 0;
+    char* argv[] = {nullptr};
+    QCoreApplication app(argc, argv);
+    app.setApplicationName("SDR Town Test");
+    app.setOrganizationName("SDR_Town");
+
+    auto& mgr = DeviceManager::instance();
+    auto devs = mgr.enumerateDevices(false);
+    REQUIRE_FALSE(devs.empty());
+
+    const QString dumpPath = QDir::temp().filePath("sdr_town_tx_tone_test.cf32");
+    QFile::remove(dumpPath);
+
+    DeviceManager::TxParams p;
+    p.centerHz = 450e6;
+    p.sampleRate = 2.0e6;
+    p.toneHz = 1000.0;
+    p.amplitude = 0.2;
+    p.dumpPath = dumpPath.toStdString();
+    p.attemptHardware = false; // unit test: file-only path
+    p.allowFileOnlyFallback = true;
+
+    REQUIRE(mgr.startToneTx(0, p));
+    REQUIRE(mgr.isTransmitting(0));
+    REQUIRE_FALSE(mgr.isHardwareTxActive(0));
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    mgr.stopTx(0);
+    REQUIRE_FALSE(mgr.isTransmitting(0));
+    REQUIRE(mgr.getTxSamplesWritten(0) > 1000);
+
+    QFile f(dumpPath);
+    REQUIRE(f.exists());
+    REQUIRE(f.size() > 1000);
+    f.remove();
+}
 
 TEST_CASE("DeviceManager basic functionality", "[devicemanager]") {
     // Minimal Qt app for paths

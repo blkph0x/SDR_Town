@@ -147,8 +147,37 @@ public:
     // Setup for RTL-SDR discovery (paths + module load)
     void setupSoapyForRTLSDR();
 
+    // --- Sprint 1: TX stream (tone / future P25 IQ). Separate from RX ring. ---
+    // Hardware TX requires a canTx device. Offline CF32 dump works on any index.
+    struct TxParams {
+        double centerHz = 0.0;
+        double sampleRate = 2.0e6;
+        double gainDb = 20.0;
+        double toneHz = 1000.0;     // baseband complex LO offset tone
+        double amplitude = 0.25;    // peak |I|/|Q| scale (0..1)
+        std::string dumpPath;       // optional host-endian CF32 dump (always written if set)
+        bool attemptHardware = true;
+        // If true and hardware open fails, still run dump/null sink (default).
+        bool allowFileOnlyFallback = true;
+    };
+
+    // Start continuous tone TX. Stops any prior TX on this index first.
+    // Returns false if index invalid or both hardware and dump path unavailable.
+    bool startToneTx(size_t index, const TxParams& params);
+    void stopTx(size_t index);
+    void stopAllTx();
+    bool isTransmitting(size_t index) const;
+    std::string getTxRuntimeState(size_t index) const;
+    uint64_t getTxSamplesWritten(size_t index) const;
+    // True only when a live Soapy TX stream is active (not file-only).
+    bool isHardwareTxActive(size_t index) const;
+
 private:
-    DeviceManager() = default;
+    DeviceManager();
+    ~DeviceManager();
+    DeviceManager(const DeviceManager&) = delete;
+    DeviceManager& operator=(const DeviceManager&) = delete;
+
     std::vector<DeviceInfo> devices;
     mutable std::mutex devicesMutex;  // protects devices and streams access from enumerate vs workers (P1 race mitigation)
 
@@ -219,7 +248,31 @@ private:
     };
     std::vector<std::unique_ptr<StreamState>> streams;
 
+    // Per-device TX session (independent Soapy TX handle when possible).
+    struct TxStreamState {
+        std::mutex lifecycleMutex;
+        std::atomic<bool> active{false};
+        std::atomic<bool> stopFlag{false};
+        std::atomic<bool> hardwareActive{false};
+        std::atomic<bool> threadRunning{false};
+        std::atomic<uint64_t> sessionGen{0};
+        std::atomic<uint64_t> samplesWritten{0};
+        std::string runtimeState = "idle";
+        TxParams params;
+        std::thread txThread;
+#ifdef HAVE_SOAPYSDR
+        SoapySDR::Device* soapyDev = nullptr;
+        SoapySDR::Stream* txStream = nullptr;
+#endif
+    };
+    std::vector<std::unique_ptr<TxStreamState>> txStreams;
+    mutable std::mutex txStreamsMutex;
+
     StreamState* streamState(size_t index) const;
+    TxStreamState* txStreamState(size_t index);
+    const TxStreamState* txStreamState(size_t index) const;
+    void ensureTxStreamSlot(size_t index);
+    void txThreadFunc(size_t index, uint64_t expectedGeneration);
     void rxThreadFunc(size_t index, uint64_t expectedGeneration);  // background RX loop
     void resetStreamBuffers(StreamState& st);
     // Live center-frequency retune: bump stream epoch without resetting the absolute

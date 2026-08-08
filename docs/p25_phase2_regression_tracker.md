@@ -13,6 +13,18 @@ Track intentional policy and cadence changes so field regressions are easy to bi
 
 ## Changes
 
+### 2026-08-08 — Sprint 1 TX tone stream + CF32 dump
+
+**Delivered:**
+- `DeviceManager::startToneTx` / `stopTx` / `stopAllTx`
+- Optional Soapy `SOAPY_SDR_TX` + `writeStream` when `canTx`
+- File-only CF32 dump path for offline validation without TX hardware
+- CLI: `tx tone <dev> <mhz> [hz=] [sec=] [gain=] [dump=]` / `tx stop`
+- Fail-safe: destructor + CLI quit call `stopAllTx`
+- Unit test: file dump produces IQ samples
+
+**Not yet:** mic, AMBE encode, superframe, H-CPM, trunk request RF.
+
 ### 2026-08-08 — Sprint 0 P25 Phase 2 clear TX shell (no RF)
 
 **Program:** Full P2 trunk clear TX (PTT) — multi-sprint. Sprint 0 only.

@@ -31,6 +31,14 @@
 static std::mutex gSoapyLiveIoMutex;
 #endif
 
+DeviceManager::DeviceManager() = default;
+
+DeviceManager::~DeviceManager()
+{
+    // Fail-safe: never leave PA/TX stream running after process teardown.
+    try { stopAllTx(); } catch (...) {}
+}
+
 DeviceManager& DeviceManager::instance() {
     static DeviceManager mgr;
     return mgr;
@@ -40,6 +48,31 @@ DeviceManager::StreamState* DeviceManager::streamState(size_t index) const {
     std::lock_guard<std::mutex> lk(devicesMutex);
     if (index >= streams.size()) return nullptr;
     return streams[index].get();
+}
+
+void DeviceManager::ensureTxStreamSlot(size_t index)
+{
+    std::lock_guard<std::mutex> lk(txStreamsMutex);
+    if (index >= txStreams.size()) {
+        txStreams.resize(index + 1);
+    }
+    if (!txStreams[index]) {
+        txStreams[index] = std::make_unique<TxStreamState>();
+    }
+}
+
+DeviceManager::TxStreamState* DeviceManager::txStreamState(size_t index)
+{
+    std::lock_guard<std::mutex> lk(txStreamsMutex);
+    if (index >= txStreams.size()) return nullptr;
+    return txStreams[index].get();
+}
+
+const DeviceManager::TxStreamState* DeviceManager::txStreamState(size_t index) const
+{
+    std::lock_guard<std::mutex> lk(txStreamsMutex);
+    if (index >= txStreams.size()) return nullptr;
+    return txStreams[index].get();
 }
 
 static double clampGainForDevice(const DeviceInfo& d, double gainDb) {
@@ -1875,4 +1908,339 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
             nextStubBlockTime = now;
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 1: TX tone stream + optional CF32 dump (hardware optional)
+// ---------------------------------------------------------------------------
+
+bool DeviceManager::startToneTx(size_t index, const TxParams& params)
+{
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (index >= devices.size()) {
+            spdlog::error("startToneTx: invalid device index {}", index);
+            return false;
+        }
+    }
+
+    TxParams p = params;
+    if (!std::isfinite(p.sampleRate) || p.sampleRate < 1e5) p.sampleRate = 2.0e6;
+    if (!std::isfinite(p.toneHz) || p.toneHz < 0.0) p.toneHz = 1000.0;
+    if (!std::isfinite(p.amplitude) || p.amplitude <= 0.0) p.amplitude = 0.25;
+    p.amplitude = std::min(1.0, std::max(0.01, p.amplitude));
+    if (!std::isfinite(p.centerHz) || p.centerHz <= 0.0) {
+        // Default: keep current RX center if streaming, else 0 (file-only ok).
+        if (auto* rx = streamState(index)) {
+            std::lock_guard<std::mutex> lk(rx->stateMutex);
+            if (rx->currentCenter > 0.0) p.centerHz = rx->currentCenter;
+        }
+    }
+
+    const bool wantDump = !p.dumpPath.empty();
+    bool deviceCanTx = false;
+    std::string driver;
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (index < devices.size()) {
+            deviceCanTx = devices[index].canTx;
+            driver = devices[index].driver;
+            if (driver == "hackrf" || driver == "plutosdr" || driver == "lime" ||
+                driver == "uhd" || driver == "bladerf") {
+                deviceCanTx = true;
+            }
+            if (driver == "rtlsdr") deviceCanTx = false;
+        }
+    }
+
+    stopTx(index);
+    ensureTxStreamSlot(index);
+    auto* txPtr = txStreamState(index);
+    if (!txPtr) return false;
+    auto& tx = *txPtr;
+
+    std::unique_lock<std::mutex> life(tx.lifecycleMutex);
+    tx.params = p;
+    tx.stopFlag = false;
+    tx.samplesWritten.store(0, std::memory_order_relaxed);
+    tx.hardwareActive.store(false, std::memory_order_relaxed);
+    tx.runtimeState = "starting";
+
+    bool hardwareOk = false;
+#ifdef HAVE_SOAPYSDR
+    if (p.attemptHardware && deviceCanTx) {
+        try {
+            std::map<std::string, std::string> args;
+            {
+                std::lock_guard<std::mutex> lk(devicesMutex);
+                if (index < devices.size()) {
+                    args["driver"] = devices[index].driver;
+                    if (!devices[index].serial.empty()) args["serial"] = devices[index].serial;
+                }
+            }
+            std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+            SoapySDR::Device* dev = SoapySDR::Device::make(args);
+            if (!dev) throw std::runtime_error("Soapy Device::make returned null for TX");
+
+            const double useRate = p.sampleRate;
+            try { dev->setSampleRate(SOAPY_SDR_TX, 0, useRate); } catch (...) {}
+            if (p.centerHz > 0.0) {
+                try { dev->setFrequency(SOAPY_SDR_TX, 0, p.centerHz); } catch (const std::exception& ex) {
+                    spdlog::warn("TX setFrequency failed: {}", ex.what());
+                }
+            }
+            try {
+                if (!devices.empty()) {
+                    // Prefer TX antenna when listed
+                    auto ants = dev->listAntennas(SOAPY_SDR_TX, 0);
+                    if (!ants.empty()) {
+                        try { dev->setAntenna(SOAPY_SDR_TX, 0, ants.front()); } catch (...) {}
+                    }
+                }
+            } catch (...) {}
+            try {
+                dev->setGainMode(SOAPY_SDR_TX, 0, false);
+                dev->setGain(SOAPY_SDR_TX, 0, p.gainDb);
+            } catch (...) {
+                try { dev->setGain(SOAPY_SDR_TX, 0, p.gainDb); } catch (...) {}
+            }
+
+            SoapySDR::Stream* stream = dev->setupStream(SOAPY_SDR_TX, "CF32");
+            if (!stream) {
+                SoapySDR::Device::unmake(dev);
+                throw std::runtime_error("setupStream(TX) returned null");
+            }
+            const int act = dev->activateStream(stream);
+            if (act != 0) {
+                dev->closeStream(stream);
+                SoapySDR::Device::unmake(dev);
+                throw std::runtime_error("activateStream(TX) failed code=" + std::to_string(act));
+            }
+            tx.soapyDev = dev;
+            tx.txStream = stream;
+            hardwareOk = true;
+            tx.hardwareActive.store(true, std::memory_order_release);
+            spdlog::info("TX hardware stream open on device {} @ {:.6f} MHz sr={:.3f} Msps gain={:.1f} dB tone={:.0f} Hz",
+                         index, p.centerHz / 1e6, useRate / 1e6, p.gainDb, p.toneHz);
+        } catch (const std::exception& ex) {
+            spdlog::warn("startToneTx hardware path failed on device {}: {}", index, ex.what());
+            hardwareOk = false;
+            tx.soapyDev = nullptr;
+            tx.txStream = nullptr;
+            tx.hardwareActive.store(false, std::memory_order_release);
+        }
+    }
+#else
+    (void)deviceCanTx;
+    (void)driver;
+#endif
+
+    if (!hardwareOk && !wantDump && !p.allowFileOnlyFallback) {
+        tx.runtimeState = "failed";
+        spdlog::error("startToneTx: no hardware TX and no dump path");
+        return false;
+    }
+    if (!hardwareOk && !wantDump) {
+        // Null sink still runs so SM/CLI can exercise the path (logs only).
+        tx.runtimeState = "null-sink";
+        spdlog::info("startToneTx: running null sink on device {} (no hardware, no dump path)", index);
+    } else if (!hardwareOk && wantDump) {
+        tx.runtimeState = "file-only";
+    } else if (hardwareOk && wantDump) {
+        tx.runtimeState = "hardware+file";
+    } else {
+        tx.runtimeState = "hardware";
+    }
+
+    const uint64_t gen = tx.sessionGen.fetch_add(1, std::memory_order_acq_rel) + 1;
+    tx.active.store(true, std::memory_order_release);
+    tx.txThread = std::thread(&DeviceManager::txThreadFunc, this, index, gen);
+    return true;
+}
+
+void DeviceManager::stopTx(size_t index)
+{
+    auto* txPtr = txStreamState(index);
+    if (!txPtr) return;
+    auto& tx = *txPtr;
+    std::unique_lock<std::mutex> life(tx.lifecycleMutex);
+    if (!tx.active.load(std::memory_order_acquire) && !tx.txThread.joinable()) {
+#ifdef HAVE_SOAPYSDR
+        if (!tx.soapyDev) return;
+#else
+        return;
+#endif
+    }
+
+    tx.sessionGen.fetch_add(1, std::memory_order_acq_rel);
+    tx.stopFlag.store(true, std::memory_order_release);
+
+    if (tx.txThread.joinable()) {
+        auto start = std::chrono::steady_clock::now();
+        while (tx.threadRunning.load(std::memory_order_acquire)) {
+            if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(500)) {
+                spdlog::warn("txThread device {} still running - detaching", index);
+                try { tx.txThread.detach(); } catch (...) {}
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(4));
+        }
+        if (tx.txThread.joinable()) {
+            try { tx.txThread.join(); } catch (...) {
+                try { tx.txThread.detach(); } catch (...) {}
+            }
+        }
+    }
+
+#ifdef HAVE_SOAPYSDR
+    SoapySDR::Device* dev = nullptr;
+    SoapySDR::Stream* stream = nullptr;
+    {
+        dev = tx.soapyDev;
+        stream = tx.txStream;
+        tx.soapyDev = nullptr;
+        tx.txStream = nullptr;
+    }
+    try {
+        if (dev && stream) {
+            std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+            try { dev->deactivateStream(stream); } catch (...) {}
+            try { dev->closeStream(stream); } catch (...) {}
+            SoapySDR::Device::unmake(dev);
+        } else if (dev) {
+            std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+            SoapySDR::Device::unmake(dev);
+        }
+    } catch (const std::exception& ex) {
+        spdlog::warn("stopTx Soapy teardown: {}", ex.what());
+    }
+#endif
+    tx.hardwareActive.store(false, std::memory_order_release);
+    tx.active.store(false, std::memory_order_release);
+    tx.runtimeState = "idle";
+    spdlog::info("TX stopped on device {} (samples written={})",
+                 index, tx.samplesWritten.load(std::memory_order_relaxed));
+}
+
+void DeviceManager::stopAllTx()
+{
+    size_t n = 0;
+    {
+        std::lock_guard<std::mutex> lk(txStreamsMutex);
+        n = txStreams.size();
+    }
+    for (size_t i = 0; i < n; ++i) stopTx(i);
+}
+
+bool DeviceManager::isTransmitting(size_t index) const
+{
+    const auto* tx = txStreamState(index);
+    return tx && tx->active.load(std::memory_order_acquire);
+}
+
+bool DeviceManager::isHardwareTxActive(size_t index) const
+{
+    const auto* tx = txStreamState(index);
+    return tx && tx->hardwareActive.load(std::memory_order_acquire);
+}
+
+std::string DeviceManager::getTxRuntimeState(size_t index) const
+{
+    const auto* tx = txStreamState(index);
+    if (!tx) return "none";
+    std::lock_guard<std::mutex> life(const_cast<TxStreamState*>(tx)->lifecycleMutex);
+    return tx->runtimeState;
+}
+
+uint64_t DeviceManager::getTxSamplesWritten(size_t index) const
+{
+    const auto* tx = txStreamState(index);
+    return tx ? tx->samplesWritten.load(std::memory_order_relaxed) : 0;
+}
+
+void DeviceManager::txThreadFunc(size_t index, uint64_t expectedGeneration)
+{
+    auto* txPtr = txStreamState(index);
+    if (!txPtr) return;
+    auto& tx = *txPtr;
+    tx.threadRunning.store(true, std::memory_order_release);
+
+    TxParams p;
+    {
+        std::lock_guard<std::mutex> life(tx.lifecycleMutex);
+        p = tx.params;
+    }
+
+    const double sr = p.sampleRate > 0.0 ? p.sampleRate : 2.0e6;
+    const double tone = p.toneHz;
+    const float amp = static_cast<float>(p.amplitude);
+    const double twoPi = 6.28318530717958647692;
+    double phase = 0.0;
+    const double dphi = twoPi * tone / sr;
+
+    // ~5 ms blocks for low latency / smooth underrun margin
+    const size_t blockSize = std::max<size_t>(256, static_cast<size_t>(sr * 0.005));
+    std::vector<std::complex<float>> block(blockSize);
+
+    std::ofstream dump;
+    if (!p.dumpPath.empty()) {
+        dump.open(p.dumpPath, std::ios::binary | std::ios::trunc);
+        if (!dump) {
+            spdlog::warn("TX dump open failed: {}", p.dumpPath);
+        } else {
+            spdlog::info("TX CF32 dump -> {}", p.dumpPath);
+        }
+    }
+
+    auto nextDeadline = std::chrono::steady_clock::now();
+    const auto blockPeriod = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<double>(static_cast<double>(blockSize) / sr));
+
+    while (!tx.stopFlag.load(std::memory_order_acquire)) {
+        if (tx.sessionGen.load(std::memory_order_acquire) != expectedGeneration) break;
+
+        for (size_t i = 0; i < blockSize; ++i) {
+            const float c = static_cast<float>(std::cos(phase));
+            const float s = static_cast<float>(std::sin(phase));
+            block[i] = {amp * c, amp * s};
+            phase += dphi;
+            if (phase > twoPi) phase -= twoPi;
+        }
+
+        if (dump) {
+            dump.write(reinterpret_cast<const char*>(block.data()),
+                       static_cast<std::streamsize>(block.size() * sizeof(std::complex<float>)));
+        }
+
+#ifdef HAVE_SOAPYSDR
+        if (tx.hardwareActive.load(std::memory_order_acquire) && tx.soapyDev && tx.txStream) {
+            try {
+                std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+                void* buffs[] = { block.data() };
+                int flags = 0;
+                long long timeNs = 0;
+                const int wrote = tx.soapyDev->writeStream(tx.txStream, buffs, blockSize, flags, timeNs, 100000);
+                if (wrote < 0) {
+                    spdlog::warn("writeStream error {} on device {}", wrote, index);
+                    // keep trying unless stop
+                }
+            } catch (const std::exception& ex) {
+                spdlog::warn("writeStream exception device {}: {}", index, ex.what());
+            }
+        }
+#endif
+
+        tx.samplesWritten.fetch_add(static_cast<uint64_t>(blockSize), std::memory_order_relaxed);
+
+        nextDeadline += blockPeriod;
+        auto now = std::chrono::steady_clock::now();
+        if (nextDeadline > now) {
+            std::this_thread::sleep_until(nextDeadline);
+        } else if (now - nextDeadline > std::chrono::milliseconds(50)) {
+            nextDeadline = now;
+        }
+    }
+
+    if (dump) dump.close();
+    tx.threadRunning.store(false, std::memory_order_release);
 }

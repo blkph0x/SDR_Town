@@ -26308,6 +26308,7 @@ int runCLI(int argc, char* argv[]) {
             for (auto& c : cmd) c = (char)std::tolower(c);
 
             if (cmd == "quit" || cmd == "exit" || cmd == "q") {
+                mgr.stopAllTx();
                 cliStop = true;
                 break;
             } else if (cmd == "help" || cmd == "h" || cmd == "?") {
@@ -26346,7 +26347,9 @@ int runCLI(int argc, char* argv[]) {
                       << "  test                      - alias for p25 test\n"
                       << "  p25 voicetest <sigmf|dir> <voice_mhz> [ms] [skip=<ms>] [slot=0|1] [tg=] [nac= wacn= system=] [clear|enc] [stream|legacy] [probe|noprobe] [windowms=720] [hopms=40] [wav=out.wav] [minframes=N] [minaudio=S] - continuous Phase 2 voice replay + automation gates\n"
                       << "  p25 voice               - show P25 voice backend status + Phase 2 validation-log path\n"
-                      << "  tx status|arm|disarm|config|ptt on|ptt off - Sprint 0 P25 clear TX shell (no RF)\n"
+                      << "  tx status|arm|disarm|config|ptt on|ptt off - P25 clear TX shell\n"
+                      << "  tx tone <dev> <mhz> [hz=1000] [sec=2] [gain=20] [dump=path.cf32] - Sprint 1 tone TX / IQ dump\n"
+                      << "  tx stop [dev]           - stop tone/TX on device (or all)\n"
                       << "  audio list              - list playback devices\n"
                       << "  audio enable <out0> <out1?>\n"
                       << "  audio disable           - stop audio outputs\n"
@@ -26819,8 +26822,76 @@ int runCLI(int argc, char* argv[]) {
                     std::cout << "tx ptt on|off\n";
                 }
                 printTxStatus();
+            } else if (sub == "tone") {
+                // Sprint 1: continuous complex baseband tone → hardware TX and/or CF32 dump.
+                int dev = 0;
+                double mhz = 0.0;
+                iss >> dev >> mhz;
+                double toneHz = 1000.0;
+                double seconds = 2.0;
+                double gainDb = 20.0;
+                std::string dumpPath;
+                std::string tok;
+                while (iss >> tok) {
+                    auto eq = tok.find('=');
+                    if (eq == std::string::npos) continue;
+                    std::string k = tok.substr(0, eq);
+                    std::string v = tok.substr(eq + 1);
+                    for (auto& c : k) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                    if (k == "hz" || k == "tone") toneHz = std::strtod(v.c_str(), nullptr);
+                    else if (k == "sec" || k == "seconds") seconds = std::strtod(v.c_str(), nullptr);
+                    else if (k == "gain") gainDb = std::strtod(v.c_str(), nullptr);
+                    else if (k == "dump" || k == "file") dumpPath = v;
+                }
+                if (mhz <= 0.0) {
+                    std::cout << "tx tone <dev> <mhz> [hz=1000] [sec=2] [gain=20] [dump=path.cf32]\n";
+                } else {
+                    if (dumpPath.empty()) {
+                        const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+                        QDir().mkpath(appData + "/tx_dumps");
+                        dumpPath = (appData + "/tx_dumps/tone_" +
+                            QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss") + ".cf32").toStdString();
+                    }
+                    DeviceManager::TxParams tp;
+                    tp.centerHz = mhz * 1e6;
+                    tp.toneHz = toneHz;
+                    tp.gainDb = gainDb;
+                    tp.dumpPath = dumpPath;
+                    tp.attemptHardware = true;
+                    tp.allowFileOnlyFallback = true;
+                    {
+                        auto* di = mgr.getDevice(static_cast<size_t>(dev));
+                        if (di && di->sampleRate > 1e5) tp.sampleRate = di->sampleRate;
+                    }
+                    const bool ok = mgr.startToneTx(static_cast<size_t>(dev), tp);
+                    std::cout << "tx tone start dev=" << dev
+                              << " mhz=" << mhz
+                              << " hz=" << toneHz
+                              << " sec=" << seconds
+                              << " state=" << mgr.getTxRuntimeState(static_cast<size_t>(dev))
+                              << " hw=" << (mgr.isHardwareTxActive(static_cast<size_t>(dev)) ? "yes" : "no")
+                              << " dump=" << dumpPath
+                              << " ok=" << (ok ? "yes" : "no") << "\n";
+                    if (ok && seconds > 0.0) {
+                        const int ms = static_cast<int>(std::max(0.05, seconds) * 1000.0);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+                        mgr.stopTx(static_cast<size_t>(dev));
+                        std::cout << "tx tone stopped samples="
+                                  << mgr.getTxSamplesWritten(static_cast<size_t>(dev))
+                                  << " state=" << mgr.getTxRuntimeState(static_cast<size_t>(dev)) << "\n";
+                    }
+                }
+            } else if (sub == "stop") {
+                int dev = -1;
+                if (iss >> dev) {
+                    mgr.stopTx(static_cast<size_t>(dev));
+                    std::cout << "tx stop dev=" << dev << "\n";
+                } else {
+                    mgr.stopAllTx();
+                    std::cout << "tx stop all\n";
+                }
             } else {
-                std::cout << "tx status | arm | disarm | config ... | ptt on|off\n";
+                std::cout << "tx status | arm | disarm | config ... | ptt on|off | tone ... | stop\n";
             }
         } else if (cmd == "audio") {
             std::string sub; iss >> sub; for(auto& c : sub) c = (char)std::tolower((unsigned char)c);
