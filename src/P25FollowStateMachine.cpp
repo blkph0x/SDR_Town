@@ -79,7 +79,10 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
     const bool hasRecentVoiceVcws = snapshot.phase2VoiceCodewords > 0 || snapshot.decodedFrames > 0 || snapshot.imbeFrames > 0;
     // Capture 20260808_010625: ACQ watchdog "no Phase 2 VCWs" fired 13–18s after
     // real gate=emit audio because recentSpeakerOutput was computed but never used.
-    constexpr int64_t kSpeakerFollowGraceMs = 5000;
+    // Capture 20260808_012422: still returned ~12s after emit islands (and
+    // preempted while CQPSK was re-locking). Hold longer through normal
+    // inter-island holes and empty-hop re-acquire.
+    constexpr int64_t kSpeakerFollowGraceMs = 15000;
     const bool recentSpeakerOutput =
         snapshot.recentSpeakerOutputMs > 0 &&
         snapshot.nowMs > 0 &&
@@ -215,7 +218,9 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         snapshot.phase2SuperframeBursts >= 4 &&
         snapshot.phase2MaskedBursts >= 4;
 
-    const int64_t continuationAnchorMs = snapshot.lastActiveMs;
+    // Speaker output must count as continuation (012422: lastActive lagged
+    // real emit, so idle/no-VCW timeouts used a stale silence clock).
+    const int64_t continuationAnchorMs = effectiveLastActiveMs;
     const bool phase2RecentContinuation =
         phase2Follow &&
         continuationAnchorMs > snapshot.tunedAtMs &&

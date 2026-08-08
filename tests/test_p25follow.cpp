@@ -611,7 +611,7 @@ TEST_CASE("P25 follow does not treat recent speaker output as live voice by itse
     REQUIRE(decision.action == P25FollowAction::None);
 
     snapshot.nowMs = 20'500;
-    snapshot.recentSpeakerOutputMs = 2'000; // far outside 5s speaker grace
+    snapshot.recentSpeakerOutputMs = 2'000; // far outside 15s speaker grace
     const auto lateDecision = evaluateP25Follow(snapshot);
     REQUIRE(lateDecision.activityGone);
     REQUIRE(lateDecision.action == P25FollowAction::ReturnNoVoiceCodewords);
@@ -624,7 +624,8 @@ TEST_CASE("P25 follow does not treat recent speaker output as live voice by itse
     REQUIRE_FALSE(holdDecision.tdmaNoVcwTimeout);
 
     // After speaker grace expires with no VCW, return is allowed again.
-    snapshot.nowMs = 56'000;
+    // Grace is 15s (field 012422: 5s still returned mid re-lock).
+    snapshot.nowMs = 66'000;
     snapshot.recentSpeakerOutputMs = 50'400;
     const auto expiredDecision = evaluateP25Follow(snapshot);
     REQUIRE(expiredDecision.action != P25FollowAction::None);

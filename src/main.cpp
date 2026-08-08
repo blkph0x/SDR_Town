@@ -7485,10 +7485,19 @@ static P25VoiceAudioBlock applyP25Phase2SecurityAudioGate(Receiver& rx,
     const bool trustedEncrypted =
         rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Encrypted ||
         windowEncrypted;
+    // Monotonic Clear latch is call-level proof. Capture 20260808_012422 fed VCWs
+    // then wiped PCM on Voice2/4 hops (ess=unknown) because trustedClear still
+    // required fresh ESS/session every window — opposite of the latch policy.
     const bool trustedClear =
         !trustedEncrypted &&
-        (sameCallRecentClearSustain ||
+        (latchClear ||
+         sameCallRecentClearSustain ||
          windowFreshClear ||
+         explicitClearGrantVoiceRelease ||
+         (rx.p25SessionState.sustain.hadSuccessfulEmit &&
+          (rx.p25VoiceClearKnown || latchClear) &&
+          !out.phase2WrongSlot &&
+          !out.phase2TargetEssEncrypted) ||
          unknownGrantProbeVoiceRelease);
     const bool trustedClearPendingRelease =
         trustedClear && key.valid() && p25Phase2PendingAudioMatches(rx, key);
@@ -11612,9 +11621,20 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
     auto releasePendingRawVoiceFromExplicitClearTrafficProof = [&]() {
         if (!audioKey.valid() || acceptedReleaseVoice || drainedPendingRawVoice) return;
         if (!canDrainPendingRawVoiceThisWindow()) return;
+        // Capture 20260808_012422: clear grant + target MAC CRC (or prior emit /
+        // clear latch) must drain the raw AMBE queue — waiting only for ESS left
+        // pending frames stranded when the next hop lost CQPSK lock.
         const bool explicitClearTrafficProof =
             p25Phase2ExplicitClearGrantVoiceReleaseEvidence(rx, out);
-        if (!explicitClearTrafficProof) return;
+        const bool clearLatchOrPostEmitDrain =
+            explicitClearGrantForCall &&
+            !out.phase2WrongSlot &&
+            !out.phase2TargetEssEncrypted &&
+            (rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Clear ||
+             rx.p25SessionState.sustain.hadSuccessfulEmit ||
+             out.phase2TargetMacCrcValid ||
+             out.phase2MacCrcValid > 0);
+        if (!explicitClearTrafficProof && !clearLatchOrPostEmitDrain) return;
 
         drainPendingRawVoice();
         // The control-channel grant selects the traffic slot; target-slot PTT/ESS
@@ -12007,8 +12027,30 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
         // Immediate AMBE-to-speaker feed requires security already proved clear
         // by target-slot ESS/PTT or prior same-call target traffic state. A
         // clear control grant may choose/follow a slot, but it cannot by itself
-        // release speaker audio.
-        // MAC CRC lock / mask alone must not open unknown or encrypted calls.
+        // open unknown/encrypted calls — once the call is latched clear or has
+        // already emitted, Voice2/4 hops (no ESS) must still feed.
+        // Capture 20260808_012422: mac=2/2 targetVcw=12 ess=unknown fed=0 on
+        // every logged VCW window because only ESS/session opened this gate,
+        // while continuous clear OR-list sat *behind* it.
+        const bool clearLatchOpen =
+            rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Clear &&
+            !rx.p25VoiceEncrypted &&
+            !out.phase2TargetEssEncrypted &&
+            !out.phase2WrongSlot;
+        const bool postEmitClearGrantOpen =
+            rx.p25SessionState.sustain.hadSuccessfulEmit &&
+            explicitClearGrantForCall &&
+            !out.phase2TargetEssEncrypted &&
+            !out.phase2WrongSlot;
+        const bool clearGrantMacOpen =
+            explicitClearGrantForCall &&
+            !out.phase2WrongSlot &&
+            !out.phase2TargetEssEncrypted &&
+            (out.phase2TargetMacCrcValid ||
+             out.phase2MacCrcValid > 0 ||
+             burst.macCrcValid ||
+             burst.macCrcLock ||
+             recentMacEvidenceForCall);
         const bool securityProvedClearForFeed =
             establishedClearCall ||
             explicitClearGrantHardVoiceRelease ||
@@ -12016,13 +12058,16 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             p25Phase2TargetHardClearEvidence(out) ||
             (burst.essKnown && !burst.encrypted && burst.sessionAudioRelease) ||
             // Window-level ESS already clear on the followed call (log: ess=clear).
-            (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted && !out.phase2WrongSlot);
+            (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted && !out.phase2WrongSlot) ||
+            clearLatchOpen ||
+            postEmitClearGrantOpen ||
+            clearGrantMacOpen ||
+            p25Phase2SessionSpeakerSustainActive(rx);
         // Selected-slot continuous clear: once traffic ESS/PTT (or established
         // same-call clear) is known, keep feeding descrambled Voice2/4 on the
         // grant slot every hop — do not re-require MAC/SF on every voice burst.
-        // Capture 20260808_010625: diag=waiting-clear-grant with p2vcw>0 and
-        // ess=clear on sibling windows — grant path must open when latch/ESS
-        // already prove clear on the followed slot.
+        // Capture 20260808_010625 / 012422: diag=waiting-clear-grant with
+        // p2vcw>0 — grant path must open when latch/MAC/emit already prove clear.
         const bool continuousSelectedClearFeed =
             currentBurstFeedTrusted &&
             securityProvedClearForFeed &&
@@ -12037,8 +12082,9 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
              p25Phase2TargetHardClearEvidence(out) ||
              (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted) ||
              p25Phase2SessionSpeakerSustainActive(rx) ||
-             (rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Clear &&
-              !rx.p25VoiceEncrypted) ||
+             clearLatchOpen ||
+             postEmitClearGrantOpen ||
+             clearGrantMacOpen ||
              (rx.p25VoiceClearKnown && !rx.p25VoiceEncrypted &&
               (burst.maskPhaseLock || burst.superframeLock || burst.stickySuperframe ||
                out.phase2SuperframeBursts > 0)));
@@ -16896,11 +16942,11 @@ public:
                             activeDiag.phase2MaskedBursts < 3 &&
                             activeDiag.phase2MacCrcValid == 0 &&
                             activeDiag.phase2EssKnown == false;
-                        // Capture 20260808_010625: preempted after "no decoded audio"
-                        // while speaker had emitted seconds earlier — diag window was
-                        // empty but follow was not stalled.
+                        // Capture 20260808_010625 / 012422: preempted after
+                        // "no decoded audio" while speaker had emitted (or was
+                        // mid empty-hop re-lock). Match follow-SM speaker grace.
                         const bool recentSpeakerHold =
-                            p25RecentSpeakerOutputActive(nowMs, 5000);
+                            p25RecentSpeakerOutputActive(nowMs, 15000);
                         currentVoiceUnacquired =
                             noDecodedAudio && noPhase2Lock && !recentSpeakerHold;
                         const qint64 silentDwellStealGraceMs = currentFollowClearTrusted
@@ -22541,23 +22587,48 @@ private:
                                 rx.p25VoiceLiveDecoder.setMaxPhase2SuperframeLocks(
                                     boundedConfigValue(priorPhase2Locks, kP25VoiceWorkerHotMaxPhase2SuperframeLocks));
                             } else if (hotPhase2TrafficJob) {
-                                // After successful emit, keep CQPSK search cheap so
-                                // hops stay under real-time (003647: 150–160 ms DSP
-                                // on ~140 ms RF → worker-busy + 1 s audio holes).
+                                // Block-channelize clears CQPSK/Gardner every hop.
+                                // Capture 20260808_012422: after emit islands,
+                                // 6@50ms never re-locked (p2bursts=0 for 20–40s
+                                // while RF still carried target VCWs on sibling
+                                // windows). Escalate search on empty streak.
                                 const bool speakerLiveHot =
                                     rx.p25SessionState.sustain.hadSuccessfulEmit ||
                                     p25Phase2SessionSpeakerSustainActive(rx) ||
                                     establishedClearStreaming;
-                                const int hotBudgetMs = speakerLiveHot ? 50 : 80;
-                                const size_t hotCands = speakerLiveHot ? size_t{6} : size_t{12};
+                                const int emptyStreak =
+                                    rx.p25SessionState.audioTail.consecutiveEmptyFeedWindows;
+                                const bool emptyEye =
+                                    rx.p25VoiceDiagnostics.phase2Bursts == 0 &&
+                                    rx.p25VoiceDiagnostics.phase2TargetVoiceCodewords == 0;
+                                const bool emptyStreakReacq =
+                                    rx.p25SessionState.sustain.hadSuccessfulEmit &&
+                                    ((emptyStreak >= 3) || (emptyEye && emptyStreak >= 2));
+                                int hotBudgetMs = 80;
+                                size_t hotCands = size_t{12};
+                                size_t hotSyncHits = kP25VoiceWorkerHotMaxPhase2SyncHits;
+                                size_t hotSfLocks = kP25VoiceWorkerHotMaxPhase2SuperframeLocks;
+                                if (emptyStreakReacq) {
+                                    hotBudgetMs = kP25VoiceWorkerColdRealtimeBudgetMs;
+                                    hotCands = kP25VoiceWorkerColdMaxCqpskCandidates;
+                                    hotSyncHits = size_t{48};
+                                    hotSfLocks = size_t{3};
+                                } else if (speakerLiveHot) {
+                                    // Modest re-search each hop after emit — not
+                                    // lock-only; block channelize has no sticky Costas.
+                                    hotBudgetMs = 90;
+                                    hotCands = size_t{16};
+                                    hotSyncHits = size_t{32};
+                                    hotSfLocks = size_t{2};
+                                }
                                 rx.p25VoiceLiveDecoder.setRealtimeDecodeBudgetMs(
                                     std::min(priorDecodeBudgetMs, hotBudgetMs));
                                 rx.p25VoiceLiveDecoder.setMaxCqpskSearchCandidates(
                                     boundedConfigValue(priorCqpskCandidates, hotCands));
                                 rx.p25VoiceLiveDecoder.setMaxPhase2SyncHits(
-                                    boundedConfigValue(priorPhase2SyncHits, kP25VoiceWorkerHotMaxPhase2SyncHits));
+                                    boundedConfigValue(priorPhase2SyncHits, hotSyncHits));
                                 rx.p25VoiceLiveDecoder.setMaxPhase2SuperframeLocks(
-                                    boundedConfigValue(priorPhase2Locks, kP25VoiceWorkerHotMaxPhase2SuperframeLocks));
+                                    boundedConfigValue(priorPhase2Locks, hotSfLocks));
                             }
                             rx.p25VoiceLiveDecoder.setCqpskDiscreteFrozen(
                                 p25Phase2ShouldFreezeCqpskDiscrete(rx));

@@ -13,6 +13,36 @@ Track intentional policy and cadence changes so field regressions are easy to bi
 
 ## Changes
 
+### 2026-08-08 — Continuous clear feed + CQPSK re-lock (012422)
+
+**Field `20260808_012422_300` (post speaker-grace/rolling fix):**
+- ~7.6 min capture; **gate=emit=10** islands only; dutySec max ~0.48 then drought
+- **All logged VOICE WORKER windows with p2vcw>0 had fed=0** (incl. mac=2/2, ess=clear)
+- After each island: p2bursts=0 for tens of seconds (dsp ~20–30 ms lock-starved hops)
+- ACQ watchdog still ~12s after emit; preempt after 37s “no decoded audio”
+- clearKnown=yes / callClearTrusted throughout waiting-clear-grant droughts
+
+**Root causes (confirmed in code+log):**
+1. `securityProvedClearForFeed` required ESS/session every hop; continuous-clear
+   OR-list (latch / clearKnown structure) sat **behind** that gate → Voice2/4
+   with xor/sf/mask and even mac=2/2 never fed mbelib.
+2. Security audio gate `trustedClear` ignored Clear latch alone → decoded PCM
+   wiped when hop had ess=unknown.
+3. Post-emit hot CQPSK budget 6@50ms cannot re-lock after block-channelize
+   clears Costas (empty streak stayed at p2bursts=0).
+4. Speaker follow/preempt grace 5s still shorter than empty-hop re-acquire.
+
+**Fixes:**
+- Open securityProvedClearForFeed on Clear latch, post-emit clear grant, or
+  clear-grant + target MAC CRC; continuous feed ORs the same.
+- Drain pending AMBE on latch/MAC/post-emit (not ESS-only).
+- trustedClear accepts latch Clear (and post-emit clear grant).
+- Empty-streak CQPSK escalate to cold 160ms/32 after emit; speaker-hot 90ms/16.
+- Speaker grace + preempt hold 15s; continuationAnchor uses effectiveLastActive.
+
+**Watch:** fed≈targetVcw on clear islands; multi-second dutySec; no ACQ return
+within 15s of emit; empty streak re-locks (p2bursts>0) without CC bounce.
+
 ### 2026-08-08 — Follow SM false return + rolling stuck (010625)
 
 **Field `20260808_010625` (post quality-passband retune):**
