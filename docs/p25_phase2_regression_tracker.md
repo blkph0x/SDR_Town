@@ -13,28 +13,25 @@ Track intentional policy and cadence changes so field regressions are easy to bi
 
 ## Changes
 
-### 2026-08-08 — Sticky mask/SF across block hops + continuous clear feed
+### 2026-08-08 — Abs-dedupe only on successful AMBE + faster live CQPSK
 
-**Field `20260808_001448` (post DDC rollback):** best so far — dutySec avg **0.50**,
-p90 **0.80**, max **0.92** on TG30003. Still choppy: dups high, blocks
-`vcw-present-but-no-sf-mask-yet` / `clear-grant-vcw-not-fed`, worker-busy,
-~155 ms DSP on 160 ms RF.
+**Field `20260808_003647`:** still blocky. emit=21 empty=334; classic pattern
+`targetVcw=6 fed=0 absDup=6`; 1–1.5 s holes between PCM islands; DSP 150–160 ms
+on ~140 ms RF; underruns ~48k.
 
 **Root causes (confirmed):**
-1. `processIq` block-channelize wiped **mask phase + superframe anchor** every hop,
-   defeating `findPhase2AnchorAlignedSuperframeLocks` sticky epoch (slot flip /
-   re-hunt).
-2. Per-burst SF/MAC re-required for AMBE feed even when `callClearTrusted=yes`.
-3. CQPSK re-search still heavy after eye (worker lag → cadence gaps).
+1. **Failed AMBE frames still called RememberEmitted** → permanent abs burn →
+   later hops suppress all VCWs as absDup with zero feed.
+2. Hot CQPSK still ~150 ms/hop → worker lag / cadence gaps.
+3. Abs-dibit map used `live.stats.symbolRate` (jitter) while align used config 6000.
 
 **Fixes:**
-- Retain XOR mask phase + SF dibit anchor across block channelize (still reset
-  CQPSK/framer/dibit tails). Opp-only windows soft-invalidate epoch.
-- Established clear selected-slot: epoch + mask trust without per-burst MAC/SF.
-- continuousSelectedClearFeed includes callSecurityLatch Clear + xor.
-- Hot CQPSK **12 cand / 80 ms**; speaker hops **120/140 ms** with 40 ms overlap.
+- Remember absolute dibit positions **only when AMBE decode succeeds**.
+- After successful emit: CQPSK **6 cand / 50 ms** (else 12/80).
+- Abs map uses **config symbolRate (6000)** consistently.
+- Speaker hops **100/120 ms** with **50 ms** overlap.
 
-**Watch:** dutySec p90 → 1.0; fewer `no-sf-mask-yet`; feedRatio↑; dspMs < hop ms.
+**Watch:** near-zero `tgt>0 fed=0 absDup=tgt`; dspMs ≪ hop; dutySec → 1.0.
 
 ### 2026-08-01 — Streaming continuity + MAC lock + security sticky (P0/P1 audit)
 

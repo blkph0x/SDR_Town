@@ -2512,17 +2512,16 @@ static constexpr double kP25Phase2VoiceDecodeAcquireOverlapSeconds = 0.160;
 static constexpr double kP25Phase2VoiceDecodeSustainChunkSeconds = 0.080;
 static constexpr double kP25Phase2VoiceDecodeSustainMinFreshSeconds = 0.040;
 static constexpr double kP25Phase2VoiceDecodeSustainOverlapSeconds = 0.080;
-// Block-channelize speaker hops: need CQPSK re-acquire + multi selected-slot
-// Voice4. Capture 20260808_001448 with ~160 ms jobs at ~155 ms DSP was near
-// real-time once mask/SF sticky; 120 ms max leaves headroom so worker-busy
-// does not open cadence gaps. Overlap supplies lattice pre-roll only.
+// Block-channelize speaker hops: CQPSK re-acquire + multi selected-slot Voice4.
+// 003647: 140 ms RF @ 150–160 ms DSP left no headroom; keep 100/120 ms hops and
+// 50 ms overlap so re-lock is easier while hot CQPSK stays ≤50 ms after emit.
 // Slot isolation remains hard (only followed grantSlot is fed).
-static constexpr double kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.120;
-static constexpr double kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.070;
-static constexpr double kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.040;
-static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.140;
-static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.080;
-static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpOverlapSeconds = 0.040;
+static constexpr double kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.100;
+static constexpr double kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.060;
+static constexpr double kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.050;
+static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.120;
+static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.070;
+static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpOverlapSeconds = 0.050;
 // If the voice worker falls behind live RF, decode a larger near-live chunk
 // with short context so one worker pass can refill the speaker ring.
 // Cap catch-up at ~180 ms so a single job cannot monopolize the worker for
@@ -11448,16 +11447,19 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
 
                 frame.lockedVariantBefore = 0;
                 const bool ok = p25DecodePhase2AmbeFrameToAudio(rx, pending.ambe96, outputRateHz, out, frame);
-                p25Phase2RememberEmittedAmbeFrame(rx,
-                                                  pending.codewordAbsDibit,
-                                                  pending.codewordEndAbsDibit,
-                                                  pending.haveAbsoluteDibits);
-                frame.lockedVariantAfter = 0;
-                ambeFrames.push_back(frame);
+                // Only burn absolute positions on successful PCM. Capture
+                // 20260808_003647 showed tgt=6 fed=0 absDup=6: failed AMBE
+                // still Remembered, so later hops permanently silenced speech.
                 if (ok) {
+                    p25Phase2RememberEmittedAmbeFrame(rx,
+                                                      pending.codewordAbsDibit,
+                                                      pending.codewordEndAbsDibit,
+                                                      pending.haveAbsoluteDibits);
                     acceptedVoice = true;
                     acceptedReleaseVoice = true;
                 }
+                frame.lockedVariantAfter = 0;
+                ambeFrames.push_back(frame);
                 continue;
             }
 
@@ -11529,16 +11531,16 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
 
                 speechFrame.lockedVariantBefore = 0;
                 const bool ok = p25DecodePhase2AmbeFrameToAudio(rx, speechItem.ambe96, outputRateHz, out, speechFrame);
-                p25Phase2RememberEmittedAmbeFrame(rx,
-                                                  speechItem.codewordAbsDibit,
-                                                  speechItem.codewordEndAbsDibit,
-                                                  speechItem.haveAbsoluteDibits);
-                speechFrame.lockedVariantAfter = 0;
-                ambeFrames.push_back(speechFrame);
                 if (ok) {
+                    p25Phase2RememberEmittedAmbeFrame(rx,
+                                                      speechItem.codewordAbsDibit,
+                                                      speechItem.codewordEndAbsDibit,
+                                                      speechItem.haveAbsoluteDibits);
                     acceptedVoice = true;
                     acceptedReleaseVoice = true;
                 }
+                speechFrame.lockedVariantAfter = 0;
+                ambeFrames.push_back(speechFrame);
             }
         }
     };
@@ -12246,10 +12248,10 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
                     ++rx.p25Phase2PreferredAmbeVariantHitsByVoiceIndex[variantSlot];
                     p25Phase2RefreshAmbeVariantSummary(rx, variantSlot);
                 }
-                p25Phase2RememberEmittedAmbeFrame(rx, speechItem.codewordAbsDibit, speechItem.codewordEndAbsDibit,
-                                                  speechItem.haveAbsoluteDibits);
-                ambeFrames.push_back(speechFrame);
+                // Remember only successful speaker frames (see pending path).
                 if (ok) {
+                    p25Phase2RememberEmittedAmbeFrame(rx, speechItem.codewordAbsDibit, speechItem.codewordEndAbsDibit,
+                                                      speechItem.haveAbsoluteDibits);
                     acceptedVoice = true;
                     if (lateEntryStrongTargetReleaseAllowed) {
                         lateEntryStrongTargetReleaseDecoded = true;
@@ -12257,6 +12259,7 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
                         acceptedReleaseVoice = true;
                     }
                 }
+                ambeFrames.push_back(speechFrame);
             }
 
             if (!drainedPendingRawVoice) {
@@ -12856,12 +12859,21 @@ static P25VoiceAudioBlock decodeP25VoiceAudioBlock(Receiver& rx,
         out.phase2TargetVoiceCodewords = out.phase2VoiceCodewords;
     }
 
+    // Use configured Phase-2 symbol rate for abs-dibit mapping (always 6000),
+    // not live.stats.symbolRate which can jitter and desync dedupe vs
+    // alignPhase2AbsoluteDibitCursor (same formula uses config.symbolRate).
+    const double absMapSymbolRate =
+        (rx.p25VoiceLiveDecoder.config().symbolRate > 0.0)
+            ? rx.p25VoiceLiveDecoder.config().symbolRate
+            : ((std::isfinite(live.stats.symbolRate) && live.stats.symbolRate > 0.0)
+                   ? live.stats.symbolRate
+                   : 6000.0);
     const bool haveAbsoluteDibits = iqStartAbsoluteKnown &&
         std::isfinite(sampleRateHz) && sampleRateHz > 0.0 &&
-        std::isfinite(live.stats.symbolRate) && live.stats.symbolRate > 0.0;
+        absMapSymbolRate > 0.0;
     const uint64_t windowStartAbsDibit = haveAbsoluteDibits
         ? static_cast<uint64_t>(std::llround(static_cast<long double>(iqStartAbsolute) *
-                                             static_cast<long double>(live.stats.symbolRate) /
+                                             static_cast<long double>(absMapSymbolRate) /
                                              static_cast<long double>(sampleRateHz)))
         : 0;
     const size_t clampedContextIqSamples = std::min(contextIqSamples, iq.size());
@@ -12869,7 +12881,7 @@ static P25VoiceAudioBlock decodeP25VoiceAudioBlock(Receiver& rx,
     const uint64_t freshStartAbsDibit = haveFreshStartDibits
         ? windowStartAbsDibit + static_cast<uint64_t>(
               std::llround(static_cast<long double>(clampedContextIqSamples) *
-                           static_cast<long double>(live.stats.symbolRate) /
+                           static_cast<long double>(absMapSymbolRate) /
                            static_cast<long double>(sampleRateHz)))
         : 0;
     if (rx.p25VoicePhase2) {
@@ -22443,14 +22455,19 @@ private:
                                 rx.p25VoiceLiveDecoder.setMaxPhase2SuperframeLocks(
                                     boundedConfigValue(priorPhase2Locks, kP25VoiceWorkerHotMaxPhase2SuperframeLocks));
                             } else if (hotPhase2TrafficJob) {
-                                // Block channelize re-searches CQPSK each window; with
-                                // sticky mask/SF retained, medium budget is enough.
-                                // 12@80ms keeps ~120 ms hops under wall-clock (001448
-                                // had ~155 ms DSP on 160 ms RF → worker-busy chop).
+                                // After successful emit, keep CQPSK search cheap so
+                                // hops stay under real-time (003647: 150–160 ms DSP
+                                // on ~140 ms RF → worker-busy + 1 s audio holes).
+                                const bool speakerLiveHot =
+                                    rx.p25SessionState.sustain.hadSuccessfulEmit ||
+                                    p25Phase2SessionSpeakerSustainActive(rx) ||
+                                    establishedClearStreaming;
+                                const int hotBudgetMs = speakerLiveHot ? 50 : 80;
+                                const size_t hotCands = speakerLiveHot ? size_t{6} : size_t{12};
                                 rx.p25VoiceLiveDecoder.setRealtimeDecodeBudgetMs(
-                                    std::min(priorDecodeBudgetMs, 80));
+                                    std::min(priorDecodeBudgetMs, hotBudgetMs));
                                 rx.p25VoiceLiveDecoder.setMaxCqpskSearchCandidates(
-                                    boundedConfigValue(priorCqpskCandidates, size_t{12}));
+                                    boundedConfigValue(priorCqpskCandidates, hotCands));
                                 rx.p25VoiceLiveDecoder.setMaxPhase2SyncHits(
                                     boundedConfigValue(priorPhase2SyncHits, kP25VoiceWorkerHotMaxPhase2SyncHits));
                                 rx.p25VoiceLiveDecoder.setMaxPhase2SuperframeLocks(
