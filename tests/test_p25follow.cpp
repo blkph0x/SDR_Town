@@ -606,15 +606,25 @@ TEST_CASE("P25 follow does not treat recent speaker output as live voice by itse
     const auto decision = evaluateP25Follow(snapshot);
     REQUIRE_FALSE(decision.activityGone);
     REQUIRE_FALSE(decision.voiceStillLooksActive);
+    // Field 20260808_010625: speaker grace blocks return-to-control even when
+    // the latest diagnostic window is empty (opposite-slot dwell between islands).
     REQUIRE(decision.action == P25FollowAction::None);
 
     snapshot.nowMs = 20'500;
-    snapshot.recentSpeakerOutputMs = 2'000;
+    snapshot.recentSpeakerOutputMs = 2'000; // far outside 5s speaker grace
     const auto lateDecision = evaluateP25Follow(snapshot);
     REQUIRE(lateDecision.activityGone);
     REQUIRE(lateDecision.action == P25FollowAction::ReturnNoVoiceCodewords);
 
+    // Fresh speaker output within grace must still suppress false ACQ returns.
     snapshot.nowMs = 50'500;
+    snapshot.recentSpeakerOutputMs = 50'400;
+    const auto holdDecision = evaluateP25Follow(snapshot);
+    REQUIRE(holdDecision.action == P25FollowAction::None);
+    REQUIRE_FALSE(holdDecision.tdmaNoVcwTimeout);
+
+    // After speaker grace expires with no VCW, return is allowed again.
+    snapshot.nowMs = 56'000;
     snapshot.recentSpeakerOutputMs = 50'400;
     const auto expiredDecision = evaluateP25Follow(snapshot);
     REQUIRE(expiredDecision.action != P25FollowAction::None);
@@ -1029,6 +1039,36 @@ TEST_CASE("Voice4 codewords share decoder sessionBurstId", "[p25][follow][contin
     REQUIRE(p25Phase2VoiceFrameKeysSameBurst(k0, k2));
     REQUIRE(p25Phase2VoiceFrameKeysSameBurst(k0, k3));
     REQUIRE_FALSE((k0.streamDibit - k0.voiceIndex) == (k1.streamDibit - k1.voiceIndex));
+}
+
+TEST_CASE("P25 Phase 2 protocol identity gates absolute AMBE de-dupe fallback", "[p25][follow][continuity]")
+{
+    Phase2VoiceFrameKey sessionKey;
+    sessionKey.sessionCodewordIdKnown = true;
+    sessionKey.sessionCodewordId = 77;
+    REQUIRE(p25Phase2VoiceFrameKeyHasProtocolIdentity(sessionKey));
+
+    Phase2VoiceFrameKey streamKey;
+    streamKey.streamDibitKnown = true;
+    streamKey.streamDibit = 10000;
+    streamKey.streamBurstStartDibitKnown = true;
+    streamKey.streamBurstStartDibit = 9900;
+    streamKey.slot = 1;
+    REQUIRE(p25Phase2VoiceFrameKeyHasProtocolIdentity(streamKey));
+
+    Phase2VoiceFrameKey burstKey;
+    burstKey.sessionBurstIdKnown = true;
+    burstKey.sessionBurstId = 42;
+    burstKey.slot = 0;
+    burstKey.voiceIndex = 3;
+    REQUIRE(p25Phase2VoiceFrameKeyHasProtocolIdentity(burstKey));
+
+    Phase2VoiceFrameKey fallbackOnly;
+    fallbackOnly.superframeAnchor = 100;
+    fallbackOnly.burstIndex = 2;
+    fallbackOnly.voiceIndex = 1;
+    fallbackOnly.slot = 0;
+    REQUIRE_FALSE(p25Phase2VoiceFrameKeyHasProtocolIdentity(fallbackOnly));
 }
 
 TEST_CASE("P25 frame keys with mixed stable coordinates are unorderable", "[p25][follow][continuity]")

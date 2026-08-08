@@ -77,7 +77,9 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
     // This fixes "stuck on inactive talk groups".
     // Partial sf/mask without ongoing VCW is explicitly not sufficient (see SDRTrunk comments in prior code).
     const bool hasRecentVoiceVcws = snapshot.phase2VoiceCodewords > 0 || snapshot.decodedFrames > 0 || snapshot.imbeFrames > 0;
-    constexpr int64_t kSpeakerFollowGraceMs = 2500;
+    // Capture 20260808_010625: ACQ watchdog "no Phase 2 VCWs" fired 13–18s after
+    // real gate=emit audio because recentSpeakerOutput was computed but never used.
+    constexpr int64_t kSpeakerFollowGraceMs = 5000;
     const bool recentSpeakerOutput =
         snapshot.recentSpeakerOutputMs > 0 &&
         snapshot.nowMs > 0 &&
@@ -87,13 +89,14 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         hasCarrier = snapshot.recentSnrDb > 3.0 ||
                      (snapshot.recentSignalLevelDb > snapshot.recentNoiseFloorDb + 5.0);
     }
+    // Speaker grace alone must not mark "live voice" (unit test + ghost hold),
+    // but it does extend lastActive / block return-to-control below.
     decision.voiceStillLooksActive = diagnosticFresh &&
         (hasRecentVoiceVcws || snapshot.phase2TrafficCallActive ||
          (snapshot.phase2TrafficAudioOpen && snapshot.phase2VoiceCodewords > 0)) &&
-        hasCarrier &&  // use actual RF energy (peak in BW vs noise floor) to ignore background noise as "real data"
+        hasCarrier &&
         (snapshot.phase2TrafficAudioOpen ||
          snapshot.phase2TrafficCallActive ||
-         // Only fall back to pure sync/nid for very brief P1-style or initial acquisition; not for sustained follow.
          (snapshot.phase2VoiceCodewords == 0 && snapshot.phase2Bursts == 0 &&
           (snapshot.syncs > 0 || snapshot.nids > 0) && (snapshot.nowMs - snapshot.tunedAtMs) < 3000));
 
@@ -124,7 +127,9 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         return decision;
     }
 
-    const int64_t effectiveLastActiveMs = snapshot.lastActiveMs;
+    // Speaker output is authoritative activity even when the latest 1s diagnostic
+    // window is empty (opposite-slot dwell / empty hops between islands).
+    const int64_t effectiveLastActiveMs = std::max(snapshot.lastActiveMs, snapshot.recentSpeakerOutputMs);
 
     const bool initialHoldExpired =
         snapshot.tunedAtMs > 0 && snapshot.nowMs - snapshot.tunedAtMs > 2500;
@@ -331,6 +336,7 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         tunedDurationMs <= (phase2UntrustedClearAcquire ? untrustedClearAcquireLimitMs : 45000);
 
     decision.tdmaNoVcwTimeout =
+        !recentSpeakerOutput &&
         !phase2StillAcquiring &&
         phase2Follow &&
         hasPublishedVoiceDiagnostic &&
@@ -349,6 +355,17 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
          diagIs(snapshot.diag, P25FollowDiagCode::NoSync) ||
          diagIs(snapshot.diag, P25FollowDiagCode::NoLduVoice) ||
          diagIs(snapshot.diag, P25FollowDiagCode::Phase2AudioLockMissing));
+
+    // Never return-to-control while the speaker recently played selected-slot PCM.
+    if (recentSpeakerOutput) {
+        decision.tdmaNoProgressTimeout = false;
+        decision.tdmaNoVcwTimeout = false;
+        decision.hardTimeout = false;
+        decision.activityGone = false;
+        decision.carrierDropped = false;
+        decision.action = P25FollowAction::None;
+        return decision;
+    }
 
     if (decision.tdmaNoProgressTimeout) {
         decision.action = P25FollowAction::ReturnNoMacEss;

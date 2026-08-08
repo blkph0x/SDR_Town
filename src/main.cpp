@@ -9247,7 +9247,34 @@ struct RollingIqWindow {
             firstNew = static_cast<size_t>(std::min<uint64_t>(decodeCursor, static_cast<uint64_t>(samples.size())));
         }
 
+        // Capture 20260808_010625: absKnown=no + waiting-fresh for 15s+ while
+        // rolling grew to 4–6M samples. Cursor sat at the live edge (firstNew
+        // ≈ size) after hard-cap catch-up; recover by rewinding into the buffer
+        // so minFresh can be satisfied from recent RF (abs-dedupe drops replays).
+        if (!absoluteKnown && firstNew >= samples.size() && samples.size() > minFreshSamples) {
+            const size_t recoverFresh = std::max(minFreshSamples, static_cast<size_t>(8192));
+            if (samples.size() > recoverFresh) {
+                firstNew = samples.size() - recoverFresh;
+                lastDecodeAbsolute = static_cast<uint64_t>(firstNew);
+                decodeAbsoluteKnown = true;
+                submittedDecodeEndKnown = false;
+            }
+        }
+
         if (firstNew >= samples.size()) return {};
+        // Soften minFresh when we only have a partial live-edge fill so we do
+        // not sit in waiting-fresh while the worker is free (010625: minFresh
+        // 245760 with empty take while RF was arriving).
+        size_t effectiveMinFresh = minFreshSamples;
+        if (samples.size() > firstNew) {
+            const size_t available = samples.size() - firstNew;
+            if (effectiveMinFresh > 0 && available > 0 && available < effectiveMinFresh) {
+                const size_t softFloor = absoluteKnown ? static_cast<size_t>(4096) : static_cast<size_t>(8192);
+                if (available >= softFloor) {
+                    effectiveMinFresh = available;
+                }
+            }
+        }
 
         // Phase 2 bursts are only 180 dibits apart and the symbol/timing recovery
         // needs pre-roll to stay locked.  Decoding a strictly non-overlapped
@@ -9273,7 +9300,7 @@ struct RollingIqWindow {
         const size_t freshBegin = std::max(first, firstNew);
         const size_t freshSamples = returnedEnd > freshBegin ? returnedEnd - freshBegin : 0;
         const size_t contextSamples = freshBegin > first ? freshBegin - first : 0;
-        if (minFreshSamples > 0 && freshSamples < minFreshSamples) {
+        if (effectiveMinFresh > 0 && freshSamples < effectiveMinFresh) {
             return {};
         }
         // After the first Phase-2 lock, never emit a sustain chunk without overlap
@@ -11993,6 +12020,9 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
         // Selected-slot continuous clear: once traffic ESS/PTT (or established
         // same-call clear) is known, keep feeding descrambled Voice2/4 on the
         // grant slot every hop — do not re-require MAC/SF on every voice burst.
+        // Capture 20260808_010625: diag=waiting-clear-grant with p2vcw>0 and
+        // ess=clear on sibling windows — grant path must open when latch/ESS
+        // already prove clear on the followed slot.
         const bool continuousSelectedClearFeed =
             currentBurstFeedTrusted &&
             securityProvedClearForFeed &&
@@ -12008,7 +12038,10 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
              (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted) ||
              p25Phase2SessionSpeakerSustainActive(rx) ||
              (rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Clear &&
-              !rx.p25VoiceEncrypted));
+              !rx.p25VoiceEncrypted) ||
+             (rx.p25VoiceClearKnown && !rx.p25VoiceEncrypted &&
+              (burst.maskPhaseLock || burst.superframeLock || burst.stickySuperframe ||
+               out.phase2SuperframeBursts > 0)));
         const bool immediateAmbeDecodeAllowed =
             continuousSelectedClearFeed ||
             (currentBurstFeedTrusted &&
@@ -16863,12 +16896,19 @@ public:
                             activeDiag.phase2MaskedBursts < 3 &&
                             activeDiag.phase2MacCrcValid == 0 &&
                             activeDiag.phase2EssKnown == false;
-                        currentVoiceUnacquired = noDecodedAudio && noPhase2Lock;
+                        // Capture 20260808_010625: preempted after "no decoded audio"
+                        // while speaker had emitted seconds earlier — diag window was
+                        // empty but follow was not stalled.
+                        const bool recentSpeakerHold =
+                            p25RecentSpeakerOutputActive(nowMs, 5000);
+                        currentVoiceUnacquired =
+                            noDecodedAudio && noPhase2Lock && !recentSpeakerHold;
                         const qint64 silentDwellStealGraceMs = currentFollowClearTrusted
                             ? kP25Phase2ClearTrustedSilentDwellStealGraceMs
                             : kP25Phase2SilentDwellStealGraceMs;
                         currentVoiceSilent =
                             noDecodedAudio &&
+                            !recentSpeakerHold &&
                             !activeDiag.phase2EssEncrypted &&
                             dwellMs >= silentDwellStealGraceMs;
                         activePhase2Unacquired = currentVoiceUnacquired || currentVoiceSilent;

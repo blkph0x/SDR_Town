@@ -13,26 +13,32 @@ Track intentional policy and cadence changes so field regressions are easy to bi
 
 ## Changes
 
-### 2026-08-08 — Phase-2 quality passband retune (edge-of-RF miss)
+### 2026-08-08 — Follow SM false return + rolling stuck (010625)
 
-**Field `20260808_005246`:** abs-dup fix worked (absDup+fed0≈1) but audio still
-sparse. Same-call hop **418.625→419.875** kept RF center **419.125** (|offset|
-**750 kHz**). Nyquist-legal (0.42·sr) but CQPSK dead after one window. TG11348
-retune to 413.375 correct but 0 VCW (late OP=0x02 / dead call). Emit≈2/session.
+**Field `20260808_010625` (post quality-passband retune):**
+- emit=3 empty=626 busy=312 waiting-fresh=265 absKnown=no storm
+- ACQ watchdog "no Phase 2 VCWs" **13–18s after real gate=emit audio**
+- Preempt stalled after 67–164s "no decoded audio" despite earlier speaker PCM
+- Quality retune 418.625→419.875 **did** fire (rfCenter=419.625) — good
+- 418.875: sumVcw=58 sumFed=0 (waiting clear grant)
+- absDup+fed0=0 (success-only remember holds)
 
-**Root causes:**
-1. In-source hop used Nyquist passband only — Phase-2 needs a tighter quality
-   window (~≤300–350 kHz / 25% Nyquist).
-2. Initial traffic-source reuse preferred same-wideband CC for ±750 kHz offsets.
-3. OP=0x02 large hops could be deferred instead of forcing low-IF retune.
+**Root causes (confirmed in code+log):**
+1. `recentSpeakerOutput` computed in follow SM but **never used** → false
+   ReturnNoVoiceCodewords after empty diagnostic windows.
+2. Stall preempt used current diag window only (no speaker grace).
+3. `takeUndecoded` with absKnown=no could sit at live edge with minFresh unmet
+   while rolling ballooned to 4–6M samples.
+4. waiting-clear-grant with clear latch / ESS not always continuous-feed.
 
 **Fixes:**
-- `p25Phase2TrafficInQualityPassband` for same-call Phase-2 hops + source select.
-- Quality miss forces MHz hop retune (including OP=0x02 within correction cap).
-- Abs-dedupe still success-only; hot CQPSK 6@50 ms after emit.
+- Follow SM: speaker grace 5s blocks all return-to-control actions; lastActive
+  includes recentSpeakerOutputMs; voiceStillLooksActive ORs speaker.
+- Preempt: require !recentSpeakerHold (5s).
+- takeUndecoded: recover sample-index cursor; soften minFresh at live edge.
+- continuousSelectedClearFeed: open when p25VoiceClearKnown + structure.
 
-**Watch:** logs show `quality passband / edge-of-RF recenter` hops; worker
-`cf` near voice (±250 kHz low-IF); continuous VCW after hop.
+**Watch:** zero watchdog-after-audio; waiting-fresh rare; fed≈target while clear.
 
 ### 2026-08-01 — Streaming continuity + MAC lock + security sticky (P0/P1 audit)
 
