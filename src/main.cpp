@@ -2588,10 +2588,12 @@ static constexpr qint64 kP25Phase2SameRfSlotHandoffGraceMs = 8000;
 static constexpr qint64 kP25Phase2SameRfUnacquiredSlotStealMs = 24000;
 static constexpr qint64 kP25Phase2SameRfMetadataSwitchCooldownMs = 8000;
 static constexpr qint64 kP25Phase2SameRfClearGrantHoldMs = 12000;
-// Speaker output can bridge only a short live-jitter gap.  A long speaker-only
-// hold makes stale decoded PCM look like an active TDMA call and leaves audio
-// playing after the real talkgroup traffic has ended.
+// Short hold: playout bridge / hop jitter / cadence diag only.
 static constexpr qint64 kP25Phase2SpeakerFollowHoldMs = 2500;
+// Capture 20260808_032428: different-TG steal at +0.5s while still emitting
+// (currentFollowSpeakerActive used only 2.5s). Protect active clear speech
+// against any different-TG auto-follow steal for a full inter-island gap.
+static constexpr qint64 kP25Phase2SpeakerFollowProtectMs = 20000;
 // Only treat very recent speaker output as a decode cadence gap.
 static constexpr qint64 kP25Phase2SpeakerDecodeGapBlockMs = 2500;
 
@@ -2661,9 +2663,9 @@ static bool p25Phase2SessionSpeakerSustainActive(const Receiver& rx) noexcept
     const auto& sustain = rx.p25SessionState.sustain;
     if (!sustain.hadSuccessfulEmit) return false;
     if (p25RecentSpeakerOutputActive(nowMs, kP25Phase2SpeakerFollowHoldMs)) return true;
-    // Keep sustain streaming for several seconds after the last PCM push so
-    // inter-slot silence does not drop us back to cold/unacquired hops.
-    return sustain.lastEmitMs > 0 && (nowMs - sustain.lastEmitMs) <= 8000;
+    // Keep sustain streaming after the last PCM push so inter-slot silence and
+    // CQPSK re-lock do not drop us back to cold/unacquired hops (032428 droughts).
+    return sustain.lastEmitMs > 0 && (nowMs - sustain.lastEmitMs) <= 20000;
 }
 
 static bool p25Phase2EstablishedClearVoiceStreamingLocked(const Receiver& rx) noexcept
@@ -8723,28 +8725,25 @@ static bool p25Phase2PlayoutBridgeAllowed(const Receiver& rx, qint64 nowMs) noex
     if (!sustain.hadSuccessfulEmit || sustain.lastEmitMs <= 0) return false;
 
     const qint64 sinceLastEmitMs = nowMs - sustain.lastEmitMs;
-    // Cover selected-slot hop variance and short worker holes (field 070533
-    // late p90 ~160 ms, outliers to ~710 ms).  Multi-second PTT ends still
-    // stop the bridge — silence there is correct, not ghost speech.
-    if (sinceLastEmitMs < 0 || sinceLastEmitMs > 1600) return false;
+    // Capture 20260808_032428: ~22s of gate=emit PCM but 40k underruns — islands
+    // of 40–160 ms every 0.5–2 s emptied the ring so the user heard almost
+    // nothing. Bridge silence longer while clear sustain is active so the ring
+    // does not click/underrun between opposite-slot dwell and re-lock holes.
+    if (sinceLastEmitMs < 0 || sinceLastEmitMs > 4500) return false;
 
     const bool activeClearTail =
         p25Phase2SessionSpeakerSustainActive(rx) ||
-        p25Phase2AudioTailGraceActive(rx);
+        p25Phase2AudioTailGraceActive(rx) ||
+        (rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Clear &&
+         !rx.p25VoiceEncrypted);
     if (!activeClearTail) return false;
 
-    // Field 20260720_070533: empty-audio worker windows are normal between
-    // selected-slot emit islands (TDMA opposite dwell + overlap).  Killing the
-    // silence bridge after only 8 empty windows left the ring to underrun and
-    // made speech sound disconnected.  Keep bridging through those holes; the
-    // since-last-real-emit cap still ends the bridge after PTT.  Ninety 20 ms
-    // frames covers the measured live-worker holes without manufacturing speech:
-    // the bridge is clock silence plus a click-free fade only.
     const auto& tail = rx.p25SessionState.audioTail;
-    if (tail.consecutivePlayoutBridgeFrames >= 90) return false;
-    if (sinceLastEmitMs > 1100 &&
-        (tail.consecutiveEmptyFeedWindows >= 32 ||
-         tail.consecutiveNoForwardFedWindows >= 32)) {
+    // ~4.5 s of 20 ms silence frames max while waiting for the next island.
+    if (tail.consecutivePlayoutBridgeFrames >= 225) return false;
+    if (sinceLastEmitMs > 3500 &&
+        (tail.consecutiveEmptyFeedWindows >= 48 ||
+         tail.consecutiveNoForwardFedWindows >= 48)) {
         return false;
     }
     return true;
@@ -17401,7 +17400,7 @@ public:
                         followTg.lastVoiceFreqHz > 0.0 &&
                         std::abs(liveFollowCarrierHz - followTg.lastVoiceFreqHz) <= 50.0;
                     currentFollowSpeakerActive =
-                        p25RecentSpeakerOutputActive(nowMs, kP25Phase2SpeakerFollowHoldMs);
+                        p25RecentSpeakerOutputActive(nowMs, kP25Phase2SpeakerFollowProtectMs);
                     phase2HandoffGraceActive = dwellMs >= 0 && dwellMs < kP25Phase2SameRfSlotHandoffGraceMs;
                     sameRfPhase2SlotHandoff = haveActiveDiag && currentVoiceUnacquired &&
                         sameRfPhase2Carrier && !phase2HandoffGraceActive &&
@@ -17436,6 +17435,22 @@ public:
                     p25AutoFollowVoiceFreqHz > 0.0 &&
                     std::isfinite(p25AutoFollowVoiceFreqHz) &&
                     std::abs(p25AutoFollowVoiceFreqHz - sameCallFollowVoiceHz) > 50.0;
+                // Absolute protect: any different TG while speaker recently played
+                // (field 032428: steal mid-emit after min dwell on different MHz).
+                if (p25FollowTalkgroupId != followTg.talkgroupId &&
+                    !sameTgVoiceHopPending &&
+                    p25RecentSpeakerOutputActive(nowMs, kP25Phase2SpeakerFollowProtectMs)) {
+                    appendP25LogLineKeyed(QString("auto-follow-speaker-protect:%1:%2")
+                            .arg(p25FollowTalkgroupId)
+                            .arg(followTg.talkgroupId),
+                        QString("P25 auto-follow speaker protect: keeping TG %1 (recent speaker PCM within %2ms); ignoring different TG %3 voice=%4MHz.")
+                            .arg(p25FollowTalkgroupId)
+                            .arg(kP25Phase2SpeakerFollowProtectMs)
+                            .arg(followTg.talkgroupId)
+                            .arg(followTg.lastVoiceFreqHz / 1e6, 0, 'f', 5),
+                        1500);
+                    return false;
+                }
                 if (sameRfDifferentSlotGrant &&
                     currentFollowSpeakerActive &&
                     !activePhase2Unacquired &&

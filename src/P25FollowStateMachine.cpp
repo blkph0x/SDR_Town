@@ -77,11 +77,10 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
     // This fixes "stuck on inactive talk groups".
     // Partial sf/mask without ongoing VCW is explicitly not sufficient (see SDRTrunk comments in prior code).
     const bool hasRecentVoiceVcws = snapshot.phase2VoiceCodewords > 0 || snapshot.decodedFrames > 0 || snapshot.imbeFrames > 0;
-    // Capture 20260808_010625 / 012422 / 022809: ACQ watchdog and preempt still
-    // tear down clear calls through natural speech pauses + CQPSK re-lock holes.
-    // sdrtrunk keeps the traffic channel until decoder squelch ends the call —
-    // hold 25s after real speaker PCM before return-to-control.
-    constexpr int64_t kSpeakerFollowGraceMs = 25000;
+    // Capture 032428: watchdog ~26s after last emit on clear TG 30003 (25s was
+    // one second short). Hold 40s after real speaker PCM before ACQ return —
+    // sdrtrunk keeps traffic until squelch, not a short no-VCW timer.
+    constexpr int64_t kSpeakerFollowGraceMs = 40000;
     const bool recentSpeakerOutput =
         snapshot.recentSpeakerOutputMs > 0 &&
         snapshot.nowMs > 0 &&

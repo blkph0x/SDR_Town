@@ -13,6 +13,23 @@ Track intentional policy and cadence changes so field regressions are easy to bi
 
 ## Changes
 
+### 2026-08-08 — Capture 032428: more PCM but user heard little
+
+**Field:** ~10 min, **260 gate=emit**, **~22 s PCM pushed**, underruns 9k→41k.
+DutySec avg 0.10; only 4× duty≥0.5. Quality OK when open (wrongSlot 1/260).
+
+**Why “didn’t hear much”:**
+1. Sparse islands (80–160 ms) every 0.5–2 s → ring underrun → sounds like silence
+2. Mid-speech TG steal at +0.5 s (`currentFollowSpeakerActive` only 2.5 s)
+3. ACQ watchdog ~26 s after last emit (25 s grace one second short)
+4. Still long `no-vcw-from-live-window` droughts after islands
+
+**Fixes:**
+- Absolute speaker protect **20 s** against any different-TG steal
+- ACQ speaker grace **40 s**
+- Speaker sustain hop mode **20 s** after emit
+- Playout silence bridge **4.5 s** while clear latch (stop underrun clicks)
+
 ### 2026-08-08 — RX clear sustain vs sdrtrunk (022809)
 
 **Field `20260808_022809` (post latch-bleed fix):**

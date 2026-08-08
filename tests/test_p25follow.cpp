@@ -610,8 +610,8 @@ TEST_CASE("P25 follow does not treat recent speaker output as live voice by itse
     // the latest diagnostic window is empty (opposite-slot dwell between islands).
     REQUIRE(decision.action == P25FollowAction::None);
 
-    snapshot.nowMs = 40'500;
-    snapshot.recentSpeakerOutputMs = 2'000; // far outside 25s speaker grace
+    snapshot.nowMs = 50'500;
+    snapshot.recentSpeakerOutputMs = 2'000; // far outside 40s speaker grace
     const auto lateDecision = evaluateP25Follow(snapshot);
     REQUIRE(lateDecision.activityGone);
     REQUIRE(lateDecision.action == P25FollowAction::ReturnNoVoiceCodewords);
@@ -624,8 +624,8 @@ TEST_CASE("P25 follow does not treat recent speaker output as live voice by itse
     REQUIRE_FALSE(holdDecision.tdmaNoVcwTimeout);
 
     // After speaker grace expires with no VCW, return is allowed again.
-    // Grace is 25s (field 022809: 15s still preempted mid clear call).
-    snapshot.nowMs = 76'000;
+    // Grace is 40s (field 032428: 25s still watchdog mid clear call).
+    snapshot.nowMs = 91'000;
     snapshot.recentSpeakerOutputMs = 50'400;
     const auto expiredDecision = evaluateP25Follow(snapshot);
     REQUIRE(expiredDecision.action != P25FollowAction::None);
