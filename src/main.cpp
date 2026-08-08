@@ -6992,38 +6992,43 @@ static bool p25Phase2BlockHasTrustedClearContext(const P25VoiceAudioBlock& out) 
 // timeslot and only plays after clear PTT/ESS on that slot; sticky grant-clear
 // must not keep feeding mbelib through MAC-dead dual-slot chaos.  Sticky
 // targetEss=clear / sticky phase2TargetMacCrcValid (recent-security latch) must
-// NOT defeat this gate — only this-window phase2MacCrcValid counts.
+// NOT defeat this gate — only this-window MAC CRC counts.
+//
+// Capture 20260808_034136 (user: "more voice but blocky/shonky, nothing can be
+// made out"): 63/177 emits dual-slot, ALL with p2mac=0/x, ALL ess=clear sticky,
+// ALL companion "accounted" (rej>=opp).  Prior gate trusted those via
+// companion+sticky-ESS+sf/mask and released ~38s of wrong-epoch AMBE as
+// explicit-clear-grant-traffic-clear-release.  Rejecting opposite labels only
+// proves we discarded companion VCWs — it does NOT prove XOR mask epoch on the
+// selected slot.  Fail closed: dual-slot requires this-window MAC CRC.
 static bool p25Phase2DualSlotUntrustedGarbleWindow(const P25VoiceAudioBlock& out) noexcept
 {
     if (out.phase2OppositeVoiceCodewords == 0) return false;
-    if (out.phase2TargetVoiceCodewords == 0) return false;
-    // Capture 20260808_021134: previously returned false once mbelib was fed,
-    // so dual-slot ess=unknown garbage (tv=8 ov=6 fed=8 mac=0/0) reached the
-    // speaker as trusted-clear-release. Mute untrusted dual-slot even after feed.
+    if (out.phase2TargetVoiceCodewords == 0) return true;
+    // This-window MAC only.  Sticky ESS clear / session-release / recent latch
+    // must never green-light MAC-dead dual-slot (034136 blocky path).
+    const bool thisWindowMacOk =
+        out.phase2MacCrcValid > 0 ||
+        out.phase2TargetMacCrcValid;
+    if (!thisWindowMacOk) {
+        return true;
+    }
+    // MAC present: still refuse when companion is busier and not accounted, or
+    // selected slot is a weak fragment without mask structure.
     const bool companionSlotAccounted =
         out.phase2RejectedVoiceCodewords >= out.phase2OppositeVoiceCodewords ||
         out.phase2WrongSlotVoiceCodewords >= out.phase2OppositeVoiceCodewords;
-    const bool targetSlotClear =
-        out.phase2TargetSessionAudioRelease ||
-        out.phase2TargetMacCrcValid ||
-        (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted);
-    const bool hardStructure =
-        out.phase2SuperframeBursts > 0 &&
-        out.phase2MaskedBursts > 0 &&
-        (out.phase2MacCrcValid > 0 || targetSlotClear);
+    if (!companionSlotAccounted &&
+        out.phase2OppositeVoiceCodewords > out.phase2TargetVoiceCodewords) {
+        return true;
+    }
     const bool strongSelectedSlot =
-        out.phase2TargetVoiceCodewords >= 4 &&
-        out.phase2TargetMaskedBursts > 0;
-    if (companionSlotAccounted && targetSlotClear && strongSelectedSlot && hardStructure) {
-        return false;
+        out.phase2TargetVoiceCodewords >= 2 &&
+        (out.phase2TargetMaskedBursts > 0 || out.phase2MaskedBursts > 0);
+    if (!strongSelectedSlot) {
+        return true;
     }
-    // Single-slot-dominant with MAC CRC on the followed call is still safe.
-    if (companionSlotAccounted &&
-        out.phase2TargetMacCrcValid &&
-        out.phase2TargetVoiceCodewords >= out.phase2OppositeVoiceCodewords) {
-        return false;
-    }
-    return true;
+    return false;
 }
 
 static bool p25Phase2DualSlotPendingDrainUnsafeWindow(const P25VoiceAudioBlock& out) noexcept
@@ -7553,8 +7558,12 @@ static P25VoiceAudioBlock applyP25Phase2SecurityAudioGate(Receiver& rx,
          (out.phase2SuperframeBursts > 0 && out.phase2MaskedBursts > 0 &&
           out.phase2TargetVoiceCodewords > 0 &&
           out.phase2OppositeVoiceCodewords == 0));
+    // Capture 20260808_034136: explicit-clear-grant and sameCallRecentClear
+    // bypassed dual-slot MAC-dead mute and released ~38s blocky PCM.  Dual-slot
+    // untrusted must fail-close every trustedClear path, not only the latch path.
     const bool trustedClear =
         !trustedEncrypted &&
+        !dualSlotUntrustedGate &&
         (latchClearSameCallSafe ||
          sameCallRecentClearSustain ||
          windowFreshClear ||
@@ -7563,7 +7572,6 @@ static P25VoiceAudioBlock applyP25Phase2SecurityAudioGate(Receiver& rx,
           (rx.p25VoiceClearKnown || latchClear) &&
           !out.phase2WrongSlot &&
           !out.phase2TargetEssEncrypted &&
-          !dualSlotUntrustedGate &&
           (out.phase2TargetMacCrcValid ||
            (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted) ||
            out.phase2OppositeVoiceCodewords == 0)) ||
@@ -7598,6 +7606,20 @@ static P25VoiceAudioBlock applyP25Phase2SecurityAudioGate(Receiver& rx,
         out.skippedEncrypted = true;
         out.diag = P25VoiceDiagCode::SkippedEncrypted;
         return finishSecurityGate("trusted-encrypted-drop");
+    }
+
+    // Dual-slot MAC-dead: drop this window's PCM only.  Do not collapse an
+    // established Clear call into unknown/waiting-clear (that thrashed follow
+    // and re-muted good single-slot windows after dual-slot islands in 034136).
+    if (dualSlotUntrustedGate) {
+        out.audio.clear();
+        out.decodedFrames = 0;
+        out.phase2SecurityTrustedClear = false;
+        out.phase2CurrentProbePcmUsable = false;
+        out.phase2UnknownProbeQualityOk = false;
+        out.phase2UnknownProbeBlockReason = "dual-slot-mac-dead-untrusted";
+        out.diag = P25VoiceDiagCode::Decoding;
+        return finishSecurityGate("dual-slot-untrusted-garble-drop");
     }
 
     if (unknownSecurity) {
@@ -12020,10 +12042,14 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             out.phase2TargetVoiceCodewords >= kP25Phase2ExplicitClearGrantProbeMinFrames &&
             out.phase2TargetMaskedBursts > 0 &&
             !out.phase2WrongSlot;
+        // Dual-slot without this-window MAC is never an explicit-grant hard release
+        // candidate (034136 sticky-clear dual-slot blocky path).
         const bool dualSlotUntrustedExplicitGrant =
             out.phase2OppositeVoiceCodewords > 0 &&
-            !targetTrafficClearEvidence &&
-            !explicitGrantTargetSlotSelected;
+            ((!targetTrafficClearEvidence && !explicitGrantTargetSlotSelected) ||
+             (!out.phase2TargetMacCrcValid &&
+              out.phase2MacCrcValid == 0 &&
+              !(burst.macCrcValid || burst.macCrcLock)));
         const bool explicitClearGrantProbeAllowed =
             explicitClearGrantForCall &&
             rx.p25VoiceMaskParamsKnown &&
@@ -12104,19 +12130,19 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
         // Capture 20260808_021134: latch/post-emit WITHOUT hard epoch + dual-slot
         // ess=unknown produced mostly garble — require mask/SF/MAC on the burst
         // and refuse dual-slot untrusted windows.
+        // Capture 20260808_034136: sticky ess=clear must NOT green-light dual-slot
+        // MAC-dead feed (wrong-epoch AMBE → blocky unintelligible speech).
         const bool hardEpochOnBurst =
             burst.maskPhaseLock ||
             burst.superframeLock ||
             burst.macCrcValid ||
             burst.macCrcLock ||
             (burst.essKnown && !burst.encrypted && burst.sessionAudioRelease);
-        // Mid-loop reject/wrongSlot counts are incomplete — use traffic clear
-        // proof only (not companion accounting) for dual-slot fail-closed.
+        // Dual-slot feed fail-closed on this-window MAC only.  Sticky ESS/session
+        // and companion accounting do not prove XOR epoch (034136).
         const bool dualSlotUntrustedNow =
             out.phase2OppositeVoiceCodewords > 0 &&
-            !(out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted) &&
             !out.phase2TargetMacCrcValid &&
-            !out.phase2TargetSessionAudioRelease &&
             !(burst.macCrcValid || burst.macCrcLock) &&
             out.phase2MacCrcValid == 0;
         const bool clearLatchOpen =
