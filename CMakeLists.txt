@@ -102,6 +102,10 @@ set(SDR_TOWN_SOURCES
     include/ITranscriptSource.h
     src/AudioCapture.cpp
     include/AudioCapture.h
+    src/P25AmbeEncoder.cpp
+    include/IP25AmbeEncoder.h
+    src/P25Phase2TxFramer.cpp
+    include/P25Phase2TxFramer.h
 )
 
 # Resources (icons, qss, etc. later)
@@ -229,6 +233,7 @@ if(BUILD_TESTS)
     tests/test_p25live.cpp
     tests/test_p25follow.cpp
     tests/test_p25tx.cpp
+    tests/test_p25tx_encode.cpp
     tests/test_p25traffic_processor.cpp
     tests/test_p25dsp.cpp
     src/DeviceManager.cpp
@@ -239,6 +244,8 @@ if(BUILD_TESTS)
     src/P25LiveDecoder.cpp
     src/P25FollowStateMachine.cpp
     src/P25TxSession.cpp
+    src/P25AmbeEncoder.cpp
+    src/P25Phase2TxFramer.cpp
     src/P25TrafficChannelProcessor.cpp
     src/SignalClassifier.cpp
     src/ClassifierModelBackend.cpp

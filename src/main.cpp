@@ -65,6 +65,8 @@
 #include "SpectrumWidget.h"
 #include "AudioEngine.h"
 #include "AudioCapture.h"
+#include "IP25AmbeEncoder.h"
+#include "P25Phase2TxFramer.h"
 #include "Demod.h"
 #include "P25Control.h"
 #include "P25LiveDecoder.h"
@@ -15321,11 +15323,45 @@ public:
                     p25TxMicMeterBar->setValue(0);
                     return;
                 }
-                // Drain ring so it does not overrun while only metering.
-                float sink[1024];
-                while (p25TxMic.pull(sink, 1024) > 0) {}
+                float sink[2048];
+                size_t pulled = 0;
+                while (true) {
+                    const size_t n = p25TxMic.pull(sink, 2048);
+                    if (n == 0) break;
+                    pulled += n;
+                    // Sprint 3: while PTT held, resample to 8 kHz and encode placeholders.
+                    if (p25TxSnapshot.pttHeld && p25TxPacketizer) {
+                        float pcm8k[512];
+                        // Simple box-decimate 48k→8k: every 6th sample average of 6.
+                        size_t outN = 0;
+                        for (size_t i = 0; i + 6 <= n && outN < 512; i += 6) {
+                            float s = 0.0f;
+                            for (size_t k = 0; k < 6; ++k) s += sink[i + k];
+                            pcm8k[outN++] = s / 6.0f;
+                        }
+                        if (outN > 0) {
+                            std::vector<P25AmbeEncodedFrame> produced;
+                            p25TxPacketizer->pushPcm8k(pcm8k, outN, produced);
+                            if (!produced.empty()) {
+                                p25TxAmbeSession.insert(p25TxAmbeSession.end(), produced.begin(), produced.end());
+                            }
+                        }
+                    }
+                }
                 const int pct = static_cast<int>(std::lround(std::min(1.0f, p25TxMic.levelMeter()) * 100.0f));
                 p25TxMicMeterBar->setValue(pct);
+                if (p25TxSnapshot.pttHeld && p25TxPacketizer) {
+                    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+                    if (now - p25TxLastEncodeLogMs >= 1000) {
+                        p25TxLastEncodeLogMs = now;
+                        appendP25LogLine(QString("P25 TX encode: backend=%1 frames=%2 pending=%3 meter=%4%")
+                            .arg(QString::fromUtf8(p25TxPacketizer->encoder() ? p25TxPacketizer->encoder()->name() : "?"))
+                            .arg(static_cast<qulonglong>(p25TxPacketizer->framesEncoded()))
+                            .arg(static_cast<int>(p25TxPacketizer->pendingSamples()))
+                            .arg(pct));
+                    }
+                }
+                (void)pulled;
             });
         }
 
@@ -15457,6 +15493,13 @@ public:
             if (!p25TxMic.isCapturing()) {
                 p25TxMic.start(micIdx, 48000.0);
             }
+            if (!p25TxPacketizer) {
+                // Energy placeholder until licensed AMBE encoder is linked.
+                p25TxPacketizer = std::make_unique<P25TxVoicePacketizer>(p25CreateAmbeEncoder("energy"));
+            }
+            p25TxPacketizer->reset();
+            p25TxAmbeSession.clear();
+            p25TxLastEncodeLogMs = 0;
             if (p25TxMicMeterTimer) p25TxMicMeterTimer->start();
             if (p25TxMuteSpkCheckBox && p25TxMuteSpkCheckBox->isChecked()) {
                 if (AudioEngine* eng = getOrCreateAudioEngine()) {
@@ -15483,6 +15526,31 @@ public:
                 applyP25TxEvent(P25TxEvent::HangComplete);
             }
             if (p25TxPttButton) p25TxPttButton->setChecked(false);
+            // Dump AMBE placeholders + skeleton superframe from this PTT hold.
+            if (p25TxPacketizer && !p25TxAmbeSession.empty()) {
+                const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+                QDir().mkpath(appData + "/tx_dumps");
+                const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
+                const std::string ambePath = (appData + "/tx_dumps/ambe_" + stamp + ".bin").toStdString();
+                p25WriteAmbePackedDump(ambePath, p25TxAmbeSession);
+                P25Phase2TxFramer framer;
+                P25Phase2TxFramerConfig fcfg;
+                fcfg.nac = p25TxSnapshot.config.nac;
+                fcfg.wacn = p25TxSnapshot.config.wacn;
+                fcfg.systemId = p25TxSnapshot.config.systemId;
+                fcfg.talkgroupId = p25TxSnapshot.config.talkgroupId;
+                fcfg.unitId = p25TxSnapshot.config.unitId;
+                fcfg.slot = p25TxSnapshot.config.tdmaSlot;
+                framer.setConfig(fcfg);
+                const auto sf = framer.buildSuperframe(p25TxAmbeSession);
+                const std::string dibitPath = (appData + "/tx_dumps/dibits_" + stamp + ".bin").toStdString();
+                if (sf.valid) p25WriteTxDibitDump(dibitPath, sf);
+                appendP25LogLine(QString("P25 TX PTT dump: ambeFrames=%1 ambe=%2 dibits=%3 note=%4")
+                    .arg(static_cast<int>(p25TxAmbeSession.size()))
+                    .arg(QString::fromStdString(ambePath))
+                    .arg(QString::fromStdString(dibitPath))
+                    .arg(QString::fromStdString(sf.note)));
+            }
             // Keep mic open while armed so next PTT has no open delay; stop if disarmed.
             if (p25TxSnapshot.state == P25TxState::Idle || p25TxSnapshot.state == P25TxState::Error) {
                 p25TxMic.stop();
@@ -23785,6 +23853,10 @@ private:
     QProgressBar* p25TxMicMeterBar = nullptr;
     QCheckBox* p25TxMuteSpkCheckBox = nullptr;
     QTimer* p25TxMicMeterTimer = nullptr;
+    // Sprint 3: mic → 8 kHz → AMBE placeholder packetizer while PTT held.
+    std::unique_ptr<P25TxVoicePacketizer> p25TxPacketizer;
+    std::vector<P25AmbeEncodedFrame> p25TxAmbeSession;
+    qint64 p25TxLastEncodeLogMs = 0;
     QTimer* diagnosticsHeartbeatTimer = nullptr;
     QTimer* diagnosticsResourceTimer = nullptr;
     qint64 diagnosticsLastHeartbeatMs = 0;
@@ -26453,6 +26525,7 @@ int runCLI(int argc, char* argv[]) {
                       << "  tx status|arm|disarm|config|ptt on|ptt off - P25 clear TX shell\n"
                       << "  tx tone <dev> <mhz> [hz=1000] [sec=2] [gain=20] [dump=path.cf32] - Sprint 1 tone TX / IQ dump\n"
                       << "  tx stop [dev]           - stop tone/TX on device (or all)\n"
+                      << "  tx encode [sec=2] [backend=energy|silence] [mic=i] - Sprint 3 mic→AMBE placeholder + dibit skeleton dump\n"
                       << "  audio list              - list playback devices\n"
                       << "  audio enable <out0> <out1?>\n"
                       << "  audio disable           - stop audio outputs\n"
@@ -26994,8 +27067,86 @@ int runCLI(int argc, char* argv[]) {
                     mgr.stopAllTx();
                     std::cout << "tx stop all\n";
                 }
+            } else if (sub == "encode") {
+                // Sprint 3: capture mic → 8 kHz → placeholder AMBE frames → superframe skeleton dump.
+                double sec = 2.0;
+                std::string backend = "energy";
+                int micIdx = -1;
+                std::string tok;
+                // optional leading seconds
+                if (iss >> tok) {
+                    if (tok.find('=') == std::string::npos) {
+                        sec = std::strtod(tok.c_str(), nullptr);
+                    } else {
+                        // put back by parsing as key=val
+                        auto eq = tok.find('=');
+                        std::string k = tok.substr(0, eq);
+                        std::string v = tok.substr(eq + 1);
+                        if (k == "sec" || k == "seconds") sec = std::strtod(v.c_str(), nullptr);
+                        else if (k == "backend") backend = v;
+                        else if (k == "mic") micIdx = std::atoi(v.c_str());
+                    }
+                }
+                while (iss >> tok) {
+                    auto eq = tok.find('=');
+                    if (eq == std::string::npos) continue;
+                    std::string k = tok.substr(0, eq);
+                    std::string v = tok.substr(eq + 1);
+                    if (k == "sec" || k == "seconds") sec = std::strtod(v.c_str(), nullptr);
+                    else if (k == "backend") backend = v;
+                    else if (k == "mic") micIdx = std::atoi(v.c_str());
+                }
+                if (!cliMic) cliMic = std::make_unique<AudioCapture>();
+                if (!cliMic->isCapturing()) {
+                    if (!cliMic->start(micIdx, 48000.0)) {
+                        std::cout << "tx encode: mic start failed\n";
+                        continue;
+                    }
+                }
+                P25TxVoicePacketizer pkt(p25CreateAmbeEncoder(backend));
+                std::vector<P25AmbeEncodedFrame> frames;
+                const auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::milliseconds(static_cast<int>(std::max(0.2, sec) * 1000.0));
+                float sink[2048];
+                while (std::chrono::steady_clock::now() < deadline) {
+                    const size_t n = cliMic->pull(sink, 2048);
+                    if (n == 0) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                        continue;
+                    }
+                    float pcm8k[512];
+                    size_t outN = 0;
+                    for (size_t i = 0; i + 6 <= n && outN < 512; i += 6) {
+                        float s = 0.0f;
+                        for (size_t k = 0; k < 6; ++k) s += sink[i + k];
+                        pcm8k[outN++] = s / 6.0f;
+                    }
+                    if (outN) pkt.pushPcm8k(pcm8k, outN, frames);
+                }
+                const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+                QDir().mkpath(appData + "/tx_dumps");
+                const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
+                const std::string ambePath = (appData + "/tx_dumps/ambe_" + stamp + ".bin").toStdString();
+                const std::string dibitPath = (appData + "/tx_dumps/dibits_" + stamp + ".bin").toStdString();
+                p25WriteAmbePackedDump(ambePath, frames);
+                P25Phase2TxFramer framer;
+                P25Phase2TxFramerConfig fcfg;
+                fcfg.nac = cliP25TxSnapshot.config.nac;
+                fcfg.wacn = cliP25TxSnapshot.config.wacn;
+                fcfg.systemId = cliP25TxSnapshot.config.systemId;
+                fcfg.talkgroupId = cliP25TxSnapshot.config.talkgroupId;
+                fcfg.unitId = cliP25TxSnapshot.config.unitId;
+                framer.setConfig(fcfg);
+                const auto sf = framer.buildSuperframe(frames);
+                if (sf.valid) p25WriteTxDibitDump(dibitPath, sf);
+                std::cout << "tx encode frames=" << frames.size()
+                          << " backend=" << (pkt.encoder() ? pkt.encoder()->name() : "?")
+                          << " realSpeech=" << (pkt.encoder() && pkt.encoder()->producesRealSpeech() ? "yes" : "no")
+                          << " ambe=" << ambePath
+                          << " dibits=" << dibitPath
+                          << " sfVoice=" << sf.voiceFramesUsed << "\n";
             } else {
-                std::cout << "tx status | arm | disarm | config ... | ptt on|off | tone ... | stop\n";
+                std::cout << "tx status | arm | disarm | config ... | ptt on|off | tone ... | stop | encode\n";
             }
         } else if (cmd == "audio") {
             std::string sub; iss >> sub; for(auto& c : sub) c = (char)std::tolower((unsigned char)c);

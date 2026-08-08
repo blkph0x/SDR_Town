@@ -13,6 +13,18 @@ Track intentional policy and cadence changes so field regressions are easy to bi
 
 ## Changes
 
+### 2026-08-08 — Sprint 3 AMBE encode adapter + Sprint 4 framer skeleton
+
+**Delivered:**
+- `IP25AmbeEncoder` + silence / energy-placeholder backends (not real speech)
+- `P25TxVoicePacketizer` (160 samples @ 8 kHz → frames)
+- GUI PTT: mic→8k→encode while held; dumps packed AMBE + dibit skeleton on release
+- CLI: `tx encode [sec] [backend=energy|silence] [mic=i]`
+- `P25Phase2TxFramer` skeleton (2160 dibits / 360 ms) — not bit-exact yet
+- Unit tests `[p25][tx][encode]`
+
+**Not on-air:** licensed AMBE, bit-exact superframe/MAC/ESS, H-CPM, trunk request.
+
 ### 2026-08-08 — Sprint 2 mic capture + PTT speaker mute
 
 **Delivered:**
