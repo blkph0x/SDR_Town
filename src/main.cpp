@@ -132,7 +132,10 @@ static constexpr bool kP25Phase2AllowUnknownGrantFieldAudioProbe = false;
 static constexpr qint64 kP25Phase2UnknownGrantAudioProbeGraceMs = 400;
 static constexpr qint64 kP25Phase2AudioTailGraceMs = 100;
 static constexpr qint64 kP25Phase2SpeakerAudioTailGraceMs = 2500;
-static constexpr qint64 kP25Phase2RecentSecurityEvidenceTtlMs = 12000;
+// sdrtrunk P25P2AudioModule keeps encrypted/clear state for the whole call
+// until squelch/reset — not a 12 s sliding window. Capture 20260808_022809
+// lost continuous feed mid-call when TTL expired between Voice2/4 islands.
+static constexpr qint64 kP25Phase2RecentSecurityEvidenceTtlMs = 45000;
 static constexpr size_t kP25Phase2UnknownGrantAudioProbeMinFrames = 2;
 static constexpr size_t kP25Phase2UnknownGrantAudioProbeMinSamples = 1920u;
 static constexpr size_t kP25Phase2ExplicitClearGrantProbeMinFrames = 2;
@@ -7166,6 +7169,18 @@ static void p25Phase2UpdateSessionSustainState(Receiver& rx,
     if (speakerEmitted) {
         sustain.hadSuccessfulEmit = true;
         sustain.lastEmitMs = nowMs;
+        // Keep same-call clear evidence alive through short RF holes so
+        // continuousSelectedClearFeed + establishedClearCall do not fall back
+        // to unknown and wipe PCM (sdrtrunk holds call security until reset).
+        if (rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Clear ||
+            (rx.p25VoiceClearKnown && !rx.p25VoiceEncrypted)) {
+            rx.p25Phase2RecentSecurityEvidenceMs = nowMs;
+            rx.p25Phase2RecentTargetSessionAudioRelease = true;
+            if (rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Unknown &&
+                rx.p25VoiceClearKnown && !rx.p25VoiceEncrypted) {
+                p25NotePhase2SecurityLatchChange(rx, P25CallSecurityLatch::Clear, "speaker-emit");
+            }
+        }
     }
     // Sticky mask/SF retained across block-channelize hops can lock onto the
     // wrong epoch (opp-slot dominant). Soft-repair without full CQPSK wipe.
@@ -7174,6 +7189,24 @@ static void p25Phase2UpdateSessionSustainState(Receiver& rx,
         out.phase2FedToMbelib == 0 &&
         out.phase2WrongSlotVoiceCodewords >= out.phase2OppositeVoiceCodewords / 2) {
         rx.p25VoiceLiveDecoder.invalidatePhase2StickyMaskEpoch();
+    }
+    // Capture 20260808_022809: long runs of p2bursts>0 with targetVcw=0 after
+    // real emits (structure without selected-slot Voice2/4) — sticky lattice
+    // stuck on SACCH/FACCH epoch. Soft rehunt mask/SF without full CQPSK wipe.
+    if (sustain.hadSuccessfulEmit &&
+        out.phase2Bursts >= 1 &&
+        out.phase2TargetVoiceCodewords == 0 &&
+        out.phase2OppositeVoiceCodewords == 0 &&
+        out.phase2FedToMbelib == 0 &&
+        out.decodedFrames == 0) {
+        ++rx.p25Phase2StructureNoTargetVoiceWindows;
+        if (rx.p25Phase2StructureNoTargetVoiceWindows >= 3) {
+            rx.p25VoiceLiveDecoder.invalidatePhase2StickyMaskEpoch();
+            rx.p25Phase2ForceMaskEpochRehunt = true;
+            rx.p25Phase2StructureNoTargetVoiceWindows = 0;
+        }
+    } else if (out.phase2TargetVoiceCodewords > 0 || out.phase2FedToMbelib > 0) {
+        rx.p25Phase2StructureNoTargetVoiceWindows = 0;
     }
 }
 
@@ -17346,11 +17379,11 @@ public:
                             activeDiag.phase2MaskedBursts < 3 &&
                             activeDiag.phase2MacCrcValid == 0 &&
                             activeDiag.phase2EssKnown == false;
-                        // Capture 20260808_010625 / 012422: preempted after
-                        // "no decoded audio" while speaker had emitted (or was
-                        // mid empty-hop re-lock). Match follow-SM speaker grace.
+                        // Capture 20260808_022809: preempted ~24s after last emit
+                        // mid clear call. Hold longer for clear trusted follows.
                         const bool recentSpeakerHold =
-                            p25RecentSpeakerOutputActive(nowMs, 15000);
+                            p25RecentSpeakerOutputActive(nowMs,
+                                currentFollowClearTrusted ? 30000 : 15000);
                         currentVoiceUnacquired =
                             noDecodedAudio && noPhase2Lock && !recentSpeakerHold;
                         const qint64 silentDwellStealGraceMs = currentFollowClearTrusted
@@ -23005,9 +23038,17 @@ private:
                                 const bool emptyEye =
                                     rx.p25VoiceDiagnostics.phase2Bursts == 0 &&
                                     rx.p25VoiceDiagnostics.phase2TargetVoiceCodewords == 0;
+                                // Structure without selected-slot voice (b>0 tv=0)
+                                // after emit — force cold CQPSK re-search budget.
+                                const bool structureNoTarget =
+                                    rx.p25VoiceDiagnostics.phase2Bursts > 0 &&
+                                    rx.p25VoiceDiagnostics.phase2TargetVoiceCodewords == 0;
                                 const bool emptyStreakReacq =
                                     rx.p25SessionState.sustain.hadSuccessfulEmit &&
-                                    ((emptyStreak >= 3) || (emptyEye && emptyStreak >= 2));
+                                    ((emptyStreak >= 3) ||
+                                     (emptyEye && emptyStreak >= 2) ||
+                                     (structureNoTarget && emptyStreak >= 2) ||
+                                     (rx.p25Phase2StructureNoTargetVoiceWindows >= 2));
                                 int hotBudgetMs = 80;
                                 size_t hotCands = size_t{12};
                                 size_t hotSyncHits = kP25VoiceWorkerHotMaxPhase2SyncHits;

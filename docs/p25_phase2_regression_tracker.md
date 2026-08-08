@@ -13,6 +13,29 @@ Track intentional policy and cadence changes so field regressions are easy to bi
 
 ## Changes
 
+### 2026-08-08 — RX clear sustain vs sdrtrunk (022809)
+
+**Field `20260808_022809` (post latch-bleed fix):**
+- Quality better when emit happens (wrongSlot=0, targetEss=clear on most audio outs)
+- Still only ~1s audio over multi-minute capture; long p2bursts with **targetVcw=0**
+- Preempt after 57s; last emit only ~24s earlier (15s speaker hold too short)
+- CADENCE feedRatio collapses to 0 with `no-vcw-from-live-window` after islands
+
+**sdrtrunk cross-check (`P25P2AudioModule`):**
+- Queues Voice2/4 until PTT/ESS establishes clear/enc **once**, then plays all
+  same-timeslot voice until squelch reset — no 12s evidence TTL.
+- Separate AudioModule per timeslot; never mixes opposite slot.
+
+**Fixes:**
+- Recent security evidence TTL 12s → **45s**; refresh TTL + session-release sticky
+  on every speaker emit
+- Soft sticky rehunt when ≥3 windows of bursts without selected-slot VCW after emit
+- Cold CQPSK escalate on structure-without-target after emit
+- Speaker grace 25s; clear-trusted preempt hold 30s
+
+**Watch:** multi-second continuous dutySec on clear TG; no preempt within 30s of
+gate=emit; fewer empty-audio windows after first clear island.
+
 ### 2026-08-08 — Sprint 3 AMBE encode adapter + Sprint 4 framer skeleton
 
 **Delivered:**
