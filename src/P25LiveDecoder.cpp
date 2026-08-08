@@ -6077,17 +6077,16 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
     } else {
         channel = channelizeP25Iq(*channelInput, sampleRate, centerFreqHz, targetFreqHz, m_config);
         // Block channelize produces an independent baseband eye every window.
-        // Carrying Gardner/Costas discrete lock + demod-state lock-only budgets
-        // across those windows is what made sequential hops go p2bursts=0 while
-        // the same RF alone decoded continuously (capture 20260729_114627 @
-        // skip=2800 then 3520). Sticky CQPSK/demod is only valid with streaming DDC.
-        // Also drop Phase-1 bit-tail + Phase-2 framer/dibit-tail: those are
-        // baseband-phase-coupled and poison the next independent eye into
-        // budget-exhausted crumbs (duty ~0.47 vs alone ~1.0 on the same RF).
-        // Mask phase + superframe dibit anchors are likewise eye-coupled: after
-        // hop1@2800, hop2@4240 kept prior xorMaskPhase and swapped slots
-        // (oppVcw=36/targetVcw=4 vs alone targetVcw=36/oppVcw=0). Keep
-        // m_phase2MaskParams (NAC XOR table); only forget the phase offset.
+        // CQPSK/Gardner + dibit framer tails are eye-coupled and must reset
+        // (capture 20260729_114627: sticky CQPSK across hops → p2bursts=0).
+        //
+        // Capture 20260808_001448: also wiping XOR mask phase + superframe
+        // dibit anchors every hop destroyed the sticky-epoch path below
+        // (findPhase2AnchorAlignedSuperframeLocks) and forced full re-hunt →
+        // vcw-present-but-no-sf-mask-yet, high dups, dutySec stuck ~0.5.
+        // Keep validated mask phase + SF anchor; hard slot isolation +
+        // starve/invalidatePhase2StickyMaskEpoch recover a wrong epoch.
+        // NAC/WACN/SYS mask table (m_phase2MaskParams) was already retained.
         if (m_cqpskLock.valid || m_cqpskDiscreteFrozen) {
             m_cqpskLock = {};
             m_cqpskDiscreteFrozen = false;
@@ -6099,15 +6098,6 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         m_pendingFramerBursts.clear();
         m_phase2DibitTail.clear();
         m_phase2RecentAcchDecodeBurstDibits.clear();
-        m_phase2MaskPhaseKnown = false;
-        m_phase2MaskPhase = 0;
-        m_phase2MaskPhaseScore = 0;
-        m_phase2MaskPhaseStarveWindows = 0;
-        m_phase2LastFullMaskPhaseHuntGeneration = 0;
-        m_phase2SuperframeAnchorKnown = false;
-        m_phase2SuperframeAnchorDibit = 0;
-        m_phase2SuperframeAnchorGeneration = 0;
-        m_phase2SuperframeAnchorMaskPhase = 0;
         {
             std::lock_guard<std::mutex> lock(m_streamingStateMutex);
             m_phase1BitTail.clear();

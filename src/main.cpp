@@ -2512,16 +2512,16 @@ static constexpr double kP25Phase2VoiceDecodeAcquireOverlapSeconds = 0.160;
 static constexpr double kP25Phase2VoiceDecodeSustainChunkSeconds = 0.080;
 static constexpr double kP25Phase2VoiceDecodeSustainMinFreshSeconds = 0.040;
 static constexpr double kP25Phase2VoiceDecodeSustainOverlapSeconds = 0.080;
-// Block-channelize speaker hops need enough eye for CQPSK re-acquire + ≥1
-// selected-slot Voice4. 80 ms fresh was too short (p2vcw=0 drought); 200 ms
-// catch-up was too slow. 140 ms max / 80 ms min fresh / 40 ms overlap balances
-// multi-burst hit rate vs worker duty (field 20260807_234054 / 235726).
+// Block-channelize speaker hops: need CQPSK re-acquire + multi selected-slot
+// Voice4. Capture 20260808_001448 with ~160 ms jobs at ~155 ms DSP was near
+// real-time once mask/SF sticky; 120 ms max leaves headroom so worker-busy
+// does not open cadence gaps. Overlap supplies lattice pre-roll only.
 // Slot isolation remains hard (only followed grantSlot is fed).
-static constexpr double kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.140;
-static constexpr double kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.080;
+static constexpr double kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.120;
+static constexpr double kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.070;
 static constexpr double kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.040;
-static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.160;
-static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.100;
+static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.140;
+static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.080;
 static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpOverlapSeconds = 0.040;
 // If the voice worker falls behind live RF, decode a larger near-live chunk
 // with short context so one worker pass can refill the speaker ring.
@@ -7153,6 +7153,14 @@ static void p25Phase2UpdateSessionSustainState(Receiver& rx,
         sustain.hadSuccessfulEmit = true;
         sustain.lastEmitMs = nowMs;
     }
+    // Sticky mask/SF retained across block-channelize hops can lock onto the
+    // wrong epoch (opp-slot dominant). Soft-repair without full CQPSK wipe.
+    if (out.phase2OppositeVoiceCodewords >= 4 &&
+        out.phase2TargetVoiceCodewords == 0 &&
+        out.phase2FedToMbelib == 0 &&
+        out.phase2WrongSlotVoiceCodewords >= out.phase2OppositeVoiceCodewords / 2) {
+        rx.p25VoiceLiveDecoder.invalidatePhase2StickyMaskEpoch();
+    }
 }
 
 static bool p25Phase2EstablishedClearNoiseFeedAllowed(const Receiver& rx,
@@ -11704,7 +11712,14 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
         }
         const bool forceEstablishedFeed = establishedClearCall &&
             p25Phase2EstablishedClearNoiseFeedAllowed(rx, out, burst, recentMacEvidenceForCall);
-        const bool epochTrusted = burst.superframeLock || burst.macCrcLock || burst.sessionAudioRelease;
+        const bool epochTrusted =
+            burst.superframeLock ||
+            burst.macCrcLock ||
+            burst.sessionAudioRelease ||
+            burst.stickySuperframe ||
+            // Clear call already proven: selected-slot Voice2/4 with xor mask is
+            // enough epoch to feed (sticky mask/SF may re-lock mid-hop).
+            (establishedClearCall && burst.xorMaskApplied && burst.grantSlotKnown);
         if (!epochTrusted && !grantMayProbeVoice && !forceEstablishedFeed) {
             out.phase2RejectedVoiceCodewords += burst.voiceCodewords.size();
             out.phase2AudioLockMissing = true;
@@ -11747,10 +11762,23 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             continue;
         }
         // Trusted descramble on the *known matching* grant slot (never unlabelled).
+        // Established clear + xor applied + correct grant slot: do not re-require
+        // per-burst SF/MAC after the call is already open (20260808_001448
+        // clear-grant-vcw-not-fed / vcw-present-but-no-sf-mask-yet while
+        // callClearTrusted=yes and dutySec only ~0.5).
+        // sameCallClearSustainFeed is computed later; establishedClearCall is enough
+        // here to keep selected-slot Voice2/4 flowing once the call is open.
+        const bool establishedClearSelectedSlot =
+            (establishedClearCall || forceEstablishedFeed) &&
+            burst.xorMaskApplied &&
+            burst.grantSlotKnown &&
+            effectiveBurstSlot == followedGrantSlot &&
+            !burst.encrypted;
         const bool maskPhaseTrusted =
             burst.maskPhaseLock ||
             burst.macCrcLock ||
             burst.sessionAudioRelease ||
+            establishedClearSelectedSlot ||
             (burst.xorMaskPhaseKnown &&
              burst.grantSlotKnown &&
              (burst.superframeLock || burst.stickySuperframe));
@@ -11962,19 +11990,23 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted && !out.phase2WrongSlot);
         // Selected-slot continuous clear: once traffic ESS/PTT (or established
         // same-call clear) is known, keep feeding descrambled Voice2/4 on the
-        // grant slot every hop — do not re-require MAC on every voice burst.
+        // grant slot every hop — do not re-require MAC/SF on every voice burst.
         const bool continuousSelectedClearFeed =
             currentBurstFeedTrusted &&
             securityProvedClearForFeed &&
             effectiveBurstSlot == followedGrantSlot &&
             !out.phase2WrongSlot &&
             !burst.encrypted &&
+            burst.xorMaskApplied &&
             (establishedClearCall ||
              sameCallClearSustainFeed ||
              explicitClearGrantHardVoiceRelease ||
+             forceEstablishedFeed ||
              p25Phase2TargetHardClearEvidence(out) ||
              (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted) ||
-             p25Phase2SessionSpeakerSustainActive(rx));
+             p25Phase2SessionSpeakerSustainActive(rx) ||
+             (rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Clear &&
+              !rx.p25VoiceEncrypted));
         const bool immediateAmbeDecodeAllowed =
             continuousSelectedClearFeed ||
             (currentBurstFeedTrusted &&
@@ -22411,13 +22443,14 @@ private:
                                 rx.p25VoiceLiveDecoder.setMaxPhase2SuperframeLocks(
                                     boundedConfigValue(priorPhase2Locks, kP25VoiceWorkerHotMaxPhase2SuperframeLocks));
                             } else if (hotPhase2TrafficJob) {
-                                // Block channelize still re-searches each window, but
-                                // after target VCW/emit use a medium budget (not full
-                                // cold 32@160ms) so hops stay near real-time.
+                                // Block channelize re-searches CQPSK each window; with
+                                // sticky mask/SF retained, medium budget is enough.
+                                // 12@80ms keeps ~120 ms hops under wall-clock (001448
+                                // had ~155 ms DSP on 160 ms RF → worker-busy chop).
                                 rx.p25VoiceLiveDecoder.setRealtimeDecodeBudgetMs(
-                                    std::min(priorDecodeBudgetMs, 100));
+                                    std::min(priorDecodeBudgetMs, 80));
                                 rx.p25VoiceLiveDecoder.setMaxCqpskSearchCandidates(
-                                    boundedConfigValue(priorCqpskCandidates, size_t{16}));
+                                    boundedConfigValue(priorCqpskCandidates, size_t{12}));
                                 rx.p25VoiceLiveDecoder.setMaxPhase2SyncHits(
                                     boundedConfigValue(priorPhase2SyncHits, kP25VoiceWorkerHotMaxPhase2SyncHits));
                                 rx.p25VoiceLiveDecoder.setMaxPhase2SuperframeLocks(

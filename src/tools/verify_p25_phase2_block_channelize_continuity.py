@@ -8,9 +8,12 @@ decoder = (root / "src" / "P25LiveDecoder.cpp").read_text(encoding="utf-8", erro
 
 checks = {
     "clear cqpsk on block channelize": (
-        "Carrying Gardner/Costas discrete lock + demod-state lock-only budgets" in decoder
+        "CQPSK/Gardner + dibit framer tails are eye-coupled" in decoder
         and "m_demodStateMachine.reset()" in decoder
         and "m_streamTimingState = {}" in decoder
+        and "m_cqpskLock = {}" in decoder.split(
+            "Block channelize produces an independent baseband eye", 1
+        )[1][:900]
     ),
     "freeze requires streaming ddc": (
         "enableStreamingChannelDdc" in main.split(
@@ -18,12 +21,12 @@ checks = {
         )[1][:500]
     ),
     "speaker sustain multi-burst hop": (
-        "kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.140" in main
+        "kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.120" in main
         and "kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.040" in main
     ),
     "speaker catch-up constants present": (
-        "kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.160" in main
-        and "kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.100" in main
+        "kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.140" in main
+        and "kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.080" in main
     ),
     "voice config keeps streaming ddc off": (
         "cfg.enableStreamingChannelDdc = false" in main
@@ -39,9 +42,8 @@ checks = {
     ),
     "block channelize hot uses medium cqpsk budget": (
         "hotPhase2TrafficJob" in main
-        and "Block channelize still re-searches each window" in main
-        and "std::min(priorDecodeBudgetMs, 100)" in main
-        and "boundedConfigValue(priorCqpskCandidates, size_t{16})" in main
+        and "boundedConfigValue(priorCqpskCandidates, size_t{12})" in main
+        and "std::min(priorDecodeBudgetMs, 80)" in main
     ),
     "carried ess alone is not cqpsk hard lock": (
         "thisWindowPhase2Structure" in decoder
@@ -58,13 +60,15 @@ checks = {
             "Block channelize produces an independent baseband eye", 1
         )[1][:1800]
     ),
-    "block channelize clears mask phase": (
-        "m_phase2MaskPhaseKnown = false" in decoder.split(
+    "block channelize retains mask phase sticky": (
+        "Keep validated mask phase + SF anchor" in decoder
+        and "m_phase2MaskPhaseKnown = false" not in decoder.split(
             "Block channelize produces an independent baseband eye", 1
-        )[1][:1800]
-        and "m_phase2SuperframeAnchorKnown = false" in decoder.split(
-            "Block channelize produces an independent baseband eye", 1
-        )[1][:1800]
+        )[1][:1200]
+    ),
+    "block channelize hot uses medium cqpsk": (
+        "std::min(priorDecodeBudgetMs, 80)" in main
+        or "boundedConfigValue(priorCqpskCandidates, size_t{12})" in main
     ),
     "standards soft-stop requires cqpsk lock": (
         "standardsStateMayHoldDemod" in decoder

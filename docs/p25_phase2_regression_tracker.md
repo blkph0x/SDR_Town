@@ -13,28 +13,28 @@ Track intentional policy and cadence changes so field regressions are easy to bi
 
 ## Changes
 
-### 2026-08-08 — Streaming DDC rollback + block-channelize recovery
+### 2026-08-08 — Sticky mask/SF across block hops + continuous clear feed
 
-**Field:**
-- `20260807_234054`: streaming DDC on; still ~7% RF coverage
-- `20260807_235726` (short hops + aggressive lock-only): **worse** — emit=7 vs
-  empty=805, underruns~45k, dutySec near 0; p2bursts=0 with dsp~21 ms lock-only
+**Field `20260808_001448` (post DDC rollback):** best so far — dutySec avg **0.50**,
+p90 **0.80**, max **0.92** on TG30003. Still choppy: dups high, blocks
+`vcw-present-but-no-sf-mask-yet` / `clear-grant-vcw-not-fed`, worker-busy,
+~155 ms DSP on 160 ms RF.
 
 **Root causes (confirmed):**
-1. Streaming DDC lock-only after first (possibly false) eye stuck on dead CQPSK.
-2. Device cursor rewind to `lastDecode` abandoned live RTL samples → RF holes.
-3. Sub-80 ms block/stream hops too short to re-acquire Phase-2 eye reliably.
+1. `processIq` block-channelize wiped **mask phase + superframe anchor** every hop,
+   defeating `findPhase2AnchorAlignedSuperframeLocks` sticky epoch (slot flip /
+   re-hunt).
+2. Per-burst SF/MAC re-required for AMBE feed even when `callClearTrusted=yes`.
+3. CQPSK re-search still heavy after eye (worker lag → cadence gaps).
 
-**Fixes (this revision):**
-- **Disable** realtime streaming DDC again (stateless block channelize).
-- Speaker sustain **140 ms** / catch-up **160 ms** with **40 ms** overlap.
-- Cold ends only on hard acquire **or target VCW** (not any p2burst).
-- After target eye: medium CQPSK budget (**16 cand / 100 ms**), not full cold 32.
-- Always pull device cursor at rolling live edge (no lastDecode rewind).
-- Rolling 2.0 s; concealment gate still allows clear-trusted PCM.
+**Fixes:**
+- Retain XOR mask phase + SF dibit anchor across block channelize (still reset
+  CQPSK/framer/dibit tails). Opp-only windows soft-invalidate epoch.
+- Established clear selected-slot: epoch + mask trust without per-burst MAC/SF.
+- continuousSelectedClearFeed includes callSecurityLatch Clear + xor.
+- Hot CQPSK **12 cand / 80 ms**; speaker hops **120/140 ms** with 40 ms overlap.
 
-**Watch:** emit≫empty during talk; underruns not climbing tens of thousands;
-dutySec back to ≥0.3 immediately, then improve.
+**Watch:** dutySec p90 → 1.0; fewer `no-sf-mask-yet`; feedRatio↑; dspMs < hop ms.
 
 ### 2026-08-01 — Streaming continuity + MAC lock + security sticky (P0/P1 audit)
 
