@@ -13,6 +13,32 @@ Track intentional policy and cadence changes so field regressions are easy to bi
 
 ## Changes
 
+### 2026-08-08 — Garble from latch bleed + dual-slot untrusted (015254 / 021134)
+
+**Field:** two captures post-dae961e. More `gate=emit` (169 on 021134) but audio
+mostly **garble/blocky** with rare clear words over 5–10 min.
+
+**Evidence:**
+- 62/151 emits `ess=unknown/unknown` with `action=trusted-clear-release`
+- Dual-slot: `tv=8 ov=6 fed=8 ws=6 mac=0/0` (and worse) still emitted
+- CADENCE `block=vcw-present-but-no-sf-mask-yet` while emit>0 (64×)
+- TG handoffs 30304→30302→12542 kept Clear latch / hadSuccessfulEmit
+
+**Root causes:**
+1. Call-boundary dedupe reset did **not** clear `callSecurityLatch` or
+   `sustain` → prior call Clear opened feed on new TG without ESS/MAC.
+2. Dual-slot untrusted garble gate returned false once mbelib was already fed.
+3. stickySuperframe-only feed trusted wrong XOR epoch after re-lock.
+
+**Fixes:**
+- Call identity change: reset latch, sustain, pending, recent security.
+- Dual-slot untrusted mutes speaker even after feed; requires ESS/MAC+structure.
+- Feed trusted requires maskPhaseLock/MAC or real superframeLock (not sticky-only).
+- Latch/post-emit open only with hard epoch and not dual-slot-untrusted.
+
+**Watch:** near-zero `trusted-clear-release` with ess=unknown on dual-slot;
+clear words continuous when targetEss=clear; no garble wash between TG hops.
+
 ### 2026-08-08 — Continuous clear feed + CQPSK re-lock (012422)
 
 **Field `20260808_012422_300` (post speaker-grace/rolling fix):**

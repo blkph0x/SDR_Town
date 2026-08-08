@@ -6985,8 +6985,9 @@ static bool p25Phase2DualSlotUntrustedGarbleWindow(const P25VoiceAudioBlock& out
 {
     if (out.phase2OppositeVoiceCodewords == 0) return false;
     if (out.phase2TargetVoiceCodewords == 0) return false;
-    if (out.phase2FedToMbelib > 0 && out.phase2EmittedPcmFrames > 0) return false;
-    if (out.phase2MacCrcValid > 0) return false;
+    // Capture 20260808_021134: previously returned false once mbelib was fed,
+    // so dual-slot ess=unknown garbage (tv=8 ov=6 fed=8 mac=0/0) reached the
+    // speaker as trusted-clear-release. Mute untrusted dual-slot even after feed.
     const bool companionSlotAccounted =
         out.phase2RejectedVoiceCodewords >= out.phase2OppositeVoiceCodewords ||
         out.phase2WrongSlotVoiceCodewords >= out.phase2OppositeVoiceCodewords;
@@ -6994,10 +6995,20 @@ static bool p25Phase2DualSlotUntrustedGarbleWindow(const P25VoiceAudioBlock& out
         out.phase2TargetSessionAudioRelease ||
         out.phase2TargetMacCrcValid ||
         (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted);
+    const bool hardStructure =
+        out.phase2SuperframeBursts > 0 &&
+        out.phase2MaskedBursts > 0 &&
+        (out.phase2MacCrcValid > 0 || targetSlotClear);
     const bool strongSelectedSlot =
-        out.phase2TargetVoiceCodewords >= 8 &&
+        out.phase2TargetVoiceCodewords >= 4 &&
         out.phase2TargetMaskedBursts > 0;
-    if (companionSlotAccounted && targetSlotClear && strongSelectedSlot) {
+    if (companionSlotAccounted && targetSlotClear && strongSelectedSlot && hardStructure) {
+        return false;
+    }
+    // Single-slot-dominant with MAC CRC on the followed call is still safe.
+    if (companionSlotAccounted &&
+        out.phase2TargetMacCrcValid &&
+        out.phase2TargetVoiceCodewords >= out.phase2OppositeVoiceCodewords) {
         return false;
     }
     return true;
@@ -7031,13 +7042,10 @@ static bool p25Phase2CurrentSelectedBurstFeedTrusted(const P25Phase2Burst& burst
         burst.macCrcLock ||
         burst.sessionAudioRelease;
     if (burst.maskPhaseLock || currentSecurityLock) return true;
-    // Voice2/Voice4 timeslots do not carry MAC/ACCH. Capture 20260807_231232
-    // showed targetVcw=4 ess=clear fed=0 because we required maskPhaseLock or
-    // MAC on every burst — continuous sticky descramble on a locked superframe
-    // lattice is enough for the *selected* grant slot (sdrtrunk keeps walking
-    // the traffic channel once the epoch is known).
-    if (burst.xorMaskPhaseKnown &&
-        (burst.superframeLock || burst.stickySuperframe)) {
+    // Voice2/Voice4: require a *real* superframe lock + known XOR phase.
+    // Capture 20260808_021134: stickySuperframe alone after block-channelize
+    // re-lock fed wrong mask epoch → continuous garble with rare clear words.
+    if (burst.xorMaskPhaseKnown && burst.superframeLock) {
         return true;
     }
     return false;
@@ -7485,19 +7493,38 @@ static P25VoiceAudioBlock applyP25Phase2SecurityAudioGate(Receiver& rx,
     const bool trustedEncrypted =
         rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Encrypted ||
         windowEncrypted;
-    // Monotonic Clear latch is call-level proof. Capture 20260808_012422 fed VCWs
-    // then wiped PCM on Voice2/4 hops (ess=unknown) because trustedClear still
-    // required fresh ESS/session every window — opposite of the latch policy.
+    // Monotonic Clear latch is same-call proof only. Capture 20260808_021134:
+    // latch alone + dual-slot ess=unknown trusted-clear-released garble; require
+    // no dual-slot-untrusted and either fresh traffic proof or clean structure.
+    const bool dualSlotUntrustedGate =
+        p25Phase2DualSlotUntrustedGarbleWindow(out);
+    const bool latchClearSameCallSafe =
+        latchClear &&
+        !dualSlotUntrustedGate &&
+        !out.phase2WrongSlot &&
+        !out.phase2TargetEssEncrypted &&
+        (windowFreshClear ||
+         sameCallRecentClearSustain ||
+         out.phase2TargetMacCrcValid ||
+         (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted) ||
+         out.phase2TargetSessionAudioRelease ||
+         (out.phase2SuperframeBursts > 0 && out.phase2MaskedBursts > 0 &&
+          out.phase2TargetVoiceCodewords > 0 &&
+          out.phase2OppositeVoiceCodewords == 0));
     const bool trustedClear =
         !trustedEncrypted &&
-        (latchClear ||
+        (latchClearSameCallSafe ||
          sameCallRecentClearSustain ||
          windowFreshClear ||
          explicitClearGrantVoiceRelease ||
          (rx.p25SessionState.sustain.hadSuccessfulEmit &&
           (rx.p25VoiceClearKnown || latchClear) &&
           !out.phase2WrongSlot &&
-          !out.phase2TargetEssEncrypted) ||
+          !out.phase2TargetEssEncrypted &&
+          !dualSlotUntrustedGate &&
+          (out.phase2TargetMacCrcValid ||
+           (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted) ||
+           out.phase2OppositeVoiceCodewords == 0)) ||
          unknownGrantProbeVoiceRelease);
     const bool trustedClearPendingRelease =
         trustedClear && key.valid() && p25Phase2PendingAudioMatches(rx, key);
@@ -10054,10 +10081,18 @@ static P25Phase2AmbeEmitDedupeState& p25Phase2SyncAmbeEmitDedupeCallContext(Rece
         if (state.slotKnown && currentSlotKnown && state.slot != currentSlot) {
             ++rx.p25DiagSlotChanged;
         }
+        p25NotePhase2VocoderReset(rx, "call-boundary");
         state = P25Phase2AmbeEmitDedupeState{};
         rx.p25SessionState.audioTail = {};
         rx.p25SessionState.resampler = {};
-        p25NotePhase2VocoderReset(rx, "call-boundary");
+        // Capture 20260808_021134: Clear latch + hadSuccessfulEmit survived
+        // TG 30304→30302→12542 handoffs (dedupe reset only). Next call then
+        // trusted-clear-released dual-slot ess=unknown VCWs → mostly garble
+        // with rare clear words when the epoch happened to match.
+        rx.p25SessionState.sustain = {};
+        rx.p25SessionState.callSecurityLatch = P25CallSecurityLatch::Unknown;
+        p25ClearPhase2PendingAudioOnly(rx, P25PendingClearReason::CallIdentityChanged);
+        p25ClearPhase2RecentSecurityEvidence(rx);
         rx.p25AmbeVoiceDecoder = P25AmbeVoiceDecoder();
         rx.p25Phase2LastGoodPcm.clear();
         p25Phase2ResetFrameSequencer(rx);
@@ -12025,27 +12060,45 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             out.phase2AudioLockMissing = true;
         }
         // Immediate AMBE-to-speaker feed requires security already proved clear
-        // by target-slot ESS/PTT or prior same-call target traffic state. A
-        // clear control grant may choose/follow a slot, but it cannot by itself
-        // open unknown/encrypted calls — once the call is latched clear or has
-        // already emitted, Voice2/4 hops (no ESS) must still feed.
-        // Capture 20260808_012422: mac=2/2 targetVcw=12 ess=unknown fed=0 on
-        // every logged VCW window because only ESS/session opened this gate,
-        // while continuous clear OR-list sat *behind* it.
+        // by target-slot ESS/PTT or prior same-call target traffic state.
+        // Capture 20260808_012422: need latch/MAC/post-emit open for Voice2/4.
+        // Capture 20260808_021134: latch/post-emit WITHOUT hard epoch + dual-slot
+        // ess=unknown produced mostly garble — require mask/SF/MAC on the burst
+        // and refuse dual-slot untrusted windows.
+        const bool hardEpochOnBurst =
+            burst.maskPhaseLock ||
+            burst.superframeLock ||
+            burst.macCrcValid ||
+            burst.macCrcLock ||
+            (burst.essKnown && !burst.encrypted && burst.sessionAudioRelease);
+        // Mid-loop reject/wrongSlot counts are incomplete — use traffic clear
+        // proof only (not companion accounting) for dual-slot fail-closed.
+        const bool dualSlotUntrustedNow =
+            out.phase2OppositeVoiceCodewords > 0 &&
+            !(out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted) &&
+            !out.phase2TargetMacCrcValid &&
+            !out.phase2TargetSessionAudioRelease &&
+            !(burst.macCrcValid || burst.macCrcLock) &&
+            out.phase2MacCrcValid == 0;
         const bool clearLatchOpen =
             rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Clear &&
             !rx.p25VoiceEncrypted &&
             !out.phase2TargetEssEncrypted &&
-            !out.phase2WrongSlot;
+            !out.phase2WrongSlot &&
+            hardEpochOnBurst &&
+            !dualSlotUntrustedNow;
         const bool postEmitClearGrantOpen =
             rx.p25SessionState.sustain.hadSuccessfulEmit &&
             explicitClearGrantForCall &&
             !out.phase2TargetEssEncrypted &&
-            !out.phase2WrongSlot;
+            !out.phase2WrongSlot &&
+            hardEpochOnBurst &&
+            !dualSlotUntrustedNow;
         const bool clearGrantMacOpen =
             explicitClearGrantForCall &&
             !out.phase2WrongSlot &&
             !out.phase2TargetEssEncrypted &&
+            hardEpochOnBurst &&
             (out.phase2TargetMacCrcValid ||
              out.phase2MacCrcValid > 0 ||
              burst.macCrcValid ||
@@ -12062,12 +12115,10 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             clearLatchOpen ||
             postEmitClearGrantOpen ||
             clearGrantMacOpen ||
-            p25Phase2SessionSpeakerSustainActive(rx);
+            (p25Phase2SessionSpeakerSustainActive(rx) && hardEpochOnBurst && !dualSlotUntrustedNow);
         // Selected-slot continuous clear: once traffic ESS/PTT (or established
         // same-call clear) is known, keep feeding descrambled Voice2/4 on the
-        // grant slot every hop — do not re-require MAC/SF on every voice burst.
-        // Capture 20260808_010625 / 012422: diag=waiting-clear-grant with
-        // p2vcw>0 — grant path must open when latch/MAC/emit already prove clear.
+        // grant slot every hop — only with hard epoch, never dual-slot untrusted.
         const bool continuousSelectedClearFeed =
             currentBurstFeedTrusted &&
             securityProvedClearForFeed &&
@@ -12075,6 +12126,8 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             !out.phase2WrongSlot &&
             !burst.encrypted &&
             burst.xorMaskApplied &&
+            hardEpochOnBurst &&
+            !dualSlotUntrustedNow &&
             (establishedClearCall ||
              sameCallClearSustainFeed ||
              explicitClearGrantHardVoiceRelease ||
@@ -12086,7 +12139,7 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
              postEmitClearGrantOpen ||
              clearGrantMacOpen ||
              (rx.p25VoiceClearKnown && !rx.p25VoiceEncrypted &&
-              (burst.maskPhaseLock || burst.superframeLock || burst.stickySuperframe ||
+              (burst.maskPhaseLock || burst.superframeLock ||
                out.phase2SuperframeBursts > 0)));
         const bool immediateAmbeDecodeAllowed =
             continuousSelectedClearFeed ||
