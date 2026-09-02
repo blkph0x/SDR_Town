@@ -67,7 +67,7 @@ forbidden_fragments = [
     "boundedProbeAccepted",
     "decodedExplicitClearPcm",
     "p25Phase2StrictLateEntryTargetVoiceEvidence",
-    "rx.p25VoiceClearKnown = true;\n        rx.p25VoiceEncrypted = false;",
+    "(targetTrafficClearEvidence || explicitGrantTargetSlotSelected)",
 ]
 for fragment in forbidden_fragments:
     if fragment in text:
@@ -102,6 +102,10 @@ if ("phase2DiagnosticAmbeProbeAccepted" in explicit_body or
         "p25AudioSamplesLookSafe" in explicit_body):
     print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
     print("explicit clear release still depends on diagnostic AMBE/PCM quality")
+    raise SystemExit(1)
+if "explicitGrantTargetSlotSelected" in explicit_body:
+    print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
+    print("explicit clear pending-drain helper still accepts selected-slot evidence")
     raise SystemExit(1)
 
 if ("out.phase2OppositeVoiceCodewords > 0 &&\n            !targetTrafficClearEvidence &&" not in text or

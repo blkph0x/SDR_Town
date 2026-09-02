@@ -2,6 +2,8 @@
 
 #include <QDateTime>
 
+#include <cmath>
+
 namespace {
 std::atomic<P25TranscriptSource*> g_p25TranscriptTap{nullptr};
 }
@@ -39,7 +41,8 @@ void P25TranscriptSource::onClearSpeakerPcm(const float* samples,
                                             int sampleRateHz,
                                             uint32_t talkgroupId,
                                             double freqHz,
-                                            int slot)
+                                            int slot,
+                                            double decoderTargetFreqHz)
 {
     if (!m_stt || !samples || count == 0 || sampleRateHz <= 0) return;
 
@@ -59,6 +62,10 @@ void P25TranscriptSource::onClearSpeakerPcm(const float* samples,
     QVariantMap meta;
     meta.insert(QStringLiteral("talkgroupId"), static_cast<qulonglong>(talkgroupId));
     meta.insert(QStringLiteral("freqHz"), freqHz);
+    meta.insert(QStringLiteral("voiceFreqHz"), freqHz);
+    if (decoderTargetFreqHz > 0.0 && std::isfinite(decoderTargetFreqHz)) {
+        meta.insert(QStringLiteral("decoderTargetFreqHz"), decoderTargetFreqHz);
+    }
     if (slot >= 0) meta.insert(QStringLiteral("slot"), slot);
 
     m_stt->submitPcm(samples, count, sampleRateHz,
@@ -127,9 +134,11 @@ void p25TranscriptTapSpeakerPcm(const float* samples,
                                 int sampleRateHz,
                                 uint32_t talkgroupId,
                                 double freqHz,
-                                int slot)
+                                int slot,
+                                double decoderTargetFreqHz)
 {
     P25TranscriptSource* tap = g_p25TranscriptTap.load(std::memory_order_acquire);
     if (!tap || !samples || count == 0) return;
-    tap->onClearSpeakerPcm(samples, count, sampleRateHz, talkgroupId, freqHz, slot);
+    tap->onClearSpeakerPcm(samples, count, sampleRateHz, talkgroupId, freqHz, slot,
+                           decoderTargetFreqHz);
 }

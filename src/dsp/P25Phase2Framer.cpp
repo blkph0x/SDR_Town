@@ -3,6 +3,7 @@
 #include "dsp/P25DspTypes.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace p25dsp {
 
@@ -40,6 +41,8 @@ void P25Phase2Framer::reset() noexcept
     m_inSyncAllowance = 0;
     m_burstFill = 0;
     m_burstBody = {};
+    m_burstSoftDibitMinAbsLlr = {};
+    m_burstSoftQualityKnown = false;
     m_superframeRing = {};
     m_ringWriteIndex = 0;
     m_ringTotalDibits = 0;
@@ -139,14 +142,18 @@ void P25Phase2Framer::tryEmitBurst(int syncErrors, bool inverted, int offsetCorr
 {
     P25Phase2FramerBurst burst;
     burst.dibits = m_burstBody;
+    burst.softDibitMinAbsLlr = m_burstSoftDibitMinAbsLlr;
     burst.absoluteStartDibit = m_absoluteDibit >= kPhase2BurstDibits
         ? m_absoluteDibit - kPhase2BurstDibits
         : 0;
     burst.syncErrors = syncErrors;
     burst.inverted = inverted;
     burst.dibitOffsetCorrection = offsetCorrection;
+    burst.softQualityKnown = m_burstSoftQualityKnown;
     m_pendingBursts.push_back(burst);
     m_burstFill = 0;
+    m_burstSoftDibitMinAbsLlr = {};
+    m_burstSoftQualityKnown = false;
     if (m_inSyncAllowance > 0) {
         --m_inSyncAllowance;
         expireSyncIfNeeded();
@@ -227,47 +234,73 @@ void P25Phase2Framer::tryEmitSuperframe()
 void P25Phase2Framer::consumeDibits(std::span<const int> dibits)
 {
     for (int dibit : dibits) {
-        const int normalized = dibit & 0x03;
-        m_syncRegister = ((m_syncRegister << 2) | static_cast<uint64_t>(normalized)) & kSyncMask;
-        ++m_absoluteDibit;
+        consumeOneDibit(dibit, 0.0, false);
+    }
+}
 
-        const int normalErrors = syncHammingDistance(m_syncRegister, kSyncWord);
-        const int invertedErrors = syncHammingDistance(m_syncRegister, kSyncWord ^ kSyncMask);
-        const int threshold = synchronized() ? kSyncThresholdSynchronized : kSyncThresholdUnsynchronized;
+void P25Phase2Framer::consumeDibits(std::span<const int> dibits,
+                                    std::span<const double> softDibitMinAbsLlr)
+{
+    const size_t softCount = softDibitMinAbsLlr.size();
+    for (size_t i = 0; i < dibits.size(); ++i) {
+        const bool softKnown = i < softCount && std::isfinite(softDibitMinAbsLlr[i]);
+        consumeOneDibit(dibits[i], softKnown ? softDibitMinAbsLlr[i] : 0.0, softKnown);
+    }
+}
 
-        if (normalErrors <= threshold || invertedErrors <= threshold) {
-            m_synchronized = true;
-            m_syncConfidence = std::min(100, m_syncConfidence + 10);
-            m_inSyncAllowance = 10;
-            m_burstFill = 0;
-            uint64_t reg = m_syncRegister;
-            for (int i = static_cast<int>(kPhase2FrameSyncDibits) - 1; i >= 0; --i) {
-                m_burstBody[static_cast<size_t>(i)] = static_cast<int>(reg & 0x03u);
-                reg >>= 2;
-            }
-            m_burstFill = kPhase2FrameSyncDibits;
-            pushSuperframeDibit(normalized);
-            if (m_superframeDibitsSinceEmit >= kPhase2SuperframeDibits) {
-                tryEmitSuperframe();
-            }
-            continue;
+void P25Phase2Framer::consumeOneDibit(int dibit,
+                                      double softDibitMinAbsLlr,
+                                      bool softQualityKnown)
+{
+    const int normalized = dibit & 0x03;
+    m_syncRegister = ((m_syncRegister << 2) | static_cast<uint64_t>(normalized)) & kSyncMask;
+    ++m_absoluteDibit;
+
+    const int normalErrors = syncHammingDistance(m_syncRegister, kSyncWord);
+    const int invertedErrors = syncHammingDistance(m_syncRegister, kSyncWord ^ kSyncMask);
+    const int threshold = synchronized() ? kSyncThresholdSynchronized : kSyncThresholdUnsynchronized;
+
+    if (normalErrors <= threshold || invertedErrors <= threshold) {
+        m_synchronized = true;
+        m_syncConfidence = std::min(100, m_syncConfidence + 10);
+        m_inSyncAllowance = 10;
+        m_burstFill = 0;
+        m_burstSoftDibitMinAbsLlr = {};
+        m_burstSoftQualityKnown = false;
+        uint64_t reg = m_syncRegister;
+        for (int i = static_cast<int>(kPhase2FrameSyncDibits) - 1; i >= 0; --i) {
+            m_burstBody[static_cast<size_t>(i)] = static_cast<int>(reg & 0x03u);
+            reg >>= 2;
         }
-
-        if (synchronized()) {
-            if (m_burstFill < kPhase2BurstDibits) {
-                m_burstBody[m_burstFill++] = normalized;
-            }
-            if (m_burstFill >= kPhase2BurstDibits) {
-                tryEmitBurst(normalErrors, invertedErrors < normalErrors, 0);
-            }
-        } else {
-            m_syncConfidence = std::max(0, m_syncConfidence - 1);
-        }
-
+        m_burstFill = kPhase2FrameSyncDibits;
         pushSuperframeDibit(normalized);
         if (m_superframeDibitsSinceEmit >= kPhase2SuperframeDibits) {
             tryEmitSuperframe();
         }
+        return;
+    }
+
+    if (synchronized()) {
+        if (m_burstFill < kPhase2BurstDibits) {
+            m_burstBody[m_burstFill] = normalized;
+            if (softQualityKnown) {
+                m_burstSoftDibitMinAbsLlr[m_burstFill] = softDibitMinAbsLlr;
+                m_burstSoftQualityKnown = true;
+            } else {
+                m_burstSoftDibitMinAbsLlr[m_burstFill] = 0.0;
+            }
+            ++m_burstFill;
+        }
+        if (m_burstFill >= kPhase2BurstDibits) {
+            tryEmitBurst(normalErrors, invertedErrors < normalErrors, 0);
+        }
+    } else {
+        m_syncConfidence = std::max(0, m_syncConfidence - 1);
+    }
+
+    pushSuperframeDibit(normalized);
+    if (m_superframeDibitsSinceEmit >= kPhase2SuperframeDibits) {
+        tryEmitSuperframe();
     }
 }
 

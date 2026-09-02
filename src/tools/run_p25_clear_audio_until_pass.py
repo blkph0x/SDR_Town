@@ -10,6 +10,13 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from p25_stt_common import (
+    DEFAULT_MIN_CHARS,
+    DEFAULT_MIN_WORDS,
+    DEFAULT_TIMEOUT_S,
+    default_stt_backend,
+)
+
 
 PASS_SCORES = {
     "PASS_CONTINUOUS_AUDIO": 100,
@@ -41,6 +48,15 @@ def score_summary(summary: dict) -> tuple[int, str]:
     waitgrant = summary.get("waitgrant") or {}
     status = str(replay.get("best_status") or "NO_REPLAY_RESULTS")
     score = PASS_SCORES.get(status, 0)
+    live_stt = waitgrant.get("live_stt") or {}
+    replay_stt = replay.get("best_stt") or {}
+    if live_stt.get("pass"):
+        score += 120
+        status = "PASS_LIVE_STT"
+    if replay_stt.get("pass"):
+        score += 100
+        if status == "NO_REPLAY_RESULTS":
+            status = "PASS_REPLAY_STT"
     wav_seconds = float(waitgrant.get("wav_seconds") or 0.0)
     if wav_seconds >= 0.5:
         score += 20
@@ -66,6 +82,15 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--replay-timeout", type=float, default=60.0)
     parser.add_argument("--max-replay-grants", type=int, default=2)
     parser.add_argument("--accept-partial", action="store_true", help="Treat PASS_PARTIAL_AUDIO as a successful stop.")
+    parser.add_argument("--no-stt", action="store_true", help="Do not run STT on live/replay WAV artifacts.")
+    parser.add_argument(
+        "--stt-backend",
+        default=default_stt_backend(),
+        help="STT backend (default: SDR_TOWN_STT_BACKEND or auto).",
+    )
+    parser.add_argument("--stt-timeout", type=float, default=DEFAULT_TIMEOUT_S)
+    parser.add_argument("--stt-min-chars", type=int, default=DEFAULT_MIN_CHARS)
+    parser.add_argument("--stt-min-words", type=int, default=DEFAULT_MIN_WORDS)
     args = parser.parse_args(argv)
 
     repo = args.repo.resolve()
@@ -101,23 +126,49 @@ def main(argv: list[str]) -> int:
             "--max-replay-grants",
             str(args.max_replay_grants),
         ]
+        if args.no_stt:
+            cmd.append("--no-stt")
+        else:
+            cmd.extend([
+                "--stt-backend",
+                args.stt_backend,
+                "--stt-timeout",
+                str(args.stt_timeout),
+                "--stt-min-chars",
+                str(args.stt_min_chars),
+                "--stt-min-words",
+                str(args.stt_min_words),
+            ])
         if args.tg:
             cmd.extend(["--tg", str(args.tg)])
-        proc = subprocess.run(
-            cmd,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=max(args.seconds + args.record_seconds + args.replay_timeout * 10.0 + 180.0, 240.0),
-            check=False,
-        )
-        (attempt_dir / "runner_stdout.txt").write_text(proc.stdout or "", encoding="utf-8", errors="replace")
+        timeout_s = max(args.seconds + args.record_seconds + args.replay_timeout * 10.0 + 180.0, 240.0)
+        try:
+            proc = subprocess.run(
+                cmd,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=timeout_s,
+                check=False,
+            )
+            output = proc.stdout or ""
+            returncode = proc.returncode
+            error = None
+        except subprocess.TimeoutExpired as ex:
+            output = ex.stdout or ""
+            if isinstance(output, bytes):
+                output = output.decode("utf-8", errors="replace")
+            error = f"live_diag_timeout_after_{timeout_s:.1f}s"
+            output += f"\n{error}\n"
+            returncode = -999
+        (attempt_dir / "runner_stdout.txt").write_text(output, encoding="utf-8", errors="replace")
         summary = load_json(attempt_dir / "clear_audio_diag_summary.json")
         score, status = score_summary(summary)
         row = {
             "attempt": index + 1,
             "cc_mhz": cc,
-            "returncode": proc.returncode,
+            "returncode": returncode,
+            "error": error,
             "score": score,
             "status": status,
             "summary_path": str(attempt_dir / "clear_audio_diag_summary.json"),
@@ -125,6 +176,8 @@ def main(argv: list[str]) -> int:
             "findings": summary.get("findings", []),
             "wav_seconds": (summary.get("waitgrant") or {}).get("wav_seconds", 0.0),
             "wav_path": (summary.get("waitgrant") or {}).get("wav_path"),
+            "live_stt": (summary.get("waitgrant") or {}).get("live_stt"),
+            "replay_stt": (summary.get("replay") or {}).get("best_stt"),
             "capture_dir": (summary.get("waitgrant") or {}).get("capture_dir"),
         }
         attempts.append(row)
@@ -144,7 +197,7 @@ def main(argv: list[str]) -> int:
         )
         print(json.dumps(row, indent=2, sort_keys=True))
 
-        if status in {"PASS_CONTINUOUS_AUDIO", "PASS_CLEAR_AUDIO"}:
+        if status in {"PASS_CONTINUOUS_AUDIO", "PASS_CLEAR_AUDIO", "PASS_LIVE_STT", "PASS_REPLAY_STT"}:
             print(f"clear-audio loop PASS on attempt {index + 1}: {status}")
             return 0
         if args.accept_partial and status == "PASS_PARTIAL_AUDIO":

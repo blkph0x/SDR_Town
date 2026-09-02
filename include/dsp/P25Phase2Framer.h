@@ -11,10 +11,12 @@ namespace p25dsp {
 
 struct P25Phase2FramerBurst {
     std::array<int, kPhase2BurstDibits> dibits{};
+    std::array<double, kPhase2BurstDibits> softDibitMinAbsLlr{};
     uint64_t absoluteStartDibit = 0;
     int syncErrors = -1;
     bool inverted = false;
     int dibitOffsetCorrection = 0;
+    bool softQualityKnown = false;
 };
 
 struct P25Phase2FramerSuperframe {
@@ -37,6 +39,8 @@ public:
     void reset() noexcept;
 
     void consumeDibits(std::span<const int> dibits);
+    void consumeDibits(std::span<const int> dibits,
+                       std::span<const double> softDibitMinAbsLlr);
 
     std::vector<P25Phase2FramerBurst> takeBursts();
     std::vector<P25Phase2FramerSuperframe> takeSuperframes();
@@ -54,6 +58,8 @@ private:
     int m_inSyncAllowance = 0;
     size_t m_burstFill = 0;
     std::array<int, kPhase2BurstDibits> m_burstBody{};
+    std::array<double, kPhase2BurstDibits> m_burstSoftDibitMinAbsLlr{};
+    bool m_burstSoftQualityKnown = false;
 
     std::array<int, kSuperframeRingCapacity> m_superframeRing{};
     size_t m_ringWriteIndex = 0;
@@ -74,6 +80,7 @@ private:
     int checkSynchronizedOffset(size_t syncStartIndex) const noexcept;
 
     void tryEmitBurst(int syncErrors, bool inverted, int offsetCorrection);
+    void consumeOneDibit(int dibit, double softDibitMinAbsLlr, bool softQualityKnown);
     void tryEmitSuperframe();
     void emitSuperframeFragment(int sync1Errors,
                                 int sync2Errors,

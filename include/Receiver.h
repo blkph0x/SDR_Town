@@ -58,6 +58,8 @@ struct P25VoiceDiagSnapshot {
     bool phase2TargetMacCrcValid = false;
     bool phase2TargetSessionAudioRelease = false;
     bool phase2TargetSecurityStateFromPtt = false;
+    bool phase2CurrentFeedTrustedTargetBurst = false;
+    bool phase2SameCallSelectedTimeslotContinuation = false;
     bool backendAvailable = false;
     bool nidLock = false;
     double phase2CenterFreqHz = 0.0;
@@ -129,6 +131,7 @@ struct Receiver {
     // Architectural continuity diagnostics (healthy clear call => all zero
     // mid-call destructive events).
     uint64_t p25DiagSlotChanged = 0;
+    uint64_t p25DiagCompanionPromoted = 0;
     uint64_t p25DiagStickyInvert = 0;
     uint64_t p25DiagSlotProbe = 0;
     uint64_t p25DiagSlotProbeBlocked = 0;
@@ -217,11 +220,23 @@ struct Receiver {
     // plus sane decoded PCM proves the current traffic slot is clear.
     bool p25Phase2AllowLateEntryAudioProbe = false;
     bool p25VoiceResetPending = false;
+    // Set on same-call RF/slot carrier hops when decoder reset runs on the GUI
+    // thread before the DSP worker can clear the speaker jitter queue + ring.
+    // Capture 20260810_221028: prior-carrier PCM kept draining → doubled/O-O-O audio.
+    bool p25Phase2SpeakerPlaybackClearPending = false;
+    // Sticky across same-call hop / voice-reset (survive clearAll sustain wipe).
+    // Capture 20260811_021036 L35906: hop reset hadSuccessfulEmit → context VCWs
+    // replayed (ctxVcw>ctxDrop) as short dual-voice / syllable repeats.
+    bool p25Phase2CallHadSpeakerAudio = false;
     P25VoiceDiagSnapshot p25VoiceDiagnostics;
     P25LiveDecoder p25VoiceLiveDecoder{p25RealtimeVoiceDecoderConfig()};
     std::unique_ptr<P25TrafficChannelProcessor> p25TrafficProcessor;
     P25ImbeVoiceDecoder p25ImbeVoiceDecoder;
     P25AmbeVoiceDecoder p25AmbeVoiceDecoder;
+    // Companion TDMA timeslot audio module (SDRTrunk dual AudioModule model).
+    // Decodes opposite-slot AMBE for observe/priority/multi-record; never mixes
+    // into the selected-slot speaker path unless selection changes.
+    P25AmbeVoiceDecoder p25AmbeVoiceDecoderOpposite;
     // Per-receiver P25 audio queue, resampler, and AMBE emit de-dupe (no global maps).
     P25ReceiverSessionState p25SessionState;
     int p25Phase2PreferredAmbeVariant = -1;
@@ -289,6 +304,7 @@ struct Receiver {
             p25TrafficProcessor.reset();
             p25ImbeVoiceDecoder = P25ImbeVoiceDecoder();
             p25AmbeVoiceDecoder = P25AmbeVoiceDecoder();
+            p25AmbeVoiceDecoderOpposite = P25AmbeVoiceDecoder();
         }
         p25Phase2PreferredAmbeVariant = -1;
         p25Phase2PreferredAmbeVariantHits = 0;
@@ -313,9 +329,11 @@ struct Receiver {
         p25Phase2GrantedSlotImmutable = false;
         p25VoiceSlotProbePending = false;
         p25VoiceSlotProbeRequested = 0;
+        p25Phase2SpeakerPlaybackClearPending = false;
         // Call-boundary reset: zero mid-call continuity counters so a healthy
         // call reports 0 slot/invert/vocoder/variant/pending-clear events.
         p25DiagSlotChanged = 0;
+        p25DiagCompanionPromoted = 0;
         p25DiagStickyInvert = 0;
         p25DiagSlotProbe = 0;
         p25DiagSlotProbeBlocked = 0;

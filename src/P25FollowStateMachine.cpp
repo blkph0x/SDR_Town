@@ -77,14 +77,33 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
     // This fixes "stuck on inactive talk groups".
     // Partial sf/mask without ongoing VCW is explicitly not sufficient (see SDRTrunk comments in prior code).
     const bool hasRecentVoiceVcws = snapshot.phase2VoiceCodewords > 0 || snapshot.decodedFrames > 0 || snapshot.imbeFrames > 0;
-    // Capture 032428: watchdog ~26s after last emit on clear TG 30003 (25s was
-    // one second short). Hold 40s after real speaker PCM before ACQ return —
-    // sdrtrunk keeps traffic until squelch, not a short no-VCW timer.
+    // Speaker PCM is strong evidence for a live call only while the traffic
+    // processor still sees current TDMA voice/structure.  Without that, use a
+    // short playout grace so a single-RTL receiver can return to the control
+    // channel instead of sitting on a dead traffic frequency for tens of seconds.
+    constexpr int64_t kSpeakerImmediateGraceMs = 2500;
     constexpr int64_t kSpeakerFollowGraceMs = 40000;
-    const bool recentSpeakerOutput =
+    const bool haveSpeakerOutputTimestamp =
         snapshot.recentSpeakerOutputMs > 0 &&
         snapshot.nowMs > 0 &&
-        snapshot.nowMs - snapshot.recentSpeakerOutputMs <= kSpeakerFollowGraceMs;
+        snapshot.nowMs >= snapshot.recentSpeakerOutputMs;
+    const int64_t speakerOutputAgeMs = haveSpeakerOutputTimestamp
+        ? snapshot.nowMs - snapshot.recentSpeakerOutputMs
+        : kSpeakerFollowGraceMs + 1;
+    const bool currentTrafficEvidenceForSpeakerHold =
+        hasRecentVoiceVcws ||
+        snapshot.phase2TrafficCallActive ||
+        snapshot.phase2TrafficAudioOpen ||
+        snapshot.phase2VoiceCodewords > 0 ||
+        (snapshot.phase2Bursts > 0 &&
+         snapshot.phase2SuperframeBursts > 0 &&
+         snapshot.phase2MaskedBursts > 0 &&
+         snapshot.phase2MacPdus > 0);
+    const bool recentSpeakerOutput =
+        speakerOutputAgeMs >= 0 &&
+        speakerOutputAgeMs <= kSpeakerFollowGraceMs &&
+        (speakerOutputAgeMs <= kSpeakerImmediateGraceMs ||
+         currentTrafficEvidenceForSpeakerHold);
     bool hasCarrier = true;
     if (snapshot.rfMetricsPopulated) {
         hasCarrier = snapshot.recentSnrDb > 3.0 ||
@@ -128,9 +147,16 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         return decision;
     }
 
-    // Speaker output is authoritative activity even when the latest 1s diagnostic
-    // window is empty (opposite-slot dwell / empty hops between islands).
-    const int64_t effectiveLastActiveMs = std::max(snapshot.lastActiveMs, snapshot.recentSpeakerOutputMs);
+    // Speaker output is authoritative activity only during the bounded grace
+    // above.  A stale speaker timestamp must not extend the silence clock after
+    // the traffic stream has gone quiet.
+    const int64_t effectiveLastActiveMs =
+        std::max(snapshot.lastActiveMs, recentSpeakerOutput ? snapshot.recentSpeakerOutputMs : int64_t{0});
+    const bool phase2RecentContinuation =
+        phase2Follow &&
+        effectiveLastActiveMs > snapshot.tunedAtMs &&
+        snapshot.nowMs > effectiveLastActiveMs &&
+        !snapshot.phase2EssEncrypted;
 
     const bool initialHoldExpired =
         snapshot.tunedAtMs > 0 && snapshot.nowMs - snapshot.tunedAtMs > 2500;
@@ -145,10 +171,17 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
     const int64_t tunedDurationMs = snapshot.tunedAtMs > 0
         ? std::max<int64_t>(0, snapshot.nowMs - snapshot.tunedAtMs)
         : 0;
+    const bool phase2CurrentEssEvidence =
+        snapshot.phase2EssKnown &&
+        (snapshot.phase2MacCrcValid > 0 ||
+         snapshot.phase2VoiceCodewords > 0 ||
+         snapshot.decodedFrames > 0 ||
+         snapshot.phase2TrafficCallActive ||
+         snapshot.phase2TrafficAudioOpen);
     const bool phase2HardProgress =
         snapshot.decodedFrames > 0 ||
         snapshot.phase2MacCrcValid > 0 ||
-        snapshot.phase2EssKnown ||
+        phase2CurrentEssEvidence ||
         snapshot.phase2TrafficAudioOpen;
     const bool phase2CurrentVoiceEvidence =
         snapshot.phase2VoiceCodewords > 0 ||
@@ -160,10 +193,11 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         snapshot.phase2MacPdus > 0;
     const bool phase2UntrustedClearAcquire =
         clearGrantKnown &&
+        !phase2RecentContinuation &&
         !phase2HardProgress &&
         snapshot.decodedFrames == 0 &&
         snapshot.phase2MacCrcValid == 0 &&
-        !snapshot.phase2EssKnown;
+        !phase2CurrentEssEvidence;
     const int64_t untrustedClearAcquireLimitMs = phase2CurrentVoiceEvidence
         ? 18000
         : (phase2CurrentStructureEvidence ? 12000 : 6500);
@@ -218,12 +252,6 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
 
     // Speaker output must count as continuation (012422: lastActive lagged
     // real emit, so idle/no-VCW timeouts used a stale silence clock).
-    const int64_t continuationAnchorMs = effectiveLastActiveMs;
-    const bool phase2RecentContinuation =
-        phase2Follow &&
-        continuationAnchorMs > snapshot.tunedAtMs &&
-        snapshot.nowMs > continuationAnchorMs &&
-        !snapshot.phase2EssEncrypted;
     const int64_t tdmaVcwNoSuperframeTunedMs = phase2RecentContinuation ? 22000 : 15000;
     const int64_t tdmaVcwNoSuperframeSilenceMs = phase2RecentContinuation ? 10000 : 3500;
     const bool waitingUnknownClearGrant =

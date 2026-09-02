@@ -12,6 +12,9 @@
 
 namespace {
 
+constexpr int kSpectrumAxisWidth = 48;
+constexpr int kSpectrumRightMargin = 28;
+
 template <typename Row>
 float peakDbInBinSpan(const Row& row, double binStart, double binEnd, float fallback)
 {
@@ -138,10 +141,24 @@ SpectrumWidget::~SpectrumWidget() = default;
 void SpectrumWidget::updateSpectrum(const std::vector<float>& powerDb, double centerFreqHz, double sampleRateHz)
 {
     QMutexLocker lock(&m_dataMutex);
+    const double previousSampleRate = m_sampleRate;
+    const double previousViewBandwidth = m_viewBandwidthHz;
     m_powerDb = QVector<float>(powerDb.begin(), powerDb.end());
     m_centerFreq = centerFreqHz;
     m_sampleRate = sampleRateHz;
-    if (m_viewBandwidthHz <= 0) m_viewBandwidthHz = sampleRateHz;
+    if (sampleRateHz > 0.0 && std::isfinite(sampleRateHz)) {
+        const bool wasFullBandwidthView =
+            previousViewBandwidth <= 0.0 ||
+            !std::isfinite(previousViewBandwidth) ||
+            (previousSampleRate > 0.0 && std::isfinite(previousSampleRate) &&
+             std::abs(previousViewBandwidth - previousSampleRate) <= previousSampleRate * 0.05) ||
+            previousViewBandwidth > sampleRateHz * 1.02;
+        if (wasFullBandwidthView) {
+            m_viewBandwidthHz = sampleRateHz;
+        } else {
+            m_viewBandwidthHz = std::clamp(previousViewBandwidth, 1000.0, sampleRateHz);
+        }
+    }
 
     // Push full high-res row to history (source of truth for zoomed render).
     if (!powerDb.empty()) {
@@ -185,7 +202,10 @@ void SpectrumWidget::setColorRange(double minDb, double maxDb)
 void SpectrumWidget::setViewBandwidth(double bwHz)
 {
     QMutexLocker lock(&m_dataMutex);
-    m_viewBandwidthHz = std::max(1000.0, bwHz);
+    const double maxBw = (m_sampleRate > 0.0 && std::isfinite(m_sampleRate))
+        ? m_sampleRate
+        : 20e6;
+    m_viewBandwidthHz = std::clamp(bwHz, 1000.0, maxBw);
     update();
 }
 
@@ -305,7 +325,11 @@ double SpectrumWidget::freqFromX(int x) const
     double start = m_centerFreq - bw/2;
     int ww = width();
     if (ww <= 0) return m_centerFreq; // safe during early layout/paint
-    return start + (x / double(ww)) * bw;
+    const int plotLeft = kSpectrumAxisWidth;
+    const int plotW = std::max(1, ww - kSpectrumAxisWidth - kSpectrumRightMargin);
+    const int plotRight = plotLeft + plotW;
+    const int clampedX = std::clamp(x, plotLeft, plotRight);
+    return start + ((clampedX - plotLeft) / double(plotW)) * bw;
 }
 
 int SpectrumWidget::xFromFreq(double freq) const
@@ -313,7 +337,11 @@ int SpectrumWidget::xFromFreq(double freq) const
     double bw = (m_viewBandwidthHz > 0 ? m_viewBandwidthHz : m_sampleRate);
     double start = m_centerFreq - bw/2;
     double rel = (freq - start) / bw;
-    return static_cast<int>(rel * width());
+    int ww = width();
+    const int plotLeft = kSpectrumAxisWidth;
+    const int plotW = std::max(1, ww - kSpectrumAxisWidth - kSpectrumRightMargin);
+    rel = std::clamp(rel, 0.0, 1.0);
+    return plotLeft + static_cast<int>(rel * plotW);
 }
 
 // Map a power dB value (in the current color range) to widget Y in the spectrum area (top 2/3).
@@ -363,8 +391,8 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
 
     // Reserve left margin for dynamic dB scale (power axis). This makes the "dynamic db numbers on the side"
     // the user asked for, using the live color range so it stays in sync with what the user sees in the WF colors.
-    const int axisW = 48;   // left dB axis gutter
-    const int rightMargin = 28; // right side for squelch grab bar / handle (easy to grab)
+    const int axisW = kSpectrumAxisWidth;   // left dB axis gutter
+    const int rightMargin = kSpectrumRightMargin; // right side for squelch grab bar / handle (easy to grab)
 
     int specH = h * 2 / 3;
     int wfH = h - specH;
@@ -376,13 +404,54 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
     QRect specRect(axisW, 0, w - axisW - rightMargin, specH);
     QRect wfRect(axisW, specH, w - axisW - rightMargin, wfH);
 
+    // Snapshot the contended visual state under one short lock, then paint from
+    // those locals so the spectrum curve, waterfall, grid, and labels all share
+    // one frequency axis for this frame.
+    QVector<float> powerCopy;
+    QImage wfCopy;
+    std::vector<std::vector<float>> highResSnap;
+    double centerSnap = m_centerFreq;
+    double srSnap = m_sampleRate;
+    double viewBwSnap = (m_viewBandwidthHz > 0 ? m_viewBandwidthHz : m_sampleRate);
+    double colorMinSnap = m_colorMinDb;
+    double colorMaxSnap = m_colorMaxDb;
+    double squelchSnap = m_squelchThresholdDb;
+    double liveSignalSnap = m_liveSignalDb;
+    double liveNoiseSnap = m_liveNoiseFloorDb;
+    bool zoomedView = false;
+
+    {
+        QMutexLocker lock(&m_dataMutex);
+        powerCopy = m_powerDb;
+        wfCopy = m_waterfall;
+        centerSnap = m_centerFreq;
+        srSnap = m_sampleRate;
+        viewBwSnap = (m_viewBandwidthHz > 0 ? m_viewBandwidthHz : m_sampleRate);
+        colorMinSnap = m_colorMinDb;
+        colorMaxSnap = m_colorMaxDb;
+        squelchSnap = m_squelchThresholdDb;
+        liveSignalSnap = m_liveSignalDb;
+        liveNoiseSnap = m_liveNoiseFloorDb;
+        zoomedView = m_viewBandwidthHz > 0.0 && m_sampleRate > 0.0 &&
+            m_viewBandwidthHz < m_sampleRate * 0.95;
+        if (zoomedView) {
+            const size_t take = std::min(m_highResHistory.size(), kMaxHighResHistory);
+            auto it = m_highResHistory.end();
+            for (size_t i = 0; i < take; ++i) {
+                --it;
+                highResSnap.push_back(*it);
+            }
+            std::reverse(highResSnap.begin(), highResSnap.end());
+        }
+    }
+
     // Draw left dB axis (dynamic, based on current colorMin/Max)
     {
         p.setPen(QColor(90, 95, 100));
         p.drawLine(axisW-1, 0, axisW-1, h); // separator line
 
-        double cmin = m_colorMinDb;
-        double cmax = m_colorMaxDb;
+        double cmin = colorMinSnap;
+        double cmax = colorMaxSnap;
         double range = cmax - cmin;
         if (range < 1.0) range = 100.0;
 
@@ -425,46 +494,11 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
     for (int i = 0; i <= 10; ++i) {
         int x = specRect.left() + plotW * i / 10;
         p.drawLine(x, specRect.top(), x, specRect.bottom());
-        double f = freqFromX( (x - specRect.left()) * width() / std::max(1, plotW) );  // approx using original logic scaled
-        // Simpler: recompute using the view
+        const double f = centerSnap - viewBwSnap / 2.0 +
+            (static_cast<double>(i) / 10.0) * viewBwSnap;
         p.setPen(QColor(140, 145, 150));
         p.drawText(x + 2, specRect.bottom() - 4, QString::number(f/1e6, 'f', 2) + "M");
         p.setPen(QColor(70, 75, 80));
-    }
-
-    // Snapshot the contended visual state under one *short* lock.
-    // Release immediately. Then paint from the local copies.
-    // This eliminates the previous second QMutexLocker on the non-recursive
-    // m_dataMutex while the first was conceptually active, and prevents
-    // holding the lock during QPainter work / drawImage / text.
-    // Directly addresses the UI-thread paint deadlock (P0) that caused
-    // "Responding: False" after entering the event loop.
-    QVector<float> powerCopy;
-    QImage wfCopy;
-    std::vector<std::vector<float>> highResSnap; // recent high-bin rows for true-res zoomed waterfall
-    double centerSnap = m_centerFreq;
-    double srSnap = m_sampleRate;
-    double viewBwSnap = (m_viewBandwidthHz > 0 ? m_viewBandwidthHz : m_sampleRate);
-    double colorMinSnap = m_colorMinDb;
-    double colorMaxSnap = m_colorMaxDb;
-    double squelchSnap = m_squelchThresholdDb;
-    double liveSignalSnap = m_liveSignalDb;
-    double liveNoiseSnap = m_liveNoiseFloorDb;
-
-    {
-        QMutexLocker lock(&m_dataMutex);
-        powerCopy = m_powerDb;
-        wfCopy = m_waterfall;
-        centerSnap = m_centerFreq;
-        srSnap = m_sampleRate;
-        // Snapshot a useful number of recent high-res rows (newest at back). Paint will use these for zoomed detail.
-        size_t take = std::min(m_highResHistory.size(), (size_t)96);
-        auto it = m_highResHistory.end();
-        for (size_t i = 0; i < take; ++i) {
-            --it;
-            highResSnap.push_back(*it); // reverse so [0] oldest in this local vec
-        }
-        std::reverse(highResSnap.begin(), highResSnap.end()); // now [0] oldest
     }
 
     // draw spectrum (from snapshot, lock already released)
@@ -510,17 +544,17 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
         p.drawText(specRect.center().x() - 80, specRect.center().y(), "No spectrum data (waiting for IQ...)");
     }
 
-    // Waterfall: render from high-res source history when we have it (true extra resolution on zoom).
-    // This is the key fix for "waterfall zoom is visual crop/stretch, not true extra resolution".
-    // We map each display column's frequency to the exact bin in the high-bin FFT rows and color from source power.
-    // Falls back to the (possibly lower-res) image if no high-res history yet.
+    // Waterfall: render from the same high-res source history as the spectrum.
+    // Each display column maps through the current frequency axis to the exact FFT
+    // bin span, so full-band and zoomed views stay horizontally aligned.
+    // Falls back to the legacy image only before live history is available.
     // wfRect and specRect already computed with left dB axis + right margin reserved.
     double fullBw = srSnap;
     double fullStart = centerSnap - fullBw / 2.0;
     double viewStart = centerSnap - viewBwSnap / 2.0;
     double viewEnd = centerSnap + viewBwSnap / 2.0;
 
-    if (!highResSnap.empty()) {
+    if (zoomedView && !highResSnap.empty()) {
         // Build a temp image for the wf area from the *source* high-res bins (correct zoomed detail).
         const int renderW = std::max(1, wfRect.width());
         QImage wfSrc(renderW, wfH, QImage::Format_RGB32);
@@ -739,7 +773,10 @@ void SpectrumWidget::wheelEvent(QWheelEvent* event)
         QMutexLocker lock(&m_dataMutex);
         double currentBw = (m_viewBandwidthHz > 0 ? m_viewBandwidthHz : m_sampleRate);
         double factor = (event->angleDelta().y() > 0) ? 0.7 : 1.4; // stronger zoom steps
-        double newBw = std::clamp(currentBw * factor, 50e3, 20e6);
+        const double maxBw = (m_sampleRate > 0.0 && std::isfinite(m_sampleRate))
+            ? m_sampleRate
+            : 20e6;
+        double newBw = std::clamp(currentBw * factor, 50e3, maxBw);
         m_viewBandwidthHz = newBw;
     }
     update();

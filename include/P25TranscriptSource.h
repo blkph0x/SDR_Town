@@ -31,7 +31,8 @@ public:
                            int sampleRateHz,
                            uint32_t talkgroupId,
                            double freqHz,
-                           int slot /* -1 if unknown */);
+                           int slot /* -1 if unknown */,
+                           double decoderTargetFreqHz = 0.0);
 
 private slots:
     void onTranscriptReady(const QString& sourceId,
@@ -59,4 +60,5 @@ void p25TranscriptTapSpeakerPcm(const float* samples,
                                 int sampleRateHz,
                                 uint32_t talkgroupId,
                                 double freqHz,
-                                int slot);
+                                int slot,
+                                double decoderTargetFreqHz = 0.0);

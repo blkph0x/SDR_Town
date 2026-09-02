@@ -10,7 +10,7 @@ checks = {
     'legacy retune path retained': 'if (!tuneP25Path(followTg.lastVoiceFreqHz)) return false;' in main,
     'traffic source path retained': 'startP25IndependentTrafficSource' in main,
     'traffic source disabled notice': 'p25-traffic-source-disabled' in main,
-    'phase2 skips wideband ddc unless centered': 'phase2Traffic && !centeredOnVoice' in main,
+    'phase2 uses safe low-IF wideband source selection': 'phase2LowIfFriendly' in main and 'same-wideband-control-source-low-if' in main,
     'clear-trusted dwell steal grace': 'kP25Phase2ClearTrustedSilentDwellStealGraceMs' in main,
     'symbol rate log uses 6000': 'cfgSymbolRate=6000Hz' in main,
 }

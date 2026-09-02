@@ -31,7 +31,7 @@ This package adds stronger capture oversight so each RF test run is reproducible
 ## Offline check
 
 ```bash
-python tools/analyze_iq_capture.py /path/to/capture_directory
+python src/tools/analyze_iq_capture.py /path/to/capture_directory
 ```
 
 The script exits non-zero when the capture health is not `ok_gapless`.

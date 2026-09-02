@@ -7,15 +7,21 @@ main = (root / 'src' / 'main.cpp').read_text(encoding='utf-8', errors='replace')
 
 checks = {
     'protected overlap samples': 'kProtectedOverlapSamples' in main,
-    'no decode cursor bump on trim': 'lastDecodeAbsolute = startAbsolute' not in main.split('protectedPrefixSamples', 1)[1][:1200],
-    'allow temporary oversize buffer': 'if (drop == 0)' in main and 'protectedPrefixSamples' in main,
+    'soft trim uses effective decode cursor': (
+        'const uint64_t decodeCursor = effectiveDecodeAbsolute();' in main
+        and 'decodeCursor - startAbsolute' in main
+    ),
+    'soft trim preserves pre-roll before cursor': (
+        'decodeHeadSamples > kProtectedOverlapSamples' in main
+        and 'decodeHeadSamples - kProtectedOverlapSamples' in main
+    ),
+    'old inverted trim math is gone': 'samples.size() - protectedPrefixSamples' not in main,
+    'allow temporary oversize buffer': 'if (drop == 0)' in main and 'const size_t hardCap = maxSamples + (maxSamples / 2);' in main,
     'active rolling window seconds': 'kP25Phase2VoiceDecodeActiveRollingSeconds' in main,
     'effective rolling window helper': 'p25Phase2EffectiveRollingWindowSeconds' in main,
     'speaker tiny chunks need stable lock': (
-        'p25Phase2HasStableSuperframeLockLocked(rx) &&\n'
-        '                                 p25Phase2SessionHadVoiceLock(rx)' in main or
-        'p25Phase2HasStableSuperframeLockLocked(rx) &&\n'
-        '                            p25Phase2SessionHadVoiceLock(rx)' in main
+        'phase2StableSuperframeLock && phase2SessionHadVoiceLock' in main and
+        'const bool speakerSustainEligible =' in main
     ),
 }
 

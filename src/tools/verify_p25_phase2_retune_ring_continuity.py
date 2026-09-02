@@ -9,10 +9,10 @@ main = (root / 'main.cpp').read_text(encoding='utf-8', errors='replace')
 
 checks = {
     'markStreamRetune declared': 'markStreamRetune' in dmh,
-    'retune uses markStreamRetune not full reset': 'markStreamRetune(st);' in dm and
-        'dev->setFrequency(SOAPY_SDR_RX, 0, tuneHz);\n                            markStreamRetune(st);' in dm,
+    'retune uses markStreamRetune not full reset': 'markStreamRetune(st, logicalCenter);' in dm and
+        'dev->setFrequency(SOAPY_SDR_RX, 0, tuneHz);\n                            markStreamRetune(st, logicalCenter);' in dm,
     'markStreamRetune preserves monotonic ring': 'markStreamRetune' in dm and
-        'Preserve monotonic totalSamplesWritten' in dm,
+        'retuneValidFromAbsolute.store(total' in dm and 'totalSamplesWritten.store(0' not in dm.split('void DeviceManager::markStreamRetune', 1)[1].split('// --- Streaming implementation', 1)[0],
     'rolling append keeps overlap on epoch change': 'Monotonic retune handoff: keep accumulated IQ/overlap' in main,
     'epoch handoff returns IQ pre-roll': 'Soft retune handoff: re-anchor at the live edge' in dm,
     'scheduler stream-retune-handoff path': 'stream-retune-handoff' in main,

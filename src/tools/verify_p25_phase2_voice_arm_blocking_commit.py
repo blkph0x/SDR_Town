@@ -12,8 +12,8 @@ checks = [
     ('voice-arm false until decoder committed', 'if (!clearAudio)' in arm and 'return false;' in arm),
     ('voice-arm removed stale rough-check branch', '/* rough check */ true' not in arm),
     ('commit comment present', 'create/commit the' in arm and 'traffic channel synchronously' in arm and 'own dspMutex' in arm),
-    ('retune receiver blocks on receiversMutex', 'std::unique_lock<std::mutex> listLock(receiversMutex);' in text),
-    ('prepare target blocks on receiversMutex', 'std::unique_lock<std::mutex> lk(receiversMutex);' in text),
+    ('retune receiver uses non-blocking receiversMutex', 'std::unique_lock<std::mutex> listLock(receiversMutex, std::try_to_lock);' in text),
+    ('prepare target uses non-blocking receiversMutex', 'std::unique_lock<std::mutex> lk(receiversMutex, std::try_to_lock);' in text),
 ]
 missing = [name for name, ok in checks if not ok]
 if missing:

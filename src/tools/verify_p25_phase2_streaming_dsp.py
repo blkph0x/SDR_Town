@@ -7,6 +7,7 @@ root = Path(__file__).resolve().parents[2]
 cmake = (root / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
 decoder_h = (root / "include" / "P25LiveDecoder.h").read_text(encoding="utf-8", errors="ignore")
 decoder_cpp = (root / "src" / "P25LiveDecoder.cpp").read_text(encoding="utf-8", errors="ignore")
+main_cpp = (root / "src" / "main.cpp").read_text(encoding="utf-8", errors="ignore")
 
 required = {
     "sdr_town_dsp static library": "add_library(sdr_town_dsp STATIC" in cmake,
@@ -20,6 +21,10 @@ required = {
     "720 dibit superframe constant": "kPhase2SuperframeDibits = 720" in (root / "include" / "dsp" / "P25DspTypes.h").read_text(encoding="utf-8"),
     "sdrtrunk sync threshold 7": "kSyncThresholdSynchronized = 7" in (root / "include" / "dsp" / "P25DspTypes.h").read_text(encoding="utf-8"),
     "streaming ddc remains opt-in by default": "enableStreamingChannelDdc = false" in decoder_h,
+    "runtime streaming ddc experiment switch": "SDR_TOWN_P25_STREAMING_DDC" in main_cpp
+    and "cfg.enableStreamingChannelDdc = false;" in main_cpp
+    and "cfg.enableStreamingChannelDdc = true;" in main_cpp,
+    "gui live path does not auto-enable streaming ddc": "setEnableStreamingChannelDdc(stickyReady)" not in main_cpp,
     "processIq uses streaming ddc": "m_streamingDdc.process" in decoder_cpp,
     "staged sync gate before full decode": "passesStagedCqpskGate" in decoder_cpp,
     "quadrant lut mapping path": "mapQuadrantsToDibits" in decoder_cpp,

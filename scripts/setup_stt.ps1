@@ -2,6 +2,10 @@
 # Usage (from repo root):
 #   powershell -ExecutionPolicy Bypass -File .\scripts\setup_stt.ps1
 #
+# Backend default for CLI/GUI automation is `auto` (SDR_TOWN_STT_BACKEND or unset).
+# The replay helpers and GUI prefer this project-local venv when it exists.
+# STT pass thresholds used by the AI clear-audio pipeline: min_chars=12, min_words=3.
+#
 # Then either:
 #   - Launch SDR_Town from the repo (auto-discovers .venv-stt), or
 #   - setx SDR_TOWN_STT_PYTHON "C:\path\to\maulaudio_pro\.venv-stt\Scripts\python.exe"
@@ -34,9 +38,11 @@ $venvPy = Join-Path $venv "Scripts\python.exe"
 $env:SDR_TOWN_WHISPER_MODEL = "base.en"
 $env:SDR_TOWN_WHISPER_DEVICE = "cpu"
 $env:SDR_TOWN_WHISPER_COMPUTE = "int8"
+$env:SDR_TOWN_STT_BACKEND = "auto"
 & $venvPy -c "from faster_whisper import WhisperModel; WhisperModel('base.en', device='cpu', compute_type='int8'); print('model_ready')"
 Write-Host ""
 Write-Host "STT venv ready: $venvPy"
 Write-Host "Optional persistent env:"
 Write-Host "  setx SDR_TOWN_STT_PYTHON `"$venvPy`""
 Write-Host "  setx SDR_TOWN_STT_SCRIPT `"$(Join-Path $root 'scripts\stt_transcribe_wav.py')`""
+Write-Host "  setx SDR_TOWN_STT_BACKEND `"auto`""

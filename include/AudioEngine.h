@@ -8,6 +8,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <new>
+#include <cstdint>
 
 #include "miniaudio.h"
 
@@ -26,12 +27,15 @@ public:
     AudioEngine();
     ~AudioEngine();
 
-    // Enumeration (call once or on demand)
+    // Enumeration (call once or on demand). Remaps active outputs' enum indices
+    // by device name so a dialog re-enumerate cannot orphan the live device list.
     std::vector<AudioDeviceInfo> enumeratePlaybackDevices();
 
-    // Active outputs: vector of device indices from the last enumerate, or by name substring match
+    // Active outputs: vector of device indices from the last enumerate, or by name substring match.
+    // setActiveOutputs is incremental: devices that stay selected are not torn down.
     void setActiveOutputs(const std::vector<size_t>& indicesFromLastEnum);
     void setActiveOutputsByName(const std::vector<std::string>& nameSubstrings); // convenient for "CABLE", "Speakers"
+    std::vector<std::string> getActiveDeviceNameList() const;
 
     // Volumes: master + per active output (0..1)
     void setMasterVolume(float vol);
@@ -45,6 +49,8 @@ public:
     // Call from your demod/resample thread at ~10-50ms blocks for low latency.
     void pushAudio(const float* samples, size_t count);
     void pushAudioToActiveOutputs(const float* samples, size_t count, const std::vector<size_t>& activeOutputIndices);
+    void pushBridgeAudioToActiveOutputs(const float* samples, size_t count, const std::vector<size_t>& activeOutputIndices);
+    size_t dropQueuedBridgeAudio(size_t maxSamples, const std::vector<size_t>& activeOutputIndices = {});
     void clearBuffers();
 
     // Test tone on a specific active output (or all)
@@ -79,9 +85,12 @@ public:
     struct ActiveOutput;
 
 private:
+    static constexpr uint8_t kRingSampleReal = 0;
+    static constexpr uint8_t kRingSampleBridge = 1;
+
     void startDevice(size_t enumIndex);
     void stopDevice(size_t enumIndex);
-    void pushAudioToActiveOutputLocked(ActiveOutput& output, const float* samples, size_t count);
+    void pushAudioToActiveOutputLocked(ActiveOutput& output, const float* samples, size_t count, uint8_t sampleKind);
 
     ma_context m_context;
     bool m_contextValid = false;
@@ -92,6 +101,7 @@ public:
     // Capacity must be power of 2.
     struct RingBuffer {
         std::vector<float> data;
+        std::vector<uint8_t> sampleKind;
         alignas(std::hardware_destructive_interference_size) std::atomic<size_t> writePos{0};
         alignas(std::hardware_destructive_interference_size) std::atomic<size_t> readPos{0};
         size_t capacity = 0; // power of 2
@@ -102,6 +112,7 @@ public:
 
         RingBuffer(RingBuffer&& other) noexcept
             : data(std::move(other.data)),
+              sampleKind(std::move(other.sampleKind)),
               writePos(other.writePos.load(std::memory_order_relaxed)),
               readPos(other.readPos.load(std::memory_order_relaxed)),
               capacity(other.capacity) {}
@@ -109,6 +120,7 @@ public:
         RingBuffer& operator=(RingBuffer&& other) noexcept {
             if (this != &other) {
                 data = std::move(other.data);
+                sampleKind = std::move(other.sampleKind);
                 writePos.store(other.writePos.load(std::memory_order_relaxed));
                 readPos.store(other.readPos.load(std::memory_order_relaxed));
                 capacity = other.capacity;
@@ -123,6 +135,7 @@ public:
             capacity = 1;
             while (capacity < cap) capacity <<= 1;
             data.assign(capacity, 0.0f);
+            sampleKind.assign(capacity, kRingSampleReal);
             writePos.store(0);
             readPos.store(0);
         }
@@ -130,6 +143,7 @@ public:
 
     struct ActiveOutput {
         size_t enumIndex = 0;
+        std::string deviceName;             // stable across re-enumerate (enum index is not)
         std::unique_ptr<ma_device> device;
         std::atomic<float> volume{1.0f};
         RingBuffer ring;                    // replaces liveBuffer for RT-safe audio delivery
@@ -149,6 +163,7 @@ public:
         ActiveOutput() = default;
         ActiveOutput(ActiveOutput&& other) noexcept
             : enumIndex(other.enumIndex),
+              deviceName(std::move(other.deviceName)),
               device(std::move(other.device)),
               volume(other.volume.load()),
               ring(std::move(other.ring)),
@@ -161,6 +176,7 @@ public:
         ActiveOutput& operator=(ActiveOutput&& other) noexcept {
             if (this != &other) {
                 enumIndex = other.enumIndex;
+                deviceName = std::move(other.deviceName);
                 device = std::move(other.device);
                 volume.store(other.volume.load());
                 ring = std::move(other.ring);

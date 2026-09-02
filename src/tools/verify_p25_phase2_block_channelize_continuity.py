@@ -13,7 +13,7 @@ checks = {
         and "m_streamTimingState = {}" in decoder
         and "m_cqpskLock = {}" in decoder.split(
             "Block channelize produces an independent baseband eye", 1
-        )[1][:900]
+        )[1][:1800]
     ),
     "freeze requires streaming ddc": (
         "enableStreamingChannelDdc" in main.split(
@@ -25,8 +25,9 @@ checks = {
         and "kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.040" in main
     ),
     "speaker catch-up constants present": (
-        "kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.140" in main
-        and "kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.080" in main
+        "kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.180" in main
+        and "kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.100" in main
+        and "kP25Phase2VoiceDecodeSpeakerCatchUpOverlapSeconds = 0.100" in main
     ),
     "voice config keeps streaming ddc off": (
         "cfg.enableStreamingChannelDdc = false" in main
@@ -42,8 +43,8 @@ checks = {
     ),
     "block channelize hot uses medium cqpsk budget": (
         "hotPhase2TrafficJob" in main
-        and "boundedConfigValue(priorCqpskCandidates, size_t{12})" in main
-        and "std::min(priorDecodeBudgetMs, 80)" in main
+        and "boundedConfigValue(priorCqpskCandidates, kP25VoiceWorkerHotMaxCqpskCandidates)" in main
+        and "std::min(priorDecodeBudgetMs, kP25VoiceWorkerHotRealtimeBudgetMs)" in main
     ),
     "carried ess alone is not cqpsk hard lock": (
         "thisWindowPhase2Structure" in decoder
@@ -52,13 +53,31 @@ checks = {
             "bool hasCqpskHardLockEvidence", 1
         )[1].split("bool hasPhase2SoftCqpskLockEvidence", 1)[0]
     ),
-    "block channelize clears framer and bit tail": (
+    "block channelize clears framer and phase1 bit tail": (
         "m_phase2Framer.reset()" in decoder.split(
             "Block channelize produces an independent baseband eye", 1
-        )[1][:1500]
+        )[1][:2200]
         and "m_phase1BitTail.clear()" in decoder.split(
             "Block channelize produces an independent baseband eye", 1
-        )[1][:1800]
+        )[1][:2600]
+    ),
+    "block channelize preserves realtime phase2 protocol tail": (
+        "const bool preservePhase2ProtocolTail" in decoder
+        and "m_config.realtimeVoiceSearch" in decoder.split(
+            "const bool preservePhase2ProtocolTail", 1
+        )[1][:300]
+        and "m_config.phase2CqpskTrafficDemod" in decoder.split(
+            "const bool preservePhase2ProtocolTail", 1
+        )[1][:300]
+        and "if (!preservePhase2ProtocolTail)" in decoder.split(
+            "const bool preservePhase2ProtocolTail", 1
+        )[1][:500]
+        and "m_phase2DibitTail.clear()" in decoder.split(
+            "if (!preservePhase2ProtocolTail)", 1
+        )[1][:220]
+        and "m_phase2RecentAcchDecodeBurstDibits.clear()" in decoder.split(
+            "if (!preservePhase2ProtocolTail)", 1
+        )[1][:260]
     ),
     "block channelize retains mask phase sticky": (
         "Keep validated mask phase + SF anchor" in decoder
@@ -67,8 +86,16 @@ checks = {
         )[1][:1200]
     ),
     "block channelize hot uses medium cqpsk": (
-        "std::min(priorDecodeBudgetMs, 80)" in main
-        or "boundedConfigValue(priorCqpskCandidates, size_t{12})" in main
+        "std::min(priorDecodeBudgetMs, kP25VoiceWorkerHotRealtimeBudgetMs)" in main
+        or "boundedConfigValue(priorCqpskCandidates, kP25VoiceWorkerHotMaxCqpskCandidates)" in main
+    ),
+    "block channelize keeps only stateless cqpsk hint": (
+        "m_blockCqpskHint = m_cqpskLock" in decoder
+        and "hintTiming.cqpskValid = false" in decoder
+        and "hintTiming.cqpskCarrierLoopValid = false" in decoder
+        and "m_phase2Framer.reset()" in decoder.split(
+            "Block channelize produces an independent baseband eye", 1
+        )[1][:2200]
     ),
     "standards soft-stop requires cqpsk lock": (
         "standardsStateMayHoldDemod" in decoder

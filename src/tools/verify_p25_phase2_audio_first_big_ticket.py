@@ -11,7 +11,10 @@ required = [
     'effectiveTargetFreqHz = candidateTarget;',
     'establishedClearCall &&',
     'burst.xorMaskApplied &&',
-    'grantAgeMs >= (sdrtrunkLateEntryVoiceRelease ? 0 : 500)',
+    'const qint64 grantAgeMs = nowMs - rx.p25VoiceGrantEpochMs;',
+    'sdrtrunkLateEntryVoiceRelease &&',
+    'grantAgeMs >= 0',
+    'const bool targetTrafficClearEvidence =',
     'out.phase2TargetSessionAudioRelease = true;',
 ]
 missing = [s for s in required if s not in main]

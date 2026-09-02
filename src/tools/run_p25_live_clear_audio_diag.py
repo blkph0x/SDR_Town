@@ -21,6 +21,13 @@ from datetime import datetime
 from pathlib import Path
 
 import p25_capture_audit
+from p25_stt_common import (
+    DEFAULT_MIN_CHARS,
+    DEFAULT_MIN_WORDS,
+    DEFAULT_TIMEOUT_S,
+    default_stt_backend,
+    run_stt,
+)
 
 
 def default_repo() -> Path:
@@ -33,6 +40,34 @@ def default_exe(repo: Path) -> Path:
 
 def safe_name(text: str) -> str:
     return "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "_" for ch in text)[:120]
+
+
+def parse_source_id_token(raw: str) -> int | None:
+    try:
+        if raw.lower().startswith("0x") or any(ch in "ABCDEFabcdef" for ch in raw):
+            return int(raw, 16)
+        return int(raw, 10)
+    except ValueError:
+        return None
+
+
+def extract_tg_source_pairs(output: str) -> list[dict]:
+    pairs: dict[tuple[int, int], dict] = {}
+    for line in output.splitlines():
+        tg_match = re.search(r"\bTG[ =](\d+)\b", line, re.IGNORECASE)
+        src_match = re.search(r"\b(?:src|source|rid|radio|sourceId)=(0x[0-9A-Fa-f]+|[0-9A-Fa-f]+)\b", line, re.IGNORECASE)
+        if not (tg_match and src_match):
+            continue
+        source_id = parse_source_id_token(src_match.group(1))
+        if source_id is None:
+            continue
+        tg = int(tg_match.group(1))
+        pairs[(tg, source_id)] = {
+            "tg": tg,
+            "source_id": source_id,
+            "source_hex": f"0x{source_id:06X}",
+        }
+    return [pairs[key] for key in sorted(pairs)]
 
 
 def parse_waitgrant_output(output: str) -> dict:
@@ -98,6 +133,7 @@ def parse_waitgrant_output(output: str) -> dict:
         "audio_opened": audio_opened,
         "last_retry_reason": reason_match.group(1).lower() if reason_match else None,
         "grant_talkgroups_seen": grant_tgs,
+        "grant_tg_sources_seen": extract_tg_source_pairs(output),
         "grant_lines": len(
             re.findall(
                 r"\bInstruction: Group\b|\bTSBK: Group Grant\b|\bGroup voice channel grant\b",
@@ -133,22 +169,33 @@ def run_waitgrant(
     env.setdefault("SDR_TOWN_P25_WAITGRANT_TRACE", "1")
     if deep_trace:
         env.setdefault("SDR_TOWN_P25_DEEP_TRACE", "1")
-    proc = subprocess.run(
-        [str(exe), "--cli", "--allow-multiple", "--cmd", command],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        timeout=max(seconds + record_seconds + 90.0, 120.0),
-        check=False,
-        env=env,
-    )
-    output = proc.stdout or ""
+    try:
+        proc = subprocess.run(
+            [str(exe), "--cli", "--allow-multiple", "--cmd", command],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=max(seconds + record_seconds + 90.0, 120.0),
+            check=False,
+            env=env,
+        )
+        output = proc.stdout or ""
+        returncode = proc.returncode
+        timeout_error = None
+    except subprocess.TimeoutExpired as ex:
+        output = ex.stdout or ""
+        if isinstance(output, bytes):
+            output = output.decode("utf-8", errors="replace")
+        timeout_error = f"waitgrant_timeout_after_{max(seconds + record_seconds + 90.0, 120.0):.1f}s"
+        output += f"\n{timeout_error}\n"
+        returncode = -999
     transcript.write_text(output, encoding="utf-8", errors="replace")
     parsed = parse_waitgrant_output(output)
     parsed.update(
         {
             "command": command,
-            "returncode": proc.returncode,
+            "returncode": returncode,
+            "error": timeout_error,
             "transcript": str(transcript),
         }
     )
@@ -162,6 +209,12 @@ def run_deep_replay(
     out_dir: Path,
     timeout_s: float,
     max_grants: int,
+    *,
+    stt_enabled: bool,
+    stt_backend: str,
+    stt_min_chars: int,
+    stt_min_words: int,
+    stt_timeout: float,
 ) -> dict:
     replay_dir = out_dir / "replay"
     replay_dir.mkdir(parents=True, exist_ok=True)
@@ -182,9 +235,9 @@ def run_deep_replay(
         "--max-grants",
         str(max_grants),
         "--window-ms",
-        "360",
+        "720",
         "--hop-ms",
-        "40",
+        "0",
         "--minframes",
         "2",
         "--minaudio",
@@ -192,28 +245,54 @@ def run_deep_replay(
         "--out-dir",
         str(replay_dir),
     ]
-    proc = subprocess.run(
-        cmd,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        timeout=max(timeout_s * max(1, max_grants) * 8.0, 120.0),
-        check=False,
-    )
+    if stt_enabled:
+        cmd.extend([
+            "--stt-backend",
+            stt_backend,
+            "--stt-min-chars",
+            str(stt_min_chars),
+            "--stt-min-words",
+            str(stt_min_words),
+            "--stt-timeout",
+            str(stt_timeout),
+        ])
+    else:
+        cmd.append("--no-stt")
+    try:
+        proc = subprocess.run(
+            cmd,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=max(timeout_s * max(1, max_grants) * 8.0, 120.0),
+            check=False,
+        )
+        stdout = proc.stdout or ""
+        returncode = proc.returncode
+        timeout_error = None
+    except subprocess.TimeoutExpired as ex:
+        stdout = ex.stdout or ""
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="replace")
+        timeout_error = f"deep_replay_timeout_after_{max(timeout_s * max(1, max_grants) * 8.0, 120.0):.1f}s"
+        stdout += f"\n{timeout_error}\n"
+        returncode = -999
     transcript = replay_dir / "deep_audit_stdout.txt"
-    transcript.write_text(proc.stdout or "", encoding="utf-8", errors="replace")
+    transcript.write_text(stdout, encoding="utf-8", errors="replace")
     summary_path = replay_dir / "deep_audit_summary.json"
     summary: dict = {}
     if summary_path.is_file():
         summary = json.loads(summary_path.read_text(encoding="utf-8", errors="replace"))
     return {
         "command": " ".join(cmd),
-        "returncode": proc.returncode,
+        "returncode": returncode,
+        "error": timeout_error,
         "stdout": str(transcript),
         "summary_path": str(summary_path) if summary_path.is_file() else None,
         "findings": summary.get("findings", []),
         "counts": summary.get("counts", {}),
         "best_status": best_replay_status(summary.get("sweep_results", [])),
+        "best_stt": best_replay_stt(summary.get("sweep_results", [])),
         "sweep_results": summary.get("sweep_results", []),
     }
 
@@ -239,6 +318,45 @@ def best_replay_status(results: list[dict]) -> str:
     return best
 
 
+def best_replay_stt(results: list[dict]) -> dict:
+    best: dict = {
+        "pass": False,
+        "transcript": "",
+        "chars": 0,
+        "words": 0,
+        "wav_path": None,
+    }
+    for result in results:
+        stt = result.get("stt") or {}
+        score = (
+            1 if stt.get("pass") else 0,
+            int(stt.get("words") or 0),
+            int(stt.get("chars") or 0),
+            float(result.get("best_audio_seconds") or 0.0),
+        )
+        best_score = (
+            1 if best.get("pass") else 0,
+            int(best.get("words") or 0),
+            int(best.get("chars") or 0),
+            float(best.get("audio_seconds") or 0.0),
+        )
+        if score > best_score:
+            best = {
+                "pass": bool(stt.get("pass")),
+                "ok": bool(stt.get("ok")),
+                "transcript": str(stt.get("transcript") or ""),
+                "chars": int(stt.get("chars") or 0),
+                "words": int(stt.get("words") or 0),
+                "wav_path": stt.get("wav_path") or result.get("wav_path"),
+                "audio_seconds": float(result.get("best_audio_seconds") or 0.0),
+                "tg": result.get("tg"),
+                "slot": result.get("slot"),
+                "voice_mhz": result.get("voice_mhz"),
+                "skip_ms": result.get("skip_ms"),
+            }
+    return best
+
+
 def diagnose_summary(waitgrant: dict, replay: dict | None) -> list[str]:
     findings: list[str] = []
     if waitgrant.get("returncode") not in (0, None):
@@ -249,10 +367,20 @@ def diagnose_summary(waitgrant: dict, replay: dict | None) -> list[str]:
         findings.append("no_voice_follow_attempt_seen")
     if waitgrant.get("wav_seconds", 0.0) <= 0.0:
         findings.append("live_wav_empty")
+    live_stt = waitgrant.get("live_stt") or {}
+    if live_stt.get("pass"):
+        findings.append("live_stt_clear_text_seen")
+    elif live_stt.get("enabled") and waitgrant.get("wav_seconds", 0.0) > 0.0:
+        findings.append("live_stt_no_clear_text")
     if waitgrant.get("capture_dir") is None:
         findings.append("no_follow_iq_capture_saved")
     if replay:
         status = str(replay.get("best_status") or "")
+        replay_stt = replay.get("best_stt") or {}
+        if replay_stt.get("pass"):
+            findings.append("replay_stt_clear_text_seen")
+        elif replay_stt.get("chars", 0) == 0 and status in {"PASS_CONTINUOUS_AUDIO", "PASS_CLEAR_AUDIO", "PASS_PARTIAL_AUDIO"}:
+            findings.append("replay_audio_pass_but_stt_empty")
         suppress_snapshot_only = set()
         if status in {"PASS_CONTINUOUS_AUDIO", "PASS_CLEAR_AUDIO", "PASS_PARTIAL_AUDIO"}:
             suppress_snapshot_only.update({"no_speaker_audio_pushed", "live_zero_phase2_bursts"})
@@ -286,6 +414,15 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--max-replay-grants", type=int, default=2)
     parser.add_argument("--no-replay", action="store_true")
     parser.add_argument("--no-deep-trace", action="store_true")
+    parser.add_argument("--no-stt", action="store_true", help="Do not run STT on live/replay WAV artifacts.")
+    parser.add_argument(
+        "--stt-backend",
+        default=default_stt_backend(),
+        help="STT backend (default: SDR_TOWN_STT_BACKEND or auto).",
+    )
+    parser.add_argument("--stt-timeout", type=float, default=DEFAULT_TIMEOUT_S)
+    parser.add_argument("--stt-min-chars", type=int, default=DEFAULT_MIN_CHARS)
+    parser.add_argument("--stt-min-words", type=int, default=DEFAULT_MIN_WORDS)
     args = parser.parse_args(argv)
 
     repo = args.repo.resolve()
@@ -306,6 +443,26 @@ def main(argv: list[str]) -> int:
         target_tg=args.tg,
         transcript=out_dir / "waitgrant_stdout.txt",
         deep_trace=not args.no_deep_trace,
+    )
+    waitgrant["live_stt"] = (
+        {
+            "enabled": False,
+            "ok": False,
+            "pass": False,
+            "transcript": "",
+            "chars": 0,
+            "words": 0,
+            "wav_path": waitgrant.get("wav_path"),
+        }
+        if args.no_stt
+        else run_stt(
+            waitgrant.get("wav_path"),
+            backend=args.stt_backend,
+            min_chars=args.stt_min_chars,
+            min_words=args.stt_min_words,
+            timeout=args.stt_timeout,
+            repo=repo,
+        )
     )
 
     capture_dir_text = waitgrant.get("capture_dir")
@@ -330,6 +487,11 @@ def main(argv: list[str]) -> int:
                     out_dir,
                     args.replay_timeout,
                     args.max_replay_grants,
+                    stt_enabled=not args.no_stt,
+                    stt_backend=args.stt_backend,
+                    stt_min_chars=args.stt_min_chars,
+                    stt_min_words=args.stt_min_words,
+                    stt_timeout=args.stt_timeout,
                 )
 
     summary = {
@@ -345,7 +507,10 @@ def main(argv: list[str]) -> int:
     print(json.dumps(summary, indent=2, sort_keys=True))
 
     best = (replay or {}).get("best_status")
-    if best == "PASS_CONTINUOUS_AUDIO":
+    stt_pass = bool((waitgrant.get("live_stt") or {}).get("pass")) or bool(((replay or {}).get("best_stt") or {}).get("pass"))
+    if stt_pass:
+        return 0
+    if best == "PASS_CONTINUOUS_AUDIO" and args.no_stt:
         return 0
     if waitgrant.get("grant_lines", 0) == 0:
         return 3

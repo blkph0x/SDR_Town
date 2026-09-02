@@ -24,9 +24,19 @@ Target end-state (user requirements, 2026-08):
 - Streaming sustain after first emit (short hops; no dual-call mix).
 
 ## Implementation order (when scheduled)
-1. Continuous clear audio on selected TG/slot (streaming quality) — **in progress**.
-2. Dual-slot parallel decode (both slots decoded; one selected for speaker).
-3. Priority list UI + auto most-active promotion.
-4. Per-TG/slot WAV/JSONL capture writers.
+1. Continuous clear audio on selected TG/slot (streaming quality) — **done** (dual-slot this-window fail-closed; CLI/GUI sustain parity).
+2. Dual-slot parallel decode (both slots decoded; one selected for speaker) — **done** (`p25AmbeVoiceDecoderOpposite` / `pendingAudioOpposite` + observe).
+3. Priority list UI + auto most-active promotion — **foundation live** (`userPriority` / `activityScore` + preempt + Set Priority UI).
+4. Per-TG/slot WAV writers — **live** (`oppwav=` / companion CLI WAV; selected+companion when follow records).
+5. Companion→speaker promote on selection change — **live** (`p25Phase2PromoteCompanionModules` swap AMBE+pending+resampler; no PCM mix).
 
 Do not weaken slot/TG isolation when adding priority or multi-record.
+
+## Recoverable baseline (2026-08-10)
+
+Best clear continuous build so far: **`p25-clear-continuous-20260810`**.
+
+- Docs: `docs/P25_BASELINE_CLEAR_CONTINUOUS_20260810.md`
+- Binary: `build/baselines/SDR_Town_p25_clear_continuous_20260810.exe`
+- Live proof log: capture `20260810_134531` (TG 10330 → 10120, slot 1; no cross-TG emit; `wrongSlot` not fed)
+- Code id: `SDR_TOWN_P25_AUDIO_BASELINE` in `src/main.cpp`

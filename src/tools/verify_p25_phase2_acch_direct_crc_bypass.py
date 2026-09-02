@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
-text = Path(__file__).resolve().parents[1].joinpath('P25LiveDecoder.cpp').read_text()
+text = Path(__file__).resolve().parents[1].joinpath('P25LiveDecoder.cpp').read_text(encoding='utf-8', errors='replace')
 checks = {
     'directBits fail-safe': 'std::vector<uint8_t> directBits;' in text,
     'direct FACCH/SACCH CRC before RS': 'directCrcOk = lcch ? p25Phase2Crc16Ok(directBits, crcProtectedBits)' in text,
@@ -13,3 +13,4 @@ missing = [name for name, ok in checks.items() if not ok]
 if missing:
     raise SystemExit('FAIL: missing ' + ', '.join(missing))
 print('P25 Phase 2 ACCH direct CRC/RS-bypass regression: PASS')
+

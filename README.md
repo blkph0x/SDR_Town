@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Current version** | **0.2.48** (stable channel) |
+| **Current version** | **0.2.49** (experimental channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
@@ -34,7 +34,7 @@ This is **active experimental software**. It is useful for real RF testing and d
 
 ### P25 Phase 2 clear audio — about ~50% of the time
 
-As of **v0.2.48**, field testing reports **clear Phase 2 voice roughly half the time** on live systems (good enough to understand speech when it works; still often blocky, intermittent, wrong-slot, or gated when it does not).
+As of **v0.2.49**, field testing reports **clear Phase 2 voice roughly half the time** on live systems (good enough to understand speech when it works; still often blocky, intermittent, wrong-slot, or gated when it does not). This build tightens live selected-slot playout restart timing to reduce the short disconnected emit gaps seen in late v0.2.48 captures.
 
 What that means in practice:
 
@@ -43,6 +43,16 @@ What that means in practice:
 - **Security is intentional and strict:** unknown grants do **not** open the speaker by default. Encrypted grants/ESS stay muted. Lab-only late-entry/unknown probe is **default off** (`kP25Phase2AllowUnknownGrantFieldAudioProbe = false`); enable only via explicit CLI/GUI flags for diagnostics.
 
 Do **not** treat Phase 2 as production-ready. Treat it as a working experimental decoder under active hardening toward SDRTrunk-class continuity.
+
+### AI clear-audio automation
+
+End-to-end live → IQ save → CLI voicetest → STT → GUI replay:
+
+```powershell
+python src/tools/run_p25_ai_clear_audio_pipeline.py --cc 420.350 --build
+```
+
+Shared STT defaults (also used by deep audit / live diag / GUI IQ replay): backend `auto` (`SDR_TOWN_STT_BACKEND` or faster-whisper then openai-whisper), `min_chars=12`, `min_words=3`. Setup: `scripts/setup_stt.ps1`.
 
 ### Incomplete or experimental (do not oversell)
 
@@ -101,6 +111,7 @@ Tester builds: https://github.com/Blkph0x/SDR_Town/releases
 | Auto Follow Grants | Follow clear voice grants from control channel |
 | Traffic Source | Independent traffic-source path when available (one-RTL retune semantics) |
 | Talkgroup table | Add / Verify / Follow TG / Delete / Refresh / Add to Scanner |
+| IQ Replay | Tools -> IQ Replay opens a seekable SigMF replay window with P25 speaker-gate decode, WAV save, and STT tap |
 | Help | Check for Updates; Report Issue; My Submitted Issues (with remote diagnostics config) |
 
 **Grant Test:** tunes selected/known CC, mutes raw control audio, arms auto-follow, opens P25 log—standard field grant/voice-gate workflow.
@@ -115,9 +126,26 @@ SDR_Town.exe --freq 476.4625 --start-device --default-audio
 SDR_Town.exe --p25-cc 420.350 --gui-auto-follow --gui-default-audio
 SDR_Town.exe --p25-cc 420.350 --grant-test --p25-log
 SDR_Town.exe --gui-start-iq-capture --capture-label field1 --capture-seconds 30
+SDR_Town.exe --gui-iq-replay "C:\captures\field_run" --gui-iq-replay-target 418.875 --gui-iq-replay-tg 30003 --gui-iq-replay-slot 1 --gui-iq-replay-autoplay
 ```
 
 Also: `--gui-device`, `--gui-p25-monitor`, `--p25-late-entry-audio-probe` (lab), `--gui-startup-self-test`, `--gui-require-clear-audio`, `--gui-exit-after-ms`, `--allow-multiple` (lab only; default single-instance).
+
+GUI IQ replay flags:
+
+```text
+--gui-iq-replay <sigmf-meta|sigmf-data|capture_dir>
+--gui-iq-replay-target <mhz>     --gui-iq-replay-center <mhz>
+--gui-iq-replay-start-ms <ms>    --gui-iq-replay-ms <ms>
+--gui-iq-replay-window-ms <ms>   --gui-iq-replay-hop-ms <ms>
+--gui-iq-replay-tg <id>          --gui-iq-replay-slot <0|1>
+--gui-iq-replay-nac <hex|dec>    --gui-iq-replay-wacn <hex|dec>
+--gui-iq-replay-system <hex|dec> --gui-iq-replay-clear|--gui-iq-replay-enc
+--gui-iq-replay-wav <path>       --gui-iq-replay-result <json>
+--gui-iq-replay-autoplay         --gui-iq-replay-no-stt
+```
+
+The replay path uses metadata-only SigMF inspection for the slider, then loads bounded windows from disk. Speaker/STT output is only tapped after the same P25 speaker gate used by live RX.
 
 ---
 

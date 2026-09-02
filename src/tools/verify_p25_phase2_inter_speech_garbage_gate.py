@@ -11,10 +11,60 @@ opp = text.split("static void p25Phase2AppendOppositeSlotSustainPlc", 1)[1].spli
     "static bool p25Phase2AmbeProbeScoreLooksFinite", 1)[0]
 gap = text.split("static void p25Phase2FillFeedGapWithPlc", 1)[1].split(
     "static void p25RecordPhase2AmbeFeedCadence", 1)[0]
+sustain_body = text.split("const bool sameCallClearSustainFeed =", 1)[1].split(
+    "const bool explicitGrantTargetSlotSelected", 1)[0]
+continuous_body = text.split("const bool continuousSelectedClearFeed =", 1)[1].split(
+    "const bool immediateAmbeDecodeAllowed", 1)[0]
+immediate_body = text.split("const bool immediateAmbeDecodeAllowed =", 1)[1].split(
+    "const bool queueUnknownAmbe", 1)[0]
 
 checks = {
     "bounded speaker tail grace": "static constexpr qint64 kP25Phase2SpeakerAudioTailGraceMs = 2500;" in text,
     "trusted clear helper": "static bool p25Phase2BlockHasTrustedClearContext" in text,
+    "current burst feed helper": "static bool p25Phase2CurrentSelectedBurstFeedTrusted" in text,
+    "sticky mac cannot feed established clear noise": (
+        "if (out.phase2TargetMacCrcValid || recentMacEvidenceForCall) return true;" not in text and
+        "p25Phase2CurrentSelectedBurstFeedTrusted(burst)" in text.split(
+            "static bool p25Phase2EstablishedClearNoiseFeedAllowed", 1
+        )[1].split("static void p25Phase2UpdateAudioTailTracker", 1)[0]
+    ),
+    "sustain feed needs current burst proof": (
+        "const bool currentBurstFeedTrusted =" in text and
+        "currentBurstFeedTrusted &&" in sustain_body and
+        "targetVoiceForLateEntryProbe" in sustain_body
+    ),
+    "explicit release needs current burst proof": (
+        "currentBurstFeedTrusted &&\n            targetVoiceForLateEntryProbe" in text.split(
+            "explicitClearGrantHardVoiceRelease", 1
+        )[1][:900]
+    ),
+    "immediate mbelib feed needs current burst proof": (
+        "currentBurstFeedTrusted &&" in continuous_body and
+        ("continuousSelectedClearFeed ||" in immediate_body and
+         "currentBurstFeedTrusted &&" in immediate_body)
+    ),
+    "pending drain needs current proof": (
+        "canDrainPendingRawVoiceThisWindow" in text and
+        "!currentWindowHasFeedTrustedTargetBurst" in text.split(
+            "auto canDrainPendingRawVoiceThisWindow", 1
+        )[1].split("auto discardStalePendingWhenLivePreferred", 1)[0] and
+        "noLiveVoiceInWindow" in text.split(
+            "auto canDrainPendingRawVoiceThisWindow", 1
+        )[1].split("auto discardStalePendingWhenLivePreferred", 1)[0] and
+        "p25Phase2DualSlotPendingDrainUnsafeWindow(out)" in text.split(
+            "auto canDrainPendingRawVoiceThisWindow", 1
+        )[1].split("auto discardStalePendingWhenLivePreferred", 1)[0] and
+        text.count("if (!canDrainPendingRawVoiceThisWindow()) return;") >= 3
+    ),
+    "pending drain rejects dual-slot untrusted windows": (
+        "p25Phase2DualSlotPendingDrainUnsafeWindow(out)" in
+        text.split("auto canDrainPendingRawVoiceThisWindow", 1)[1].split("auto drainPendingRawVoice", 1)[0]
+    ),
+    "fresh selected-slot dual-slot windows can pass when companion accounted": (
+        "p25Phase2CompanionSlotAccounted" in text and
+        "p25Phase2StrongSelectedSlotStructure" in text and
+        "static bool p25Phase2DualSlotPendingDrainUnsafeWindow" in text
+    ),
     "plc helper hard-denies invent audio": "return false;" in may and "never synthesizes" in may,
     "opposite-slot PLC disabled": "Intentionally disabled" in opp and "return;" not in opp.split("{", 1)[1][:80] or "(void)rx;" in opp,
     "feed-gap PLC disabled": "Disabled: SDRTrunk does not invent" in gap,

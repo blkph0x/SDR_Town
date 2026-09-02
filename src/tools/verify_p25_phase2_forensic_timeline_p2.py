@@ -17,14 +17,17 @@ slot_probe_fn = main.split("static bool applyP25Phase2SlotProbeLocked", 1)[1].sp
 
 required = {
     "single cursor settlement after publish": "outcome == P25VoicePublishOutcome::Published" in main,
-    "speaker pipeline depth 3": "kP25VoiceDecodeMaxPendingJobsSpeaker = 3" in main,
+    "speaker pipeline allows queued prestage": (
+        "kP25VoiceDecodeMaxPendingJobsSpeaker = 4" in main
+        or "kP25VoiceDecodeMaxPendingJobsSpeaker = 3" in main
+    ),
     "cqpsk discrete freeze api": "setCqpskDiscreteFrozen" in decoder_h and "m_cqpskDiscreteFrozen" in decoder_cpp,
     "cqpsk hypothesis blocked counter": "m_cqpskDiscreteChangesBlocked" in decoder_cpp and "p25DiagCqpskHypothesisChanges" in receiver_h,
     "worker applies cqpsk freeze": "p25Phase2ShouldFreezeCqpskDiscrete" in main,
     "non-destructive slot probe keeps decoder": "P25LiveDecoder(p25VoiceDecoderConfigForReceiver" not in slot_probe_fn,
     "slot probe retargets preferred slot": "setPhase2PreferredTdmaSlot(true, requested)" in slot_probe_fn,
     "slot probe continues decode": 'return false;\n                };' in main.split("slot-probe-applied-before-decode", 1)[1][:400],
-    "playout bridge frame cap": "consecutivePlayoutBridgeFrames >= 8" in main,
+    "playout bridge frame cap": "consecutivePlayoutBridgeFrames >= 225" in main,
 }
 
 missing = [name for name, ok in required.items() if not ok]

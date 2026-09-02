@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
 src = Path(__file__).resolve().parents[1] / 'P25LiveDecoder.cpp'
-text = src.read_text()
+text = src.read_text(encoding='utf-8', errors='replace')
 required = 'if (!burst.isch.sync && burst.isch.location <= 2 && burst.superframeBurstIndexKnown)'
 forbidden = 'if (burst.isch.valid && burst.isch.sync && burst.isch.location <= 2 && burst.superframeBurstIndexKnown)'
 if required not in text:
@@ -11,3 +11,4 @@ if forbidden in text:
 if 'expectedMaskIndex = static_cast<size_t>(burst.isch.location) * 4u + (burstIndex % 4u)' not in text:
     raise SystemExit('FAIL: expected I-ISCH location-to-mask segment mapping missing')
 print('PASS: Phase 2 decoded I-ISCH now anchors XOR mask phase scoring')
+

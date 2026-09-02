@@ -14,6 +14,9 @@ call_changed = main[main.index("if (callChanged) {"):main.index("state.talkgroup
 assert "rx.p25AmbeVoiceDecoder = P25AmbeVoiceDecoder();" in call_changed, (
     "new Phase 2 calls must reset the persistent mbelib decoder"
 )
+assert "rx.p25AmbeVoiceDecoderOpposite = P25AmbeVoiceDecoder();" in call_changed, (
+    "new Phase 2 calls must reset the companion-slot mbelib decoder"
+)
 assert "rx.p25SessionState.resampler = {};" in call_changed, (
     "new Phase 2 calls must reset P25 resampler history"
 )

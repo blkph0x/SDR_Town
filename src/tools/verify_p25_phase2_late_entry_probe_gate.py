@@ -4,10 +4,11 @@ root = Path(__file__).resolve().parents[1]
 main = (root / 'main.cpp').read_text(errors='ignore')
 required = [
     'const bool grantMayProbeVoice = grantClearTrusted || grantUnknownProbe;',
-    'if (!epochTrusted && !grantMayProbeVoice)',
+    'if (!epochTrusted && !grantMayProbeVoice && !forceEstablishedFeed)',
     'if (!epochTrusted && grantMayProbeVoice)',
-    'if (burst.grantSlotKnown && static_cast<uint8_t>(burst.grantSlot & 0x01u) != followedGrantSlot)',
-    'if (!burst.grantSlotKnown && !grantMayProbeVoice)',
+    'const uint8_t effectiveBurstSlot = burst.grantSlotKnown',
+    'if (burst.grantSlotKnown && effectiveBurstSlot != followedGrantSlot)',
+    'if (!burst.grantSlotKnown && !grantMayProbeVoice && !forceEstablishedFeed)',
     'if (!burst.grantSlotKnown && grantMayProbeVoice)',
     'if (acceptedVoice) {',
     'out.phase2AudioLockMissing = false;',

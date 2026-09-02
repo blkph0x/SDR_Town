@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
-main = (root / 'main.cpp').read_text()
-dec = (root / 'P25LiveDecoder.cpp').read_text()
-hdr = (root.parent / 'include' / 'P25LiveDecoder.h').read_text()
+main = (root / 'main.cpp').read_text(encoding='utf-8', errors='replace')
+dec = (root / 'P25LiveDecoder.cpp').read_text(encoding='utf-8', errors='replace')
+hdr = (root.parent / 'include' / 'P25LiveDecoder.h').read_text(encoding='utf-8', errors='replace')
 assert 'm_phase2SlotEss' in hdr
 assert 'm_phase2SlotSessionMacCrcSeen' in hdr
 assert 'm_phase2SlotFirst4vSlot' in hdr
@@ -37,3 +37,4 @@ assert 'unknown-grant-probe-validated-release' not in main
 assert 'voiceReleaseTrusted || burstSdrtrunkLateEntryVoiceRelease || lateEntryAudioProbeAllowed' not in main
 assert 'late-entry-field-audio-probe-release' not in main
 print('P25 Phase 2 hard sdrtrunk parity regression: PASS')
+

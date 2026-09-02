@@ -1,60 +1,149 @@
 #!/usr/bin/env python3
-"""Guard: dual-slot MAC-dead windows never reach speaker as trusted-clear."""
+"""Guard: dual-slot MAC-dead fail-close, with a narrow same-call continuation escape."""
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
 main = (root / "src" / "main.cpp").read_text(encoding="utf-8", errors="replace")
 
-helper = main.split("p25Phase2DualSlotUntrustedGarbleWindow", 1)[1].split(
+
+def region_after(marker: str, chars: int) -> str:
+    if marker not in main:
+        return ""
+    return main.split(marker, 1)[1][:chars]
+
+
+# Prefer the function body, not the forward declaration.
+body_marker = (
+    "static bool p25Phase2DualSlotUntrustedGarbleWindow(const P25VoiceAudioBlock& out) noexcept\n{"
+)
+if body_marker not in main:
+    body_marker = (
+        "static bool p25Phase2DualSlotUntrustedGarbleWindow(const P25VoiceAudioBlock& out) noexcept\r\n{"
+    )
+garble_fn = main.split(body_marker, 1)[1].split(
     "p25Phase2DualSlotPendingDrainUnsafeWindow", 1
 )[0]
-pending = main.split("p25Phase2DualSlotPendingDrainUnsafeWindow", 1)[1].split(
-    "p25Phase2UnsafeMixedSlotAudioWindow", 1
+pending_fn = main.split("p25Phase2DualSlotPendingDrainUnsafeWindow", 1)[1].split(
+    "p25Phase2CurrentSelectedBurstFeedTrusted", 1
 )[0]
-trusted_clear = main.split("const bool trustedClear =", 1)[1][:800]
-dual_now = main.split("const bool dualSlotUntrustedNow =", 1)[1][:400]
-drop_path = main.split("dual-slot-untrusted-garble-drop", 1)[0][-400:]
+feed_region = main.split("hardEpochOnBurst =", 1)[1][:9000]
+pending_drain_body = main.split("auto canDrainPendingRawVoiceThisWindow", 1)[1].split(
+    "auto discardStalePendingWhenLivePreferred", 1
+)[0]
+pending_dual_branch = pending_drain_body.split(
+    "if (out.phase2OppositeVoiceCodewords > 0) {", 2
+)[-1].split("}", 1)[0]
+continuation_fn = region_after(
+    "static bool p25Phase2SameCallSelectedTimeslotContinuationSafe", 2400
+)
+unsafe_mixed_fn = region_after(
+    "static bool p25Phase2UnsafeMixedSlotAudioWindow", 1200
+)
+security_gate_region = region_after(
+    "const bool sameCallSelectedContinuation =", 800
+)
+trusted_clear_region = region_after(
+    "const bool trustedClear =",
+    1800,
+)
+recent_continuation_region = region_after(
+    "const bool recentClearContinuationEvidence =",
+    700,
+)
+feed_region_after_now = (
+    feed_region.split("const bool dualSlotUntrustedNow", 1)[1].split(";", 1)[0]
+    if "const bool dualSlotUntrustedNow" in feed_region
+    else ""
+)
 
 checks = {
-    "helper defined": "p25Phase2DualSlotUntrustedGarbleWindow" in main,
-    "pending drain helper defined": "p25Phase2DualSlotPendingDrainUnsafeWindow" in main,
-    "helper requires this-window MAC (macCrcValid)": (
-        "phase2MacCrcValid > 0" in helper and "thisWindowMacOk" in helper
+    "garble uses this-window selected proof": (
+        "phase2ThisWindowTargetMacCrcValid" in garble_fn
+        and "phase2ThisWindowTargetEssClear" in garble_fn
+        and "selectedSlotContinuityProof" not in garble_fn
+        and "targetSlotClear" not in garble_fn
+        # Sticky targetMac alone must not appear as the allow path.
+        and "out.phase2TargetMacCrcValid" not in garble_fn
     ),
-    "helper requires target MAC OR window MAC": "phase2TargetMacCrcValid" in helper,
-    "helper fails closed without MAC": (
-        "if (!thisWindowMacOk)" in helper and "return true;" in helper
+    "pending drain delegates to garble helper": (
+        "return p25Phase2DualSlotUntrustedGarbleWindow(out);" in pending_fn
     ),
-    "sticky ESS must not defeat helper": (
-        "phase2TargetEssKnown" not in helper.split("thisWindowMacOk", 1)[0]
-        or "targetSlotClear" not in helper
+    "continuation helper is narrow": (
+        "p25Phase2SameCallSelectedTimeslotContinuationSafe" in main
+        and "p25Phase2RecentSecurityEvidenceUsable(rx, key, nowMs)" in continuation_fn
+        and "p25Phase2CompanionSlotAccounted(out)" in continuation_fn
+        and "p25Phase2StrongSelectedSlotStructure(out)" in continuation_fn
+        and "out.phase2WrongSlot" in continuation_fn
+        and "out.phase2FeedOrderIssues > 0" in continuation_fn
+        and "out.phase2PendingAmbeFramesReleased > 0" in continuation_fn
+        and "out.phase2CurrentFeedTrustedTargetBurst" in continuation_fn
+        and "p25AudioSamplesLookSafe(out.audio)" in continuation_fn
+        and "thisWindowSelectedSlotProof" in continuation_fn
+        and "out.phase2ThisWindowTargetMacCrcValid" in continuation_fn
+        and "out.phase2ThisWindowTargetEssClear" in continuation_fn
     ),
-    "trustedClear fail-closes dual-slot first": (
-        "!dualSlotUntrustedGate" in trusted_clear[:200]
+    "speaker dual-slot gate has continuation escape": (
+        "p25Phase2SameCallSelectedTimeslotContinuationSafe(rx, out, key, nowMs, true)"
+        in security_gate_region
+        and "p25Phase2DualSlotUntrustedGarbleWindow(out)" in security_gate_region
+        and "!sameCallSelectedContinuation" in security_gate_region
     ),
-    "dualSlotUntrustedNow ignores sticky ESS": (
-        "phase2TargetEssKnown" not in dual_now
-        and "phase2TargetSessionAudioRelease" not in dual_now
+    "feed dual-slot gate has continuation escape": (
+        "dualSlotSelectedContinuationProof" not in feed_region
+        and "dualSlotUntrustedNow" in feed_region
+        and "dualSlotSelectedContinuationForBurst" in feed_region
+        and "p25Phase2SameCallSelectedTimeslotContinuationSafe(rx, out, audioKey, nowMs, false)"
+        in feed_region
+        and "!dualSlotSelectedContinuationForBurst" in feed_region_after_now
+        and "hadSuccessfulEmit"
+        not in feed_region_after_now
     ),
-    "dualSlotUntrustedNow requires MAC": (
-        "phase2MacCrcValid == 0" in dual_now or "phase2MacCrcValid" in dual_now
+    "feed uses this-window selected proof": (
+        # Capture 20260811_080304: feed dualSlotUntrustedNow delegates to the
+        # same DualSlotUntrustedGarbleWindow helper (which owns this-window
+        # MAC/ESS). Do not re-inline weaker this-window flags on the feed path.
+        "p25Phase2DualSlotUntrustedGarbleWindow(out)"
+        in feed_region_after_now
+        and "phase2ThisWindowTargetMacCrcValid" in garble_fn
+        and "phase2ThisWindowTargetEssClear" in garble_fn
     ),
-    "window drop path for dual-slot": "dual-slot-untrusted-garble-drop" in main,
-    "drop path clears audio without unknown thrash": (
-        "out.audio.clear()" in drop_path and "WaitingForClearGrant" not in drop_path
+    "unsafe mixed-slot audio honors same-call continuation": (
+        "phase2SameCallSelectedTimeslotContinuation" in unsafe_mixed_fn
+        and "phase2CurrentFeedTrustedTargetBurst" in unsafe_mixed_fn
+        and "phase2PendingAmbeFramesReleased == 0" in unsafe_mixed_fn
+        and "p25Phase2CompanionSlotAccounted(out)" in unsafe_mixed_fn
+        and "return false;" in unsafe_mixed_fn
+    ),
+    "pending dual-slot drain requires target proof": (
+        "out.phase2ThisWindowTargetMacCrcValid" in pending_dual_branch
+        and "out.phase2ThisWindowTargetEssClear" in pending_dual_branch
+        and "out.phase2MacCrcValid > 0" not in pending_dual_branch
+        and "currentWindowHasFeedTrustedTargetBurst &&" not in pending_dual_branch
+    ),
+    "recent continuation cannot bypass dual-slot proof": (
+        "out.phase2OppositeVoiceCodewords == 0 ||" in recent_continuation_region
+        and "out.phase2ThisWindowTargetMacCrcValid" in recent_continuation_region
+        and "out.phase2ThisWindowTargetEssClear" in recent_continuation_region
+        and "sameCallContinuationStructure" not in recent_continuation_region.split(");", 1)[0]
+    ),
+    "trusted clear sustain cannot bypass dual-slot proof": (
+        "out.phase2OppositeVoiceCodewords == 0 ||" in trusted_clear_region
+        and "out.phase2ThisWindowTargetMacCrcValid" in trusted_clear_region
+        and "out.phase2ThisWindowTargetEssClear" in trusted_clear_region
+        and "sameCallSelectedContinuation" not in trusted_clear_region.split("unknownGrantProbeVoiceRelease", 1)[0]
     ),
     "speaker gate names garble": "phase2-dual-slot-untrusted-garble" in main,
-    "unsafe mixed includes garble": (
+    "explicit-clear evidence fails closed on dual-slot": (
         "p25Phase2DualSlotUntrustedGarbleWindow(out)"
-        in main.split("p25Phase2UnsafeMixedSlotAudioWindow", 1)[1][:600]
+        in main.split("p25Phase2ExplicitClearGrantVoiceReleaseEvidence", 1)[1][:900]
     ),
-    "pending drain uses strict helper": (
-        "p25Phase2DualSlotPendingDrainUnsafeWindow(out)"
-        in main.split("auto canDrainPendingRawVoiceThisWindow", 1)[1].split(
-            "auto drainPendingRawVoice", 1
-        )[0]
+    "gui sustain matches cli speakerMayEmit": (
+        "Match CLI voicetest: sustain lattice" in main
+        and "pushed > 0);"
+        not in main.split("configureReceiver =", 1)[-1].split(
+            "p25Phase2UpdateSessionSustainState", 1
+        )[1][:350]
     ),
-    "034136 capture note present": "20260808_034136" in main,
 }
 
 failed = [name for name, ok in checks.items() if not ok]
@@ -64,5 +153,3 @@ if failed:
         + ", ".join(failed)
     )
 print("P25 Phase 2 dual-slot untrusted garble gate regression: PASS")
-for name in checks:
-    print(f"  OK  {name}")

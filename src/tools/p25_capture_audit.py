@@ -25,6 +25,10 @@ PATTERNS = {
     "worker_result": "P25 DSP VOICE WORKER:",
     "worker_stale": "P25 voice worker stale/drop",
     "audio_output": "P25 audio output:",
+    "audio_top_up": "P25 audio top-up:",
+    "auto_follow_skip_encrypted": "Auto-follow skipped encrypted P25 TG",
+    "auto_follow_recent_encrypted_hold": "unknown grant update because an explicit encrypted grant",
+    "auto_follow_sticky_encrypted_hold": "prior explicit encrypted state is still active",
     "gate_emit": "gate=emit",
     "ess_clear": "ess=clear",
     "ess_unknown": "ess=unknown",
@@ -54,19 +58,39 @@ SAME_CALL_IN_SOURCE_HOP_RE = re.compile(
     r"(?P<old>[0-9.]+)MHz\s+->\s+(?P<new>[0-9.]+)MHz",
     re.IGNORECASE,
 )
+SAME_RF_SLOT_HANDOFF_RE = re.compile(
+    r"same-RF slot handoff: current TG (?P<current>\d+) on (?P<voice>[0-9.]+)MHz .*?"
+    r"following new grant TG (?P<new>\d+) slot (?P<slot>[01]|unknown)",
+    re.IGNORECASE,
+)
+GRANT_LINE_RE = re.compile(
+    r"\bGrant:\s+TG=(?P<tg>\d+)\b.*?\bFREQ=(?P<freq>[0-9.]+)MHz\b.*?\bENC=(?P<enc>\w+)\b",
+    re.IGNORECASE,
+)
 WORKER_TARGET_RE = re.compile(r"\btarget=(?P<target>[0-9.]+)MHz\b", re.IGNORECASE)
+WORKER_CF_RE = re.compile(r"\bcf=(?P<cf>[0-9.]+)MHz\b", re.IGNORECASE)
+WORKER_SR_RE = re.compile(r"\bsr=(?P<sr>[0-9.]+)MHz\b", re.IGNORECASE)
 NAC_FIELD_RE = re.compile(r"\bnac=0x(?P<nac>[0-9A-Fa-f]+)\b", re.IGNORECASE)
 WACN_FIELD_RE = re.compile(r"\bwacn=0x(?P<wacn>[0-9A-Fa-f]+)\b", re.IGNORECASE)
 SYSTEM_FIELD_RE = re.compile(r"\b(?:sys|system|systemid)=0x(?P<sys>[0-9A-Fa-f]+)\b", re.IGNORECASE)
-WORKER_INT_FIELD_RE = re.compile(r"\b(?P<key>decoded|speaker|targetVcw|oppVcw|gaps|fed|emitPcm)=(?P<value>\d+)\b")
+SOURCE_FIELD_RE = re.compile(r"\b(?:src|source|rid|radio|sourceId)=(?P<src>0x[0-9A-Fa-f]+|[0-9A-Fa-f]+)\b", re.IGNORECASE)
+WORKER_INT_FIELD_RE = re.compile(
+    r"\b(?P<key>decoded|speaker|targetVcw|oppVcw|gaps|fed|emitPcm|ctxVcw|ctxDrop|"
+    r"reject|wrongSlot|dup|absDup|seqDrop|feedOrderIssues)=(?P<value>\d+)\b"
+)
 WORKER_DSP_RE = re.compile(r"\bdsp=(?P<value>\d+)us\b")
 AUDIO_OUTPUT_FIELD_RE = re.compile(
-    r"\b(?P<key>pushed|gate|decoded|targetVcw|oppVcw|fed|emitPcm|gaps|reject|wrongSlot|dup|"
-    r"pendingRel|p2mac|probe|ess|targetEss|targetSession|targetPtt|action)=(?P<value>[^\s]+)"
+    r"\b(?P<key>pushed|gate|decoded|targetVcw|oppVcw|fed|emitPcm|gaps|reject|wrongSlot|dup|absDup|seqDrop|"
+    r"pendingQueued|pendingRel|p2mac|probe|ess|targetEss|targetSession|targetPtt|action|ringQueued|src|source|rid|call|grantEpoch|pttGen)=(?P<value>[^\s]+)"
+)
+AUDIO_TOP_UP_FIELD_RE = re.compile(
+    r"\b(?P<key>TG|real|bridge|ringQueued|ringFill|underruns)=(?P<value>[^\s]+)",
+    re.IGNORECASE,
 )
 AUDIO_PUSH_RE = re.compile(r"\bpushed=(?P<pushed>\d+)\s+samples\b", re.IGNORECASE)
 AUDIO_UNDERRUN_RE = re.compile(r"\bunderruns=(?P<underruns>\d+)\b", re.IGNORECASE)
 AUDIO_RING_FILL_RE = re.compile(r"\bringFill=(?P<fill>[0-9.]+)%", re.IGNORECASE)
+AUDIO_RING_QUEUED_RE = re.compile(r"\bringQueued=(?P<queued>\d+)\b", re.IGNORECASE)
 AUDIO_OUTPUT_RATE_HZ = 48000.0
 
 
@@ -92,6 +116,19 @@ def parse_partial_mask_params_from_text(text: str) -> dict:
     if system_match := SYSTEM_FIELD_RE.search(text):
         out["system"] = int(system_match.group("sys"), 16)
     return out
+
+
+def parse_source_id_from_text(text: str) -> int | None:
+    match = SOURCE_FIELD_RE.search(text)
+    if not match:
+        return None
+    raw = match.group("src")
+    try:
+        if raw.lower().startswith("0x") or any(ch in "ABCDEFabcdef" for ch in raw):
+            return int(raw, 16)
+        return int(raw, 10)
+    except ValueError:
+        return None
 
 
 def extract_default_mask_params(lines: list[str]) -> dict | None:
@@ -149,9 +186,32 @@ def clear_target_feed_starvation_issue(line: str) -> str | None:
     if target <= 0 or fed > 0:
         return None
     clear_context = "ess=clear" in line or "diag=decoding clear voice" in line
-    if clear_context:
-        return "phase2-clear-target-vcw-not-fed"
-    return None
+    if not clear_context:
+        return None
+
+    reject = fields.get("reject", 0)
+    opposite = fields.get("oppVcw", 0)
+    wrong_slot = fields.get("wrongSlot", 0)
+    non_target_reject = min(reject, max(opposite, wrong_slot))
+    target_reject = max(0, reject - non_target_reject)
+    accounted_target_drops = (
+        target_reject
+        + fields.get("dup", 0)
+        + fields.get("absDup", 0)
+        + fields.get("seqDrop", 0)
+        + fields.get("ctxDrop", 0)
+    )
+    if accounted_target_drops >= target:
+        duplicate_or_context_drops = (
+            fields.get("dup", 0)
+            + fields.get("absDup", 0)
+            + fields.get("seqDrop", 0)
+            + fields.get("ctxDrop", 0)
+        )
+        if target_reject <= 0 and duplicate_or_context_drops >= target:
+            return "phase2-clear-target-vcw-duplicate-context-accounted"
+        return "phase2-clear-target-vcw-rejected-before-feed"
+    return "phase2-clear-target-vcw-not-fed"
 
 
 def slow_voice_worker_issue(line: str) -> str | None:
@@ -171,6 +231,25 @@ def slow_voice_worker_issue(line: str) -> str | None:
 
 def parse_audio_output_fields(line: str) -> dict[str, str]:
     return {match.group("key"): match.group("value") for match in AUDIO_OUTPUT_FIELD_RE.finditer(line)}
+
+
+def parse_loose_int(value: str | None) -> int | None:
+    if value is None:
+        return None
+    text = str(value).strip().rstrip(".,;")
+    if not text:
+        return None
+    try:
+        return int(text, 0)
+    except ValueError:
+        return None
+
+
+def parse_audio_top_up_fields(line: str) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for match in AUDIO_TOP_UP_FIELD_RE.finditer(line):
+        fields[match.group("key").lower()] = match.group("value").rstrip(".")
+    return fields
 
 
 def audio_output_security_issue(line: str) -> str | None:
@@ -214,6 +293,39 @@ def audio_output_security_issue(line: str) -> str | None:
     return None
 
 
+def audio_output_session_issue(line: str) -> str | None:
+    if "P25 audio output:" not in line:
+        return None
+    fields = parse_audio_output_fields(line)
+    if not fields:
+        return None
+    pushed = parse_loose_int(fields.get("pushed")) or 0
+    if pushed <= 0:
+        return None
+    tg_match = TG_RE.search(line)
+    if not tg_match:
+        return None
+    tg = int(tg_match.group("tg"))
+    if tg <= 0:
+        return None
+    call_session = parse_loose_int(fields.get("call"))
+    if call_session is None:
+        return None
+    if call_session == 0:
+        return "audio-output-missing-call-session"
+    session_tg = call_session >> 32
+    if session_tg != tg:
+        return f"audio-output-call-session-talkgroup-mismatch:{session_tg}!={tg}"
+    ptt_generation = parse_loose_int(fields.get("pttGen"))
+    if ptt_generation == 0:
+        return "audio-output-zero-ptt-generation"
+    grant_epoch = parse_loose_int(fields.get("grantEpoch"))
+    target_session = fields.get("targetSession", "no").lower().rstrip(".,;")
+    if target_session == "yes" and grant_epoch == 0:
+        return "audio-output-zero-grant-epoch"
+    return None
+
+
 def audio_output_underpush_issue(line: str) -> str | None:
     if "P25 audio output:" not in line:
         return None
@@ -235,6 +347,47 @@ def audio_output_underpush_issue(line: str) -> str | None:
     return None
 
 
+def parse_audio_speaker_push_event(line: str) -> dict | None:
+    source = ""
+    pushed = 0
+    bridge = 0
+    if "P25 audio output:" in line:
+        pushed_match = AUDIO_PUSH_RE.search(line)
+        if not pushed_match:
+            return None
+        pushed = int(pushed_match.group("pushed"))
+        source = "direct"
+    elif "P25 audio top-up:" in line:
+        fields = parse_audio_top_up_fields(line)
+        try:
+            pushed = int(fields.get("real", "0"))
+            bridge = int(fields.get("bridge", "0"))
+        except ValueError:
+            return None
+        source = "top_up"
+    else:
+        return None
+    if pushed <= 0:
+        return None
+
+    when = parse_utc_from_line(line)
+    underruns_match = AUDIO_UNDERRUN_RE.search(line)
+    underruns = int(underruns_match.group("underruns")) if underruns_match else None
+    ring_match = AUDIO_RING_FILL_RE.search(line)
+    ring_fill = float(ring_match.group("fill")) if ring_match else None
+    ring_queued_match = AUDIO_RING_QUEUED_RE.search(line)
+    ring_queued = int(ring_queued_match.group("queued")) if ring_queued_match else None
+    return {
+        "utc": when,
+        "pushed": pushed,
+        "bridge": bridge,
+        "source": source,
+        "ring_queued_samples": ring_queued,
+        "ring_fill_percent": ring_fill,
+        "underruns": underruns,
+    }
+
+
 def audio_output_starvation(lines: list[str]) -> dict:
     events: list[dict] = []
     sparse_gaps: list[dict] = []
@@ -246,19 +399,14 @@ def audio_output_starvation(lines: list[str]) -> dict:
     last_underruns: int | None = None
 
     for line_number, line in enumerate(lines, start=1):
-        if "P25 audio output:" not in line:
+        event = parse_audio_speaker_push_event(line)
+        if not event:
             continue
-        pushed_match = AUDIO_PUSH_RE.search(line)
-        if not pushed_match:
-            continue
-        pushed = int(pushed_match.group("pushed"))
-        if pushed <= 0:
-            continue
-        when = parse_utc_from_line(line)
-        underruns_match = AUDIO_UNDERRUN_RE.search(line)
-        underruns = int(underruns_match.group("underruns")) if underruns_match else None
-        ring_match = AUDIO_RING_FILL_RE.search(line)
-        ring_fill = float(ring_match.group("fill")) if ring_match else None
+        pushed = event["pushed"]
+        when = event["utc"]
+        underruns = event["underruns"]
+        ring_fill = event["ring_fill_percent"]
+        ring_queued = event["ring_queued_samples"]
 
         if last_dt and when:
             interval_ms = max(0.0, (when - last_dt).total_seconds() * 1000.0)
@@ -271,8 +419,10 @@ def audio_output_starvation(lines: list[str]) -> dict:
                     "gap_ms": round(interval_ms, 3),
                     "previous_audio_ms": round(last_audio_ms, 3),
                     "pushed": pushed,
+                    "ring_queued_samples": ring_queued,
                     "ring_fill_percent": ring_fill,
                     "underruns": underruns,
+                    "source": event["source"],
                 })
         if (
             last_underruns is not None
@@ -285,7 +435,10 @@ def audio_output_starvation(lines: list[str]) -> dict:
             "line": line_number,
             "utc": when.isoformat().replace("+00:00", "Z") if when else None,
             "pushed": pushed,
+            "source": event["source"],
+            "bridge_samples": event["bridge"],
             "audio_ms": round((pushed / AUDIO_OUTPUT_RATE_HZ) * 1000.0, 3),
+            "ring_queued_samples": ring_queued,
             "ring_fill_percent": ring_fill,
             "underruns": underruns,
         })
@@ -384,6 +537,7 @@ def same_call_stale_target_hops(lines: list[str]) -> list[dict]:
 def same_call_out_of_source_inplace_hops(lines: list[str]) -> list[dict]:
     bad: list[dict] = []
     active_source_by_tg: dict[int, dict] = {}
+    latest_worker_source_by_tg: dict[int, dict] = {}
     for line_number, line in enumerate(lines, start=1):
         if source := TRAFFIC_SOURCE_RE.search(line):
             tg = int(source.group("tg"))
@@ -394,9 +548,20 @@ def same_call_out_of_source_inplace_hops(lines: list[str]) -> list[dict]:
                 "sample_rate_mhz": float(source.group("sr")),
             }
             continue
+        if "P25 DSP VOICE WORKER" in line:
+            tg_match = TG_RE.search(line)
+            cf_match = WORKER_CF_RE.search(line)
+            sr_match = WORKER_SR_RE.search(line)
+            if tg_match and cf_match and sr_match:
+                latest_worker_source_by_tg[int(tg_match.group("tg"))] = {
+                    "line": line_number,
+                    "center_mhz": float(cf_match.group("cf")),
+                    "sample_rate_mhz": float(sr_match.group("sr")),
+                    "source": "worker",
+                }
         if hop := SAME_CALL_IN_SOURCE_HOP_RE.search(line):
             tg = int(hop.group("tg"))
-            source = active_source_by_tg.get(tg)
+            source = latest_worker_source_by_tg.get(tg) or active_source_by_tg.get(tg)
             if not source:
                 continue
             new_mhz = float(hop.group("new"))
@@ -416,6 +581,66 @@ def same_call_out_of_source_inplace_hops(lines: list[str]) -> list[dict]:
                     "passband_limit_mhz": round(passband_limit_mhz, 6),
                     "source_line": source["line"],
                 })
+    return bad
+
+
+def same_rf_slot_handoff_before_current_clear_grant(lines: list[str]) -> list[dict]:
+    """Find same-RF selected-slot steals immediately followed by a clear grant for the old slot."""
+    bad: list[dict] = []
+    pending: list[dict] = []
+    for line_number, line in enumerate(lines, start=1):
+        now_utc = parse_utc_from_line(line)
+        if handoff := SAME_RF_SLOT_HANDOFF_RE.search(line):
+            pending.append({
+                "line": line_number,
+                "utc": now_utc,
+                "current_tg": int(handoff.group("current")),
+                "new_tg": int(handoff.group("new")),
+                "voice_mhz": float(handoff.group("voice")),
+                "new_slot": handoff.group("slot"),
+            })
+            continue
+
+        if not pending:
+            continue
+        if now_utc:
+            pending = [
+                item for item in pending
+                if item["utc"] is None or (now_utc - item["utc"]).total_seconds() <= 1.5
+            ]
+        else:
+            pending = [
+                item for item in pending
+                if line_number - item["line"] <= 40
+            ]
+        if not pending:
+            continue
+        grant = GRANT_LINE_RE.search(line)
+        if not grant or grant.group("enc").lower() != "clear":
+            continue
+        grant_tg = int(grant.group("tg"))
+        grant_freq_mhz = float(grant.group("freq"))
+        for item in list(pending):
+            if grant_tg != item["current_tg"]:
+                continue
+            if abs(grant_freq_mhz - item["voice_mhz"]) > 0.00005:
+                continue
+            grant_utc = parse_utc_from_line(line)
+            delay_ms = None
+            if item["utc"] and grant_utc:
+                delay_ms = round((grant_utc - item["utc"]).total_seconds() * 1000.0, 3)
+            bad.append({
+                "line": item["line"],
+                "utc": item["utc"].isoformat().replace("+00:00", "Z") if item["utc"] else None,
+                "current_tg": item["current_tg"],
+                "new_tg": item["new_tg"],
+                "new_slot": item["new_slot"],
+                "voice_mhz": item["voice_mhz"],
+                "clear_grant_line": line_number,
+                "clear_grant_delay_ms": delay_ms,
+            })
+            pending.remove(item)
+            break
     return bad
 
 
@@ -487,8 +712,43 @@ def parse_grants(lines: list[str], started_utc: datetime | None) -> list[dict]:
             grant.update(mask_params)
         else:
             grant.update(parse_partial_mask_params_from_text(line))
+        if (source_id := parse_source_id_from_text(line)) is not None:
+            grant["source_id"] = source_id
         grants.append(grant)
     return grants
+
+
+def grant_flag_enabled(grant: dict, key: str) -> bool:
+    return str(grant.get(key, "")).strip().lower() in {"yes", "true", "1", "on"}
+
+
+def grant_guarded_as_encrypted(grant: dict) -> bool:
+    return (
+        grant_flag_enabled(grant, "arm_encrypted")
+        or bool(grant.get("skipped_encrypted"))
+        or bool(grant.get("skipped_recent_encrypted_hold"))
+        or bool(grant.get("skipped_sticky_encrypted_hold"))
+        or bool(grant.get("skipped_sticky_encrypted_hold_inferred"))
+    )
+
+
+def annotate_inferred_encrypted_holds(grants: list[dict]) -> None:
+    sticky_encrypted_tgs: set[int] = set()
+    for grant in sorted(grants, key=lambda item: int(item.get("line") or 0)):
+        try:
+            tg = int(grant.get("tg") or 0)
+        except (TypeError, ValueError):
+            continue
+        if tg <= 0:
+            continue
+        if grant_flag_enabled(grant, "arm_clear"):
+            sticky_encrypted_tgs.discard(tg)
+            continue
+        if grant_flag_enabled(grant, "arm_encrypted"):
+            sticky_encrypted_tgs.add(tg)
+            continue
+        if tg in sticky_encrypted_tgs and not grant_guarded_as_encrypted(grant):
+            grant["skipped_sticky_encrypted_hold_inferred"] = True
 
 
 def cached_mask_params_for_grant(capture_dir: Path, grant: dict) -> dict | None:
@@ -538,17 +798,50 @@ def cached_mask_params_for_grant(capture_dir: Path, grant: dict) -> dict | None:
 def annotate_grants(grants: list[dict], lines: list[str]) -> None:
     for pos, grant in enumerate(grants):
         next_line = grants[pos + 1]["line"] if pos + 1 < len(grants) else len(lines) + 1
-        window = lines[grant["line"] - 1 : max(grant["line"], min(len(lines), next_line - 1))]
+        window_start = max(0, grant["line"] - 8)
+        window = lines[window_start : max(grant["line"], min(len(lines), next_line - 1))]
         text = "\n".join(window)
         grant["inband_follow"] = "P25 Phase 2 in-band follow" in text
         grant["followed"] = "Auto-following P25 TG" in text or "Following Phase 2" in text
         grant["worker_start_seen"] = "P25 DSP VOICE WORKER START" in text
         grant["worker_result_seen"] = "P25 DSP VOICE WORKER:" in text
         grant["audio_output_seen"] = "P25 audio output:" in text
+        grant["skipped_encrypted"] = "Auto-follow skipped encrypted P25 TG" in text
+        grant["skipped_recent_encrypted_hold"] = (
+            "unknown grant update because an explicit encrypted grant" in text
+        )
+        grant["skipped_sticky_encrypted_hold"] = (
+            "prior explicit encrypted state is still active" in text
+        )
         refresh = re.search(r"P25 voice arm refreshed.*?clear=(?P<clear>\w+).*?encrypted=(?P<enc>\w+)", text)
         if refresh:
             grant["arm_clear"] = refresh.group("clear")
             grant["arm_encrypted"] = refresh.group("enc")
+        if "source_id" not in grant:
+            if (source_id := parse_source_id_from_text(text)) is not None:
+                grant["source_id"] = source_id
+                grant["source_hex"] = f"0x{source_id:06X}"
+        source = TRAFFIC_SOURCE_RE.search(text)
+        if source:
+            try:
+                if int(source.group("tg")) == int(grant.get("tg") or 0):
+                    grant["source_center_mhz"] = float(source.group("center"))
+                    grant["source_sample_rate_mhz"] = float(source.group("sr"))
+            except (TypeError, ValueError):
+                pass
+        elif grant.get("worker_start_seen"):
+            cf_match = WORKER_CF_RE.search(text)
+            sr_match = WORKER_SR_RE.search(text)
+            if cf_match:
+                try:
+                    grant["source_center_mhz"] = float(cf_match.group("cf"))
+                except ValueError:
+                    pass
+            if sr_match:
+                try:
+                    grant["source_sample_rate_mhz"] = float(sr_match.group("sr"))
+                except ValueError:
+                    pass
 
 
 def grant_security_suffix(grant: dict) -> str:
@@ -575,6 +868,16 @@ def grant_in_capture_passband(grant: dict, center_mhz: float, sample_rate_hz: fl
     return abs((voice_mhz - center_mhz) * 1e6) <= sr_hz * 0.47
 
 
+def grant_replay_center_mhz(grant: dict, capture_center_mhz: float) -> float:
+    try:
+        source_center_mhz = float(grant.get("source_center_mhz") or 0.0)
+    except (TypeError, ValueError):
+        source_center_mhz = 0.0
+    if source_center_mhz > 0.0:
+        return source_center_mhz
+    return capture_center_mhz
+
+
 def recommended_commands(capture_dir: Path, summary: dict, grants: list[dict]) -> list[str]:
     center_mhz = float(summary.get("center_freq_hz") or summary.get("freq_hz") or 0.0) / 1e6
     sample_rate_hz = summary.get("sample_rate_hz")
@@ -585,18 +888,20 @@ def recommended_commands(capture_dir: Path, summary: dict, grants: list[dict]) -
     for grant in grants:
         if suggested_voice >= 6:
             break
-        if not grant_in_capture_passband(grant, center_mhz, sample_rate_hz):
+        replay_center_mhz = grant_replay_center_mhz(grant, center_mhz)
+        if not grant_in_capture_passband(grant, replay_center_mhz, sample_rate_hz):
             grant["replay_skipped"] = "outside_capture_passband"
             continue
         skip_ms = max(0.0, float(grant.get("relative_ms") or 0.0) - 150.0)
         voice_mhz = float(grant["voice_mhz"])
-        # One-RTL traffic retunes center the capture on the traffic channel, not
-        # CC.  For in-passband wideband captures, keep center=<capture center>
-        # and let the target voice frequency provide the offset; otherwise replay
-        # misclassifies the TDMA slot.
+        # One-RTL traffic retunes center the live stream on the traffic source,
+        # while the capture metadata remains anchored to the original CC.  Replay
+        # with the traffic source center when the log provides it; using the voice
+        # frequency itself as the center hides the real offset and produces false
+        # no-burst results.
         voice_center_arg = ""
-        if not grant_in_capture_passband(grant, center_mhz, sample_rate_hz) and abs(voice_mhz - center_mhz) > 0.10:
-            voice_center_arg = f" voicecenter={voice_mhz:.5f}"
+        if replay_center_mhz > 0.0 and abs(replay_center_mhz - center_mhz) > 0.00001:
+            voice_center_arg = f" voicecenter={replay_center_mhz:.5f}"
         if grant.get("phase2") and grant.get("slot") is not None:
             masks = ""
             if {"nac", "wacn", "system"}.issubset(grant):
@@ -647,12 +952,21 @@ def audit_capture(capture_dir: Path) -> dict:
     mixed_slot_speaker_examples: list[dict] = []
     unsafe_audio_output_examples: list[dict] = []
     audio_underpush_examples: list[dict] = []
+    audio_session_examples: list[dict] = []
     clear_target_feed_starvation_examples: list[dict] = []
+    clear_target_rejected_before_feed_examples: list[dict] = []
+    clear_target_accounted_without_feed_examples: list[dict] = []
     slow_voice_worker_examples: list[dict] = []
     for line_number, line in enumerate(lines, start=1):
         for key, needle in PATTERNS.items():
             if needle in line:
                 counts[key] += 1
+        if "P25 DSP VOICE WORKER:" in line:
+            fields = parse_worker_int_fields(line)
+            if fields.get("absDup", 0) > 0:
+                counts["worker_abs_duplicate_suppression"] += 1
+            if fields.get("seqDrop", 0) > 0:
+                counts["worker_sequencer_suppression"] += 1
         if issue := mixed_slot_speaker_issue(line):
             counts["mixed_slot_speaker_output"] += 1
             counts[f"mixed_slot_speaker_{issue}"] += 1
@@ -665,10 +979,18 @@ def audit_capture(capture_dir: Path) -> dict:
                     **parse_worker_int_fields(line),
                 })
         if issue := clear_target_feed_starvation_issue(line):
-            counts["clear_target_feed_starvation"] += 1
-            if len(clear_target_feed_starvation_examples) < 8:
+            if issue == "phase2-clear-target-vcw-rejected-before-feed":
+                counts["clear_target_rejected_before_feed"] += 1
+                examples = clear_target_rejected_before_feed_examples
+            elif issue == "phase2-clear-target-vcw-duplicate-context-accounted":
+                counts["clear_target_accounted_without_feed"] += 1
+                examples = clear_target_accounted_without_feed_examples
+            else:
+                counts["clear_target_feed_starvation"] += 1
+                examples = clear_target_feed_starvation_examples
+            if len(examples) < 8:
                 utc = parse_utc_from_line(line)
-                clear_target_feed_starvation_examples.append({
+                examples.append({
                     "line": line_number,
                     "utc": utc.isoformat().replace("+00:00", "Z") if utc else None,
                     "reason": issue,
@@ -697,6 +1019,17 @@ def audit_capture(capture_dir: Path) -> dict:
                     "reason": issue,
                     **parse_audio_output_fields(line),
                 })
+        if issue := audio_output_session_issue(line):
+            counts["audio_output_session_mismatch"] += 1
+            counts[issue.split(":", 1)[0]] += 1
+            if len(audio_session_examples) < 8:
+                utc = parse_utc_from_line(line)
+                audio_session_examples.append({
+                    "line": line_number,
+                    "utc": utc.isoformat().replace("+00:00", "Z") if utc else None,
+                    "reason": issue,
+                    **parse_audio_output_fields(line),
+                })
         if issue := audio_output_underpush_issue(line):
             counts["audio_output_underpush"] += 1
             if len(audio_underpush_examples) < 8:
@@ -707,6 +1040,20 @@ def audit_capture(capture_dir: Path) -> dict:
                     "reason": issue,
                     **parse_audio_output_fields(line),
                 })
+        if "P25 audio top-up:" in line:
+            fields = parse_audio_top_up_fields(line)
+            try:
+                real = int(fields.get("real", "0"))
+                bridge = int(fields.get("bridge", "0"))
+            except ValueError:
+                real = 0
+                bridge = 0
+            if real > 0:
+                counts["audio_top_up_real"] += 1
+                counts["audio_top_up_real_samples"] += real
+            if bridge > 0:
+                counts["audio_top_up_bridge"] += 1
+                counts["audio_top_up_bridge_samples"] += bridge
     started = summary.get("started_utc")
     started_utc = None
     if isinstance(started, str):
@@ -715,6 +1062,7 @@ def audit_capture(capture_dir: Path) -> dict:
     retune_stalls = traffic_retune_stalls(lines)
     stale_target_hops = same_call_stale_target_hops(lines)
     out_of_source_inplace_hops = same_call_out_of_source_inplace_hops(lines)
+    same_rf_clear_steals = same_rf_slot_handoff_before_current_clear_grant(lines)
     audio_starvation = audio_output_starvation(lines)
     if retune_stalls:
         counts["traffic_retune_stall"] = len(retune_stalls)
@@ -722,6 +1070,8 @@ def audit_capture(capture_dir: Path) -> dict:
         counts["same_call_stale_target_hop"] = len(stale_target_hops)
     if out_of_source_inplace_hops:
         counts["same_call_out_of_source_inplace_hop"] = len(out_of_source_inplace_hops)
+    if same_rf_clear_steals:
+        counts["same_rf_slot_handoff_before_current_clear_grant"] = len(same_rf_clear_steals)
     if audio_starvation["sparse_gap_count"]:
         counts["audio_output_sparse_gap"] = audio_starvation["sparse_gap_count"]
     if audio_starvation["underrun_climb_count"]:
@@ -738,6 +1088,16 @@ def audit_capture(capture_dir: Path) -> dict:
                 for key, value in cached_mask.items():
                     grant.setdefault(key, value)
     annotate_grants(grants, lines)
+    annotate_inferred_encrypted_holds(grants)
+    encrypted_guarded_grants = sum(1 for grant in grants if grant_guarded_as_encrypted(grant))
+    clear_grants = sum(1 for grant in grants if grant_flag_enabled(grant, "arm_clear"))
+    unknown_unguarded_grants = max(0, len(grants) - encrypted_guarded_grants - clear_grants)
+    if encrypted_guarded_grants:
+        counts["encrypted_or_guarded_group_grants"] = encrypted_guarded_grants
+    if clear_grants:
+        counts["clear_group_grants"] = clear_grants
+    if unknown_unguarded_grants:
+        counts["unknown_unguarded_group_grants"] = unknown_unguarded_grants
     health = {
         "health": summary.get("health"),
         "actual_seconds": summary.get("actual_seconds"),
@@ -752,29 +1112,46 @@ def audit_capture(capture_dir: Path) -> dict:
     if health.get("ring_overrun_samples") == 0 and health.get("max_single_gap_samples") == 0:
         findings.append("capture_iq_gapless")
     if counts["group_instructions"] and counts["worker_result"] == 0:
-        findings.append("grants_seen_but_no_worker_results")
+        if grants and encrypted_guarded_grants == len(grants):
+            findings.append("encrypted_grants_skipped_by_design")
+        else:
+            findings.append("grants_seen_but_no_worker_results")
     if counts["worker_start"] and counts["worker_result"] == 0:
         findings.append("worker_started_without_results")
     if counts["worker_stale"]:
         findings.append("worker_jobs_stale")
-    if counts["audio_output"] == 0:
-        findings.append("no_speaker_audio_pushed")
+    speaker_audio_events = counts["audio_output"] + counts["audio_top_up_real"]
+    if speaker_audio_events == 0:
+        if grants and encrypted_guarded_grants == len(grants):
+            findings.append("no_speaker_audio_expected_encrypted_only")
+        else:
+            findings.append("no_speaker_audio_pushed")
     if counts["mixed_slot_speaker_output"]:
         findings.append("mixed_slot_speaker_output")
     if counts["clear_target_feed_starvation"]:
         findings.append("clear_target_feed_starvation")
+    if counts["clear_target_rejected_before_feed"]:
+        findings.append("clear_target_rejected_before_feed")
     if counts["slow_voice_worker"]:
         findings.append("slow_voice_worker")
     if counts["unsafe_audio_output"]:
         findings.append("unsafe_audio_output")
+    if counts["audio_output_session_mismatch"]:
+        findings.append("audio_output_session_mismatch")
     if counts["audio_output_underpush"]:
         findings.append("audio_output_underpush")
+    if counts["worker_abs_duplicate_suppression"]:
+        findings.append("worker_abs_duplicate_suppression")
+    if counts["worker_sequencer_suppression"]:
+        findings.append("worker_sequencer_suppression")
     if counts["traffic_retune_stall"]:
         findings.append("traffic_retune_stall")
     if counts["same_call_stale_target_hop"]:
         findings.append("same_call_stale_target_hop")
     if counts["same_call_out_of_source_inplace_hop"]:
         findings.append("same_call_out_of_source_inplace_hop")
+    if counts["same_rf_slot_handoff_before_current_clear_grant"]:
+        findings.append("same_rf_slot_handoff_before_current_clear_grant")
     if counts["audio_output_sparse_gap"] and counts["audio_output_underrun_climb"]:
         findings.append("speaker_ring_starvation")
     return {
@@ -784,13 +1161,17 @@ def audit_capture(capture_dir: Path) -> dict:
         "counts": dict(counts),
         "mixed_slot_speaker_examples": mixed_slot_speaker_examples,
         "clear_target_feed_starvation_examples": clear_target_feed_starvation_examples,
+        "clear_target_rejected_before_feed_examples": clear_target_rejected_before_feed_examples,
+        "clear_target_accounted_without_feed_examples": clear_target_accounted_without_feed_examples,
         "slow_voice_worker_examples": slow_voice_worker_examples,
         "unsafe_audio_output_examples": unsafe_audio_output_examples,
+        "audio_session_examples": audio_session_examples,
         "audio_underpush_examples": audio_underpush_examples,
         "audio_output_timing": audio_starvation,
         "traffic_retune_stalls": retune_stalls,
         "same_call_stale_target_hops": stale_target_hops,
         "same_call_out_of_source_inplace_hops": out_of_source_inplace_hops,
+        "same_rf_slot_handoff_before_current_clear_grant": same_rf_clear_steals,
         "grants": grants,
         "findings": findings,
         "recommended_cli_commands": recommended_commands(capture_dir, summary, grants),
@@ -811,6 +1192,35 @@ def run_self_test() -> None:
     assert grants[0]["slot"] == 1
     assert grants[0]["inband_follow"] is True
     assert grants[0]["nac"] == 0x2DC
+    retune_lines = [
+        "[00:00:10.000 | 2026-07-04T00:00:10.000Z UTC] Instruction: Group Update | tg=30304 | ch=0X6090 | carrier=72 | voice=413.37500MHz | P25 Phase 2 TDMA | slot=0 | nac=0X2DF | wacn=0XBEE00 | sys=0X2D1",
+        "[00:00:10.001 | 2026-07-04T00:00:10.001Z UTC] P25 traffic source started: TG=30304 voice=413.37500MHz slot=0 control=419.12500MHz dev=0 kind=single-rtl-retune-traffic-source-low-if sourceCenter=413.62500MHz sr=2.048MHz.",
+        "[00:00:10.002 | 2026-07-04T00:00:10.002Z UTC] Auto-following P25 TG 30304 with independent traffic source voice=413.37500MHz control=419.12500MHz protocol=Phase 2 TDMA enc=unknown.",
+    ]
+    retune_grants = parse_grants(retune_lines, started)
+    annotate_grants(retune_grants, retune_lines)
+    assert len(retune_grants) == 1
+    assert retune_grants[0]["source_center_mhz"] == 413.625
+    assert grant_replay_center_mhz(retune_grants[0], 419.125) == 413.625
+    encrypted_lines = [
+        "[00:00:20.000 | 2026-07-04T00:00:20.000Z UTC] Instruction: Group Grant | tg=12068 | ch=0X6401 | carrier=512 | voice=418.87500MHz | SVC=0X44 | encrypted | P25 Phase 2 TDMA | slot=1 | nac=0X2DF | wacn=0XBEE00 | sys=0X2D1",
+        "[00:00:20.001 | 2026-07-04T00:00:20.001Z UTC] Auto-follow skipped encrypted P25 TG 12068 (Phase 2 TDMA); staying on/returning to control channel.",
+        "[00:00:22.000 | 2026-07-04T00:00:22.000Z UTC] Instruction: Group Update | tg=12068 | ch=0X6401 | carrier=512 | voice=418.87500MHz | P25 Phase 2 TDMA | slot=1 | nac=0X2DF | wacn=0XBEE00 | sys=0X2D1",
+        "[00:00:22.001 | 2026-07-04T00:00:22.001Z UTC] Auto-follow skipped Phase 2 TG 12068 unknown grant update because an explicit encrypted grant for the same TG/channel/frequency was seen 2000ms earlier; matching sdrtrunk, wait for a fresh clear/current-call MAC or ESS before opening audio.",
+        "[00:00:24.000 | 2026-07-04T00:00:24.000Z UTC] Instruction: Group Update | tg=12068 | ch=0X6401 | carrier=512 | voice=418.87500MHz | P25 Phase 2 TDMA | slot=1 | nac=0X2DF | wacn=0XBEE00 | sys=0X2D1",
+        "[00:00:24.001 | 2026-07-04T00:00:24.001Z UTC] Auto-follow skipped Phase 2 TG 12068 OP=0x02 on 418.87500MHz because prior explicit encrypted state is still active; waiting for a fresh clear grant or traffic-channel MAC/ESS proof before audio.",
+    ]
+    encrypted_grants = parse_grants(encrypted_lines, started)
+    annotate_grants(encrypted_grants, encrypted_lines)
+    assert len(encrypted_grants) == 3
+    assert all(grant_guarded_as_encrypted(grant) for grant in encrypted_grants)
+    retune_commands = recommended_commands(
+        Path("capture"),
+        {"center_freq_hz": 419125000.0, "freq_hz": 419125000.0, "sample_rate_hz": 2048000.0},
+        retune_grants,
+    )
+    assert any("voicecenter=413.62500" in cmd for cmd in retune_commands)
+    assert all("voicecenter=413.37500" not in cmd for cmd in retune_commands)
     stale = same_call_stale_target_hops([
         "[00:00:02.000 | 2026-07-04T00:00:02.000Z UTC] P25 auto-follow same-call MHz hop pending: TG 30302 voice 419.87500MHz -> 418.87500MHz; retuning traffic source before continuing metadata-only follow.",
         "[00:00:02.100 | 2026-07-04T00:00:02.100Z UTC] P25 DSP VOICE WORKER START: sr=2.048MHz cf=419.12500MHz target=419.87500MHz tg=30302 slot=0 generation=2.",
@@ -826,6 +1236,16 @@ def run_self_test() -> None:
     ])
     assert len(out_of_source) == 1
     assert out_of_source[0]["tg"] == 30302
+    same_rf_steal = same_rf_slot_handoff_before_current_clear_grant([
+        "[00:00:10.000 | 2026-07-04T00:00:10.000Z UTC] "
+        "P25 Phase 2 same-RF slot handoff: current TG 10301 on 419.87500MHz remained unacquired after the acquisition grace, "
+        "so following new grant TG 30302 slot 1. This approximates sdrtrunk's independent traffic-slot handling on a single scanner receiver.",
+        "[00:00:10.176 | 2026-07-04T00:00:10.176Z UTC] "
+        "Grant: TG=10301 SRC=0X235B8A CH=0X64A0 ID=6 CHAN=0X4A0 CARRIER=592 SLOT=0 FREQ=419.87500MHz PHASE2=yes ENC=clear SVC=0X04 PRI=4 OP=0X00 MFID=0X00",
+    ])
+    assert len(same_rf_steal) == 1
+    assert same_rf_steal[0]["current_tg"] == 10301
+    assert same_rf_steal[0]["clear_grant_delay_ms"] == 176.0
     assert mixed_slot_speaker_issue(
         "[00:00:03.000 | 2026-07-04T00:00:03.000Z UTC] "
         "P25 DSP VOICE WORKER: gate=emit decoded=9 speaker=8640 targetVcw=9 oppVcw=4 gaps=0"
@@ -835,6 +1255,18 @@ def run_self_test() -> None:
         "P25 DSP VOICE WORKER: diag=decoding clear voice gate=empty-audio decoded=0 "
         "speaker=0 targetVcw=3 oppVcw=4 fed=0 emitPcm=0 ess=clear dsp=15154us"
     ) == "phase2-clear-target-vcw-not-fed"
+    assert clear_target_feed_starvation_issue(
+        "[00:00:03.150 | 2026-07-04T00:00:03.150Z UTC] "
+        "P25 DSP VOICE WORKER: diag=decoding clear voice gate=empty-audio decoded=0 "
+        "speaker=0 targetVcw=8 oppVcw=4 fed=0 emitPcm=0 reject=12 wrongSlot=4 "
+        "dup=0 absDup=0 seqDrop=0 ctxDrop=0 ess=clear dsp=43197us"
+    ) == "phase2-clear-target-vcw-rejected-before-feed"
+    assert clear_target_feed_starvation_issue(
+        "[00:00:03.175 | 2026-07-04T00:00:03.175Z UTC] "
+        "P25 DSP VOICE WORKER: diag=decoding clear voice gate=empty-audio decoded=0 "
+        "speaker=0 targetVcw=10 oppVcw=4 fed=0 emitPcm=0 reject=0 wrongSlot=4 "
+        "dup=0 absDup=10 seqDrop=0 ctxDrop=0 ess=clear dsp=43197us"
+    ) == "phase2-clear-target-vcw-duplicate-context-accounted"
     assert slow_voice_worker_issue(
         "[00:00:03.200 | 2026-07-04T00:00:03.200Z UTC] "
         "P25 DSP VOICE WORKER: gate=emit decoded=4 speaker=3840 "
@@ -890,19 +1322,39 @@ def run_self_test() -> None:
         "ess=clear targetEss=clear targetSession=yes targetPtt=no action=target-session-clear "
         "activeOutputs=1 ringFill=36.9% underruns=0."
     ) == "audio-output-underpushed-decoded-pcm"
+    assert audio_output_session_issue(
+        "[00:00:04.040 | 2026-07-04T00:00:04.040Z UTC] "
+        "P25 audio output: TG=30302 pushed=3840 samples gate=emit decoded=4 "
+        "targetVcw=4 oppVcw=0 targetSession=yes call=0 grantEpoch=0 pttGen=0."
+    ) == "audio-output-missing-call-session"
+    assert audio_output_session_issue(
+        "[00:00:04.042 | 2026-07-04T00:00:04.042Z UTC] "
+        "P25 audio output: TG=30302 pushed=3840 samples gate=emit decoded=4 "
+        "targetVcw=4 oppVcw=0 targetSession=yes call=45969034969089 grantEpoch=123 pttGen=1."
+    ) == "audio-output-call-session-talkgroup-mismatch:10703!=30302"
+    assert audio_output_session_issue(
+        "[00:00:04.044 | 2026-07-04T00:00:04.044Z UTC] "
+        "P25 audio output: TG=30302 pushed=3840 samples gate=emit decoded=4 "
+        "targetVcw=4 oppVcw=0 targetSession=yes call=130146099003393 grantEpoch=123 pttGen=1."
+    ) is None
     starvation = audio_output_starvation([
         "[00:00:05.000 | 2026-07-04T00:00:05.000Z UTC] "
         "P25 audio output: TG=30302 pushed=1920 samples gate=emit decoded=2 "
         "targetVcw=2 oppVcw=0 p2mac=1/9 ess=clear targetEss=clear "
         "targetSession=yes targetPtt=no action=target-session-clear activeOutputs=1 ringFill=6.0% underruns=10.",
         "[00:00:06.200 | 2026-07-04T00:00:06.200Z UTC] "
-        "P25 audio output: TG=30302 pushed=3840 samples gate=emit decoded=4 "
-        "targetVcw=4 oppVcw=0 p2mac=1/9 ess=clear targetEss=clear "
-        "targetSession=yes targetPtt=no action=target-session-clear activeOutputs=1 ringFill=7.0% underruns=16.",
+        "P25 audio top-up: TG=30302 real=3840 bridge=0 ringQueued=3840 ringFill=7.0% underruns=16.",
+        "[00:00:06.240 | 2026-07-04T00:00:06.240Z UTC] "
+        "P25 audio top-up: TG=30302 real=0 bridge=5760 ringQueued=9600 ringFill=18.0% underruns=16.",
     ])
     assert starvation["event_count"] == 2
     assert starvation["sparse_gap_count"] == 1
     assert starvation["underrun_climb_count"] == 1
+    assert starvation["first_events"][1]["source"] == "top_up"
+    assert parse_audio_speaker_push_event(
+        "[00:00:07.000 | 2026-07-04T00:00:07.000Z UTC] "
+        "P25 audio top-up: real=0 bridge=5760 ringQueued=9600 ringFill=18.0% underruns=16."
+    ) is None
     print("p25_capture_audit self-test: PASS")
 
 

@@ -2,7 +2,7 @@
 """Summarize SDR Town IQ capture health from a capture directory or manifest row.
 
 Usage:
-  python tools/analyze_iq_capture.py /path/to/capture_dir
+  python src/tools/analyze_iq_capture.py /path/to/capture_dir
 
 The script is intentionally dependency-free so it can run on tester machines.
 """

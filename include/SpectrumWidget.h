@@ -85,11 +85,13 @@ private:
     QImage m_waterfall;             // scrolling image (height = history, width = bins) - used for fast full-view path
     int m_waterfallPos = 0;
 
-    // SOTA high-resolution spectrum history for *true* zoomed waterfall (not crop/stretch of low-res image).
-    // Each row is a full high-bin FFT power vector (e.g. 8192). Paint uses sub-range bin lookup for the current viewBw.
-    // This delivers the extra resolution the user asked for when zooming the waterfall.
+    // High-resolution spectrum history for waterfall rendering.
+    // Each row is a full high-bin FFT power vector. Paint uses sub-range bin lookup
+    // for the current view, so the spectrum and waterfall share one frequency axis.
     std::deque<std::vector<float>> m_highResHistory;
-    static constexpr size_t kMaxHighResHistory = 256;
+    // Cap history: long FM sessions + 256×FFT-row paint on the UI thread froze
+    // the GUI after ~10–15 min (field 20260811). Keep enough for zoomed detail.
+    static constexpr size_t kMaxHighResHistory = 96;
 
     QTimer* m_demoTimer = nullptr;
     QMutex m_dataMutex;

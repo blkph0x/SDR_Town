@@ -791,6 +791,26 @@ TEST_CASE("P25 control analyzer parses Motorola Phase 2 regroup grants only for 
     REQUIRE(events.front().sourceId == 0x102030);
     REQUIRE(events.front().tdmaSlotKnown);
     REQUIRE(events.front().tdmaSlot == 1);
+    REQUIRE(events.front().encryptionKnown);
+    REQUIRE_FALSE(events.front().encrypted);
+
+    std::vector<uint8_t> userExtended(17, 0);
+    userExtended[0] = static_cast<uint8_t>(4u << 5);
+    userExtended[1] = 0xa0;
+    userExtended[2] = 0x90;
+    userExtended[3] = 16;   // vendor variable-length octet
+    userExtended[4] = 0x40; // encrypted service options at SDRTrunk OCTET_4
+    writeBitsMsb(userExtended, (1 + 4) * 8, 16, 30003);
+    writeBitsMsb(userExtended, (1 + 6) * 8, 24, 0x654321);
+
+    const auto userEvents = analyzer.ingestPhase2MacPdu(4, 0, userExtended, true);
+    REQUIRE(userEvents.size() == 1);
+    REQUIRE(userEvents.front().type == P25ControlEventType::GroupVoiceUser);
+    REQUIRE(userEvents.front().mfid == 0x90);
+    REQUIRE(userEvents.front().talkgroupId == 30003);
+    REQUIRE(userEvents.front().sourceId == 0x654321);
+    REQUIRE(userEvents.front().encryptionKnown);
+    REQUIRE(userEvents.front().encrypted);
 
     grant[2] = 0x91;
     const auto nonMotorola = analyzer.ingestPhase2MacPdu(4, 0, grant, true);

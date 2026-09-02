@@ -10,11 +10,14 @@ assert 'peak > kP25DecodedAudioSafeMaxPeak' in fn and 'rms > kP25DecodedAudioSaf
 decode = text[text.index('static bool p25DecodePhase2AmbeFrameToAudio'):text.index('static bool p25ProbePhase2AmbeFrameForDiagnostics')]
 assert 'const bool strictFresh = p25AmbeDecodeFrameLooksUsable(decoded);' in decode, 'hard path must still classify fresh speech quality'
 assert 'const bool speakerSafe = p25DecodedAmbePcmLooksSafeForSpeaker(decoded);' in decode, 'hard path must keep a separate speaker safety gate'
-assert 'mildSoftConceal' in decode, 'mild mbelib soft-concealment may still emit for cadence'
-assert 'erasureOrMute' in decode, 'erasure/mute codec garbage must not emit as speaker PCM'
-assert 'nearSilentCodecPcm' in decode and 'emitAsSpeaker' in decode, 'near-silent erasure/repeat PCM must not count as accepted speaker audio'
+assert 'const bool codecConcealment' in decode, 'mbelib repeat/erasure/mute frames must be counted as concealment quality debt'
+assert 'erasureOrMute' in decode, 'erasure/mute codec output must be tracked separately from fresh speech proof'
+assert 'nearSilentCodecPcm' in decode and 'emitAsSpeaker' in decode, 'near-silent codec output must be tracked without chopping cadence'
+assert 'const bool emitAsSpeaker = speakerSafe;' in decode, 'safe mbelib PCM must emit without an extra post-vocoder speech gate'
 assert 'frame.accepted = emitAsSpeaker;' in decode, 'validation accepted flag should reflect speaker emission, not fresh proof'
-assert 'if (!strictFresh)' in decode and '++out.phase2ConcealmentFrames;' in decode, 'non-fresh codec PCM must be counted as concealment quality debt'
+assert 'if (codecConcealment && emitAsSpeaker)' in decode and '++out.phase2ConcealmentFrames;' in decode, 'non-fresh emitted codec PCM must be counted as concealment quality debt'
+assert 'concealSelectedSlotTimeline("unsafe-codec-pcm", false);' in decode, 'unsafe codec PCM must advance the selected-slot timeline as silence'
+assert 'p25Phase2AppendPlcBlock(rx, outputRateHz, out);' in decode, 'catastrophic input-quality rejects must insert exactly one cadence block'
 may = text[text.index('static bool p25VoiceBlockMayEmitAudio'):text.index('static P25VoiceAudioBlock applyP25Phase2SecurityAudioGate')]
 assert 'out.phase2AmbeRejected ||' not in may, 'mixed window rejected candidates must not mute accepted audio'
 accepted = text[text.index('if (acceptedReleaseVoice &&'):text.index('} else if ((sdrtrunkLateEntryVoiceRelease', text.index('if (acceptedReleaseVoice &&'))]

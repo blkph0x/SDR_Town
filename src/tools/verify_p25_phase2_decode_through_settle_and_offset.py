@@ -12,11 +12,15 @@ assert 'mgr.setReceiverCursorToLiveEdge(di, rx);\n                        }\n   
 assert 'Never assign rx.p25VoiceLiveDecoder unless rx.dspMutex is held' not in main or 'if (dspLock.owns_lock())' in main
 assert 'std::unique_lock<std::recursive_mutex> dspLock(rx.dspMutex, std::try_to_lock);' in main
 assert 'if (!clearAudio)' in main and 'return false;' in main
-assert 'Do not add burst.dibitOffset again' in dec
-assert 'const uint64_t streamDibit = streamStart +\n                static_cast<uint64_t>(codeword.dibitOffset);' in dec
+assert 'Convert that window coordinate to the monotonic stream coordinate\n            // exactly once' in dec
+assert 'Adding streamBurstStart here collapses same-burst' in dec
+assert 'const uint64_t streamDibit = codeword.streamDibitKnown' in dec
+assert '? codeword.streamDibit' in dec
+assert ': (streamStart + static_cast<uint64_t>(codeword.dibitOffset));' in dec
 assert 'Normalize offsets back to the caller\'s fresh input' in dec
-assert 'annotatePhase2SessionCodewords(out, dibits);' in dec
-assert 'slotSessions[phase2TrafficSlotFromSuperframeBurstIndex(slot) & 0x01u]' in dec
+assert 'annotatePhase2SessionCodewords(out, dibits, softDibitMinAbsLlr);' in dec
+assert 'const uint8_t trafficSlot = phase2TrafficSlotForSuperframeBurst' in dec
+assert 'auto& burstSession = slotSessions[trafficSlot & 0x01u];' in dec
 assert 'trafficRx->p25AfcFrozen = source.retunesPrimary && inheritedControlAfcKnown && !phase2Traffic' in main
 assert 'p25TrustedControlOffsetForPhase2Traffic' in main
 assert 'kP25Phase2ControlCarryFreshMs = 30000' in main

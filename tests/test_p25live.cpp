@@ -1781,6 +1781,7 @@ TEST_CASE("P25 live decoder releases clear MAC_ACTIVE group user for continuous 
     REQUIRE(macBurst != result.phase2Bursts.end());
     REQUIRE(macBurst->trafficTalkgroupKnown);
     REQUIRE(macBurst->trafficTalkgroupId == talkgroupId);
+    REQUIRE(macBurst->trafficTalkgroupObservedThisBurst);
     REQUIRE_FALSE(macBurst->trafficEncrypted);
     REQUIRE_FALSE(macBurst->encrypted);
     // Clear traffic SO + MAC_ACTIVE with xor mask applied opens continuous
@@ -1796,6 +1797,7 @@ TEST_CASE("P25 live decoder releases clear MAC_ACTIVE group user for continuous 
         REQUIRE(voiceBurst.trafficSecurityKnown);
         REQUIRE(voiceBurst.trafficTalkgroupKnown);
         REQUIRE(voiceBurst.trafficTalkgroupId == talkgroupId);
+        REQUIRE_FALSE(voiceBurst.trafficTalkgroupObservedThisBurst);
         REQUIRE_FALSE(voiceBurst.trafficEncrypted);
         REQUIRE_FALSE(voiceBurst.encrypted);
         REQUIRE(voiceBurst.sessionAudioRelease);
@@ -1825,6 +1827,7 @@ TEST_CASE("P25 live decoder keeps Phase 2 MAC_ACTIVE encrypted group user muted"
     REQUIRE(macBurst != result.phase2Bursts.end());
     REQUIRE(macBurst->trafficTalkgroupKnown);
     REQUIRE(macBurst->trafficTalkgroupId == talkgroupId);
+    REQUIRE(macBurst->trafficTalkgroupObservedThisBurst);
     REQUIRE(macBurst->trafficEncrypted);
     REQUIRE(macBurst->encrypted);
     REQUIRE_FALSE(macBurst->sessionAudioRelease);
@@ -1862,6 +1865,7 @@ TEST_CASE("P25 live decoder treats Phase 2 MAC_HANGTIME encrypted group user as 
     REQUIRE(macBurst != result.phase2Bursts.end());
     REQUIRE(macBurst->trafficTalkgroupKnown);
     REQUIRE(macBurst->trafficTalkgroupId == talkgroupId);
+    REQUIRE(macBurst->trafficTalkgroupObservedThisBurst);
     REQUIRE(macBurst->trafficEncrypted);
     REQUIRE(macBurst->encrypted);
     REQUIRE_FALSE(macBurst->sessionAudioRelease);
@@ -2286,6 +2290,9 @@ TEST_CASE("P25 Phase 2 CQPSK traffic config matches SDRTrunk HDQPSK (6000 baud, 
     REQUIRE_FALSE(cfg.cqpskUseMatchedRrcFilter);
     REQUIRE(cfg.cqpskCarrierLoopBandwidth == Catch::Approx((2.0 * 3.14159265358979323846) / 300.0));
     REQUIRE(cfg.cqpskCarrierLoopMaxCorrectionHz == Catch::Approx(3000.0));
+    const auto lpf = p25ChannelizerLowpass(cfg, 192000.0, 48000.0);
+    REQUIRE(lpf.cutoffHz == Catch::Approx(kP25Phase2HdqpskPassHz));
+    REQUIRE(lpf.transitionHz == Catch::Approx(kP25Phase2HdqpskStopHz - kP25Phase2HdqpskPassHz));
 }
 
 TEST_CASE("P25 Phase 2 6000 baud CQPSK processIq stays inside realtime budget on noise", "[p25][cqpsk][budget]")
@@ -2347,4 +2354,25 @@ TEST_CASE("P25 AMBE Phase 2 voice decoder reports backend availability explicitl
         REQUIRE(result.status == P25VoiceDecodeStatus::BackendUnavailable);
         REQUIRE(result.pcm.empty());
     }
+}
+
+TEST_CASE("P25 AMBE Phase 2 decoder rejects packed or soft values on hard-bit API", "[p25][ambe]")
+{
+    P25AmbeVoiceDecoder voice;
+    if (!voice.backendAvailable()) {
+        SUCCEED("mbelib backend not available in this build");
+        return;
+    }
+
+    std::array<uint8_t, 96> ambe96{};
+    ambe96[7] = 2;
+    const auto frameResult = voice.decodeAmbe3600x2450Frame(ambe96);
+    REQUIRE(frameResult.status == P25VoiceDecodeStatus::InvalidFrame);
+    REQUIRE(frameResult.pcm.empty());
+
+    std::array<uint8_t, 49> ambe49{};
+    ambe49[3] = 255;
+    const auto dataResult = voice.decodeAmbe2450Data(ambe49);
+    REQUIRE(dataResult.status == P25VoiceDecodeStatus::InvalidFrame);
+    REQUIRE(dataResult.pcm.empty());
 }

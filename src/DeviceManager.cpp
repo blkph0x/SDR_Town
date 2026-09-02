@@ -1331,19 +1331,28 @@ DeviceManager::RecentIQWindow DeviceManager::getNewIQWindowForReceiver(size_t de
 
     size_t toRead = (size_t)std::min((uint64_t)maxSamples, available);
 
-    outWindow.samples.reserve(toRead);
+    outWindow.samples.resize(toRead);
     outWindow.startAbsolute = myLast;
     outWindow.endAbsolute = myLast + static_cast<uint64_t>(toRead);
 
-    size_t cap = st.ringCapacity;
-    size_t startWrapped = (size_t)(myLast % cap);
-    const bool powerOfTwoCap = (cap & (cap - 1)) == 0;
-
-    for (size_t k = 0; k < toRead; ++k) {
-        size_t pos = powerOfTwoCap
-            ? ((startWrapped + k) & (cap - 1))
-            : ((startWrapped + k) % cap);
-        outWindow.samples.push_back(st.iqRing[pos]);
+    // Same 1–2 segment memcpy as getRecentIQWindowWithCursor. The old
+    // per-sample push_back held ringMutex across hundreds of thousands of
+    // live RTL samples and stalled the voice worker behind the tuner clock.
+    if (toRead > 0) {
+        const size_t cap = st.ringCapacity;
+        const bool powerOfTwoCap = (cap & (cap - 1)) == 0;
+        const size_t startIdx = powerOfTwoCap
+            ? static_cast<size_t>(myLast) & (cap - 1)
+            : static_cast<size_t>(myLast % static_cast<uint64_t>(cap));
+        const size_t firstPart = std::min(toRead, cap - startIdx);
+        std::copy(st.iqRing.begin() + static_cast<std::ptrdiff_t>(startIdx),
+                  st.iqRing.begin() + static_cast<std::ptrdiff_t>(startIdx + firstPart),
+                  outWindow.samples.begin());
+        if (firstPart < toRead) {
+            std::copy(st.iqRing.begin(),
+                      st.iqRing.begin() + static_cast<std::ptrdiff_t>(toRead - firstPart),
+                      outWindow.samples.begin() + static_cast<std::ptrdiff_t>(firstPart));
+        }
     }
 
     rx.lastConsumedAbsolute.store(outWindow.endAbsolute, std::memory_order_release);
@@ -1676,6 +1685,9 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
         // Broad guard: native readStream / USB / driver faults in the background thread must never terminate the process.
         try {
             auto lastSpectrumTime = std::chrono::steady_clock::now();
+            auto lastReadErrorLogTime = std::chrono::steady_clock::now() - std::chrono::seconds(10);
+            int consecutiveReadTimeouts = 0;
+            int consecutiveReadErrors = 0;
             while (!st.stopFlag && st.sessionGen.load(std::memory_order_acquire) == myGen) {
                 const uint64_t requestedTuneSeq = st.centerTuneRequestSeq.load(std::memory_order_acquire);
                 const uint64_t appliedTuneSeq = st.centerTuneAppliedSeq.load(std::memory_order_acquire);
@@ -1731,7 +1743,27 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                     numElems = dev->readStream(stream, buffs, blockSize, flags, timeNs, 100000);
                 }
                 if (numElems < 0) {
-                    spdlog::warn("readStream error code: {}", numElems);
+                    ++consecutiveReadErrors;
+                    const auto errorNow = std::chrono::steady_clock::now();
+                    const auto msSinceReadErrorLog = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        errorNow - lastReadErrorLogTime).count();
+                    if (numElems == -1) { // SOAPY_SDR_TIMEOUT: common during retune/stop or USB stalls.
+                        ++consecutiveReadTimeouts;
+                        if (consecutiveReadTimeouts == 1 || msSinceReadErrorLog >= 5000) {
+                            lastReadErrorLogTime = errorNow;
+                            if (consecutiveReadTimeouts >= 50) {
+                                spdlog::warn("readStream timeout on device {} repeated {} times; keeping stream alive", index, consecutiveReadTimeouts);
+                            } else {
+                                spdlog::debug("readStream timeout on device {} (code -1); keeping stream alive", index);
+                            }
+                        }
+                    } else {
+                        consecutiveReadTimeouts = 0;
+                        if (consecutiveReadErrors == 1 || msSinceReadErrorLog >= 1000) {
+                            lastReadErrorLogTime = errorNow;
+                            spdlog::warn("readStream error code on device {}: {}", index, numElems);
+                        }
+                    }
                     if (numElems == -4) { // SOAPY_SDR_OVERFLOW - samples were dropped before we read
                         static std::atomic<int> overflowCount{0};
                         int c = ++overflowCount;
@@ -1742,6 +1774,8 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                 }
                 size_t numRead = static_cast<size_t>(numElems);
                 if (numRead > 0) {
+                    consecutiveReadTimeouts = 0;
+                    consecutiveReadErrors = 0;
                     if (numRead > blockSize) numRead = blockSize;
                     std::vector<std::complex<float>> block(buff.begin(), buff.begin() + numRead);
                     // Centralized: feeds ring before move into queue (fixes ring getting no samples after move)
@@ -1755,7 +1789,9 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                     // - Throttled (~16-30 Hz) in RX thread to keep readStream lean (future: can move to dedicated spectrum worker thread)
                     // - Published as high-res latestPower so SpectrumWidget can do true-resolution zoomed waterfall from source history.
                     auto now = std::chrono::steady_clock::now();
-                    if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastSpectrumTime).count() > 45) {
+                    // 80 ms: keep Soapy readStream + P25 ring pulls ahead of FFT.
+                    // try_lock: voice worker memcpy wins if the ring is busy.
+                    if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastSpectrumTime).count() > 80) {
                         size_t fftN = 8192;
                         {
                             std::lock_guard<std::mutex> lk(st.queueMutex);
@@ -1763,17 +1799,28 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                         }
                         std::vector<float> localPower;
 
-                        // Draw window from ring (best continuous recent IQ, enables overlap if we hop)
                         std::vector<std::complex<float>> samples;
-                        samples.reserve(fftN);
                         {
-                            std::lock_guard<std::mutex> ringLock(st.ringMutex);
-                            uint64_t total = st.totalSamplesWritten.load(std::memory_order_acquire);
-                            if (st.ringCapacity > 0 && total >= fftN) {
-                                uint64_t start = total - fftN;
-                                for (size_t k = 0; k < fftN; ++k) {
-                                    size_t idx = (start + k) % st.ringCapacity;
-                                    samples.push_back(st.iqRing[idx]);
+                            std::unique_lock<std::mutex> ringLock(st.ringMutex, std::try_to_lock);
+                            if (ringLock.owns_lock()) {
+                                const uint64_t total = st.totalSamplesWritten.load(std::memory_order_acquire);
+                                const size_t cap = st.ringCapacity;
+                                if (cap > 0 && total >= fftN) {
+                                    samples.resize(fftN);
+                                    const uint64_t start = total - fftN;
+                                    const bool powerOfTwoCap = (cap & (cap - 1)) == 0;
+                                    const size_t startIdx = powerOfTwoCap
+                                        ? static_cast<size_t>(start) & (cap - 1)
+                                        : static_cast<size_t>(start % static_cast<uint64_t>(cap));
+                                    const size_t firstPart = std::min(fftN, cap - startIdx);
+                                    std::copy(st.iqRing.begin() + static_cast<std::ptrdiff_t>(startIdx),
+                                              st.iqRing.begin() + static_cast<std::ptrdiff_t>(startIdx + firstPart),
+                                              samples.begin());
+                                    if (firstPart < fftN) {
+                                        std::copy(st.iqRing.begin(),
+                                                  st.iqRing.begin() + static_cast<std::ptrdiff_t>(fftN - firstPart),
+                                                  samples.begin() + static_cast<std::ptrdiff_t>(firstPart));
+                                    }
                                 }
                             }
                         }

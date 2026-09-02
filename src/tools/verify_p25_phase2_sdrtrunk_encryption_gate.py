@@ -2,7 +2,9 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 main = (root / 'main.cpp').read_text(errors='ignore')
 checks = [
-    ('sticky encrypted history preserved', 'Preserve sticky clear *and* sticky encrypted' in main or 'Fail closed: keep encrypted' in main),
+    ('stale encrypted history follows traffic but keeps speaker gated',
+     'Preserve sticky clear, but do not let stale encrypted registry history' in main and
+     'probingUnknownPhase2EncryptedHistory = true' in main),
     ('current-call encrypted hold still present', 'gP25RecentExplicitEncryptedPhase2Grants' in main or 'same TG/channel/frequency' in main),
     ('sdrtrunk queue/PTT/ESS gate present', 'applyP25Phase2SecurityAudioGate' in main and 'P25P2CallAudioKey' in main and 'p25QueuePhase2PendingAmbeFrame' in main),
     ('unknown speaker audio is queued', 'waitingForClearGrant = true' in main and 'unknown-waiting-clear' in main),

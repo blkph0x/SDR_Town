@@ -263,6 +263,34 @@ TEST_CASE("P25 follow holds Phase 2 traffic after recent activity while reacquir
     REQUIRE(decision.action == P25FollowAction::ReturnNoMacEss);
 }
 
+TEST_CASE("P25 follow does not re-enter fresh acquire timeout after Phase 2 continuation", "[p25][follow]")
+{
+    P25FollowSnapshot snapshot;
+    snapshot.autoActive = true;
+    snapshot.phase2Voice = true;
+    snapshot.nowMs = 24'500;
+    snapshot.tunedAtMs = 10'000;
+    snapshot.lastActiveMs = 22'000;
+    snapshot.diagUpdatedMs = 24'400;
+    snapshot.diag = diag(P25FollowDiagCode::NoSync);
+    snapshot.grantEncryptionKnown = true;
+    snapshot.grantEncrypted = false;
+    snapshot.decodedFrames = 0;
+    snapshot.phase2VoiceCodewords = 0;
+    snapshot.phase2MacCrcValid = 0;
+    snapshot.phase2EssKnown = false;
+    snapshot.phase2TrafficProcessorActive = true;
+    snapshot.phase2TrafficCallActive = false;
+    snapshot.rfMetricsPopulated = true;
+    snapshot.recentSnrDb = 8.0;
+    snapshot.recentSignalLevelDb = -52.0;
+    snapshot.recentNoiseFloorDb = -70.0;
+
+    const auto decision = evaluateP25Follow(snapshot);
+    REQUIRE_FALSE(decision.tdmaNoVcwTimeout);
+    REQUIRE(decision.action == P25FollowAction::None);
+}
+
 TEST_CASE("P25 follow does not call idle unpublished diagnostics a no-VCW voice failure", "[p25][follow]")
 {
     P25FollowSnapshot snapshot;
@@ -541,6 +569,32 @@ TEST_CASE("P25 follow holds active traffic processor call during clear-grant no-
     REQUIRE(decision.action == P25FollowAction::None);
 }
 
+TEST_CASE("P25 follow does not let stale clear ESS hold a no-VCW traffic channel", "[p25][follow]")
+{
+    P25FollowSnapshot snapshot;
+    snapshot.autoActive = true;
+    snapshot.phase2Voice = true;
+    snapshot.nowMs = 20'000;
+    snapshot.tunedAtMs = 1'000;
+    snapshot.lastActiveMs = 1'000;
+    snapshot.diagUpdatedMs = 19'500;
+    snapshot.diag = diag(P25FollowDiagCode::Phase2AudioLockMissing);
+    snapshot.grantEncryptionKnown = true;
+    snapshot.grantEncrypted = false;
+    snapshot.phase2EssKnown = true;
+    snapshot.phase2EssEncrypted = false;
+    snapshot.phase2TrafficProcessorActive = true;
+    snapshot.phase2TrafficCallActive = false;
+    snapshot.decodedFrames = 0;
+    snapshot.phase2VoiceCodewords = 0;
+    snapshot.phase2MacCrcValid = 0;
+    snapshot.phase2Bursts = 0;
+
+    const auto decision = evaluateP25Follow(snapshot);
+    REQUIRE(decision.tdmaNoVcwTimeout);
+    REQUIRE(decision.action == P25FollowAction::ReturnNoVoiceCodewords);
+}
+
 TEST_CASE("P25 follow holds unknown clear-grant acquisition longer before no-VCW return", "[p25][follow]")
 {
     P25FollowSnapshot snapshot;
@@ -632,6 +686,54 @@ TEST_CASE("P25 follow does not treat recent speaker output as live voice by itse
     REQUIRE((expiredDecision.action == P25FollowAction::ReturnActivityGone ||
              expiredDecision.action == P25FollowAction::ReturnNoVoiceCodewords ||
              expiredDecision.action == P25FollowAction::ReturnHardTimeout));
+}
+
+TEST_CASE("P25 follow returns after short speaker grace when traffic stream is quiet", "[p25][follow]")
+{
+    P25FollowSnapshot snapshot;
+    snapshot.autoActive = true;
+    snapshot.phase2Voice = true;
+    snapshot.nowMs = 50'000;
+    snapshot.tunedAtMs = 1'000;
+    snapshot.lastActiveMs = 10'000;
+    snapshot.recentSpeakerOutputMs = 46'900;
+    snapshot.diagUpdatedMs = 49'900;
+    snapshot.diag = diag(P25FollowDiagCode::NoSync);
+    snapshot.decodedFrames = 0;
+    snapshot.phase2VoiceCodewords = 0;
+    snapshot.phase2Bursts = 0;
+    snapshot.phase2SuperframeBursts = 0;
+    snapshot.phase2MaskedBursts = 0;
+    snapshot.phase2MacPdus = 0;
+    snapshot.phase2TrafficProcessorActive = true;
+
+    const auto decision = evaluateP25Follow(snapshot);
+    REQUIRE(decision.tdmaNoVcwTimeout);
+    REQUIRE(decision.action == P25FollowAction::ReturnNoVoiceCodewords);
+}
+
+TEST_CASE("P25 follow keeps speaker grace when current TDMA structure remains alive", "[p25][follow]")
+{
+    P25FollowSnapshot snapshot;
+    snapshot.autoActive = true;
+    snapshot.phase2Voice = true;
+    snapshot.nowMs = 50'000;
+    snapshot.tunedAtMs = 1'000;
+    snapshot.lastActiveMs = 10'000;
+    snapshot.recentSpeakerOutputMs = 46'900;
+    snapshot.diagUpdatedMs = 49'900;
+    snapshot.diag = diag(P25FollowDiagCode::Decoding);
+    snapshot.decodedFrames = 0;
+    snapshot.phase2VoiceCodewords = 0;
+    snapshot.phase2Bursts = 8;
+    snapshot.phase2SuperframeBursts = 8;
+    snapshot.phase2MaskedBursts = 8;
+    snapshot.phase2MacPdus = 2;
+    snapshot.phase2TrafficProcessorActive = true;
+
+    const auto decision = evaluateP25Follow(snapshot);
+    REQUIRE_FALSE(decision.tdmaNoVcwTimeout);
+    REQUIRE(decision.action == P25FollowAction::None);
 }
 
 TEST_CASE("P25 slot probe flips once on long unknown clear-grant no-sync acquisition", "[p25][follow]")
@@ -1048,6 +1150,7 @@ TEST_CASE("P25 Phase 2 protocol identity gates absolute AMBE de-dupe fallback", 
     sessionKey.sessionCodewordIdKnown = true;
     sessionKey.sessionCodewordId = 77;
     REQUIRE(p25Phase2VoiceFrameKeyHasProtocolIdentity(sessionKey));
+    REQUIRE_FALSE(p25Phase2VoiceFrameNeedsAbsoluteDedupeFallback(sessionKey));
 
     Phase2VoiceFrameKey streamKey;
     streamKey.streamDibitKnown = true;
@@ -1056,6 +1159,7 @@ TEST_CASE("P25 Phase 2 protocol identity gates absolute AMBE de-dupe fallback", 
     streamKey.streamBurstStartDibit = 9900;
     streamKey.slot = 1;
     REQUIRE(p25Phase2VoiceFrameKeyHasProtocolIdentity(streamKey));
+    REQUIRE_FALSE(p25Phase2VoiceFrameNeedsAbsoluteDedupeFallback(streamKey));
 
     Phase2VoiceFrameKey burstKey;
     burstKey.sessionBurstIdKnown = true;
@@ -1063,6 +1167,7 @@ TEST_CASE("P25 Phase 2 protocol identity gates absolute AMBE de-dupe fallback", 
     burstKey.slot = 0;
     burstKey.voiceIndex = 3;
     REQUIRE(p25Phase2VoiceFrameKeyHasProtocolIdentity(burstKey));
+    REQUIRE_FALSE(p25Phase2VoiceFrameNeedsAbsoluteDedupeFallback(burstKey));
 
     Phase2VoiceFrameKey fallbackOnly;
     fallbackOnly.superframeAnchor = 100;
@@ -1070,6 +1175,7 @@ TEST_CASE("P25 Phase 2 protocol identity gates absolute AMBE de-dupe fallback", 
     fallbackOnly.voiceIndex = 1;
     fallbackOnly.slot = 0;
     REQUIRE_FALSE(p25Phase2VoiceFrameKeyHasProtocolIdentity(fallbackOnly));
+    REQUIRE(p25Phase2VoiceFrameNeedsAbsoluteDedupeFallback(fallbackOnly));
 }
 
 TEST_CASE("P25 frame keys with mixed stable coordinates are unorderable", "[p25][follow][continuity]")

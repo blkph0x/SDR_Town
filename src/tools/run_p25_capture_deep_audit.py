@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
@@ -14,6 +13,16 @@ from datetime import datetime
 from pathlib import Path
 
 import p25_capture_audit
+from p25_stt_common import (
+    DEFAULT_MIN_CHARS,
+    DEFAULT_MIN_WORDS,
+    DEFAULT_TIMEOUT_S,
+    default_stt_backend,
+    run_stt,
+)
+from p25_voicetest_classify import PASS_AUDIO_STATUSES, classify_voicetest_output
+
+CLEAR_AUDIO_STATUSES = frozenset({"PASS_CONTINUOUS_AUDIO", "PASS_CLEAR_AUDIO"})
 
 
 @dataclass
@@ -41,6 +50,21 @@ class SweepResult:
     gate_emit_hits: int
     explicit_clear_release_hits: int
     wav_path: str | None
+    final_p2bursts: int = 0
+    final_target_vcw: int = 0
+    final_p2vcw: int = 0
+    final_decoded_frames: int = 0
+    final_audio_samples: int = 0
+    final_audio_seconds: float = 0.0
+    final_duty: float = 0.0
+    final_plc: int = 0
+    final_iq_reject: int = 0
+    final_ambe_accepted: int = 0
+    final_ambe_attempts: int = 0
+    stt_pass: bool = False
+    stt_words: int = 0
+    stt_chars: int = 0
+    stt_transcript: str = ""
 
 
 def default_exe(repo: Path) -> Path:
@@ -48,37 +72,22 @@ def default_exe(repo: Path) -> Path:
 
 
 def run_voicetest(exe: Path, command: str, timeout_s: float) -> tuple[str, str]:
-    proc = subprocess.run(
-        [str(exe), "--cli", "--allow-multiple", "--cmd", command],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        timeout=timeout_s,
-        check=False,
-    )
-    return proc.stdout or "", classify_voicetest_output(proc.stdout or "")
-
-
-def classify_voicetest_output(output: str) -> str:
-    if "PASS_CONTINUOUS_AUDIO" in output:
-        return "PASS_CONTINUOUS_AUDIO"
-    if "PASS_CLEAR_AUDIO" in output:
-        return "PASS_CLEAR_AUDIO"
-    if "PASS_PARTIAL_AUDIO" in output:
-        return "PASS_PARTIAL_AUDIO"
-    if "PASS_ENCRYPTED_GATED" in output:
-        return "PASS_ENCRYPTED_GATED"
-    if "FAIL_RAW_AUDIO_GATED" in output:
-        return "FAIL_RAW_AUDIO_GATED"
-    if "FAIL_NO_TRAFFIC_BURSTS" in output:
-        return "FAIL_NO_TRAFFIC_BURSTS"
-    if "FAIL_NO_AUDIO" in output:
-        return "FAIL_NO_AUDIO"
-    if "P25 voicetest load failed" in output:
-        return "LOAD_FAILED"
-    if "P25 voicetest voice" in output:
-        return "RAN_NO_PASS"
-    return "NO_TEST_OUTPUT"
+    try:
+        proc = subprocess.run(
+            [str(exe), "--cli", "--allow-multiple", "--cmd", command],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=timeout_s,
+            check=False,
+        )
+        return proc.stdout or "", classify_voicetest_output(proc.stdout or "")
+    except subprocess.TimeoutExpired as ex:
+        output = ex.stdout or ""
+        if isinstance(output, bytes):
+            output = output.decode("utf-8", errors="replace")
+        output += f"\nP25 voicetest timeout after {timeout_s:.1f}s\n"
+        return output, classify_voicetest_output(output, timed_out=True)
 
 
 def parse_voicetest_metrics(output: str) -> dict:
@@ -104,7 +113,34 @@ def parse_voicetest_metrics(output: str) -> dict:
     gate_emit = len(re.findall(r"\bgate=emit\b", output))
     explicit_release = len(re.findall(r"\bexplicit-clear-grant-(?:traffic-clear|validated)-release\b", output))
     wav_match = re.search(r'P25 voicetest wav="([^"]+)"', output)
-    return {
+    result_lines = re.findall(r"^P25 voicetest result=.*$", output, flags=re.MULTILINE)
+    result_line = result_lines[-1] if result_lines else ""
+
+    def final_int(name: str, default: int = 0) -> int:
+        match = re.search(rf"\b{re.escape(name)}=(\d+)\b", result_line)
+        return int(match.group(1)) if match else default
+
+    def final_float(name: str, default: float = 0.0) -> float:
+        match = re.search(rf"\b{re.escape(name)}=([0-9.]+)\b", result_line)
+        return float(match.group(1)) if match else default
+
+    def final_yesno(name: str) -> bool | None:
+        match = re.search(rf"\b{re.escape(name)}=(yes|no)\b", result_line)
+        if not match:
+            return None
+        return match.group(1) == "yes"
+
+    def final_pair(name: str) -> tuple[int, int]:
+        match = re.search(rf"\b{re.escape(name)}=(\d+)/(\d+)\b", result_line)
+        if not match:
+            return (0, 0)
+        return (int(match.group(1)), int(match.group(2)))
+
+    final_ambe = final_pair("ambe")
+    final_opp_ambe = final_pair("oppAmbe")
+    final_ambe_probe = final_pair("ambeProbe")
+    final_status_match = re.search(r"\bresult=([A-Z0-9_]+)\b", result_line)
+    metrics = {
         "best_p2bursts": max(bursts) if bursts else 0,
         "best_p2vcw": max(vcw) if vcw else 0,
         "best_target_vcw": max(target_vcw) if target_vcw else 0,
@@ -126,7 +162,49 @@ def parse_voicetest_metrics(output: str) -> dict:
         "gate_emit_hits": gate_emit,
         "explicit_clear_release_hits": explicit_release,
         "wav_path": wav_match.group(1) if wav_match else None,
+        "final_status": final_status_match.group(1) if final_status_match else "",
+        "final_voice_windows": final_int("voiceWindows"),
+        "final_emit_windows": final_int("emitWindows"),
+        "final_empty_windows": final_int("emptyWindows"),
+        "final_decoded_frames": final_int("decodedFrames"),
+        "final_audio_samples": final_int("audioSamples"),
+        "final_speaker_samples": final_int("speakerSamples"),
+        "final_audio_seconds": final_float("audioSeconds"),
+        "final_span_seconds": final_float("spanSeconds"),
+        "final_duty": final_float("duty"),
+        "final_p2bursts": final_int("p2bursts"),
+        "final_p2vcw": final_int("p2vcw"),
+        "final_target_vcw": final_int("targetVcw"),
+        "final_expected_vcw": final_int("expectedVcw"),
+        "final_context_vcw": final_int("contextVcw"),
+        "final_context_suppressed": final_int("contextSuppressed"),
+        "final_fed": final_int("fed"),
+        "final_emit_pcm": final_int("emitPcm"),
+        "final_plc": final_int("plc"),
+        "final_gaps": final_int("gaps"),
+        "final_iq_reject": final_int("iqReject"),
+        "final_ambe_accepted": final_ambe[0],
+        "final_ambe_attempts": final_ambe[1],
+        "final_opp_ambe_accepted": final_opp_ambe[0],
+        "final_opp_ambe_attempts": final_opp_ambe[1],
+        "final_opp_pending": final_int("oppPend"),
+        "final_p2mask": final_int("p2mask"),
+        "final_p2mac_crc": final_int("p2macCrc"),
+        "final_trusted_clear_windows": final_int("trustedClearWindows"),
+        "final_target_session_windows": final_int("targetSessionWindows"),
+        "final_target_ess_clear_windows": final_int("targetEssClearWindows"),
+        "final_dup_suppressed": final_int("dupSuppressed"),
+        "final_abs_dup_suppressed": final_int("absDupSuppressed"),
+        "final_seq_suppressed": final_int("seqSuppressed"),
+        "final_timeline_ok": final_yesno("timelineOk"),
+        "final_sequencer_ok": final_yesno("sequencerOk"),
+        "final_concealment_ok": final_yesno("concealmentOk"),
+        "final_ess_known": final_yesno("essKnown"),
+        "final_ess_encrypted": final_yesno("essEncrypted"),
+        "final_ambe_probe_accepted": final_ambe_probe[0],
+        "final_ambe_probe_attempts": final_ambe_probe[1],
     }
+    return metrics
 
 
 def analyze_live_log(log_path: Path) -> dict:
@@ -198,14 +276,15 @@ def build_voicetest_command(
     center_mhz = float(summary.get("center_freq_hz") or summary.get("freq_hz") or 0.0) / 1e6
     sample_rate_hz = summary.get("sample_rate_hz")
     voice_mhz = float(grant["voice_mhz"])
+    replay_center_mhz = p25_capture_audit.grant_replay_center_mhz(grant, center_mhz)
     voice_center_arg = ""
     in_capture_passband = p25_capture_audit.grant_in_capture_passband(
         grant,
-        center_mhz,
+        replay_center_mhz,
         sample_rate_hz,
     )
-    if not in_capture_passband and abs(voice_mhz - center_mhz) > 0.10:
-        voice_center_arg = f" voicecenter={voice_mhz:.5f}"
+    if replay_center_mhz > 0.0 and abs(replay_center_mhz - center_mhz) > 0.00001:
+        voice_center_arg = f" voicecenter={replay_center_mhz:.5f}"
     masks = ""
     if {"nac", "wacn", "system"}.issubset(grant):
         masks = f" nac=0x{grant['nac']:x} wacn=0x{grant['wacn']:x} system=0x{grant['system']:x}"
@@ -233,12 +312,29 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--max-grants", type=int, default=3)
     parser.add_argument("--out-dir", type=Path)
     parser.add_argument("--window-ms", type=float, default=720.0, help="Continuous voice replay lookback window.")
-    parser.add_argument("--hop-ms", type=float, default=40.0, help="Continuous voice replay hop size.")
+    parser.add_argument("--hop-ms", type=float, default=0.0, help="Continuous voice replay hop size. 0 uses CLI/GUI auto cadence.")
     parser.add_argument("--replay-ms", type=float, default=6000.0, help="Milliseconds to replay per sweep offset.")
     parser.add_argument("--minframes", type=int, default=2, help="Minimum decoded frames for a clear-audio pass.")
     parser.add_argument("--minaudio", type=float, default=0.05, help="Minimum decoded audio seconds for a clear-audio pass.")
     parser.add_argument("--no-wav", action="store_true", help="Do not write per-sweep decoded WAV artifacts.")
+    parser.add_argument("--no-stt", action="store_true", help="Do not run STT on decoded WAV artifacts.")
+    parser.add_argument(
+        "--require-stt",
+        action="store_true",
+        help="Require a PASS_* audio status with STT pass for clear_audio_proven / exit 0.",
+    )
+    parser.add_argument(
+        "--stt-backend",
+        default=default_stt_backend(),
+        help="STT backend for decoded WAV scoring (default: SDR_TOWN_STT_BACKEND or auto).",
+    )
+    parser.add_argument("--stt-timeout", type=float, default=DEFAULT_TIMEOUT_S)
+    parser.add_argument("--stt-min-chars", type=int, default=DEFAULT_MIN_CHARS)
+    parser.add_argument("--stt-min-words", type=int, default=DEFAULT_MIN_WORDS)
     args = parser.parse_args(argv)
+    if args.require_stt and args.no_stt:
+        parser.error("--require-stt cannot be combined with --no-stt")
+    args.repo = args.repo.resolve()
 
     capture = (
         p25_capture_audit.latest_capture_dir(p25_capture_audit.default_capture_root())
@@ -285,6 +381,26 @@ def main(argv: list[str]) -> int:
             )
             output, status = run_voicetest(exe, command, args.timeout)
             metrics = parse_voicetest_metrics(output)
+            stt = (
+                {
+                    "enabled": False,
+                    "ok": False,
+                    "pass": False,
+                    "transcript": "",
+                    "chars": 0,
+                    "words": 0,
+                    "wav_path": metrics.get("wav_path"),
+                }
+                if args.no_stt
+                else run_stt(
+                    metrics.get("wav_path") or (str(wav_path) if wav_path else None),
+                    backend=args.stt_backend,
+                    min_chars=args.stt_min_chars,
+                    min_words=args.stt_min_words,
+                    timeout=args.stt_timeout,
+                    repo=args.repo,
+                )
+            )
             result = SweepResult(
                 skip_ms=skip_ms,
                 status=status,
@@ -309,6 +425,21 @@ def main(argv: list[str]) -> int:
                 gate_emit_hits=metrics["gate_emit_hits"],
                 explicit_clear_release_hits=metrics["explicit_clear_release_hits"],
                 wav_path=metrics["wav_path"],
+                final_p2bursts=metrics["final_p2bursts"],
+                final_target_vcw=metrics["final_target_vcw"],
+                final_p2vcw=metrics["final_p2vcw"],
+                final_decoded_frames=metrics["final_decoded_frames"],
+                final_audio_samples=metrics["final_audio_samples"],
+                final_audio_seconds=metrics["final_audio_seconds"],
+                final_duty=metrics["final_duty"],
+                final_plc=metrics["final_plc"],
+                final_iq_reject=metrics["final_iq_reject"],
+                final_ambe_accepted=metrics["final_ambe_accepted"],
+                final_ambe_attempts=metrics["final_ambe_attempts"],
+                stt_pass=bool(stt.get("pass")),
+                stt_words=int(stt.get("words") or 0),
+                stt_chars=int(stt.get("chars") or 0),
+                stt_transcript=str(stt.get("transcript") or ""),
             )
             transcript = out_dir / f"tg{grant['tg']}_slot{grant['slot']}_skip{int(skip_ms)}_{status}.txt"
             transcript.write_text(output, encoding="utf-8", errors="replace")
@@ -320,23 +451,32 @@ def main(argv: list[str]) -> int:
                     "skip_ms": skip_ms,
                     "status": status,
                     **metrics,
+                    "stt": stt,
                     "transcript": str(transcript),
                 }
             )
             if best is None or (
-                result.best_p2bursts,
-                result.best_target_vcw,
-                result.best_p2vcw,
-                result.best_decoded,
-                result.best_audio,
-                result.best_audio_seconds,
+                int(result.stt_pass),
+                result.stt_words,
+                result.final_duty,
+                result.final_audio_seconds,
+                result.final_decoded_frames,
+                -result.final_plc,
+                -result.final_iq_reject,
+                result.final_p2bursts,
+                result.final_target_vcw,
+                result.final_p2vcw,
             ) > (
-                best.best_p2bursts,
-                best.best_target_vcw,
-                best.best_p2vcw,
-                best.best_decoded,
-                best.best_audio,
-                best.best_audio_seconds,
+                int(best.stt_pass),
+                best.stt_words,
+                best.final_duty,
+                best.final_audio_seconds,
+                best.final_decoded_frames,
+                -best.final_plc,
+                -best.final_iq_reject,
+                best.final_p2bursts,
+                best.final_target_vcw,
+                best.final_p2vcw,
             ):
                 best = result
 
@@ -359,8 +499,14 @@ def main(argv: list[str]) -> int:
         findings.append("cli_replay_has_phase2_sync")
     if sweep_results and any(r["status"] == "PASS_CONTINUOUS_AUDIO" for r in sweep_results):
         findings.append("cli_replay_continuous_audio_pass")
+    elif sweep_results and any(r["status"] == "PASS_CLEAR_AUDIO" for r in sweep_results):
+        findings.append("cli_replay_clear_audio_pass")
     elif sweep_results and any(r["status"] == "PASS_PARTIAL_AUDIO" for r in sweep_results):
         findings.append("cli_replay_partial_audio_only")
+    elif sweep_results and any(r["status"] == "FAIL_PLC_ONLY_INPUT_QUALITY_REJECTED" for r in sweep_results):
+        findings.append("cli_replay_plc_only_input_quality_rejected")
+    elif sweep_results and any(r["status"] == "FAIL_CONCEALMENT_ONLY_AUDIO" for r in sweep_results):
+        findings.append("cli_replay_concealment_only_audio")
     elif sweep_results and any(r["status"] == "FAIL_RAW_AUDIO_GATED" for r in sweep_results):
         findings.append("raw_audio_present_but_speaker_gated")
     elif sweep_results and any(r["best_ambe_probe_accepted"] > 0 and r["best_audio"] == 0 for r in sweep_results):
@@ -381,8 +527,18 @@ def main(argv: list[str]) -> int:
         findings.append("phase2_acch_recovery_seen")
     if sweep_results and any(r["best_target_vcw"] == 0 and r["best_opp_vcw"] > 0 for r in sweep_results):
         findings.append("opposite_slot_voice_seen_without_target_voice")
+    if not args.no_stt and sweep_results:
+        if any((r.get("stt") or {}).get("pass") for r in sweep_results):
+            findings.append("stt_clear_text_seen")
+        elif any(
+            float(r.get("final_audio_seconds") or r.get("best_audio_seconds") or 0.0) > 0.0
+            for r in sweep_results
+        ):
+            findings.append("stt_no_clear_text_from_decoded_audio")
+        else:
+            findings.append("stt_no_audio_to_score")
 
-    if sweep_results and any(r["status"] in {"PASS_CONTINUOUS_AUDIO", "PASS_CLEAR_AUDIO", "PASS_PARTIAL_AUDIO"} for r in sweep_results):
+    if sweep_results and any(r["status"] in PASS_AUDIO_STATUSES for r in sweep_results):
         snapshot_only = {"no_speaker_audio_pushed", "live_zero_phase2_bursts"}
         findings = [finding for finding in findings if finding not in snapshot_only]
 
@@ -390,6 +546,28 @@ def main(argv: list[str]) -> int:
     for finding in findings:
         if finding not in deduped_findings:
             deduped_findings.append(finding)
+
+    has_audio_pass = any(r["status"] in PASS_AUDIO_STATUSES for r in sweep_results)
+    has_clear_audio_pass = any(r["status"] in CLEAR_AUDIO_STATUSES for r in sweep_results)
+    has_stt_pass = any(bool((r.get("stt") or {}).get("pass")) for r in sweep_results)
+    all_sweeps_fail = bool(sweep_results) and not any(
+        str(r.get("status") or "").startswith("PASS_") for r in sweep_results
+    )
+    if args.require_stt:
+        clear_audio_proven = has_audio_pass and has_stt_pass
+    else:
+        clear_audio_proven = has_clear_audio_pass or has_stt_pass
+    if all_sweeps_fail or not sweep_results:
+        clear_audio_proven = False
+
+    verdict = {
+        "has_audio_pass": has_audio_pass,
+        "has_clear_audio_pass": has_clear_audio_pass,
+        "has_stt_pass": has_stt_pass,
+        "all_sweeps_fail": all_sweeps_fail,
+        "require_stt": bool(args.require_stt),
+        "clear_audio_proven": clear_audio_proven,
+    }
 
     summary = {
         "capture_dir": str(capture),
@@ -402,6 +580,11 @@ def main(argv: list[str]) -> int:
             "minframes": args.minframes,
             "minaudio": args.minaudio,
             "wav_enabled": not args.no_wav,
+            "stt_enabled": not args.no_stt,
+            "require_stt": bool(args.require_stt),
+            "stt_backend": args.stt_backend,
+            "stt_min_chars": args.stt_min_chars,
+            "stt_min_words": args.stt_min_words,
         },
         "health": report["health"],
         "counts": report["counts"],
@@ -409,11 +592,12 @@ def main(argv: list[str]) -> int:
         "findings": deduped_findings,
         "grants": grants,
         "sweep_results": sweep_results,
+        "verdict": verdict,
     }
     summary_path = out_dir / "deep_audit_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     print(json.dumps(summary, indent=2, sort_keys=True))
-    return 0
+    return 0 if verdict["clear_audio_proven"] else 1
 
 
 if __name__ == "__main__":

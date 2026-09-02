@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
-audio = (root / 'AudioEngine.cpp').read_text()
+audio = (root / 'AudioEngine.cpp').read_text(encoding='utf-8', errors='replace')
 checks = {
     'ring capacity increased for digital voice buffering': '1u << 19' in audio,
     'jitter buffer named': 'kDigitalVoiceJitterSeconds' in audio,
@@ -15,3 +15,4 @@ failed = [name for name, ok in checks.items() if not ok]
 if failed:
     raise SystemExit('P25 Phase 2 audio jitter buffer regression failed: ' + ', '.join(failed))
 print('P25 Phase 2 audio jitter buffer regression: PASS')
+

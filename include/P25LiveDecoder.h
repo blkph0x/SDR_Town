@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <complex>
 #include <cstddef>
@@ -90,6 +91,47 @@ struct P25LiveDecoderConfig {
     bool enableStagedCqpskScoring = true;
     bool enablePersistentPhase2Framer = true;
 };
+
+// SDRTrunk DecodeConfigP25Phase2.getChannelSpecification():
+//   ChannelSpecification(50000.0, 12500, 6500.0, 7200.0)
+// SDRTrunk P25P2DecoderHDQPSK.getBasebandFilter(): pass 6500, stop 7200
+// (taps designed at the 50 kHz channel rate). Same analog frequencies at our
+// DDC / work rates. Do not lift the passband to symbolRate*1.15 (6900 Hz).
+constexpr double kP25Phase2HdqpskPassHz = 6500.0;
+constexpr double kP25Phase2HdqpskStopHz = 7200.0;
+
+struct P25ChannelLowpass {
+    double cutoffHz = 0.0;
+    double transitionHz = 0.0;
+};
+
+// Channelizer / DDC lowpass at the same chain stage as SDRTrunk's
+// ChannelSpecification pass/stop. Phase-1 keeps the historical 0.58*BW
+// cutoff so analog/P1 C4FM is unchanged.
+inline P25ChannelLowpass p25ChannelizerLowpass(const P25LiveDecoderConfig& config,
+                                               double intermediateRate = 0.0,
+                                               double outputRate = 0.0)
+{
+    P25ChannelLowpass out;
+    if (config.phase2CqpskTrafficDemod) {
+        out.cutoffHz = kP25Phase2HdqpskPassHz;
+        out.transitionHz = kP25Phase2HdqpskStopHz - kP25Phase2HdqpskPassHz;
+    } else {
+        out.cutoffHz = config.channelBandwidthHz * 0.58;
+        out.transitionHz = config.channelBandwidthHz * 0.25;
+    }
+    if (intermediateRate > 0.0 && outputRate > 0.0) {
+        const double nyquistCap = std::min(intermediateRate * 0.42, outputRate * 0.45);
+        if (config.phase2CqpskTrafficDemod) {
+            out.cutoffHz = std::clamp(out.cutoffHz, 10.0, nyquistCap);
+            out.transitionHz = std::clamp(out.transitionHz, 400.0, std::max(400.0, nyquistCap));
+        } else {
+            out.cutoffHz = std::clamp(out.cutoffHz, config.symbolRate * 1.15, nyquistCap);
+            out.transitionHz = std::clamp(out.transitionHz, 1800.0, 6000.0);
+        }
+    }
+    return out;
+}
 
 
 struct P25BlockTimingState {
@@ -323,6 +365,12 @@ struct P25Phase2VoiceCodeword {
     uint64_t sessionBurstId = 0;
     bool duplicateInSession = false;
     std::array<uint8_t, 72> bits{};
+    bool inputQualityKnown = false;
+    double inputSoftDecisionQuality = 0.0;
+    size_t inputSoftDecisionSymbols = 0;
+    size_t inputSoftLowConfidenceSymbols = 0;
+    double inputSoftBitLlrMean = 0.0;
+    double inputSoftBitLlrMinimum = 0.0;
 };
 
 struct P25Phase2Burst {
@@ -343,6 +391,13 @@ struct P25Phase2Burst {
     bool macCrcLock = false;
     bool sessionAudioRelease = false;
     bool securityStateFromPtt = false;
+    // True only when ESS/traffic-SO was recovered from THIS burst's MAC/ACCH/voice
+    // ESS path — not painted from sticky session state. Capture 20260811_080304:
+    // sticky essKnown on every Voice2/4 burst made ThisWindowTargetEssClear a lie
+    // and re-opened dual-slot MAC-dead feed after session-release≠epoch patches.
+    bool essObservedThisBurst = false;
+    bool trafficSecurityObservedThisBurst = false;
+    bool trafficTalkgroupObservedThisBurst = false;
     bool macPttSeen = false;
     bool macActiveSeen = false;
     bool macEndPttSeen = false;
@@ -372,6 +427,7 @@ struct P25Phase2Burst {
     bool macFecDecoded = false;
     bool macCrcValid = false;
     bool essKnown = false;
+    bool essEncrypted = false;
     bool encrypted = false;
     std::vector<int> rawPayloadDibits;
     std::vector<int> maskedPayloadDibits;
@@ -389,6 +445,7 @@ struct P25LiveDecodeResult {
     std::vector<P25Phase2Burst> phase2Bursts;
     std::vector<P25Phase2MacPdu> phase2MacPdus;
     P25Phase2EssState phase2Ess;
+    std::vector<double> softDibitMinAbsLlr;
     P25LiveDecoderStats stats;
     std::vector<std::string> warnings;
 };
@@ -471,6 +528,7 @@ public:
     void setMaxCqpskSearchCandidates(size_t maxCandidates) { m_config.maxCqpskSearchCandidates = maxCandidates; }
     void setMaxPhase2SyncHits(size_t maxSyncHits) { m_config.maxPhase2SyncHits = maxSyncHits; }
     void setMaxPhase2SuperframeLocks(size_t maxLocks) { m_config.maxPhase2SuperframeLocks = maxLocks; }
+    void setEnableStreamingChannelDdc(bool enable) { m_config.enableStreamingChannelDdc = enable; }
     void setAllowPhase2SoftAmbeMaskPhaseLock(bool allow) { m_config.allowPhase2SoftAmbeMaskPhaseLock = allow; }
     void setPhase2PreferredTdmaSlot(bool known, uint8_t slot) {
         m_config.phase2PreferredTdmaSlotKnown = known;
@@ -554,17 +612,20 @@ private:
     void restorePhase1BitTail(const std::deque<uint8_t>& snapshot);
 
     P25LiveDecodeResult processHardDibitsInternal(const std::vector<int>& dibits,
-                                                  bool annotateSessionCodewords);
+                                                  bool annotateSessionCodewords,
+                                                  const std::vector<double>* softDibitMinAbsLlr = nullptr);
     P25LiveDecodeResult processFmDiscriminatorInternal(const std::vector<float>& discriminatorHz,
                                                        double sampleRate,
                                                        bool annotateSessionCodewords);
     P25Phase2DecodeResult processPhase2HardDibitsDetailedInternal(const std::vector<int>& dibits,
-                                                                  bool annotateSessionCodewords);
+                                                                  bool annotateSessionCodewords,
+                                                                  const std::vector<double>* softDibitMinAbsLlr = nullptr);
     P25Phase2DecodeResult processPhase2FromFramerBurstsInternal(
         std::vector<p25dsp::P25Phase2FramerBurst> framerBursts,
         bool annotateSessionCodewords);
     void annotatePhase2SessionCodewords(P25Phase2DecodeResult& out,
-                                        const std::vector<int>& dibits);
+                                        const std::vector<int>& dibits,
+                                        const std::vector<double>* softDibitMinAbsLlr = nullptr);
 
     mutable std::mutex m_streamingStateMutex;
     P25BlockTimingState m_streamTimingState;
@@ -586,11 +647,23 @@ private:
     std::array<P25Phase2EssState, 5> m_phase2EssHypotheses{};
     std::array<std::array<uint8_t, 16>, 5> m_phase2EssBHypotheses{};
     std::array<std::array<bool, 4>, 5> m_phase2EssBSeenHypotheses{};
+    bool m_phase2SessionActiveSeen = false;
+    bool m_phase2SessionSecurityStateFromPtt = false;
+    bool m_phase2SessionTrafficSecurityKnown = false;
+    bool m_phase2SessionTrafficEncrypted = false;
+    bool m_phase2SessionTrafficTalkgroupKnown = false;
+    uint32_t m_phase2SessionTrafficTalkgroupId = 0;
     std::array<P25Phase2EssState, 2> m_phase2SlotEss{};
     std::array<std::array<uint8_t, 16>, 2> m_phase2SlotEssB{};
     std::array<std::array<bool, 4>, 2> m_phase2SlotEssBSeen{};
     std::array<uint8_t, 2> m_phase2SlotEssBNext{};
     std::array<bool, 2> m_phase2SlotSessionMacCrcSeen{};
+    std::array<bool, 2> m_phase2SlotActiveSeen{};
+    std::array<bool, 2> m_phase2SlotSecurityStateFromPtt{};
+    std::array<bool, 2> m_phase2SlotTrafficSecurityKnown{};
+    std::array<bool, 2> m_phase2SlotTrafficEncrypted{};
+    std::array<bool, 2> m_phase2SlotTrafficTalkgroupKnown{};
+    std::array<uint32_t, 2> m_phase2SlotTrafficTalkgroupId{};
     std::array<int, 2> m_phase2SlotFirst4vSlot{{-1, -1}};
     std::array<std::array<P25Phase2EssState, 5>, 2> m_phase2SlotEssHypotheses{};
     std::array<std::array<std::array<uint8_t, 16>, 5>, 2> m_phase2SlotEssBHypotheses{};
@@ -623,6 +696,7 @@ private:
     std::deque<RecentPhase2Burst> m_phase2RecentBursts;
     std::deque<uint64_t> m_phase2RecentAcchDecodeBurstDibits;
     std::deque<int> m_phase2DibitTail;
+    std::deque<double> m_phase2SoftDibitTail;
     uint64_t m_phase2NextCodewordId = 1;
     uint64_t m_phase2NextSessionBurstId = 1;
     uint64_t m_phase2DecodeGeneration = 0;
@@ -631,8 +705,13 @@ private:
     bool m_phase2FramerOriginLatched = false;
 
     void latchPhase2FramerOriginIfNeeded() noexcept;
-    void feedPhase2FramerDibits(const std::vector<int>& dibits);
+    void feedPhase2FramerDibits(const std::vector<int>& dibits,
+                                const std::vector<double>* softDibitMinAbsLlr = nullptr);
     CqpskDemodLock m_cqpskLock;
+    // Stateless block-channelize hint: keeps only the last proven discrete
+    // CQPSK mapping so the next independent window can try that eye first.
+    // Timing/framer/FIR state is still reset for every block-channelized hop.
+    CqpskDemodLock m_blockCqpskHint;
     bool m_cqpskDiscreteFrozen = false;
     uint64_t m_cqpskDiscreteChangesBlocked = 0;
     p25dsp::P25StreamingChannelDdc m_streamingDdc;

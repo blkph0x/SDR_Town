@@ -26,7 +26,9 @@ checks = {
         'phase2FrameSamples' in main.split('pushP25SpeakerAudio', 1)[1][:900] and
         'pushP25LiveStreamingAudio(engine, pending, audio, activeOutputIndices,' in
             main.split('pushP25SpeakerAudio', 1)[1][:1200] and
-        'phase2FrameSamples, ringFillPercent);' in
+        'phase2FrameSamples, ringFillPercent,' in
+            main.split('pushP25SpeakerAudio', 1)[1][:1200] and
+        'warmPendingRealAudio, pushedRealAudio);' in
             main.split('pushP25SpeakerAudio', 1)[1][:1200] and
         'pushAudioFrames(engine, pending, audio' not in main.split('pushP25SpeakerAudio', 1)[1][:900]
     ),
@@ -37,17 +39,28 @@ checks = {
         'selectedClearStreamingEye' in main
     ),
     'same-call clear sustain feeds target voice': (
-        'sameCallClearSustainFeed' in main and
-        'targetTrafficClearEvidence ||' in main.split('sameCallClearSustainFeed', 1)[1][:1200] and
-        'p25Phase2AudioTailGraceActive(rx)' in main.split('sameCallClearSustainFeed', 1)[1][:1200] and
+        'const bool sameCallClearSustainFeed' in main and
+        'targetTrafficClearEvidence ||' in main.split('const bool sameCallClearSustainFeed', 1)[1][:1200] and
+        'p25Phase2AudioTailGraceActive(rx)' in main.split('const bool sameCallClearSustainFeed', 1)[1][:1200] and
         'sameCallClearSustainFeed ||' in main.split('securityProvedClearForFeed', 1)[1][:500]
+    ),
+    'broad clear latch cannot feed mbelib': (
+        'recentClearSecurityForCall &&' in main.split('const bool establishedClearCall', 1)[1][:220] and
+        '(latchedClearForCall || recentClearSecurityForCall)' not in main and
+        'broad Clear latch alone must not' in main
+    ),
+    'security gate sustain requires recent target proof': (
+        'sameCallRecentClearSustain' in main and
+        'recentTargetClearForCall' in main and
+        'recent-clear-sustain' in main and
+        'latched-clear-sustain' not in main
     ),
     'explicit clear grant queues until target traffic proof': (
         'explicitClearGrantHardVoiceRelease' in main and
         'explicitClearGrantSelectedVoiceRelease' not in main and
         '(targetTrafficClearEvidence || explicitClearGrantSelectedVoiceRelease)' not in main and
         'targetTrafficClearEvidence &&' in main.split('const bool explicitClearGrantHardVoiceRelease', 1)[1].split(';', 1)[0] and
-        'clear control grant may choose/follow a slot' in main
+        'explicit clear control-channel' in main
     ),
     'hot cqpsk search bounded for live voice': (
         'kP25VoiceWorkerHotRealtimeBudgetMs = 70' in main and
@@ -57,7 +70,10 @@ checks = {
     'soft cqpsk hold before mac ess': (
         'allowRealtimePhase2SoftDemodHold' in p25 and
         'allowSoftCqpskStop' in p25 and
-        'phase2StandardsStateSeen ||\n        allowRealtimePhase2SoftDemodHold' in p25
+        'const bool standardsStateMayHoldDemod =\n        phase2StandardsStateSeen && m_cqpskLock.valid;' in p25 and
+        '(standardsStateMayHoldDemod ||\n         m_config.allowPhase2SoftAmbeMaskPhaseLock ||\n         allowRealtimeLockOnlyCandidate)' in p25 and
+        'standardsStateMayHoldDemod ||\n        allowRealtimePhase2SoftDemodHold' in p25 and
+        'phase2StandardsStateSeen ||\n        allowRealtimePhase2SoftDemodHold' not in p25
     ),
     'locked soft cqpsk candidate selected': (
         'lockedSoftPhase2Evidence' in p25 and
@@ -71,9 +87,8 @@ checks = {
     'bounded realtime mask rescue': (
         'maxRescueCandidates' in p25 and
         'm_config.realtimeVoiceSearch ? std::min<size_t>(phaseWindows.size(), 1u)' in p25 and
-        'rescueScoreSlots = m_config.realtimeVoiceSearch ? 3u : 12u' in p25 and
+        'rescueScoreSlots = 12u' in p25 and
         'rescueDeepBudget = m_config.realtimeVoiceSearch ? 1u : 8u' in p25 and
-        'm_config.realtimeVoiceSearch ? 3u : 12u' in p25 and
         '? size_t{2}' in p25
     ),
     'throttled unknown-security realtime mask hunt': (

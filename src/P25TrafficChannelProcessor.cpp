@@ -59,14 +59,19 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
     const uint8_t targetSlot = static_cast<uint8_t>(m_grantedSlot & 0x01);
     for (const auto& burst : result.phase2Bursts) {
         burstVoiceCodewords += burst.voiceCodewords.size();
-        const bool trafficTalkgroupMatches =
+        const bool trafficTalkgroupBelongsToCall =
             !burst.trafficTalkgroupKnown ||
             m_talkgroup == 0 ||
             burst.trafficTalkgroupId == m_talkgroup;
+        const bool trafficTalkgroupAuthoritativeMismatch =
+            burst.trafficTalkgroupObservedThisBurst &&
+            burst.trafficTalkgroupKnown &&
+            m_talkgroup != 0 &&
+            burst.trafficTalkgroupId != m_talkgroup;
         const bool slotMatches = !targetSlotKnown ||
             (burst.grantSlotKnown &&
              static_cast<uint8_t>(burst.grantSlot & 0x01u) == targetSlot);
-        const bool burstTargetsCall = slotMatches && trafficTalkgroupMatches;
+        const bool burstTargetsCall = slotMatches && !trafficTalkgroupAuthoritativeMismatch;
         if (!burstTargetsCall) continue;
         targetVoiceCodewords += burst.voiceCodewords.size();
         const bool goodVoiceEvidence = burst.xorMaskApplied &&
@@ -76,11 +81,14 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
         if (goodVoiceEvidence) {
             meaningfulVoiceCodewords += burst.voiceCodewords.size();
         }
-        sessionAudioRelease = sessionAudioRelease || (burst.sessionAudioRelease && trafficTalkgroupMatches);
-        burstEssKnown = burstEssKnown || burst.essKnown || burst.trafficSecurityKnown;
+        sessionAudioRelease = sessionAudioRelease ||
+            (burst.sessionAudioRelease && trafficTalkgroupBelongsToCall);
+        burstEssKnown = burstEssKnown ||
+            burst.essKnown ||
+            (trafficTalkgroupBelongsToCall && burst.trafficSecurityKnown);
         burstEncrypted = burstEncrypted ||
             (burst.essKnown && burst.encrypted) ||
-            (burst.trafficSecurityKnown && burst.trafficEncrypted);
+            (trafficTalkgroupBelongsToCall && burst.trafficSecurityKnown && burst.trafficEncrypted);
         macPttSeen = macPttSeen || burst.macPttSeen;
         macActiveSeen = macActiveSeen || burst.macActiveSeen;
         macEndPttSeen = macEndPttSeen || burst.macEndPttSeen;

@@ -161,6 +161,32 @@ TEST_CASE("Staged CQPSK gate rejects noise and accepts sync preview", "[p25][dsp
     REQUIRE(good.bestSyncErrors <= p25dsp::kSyncThresholdUnsynchronized);
 }
 
+TEST_CASE("Phase-2 channelizer LPF matches SDRTrunk HDQPSK 6500/7200", "[p25][dsp][filter]")
+{
+    P25LiveDecoderConfig phase2;
+    phase2.symbolRate = 6000.0;
+    phase2.channelBandwidthHz = 12500.0;
+    phase2.phase2CqpskTrafficDemod = true;
+
+    const auto spec = p25ChannelizerLowpass(phase2);
+    REQUIRE(spec.cutoffHz == Catch::Approx(kP25Phase2HdqpskPassHz));
+    REQUIRE(spec.transitionHz == Catch::Approx(kP25Phase2HdqpskStopHz - kP25Phase2HdqpskPassHz));
+
+    // DDC at ~192 kHz intermediate / 48 kHz work rate must keep 6500 Hz, not
+    // lift to symbolRate*1.15 (6900 Hz) which would miss SDRTrunk's passband.
+    const auto ddc = p25ChannelizerLowpass(phase2, 192000.0, 48000.0);
+    REQUIRE(ddc.cutoffHz == Catch::Approx(6500.0));
+    REQUIRE(ddc.transitionHz == Catch::Approx(700.0));
+
+    P25LiveDecoderConfig phase1;
+    phase1.symbolRate = 4800.0;
+    phase1.channelBandwidthHz = 12500.0;
+    phase1.phase2CqpskTrafficDemod = false;
+    const auto p1 = p25ChannelizerLowpass(phase1, 192000.0, 48000.0);
+    REQUIRE(p1.cutoffHz == Catch::Approx(12500.0 * 0.58));
+    REQUIRE(p1.transitionHz == Catch::Approx(12500.0 * 0.25));
+}
+
 TEST_CASE("Filter cache avoids repeated tap design", "[p25][dsp][filter]")
 {
     p25dsp::P25FilterCache cache;

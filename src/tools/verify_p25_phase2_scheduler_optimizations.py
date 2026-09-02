@@ -15,13 +15,18 @@ checks = {
     'depleted rolling pull boost': 'p25Phase2PrepareRollingIqPull' in main and 'recoveryPull' in main,
     'speaker decode gap window': 'kP25Phase2SpeakerDecodeGapBlockMs' in main,
     'narrow decode-cadence-gap block': 'veryRecentSpeakerGap' in main,
-    'lower minFresh floor': 'minDecodeFreshFloor = speakerSustainDecode ? 8192.0 : 16384.0' in main,
+    'lower minFresh floor': (
+        'plan.minFreshFloorSamples = 8192.0' in main
+        and 'plan.minFreshFloorSamples = 16384.0' in main
+    ),
     'waiting-fresh logs effective minFresh': 'effMinFresh' in main,
-    '120ms playback prime': '0.120' in main.split('pushP25LiveStreamingAudio', 1)[1][:2200],
-    '120ms p25 live target': '0.120' in main.split('pushP25LiveStreamingAudio', 1)[1][:3200],
+    '180ms cold playback prime': '0.180' in main.split('pushP25LiveStreamingAudio', 1)[1][:2200],
+    '120ms hot restart prime': '0.120' in main.split('pushP25LiveStreamingAudio', 1)[1][:2600],
+    '180ms p25 live target': '0.180' in main.split('pushP25LiveStreamingAudio', 1)[1][:3400],
     'ring already primed bypass': 'ringAlreadyPrimed' in main,
     'trust emitted pcm for carrier gate': (
-        'phase2EmittedPcmFrames > 0 && p25Audio.decodedFrames > 0' in main
+        'p25Audio.phase2EmittedPcmFrames > 0' in main
+        and 'p25VoiceBlockHasSpeakerTimelineAudio(p25Audio)' in main
     ),
 }
 

@@ -32,6 +32,7 @@ assert "bootstrappedMaskImmediateFeed" not in main
 assert "clearGrantTargetReleaseAllowed" not in main
 assert "explicit-clear-grant-target-release" not in main
 assert "explicit-clear-grant-validated-release" not in main
+assert "(targetTrafficClearEvidence || explicitGrantTargetSlotSelected)" not in main
 assert "validatedExplicitClearGrantSeed" not in main
 assert "boundedProbeAccepted" not in main
 assert "!snapshot.grantMaskParamsKnown &&" in (ROOT / "src" / "P25FollowStateMachine.cpp").read_text(

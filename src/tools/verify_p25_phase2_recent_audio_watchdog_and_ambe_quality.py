@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
-follow = (root / 'P25FollowStateMachine.cpp').read_text()
-main = (root / 'main.cpp').read_text()
+follow = (root / 'P25FollowStateMachine.cpp').read_text(encoding='utf-8', errors='replace')
+main = (root / 'main.cpp').read_text(encoding='utf-8', errors='replace')
 assert 'phase2RecentContinuation' in follow, 'watchdog must distinguish first acquisition from recent-activity reacquisition'
 assert 'tdmaNoVcwSilenceMs = waitingUnknownClearGrant' in follow, 'no-VCW watchdog should include grant-aware nested thresholds'
 assert 'phase2RecentContinuation ? 10000 : 3500' in follow, 'no-VCW watchdog must hold longer after recent Phase-2 activity'
@@ -16,3 +16,4 @@ assert "decoded.message.find('R')" in fn and "decoded.message.find('E')" in fn, 
 assert 'rms < 1.0e-6' not in fn, 'AMBE gate must not drop low-energy vocoder frames and break cadence'
 assert 'peak > kP25DecodedAudioSafeMaxPeak' in fn and 'rms > kP25DecodedAudioSafeMaxRms' in fn, 'AMBE gate should still reject runaway PCM'
 print('P25 Phase 2 recent-audio watchdog and strict AMBE quality regression: PASS')
+

@@ -2,7 +2,7 @@
 from pathlib import Path
 import re
 src = Path(__file__).resolve().parents[1] / 'P25LiveDecoder.cpp'
-text = src.read_text()
+text = src.read_text(encoding='utf-8', errors='replace')
 expected = {
     '0x00': 'VOICE_4',
     '0x39': 'SCRAMBLED_SACCH',
@@ -27,3 +27,4 @@ if missing or wrong_present:
         print('old wrong values present:', wrong_present)
     raise SystemExit(1)
 print('P25 Phase 2 DUID sdrtrunk table regression: PASS')
+

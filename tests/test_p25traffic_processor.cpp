@@ -4,14 +4,16 @@
 #include "P25TrafficChannelProcessor.h"
 #include "Receiver.h"
 
-TEST_CASE("P25 Phase 2 audio call key binds session slot and frequency only", "[p25][traffic][session]")
+TEST_CASE("P25 Phase 2 audio call key binds selected call identity", "[p25][traffic][session]")
 {
     P25P2CallAudioKey first;
     first.nac = 0x2df;
     first.wacn = 0xbee00;
     first.systemId = 0x2d1;
     first.talkgroupId = 30302;
+    first.sourceId = 0x1ed289;
     first.callSessionId = 0x30302abcdULL;
+    first.grantEpochMs = 1'000'000;
     first.slot = 1;
     first.frequencyHz = 418875000;
 
@@ -32,6 +34,14 @@ TEST_CASE("P25 Phase 2 audio call key binds session slot and frequency only", "[
     second.wacn = first.wacn + 1;
     second.systemId = static_cast<uint16_t>(first.systemId + 1);
     REQUIRE(first == second);
+
+    second = first;
+    second.sourceId = 0;
+    REQUIRE_FALSE(first == second);
+
+    second = first;
+    second.grantEpochMs = first.grantEpochMs + 500;
+    REQUIRE_FALSE(first == second);
 }
 
 TEST_CASE("P25 grant refresh preserves PTT generation and call session", "[p25][traffic][session]")
@@ -47,10 +57,36 @@ TEST_CASE("P25 grant refresh preserves PTT generation and call session", "[p25][
     p25Phase2RefreshGrantEpoch(rx, 1'000'500);
     REQUIRE(rx.p25CurrentCallSessionId == firstSession);
     REQUIRE(rx.p25PttGeneration == firstPtt);
+    REQUIRE(rx.p25VoiceGrantEpochMs == 1'000'000);
 
     p25Phase2BeginNewPtt(rx, 1'001'000);
     REQUIRE(rx.p25PttGeneration == firstPtt + 1);
     REQUIRE(rx.p25CurrentCallSessionId != firstSession);
+}
+
+TEST_CASE("P25 new PTT clears Phase 2 call-bound audio and security state", "[p25][traffic][session]")
+{
+    Receiver rx;
+    rx.p25VoiceTalkgroupId = 30003;
+    p25Phase2BeginNewPtt(rx, 1'000'000);
+
+    rx.p25SessionState.callSecurityLatch = P25CallSecurityLatch::Clear;
+    rx.p25SessionState.pendingAudio.armed = true;
+    rx.p25SessionState.pendingAudio.ambeFrames.push_back(P25P2PendingAmbeFrame{});
+    rx.p25SessionState.ambeDedupe.talkgroupId = 30003;
+    rx.p25SessionState.frameSequencer.armed = true;
+    rx.p25SessionState.audioTail.consecutivePlayoutBridgeFrames = 7;
+    rx.p25SessionState.sustain.hadSuccessfulEmit = true;
+
+    p25Phase2BeginNewPtt(rx, 1'002'000);
+
+    REQUIRE(rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Unknown);
+    REQUIRE_FALSE(rx.p25SessionState.pendingAudio.armed);
+    REQUIRE(rx.p25SessionState.pendingAudio.ambeFrames.empty());
+    REQUIRE(rx.p25SessionState.ambeDedupe.talkgroupId == 0);
+    REQUIRE_FALSE(rx.p25SessionState.frameSequencer.armed);
+    REQUIRE(rx.p25SessionState.audioTail.consecutivePlayoutBridgeFrames == 0);
+    REQUIRE_FALSE(rx.p25SessionState.sustain.hadSuccessfulEmit);
 }
 
 TEST_CASE("P25 traffic processor advances dibit cursor without internal decode", "[p25][traffic]")

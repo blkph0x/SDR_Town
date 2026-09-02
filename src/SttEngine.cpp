@@ -6,6 +6,7 @@
 #include <QFileInfo>
 #include <QMutexLocker>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
@@ -64,7 +65,7 @@ void SttEngine::start()
     m_running.store(true, std::memory_order_release);
     m_worker = std::thread([this]() { workerLoop(); });
     if (m_engineAvailable) {
-        setStatus(SttEngineStatus::Ready, QStringLiteral("STT ready (faster-whisper)"));
+        setStatus(SttEngineStatus::Ready, QStringLiteral("STT ready"));
     } else {
         setStatus(SttEngineStatus::Unavailable, m_unavailableReason);
     }
@@ -160,8 +161,8 @@ void SttEngine::probeAvailability()
 
     if (m_pythonExe.isEmpty()) {
         m_unavailableReason = QStringLiteral(
-            "STT unavailable — install Python 3 and faster-whisper "
-            "(pip install faster-whisper)");
+            "STT unavailable — install Python 3 and openai-whisper "
+            "(pip install openai-whisper)");
         return;
     }
     if (m_scriptPath.isEmpty()) {
@@ -170,10 +171,19 @@ void SttEngine::probeAvailability()
         return;
     }
 
+    QStringList args;
+    QString program = m_pythonExe;
+    const QFileInfo pyInfo(m_pythonExe);
+    if (pyInfo.fileName().compare(QStringLiteral("py"), Qt::CaseInsensitive) == 0 ||
+        pyInfo.fileName().compare(QStringLiteral("py.exe"), Qt::CaseInsensitive) == 0) {
+        args << QStringLiteral("-3");
+    }
+    args << m_scriptPath << QStringLiteral("--probe");
+
     QProcess probe;
     probe.setProcessChannelMode(QProcess::MergedChannels);
-    probe.start(m_pythonExe, {QStringLiteral("-c"),
-                              QStringLiteral("import faster_whisper; print('ok')")});
+    probe.setProcessEnvironment(QProcessEnvironment::systemEnvironment());
+    probe.start(program, args);
     if (!probe.waitForStarted(3000)) {
         m_unavailableReason = QStringLiteral(
             "STT unavailable — could not start Python (%1)").arg(m_pythonExe);
@@ -188,7 +198,7 @@ void SttEngine::probeAvailability()
     const QString out = QString::fromUtf8(probe.readAllStandardOutput()).trimmed();
     if (probe.exitCode() != 0 || !out.contains(QStringLiteral("ok"))) {
         m_unavailableReason = QStringLiteral(
-            "STT unavailable — install faster-whisper: pip install faster-whisper");
+            "STT unavailable — install openai-whisper or faster-whisper");
         spdlog::info("STT probe failed: exit={} out={}",
                      probe.exitCode(), out.toStdString());
         return;
@@ -196,8 +206,8 @@ void SttEngine::probeAvailability()
 
     m_engineAvailable = true;
     m_unavailableReason.clear();
-    spdlog::info("STT engine available via {} + {}",
-                 m_pythonExe.toStdString(), m_scriptPath.toStdString());
+    spdlog::info("STT engine available via {} + {} ({})",
+                 m_pythonExe.toStdString(), m_scriptPath.toStdString(), out.toStdString());
 }
 
 QString SttEngine::findPythonExecutable() const
@@ -453,6 +463,7 @@ QString SttEngine::runFasterWhisper(const QString& wavPath, QString* errorOut) c
 
     QProcess proc;
     proc.setProcessChannelMode(QProcess::SeparateChannels);
+    proc.setProcessEnvironment(QProcessEnvironment::systemEnvironment());
     proc.start(program, args);
     if (!proc.waitForStarted(5000)) {
         if (errorOut) *errorOut = QStringLiteral("failed to start STT process");
@@ -534,7 +545,7 @@ void SttEngine::workerLoop()
         if (!m_engineAvailable) {
             emit segmentSkipped(job.sourceId, job.sourceName, job.channel, job.durationSec,
                                 m_unavailableReason.isEmpty()
-                                    ? QStringLiteral("STT unavailable — install faster-whisper: pip install faster-whisper")
+                                    ? QStringLiteral("STT unavailable — install openai-whisper or faster-whisper")
                                     : m_unavailableReason,
                                 job.meta);
             continue;
@@ -568,7 +579,7 @@ void SttEngine::workerLoop()
                                 job.meta);
         } else {
             emit transcriptReady(job.sourceId, job.sourceName, job.channel, text, job.meta);
-            setStatus(SttEngineStatus::Ready, QStringLiteral("STT ready (faster-whisper)"));
+            setStatus(SttEngineStatus::Ready, QStringLiteral("STT ready"));
         }
     }
 

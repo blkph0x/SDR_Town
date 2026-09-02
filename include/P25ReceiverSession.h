@@ -15,7 +15,9 @@ struct P25P2CallAudioKey {
     uint32_t wacn = 0;
     uint16_t systemId = 0;
     uint32_t talkgroupId = 0;
+    uint32_t sourceId = 0;
     uint64_t callSessionId = 0;
+    int64_t grantEpochMs = 0;
     uint8_t slot = 0xffu;
     int64_t frequencyHz = 0;
 
@@ -26,9 +28,14 @@ struct P25P2CallAudioKey {
 
     bool operator==(const P25P2CallAudioKey& other) const noexcept
     {
-        // NAC/WACN/system are late-arriving metadata — not audio-stream identity.
+        // Audio state is bound to one selected traffic call.  NAC/WACN/system
+        // are site metadata, but source/session/start-epoch are part of the
+        // speech stream identity; reusing them across talkers or grant epochs
+        // can feed mbelib with another slot's predictor history.
         return talkgroupId == other.talkgroupId &&
+            sourceId == other.sourceId &&
             callSessionId == other.callSessionId &&
+            grantEpochMs == other.grantEpochMs &&
             slot == other.slot &&
             frequencyHz == other.frequencyHz;
     }
@@ -79,10 +86,27 @@ struct Phase2VoiceFrameKey {
 inline int p25Phase2CompareVoiceFrameKeys(const Phase2VoiceFrameKey& a,
                                           const Phase2VoiceFrameKey& b) noexcept
 {
+    if (a.sessionCodewordIdKnown && b.sessionCodewordIdKnown) {
+        if (a.sessionCodewordId < b.sessionCodewordId) return -1;
+        if (a.sessionCodewordId > b.sessionCodewordId) return 1;
+        return 0;
+    }
     if (a.streamDibitKnown && b.streamDibitKnown) {
         if (a.streamDibit < b.streamDibit) return -1;
         if (a.streamDibit > b.streamDibit) return 1;
-    } else if (a.streamDibitKnown != b.streamDibitKnown) {
+    }
+    if (a.sessionBurstIdKnown && b.sessionBurstIdKnown) {
+        if (a.sessionBurstId < b.sessionBurstId) return -1;
+        if (a.sessionBurstId > b.sessionBurstId) return 1;
+        if (a.voiceIndex < b.voiceIndex) return -1;
+        if (a.voiceIndex > b.voiceIndex) return 1;
+        if (a.slot < b.slot) return -1;
+        if (a.slot > b.slot) return 1;
+        return 0;
+    }
+    if (a.sessionCodewordIdKnown != b.sessionCodewordIdKnown ||
+        a.streamDibitKnown != b.streamDibitKnown ||
+        a.sessionBurstIdKnown != b.sessionBurstIdKnown) {
         return 2;
     }
     if (a.superframeAnchor < b.superframeAnchor) return -1;
@@ -109,15 +133,35 @@ inline bool p25Phase2VoiceFrameKeysSameBurst(const Phase2VoiceFrameKey& a,
     return a.burstIndex == b.burstIndex && a.slot == b.slot;
 }
 
+inline bool p25Phase2VoiceFrameKeyHasProtocolIdentity(const Phase2VoiceFrameKey& key) noexcept
+{
+    if (key.sessionCodewordIdKnown && key.sessionCodewordId != 0) return true;
+    if (key.streamDibitKnown && key.streamBurstStartDibitKnown && key.slot < 2) return true;
+    return key.sessionBurstIdKnown && key.sessionBurstId != 0 && key.slot < 2 && key.voiceIndex < 4;
+}
+
+inline bool p25Phase2VoiceFrameNeedsAbsoluteDedupeFallback(const Phase2VoiceFrameKey& key) noexcept
+{
+    return !p25Phase2VoiceFrameKeyHasProtocolIdentity(key);
+}
+
 struct P25Phase2SequencerSpeechInput {
     Phase2VoiceFrameKey key{};
     std::array<uint8_t, 96> ambe96{};
     bool haveAmbe = false;
+    bool speechOrdinalKnown = false;
+    int64_t speechOrdinal = -1;
     bool grantSlotKnown = false;
     uint8_t grantSlot = 0xffu;
     bool haveAbsoluteDibits = false;
     uint64_t codewordAbsDibit = 0;
     uint64_t codewordEndAbsDibit = 0;
+    bool inputQualityKnown = false;
+    double inputSoftDecisionQuality = 0.0;
+    size_t inputSoftDecisionSymbols = 0;
+    size_t inputSoftLowConfidenceSymbols = 0;
+    double inputCqpskPhaseErrorRmsRad = 0.0;
+    int inputBestPhase2SyncErrors = -1;
 };
 
 struct P25P2PendingAmbeFrame {
@@ -130,6 +174,12 @@ struct P25P2PendingAmbeFrame {
     bool haveAbsoluteDibits = false;
     uint64_t codewordAbsDibit = 0;
     uint64_t codewordEndAbsDibit = 0;
+    bool inputQualityKnown = false;
+    double inputSoftDecisionQuality = 0.0;
+    size_t inputSoftDecisionSymbols = 0;
+    size_t inputSoftLowConfidenceSymbols = 0;
+    double inputCqpskPhaseErrorRmsRad = 0.0;
+    int inputBestPhase2SyncErrors = -1;
 };
 
 struct P25P2PendingAudioQueue {
@@ -198,6 +248,7 @@ struct P25Phase2FrameSequencer {
 // Producer-side speaker PCM bound to one call session.
 struct P25Phase2SpeakerPendingQueue {
     uint64_t callSessionId = 0;
+    bool nextSpeechOrdinalKnown = false;
     int64_t nextSpeechOrdinal = 0;
     std::vector<float> samples;
 };
@@ -214,6 +265,9 @@ struct P25Phase2AudioTailState {
     int64_t lastFreshTargetVoiceMs = 0;
     int64_t lastPlayoutBridgeMs = 0;
     uint64_t lastForwardedFedAbsDibit = 0;
+    P25P2CallAudioKey lastSpeakerKey{};
+    bool haveLastSpeakerKey = false;
+    bool playoutBridgeEligible = false;
     int consecutiveNoForwardFedWindows = 0;
     int consecutiveEmptyFeedWindows = 0;
     int consecutivePlayoutBridgeFrames = 0;
@@ -245,21 +299,34 @@ struct P25Phase2SessionSustainState {
 
 struct P25ReceiverSessionState {
     P25P2PendingAudioQueue pendingAudio;
+    // Companion-slot pending AMBE (multi-record / priority observe). Never drained
+    // to the selected speaker path.
+    P25P2PendingAudioQueue pendingAudioOpposite;
     P25AudioResamplerState resampler;
+    // Independent resampler for companion-slot record path (never shares selected).
+    P25AudioResamplerState resamplerOpposite;
     P25Phase2AmbeEmitDedupeState ambeDedupe;
     P25Phase2FrameSequencer frameSequencer;
     P25Phase2AudioTailState audioTail;
     P25Phase2SessionSustainState sustain;
     P25CallSecurityLatch callSecurityLatch = P25CallSecurityLatch::Unknown;
+    // PTT evidence is retained across voice windows for SDRTrunk-style clear
+    // release, but the queued-AMBE PTT reset is an edge operation.  Remember the
+    // call session already reset so sticky PTT state cannot repeatedly discard
+    // selected-slot voice context mid-call.
+    uint64_t lastPttStartPendingClearCallSessionId = 0;
 
     void clearAll() noexcept
     {
         pendingAudio = {};
+        pendingAudioOpposite = {};
         resampler = {};
+        resamplerOpposite = {};
         ambeDedupe = {};
         frameSequencer = {};
         audioTail = {};
         sustain = {};
         callSecurityLatch = P25CallSecurityLatch::Unknown;
+        lastPttStartPendingClearCallSessionId = 0;
     }
 };

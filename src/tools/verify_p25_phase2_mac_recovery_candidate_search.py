@@ -2,12 +2,12 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-cpp = (root / "P25LiveDecoder.cpp").read_text()
+cpp = (root / "P25LiveDecoder.cpp").read_text(encoding='utf-8', errors='replace')
 
 required = [
     "rs63DecodeWithUnknownSymbolErrors",
-    "const int maxUnknownSymbols = deepSearch ? 2 : 0;",
-    "too expensive for every realtime false ACCH hypothesis",
+    "const int maxUnknownSymbols = deepSearch ? (nominalLayout ? 2 : 1) : 0;",
+    "too expensive to run on every",
     "transmittedPositions.push_back(v)",
     "return r.stats.phase2MacCrcValid > 0 || r.stats.phase2EssKnown;",
     "phase2FecMacCandidates",
@@ -24,3 +24,4 @@ if bad in cpp[cpp.find("bool hasPhase2FastStopEvidence"):cpp.find("size_t phase2
     raise SystemExit("Phase 2 fast-stop still accepts untrusted VCW-only telemetry")
 
 print("P25 Phase 2 MAC recovery and candidate-search regression: PASS")
+

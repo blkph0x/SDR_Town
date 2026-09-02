@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
-s = Path('src/main.cpp').read_text()
+s = Path('src/main.cpp').read_text(encoding='utf-8', errors='replace')
 checks = {
     'phase2 arm delay zero': 'static constexpr int kP25Phase2ArmDelayMs = 0;' in s,
     'control cadence faster': 'static constexpr int kP25ControlDecodeCadenceMs = 70;' in s,
@@ -14,3 +14,4 @@ failed = [name for name, ok in checks.items() if not ok]
 if failed:
     raise SystemExit('FAILED: ' + ', '.join(failed))
 print('P25 Phase 2 audio path fast-arm regression: PASS')
+

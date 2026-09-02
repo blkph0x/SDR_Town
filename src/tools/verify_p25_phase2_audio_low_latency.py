@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
-main = (root / 'main.cpp').read_text()
-audio = (root / 'AudioEngine.cpp').read_text()
+main = (root / 'main.cpp').read_text(encoding='utf-8', errors='replace')
+audio = (root / 'AudioEngine.cpp').read_text(encoding='utf-8', errors='replace')
 checks = {
     'phase2 rolling window keeps two-superframe cold context': 'kP25Phase2VoiceDecodeWindowSeconds = 0.720' in main,
     'first cold eye keeps two-superframe late-entry context': 'kP25Phase2VoiceDecodeFirstColdEyeSeconds = 0.720' in main,
@@ -20,7 +20,7 @@ checks = {
     'cold cqpsk search is bounded for live traffic': 'kP25VoiceWorkerColdMaxCqpskCandidates = 32' in main,
     'hot phase2 commit work is bounded': 'kP25VoiceWorkerHotMaxPhase2SyncHits = 24' in main and 'setMaxPhase2SyncHits' in main,
     'wide reacquire does not override current streaming eye': 'currentStreamingEye' in main,
-    'audio jitter cap deepened for continuity': 'kDigitalVoiceJitterSeconds = 0.85' in audio,
+    'audio jitter cap bounded for continuity without excessive lag': 'kDigitalVoiceJitterSeconds = 0.65' in audio,
     'overflow preserves SPSC read cursor ownership': 'producer must not advance' in audio and 'rb.readPos.store(newRead' not in audio,
     'oversized producer block keeps most recent speech': 'samples += drop' in audio,
 }
@@ -28,3 +28,4 @@ failed = [name for name, ok in checks.items() if not ok]
 if failed:
     raise SystemExit('P25 Phase 2 low-latency audio regression failed: ' + ', '.join(failed))
 print('P25 Phase 2 low-latency audio regression: PASS')
+

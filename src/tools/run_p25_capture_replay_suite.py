@@ -6,13 +6,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 
 import p25_capture_audit
+from p25_voicetest_classify import classify_voicetest_output
 
 
 def default_exe(repo: Path) -> Path:
@@ -57,54 +57,6 @@ def run_cli_command(exe: Path, command: str, timeout_s: float, deep_trace: bool)
         }
 
 
-def classify_output(output: str, timed_out: bool) -> str:
-    if timed_out:
-        return "TIMEOUT"
-    if "PASS_CONTINUOUS_AUDIO" in output:
-        return "PASS_CONTINUOUS_AUDIO"
-    if "PASS_CLEAR_AUDIO" in output:
-        return "PASS_CLEAR_AUDIO"
-    if "PASS_PARTIAL_AUDIO" in output:
-        return "PASS_PARTIAL_AUDIO"
-    if "PASS_ENCRYPTED_GATED" in output:
-        return "PASS_ENCRYPTED_GATED"
-    if "FAIL_RAW_AUDIO_GATED" in output:
-        return "FAIL_RAW_AUDIO_GATED"
-    if "FAIL_NO_AUDIO" in output:
-        if re.search(r"\bp2bursts=0\b", output) and not re.search(r"\bp2bursts=[1-9]\d*\b", output):
-            return "FAIL_NO_TRAFFIC_BURSTS"
-        target_values = [int(x) for x in re.findall(r"\btargetVcw=(\d+)\b", output)]
-        opp_values = [int(x) for x in re.findall(r"\boppVcw=(\d+)\b", output)]
-        ambe_probe = [tuple(map(int, m)) for m in re.findall(r"\bambeProbe=(\d+)/(\d+)\b", output)]
-        target_vcw = max(target_values) if target_values else 0
-        opp_vcw = max(opp_values) if opp_values else 0
-        probe_accepted = max((a for a, _ in ambe_probe), default=0)
-        probe_attempts = max((b for _, b in ambe_probe), default=0)
-        if target_vcw > 0 and "p2ess=unknown" in output and re.search(r"\bp2mac=0/\d+\b", output):
-            if (
-                re.search(r"\baudioSamples=0\b", output)
-                and re.search(r"\bspeakerSamples=0\b", output)
-                and (
-                    "gate=unknown-raw-queued-waiting-clear" in output
-                    or "gate=unknown-waiting-clear" in output
-                )
-            ):
-                return "PASS_UNKNOWN_GATED"
-            return "FAIL_SECURITY_UNKNOWN_TARGET_VOICE_PROBED" if probe_attempts > 0 else "FAIL_SECURITY_UNKNOWN_TARGET_VOICE"
-        if target_vcw == 0 and opp_vcw > 0:
-            return "FAIL_OPPOSITE_SLOT_ONLY"
-        if probe_accepted > 0:
-            return "FAIL_AMBE_PROBE_ACCEPTED_BUT_GATED"
-        return "FAIL_NO_AUDIO"
-    if "NO_FOLLOW_CANDIDATE" in output:
-        return "NO_FOLLOW_CANDIDATE"
-    if "P25 replay load failed" in output or "P25 voicetest load failed" in output:
-        return "LOAD_FAILED"
-    if "P25 voicetest voice" in output or "P25 followtest control" in output:
-        return "RAN_NO_PASS"
-    return "NO_TEST_OUTPUT"
-
-
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("capture", nargs="?", help="Capture directory. Defaults to latest SDR Town capture.")
@@ -131,7 +83,7 @@ def main(argv: list[str]) -> int:
     results = []
     for index, command in enumerate(commands, start=1):
         result = run_cli_command(exe, command, args.timeout, not args.no_deep_trace)
-        status = classify_output(result["output"], result["timed_out"])
+        status = classify_voicetest_output(result["output"] or "", result["timed_out"])
         transcript = out_dir / f"{index:02d}_{safe_name(status)}.txt"
         transcript.write_text(result["output"], encoding="utf-8", errors="replace")
         results.append(

@@ -191,6 +191,27 @@ std::vector<AudioDeviceInfo> AudioEngine::enumeratePlaybackDevices()
         m_devices.push_back(info);
     }
 
+    // Field 20260811: Configure Output called enumeratePlaybackDevices() which
+    // rebuilt m_devices while m_active still held stale enum indices. Dialog
+    // checkboxes then looked "off", Apply set outputs to None, and DSP
+    // ensureAudioOutputActive fought the user by restarting the default device.
+    {
+        std::lock_guard<std::mutex> lk(audioMutex);
+        for (auto& act : m_active) {
+            if (!act) continue;
+            size_t matched = static_cast<size_t>(-1);
+            for (size_t i = 0; i < m_devices.size(); ++i) {
+                if (m_devices[i].name == act->deviceName) {
+                    matched = i;
+                    break;
+                }
+            }
+            if (matched != static_cast<size_t>(-1)) {
+                act->enumIndex = matched;
+            }
+        }
+    }
+
     spdlog::info("Enumerated {} playback devices", m_devices.size());
     for (const auto& d : m_devices) {
         spdlog::debug("  - {} {}", d.name, d.isDefault ? "(default)" : "");
@@ -205,21 +226,56 @@ void AudioEngine::setActiveOutputs(const std::vector<size_t>& indicesFromLastEnu
         return;
     }
 
-    std::vector<std::shared_ptr<ActiveOutput>> oldOutputs;
-    {
-        std::lock_guard<std::mutex> lk(audioMutex);
-        for (auto& act : m_active) {
-            if (act) act->valid.store(false, std::memory_order_release);
-        }
-        oldOutputs.swap(m_active);
+    // Deduplicate desired enum indices while preserving order.
+    std::vector<size_t> desired;
+    desired.reserve(indicesFromLastEnum.size());
+    for (size_t idx : indicesFromLastEnum) {
+        if (idx >= m_devices.size()) continue;
+        if (std::find(desired.begin(), desired.end(), idx) != desired.end()) continue;
+        desired.push_back(idx);
     }
 
-    for (auto& act : oldOutputs) stopAndUninitOutput(act);
-    oldOutputs.clear();
+    std::vector<std::shared_ptr<ActiveOutput>> keep;
+    std::vector<std::shared_ptr<ActiveOutput>> stopList;
+    std::vector<size_t> needStart;
+    keep.reserve(desired.size());
+    {
+        std::lock_guard<std::mutex> lk(audioMutex);
+        for (size_t idx : desired) {
+            std::shared_ptr<ActiveOutput> existing;
+            for (auto& act : m_active) {
+                if (!act) continue;
+                if (act->enumIndex == idx || act->deviceName == m_devices[idx].name) {
+                    existing = act;
+                    break;
+                }
+            }
+            if (existing) {
+                existing->enumIndex = idx;
+                existing->deviceName = m_devices[idx].name;
+                keep.push_back(existing);
+            } else {
+                needStart.push_back(idx);
+            }
+        }
+        for (auto& act : m_active) {
+            if (!act) continue;
+            const bool kept = std::find(keep.begin(), keep.end(), act) != keep.end();
+            if (!kept) {
+                act->valid.store(false, std::memory_order_release);
+                stopList.push_back(act);
+            }
+        }
+        m_active.swap(keep);
+    }
+
+    // Tear down removed devices outside audioMutex (miniaudio join can block).
+    for (auto& act : stopList) stopAndUninitOutput(act);
+    stopList.clear();
 
     {
         std::lock_guard<std::mutex> lk(audioMutex);
-        for (size_t idx : indicesFromLastEnum) {
+        for (size_t idx : needStart) {
             if (idx < m_devices.size()) {
                 startDevice(idx);
             }
@@ -231,13 +287,24 @@ void AudioEngine::setActiveOutputs(const std::vector<size_t>& indicesFromLastEnu
 void AudioEngine::setActiveOutputsByName(const std::vector<std::string>& nameSubstrings)
 {
     std::vector<size_t> indices;
-    for (size_t i = 0; i < m_devices.size(); ++i) {
-        for (const auto& sub : nameSubstrings) {
-            if (m_devices[i].name.find(sub) != std::string::npos) {
-                indices.push_back(i);
+    for (const auto& sub : nameSubstrings) {
+        if (sub.empty()) continue;
+        size_t exact = static_cast<size_t>(-1);
+        size_t partial = static_cast<size_t>(-1);
+        for (size_t i = 0; i < m_devices.size(); ++i) {
+            if (m_devices[i].name == sub) {
+                exact = i;
                 break;
             }
+            if (partial == static_cast<size_t>(-1) &&
+                m_devices[i].name.find(sub) != std::string::npos) {
+                partial = i;
+            }
         }
+        const size_t chosen = (exact != static_cast<size_t>(-1)) ? exact : partial;
+        if (chosen == static_cast<size_t>(-1)) continue;
+        if (std::find(indices.begin(), indices.end(), chosen) != indices.end()) continue;
+        indices.push_back(chosen);
     }
     setActiveOutputs(indices);
 }
@@ -248,6 +315,7 @@ void AudioEngine::startDevice(size_t enumIndex)
 
     auto actPtr = std::make_shared<ActiveOutput>();
     actPtr->enumIndex = enumIndex;
+    actPtr->deviceName = m_devices[enumIndex].name;
     actPtr->volume = 0.9f;
     actPtr->owningEngine = this;
     actPtr->ring.init(kOutputRingFrames);
@@ -352,11 +420,14 @@ void AudioEngine::clearBuffers()
     }
 }
 
-void AudioEngine::pushAudioToActiveOutputLocked(ActiveOutput& output, const float* samples, size_t count)
+void AudioEngine::pushAudioToActiveOutputLocked(ActiveOutput& output, const float* samples, size_t count, uint8_t sampleKind)
 {
     if (!output.valid.load(std::memory_order_acquire)) return;
     auto& rb = output.ring;
     if (rb.capacity == 0) return;
+    if (rb.sampleKind.size() != rb.capacity) {
+        rb.sampleKind.assign(rb.capacity, kRingSampleReal);
+    }
 
     // Digital voice decoders synthesize fixed 20 ms PCM frames.  We need enough
     // depth for one Phase-2 superframe-sized producer burst, but not a 1.5 second
@@ -384,6 +455,7 @@ void AudioEngine::pushAudioToActiveOutputLocked(ActiveOutput& output, const floa
         const size_t next = ringWrap(w + 1, rb.capacity);
         if (next == rb.readPos.load(std::memory_order_acquire)) break;
         rb.data[w] = samples[i];
+        rb.sampleKind[w] = sampleKind;
         w = next;
     }
     rb.writePos.store(w, std::memory_order_release);
@@ -395,7 +467,7 @@ void AudioEngine::pushAudio(const float* samples, size_t count)
     std::lock_guard<std::mutex> lk(audioMutex);
 
     for (auto& actPtr : m_active) {
-        if (actPtr) pushAudioToActiveOutputLocked(*actPtr, samples, count);
+        if (actPtr) pushAudioToActiveOutputLocked(*actPtr, samples, count, kRingSampleReal);
     }
 }
 
@@ -413,9 +485,87 @@ void AudioEngine::pushAudioToActiveOutputs(const float* samples, size_t count, c
     for (size_t activeIndex : activeOutputIndices) {
         if (activeIndex >= m_active.size() || !m_active[activeIndex]) continue;
         if (std::find(pushed.begin(), pushed.end(), activeIndex) != pushed.end()) continue;
-        pushAudioToActiveOutputLocked(*m_active[activeIndex], samples, count);
+        pushAudioToActiveOutputLocked(*m_active[activeIndex], samples, count, kRingSampleReal);
         pushed.push_back(activeIndex);
     }
+}
+
+void AudioEngine::pushBridgeAudioToActiveOutputs(const float* samples, size_t count, const std::vector<size_t>& activeOutputIndices)
+{
+    if (!samples || count == 0) return;
+    if (activeOutputIndices.empty()) {
+        std::lock_guard<std::mutex> lk(audioMutex);
+        for (auto& actPtr : m_active) {
+            if (actPtr) pushAudioToActiveOutputLocked(*actPtr, samples, count, kRingSampleBridge);
+        }
+        return;
+    }
+
+    std::lock_guard<std::mutex> lk(audioMutex);
+    std::vector<size_t> pushed;
+    pushed.reserve(activeOutputIndices.size());
+    for (size_t activeIndex : activeOutputIndices) {
+        if (activeIndex >= m_active.size() || !m_active[activeIndex]) continue;
+        if (std::find(pushed.begin(), pushed.end(), activeIndex) != pushed.end()) continue;
+        pushAudioToActiveOutputLocked(*m_active[activeIndex], samples, count, kRingSampleBridge);
+        pushed.push_back(activeIndex);
+    }
+}
+
+size_t AudioEngine::dropQueuedBridgeAudio(size_t maxSamples, const std::vector<size_t>& activeOutputIndices)
+{
+    if (maxSamples == 0) return 0;
+
+    auto dropForOutput = [maxSamples](ActiveOutput& output) -> size_t {
+        if (!output.valid.load(std::memory_order_acquire)) return 0;
+        auto& rb = output.ring;
+        if (rb.capacity == 0 || rb.sampleKind.size() != rb.capacity) return 0;
+
+        size_t droppedTotal = 0;
+        while (droppedTotal < maxSamples) {
+            const size_t r = rb.readPos.load(std::memory_order_acquire);
+            const size_t w = rb.writePos.load(std::memory_order_acquire);
+            const size_t queued = ringDistance(w, r, rb.capacity);
+            if (queued == 0) break;
+
+            const size_t dropLimit = std::min(queued, maxSamples - droppedTotal);
+            size_t droppable = 0;
+            while (droppable < dropLimit &&
+                   rb.sampleKind[ringWrap(r + droppable, rb.capacity)] == kRingSampleBridge) {
+                ++droppable;
+            }
+            if (droppable == 0) break;
+
+            const size_t nextRead = ringWrap(r + droppable, rb.capacity);
+            size_t expected = r;
+            if (rb.readPos.compare_exchange_weak(expected,
+                                                 nextRead,
+                                                 std::memory_order_release,
+                                                 std::memory_order_acquire)) {
+                droppedTotal += droppable;
+            }
+        }
+        return droppedTotal;
+    };
+
+    std::lock_guard<std::mutex> lk(audioMutex);
+    size_t dropped = 0;
+    if (activeOutputIndices.empty()) {
+        for (auto& actPtr : m_active) {
+            if (actPtr) dropped += dropForOutput(*actPtr);
+        }
+        return dropped;
+    }
+
+    std::vector<size_t> touched;
+    touched.reserve(activeOutputIndices.size());
+    for (size_t activeIndex : activeOutputIndices) {
+        if (activeIndex >= m_active.size() || !m_active[activeIndex]) continue;
+        if (std::find(touched.begin(), touched.end(), activeIndex) != touched.end()) continue;
+        dropped += dropForOutput(*m_active[activeIndex]);
+        touched.push_back(activeIndex);
+    }
+    return dropped;
 }
 
 void AudioEngine::playTestTone(size_t activeIndex, float freq, float durationSec)
@@ -470,6 +620,22 @@ bool AudioEngine::isDeviceActive(size_t enumIndex) const
     std::lock_guard<std::mutex> lk(audioMutex);
     for (const auto& aPtr : m_active) if (aPtr && aPtr->enumIndex == enumIndex) return true;
     return false;
+}
+
+std::vector<std::string> AudioEngine::getActiveDeviceNameList() const
+{
+    std::lock_guard<std::mutex> lk(audioMutex);
+    std::vector<std::string> names;
+    names.reserve(m_active.size());
+    for (const auto& aPtr : m_active) {
+        if (!aPtr) continue;
+        if (!aPtr->deviceName.empty()) {
+            names.push_back(aPtr->deviceName);
+        } else if (aPtr->enumIndex < m_devices.size()) {
+            names.push_back(m_devices[aPtr->enumIndex].name);
+        }
+    }
+    return names;
 }
 
 std::string AudioEngine::getActiveDeviceNames() const

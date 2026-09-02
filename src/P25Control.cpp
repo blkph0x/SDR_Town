@@ -1470,7 +1470,8 @@ std::vector<P25ControlEvent> P25ControlChannelAnalyzer::parsePhase2MacMessages(u
                                                    ? "Motorola Phase 2 regroup voice channel user"
                                                    : "Motorola Phase 2 regroup voice channel user extended");
                 ev.mfid = mfid;
-                if (hasBytes(bytes, pos + 2, 1)) applyServiceOptions(ev, bytes[pos + 2]);
+                const size_t serviceOffset = op == 0x80 ? pos + 2 : pos + 3;
+                if (hasBytes(bytes, serviceOffset, 1)) applyServiceOptions(ev, bytes[serviceOffset]);
                 ev.talkgroupId = readU16Msb(bytes, op == 0x80 ? pos + 3 : pos + 4);
                 ev.sourceId = readU24Msb(bytes, op == 0x80 ? pos + 5 : pos + 6);
                 ev.voiceProtocol = P25VoiceProtocol::Phase2TDMA;
@@ -1489,7 +1490,7 @@ std::vector<P25ControlEvent> P25ControlChannelAnalyzer::parsePhase2MacMessages(u
                 P25ControlEvent ev = makeGrant(op, pos, P25ControlEventType::GroupVoiceGrant,
                                                "Motorola Phase 2 regroup channel grant");
                 ev.mfid = mfid;
-                if (hasBytes(bytes, pos + 2, 1)) applyServiceOptions(ev, bytes[pos + 2]);
+                if (hasBytes(bytes, pos + 3, 1)) applyServiceOptions(ev, bytes[pos + 3]);
                 ev.talkgroupId = readU16Msb(bytes, pos + 6);
                 ev.sourceId = readU24Msb(bytes, pos + 8);
                 addVoiceChannel(ev, readU16Msb(bytes, pos + 4));
@@ -1507,7 +1508,7 @@ std::vector<P25ControlEvent> P25ControlChannelAnalyzer::parsePhase2MacMessages(u
                 P25ControlEvent ev = makeGrant(op, pos, P25ControlEventType::GroupVoiceGrantExplicit,
                                                "Motorola Phase 2 regroup channel grant explicit");
                 ev.mfid = mfid;
-                if (hasBytes(bytes, pos + 2, 1)) applyServiceOptions(ev, bytes[pos + 2]);
+                if (hasBytes(bytes, pos + 3, 1)) applyServiceOptions(ev, bytes[pos + 3]);
                 ev.talkgroupId = readU16Msb(bytes, pos + 8);
                 ev.sourceId = readU24Msb(bytes, pos + 10);
                 addExplicitVoiceChannel(ev, readU16Msb(bytes, pos + 4), readU16Msb(bytes, pos + 6));
@@ -1525,7 +1526,6 @@ std::vector<P25ControlEvent> P25ControlChannelAnalyzer::parsePhase2MacMessages(u
                 P25ControlEvent first = makeGrant(op, pos, P25ControlEventType::GroupVoiceUpdate,
                                                   "Motorola Phase 2 regroup channel update");
                 first.mfid = mfid;
-                if (hasBytes(bytes, pos + 2, 1)) applyServiceOptions(first, bytes[pos + 2]);
                 first.talkgroupId = readU16Msb(bytes, pos + 5);
                 addVoiceChannel(first, readU16Msb(bytes, pos + 3));
                 if (shouldEmitGrant(first.talkgroupId, first.channel)) events.push_back(first);
@@ -1533,7 +1533,6 @@ std::vector<P25ControlEvent> P25ControlChannelAnalyzer::parsePhase2MacMessages(u
                 P25ControlEvent second = makeGrant(op, pos, P25ControlEventType::GroupVoiceUpdate,
                                                    "Motorola Phase 2 regroup channel update");
                 second.mfid = mfid;
-                if (hasBytes(bytes, pos + 2, 1)) applyServiceOptions(second, bytes[pos + 2]);
                 second.talkgroupId = readU16Msb(bytes, pos + 9);
                 addVoiceChannel(second, readU16Msb(bytes, pos + 7));
                 if (shouldEmitGrant(second.talkgroupId, second.channel, first.talkgroupId)) events.push_back(second);

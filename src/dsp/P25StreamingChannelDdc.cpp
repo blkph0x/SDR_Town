@@ -335,9 +335,9 @@ P25StreamingChannelDdcResult P25StreamingChannelDdc::process(
     if (m_decimatedScratch.size() < 2) return out;
 
     m_channelScratch = m_decimatedScratch;
-    const double channelCutoffHz = std::clamp(config.channelBandwidthHz * 0.58, config.symbolRate * 1.15,
-                                             std::min(intermediateRate * 0.42, outputRate * 0.45));
-    const double channelTransitionHz = std::clamp(config.channelBandwidthHz * 0.25, 1800.0, 6000.0);
+    const auto channelLpf = p25ChannelizerLowpass(config, intermediateRate, outputRate);
+    const double channelCutoffHz = channelLpf.cutoffHz;
+    const double channelTransitionHz = channelLpf.transitionHz;
     const auto& channelTaps = filterCache.lowpassTaps(
         intermediateRate, channelCutoffHz, channelTransitionHz, 161);
     m_channelFir.processInPlace(m_channelScratch, channelTaps);
