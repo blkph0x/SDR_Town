@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Current version** | **0.2.49** (experimental channel) |
+| **Current version** | **0.2.50** (experimental channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
@@ -34,7 +34,7 @@ This is **active experimental software**. It is useful for real RF testing and d
 
 ### P25 Phase 2 clear audio — about ~50% of the time
 
-As of **v0.2.49**, field testing reports **clear Phase 2 voice roughly half the time** on live systems (good enough to understand speech when it works; still often blocky, intermittent, wrong-slot, or gated when it does not). This build tightens live selected-slot playout restart timing to reduce the short disconnected emit gaps seen in late v0.2.48 captures.
+As of **v0.2.50**, field testing reports **clear Phase 2 voice roughly half the time** on live systems (good enough to understand speech when it works; still often blocky or intermittent when it does not). This build keeps the stricter selected-slot/source gates and backs out the 180 ms live speaker catch-up experiment that regressed the 2026-09-03 capture into more bridge fill and duplicate suppression.
 
 What that means in practice:
 

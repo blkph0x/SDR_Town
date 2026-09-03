@@ -11,7 +11,8 @@ checks = {
         "kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.180" in main
         and "kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.100" in main
         and "kP25Phase2VoiceDecodeSpeakerCatchUpOverlapSeconds = 0.100" in main
-        and "20260825_102710" in main
+        and "20260903_040719" in main
+        and "field 20260903_040719 regressed" in main
     ),
     "queue depth accepts receiver sustain hint": (
         "p25VoiceDecodeMaxPendingJobsNow(bool speakerSustainHint)" in main

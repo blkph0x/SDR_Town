@@ -2789,10 +2789,9 @@ static constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpOverlapSeconds = 0.10
 // If the voice worker falls behind live RF, decode a larger near-live chunk
 // with short context so one worker pass can refill the speaker ring.
 // Cap non-speaker catch-up at 120 ms so a single job cannot monopolize the
-// worker before hard clear. Speaker catch-up above uses 180 ms: field
-// 20260825_102710 showed replay-clear IQ but live GUI outputting 80-160 ms
-// islands separated by 300-1400 ms gaps because active backlog still used the
-// normal 120 ms hop.
+// worker before hard clear. Speaker catch-up is intentionally conservative:
+// field 20260903_040719 regressed when 180 ms catch-up became reachable on the
+// active speaker path, raising duplicate/context suppression and bridge fill.
 static constexpr double kP25Phase2VoiceDecodeBacklogCatchUpChunkSeconds = 0.120;
 static constexpr double kP25Phase2VoiceDecodeBacklogCatchUpMinFreshSeconds = 0.080;
 static constexpr double kP25Phase2VoiceDecodeBacklogCatchUpOverlapSeconds = 0.040;
@@ -7674,6 +7673,16 @@ static bool p25Phase2DualSlotUntrustedGarbleWindow(const P25VoiceAudioBlock& out
     if (out.phase2TargetVoiceCodewords == 0) return true;
     const bool companionSlotAccounted = p25Phase2CompanionSlotAccounted(out);
     const bool strongSelectedSlot = p25Phase2StrongSelectedSlotStructure(out);
+    const bool selectedTimeslotContinuation =
+        out.phase2SameCallSelectedTimeslotContinuation &&
+        out.phase2CurrentFeedTrustedTargetBurst &&
+        companionSlotAccounted &&
+        strongSelectedSlot &&
+        !out.phase2TargetEssEncrypted &&
+        !out.phase2WrongSlot;
+    if (selectedTimeslotContinuation) {
+        return false;
+    }
     const bool thisWindowSelectedClearProof =
         out.phase2ThisWindowTargetMacCrcValid ||
         (out.phase2ThisWindowTargetEssClear &&
@@ -7723,9 +7732,6 @@ static bool p25Phase2SameCallSelectedTimeslotContinuationSafe(const Receiver& rx
     const bool thisWindowSelectedSlotProof =
         out.phase2ThisWindowTargetMacCrcValid ||
         out.phase2ThisWindowTargetEssClear;
-    if (!thisWindowSelectedSlotProof) {
-        return false;
-    }
     const bool sameCallClear =
         p25Phase2RecentSecurityEvidenceUsable(rx, key, nowMs) &&
         (rx.p25Phase2RecentTargetMacCrcValid ||
@@ -7734,6 +7740,17 @@ static bool p25Phase2SameCallSelectedTimeslotContinuationSafe(const Receiver& rx
         (rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Clear ||
          (rx.p25VoiceClearKnown && !rx.p25VoiceEncrypted));
     if (!sameCallClear) return false;
+    const bool recentSelectedSlotProof =
+        (rx.p25Phase2RecentTargetMacCrcValid ||
+         rx.p25Phase2RecentTargetSessionAudioRelease ||
+         (rx.p25Phase2RecentTargetEssKnown &&
+          !rx.p25Phase2RecentTargetEssEncrypted)) &&
+        (rx.p25Phase2RecentSuperframeMaskLock ||
+         out.phase2TargetMaskedBursts > 0 ||
+         out.phase2MaskedBursts > 0);
+    if (!thisWindowSelectedSlotProof && !recentSelectedSlotProof) {
+        return false;
+    }
     if (!requireFedAudio) return true;
     if (out.phase2PendingAmbeFramesReleased > 0) return false;
     if (out.phase2FedToMbelib == 0 ||
@@ -11621,7 +11638,12 @@ static P25Phase2AmbeEmitDedupeState& p25Phase2SyncAmbeEmitDedupeCallContext(Rece
     const bool currentSlotKnown = rx.p25VoiceTdmaSlotKnown;
     const uint8_t currentSlot = static_cast<uint8_t>(rx.p25VoiceTdmaSlot & 0x01u);
     const double currentVoiceFreqHz = p25Phase2VoiceSchedulerNominalHz(rx);
+    const bool sourceChanged =
+        state.sourceId != 0 &&
+        currentSource != 0 &&
+        state.sourceId != currentSource;
     const bool callChanged = state.talkgroupId != currentTg ||
+                             sourceChanged ||
                              state.callSessionId != currentCallSession ||
                              state.slotKnown != currentSlotKnown ||
                              (currentSlotKnown && state.slotKnown && state.slot != currentSlot) ||
@@ -12570,6 +12592,15 @@ static bool p25Phase2TrafficTalkgroupMismatchBlocksSelectedSlot(
         !p25Phase2TrafficTalkgroupBelongsToFollowedCall(rx, burst);
 }
 
+static bool p25Phase2TrafficTalkgroupKnownMismatch(
+    const Receiver& rx,
+    const P25Phase2Burst& burst) noexcept
+{
+    return burst.trafficTalkgroupKnown &&
+        rx.p25VoiceTalkgroupId != 0 &&
+        burst.trafficTalkgroupId != rx.p25VoiceTalkgroupId;
+}
+
 static bool p25Phase2BurstEncryptedForFollowedCall(
     const Receiver& rx,
     const P25Phase2Burst& burst) noexcept
@@ -12971,6 +13002,7 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
     bool oppositeSlotHasVoiceCodewords = false;
     bool phase2InvertSlotLabelsForWindow = false;
     bool bothSlotsHaveVoiceInWindow = false;
+    bool selectedSlotKnownOtherTalkgroupInWindow = false;
     if (rx.p25VoiceTdmaSlotKnown) {
         const uint8_t followedGrantSlot = static_cast<uint8_t>(rx.p25VoiceTdmaSlot & 0x01u);
 
@@ -13042,8 +13074,24 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             (rx.p25Phase2RecentTargetMacCrcValid || rx.p25Phase2RecentAnyMacCrcValid);
 
         for (const auto& burst : live.phase2Bursts) {
+            if (!burst.grantSlotKnown ||
+                !burst.trafficTalkgroupKnown ||
+                rx.p25VoiceTalkgroupId == 0) {
+                continue;
+            }
+            if (!burstIsFollowedSlot(burst)) {
+                continue;
+            }
+            if (burst.trafficTalkgroupId != rx.p25VoiceTalkgroupId) {
+                selectedSlotKnownOtherTalkgroupInWindow = true;
+            }
+        }
+
+        for (const auto& burst : live.phase2Bursts) {
             const bool trafficTalkgroupBelongs =
                 p25Phase2TrafficTalkgroupBelongsToFollowedCall(rx, burst);
+            const bool trafficTalkgroupKnownMismatch =
+                p25Phase2TrafficTalkgroupKnownMismatch(rx, burst);
             const bool trafficTalkgroupBlocksSelectedSlot =
                 p25Phase2TrafficTalkgroupMismatchBlocksSelectedSlot(rx, burst);
             const bool burstEncryptedForFollowedCall =
@@ -13089,12 +13137,22 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
                     continue;
                 }
             }
-            if (targetSlot && burst.trafficTalkgroupKnown &&
-                rx.p25VoiceTalkgroupId != 0 &&
-                burst.trafficTalkgroupId != rx.p25VoiceTalkgroupId &&
-                !p25Phase2TrafficTalkgroupAuthoritativeThisBurst(burst) &&
-                !burst.voiceCodewords.empty()) {
-                out.phase2TrafficTalkgroupStaleMismatchVoiceCodewords += burst.voiceCodewords.size();
+            const bool selectedSlotBlockedByWindowTalkgroup =
+                targetSlot &&
+                selectedSlotKnownOtherTalkgroupInWindow &&
+                (!burst.trafficTalkgroupKnown ||
+                 burst.trafficTalkgroupId != rx.p25VoiceTalkgroupId);
+            if (targetSlot &&
+                (trafficTalkgroupKnownMismatch || selectedSlotBlockedByWindowTalkgroup)) {
+                if (!burst.voiceCodewords.empty()) {
+                    // A retained or same-window traffic TG label that names a
+                    // different TG is still not our audio module.  Count that
+                    // selected-slot material as non-target structure and let
+                    // the feed loop record the exact reject reason once.
+                    oppositeSlotHasVoiceCodewords = true;
+                    out.phase2OppositeVoiceCodewords += burst.voiceCodewords.size();
+                }
+                continue;
             }
             if (targetSlot && trafficTalkgroupBlocksSelectedSlot) {
                 if (!burst.voiceCodewords.empty()) {
@@ -13652,6 +13710,14 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             if (burstSlot != static_cast<uint8_t>(rx.p25VoiceTdmaSlot & 0x01u)) {
                 continue;
             }
+            if (p25Phase2TrafficTalkgroupKnownMismatch(rx, b)) {
+                continue;
+            }
+            if (selectedSlotKnownOtherTalkgroupInWindow &&
+                (!b.trafficTalkgroupKnown ||
+                 b.trafficTalkgroupId != rx.p25VoiceTalkgroupId)) {
+                continue;
+            }
         }
         for (const auto& cw : b.voiceCodewords) {
             const bool cwAbsKnown = codewordAbsoluteDibitKnown(cw);
@@ -13762,12 +13828,22 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             }
             continue;
         }
-        if (burst.trafficTalkgroupKnown &&
-            rx.p25VoiceTalkgroupId != 0 &&
-            burst.trafficTalkgroupId != rx.p25VoiceTalkgroupId) {
-            if (!p25Phase2TrafficTalkgroupAuthoritativeThisBurst(burst)) {
+        if (p25Phase2TrafficTalkgroupKnownMismatch(rx, burst)) {
+            out.phase2RejectedVoiceCodewords += burst.voiceCodewords.size();
+            if (p25Phase2TrafficTalkgroupAuthoritativeThisBurst(burst)) {
+                out.phase2WrongSlotVoiceCodewords += burst.voiceCodewords.size();
+                out.phase2TrafficTalkgroupMismatchVoiceCodewords += burst.voiceCodewords.size();
+            } else {
                 out.phase2TrafficTalkgroupStaleMismatchVoiceCodewords += burst.voiceCodewords.size();
             }
+            continue;
+        }
+        if (selectedSlotKnownOtherTalkgroupInWindow &&
+            (!burst.trafficTalkgroupKnown ||
+             burst.trafficTalkgroupId != rx.p25VoiceTalkgroupId)) {
+            out.phase2RejectedVoiceCodewords += burst.voiceCodewords.size();
+            out.phase2TrafficTalkgroupStaleMismatchVoiceCodewords += burst.voiceCodewords.size();
+            continue;
         }
         if (p25Phase2TrafficTalkgroupMismatchBlocksSelectedSlot(rx, burst)) {
             out.phase2RejectedVoiceCodewords += burst.voiceCodewords.size();
@@ -13951,7 +14027,8 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             !p25Phase2DualSlotUntrustedGarbleWindow(out) &&
             (out.phase2OppositeVoiceCodewords == 0 ||
              out.phase2ThisWindowTargetMacCrcValid ||
-             out.phase2ThisWindowTargetEssClear);
+             out.phase2ThisWindowTargetEssClear ||
+             out.phase2SameCallSelectedTimeslotContinuation);
         const bool targetTrafficClearEvidence =
             freshTargetTrafficClearEvidence || recentClearContinuationEvidence;
         const bool sameCallClearSustainFeed =
@@ -14060,7 +14137,7 @@ static P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
         // while speaker later muted → poison vocoder / blocky audio.
         const bool dualSlotSelectedContinuationForBurst =
             sameCallContinuationStructure &&
-            currentBurstFeedTrustedRaw &&
+            currentBurstFeedTrusted &&
             effectiveBurstSlot == followedGrantSlot &&
             burst.xorMaskApplied &&
             selectedSlotEpochForFeed &&
@@ -18279,10 +18356,35 @@ public:
 
                 std::unique_lock<std::recursive_mutex> dspLock(rx.dspMutex, std::try_to_lock);
                 if (dspLock.owns_lock()) {
+                    const bool armedVoiceDecodeEnabled = rx.p25VoiceDecodeEnabled;
+                    const bool armedVoiceClearKnown = rx.p25VoiceClearKnown;
+                    const bool armedVoiceEncrypted = rx.p25VoiceEncrypted;
+                    const uint32_t armedTalkgroupId = rx.p25VoiceTalkgroupId;
                     const uint32_t armedSourceId = rx.p25VoiceSourceId;
                     const int64_t armedGrantEpochMs = rx.p25VoiceGrantEpochMs;
                     const uint64_t armedCallSessionId = rx.p25CurrentCallSessionId;
                     const uint64_t armedPttGeneration = rx.p25PttGeneration;
+                    const bool armedPhase2 = rx.p25VoicePhase2;
+                    const bool armedSlotKnown = rx.p25VoiceTdmaSlotKnown;
+                    const uint8_t armedSlot = rx.p25VoiceTdmaSlot;
+                    const bool armedGrantedSlotImmutable = rx.p25Phase2GrantedSlotImmutable;
+                    const bool armedMaskKnown = rx.p25VoiceMaskParamsKnown;
+                    const uint16_t armedNac = rx.p25VoiceNac;
+                    const uint32_t armedWacn = rx.p25VoiceWacn;
+                    const uint16_t armedSystemId = rx.p25VoiceSystemId;
+                    const int64_t armedSettleUntilMs = rx.p25VoiceSettleUntilMs;
+                    const int armedDiscardWindows = rx.p25VoiceDiscardWindows;
+                    const bool armedLateEntryProbe = rx.p25Phase2AllowLateEntryAudioProbe;
+                    const bool armedAfcFrozen = rx.p25AfcFrozen;
+                    const double armedFrozenAfcOffsetHz = rx.p25FrozenAfcOffsetHz;
+                    const bool armedIndependentTrafficSource = rx.p25IndependentTrafficSource;
+                    const bool armedTrafficRetunesPrimary = rx.p25TrafficRetunesPrimary;
+                    const uint64_t armedTrafficGeneration = rx.p25TrafficGeneration;
+                    const double armedTrafficControlFreqHz = rx.p25TrafficControlFreqHz;
+                    const double armedTrafficSourceCenterFreqHz = rx.p25TrafficSourceCenterFreqHz;
+                    const double armedTrafficVoiceFreqHz = rx.p25TrafficVoiceFreqHz;
+                    const uint8_t armedTrafficSlot = rx.p25TrafficSlot;
+                    const qint64 armedTrafficLastGrantMs = rx.p25TrafficLastGrantMs;
                     const bool armedTargetOffsetKnown = rx.p25Phase2TrafficTargetOffsetKnown;
                     const double armedTargetOffsetHz = rx.p25Phase2TrafficTargetOffsetHz;
                     const int armedTargetOffsetTrust = rx.p25Phase2TrafficTargetOffsetTrust;
@@ -18291,12 +18393,37 @@ public:
                     p25ClearPhase2PendingAudio(rx);
                     rx.resetP25VoiceState();
                     clearP25SessionScopedState(rx);
+                    rx.p25VoiceDecodeEnabled = armedVoiceDecodeEnabled;
+                    rx.p25VoiceClearKnown = armedVoiceClearKnown;
+                    rx.p25VoiceEncrypted = armedVoiceEncrypted;
+                    rx.p25VoiceTalkgroupId = armedTalkgroupId;
                     rx.p25VoiceSourceId = armedSourceId;
                     rx.p25VoiceGrantEpochMs = armedGrantEpochMs;
                     rx.p25PttGeneration = armedPttGeneration;
                     rx.p25CurrentCallSessionId = armedCallSessionId != 0
                         ? armedCallSessionId
                         : p25MakeCurrentCallSessionId(rx.p25VoiceTalkgroupId, rx.p25PttGeneration);
+                    rx.p25VoicePhase2 = armedPhase2;
+                    rx.p25VoiceTdmaSlotKnown = armedSlotKnown;
+                    rx.p25VoiceTdmaSlot = armedSlot;
+                    rx.p25Phase2GrantedSlotImmutable = armedGrantedSlotImmutable;
+                    rx.p25VoiceMaskParamsKnown = armedMaskKnown;
+                    rx.p25VoiceNac = armedNac;
+                    rx.p25VoiceWacn = armedWacn;
+                    rx.p25VoiceSystemId = armedSystemId;
+                    rx.p25VoiceSettleUntilMs = armedSettleUntilMs;
+                    rx.p25VoiceDiscardWindows = armedDiscardWindows;
+                    rx.p25Phase2AllowLateEntryAudioProbe = armedLateEntryProbe;
+                    rx.p25AfcFrozen = armedAfcFrozen;
+                    rx.p25FrozenAfcOffsetHz = armedFrozenAfcOffsetHz;
+                    rx.p25IndependentTrafficSource = armedIndependentTrafficSource;
+                    rx.p25TrafficRetunesPrimary = armedTrafficRetunesPrimary;
+                    rx.p25TrafficGeneration = armedTrafficGeneration;
+                    rx.p25TrafficControlFreqHz = armedTrafficControlFreqHz;
+                    rx.p25TrafficSourceCenterFreqHz = armedTrafficSourceCenterFreqHz;
+                    rx.p25TrafficVoiceFreqHz = armedTrafficVoiceFreqHz;
+                    rx.p25TrafficSlot = armedTrafficSlot;
+                    rx.p25TrafficLastGrantMs = armedTrafficLastGrantMs;
                     rx.p25Phase2TrafficTargetOffsetKnown = armedTargetOffsetKnown;
                     rx.p25Phase2TrafficTargetOffsetHz = armedTargetOffsetHz;
                     rx.p25Phase2TrafficTargetOffsetTrust = armedTargetOffsetTrust;
@@ -19355,6 +19482,10 @@ public:
                             incomingSourceKnown &&
                             activeRx->p25VoiceSourceId != 0 &&
                             activeRx->p25VoiceSourceId != followTg.lastSourceId;
+                        if (incomingSourceKnown && incomingSourceChanged) {
+                            p25Phase2AdoptGrantSourceIdForCurrentCall(*activeRx, followTg.lastSourceId);
+                            updatedSource = true;
+                        }
                         if (trafficCarrierChanged ||
                             incomingSourceChanged ||
                             !commitSameCallMetadataInPlace ||
@@ -20051,6 +20182,9 @@ public:
                                 incomingSourceKnown &&
                                 activeRx->p25VoiceSourceId != 0 &&
                                 activeRx->p25VoiceSourceId != followTg.lastSourceId;
+                            if (incomingSourceKnown && incomingSourceChanged) {
+                                p25Phase2AdoptGrantSourceIdForCurrentCall(*activeRx, followTg.lastSourceId);
+                            }
                             if (incomingSlotKnown) {
                                 activeRx->p25VoiceTdmaSlotKnown = true;
                                 activeRx->p25VoiceTdmaSlot = incomingSlot;
@@ -23202,6 +23336,7 @@ public:
                     bool monP25IndependentTrafficSource = false;
                     uint64_t monP25TrafficGeneration = 0;
                     uint32_t monP25VoiceTalkgroupId = 0;
+                    uint32_t monP25VoiceSourceId = 0;
                     bool monP25VoiceTdmaSlotKnown = false;
                     uint8_t monP25VoiceTdmaSlot = 0;
                     double monP25TrafficVoiceFreqHz = 0.0;
@@ -23274,6 +23409,7 @@ public:
                         monP25IndependentTrafficSource = rx.p25IndependentTrafficSource;
                         monP25TrafficGeneration = rx.p25TrafficGeneration;
                         monP25VoiceTalkgroupId = rx.p25VoiceTalkgroupId;
+                        monP25VoiceSourceId = rx.p25VoiceSourceId;
                         monP25VoiceTdmaSlotKnown = rx.p25VoiceTdmaSlotKnown;
                         monP25VoiceTdmaSlot = static_cast<uint8_t>(rx.p25VoiceTdmaSlot & 0x01u);
                         monP25TrafficVoiceFreqHz = rx.p25TrafficVoiceFreqHz > 0.0 ? rx.p25TrafficVoiceFreqHz : rx.freqHz;
@@ -23299,6 +23435,7 @@ public:
                             if (tryApplyP25VoiceResetLocked(rx)) {
                                 monP25VoiceDecode = rx.p25VoiceDecodeEnabled;
                                 monP25VoicePhase2 = rx.p25VoicePhase2;
+                                monP25VoiceSourceId = rx.p25VoiceSourceId;
                                 phase2IqByRx.erase(p25ReceiverSessionKey(rx));
                                 p25Phase2ClearSpeakerPendingQueue(rx,
                                                           p25SpeakerPendingFor(pendingAudioByRx, rx),
@@ -23340,6 +23477,7 @@ public:
                                         rx, appliedQueuedSlot, QDateTime::currentMSecsSinceEpoch());
                                     monP25VoiceDecode = rx.p25VoiceDecodeEnabled;
                                     monP25VoicePhase2 = rx.p25VoicePhase2;
+                                    monP25VoiceSourceId = rx.p25VoiceSourceId;
                                     if (probeApplied) {
                                         skipP25VoiceWindow = true;
                                         mgr.setReceiverCursorToLiveEdge(i, rx);
@@ -23770,6 +23908,7 @@ public:
                         job.trafficGeneration = monP25TrafficGeneration;
                         job.independentTrafficSource = monP25IndependentTrafficSource;
                         job.talkgroupId = monP25VoiceTalkgroupId;
+                        job.sourceId = monP25VoiceSourceId;
                         job.tdmaSlotKnown = monP25VoiceTdmaSlotKnown;
                         job.tdmaSlot = monP25VoiceTdmaSlot;
                         job.voiceFreqHz = monP25TrafficVoiceFreqHz;
@@ -25183,6 +25322,7 @@ private:
         bool independentTrafficSource = false;
         bool speakerSustainDecode = false;
         uint32_t talkgroupId = 0;
+        uint32_t sourceId = 0;
         bool tdmaSlotKnown = false;
         uint8_t tdmaSlot = 0;
         double voiceFreqHz = 0.0;
@@ -25218,6 +25358,7 @@ private:
         size_t contextIqSamples = 0;
         uint64_t trafficGeneration = 0;
         uint32_t talkgroupId = 0;
+        uint32_t sourceId = 0;
         bool tdmaSlotKnown = false;
         uint8_t tdmaSlot = 0;
         double voiceFreqHz = 0.0;
@@ -25420,6 +25561,7 @@ private:
                 result.contextIqSamples = job.contextIqSamples;
                 result.trafficGeneration = job.trafficGeneration;
                 result.talkgroupId = job.talkgroupId;
+                result.sourceId = job.sourceId;
                 result.tdmaSlotKnown = job.tdmaSlotKnown;
                 result.tdmaSlot = job.tdmaSlot;
                 result.voiceFreqHz = job.voiceFreqHz;
@@ -25438,16 +25580,17 @@ private:
                 const double workerCf = job.centerFreqHz;
                 const double workerTarget = job.targetFreqHz;
                 const uint32_t workerTg = job.talkgroupId;
+                const uint32_t workerSource = job.sourceId;
                 const bool workerSlotKnown = job.tdmaSlotKnown;
                 const int workerSlot = static_cast<int>(job.tdmaSlot & 0x01u);
                 const uint64_t workerGeneration = job.trafficGeneration;
                 QTimer::singleShot(0, this, [this, workerRxKey, workerSeq, workerIq, workerFresh,
                                               workerContext, workerRolling, workerSr, workerCf,
                                               workerTarget, workerTg, workerSlotKnown, workerSlot,
-                                              workerGeneration]() {
+                                              workerGeneration, workerSource]() {
                     const QString key = QString("p25-voice-worker-start:%1").arg(static_cast<qulonglong>(workerRxKey));
                     appendP25LogLineKeyed(key,
-                        QString("P25 DSP VOICE WORKER START: seq=%1 rolling=%2 iq=%3 fresh=%4 context=%5 sr=%6MHz cf=%7MHz target=%8MHz tg=%9 slot=%10 generation=%11.")
+                        QString("P25 DSP VOICE WORKER START: seq=%1 rolling=%2 iq=%3 fresh=%4 context=%5 sr=%6MHz cf=%7MHz target=%8MHz tg=%9 src=%10 slot=%11 generation=%12.")
                             .arg(static_cast<qulonglong>(workerSeq))
                             .arg(workerRolling ? "yes" : "no")
                             .arg(static_cast<qulonglong>(workerIq))
@@ -25457,6 +25600,7 @@ private:
                             .arg(workerCf / 1e6, 0, 'f', 5)
                             .arg(workerTarget / 1e6, 0, 'f', 5)
                             .arg(workerTg)
+                            .arg(workerSource != 0 ? p25HexId(workerSource, 6) : QStringLiteral("unknown"))
                             .arg(workerSlotKnown ? QString::number(workerSlot) : QStringLiteral("unknown"))
                             .arg(static_cast<qulonglong>(workerGeneration)),
                         750);
@@ -25548,6 +25692,11 @@ private:
                     // publish a queued result for an old TG/slot just because the
                     // physical voice carrier/generation still matches.
                     if (job.talkgroupId != 0 && rx.p25VoiceTalkgroupId != job.talkgroupId) return fail("talkgroup-changed");
+                    if (job.sourceId != 0 &&
+                        rx.p25VoiceSourceId != 0 &&
+                        rx.p25VoiceSourceId != job.sourceId) {
+                        return fail("source-changed");
+                    }
                     if (job.tdmaSlotKnown &&
                         (!rx.p25VoiceTdmaSlotKnown ||
                          static_cast<uint8_t>(rx.p25VoiceTdmaSlot & 0x01u) != static_cast<uint8_t>(job.tdmaSlot & 0x01u))) {
@@ -26132,6 +26281,11 @@ private:
             } else if (result.talkgroupId != 0 && rx.p25VoiceTalkgroupId != result.talkgroupId) {
                 stale = true;
                 if (staleReason.empty()) staleReason = "talkgroup-changed";
+            } else if (result.sourceId != 0 &&
+                       rx.p25VoiceSourceId != 0 &&
+                       rx.p25VoiceSourceId != result.sourceId) {
+                stale = true;
+                if (staleReason.empty()) staleReason = "source-changed";
             } else if (result.tdmaSlotKnown &&
                        (!rx.p25VoiceTdmaSlotKnown ||
                         static_cast<uint8_t>(rx.p25VoiceTdmaSlot & 0x01u) != static_cast<uint8_t>(result.tdmaSlot & 0x01u))) {
@@ -26176,15 +26330,17 @@ private:
                 const QString reason = QString::fromStdString(
                     staleReason.empty() ? std::string("stale") : staleReason);
                 const uint32_t tgLog = result.talkgroupId;
+                const uint32_t sourceLogValue = result.sourceId;
                 const bool slotKnownLog = result.tdmaSlotKnown;
                 const int slotLog = static_cast<int>(result.tdmaSlot & 0x01u);
                 const qulonglong genLog = static_cast<qulonglong>(result.trafficGeneration);
-                QTimer::singleShot(0, this, [this, rxKey, seqLog, reason, tgLog, slotKnownLog, slotLog, genLog]() {
+                QTimer::singleShot(0, this, [this, rxKey, seqLog, reason, tgLog, sourceLogValue, slotKnownLog, slotLog, genLog]() {
                     appendP25LogLineKeyed(QString("p25-voice-worker-stale:%1").arg(static_cast<qulonglong>(rxKey)),
-                        QString("P25 voice worker stale/drop: seq=%1 reason=%2 tg=%3 slot=%4 generation=%5.")
+                        QString("P25 voice worker stale/drop: seq=%1 reason=%2 tg=%3 src=%4 slot=%5 generation=%6.")
                             .arg(static_cast<qulonglong>(seqLog))
                             .arg(reason)
                             .arg(tgLog)
+                            .arg(sourceLogValue != 0 ? p25HexId(sourceLogValue, 6) : QStringLiteral("unknown"))
                             .arg(slotKnownLog ? QString::number(slotLog) : QStringLiteral("unknown"))
                             .arg(genLog),
                         1000);

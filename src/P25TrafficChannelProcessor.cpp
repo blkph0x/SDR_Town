@@ -63,15 +63,10 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
             !burst.trafficTalkgroupKnown ||
             m_talkgroup == 0 ||
             burst.trafficTalkgroupId == m_talkgroup;
-        const bool trafficTalkgroupAuthoritativeMismatch =
-            burst.trafficTalkgroupObservedThisBurst &&
-            burst.trafficTalkgroupKnown &&
-            m_talkgroup != 0 &&
-            burst.trafficTalkgroupId != m_talkgroup;
         const bool slotMatches = !targetSlotKnown ||
             (burst.grantSlotKnown &&
              static_cast<uint8_t>(burst.grantSlot & 0x01u) == targetSlot);
-        const bool burstTargetsCall = slotMatches && !trafficTalkgroupAuthoritativeMismatch;
+        const bool burstTargetsCall = slotMatches && trafficTalkgroupBelongsToCall;
         if (!burstTargetsCall) continue;
         targetVoiceCodewords += burst.voiceCodewords.size();
         const bool goodVoiceEvidence = burst.xorMaskApplied &&

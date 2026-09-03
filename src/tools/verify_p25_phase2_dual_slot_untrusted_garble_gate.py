@@ -34,7 +34,7 @@ pending_dual_branch = pending_drain_body.split(
     "if (out.phase2OppositeVoiceCodewords > 0) {", 2
 )[-1].split("}", 1)[0]
 continuation_fn = region_after(
-    "static bool p25Phase2SameCallSelectedTimeslotContinuationSafe", 2400
+    "static bool p25Phase2SameCallSelectedTimeslotContinuationSafe", 3200
 )
 unsafe_mixed_fn = region_after(
     "static bool p25Phase2UnsafeMixedSlotAudioWindow", 1200
@@ -79,6 +79,7 @@ checks = {
         and "out.phase2CurrentFeedTrustedTargetBurst" in continuation_fn
         and "p25AudioSamplesLookSafe(out.audio)" in continuation_fn
         and "thisWindowSelectedSlotProof" in continuation_fn
+        and "recentSelectedSlotProof" in continuation_fn
         and "out.phase2ThisWindowTargetMacCrcValid" in continuation_fn
         and "out.phase2ThisWindowTargetEssClear" in continuation_fn
     ),
@@ -120,11 +121,11 @@ checks = {
         and "out.phase2MacCrcValid > 0" not in pending_dual_branch
         and "currentWindowHasFeedTrustedTargetBurst &&" not in pending_dual_branch
     ),
-    "recent continuation cannot bypass dual-slot proof": (
+    "recent continuation uses same-call selected-slot proof": (
         "out.phase2OppositeVoiceCodewords == 0 ||" in recent_continuation_region
         and "out.phase2ThisWindowTargetMacCrcValid" in recent_continuation_region
         and "out.phase2ThisWindowTargetEssClear" in recent_continuation_region
-        and "sameCallContinuationStructure" not in recent_continuation_region.split(");", 1)[0]
+        and "out.phase2SameCallSelectedTimeslotContinuation" in recent_continuation_region
     ),
     "trusted clear sustain cannot bypass dual-slot proof": (
         "out.phase2OppositeVoiceCodewords == 0 ||" in trusted_clear_region
