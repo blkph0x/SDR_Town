@@ -16,7 +16,8 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $verify = @(
     "verify_p25_phase2_same_call_mhz_hop.py",
-    "verify_p25_phase2_clear_grant_op02_preservation.py"
+    "verify_p25_phase2_clear_grant_op02_preservation.py",
+    "verify_p25_phase2_live_min_fresh_contract.py"
 )
 foreach ($script in $verify) {
     python "$Root\src\tools\$script"

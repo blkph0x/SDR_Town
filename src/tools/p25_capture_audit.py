@@ -87,6 +87,12 @@ AUDIO_TOP_UP_FIELD_RE = re.compile(
     r"\b(?P<key>TG|real|bridge|ringQueued|ringFill|underruns)=(?P<value>[^\s]+)",
     re.IGNORECASE,
 )
+SCHEDULER_SUBMITTED_RE = re.compile(
+    r"P25 voice scheduler:\s+submitted\s+iq=(?P<iq>\d+)\s+fresh=(?P<fresh>\d+)\s+"
+    r"context=(?P<context>\d+).*?\bsr=(?P<sr>[0-9.]+)MHz\b.*?\btg=(?P<tg>\d+)\b.*?"
+    r"\bslot=(?P<slot>[01])\b",
+    re.IGNORECASE,
+)
 AUDIO_PUSH_RE = re.compile(r"\bpushed=(?P<pushed>\d+)\s+samples\b", re.IGNORECASE)
 AUDIO_UNDERRUN_RE = re.compile(r"\bunderruns=(?P<underruns>\d+)\b", re.IGNORECASE)
 AUDIO_RING_FILL_RE = re.compile(r"\bringFill=(?P<fill>[0-9.]+)%", re.IGNORECASE)
@@ -250,6 +256,36 @@ def parse_audio_top_up_fields(line: str) -> dict[str, str]:
     for match in AUDIO_TOP_UP_FIELD_RE.finditer(line):
         fields[match.group("key").lower()] = match.group("value").rstrip(".")
     return fields
+
+
+def scheduler_fresh_issue(line: str) -> tuple[str, dict] | None:
+    match = SCHEDULER_SUBMITTED_RE.search(line)
+    if not match:
+        return None
+    try:
+        fresh = int(match.group("fresh"))
+        context = int(match.group("context"))
+        sample_rate_hz = float(match.group("sr")) * 1_000_000.0
+        tg = int(match.group("tg"))
+        slot = int(match.group("slot"))
+    except ValueError:
+        return None
+    one_ambe_frame = int(sample_rate_hz * 0.020 + 0.5)
+    two_ambe_frames = int(sample_rate_hz * 0.040 + 0.5)
+    detail = {
+        "fresh": fresh,
+        "context": context,
+        "sample_rate_hz": int(sample_rate_hz + 0.5),
+        "one_ambe_frame_samples": one_ambe_frame,
+        "two_ambe_frame_samples": two_ambe_frames,
+        "tg": tg,
+        "slot": slot,
+    }
+    if one_ambe_frame > 0 and fresh < one_ambe_frame:
+        return "phase2-scheduler-subframe-fresh", detail
+    if two_ambe_frames > 0 and fresh < two_ambe_frames:
+        return "phase2-scheduler-less-than-two-frames-fresh", detail
+    return None
 
 
 def audio_output_security_issue(line: str) -> str | None:
@@ -957,6 +993,7 @@ def audit_capture(capture_dir: Path) -> dict:
     clear_target_rejected_before_feed_examples: list[dict] = []
     clear_target_accounted_without_feed_examples: list[dict] = []
     slow_voice_worker_examples: list[dict] = []
+    scheduler_short_fresh_examples: list[dict] = []
     for line_number, line in enumerate(lines, start=1):
         for key, needle in PATTERNS.items():
             if needle in line:
@@ -967,6 +1004,20 @@ def audit_capture(capture_dir: Path) -> dict:
                 counts["worker_abs_duplicate_suppression"] += 1
             if fields.get("seqDrop", 0) > 0:
                 counts["worker_sequencer_suppression"] += 1
+        if issue := scheduler_fresh_issue(line):
+            reason, detail = issue
+            if reason == "phase2-scheduler-subframe-fresh":
+                counts["scheduler_subframe_fresh_submit"] += 1
+            else:
+                counts["scheduler_short_fresh_submit"] += 1
+            if len(scheduler_short_fresh_examples) < 8:
+                utc = parse_utc_from_line(line)
+                scheduler_short_fresh_examples.append({
+                    "line": line_number,
+                    "utc": utc.isoformat().replace("+00:00", "Z") if utc else None,
+                    "reason": reason,
+                    **detail,
+                })
         if issue := mixed_slot_speaker_issue(line):
             counts["mixed_slot_speaker_output"] += 1
             counts[f"mixed_slot_speaker_{issue}"] += 1
@@ -1144,6 +1195,10 @@ def audit_capture(capture_dir: Path) -> dict:
         findings.append("worker_abs_duplicate_suppression")
     if counts["worker_sequencer_suppression"]:
         findings.append("worker_sequencer_suppression")
+    if counts["scheduler_subframe_fresh_submit"]:
+        findings.append("phase2_scheduler_subframe_fresh")
+    elif counts["scheduler_short_fresh_submit"]:
+        findings.append("phase2_scheduler_short_fresh")
     if counts["traffic_retune_stall"]:
         findings.append("traffic_retune_stall")
     if counts["same_call_stale_target_hop"]:
@@ -1164,6 +1219,7 @@ def audit_capture(capture_dir: Path) -> dict:
         "clear_target_rejected_before_feed_examples": clear_target_rejected_before_feed_examples,
         "clear_target_accounted_without_feed_examples": clear_target_accounted_without_feed_examples,
         "slow_voice_worker_examples": slow_voice_worker_examples,
+        "scheduler_short_fresh_examples": scheduler_short_fresh_examples,
         "unsafe_audio_output_examples": unsafe_audio_output_examples,
         "audio_session_examples": audio_session_examples,
         "audio_underpush_examples": audio_underpush_examples,
@@ -1322,6 +1378,14 @@ def run_self_test() -> None:
         "ess=clear targetEss=clear targetSession=yes targetPtt=no action=target-session-clear "
         "activeOutputs=1 ringFill=36.9% underruns=0."
     ) == "audio-output-underpushed-decoded-pcm"
+    sched_issue = scheduler_fresh_issue(
+        "[00:00:04.035 | 2026-07-04T00:00:04.035Z UTC] "
+        "P25 voice scheduler: submitted iq=196608 fresh=32768 context=163840 "
+        "absKnown=yes sr=2.048MHz cf=420.97500MHz target=421.22500MHz tg=10330 slot=0 generation=1."
+    )
+    assert sched_issue is not None
+    assert sched_issue[0] == "phase2-scheduler-subframe-fresh"
+    assert sched_issue[1]["one_ambe_frame_samples"] == 40960
     assert audio_output_session_issue(
         "[00:00:04.040 | 2026-07-04T00:00:04.040Z UTC] "
         "P25 audio output: TG=30302 pushed=3840 samples gate=emit decoded=4 "

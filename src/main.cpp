@@ -10584,7 +10584,8 @@ struct RollingIqWindow {
                                                     size_t* outContextSamples = nullptr,
                                                     size_t minFreshSamples = 0,
                                                     uint64_t* outDecodeEndAbsolute = nullptr,
-                                                    bool* outDecodeEndAbsoluteKnown = nullptr)
+                                                    bool* outDecodeEndAbsoluteKnown = nullptr,
+                                                    bool allowPartialFresh = true)
     {
         outStartAbsolute = 0;
         outAbsoluteKnown = false;
@@ -10627,7 +10628,7 @@ struct RollingIqWindow {
         size_t effectiveMinFresh = minFreshSamples;
         if (samples.size() > firstNew) {
             const size_t available = samples.size() - firstNew;
-            if (effectiveMinFresh > 0 && available > 0 && available < effectiveMinFresh) {
+            if (allowPartialFresh && effectiveMinFresh > 0 && available > 0 && available < effectiveMinFresh) {
                 const size_t softFloor = absoluteKnown ? static_cast<size_t>(4096) : static_cast<size_t>(8192);
                 if (available >= softFloor) {
                     effectiveMinFresh = available;
@@ -23992,9 +23993,14 @@ public:
                             const size_t minDecodeFresh = p25Phase2EffectiveMinFreshSamples(
                                 rolling.samples.size(), decodeOverlap, minDecodeFreshNominal,
                                 static_cast<size_t>(minDecodeFreshFloor), maxDecodeChunk);
+                            // Phase 2 TDMA must reach the decoder in complete
+                            // AMBE cadence units.  Letting live-edge pressure
+                            // soften a 40 ms speaker slice down to 16-32 ms
+                            // burns worker passes and leaves the output ring
+                            // playing isolated words.
                             iq = rolling.takeUndecoded(maxDecodeChunk, decodeOverlap, iqStartAbsolute, iqStartAbsoluteKnown,
                                 &phase2FreshIqSamples, &phase2ContextIqSamples, minDecodeFresh,
-                                &iqDecodeEndAbsolute, &iqDecodeEndAbsoluteKnown);
+                                &iqDecodeEndAbsolute, &iqDecodeEndAbsoluteKnown, false);
                             if (iq.empty()) {
                                 logP25VoiceScheduler("waiting-fresh-iq",
                                     QString("rolling=%1 maxChunk=%2 overlap=%3 minFresh=%4 effMinFresh=%5 absKnown=%6 tg=%7 target=%8MHz.")
@@ -30725,9 +30731,12 @@ int runCLI(int argc, char* argv[]) {
                         const size_t minDecodeFresh = p25Phase2EffectiveMinFreshSamples(
                             rolling.samples.size(), decodeOverlap, minDecodeFreshNominal,
                             static_cast<size_t>(minDecodeFreshFloor), maxDecodeChunk);
+                        // Keep CLI live capture on the same complete-chunk
+                        // contract as the GUI path; replay can still consume
+                        // bounded file windows independently.
                         iq = rolling.takeUndecoded(maxDecodeChunk, decodeOverlap, iqStartAbsolute, iqStartAbsoluteKnown,
                             &phase2FreshIqSamples, &phase2ContextIqSamples, minDecodeFresh,
-                            &iqDecodeEndAbsolute, &iqDecodeEndAbsoluteKnown);
+                            &iqDecodeEndAbsolute, &iqDecodeEndAbsoluteKnown, false);
                         if (iq.empty()) {
                             did = true;
                             continue;
