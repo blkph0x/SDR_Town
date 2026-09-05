@@ -15,9 +15,9 @@ checks = {
     'speaker-active decode cadence tightened': 'kP25Phase2VoiceDecodeSpeakerCadenceMs = 3' in main,
     'non-speaker sustain decode windows bounded': 'kP25Phase2VoiceDecodeSustainChunkSeconds = 0.080' in main,
     'speaker sustain cadence evidence-backed': (
-        'kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.720' in main and
-        'kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.360' in main and
-        'kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.060' in main
+        'kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.080' in main and
+        'kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.040' in main and
+        'kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.080' in main
     ),
     'cc bleed guard on retuned traffic tuner': 'oneRtlTrafficTunerAwayFromCc' in main,
     'traffic channelization preserves CQPSK eye while guarding cc bleed': (

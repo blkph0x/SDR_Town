@@ -21,9 +21,10 @@ checks = {
         )[1][:500]
         and "return false;" in main.split("p25Phase2ShouldFreezeCqpskDiscrete", 1)[1][:500]
     ),
-    "speaker sustain multi-burst hop": (
-        "kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.100" in main
-        and "kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.050" in main
+    "speaker sustain near-live hop": (
+        "kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.080" in main
+        and "kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.040" in main
+        and "kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.080" in main
     ),
     "speaker catch-up constants present": (
         "kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.180" in main

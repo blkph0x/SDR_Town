@@ -60,9 +60,9 @@ checks = {
     'ring already primed bypass': 'ringAlreadyPrimed' in main,
     'speaker queue depth single-flight': 'kP25VoiceDecodeMaxPendingJobsSpeaker = 1' in main
         and 'const size_t runningJobs = p25VoiceWorkerBusy.load' in main,
-    'speaker sustain full-eye hop': 'kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.720' in main,
-    'speaker sustain half-window fresh': 'kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.360' in main,
-    'speaker sustain short lattice overlap': 'kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.060' in main,
+    'speaker sustain near-live hop': 'kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.080' in main,
+    'speaker sustain frame-pair fresh': 'kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.040' in main,
+    'speaker sustain bounded lattice overlap': 'kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.080' in main,
     'speaker backlog catch-up uses catch-up constants': 'kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds' in main
         and 'kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds' in main,
     'backlog helper uses effective decode cursor': 'p25Phase2UndecodedBacklogSamples' in main

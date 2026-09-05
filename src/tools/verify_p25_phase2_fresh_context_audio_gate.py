@@ -23,10 +23,10 @@ required = {
     and "live.stats.symbolRate" in main,
     "bounded late-decode context grace": "kFreshContextAudioGraceDibits = 240u" in main
     and "contextAudioFloorDibit" in main,
-    "speaker sustain uses measured hot-eye fresh chunks": "kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.120" in main
-    and "kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.040" in main
-    and "several consecutive AMBE frames" in main
-    and "de-dupes by absolute VCW position" in main,
+    "speaker sustain uses near-live locked cadence": "kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.080" in main
+    and "kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.040" in main
+    and "kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.080" in main
+    and "fall behind live traffic" in main,
     "context-only AMBE blocked before frame key": "if (codewordIsContextOnly(codewordAbsKnown, codewordEndAbsDibit))" in codeword_loop
     and codeword_loop.find("if (codewordIsContextOnly(codewordAbsKnown, codewordEndAbsDibit))")
     < codeword_loop.find("const Phase2VoiceFrameKey frameKey ="),

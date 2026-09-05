@@ -2765,15 +2765,14 @@ static constexpr double kP25Phase2VoiceDecodeAcquireOverlapSeconds = 0.160;
 static constexpr double kP25Phase2VoiceDecodeSustainChunkSeconds = 0.080;
 static constexpr double kP25Phase2VoiceDecodeSustainMinFreshSeconds = 0.040;
 static constexpr double kP25Phase2VoiceDecodeSustainOverlapSeconds = 0.080;
-// Block-channelize speaker hops: keep a full two-superframe eye while audio is
-// open, but advance by a half-window of fresh RF.  The deterministic clear test
-// on 20260904_223158 produces 10.44 s of STT-readable Phase-2 audio with this
-// shape; the 100/60/50 ms eye emitted valid frames but collapsed into word
-// islands in GUI replay. Absolute VCW de-dupe prevents overlap replay, and slot
-// isolation remains hard (only followed grantSlot is fed).
-static constexpr double kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.720;
-static constexpr double kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.360;
-static constexpr double kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.060;
+// Block-channelize speaker hops use the same locked-sustain geometry as the
+// non-speaker path.  The first cold eye above still supplies two-superframe
+// late-entry context; once audio/acquire state is active, replaying 720 ms of
+// fresh RF per tick makes the worker fall behind live traffic and the rolling
+// buffer eventually skips real voice frames.
+static constexpr double kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.080;
+static constexpr double kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.040;
+static constexpr double kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.080;
 // Streaming-DDC live traffic: contiguous slices like SDRTrunk channelizer
 // buffers. 20 ms minFresh is one AMBE frame of RF at 6000 sps; 40 ms max
 // keeps the worker on the tuner clock instead of 80–120 ms islands.
@@ -10252,14 +10251,6 @@ static P25Phase2VoiceChunkPlan p25Phase2PlanVoiceDecodeChunk(
             plan.minFreshSeconds = kP25Phase2VoiceDecodeUnacquiredAcquireMinFreshSeconds;
         }
         plan.minFreshFloorSamples = 16384.0;
-        return plan;
-    }
-
-    if (speakerSustainDecode) {
-        plan.maxChunkSeconds = kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds;
-        plan.overlapSeconds = kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds;
-        plan.minFreshSeconds = kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds;
-        plan.minFreshFloorSamples = 8192.0;
         return plan;
     }
 
