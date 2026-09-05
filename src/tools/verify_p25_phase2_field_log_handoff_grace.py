@@ -11,7 +11,9 @@ assert 'service-option-less grant' in main
 assert 'p25VoiceGrantEpochMs' in recv and 'p25VoiceSourceId' in recv
 assert 'key.sourceId = rx.p25VoiceSourceId;' in main
 assert 'key.grantEpochMs = rx.p25VoiceGrantEpochMs;' in main
-assert 'sourceId == other.sourceId' in (root.parent / 'include' / 'P25ReceiverSession.h').read_text(encoding='utf-8', errors='replace')
+session = (root.parent / 'include' / 'P25ReceiverSession.h').read_text(encoding='utf-8', errors='replace')
+call_key_eq = session[session.find('bool operator=='):session.find('};', session.find('bool operator=='))]
+assert 'sourceId == other.sourceId' not in call_key_eq
 assert 'grantEpochMs == other.grantEpochMs' in (root.parent / 'include' / 'P25ReceiverSession.h').read_text(encoding='utf-8', errors='replace')
 assert 'p25TrafficProcessorSessionId' in main
 assert 'rx.p25VoiceGrantEpochMs' in main and 'rx.p25VoiceSourceId' in main

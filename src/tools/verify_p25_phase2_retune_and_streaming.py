@@ -13,7 +13,7 @@ metadata_ready = re.search(
     re.DOTALL)
 metadata_ready_expr = metadata_ready.group(1) if metadata_ready else ''
 can_accept = re.search(
-    r'bool p25VoiceWorkerCanAcceptJob\(\)\s*\{(.*?)\n    \}',
+    r'bool p25VoiceWorkerCanAcceptJobForDepth\(bool speakerSustainHint\)\s*\{(.*?)\n    \}',
     main,
     re.DOTALL)
 can_accept_body = can_accept.group(1) if can_accept else ''
@@ -35,13 +35,15 @@ checks = {
     'same-rf metadata switch resets dwell': 'p25AutoFollowTunedAtMs = nowMs;' in main,
     'speaker sustain decode chunks': 'kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.720' in main,
     'speaker cadence 3ms': 'kP25Phase2VoiceDecodeSpeakerCadenceMs = 3' in main,
-    'speaker pending jobs': 'kP25VoiceDecodeMaxPendingJobsSpeaker = 3' in main,
-    'worker queues while busy': 'p25VoiceWorkerBusy.load' not in can_accept_body,
+    'speaker pending jobs single-flight': 'kP25VoiceDecodeMaxPendingJobsSpeaker = 1' in main,
+    'worker refuses new cursor pull while busy': 'p25VoiceWorkerBusy.load' in can_accept_body
+        and 'inFlightJobs < p25VoiceDecodeMaxPendingJobsNow' in can_accept_body,
     'rolling cursor commits non-stale': 'result.hasAudioBlock && !result.stale' in main,
     'same-rf stale shortcut removed': 'sameRfTrafficSession' not in still_current_body,
     'multi-pass voice drain': 'for (int drainPass = 0; drainPass < 6; ++drainPass)' in main,
     'pcm prime before empty ring': 'queuedNow + pending.size() < minPrimeSamples' in main,
-    'decode budget tightened': 'std::min(priorDecodeBudgetMs, 55)' in main,
+    'decode budget bounded by named hot constant': 'kP25VoiceWorkerHotRealtimeBudgetMs = 120' in main
+        and 'hotBudgetMs = kP25VoiceWorkerHotRealtimeBudgetMs' in main,
     'ring fill vs jitter cap': 'jitterCapFrames' in audio,
     'pending audio flush seq': 'p25PendingAudioFlushSeq' in main,
     'warm standby same mhz': 'warm-standby-same-mhz' in main,

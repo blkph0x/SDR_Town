@@ -7,11 +7,18 @@ main = (root / 'main.cpp').read_text(encoding='utf-8', errors='replace')
 checks = {
     'live streaming push path exists': 'pushP25LiveStreamingAudio' in main,
     '800ms starvation cushion removed': 'rate * 0.800' not in main and 'pushP25JitterBufferedAudio' not in main,
-    'voice worker queue depth bounded': 'kP25VoiceDecodeMaxPendingJobs = 1' in main,
-    'speaker worker queue depth allows prestage': 'kP25VoiceDecodeMaxPendingJobsSpeaker = 3' in main,
+    'voice worker queue depth single-flight': 'kP25VoiceDecodeMaxPendingJobs = 1' in main,
+    'speaker worker queue depth single-flight': 'kP25VoiceDecodeMaxPendingJobsSpeaker = 1' in main,
+    'worker busy counts as in-flight': 'const size_t runningJobs = p25VoiceWorkerBusy.load' in main
+        and 'const size_t inFlightJobs = p25VoicePendingJobs.size() + publishBacklog + runningJobs;' in main,
     'completed voice results bounded': 'kP25VoiceDecodeMaxCompletedResults = 16' in main,
     'speaker-active decode cadence tightened': 'kP25Phase2VoiceDecodeSpeakerCadenceMs = 3' in main,
-    'sustain decode windows shortened': 'kP25Phase2VoiceDecodeSustainChunkSeconds = 0.040' in main,
+    'non-speaker sustain decode windows bounded': 'kP25Phase2VoiceDecodeSustainChunkSeconds = 0.080' in main,
+    'speaker sustain cadence evidence-backed': (
+        'kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.720' in main and
+        'kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.360' in main and
+        'kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.060' in main
+    ),
     'cc bleed guard on retuned traffic tuner': 'oneRtlTrafficTunerAwayFromCc' in main,
     'traffic channelization preserves CQPSK eye while guarding cc bleed': (
         'p25VoiceDecoderConfigForReceiver' in main and

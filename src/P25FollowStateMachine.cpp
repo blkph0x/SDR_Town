@@ -227,6 +227,15 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
          (clearGrantKnown &&
           strongTrafficCarrier &&
           tunedDurationMs < untrustedClearAcquireLimitMs));
+    if (phase2StillAcquiring &&
+        diagnosticFresh &&
+        hasCarrier &&
+        !snapshot.phase2EssEncrypted &&
+        (phase2CurrentVoiceEvidence ||
+         phase2CurrentStructureEvidence ||
+         snapshot.phase2TrafficCallActive)) {
+        decision.voiceStillLooksActive = true;
+    }
     const int64_t activitySilenceLimitMs =
         phase2StillAcquiring ? 30000 : 3500;
     decision.activityGone =

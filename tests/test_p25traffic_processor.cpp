@@ -4,7 +4,7 @@
 #include "P25TrafficChannelProcessor.h"
 #include "Receiver.h"
 
-TEST_CASE("P25 Phase 2 audio call key binds selected call identity", "[p25][traffic][session]")
+TEST_CASE("P25 Phase 2 audio call key binds selected allocation identity", "[p25][traffic][session]")
 {
     P25P2CallAudioKey first;
     first.nac = 0x2df;
@@ -37,7 +37,11 @@ TEST_CASE("P25 Phase 2 audio call key binds selected call identity", "[p25][traf
 
     second = first;
     second.sourceId = 0;
-    REQUIRE_FALSE(first == second);
+    REQUIRE(first == second);
+
+    second = first;
+    second.sourceId = 0x445566;
+    REQUIRE(first == second);
 
     second = first;
     second.grantEpochMs = first.grantEpochMs + 500;

@@ -83,8 +83,15 @@ require(
     "same-call metadata promotion must defer traffic-carrier reset until after metadata is applied",
 )
 require(
-    "if (trafficCarrierChanged ||\n                            !commitSameCallMetadataInPlace" in same_call_block,
-    "same-call traffic-carrier changes must create a new PTT/session boundary",
+    "if (trafficCarrierChanged ||" in same_call_block
+    and "incomingSourceStartsNewPtt ||" in same_call_block
+    and "!commitSameCallMetadataInPlace ||" in same_call_block,
+    "same-call traffic-carrier and real source-boundary changes must create a new PTT/session boundary",
+)
+require(
+    "sourceChangeIsControlMetadataOnly" in same_call_block
+    and "heldSourceMetadata" in same_call_block,
+    "same-allocation control RID changes must be held soft while traffic PTT/ESS owns call boundaries",
 )
 require(
     "resetTrafficCarrierAfterMetadata = true;" in same_call_block,

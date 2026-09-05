@@ -30,6 +30,20 @@ from p25_stt_common import (
 )
 
 
+WAITGRANT_TG_EVENT_MARKERS = (
+    "Instruction: Group",
+    "TSBK: Group",
+    "Group voice channel grant",
+    "Group voice channel grant update",
+    "selected_grant_event=",
+    "P25 waitgrant grant selected:",
+    "P25 waitgrant following TG",
+    "Following Phase 2:",
+    "Following Phase 1:",
+    "Auto-following P25 TG",
+)
+
+
 def default_repo() -> Path:
     return Path(__file__).resolve().parents[2]
 
@@ -51,9 +65,17 @@ def parse_source_id_token(raw: str) -> int | None:
         return None
 
 
-def extract_tg_source_pairs(output: str) -> list[dict]:
+def waitgrant_tg_event_lines(output: str) -> list[str]:
+    return [
+        line
+        for line in output.splitlines()
+        if any(marker in line for marker in WAITGRANT_TG_EVENT_MARKERS)
+    ]
+
+
+def extract_tg_source_pairs(lines: list[str]) -> list[dict]:
     pairs: dict[tuple[int, int], dict] = {}
-    for line in output.splitlines():
+    for line in lines:
         tg_match = re.search(r"\bTG[ =](\d+)\b", line, re.IGNORECASE)
         src_match = re.search(r"\b(?:src|source|rid|radio|sourceId)=(0x[0-9A-Fa-f]+|[0-9A-Fa-f]+)\b", line, re.IGNORECASE)
         if not (tg_match and src_match):
@@ -112,7 +134,12 @@ def parse_waitgrant_output(output: str) -> dict:
         "followCaptureReason=audio_opened" in output or
         wav_pcm_opened
     )
-    grant_tgs = sorted({int(x) for x in re.findall(r"\bTG[ =](\d+)\b", output, re.IGNORECASE)})
+    tg_event_lines = waitgrant_tg_event_lines(output)
+    grant_tgs = sorted({
+        int(x)
+        for line in tg_event_lines
+        for x in re.findall(r"\bTG[ =](\d+)\b", line, re.IGNORECASE)
+    })
     best_record = None
     if follow_records:
         best_record = max(
@@ -133,7 +160,7 @@ def parse_waitgrant_output(output: str) -> dict:
         "audio_opened": audio_opened,
         "last_retry_reason": reason_match.group(1).lower() if reason_match else None,
         "grant_talkgroups_seen": grant_tgs,
-        "grant_tg_sources_seen": extract_tg_source_pairs(output),
+        "grant_tg_sources_seen": extract_tg_source_pairs(tg_event_lines),
         "grant_lines": len(
             re.findall(
                 r"\bInstruction: Group\b|\bTSBK: Group Grant\b|\bGroup voice channel grant\b",

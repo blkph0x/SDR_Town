@@ -27,6 +27,11 @@ dedupe_sync_region = main.split(
 )[1].split(
     'static bool p25Phase2ShouldEmitAmbeFrame', 1
 )[0]
+recent_security_region = main.split(
+    'static bool p25Phase2RecentSecurityEvidenceMatches', 1
+)[1].split(
+    'static void p25Phase2AdoptGrantSourceIdForCurrentCall', 1
+)[0]
 same_call_update_region = main.split(
     'const bool incomingSourceKnown = followTg.lastSourceId != 0;', 1
 )[1].split(
@@ -90,15 +95,21 @@ checks = {
         'selectedSlotKnownOtherTalkgroupInWindow' in expected_region and
         'selectedSlotKnownOtherTalkgroupInWindow' in feed_region
     ),
-    'RID change resets AMBE and dedupe context': (
-        'const bool sourceChanged' in dedupe_sync_region and
-        'state.sourceId != currentSource' in dedupe_sync_region and
-        'sourceChanged ||' in dedupe_sync_region
+    'same-session RID changes do not reset AMBE/dedupe': (
+        'state.callSessionId != currentCallSession' in dedupe_sync_region and
+        'sourceChanged ||' not in dedupe_sync_region
     ),
-    'GUI same-call updates stamp RID before new PTT': (
-        'p25Phase2AdoptGrantSourceIdForCurrentCall(*activeRx, followTg.lastSourceId);' in same_call_update_region and
-        same_call_update_region.find('p25Phase2AdoptGrantSourceIdForCurrentCall(*activeRx, followTg.lastSourceId);') <
-        same_call_update_region.find('p25Phase2BeginNewPtt(*activeRx, nowMs);')
+    'recent security source is compatible not exact': (
+        'const bool sourceCompatible' in recent_security_region and
+        'rx.p25Phase2RecentSecuritySourceId == 0' in recent_security_region and
+        'key.sourceId == 0' in recent_security_region and
+        'sourceCompatible &&' in recent_security_region
+    ),
+    'GUI same-call source metadata is soft on the same TDMA allocation': (
+        'sourceChangeIsControlMetadataOnly' in same_call_update_region and
+        'incomingSourceStartsNewPtt' in same_call_update_region and
+        'heldSourceMetadata' in same_call_update_region and
+        'incomingSourceStartsNewPtt ||' in same_call_update_region
     ),
     'GUI same-call hops stamp RID before new PTT': (
         'p25Phase2AdoptGrantSourceIdForCurrentCall(*activeRx, followTg.lastSourceId);' in same_call_hop_region and
@@ -111,17 +122,12 @@ checks = {
         'job.sourceId = monP25VoiceSourceId;' in main and
         'result.sourceId = job.sourceId;' in main
     ),
-    'GUI voice worker rejects stale RID before decode': (
-        'job.sourceId != 0' in worker_still_current_region and
-        'rx.p25VoiceSourceId != 0' in worker_still_current_region and
-        'rx.p25VoiceSourceId != job.sourceId' in worker_still_current_region and
-        'return fail("source-changed");' in worker_still_current_region
+    'GUI voice worker does not reject same-call RID churn before decode': (
+        'return fail("source-changed");' not in worker_still_current_region and
+        'Source/RID is traffic metadata' in worker_still_current_region
     ),
-    'GUI voice worker rejects stale RID before publish': (
-        'result.sourceId != 0' in worker_publish_region and
-        'rx.p25VoiceSourceId != 0' in worker_publish_region and
-        'rx.p25VoiceSourceId != result.sourceId' in worker_publish_region and
-        'staleReason.empty()) staleReason = "source-changed"' in worker_publish_region
+    'GUI voice worker does not reject same-call RID churn before publish': (
+        'staleReason.empty()) staleReason = "source-changed"' not in worker_publish_region
     ),
     'GUI follow-arm reset preserves grant identity tuple': (
         'const bool armedVoiceDecodeEnabled = rx.p25VoiceDecodeEnabled;' in follow_arm_region and

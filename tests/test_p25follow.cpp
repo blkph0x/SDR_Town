@@ -356,6 +356,40 @@ TEST_CASE("P25 follow keeps Phase 2 audio open while MAC or ESS catches up", "[p
     REQUIRE(decision.action == P25FollowAction::None);
 }
 
+TEST_CASE("P25 follow treats pre-audio Phase 2 acquisition as call activity", "[p25][follow]")
+{
+    P25FollowSnapshot snapshot;
+    snapshot.autoActive = true;
+    snapshot.phase2Voice = true;
+    snapshot.nowMs = 4'200;
+    snapshot.tunedAtMs = 1'000;
+    snapshot.lastActiveMs = 1'000;
+    snapshot.diagUpdatedMs = 4'100;
+    snapshot.diag = diag(P25FollowDiagCode::WaitingForClearGrant);
+    snapshot.grantEncryptionKnown = false;
+    snapshot.grantEncrypted = false;
+    snapshot.phase2TrafficProcessorActive = true;
+    snapshot.phase2Bursts = 6;
+    snapshot.phase2VoiceCodewords = 4;
+    snapshot.phase2SuperframeBursts = 6;
+    snapshot.phase2MaskedBursts = 6;
+    snapshot.phase2MacPdus = 2;
+    snapshot.phase2MacCrcValid = 0;
+    snapshot.phase2EssKnown = false;
+    snapshot.decodedFrames = 0;
+    snapshot.rfMetricsPopulated = true;
+    snapshot.recentSnrDb = 14.0;
+    snapshot.recentSignalLevelDb = -52.0;
+    snapshot.recentNoiseFloorDb = -72.0;
+
+    const auto decision = evaluateP25Follow(snapshot);
+    REQUIRE(decision.voiceStillLooksActive);
+    REQUIRE_FALSE(decision.activityGone);
+    REQUIRE_FALSE(decision.tdmaNoProgressTimeout);
+    REQUIRE_FALSE(decision.tdmaNoVcwTimeout);
+    REQUIRE(decision.action == P25FollowAction::None);
+}
+
 TEST_CASE("P25 follow returns when the traffic processor proves encryption", "[p25][follow]")
 {
     P25FollowSnapshot snapshot;

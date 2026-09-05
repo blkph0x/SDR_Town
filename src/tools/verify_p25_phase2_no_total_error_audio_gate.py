@@ -16,8 +16,12 @@ assert "decoded.message.find('R')" in body and "decoded.message.find('E')" in bo
 assert 'return true;' in body, 'usable finite mbelib PCM should be accepted'
 assert 'rms < 1.0e-6' not in body, 'valid low-energy AMBE concealment/silence frames must preserve 20 ms cadence'
 assert 'peak > kP25DecodedAudioSafeMaxPeak' in body and 'rms > kP25DecodedAudioSafeMaxRms' in body, 'runaway PCM safety gate should remain'
-assert 'mildSoftConceal' in main and 'out.audio.insert(out.audio.end(), samplesPerFrame, 0.0f);' in main, (
-    'non-fresh clear-call AMBE slots must advance as soft concealment/silence, not cadence gaps'
+decode = main[main.index('static bool p25DecodePhase2AmbeFrameToAudio'):main.index('static bool p25ProbePhase2AmbeFrameForDiagnostics')]
+assert 'const bool emitAsSpeaker = speakerSafe;' in decode and 'frame.accepted = emitAsSpeaker;' in decode, (
+    'non-fresh clear-call AMBE slots must still emit safe mbelib PCM so the speaker cadence does not stutter'
+)
+assert 'if (codecConcealment && emitAsSpeaker)' in decode and '++out.phase2ConcealmentFrames;' in decode, (
+    'repeat/erasure/near-silent mbelib frames should be counted as quality debt, not hard speaker gaps'
 )
 assert 'p25Phase2AppendOppositeSlotSustainPlc' in main and 'Intentionally disabled' in main, (
     'opposite-slot invent PLC must stay disabled (SDRTrunk per-timeslot silence)'

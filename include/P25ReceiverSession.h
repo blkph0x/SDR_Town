@@ -28,12 +28,12 @@ struct P25P2CallAudioKey {
 
     bool operator==(const P25P2CallAudioKey& other) const noexcept
     {
-        // Audio state is bound to one selected traffic call.  NAC/WACN/system
-        // are site metadata, but source/session/start-epoch are part of the
-        // speech stream identity; reusing them across talkers or grant epochs
-        // can feed mbelib with another slot's predictor history.
+        // Audio state is bound to one selected traffic allocation.  NAC/WACN/
+        // system are site metadata.  Source/RID can arrive late or be refreshed
+        // by control-channel metadata while the same TDMA timeslot continues, so
+        // treat zero-or-different source as metadata here and keep the hard
+        // boundaries on talkgroup, call session, grant epoch, slot, and carrier.
         return talkgroupId == other.talkgroupId &&
-            sourceId == other.sourceId &&
             callSessionId == other.callSessionId &&
             grantEpochMs == other.grantEpochMs &&
             slot == other.slot &&
@@ -248,6 +248,11 @@ struct P25Phase2FrameSequencer {
 // Producer-side speaker PCM bound to one call session.
 struct P25Phase2SpeakerPendingQueue {
     uint64_t callSessionId = 0;
+    uint32_t talkgroupId = 0;
+    uint32_t sourceId = 0;
+    int64_t grantEpochMs = 0;
+    uint8_t slot = 0xffu;
+    int64_t frequencyHz = 0;
     bool nextSpeechOrdinalKnown = false;
     int64_t nextSpeechOrdinal = 0;
     std::vector<float> samples;

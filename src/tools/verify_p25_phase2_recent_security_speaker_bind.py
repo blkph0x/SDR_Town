@@ -30,8 +30,8 @@ def main() -> None:
     )
     require(
         speaker_emit,
-        "targetPttSessionClearThisWindow",
-        "speaker emit refresh requires current-window target PTT clear proof",
+        "targetSessionClearThisWindow",
+        "speaker emit refresh accepts current-window target session release proof",
     )
     require(
         speaker_emit,
@@ -40,6 +40,10 @@ def main() -> None:
     )
     if "rx.p25Phase2RecentTargetSessionAudioRelease = true;" in speaker_emit:
         raise SystemExit("speaker emit must not create same-call clear continuation proof")
+    if "targetSessionAudioRelease && targetSecurityStateFromPtt && !targetEssEncrypted" in text:
+        raise SystemExit("target session release must not be gated on a same-window PTT flag")
+    if "targetPttSessionClearThisWindow" in text:
+        raise SystemExit("old PTT-only session clear helper is still present")
     print("P25 Phase 2 recent security speaker-bind regression: PASS")
 
 

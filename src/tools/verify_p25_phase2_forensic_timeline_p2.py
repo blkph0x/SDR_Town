@@ -17,10 +17,8 @@ slot_probe_fn = main.split("static bool applyP25Phase2SlotProbeLocked", 1)[1].sp
 
 required = {
     "single cursor settlement after publish": "outcome == P25VoicePublishOutcome::Published" in main,
-    "speaker pipeline allows queued prestage": (
-        "kP25VoiceDecodeMaxPendingJobsSpeaker = 4" in main
-        or "kP25VoiceDecodeMaxPendingJobsSpeaker = 3" in main
-    ),
+    "speaker pipeline is single-flight": "kP25VoiceDecodeMaxPendingJobsSpeaker = 1" in main
+    and "inFlightJobs < p25VoiceDecodeMaxPendingJobsNow" in main,
     "cqpsk discrete freeze api": "setCqpskDiscreteFrozen" in decoder_h and "m_cqpskDiscreteFrozen" in decoder_cpp,
     "cqpsk hypothesis blocked counter": "m_cqpskDiscreteChangesBlocked" in decoder_cpp and "p25DiagCqpskHypothesisChanges" in receiver_h,
     "worker applies cqpsk freeze": "p25Phase2ShouldFreezeCqpskDiscrete" in main,

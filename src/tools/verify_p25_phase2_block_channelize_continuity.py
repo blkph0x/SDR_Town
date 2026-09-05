@@ -15,14 +15,15 @@ checks = {
             "Block channelize produces an independent baseband eye", 1
         )[1][:1800]
     ),
-    "freeze requires streaming ddc": (
-        "enableStreamingChannelDdc" in main.split(
+    "cqpsk discrete freeze disabled for block channelize": (
+        "Never freeze. Capture 20260807_235726" in main.split(
             "p25Phase2ShouldFreezeCqpskDiscrete", 1
         )[1][:500]
+        and "return false;" in main.split("p25Phase2ShouldFreezeCqpskDiscrete", 1)[1][:500]
     ),
     "speaker sustain multi-burst hop": (
-        "kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.120" in main
-        and "kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.040" in main
+        "kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.100" in main
+        and "kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.050" in main
     ),
     "speaker catch-up constants present": (
         "kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.180" in main

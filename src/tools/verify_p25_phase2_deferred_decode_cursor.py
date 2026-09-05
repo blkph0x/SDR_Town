@@ -8,19 +8,20 @@ take = main[main.find('std::vector<std::complex<float>> takeUndecoded'):main.fin
 
 checks = {
     'takeUndecoded exposes decode end absolute': 'outDecodeEndAbsolute' in take,
-    'takeUndecoded does not advance lastDecodeAbsolute': 'lastDecodeAbsolute =' not in take,
+    'takeUndecoded does not commit decode absolute': 'commitDecodeAbsolute' not in take
+        and 'lastDecodeAbsolute = endAbsolute' not in take,
     'rolling window commits decode absolute': 'commitDecodeAbsolute' in main,
     'rolling window rolls back submitted decode': 'rollbackSubmittedDecode' in main,
     'rolling window tracks submitted decode end': 'markDecodeSubmitted' in main,
     'worker result commits rolling cursor': 'commitDecodeAbsolute(result.iqDecodeEndAbsolute)' in main,
     'bounded pending voice jobs': 'kP25VoiceDecodeMaxPendingJobs = 2' in main
         or 'kP25VoiceDecodeMaxPendingJobs = 1' in main,
-    'speaker pending allows prestage': (
-        'kP25VoiceDecodeMaxPendingJobsSpeaker = 4' in main
-        or 'kP25VoiceDecodeMaxPendingJobsSpeaker = 3' in main
-    ),
+    'speaker pending is single-flight': 'kP25VoiceDecodeMaxPendingJobsSpeaker = 1' in main,
+    'running worker blocks new cursor pull': 'const size_t runningJobs = p25VoiceWorkerBusy.load' in main
+        and 'inFlightJobs < p25VoiceDecodeMaxPendingJobsNow' in main,
     'backlog catch-up disables tiny speaker chunks': 'backlogCatchUp' in main and 'speakerSustainDecode' in main,
-    'iq pull pauses during decode backlog': 'syncAbsolute = rolling.lastDecodeAbsolute' in main,
+    'iq pull pauses during decode backlog': 'const size_t inFlightJobs = p25VoicePendingJobs.size() + publishBacklog + runningJobs;' in main
+        and 'inFlightJobs < p25VoiceDecodeMaxPendingJobsNow' in main,
 }
 
 failed = [name for name, ok in checks.items() if not ok]

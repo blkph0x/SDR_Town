@@ -17,9 +17,13 @@ checks = {
     "new ptt clears audio tail": "rx.p25SessionState.audioTail = {};" in begin,
     "new ptt clears sustain": "rx.p25SessionState.sustain = {};" in begin,
     "new ptt clears security latch": "rx.p25SessionState.callSecurityLatch = P25CallSecurityLatch::Unknown;" in begin,
-    "same-call metadata checks source": "sourceCompatible" in commit and "rx.p25VoiceSourceId == followTg.lastSourceId" in commit,
+    "same-call metadata treats source as soft control-plane state": (
+        "sameAllocationControlSourceChange" in commit and
+        "rx.p25VoiceSourceId != followTg.lastSourceId" in commit and
+        "(!sameAllocationControlSourceChange || rx.p25VoiceSourceId == 0)" in commit
+    ),
     "same-call metadata checks slot": "slotCompatible" in commit and "rx.p25VoiceTdmaSlot & 0x01u" in commit,
-    "same-call requires source compatible": "sourceCompatible &&" in commit,
+    "same-call does not require source compatible": "sourceCompatible &&" not in commit,
     "same-call requires slot compatible": "slotCompatible &&" in commit,
 }
 
