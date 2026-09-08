@@ -32,10 +32,12 @@ required = {
     "dualSlotUntrustedNow excludes session-release alone": (
         "SessionAudioRelease" not in dual_now
         and "p25Phase2DualSlotUntrustedGarbleWindow(out)" in dual_now
+        and "p25Phase2PostEmitMixedMacDeadWindow(rx, out)" in dual_now
     ),
     "dualSlotUntrustedExplicitGrant excludes session-release alone": (
         "SessionAudioRelease" not in dual_explicit
         and "p25Phase2DualSlotUntrustedGarbleWindow(out)" in dual_explicit
+        and "p25Phase2PostEmitMixedMacDeadWindow(rx, out)" in dual_explicit
     ),
     "dualSlot clear proof excludes session-release alone": (
         "SessionAudioRelease" not in proof

@@ -21,24 +21,25 @@ required = {
     "fresh boundary computed from context iq": "clampedContextIqSamples" in main
     and "freshStartAbsDibit" in main
     and "live.stats.symbolRate" in main,
-    "bounded late-decode context grace": "kFreshContextAudioGraceDibits = 240u" in main
-    and "contextAudioFloorDibit" in main,
+    "bounded late-decode context grace": "kFreshContextAudioGraceDibits = 480u" in main
+    and "contextAudioFloorDibit" in main
+    and "DEC-0010" in main,
     "speaker sustain uses near-live locked cadence": "kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.080" in main
     and "kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.040" in main
-    and "kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.080" in main
+    and "kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.280" in main
     and "fall behind live traffic" in main,
-    "context-only AMBE blocked before frame key": "if (codewordIsContextOnly(codewordAbsKnown, codewordEndAbsDibit))" in codeword_loop
-    and codeword_loop.find("if (codewordIsContextOnly(codewordAbsKnown, codewordEndAbsDibit))")
-    < codeword_loop.find("const Phase2VoiceFrameKey frameKey ="),
-    "context-grace AMBE absolute gated": "contextAudioLockedOut" in codeword_loop
+    "context-only missed RF uses ShouldEmit not hard drop": "Do not hard-drop Voice2/4 that sit before the 80 ms context floor" in main
+    and "DEC-0007" in main
+    and "DEC-0013" in main
+    and "contextAudioLockedOut" in codeword_loop
     and "codewordEndsBeforeFresh &&" in codeword_loop
     and "!p25Phase2ShouldEmitAmbeFrame" in codeword_loop
+    and "p25Phase2LatticeKeyAlreadyEmitted" in codeword_loop,
+    "context-grace AMBE absolute gated": "contextAudioLockedOut" in codeword_loop
     and "hadSuccessfulEmit ||" not in codeword_loop.split("const bool contextAudioLockedOut", 1)[1].split(";", 1)[0]
     and "p25Phase2CallHadSpeakerAudio ||" not in codeword_loop.split("const bool contextAudioLockedOut", 1)[1].split(";", 1)[0]
     and "frame.duplicateSuppressedByAbsolute = true;" in codeword_loop
     and "frame.contextSuppressed = true;" in codeword_loop,
-    "context AMBE never queued": codeword_loop.find("if (codewordIsContextOnly(codewordAbsKnown, codewordEndAbsDibit))")
-    < codeword_loop.find("P25P2PendingAmbeFrame pending;"),
     "GUI foreground passes context": "iqStartAbsolute, iqStartAbsoluteKnown, phase2ContextIqSamples);" in main,
     "GUI worker passes context": "job.iqStartAbsoluteKnown,\n                                job.contextIqSamples)" in main,
     "CLI live passes context": "iqStartAbsolute, iqStartAbsoluteKnown, phase2ContextIqSamples);" in main,

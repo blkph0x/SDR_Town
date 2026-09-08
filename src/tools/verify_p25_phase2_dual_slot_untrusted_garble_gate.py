@@ -26,7 +26,7 @@ garble_fn = main.split(body_marker, 1)[1].split(
 pending_fn = main.split("p25Phase2DualSlotPendingDrainUnsafeWindow", 1)[1].split(
     "p25Phase2CurrentSelectedBurstFeedTrusted", 1
 )[0]
-feed_region = main.split("hardEpochOnBurst =", 1)[1][:9000]
+feed_region = main.split("hardEpochOnBurst =", 1)[1][:16000]
 pending_drain_body = main.split("auto canDrainPendingRawVoiceThisWindow", 1)[1].split(
     "auto discardStalePendingWhenLivePreferred", 1
 )[0]
@@ -40,7 +40,7 @@ unsafe_mixed_fn = region_after(
     "static bool p25Phase2UnsafeMixedSlotAudioWindow", 1200
 )
 security_gate_region = region_after(
-    "const bool sameCallSelectedContinuation =", 800
+    "const bool sameCallSelectedContinuation =", 1600
 )
 trusted_clear_region = region_after(
     "const bool trustedClear =",
@@ -88,6 +88,13 @@ checks = {
         in security_gate_region
         and "p25Phase2DualSlotUntrustedGarbleWindow(out)" in security_gate_region
         and "!sameCallSelectedContinuation" in security_gate_region
+        and "p25Phase2PostEmitMixedMacDeadWindow(rx, out)" in security_gate_region
+        and "dual-slot-untrusted-garble-drop" in main.split(
+            "if (dualSlotUntrustedGate)", 1
+        )[1][:900]
+        and "postEmitMixedMacDeadGate" not in main.split(
+            "if (dualSlotUntrustedGate)", 1
+        )[1][:900]
     ),
     "feed dual-slot gate has continuation escape": (
         "dualSlotSelectedContinuationProof" not in feed_region
@@ -96,6 +103,7 @@ checks = {
         and "p25Phase2SameCallSelectedTimeslotContinuationSafe(rx, out, audioKey, nowMs, false)"
         in feed_region
         and "!dualSlotSelectedContinuationForBurst" in feed_region_after_now
+        and "p25Phase2PostEmitMixedMacDeadWindow(rx, out)" in feed_region_after_now
         and "hadSuccessfulEmit"
         not in feed_region_after_now
     ),
@@ -136,7 +144,12 @@ checks = {
     "speaker gate names garble": "phase2-dual-slot-untrusted-garble" in main,
     "explicit-clear evidence fails closed on dual-slot": (
         "p25Phase2DualSlotUntrustedGarbleWindow(out)"
-        in main.split("p25Phase2ExplicitClearGrantVoiceReleaseEvidence", 1)[1][:900]
+        in main.split("p25Phase2ExplicitClearGrantVoiceReleaseEvidence", 1)[1][:1200]
+        and "p25Phase2PostEmitMixedMacDeadWindow(rx, out)"
+        in main.split("p25Phase2ExplicitClearGrantVoiceReleaseEvidence", 1)[1][:1200]
+    ),
+    "trusted clear cannot bypass post-emit mixed MAC-dead": (
+        "!postEmitMixedMacDeadGate" in trusted_clear_region
     ),
     "gui sustain matches cli speakerMayEmit": (
         "Match CLI voicetest: sustain lattice" in main

@@ -58,6 +58,7 @@ required = {
     ),
     "dualSlotUntrustedNow uses DualSlotUntrustedGarbleWindow": (
         "p25Phase2DualSlotUntrustedGarbleWindow(out)" in dual_now
+        and "p25Phase2PostEmitMixedMacDeadWindow(rx, out)" in dual_now
     ),
     "epochTrusted excludes sessionAudioRelease": "sessionAudioRelease" not in epoch,
     "maskPhaseTrusted excludes sessionAudioRelease": (

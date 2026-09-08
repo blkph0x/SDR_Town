@@ -2168,6 +2168,45 @@ TEST_CASE("P25 live decoder aligns absolute dibit cursor on traffic chunks")
     REQUIRE(decoder.phase2StreamDibitCursorForDiagnostics() == 680);
 }
 
+TEST_CASE("streaming DDC small RF-time gap does not jump the dibit lattice", "[p25][dec0018]")
+{
+    auto chunk = [](int dibit) {
+        return std::vector<int>(180, dibit);
+    };
+
+    P25LiveDecoder decoder;
+    decoder.setEnableStreamingChannelDdc(true);
+    decoder.alignPhase2AbsoluteDibitCursor(1000, 180);
+    decoder.processHardDibits(chunk(0));
+    REQUIRE(decoder.phase2StreamDibitCursorForDiagnostics() == 1180);
+
+    // DEC-0018: FIR lag vs iqStart*6000/sr is not dropped RF. Keep 1180.
+    decoder.alignPhase2AbsoluteDibitCursor(1240, 180);
+    REQUIRE(decoder.phase2StreamDibitCursorForDiagnostics() == 1180);
+    decoder.processHardDibits(chunk(1));
+    REQUIRE(decoder.phase2StreamDibitCursorForDiagnostics() == 1360);
+}
+
+TEST_CASE("P25 live decoder rewinds stream cursor on overlapping lookback without dropping epoch")
+{
+    auto chunk = [](int dibit, size_t n) {
+        return std::vector<int>(n, dibit);
+    };
+
+    P25LiveDecoder decoder;
+    decoder.alignPhase2AbsoluteDibitCursor(1000, 180);
+    decoder.processHardDibits(chunk(0, 180));
+    REQUIRE(decoder.phase2StreamDibitCursorForDiagnostics() == 1180);
+
+    // Sustain eye: 180 dibits of overlap + 180 fresh. Chunk starts BEFORE the
+    // previous end but extends past it. Must rewind to chunk start (DEC-0006)
+    // and must not take the ring-reset discontinuity path.
+    decoder.alignPhase2AbsoluteDibitCursor(1000, 360);
+    REQUIRE(decoder.phase2StreamDibitCursorForDiagnostics() == 1000);
+    decoder.processHardDibits(chunk(1, 360));
+    REQUIRE(decoder.phase2StreamDibitCursorForDiagnostics() == 1360);
+}
+
 TEST_CASE("P25 framer origin latches to stream cursor and survives post-stream advance", "[p25][framer][epoch]")
 {
     auto syncBurst = []() {

@@ -211,6 +211,19 @@ struct P25Phase2AmbeEmitDedupeState {
     double voiceFreqHz = 0.0;
     uint64_t lastAbsDibit = 0;
     std::vector<uint64_t> recentAbsDibits;
+    // Independent block-channelize eyes recover jittered abs (DEC-0008), so
+    // 12-dibit ShouldEmit misses overlap replays (073304). Slot+ISCH burst
+    // index+voiceIndex is stable across those eyes for one superframe
+    // (~360 ms). TTL must be >= overlap (280 ms) and < one superframe.
+    struct LatticeEmit {
+        uint8_t slot = 0xffu;
+        uint8_t burstIndex = 0xffu;
+        uint8_t voiceIndex = 0xffu;
+        uint64_t absDibit = 0;
+        bool absKnown = false;
+        int64_t emitMs = 0;
+    };
+    std::vector<LatticeEmit> recentLatticeKeys;
 };
 
 // Per-call speech-frame sequencer.  Tracks Voice2/Voice4 burst cadence and

@@ -6,6 +6,8 @@ checks = {
     'one rtl source kind': 'single-rtl-retune-traffic-source' in main,
     'primary low-if retune happens': 'primaryRetuneSeq = mgr.setCenterFreq(source.deviceIndex, desiredCenterHz);' in main,
     'phase2 low-if center helper': 'p25Phase2LowIfTrafficCenterHz' in main,
+    'sdrtrunk center calculator': 'p25SdrtrunkTunerCenterHz' in main,
+    'sdrtrunk align log': 'P25 tuner center aligned (SDRTrunk CenterFrequencyCalculator)' in main,
     'one rtl log': 'P25 one-RTL traffic source retuned primary tuner' in main,
     'tooltip mentions one rtl retune': 'temporarily retunes the single tuner to traffic' in main,
     'source log branches on retune': 'source.retunesPrimary' in main,

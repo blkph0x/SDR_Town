@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.50 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.51 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -75,6 +75,7 @@ set(SDR_TOWN_SOURCES
     src/P25Control.cpp
     src/P25LiveDecoder.cpp
     src/P25FollowStateMachine.cpp
+    src/P25AudioDropClass.cpp
     src/P25TxSession.cpp
     include/P25TxSession.h
     include/P25TxConfig.h
@@ -232,6 +233,8 @@ if(BUILD_TESTS)
     tests/test_p25control.cpp
     tests/test_p25live.cpp
     tests/test_p25follow.cpp
+    tests/test_p25_audio_drop_class.cpp
+    tests/test_p25_sdrtrunk_tune.cpp
     tests/test_p25tx.cpp
     tests/test_p25tx_encode.cpp
     tests/test_p25traffic_processor.cpp
@@ -243,6 +246,7 @@ if(BUILD_TESTS)
     src/P25Control.cpp
     src/P25LiveDecoder.cpp
     src/P25FollowStateMachine.cpp
+    src/P25AudioDropClass.cpp
     src/P25TxSession.cpp
     src/P25AmbeEncoder.cpp
     src/P25Phase2TxFramer.cpp

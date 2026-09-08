@@ -20,12 +20,21 @@ required = {
     "180 dibit burst constant": "kPhase2BurstDibits = 180" in (root / "include" / "dsp" / "P25DspTypes.h").read_text(encoding="utf-8"),
     "720 dibit superframe constant": "kPhase2SuperframeDibits = 720" in (root / "include" / "dsp" / "P25DspTypes.h").read_text(encoding="utf-8"),
     "sdrtrunk sync threshold 7": "kSyncThresholdSynchronized = 7" in (root / "include" / "dsp" / "P25DspTypes.h").read_text(encoding="utf-8"),
-    "streaming ddc remains opt-in by default": "enableStreamingChannelDdc = false" in decoder_h,
-    "runtime streaming ddc experiment switch": "SDR_TOWN_P25_STREAMING_DDC" in main_cpp
-    and "cfg.enableStreamingChannelDdc = false;" in main_cpp
+    "streaming ddc remains off in decoder default / CC / forensic": "enableStreamingChannelDdc = false" in decoder_h
+    and "cfg.enableStreamingChannelDdc = false;" in main_cpp,
+    "runtime streaming ddc env switch": "SDR_TOWN_P25_STREAMING_DDC" in main_cpp
     and "cfg.enableStreamingChannelDdc = true;" in main_cpp,
-    "gui live path does not auto-enable streaming ddc": "setEnableStreamingChannelDdc(stickyReady)" not in main_cpp,
+    "gui live path does not auto-enable via stickyReady": "setEnableStreamingChannelDdc(stickyReady)" not in main_cpp,
+    "independent traffic streaming ddc stays opt-in": "p25Phase2StreamingDdcExperimentEnabled" in main_cpp
+    and "duty 0.685" in main_cpp,
+    "locked streaming hops are 80 ms": "kP25Phase2StreamingLiveSliceSeconds = 0.080" in main_cpp
+    and "kP25Phase2StreamingLiveMinFreshSeconds = 0.040" in main_cpp,
     "processIq uses streaming ddc": "m_streamingDdc.process" in decoder_cpp,
+    "streaming ddc does not jump lattice on fir lag": (
+        "DEC-0018" in decoder_cpp
+        and "jumping the lattice" in decoder_cpp.lower()
+        and "!rx.p25VoiceLiveDecoder.config().enableStreamingChannelDdc" in main_cpp
+    ),
     "staged sync gate before full decode": "passesStagedCqpskGate" in decoder_cpp,
     "quadrant lut mapping path": "mapQuadrantsToDibits" in decoder_cpp,
     "persistent framer feed": "m_phase2Framer.consumeDibits" in decoder_cpp,

@@ -10,11 +10,13 @@ needles = [
     'p25Phase2VoiceFrameKeyHasProtocolIdentity(frameKey)',
     'SDRTrunk never re-plays a stream position',
     'phase2AbsoluteDuplicateSuppressedVoiceCodewords',
-    'phase2SequencerSuppressedVoiceCodewords',
+    'p25Phase2LatticeKeyAlreadyEmitted',
+    'kSameSuperframeAbsDibits = 1800u',
 ]
 for n in needles:
     assert n in main, f'missing Phase 2 overlap AMBE de-dupe marker: {n}'
 assert 'std::vector<uint64_t> recentAbsDibits' in session, 'session-owned AMBE absolute-position de-dupe state missing'
+assert 'recentLatticeKeys' in session, 'ISCH lattice overlap de-dupe state missing'
 assert 'p25Phase2VoiceFrameKeyHasProtocolIdentity' in session, 'protocol-key helper missing'
 assert 'p25Audio.audio.erase' not in main, 'stale PCM tail trim remains'
 assert 'p25AmbeFrameHash' not in main, 'AMBE payload hash de-dupe should stay removed'

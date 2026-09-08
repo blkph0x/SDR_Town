@@ -17,7 +17,7 @@ checks = {
     'speaker sustain cadence evidence-backed': (
         'kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.080' in main and
         'kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.040' in main and
-        'kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.080' in main
+        'kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.280' in main
     ),
     'cc bleed guard on retuned traffic tuner': 'oneRtlTrafficTunerAwayFromCc' in main,
     'traffic channelization preserves CQPSK eye while guarding cc bleed': (

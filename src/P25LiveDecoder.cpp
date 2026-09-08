@@ -6060,13 +6060,16 @@ void P25LiveDecoder::alignPhase2AbsoluteDibitCursor(uint64_t chunkStartAbsolute,
     // advances it to the end after the chunk is actually consumed.
     if (chunkStartAbsolute > m_phase2StreamDibits) {
         const uint64_t forwardGap = chunkStartAbsolute - m_phase2StreamDibits;
-        // Streaming DDC/FIR/resampler output can lag the RF input cursor by a
-        // small bounded amount at chunk boundaries. That is not a dropped
-        // traffic burst and must not clear the persistent Phase-2 framer. The
-        // live scheduler still reports true cursor discontinuities separately.
+        // DEC-0018: FIR/resampler output lags RF-sample-index * 6000 / sr.
+        // Jumping the lattice to that predicted time (old code set
+        // m_phase2StreamDibits = chunkStartAbsolute) desynced sticky HDQPSK
+        // after the first hops — 105622 env=1 duty 0.095, emptyWindows=80/89.
+        // A small forward gap is not dropped RF. Leave the actual dibit count.
+        // The live scheduler still reports true cursor discontinuities separately.
         if (m_config.enableStreamingChannelDdc &&
+            m_phase2StreamDibits > 0 &&
             forwardGap <= static_cast<uint64_t>(Phase2BurstDibits * 8u)) {
-            m_phase2StreamDibits = chunkStartAbsolute;
+            return;
         } else {
             // Gap in the traffic feed: drop sticky tail so the next lock re-acquires cleanly.
             clearTrafficContinuity();
@@ -6077,6 +6080,16 @@ void P25LiveDecoder::alignPhase2AbsoluteDibitCursor(uint64_t chunkStartAbsolute,
         // Cursor moved backward (ring reset / retune): force stream discontinuity.
         clearTrafficContinuity();
         m_phase2DecodeGeneration++;
+        m_phase2StreamDibits = chunkStartAbsolute;
+    } else if (chunkStartAbsolute < m_phase2StreamDibits) {
+        // Overlapping lookback (GUI/voicetest sustain: context + fresh in one
+        // eye). Leave sticky epoch/tail alone — abs-dibit de-dupe already
+        // drops the overlap — but the stream cursor MUST be this chunk's
+        // start. Capture 20260905_105622 skip=97334: unhandled overlap left
+        // the cursor at the previous end while IQ started 80–560 ms earlier;
+        // sticky lattice walk then decoded at the wrong burst times
+        // (p2sf/p2mask high, p2vcw=0 / wrong-slot islands, duty 0.28).
+        // ISS-0001, REQ-P2.1, DEC-0006.
         m_phase2StreamDibits = chunkStartAbsolute;
     }
 }
@@ -7930,7 +7943,14 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
         currentAnchorGenerationForLocks >= m_phase2SuperframeAnchorGeneration &&
         currentAnchorGenerationForLocks - m_phase2SuperframeAnchorGeneration <=
             kPhase2StickyAnchorMaxAgeGenerationsForLocks;
-    if (stickyAnchorMaskMatches && stickyAnchorFreshForLocks) {
+    // Stream-space lattice alignment is only valid when dibits are a contiguous
+    // continuation of the previous hop (streaming DDC). Block-channelize eyes
+    // are independent: capture 20260905_105622 skip=97334 hop 3+ used the old
+    // stream anchor on a new CQPSK eye → p2sf/p2mask with p2vcw=0 / wrong-slot
+    // islands and duty 0.28 (ISS-0001, REQ-P2.1, DEC-0008). Keep sticky XOR
+    // phase; re-lock the superframe on this window's syncs.
+    if (m_config.enableStreamingChannelDdc &&
+        stickyAnchorMaskMatches && stickyAnchorFreshForLocks) {
         auto anchoredLocks = findPhase2AnchorAlignedSuperframeLocks(
             hits, workingDibits, workingDibits.size(), phase2WorkingStreamStart, m_phase2SuperframeAnchorDibit);
         if (!anchoredLocks.empty()) {
@@ -8115,8 +8135,12 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
     // This mirrors sdrtrunk's continuous P25P2SuperFrameDetector model and
     // avoids re-running full lock/mask/ACCH hunts over overlapped historical
     // context on every 40 ms GUI hop.
+    // Contiguous dibits only (streaming DDC). Block-channelize resets Gardner
+    // each eye (20260729_114627); walking the previous stream lattice there
+    // framed the wrong 30 ms timeslots (20260905_105622, DEC-0008).
     if (annotateSessionCodewords &&
         m_config.realtimeVoiceSearch &&
+        m_config.enableStreamingChannelDdc &&
         stickyAnchorMaskMatches &&
         stickyAnchorFreshForLocks &&
         mask &&
@@ -8128,7 +8152,12 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
             static_cast<uint64_t>(phase2PrefixDibits);
         const uint64_t anchor = m_phase2SuperframeAnchorDibit;
         constexpr uint64_t kBurst = static_cast<uint64_t>(Phase2BurstDibits);
-        constexpr size_t kMaxRealtimeStickyBursts = 18; // 540 ms cap; GUI chunks are smaller.
+        // Walk every complete timeslot in this working window. The old 18-burst
+        // (540 ms) cap truncated the 720 ms cold eye (~24 bursts) and left the
+        // last superframe unframed (capture 20260905_105622 hop 2 had 21 bursts
+        // in 720 ms). 48 is two 720 ms eyes — not a new hop/TTL constant.
+        const size_t maxRealtimeStickyBursts = std::min<size_t>(
+            workingDibits.size() / Phase2BurstDibits + 2u, 48u);
         uint64_t firstBurstNum = 0;
         if (workStartStream > anchor) {
             const uint64_t delta = workStartStream - anchor;
@@ -8136,7 +8165,7 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
         }
         size_t fastBursts = 0;
         for (uint64_t burstNum = firstBurstNum;
-             fastBursts < kMaxRealtimeStickyBursts;
+             fastBursts < maxRealtimeStickyBursts;
              ++burstNum) {
             const uint64_t streamPos = anchor + burstNum * kBurst;
             if (streamPos + kBurst > workEndStream) break;
@@ -8521,7 +8550,10 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
     // (20260712_125240) showed exactly 4 AMBE frames every ~1.5–2.5s: one Voice4
     // from a single lock while multi-superframe RF between worker jobs was never
     // walked.  SDRTrunk emits SuperFrameFragments continuously as dibits arrive.
+    // Same DEC-0008 gate as the hot sticky path: independent block eyes must
+    // not invent extra bursts from a stale stream anchor.
     if (annotateSessionCodewords &&
+        m_config.enableStreamingChannelDdc &&
         m_phase2SuperframeAnchorKnown &&
         m_phase2MaskPhaseKnown &&
         mask &&

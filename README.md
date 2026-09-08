@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Current version** | **0.2.50** (experimental channel) |
+| **Current version** | **0.2.51** (experimental channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
@@ -16,6 +16,12 @@ Formerly *MaulAudio Pro*. Branding, binaries, installer, AppData paths, and rele
 ---
 
 ## Current state (honest, code- and field-verified)
+
+Development method (binding): [`SOURCE_OF_TRUTH.md`](SOURCE_OF_TRUTH.md),
+[`CAUSE_EFFECT_MAP.md`](CAUSE_EFFECT_MAP.md), [`DEVELOPMENT_RULES.md`](DEVELOPMENT_RULES.md),
+desk [`docs/README.md`](docs/README.md). **Continuous Phase 2 audio is not done.**
+`PASS_PARTIAL_AUDIO` is a diagnosis. Do not start another gate/TTL tweak until
+CADENCE/voicetest print `drop=A|B|C|D|E|ok` (REQ-P2.0 / ISS-0001).
 
 This is **active experimental software**. It is useful for real RF testing and development. It is **not** a finished production trunking scanner.
 
@@ -34,7 +40,7 @@ This is **active experimental software**. It is useful for real RF testing and d
 
 ### P25 Phase 2 clear audio — about ~50% of the time
 
-As of **v0.2.50**, field testing reports **clear Phase 2 voice roughly half the time** on live systems (good enough to understand speech when it works; still often blocky or intermittent when it does not). This build keeps the stricter selected-slot/source gates and backs out the 180 ms live speaker catch-up experiment that regressed the 2026-09-03 capture into more bridge fill and duplicate suppression.
+As of **v0.2.51**, file voicetest of the 2026-09-08 `041716` call (TG 10330 slot 1) is `PASS_CONTINUOUS_AUDIO duty=0.87` after DEC-0012 stopped companion-louder mixed MAC-dead hops from reaching the speaker. Live CADENCE is still often drop **D** (worker-busy independent CQPSK). Treat Phase 2 as experimental.
 
 What that means in practice:
 

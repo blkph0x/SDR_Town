@@ -35,7 +35,7 @@ checks = {
     'same-rf metadata switch resets dwell': 'p25AutoFollowTunedAtMs = nowMs;' in main,
     'speaker sustain decode chunks': 'kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.080' in main
         and 'kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.040' in main
-        and 'kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.080' in main,
+        and 'kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.280' in main,
     'speaker cadence 3ms': 'kP25Phase2VoiceDecodeSpeakerCadenceMs = 3' in main,
     'speaker pending jobs single-flight': 'kP25VoiceDecodeMaxPendingJobsSpeaker = 1' in main,
     'worker refuses new cursor pull while busy': 'p25VoiceWorkerBusy.load' in can_accept_body

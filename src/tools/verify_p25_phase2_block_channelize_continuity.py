@@ -24,7 +24,7 @@ checks = {
     "speaker sustain near-live hop": (
         "kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.080" in main
         and "kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.040" in main
-        and "kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.080" in main
+        and "kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.280" in main
     ),
     "speaker catch-up constants present": (
         "kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.180" in main
@@ -101,6 +101,21 @@ checks = {
     ),
     "standards soft-stop requires cqpsk lock": (
         "standardsStateMayHoldDemod" in decoder
+    ),
+    "sticky lattice walk requires streaming ddc": (
+        "m_config.enableStreamingChannelDdc &&" in decoder.split(
+            "Hot Phase-2 traffic path:", 1
+        )[1][:900]
+        and "DEC-0008" in decoder
+    ),
+    "anchor-aligned locks require streaming ddc": (
+        "Stream-space lattice alignment is only valid" in decoder
+        and "m_config.enableStreamingChannelDdc &&" in decoder.split(
+            "Stream-space lattice alignment is only valid", 1
+        )[1][:600]
+        and "stickyAnchorMaskMatches" in decoder.split(
+            "Stream-space lattice alignment is only valid", 1
+        )[1][:600]
     ),
 }
 
