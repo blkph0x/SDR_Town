@@ -12,6 +12,7 @@ ORCHESTRATION_CPP = [
     ROOT / "src" / "main.cpp",
     ROOT / "src" / "P25AppGlobals.cpp",
     ROOT / "src" / "P25TalkgroupRegistry.cpp",
+    ROOT / "include" / "P25TalkgroupRegistry.h",
     ROOT / "include" / "P25VoiceTiming.h",
     ROOT / "src" / "P25VoiceTiming.cpp",
     ROOT / "src" / "P25RollingIq.cpp",
