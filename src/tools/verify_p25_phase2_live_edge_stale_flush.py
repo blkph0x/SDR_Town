@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
-main = Path(__file__).resolve().parents[1] / 'main.cpp'
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 s = main.read_text(encoding='utf-8', errors='replace')
 assert 'p25Phase2ShouldFlushStaleVoicePipeline' in s, 'missing stale Phase-2 pipeline flush helper'
 assert 'out.diag == P25VoiceDiagCode::NoSync' in s, 'flush helper must key on hard no-sync'

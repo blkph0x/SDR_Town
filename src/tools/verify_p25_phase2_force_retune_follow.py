@@ -3,7 +3,8 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-main = (root / 'main.cpp').read_text(errors='ignore')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 checks = {
     'in-band shortcut removed': 'in-band auto-follow' not in main,
     'physical retune forced for in-passband': 'forcing physical retune' in main,

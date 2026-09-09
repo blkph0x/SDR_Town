@@ -1,11 +1,13 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-MAIN = ROOT / "src" / "main.cpp"
+from p25_orchestration_sources import orchestration_source_text
+# DEC-0040: search all orchestration TUs
+MAIN_TEXT = orchestration_source_text()
 SESSION = ROOT / "include" / "P25ReceiverSession.h"
 RECEIVER = ROOT / "src" / "Receiver.cpp"
 
-main = MAIN.read_text(encoding="utf-8")
+main = MAIN_TEXT
 session = SESSION.read_text(encoding="utf-8")
 receiver = RECEIVER.read_text(encoding="utf-8")
 

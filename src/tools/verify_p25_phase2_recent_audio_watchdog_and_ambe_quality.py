@@ -2,7 +2,8 @@
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 follow = (root / 'P25FollowStateMachine.cpp').read_text(encoding='utf-8', errors='replace')
-main = (root / 'main.cpp').read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 assert 'phase2RecentContinuation' in follow, 'watchdog must distinguish first acquisition from recent-activity reacquisition'
 assert 'tdmaNoVcwSilenceMs = waitingUnknownClearGrant' in follow, 'no-VCW watchdog should include grant-aware nested thresholds'
 assert 'phase2RecentContinuation ? 10000 : 3500' in follow, 'no-VCW watchdog must hold longer after recent Phase-2 activity'

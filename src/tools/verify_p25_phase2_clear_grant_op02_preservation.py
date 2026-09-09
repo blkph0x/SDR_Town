@@ -7,7 +7,9 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-MAIN = ROOT / "src" / "main.cpp"
+from p25_orchestration_sources import orchestration_source_text
+# DEC-0040: search all orchestration TUs
+MAIN_TEXT = orchestration_source_text()
 
 
 def must_contain(text: str, needle: str, label: str) -> None:
@@ -21,7 +23,7 @@ def must_not_contain(text: str, needle: str, label: str) -> None:
 
 
 def main() -> int:
-    text = MAIN.read_text(encoding="utf-8", errors="replace")
+    text = MAIN_TEXT
     must_contain(text, "p25PreserveTalkgroupEncryptionFromPrior", "encryption merge helper")
     must_contain(text, "p25PreserveTalkgroupEncryptionFromPrior(followTg, tg)", "auto-follow merge call")
     must_contain(

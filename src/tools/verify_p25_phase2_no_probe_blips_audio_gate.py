@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
-text = Path('src/main.cpp').read_text(errors='ignore')
+from p25_orchestration_sources import orchestration_source_text
+text = orchestration_source_text()
 checks = {
     'phase2 min decoded frames': 'out.decodedFrames >= kP25Phase2UnknownGrantAudioProbeMinFrames' in text,
     'phase2 min pcm samples': 'out.audio.size() >= kP25Phase2UnknownGrantAudioProbeMinSamples' in text,

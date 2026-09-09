@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
-main = (root / 'main.cpp').read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 recv = (root.parent / 'include' / 'Receiver.h').read_text(encoding='utf-8', errors='replace')
 assert 'kP25Phase2SameRfSlotHandoffGraceMs' in main
 assert 'phase2HandoffGraceActive' in main

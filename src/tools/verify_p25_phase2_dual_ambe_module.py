@@ -7,7 +7,8 @@ receiver_h = (root / "include" / "Receiver.h").read_text(encoding="utf-8", error
 session_h = (root / "include" / "P25ReceiverSession.h").read_text(
     encoding="utf-8", errors="replace"
 )
-main = (root / "src" / "main.cpp").read_text(encoding="utf-8", errors="replace")
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 
 observe_parts = main.split(
     "static void p25Phase2ObserveOppositeSlotAmbe", 1

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
 root = Path(__file__).resolve().parents[2]
-main = (root / 'src' / 'main.cpp').read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 follow = (root / 'src' / 'P25FollowStateMachine.cpp').read_text(encoding='utf-8', errors='replace')
 session = (root / 'include' / 'P25ReceiverSession.h').read_text(encoding='utf-8', errors='replace')
 call_key_eq = session[session.find('bool operator=='):session.find('};', session.find('bool operator=='))]

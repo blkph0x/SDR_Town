@@ -1,5 +1,6 @@
 from pathlib import Path
-main = Path('src/main.cpp').read_text(errors='ignore')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 dec = Path('src/P25LiveDecoder.cpp').read_text(errors='ignore')
 assert 'Decode through settle' in main or 'Do not skip Phase-2 decode during retune/settle' in main
 assert 'p25VoiceOutputMutedForSettle' in main

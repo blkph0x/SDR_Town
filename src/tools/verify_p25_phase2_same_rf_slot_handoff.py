@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
-src = Path(__file__).resolve().parents[1] / 'main.cpp'
-text = src.read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+src_text = orchestration_source_text()
+text = src_text
 checks = {
     'same RF handoff flag': 'sameRfPhase2SlotHandoff' in text,
     'unacquired requires no decoded frames': 'activeDiag.decodedFrames == 0' in text,

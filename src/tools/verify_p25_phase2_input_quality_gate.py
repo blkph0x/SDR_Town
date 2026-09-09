@@ -2,7 +2,8 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-main = (root / "main.cpp").read_text(errors="ignore")
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 session = (root.parent / "include" / "P25ReceiverSession.h").read_text(errors="ignore")
 
 assert "phase2InputQualityRejectedVoiceCodewords" in main, (

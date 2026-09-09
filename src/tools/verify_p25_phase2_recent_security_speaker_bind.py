@@ -2,7 +2,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-MAIN = ROOT / "src" / "main.cpp"
+from p25_orchestration_sources import orchestration_source_text
+# DEC-0040: search all orchestration TUs
+MAIN_TEXT = orchestration_source_text()
 
 
 def require(text: str, needle: str, label: str) -> None:
@@ -11,7 +13,7 @@ def require(text: str, needle: str, label: str) -> None:
 
 
 def main() -> None:
-    text = MAIN.read_text(encoding="utf-8", errors="ignore")
+    text = MAIN_TEXT
     require(
         text,
         "static void p25BindPhase2RecentSecurityEvidenceToCall",

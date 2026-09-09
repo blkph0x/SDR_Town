@@ -2,7 +2,8 @@
 from pathlib import Path
 import re
 root = Path(__file__).resolve().parents[1]
-main = (root / 'main.cpp').read_text(errors='ignore')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 fn = re.search(r'static bool p25AmbeDecodeFrameLooksUsable\([^)]*\)\s*\{(?P<body>.*?)\n\}', main, re.S)
 assert fn, 'p25AmbeDecodeFrameLooksUsable not found'
 body = fn.group('body')

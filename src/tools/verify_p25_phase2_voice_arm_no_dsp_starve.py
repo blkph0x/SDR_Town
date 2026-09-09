@@ -8,8 +8,9 @@ returns false so the retry loop commits a fresh decoder instead of producing
 short, stale-decoder audio bursts.
 """
 from pathlib import Path
-src = Path(__file__).resolve().parents[1] / "main.cpp"
-text = src.read_text(encoding="utf-8")
+from p25_orchestration_sources import orchestration_source_text
+src_text = orchestration_source_text()
+text = src_text
 start = text.index('auto armP25VoiceFollowState = [this]')
 end = text.index('auto scheduleP25VoiceFollowArm', start)
 arm = text[start:end]

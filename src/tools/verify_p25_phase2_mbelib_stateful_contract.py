@@ -2,7 +2,8 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-main = (root / "main.cpp").read_text(errors="ignore")
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 
 assert "for (int v = 0; v < 8" not in main, (
     "Phase 2 AMBE must not brute-force bit variants through the live stateful mbelib decoder"

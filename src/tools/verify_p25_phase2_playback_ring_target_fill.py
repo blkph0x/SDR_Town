@@ -3,7 +3,8 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-main = (root / 'main.cpp').read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 engine_h = (root / '../include/AudioEngine.h').resolve().read_text(encoding='utf-8', errors='replace')
 engine_cpp = (root / 'AudioEngine.cpp').read_text(encoding='utf-8', errors='replace')
 topup_helper = main.split('static size_t p25TopUpSpeakerPlaybackRing', 1)[1].split(

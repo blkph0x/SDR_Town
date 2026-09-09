@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
-src = Path(__file__).resolve().parents[1] / 'main.cpp'
-text = src.read_text(encoding='utf-8')
+from p25_orchestration_sources import orchestration_source_text
+src_text = orchestration_source_text()
+text = src_text
 required = [
     'TDMA DEEP DIAG:',
     'state{decode=%2 phase2=%3 clearKnown=%4 encrypted=%5 callClearTrusted=%6 unknownProbe=%7',

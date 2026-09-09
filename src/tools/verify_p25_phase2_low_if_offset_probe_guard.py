@@ -1,7 +1,8 @@
 from pathlib import Path
+from p25_orchestration_sources import orchestration_source_text
 
 ROOT = Path(__file__).resolve().parents[2]
-main = (ROOT / "src" / "main.cpp").read_text(encoding="utf-8", errors="replace")
+main = orchestration_source_text()
 
 assert "oneRtlLowIfTrafficSource" in main, "decode path must identify one-RTL low-IF traffic follows"
 assert "!verifiedTrafficTargetOffset && !oneRtlLowIfTrafficSource" in main, (

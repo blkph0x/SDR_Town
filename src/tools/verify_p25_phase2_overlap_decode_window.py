@@ -1,5 +1,6 @@
 from pathlib import Path
-main = Path(__file__).resolve().parents[1] / 'main.cpp'
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 text = main.read_text(encoding='utf-8', errors='replace')
 assert 'takeUndecoded(size_t maxSamples,' in text and 'size_t overlapSamples,' in text, 'Rolling IQ decode must accept overlapSamples'
 assert 'absolute dibit de-duplication' in text, 'Overlap rationale/de-duplication comment missing'

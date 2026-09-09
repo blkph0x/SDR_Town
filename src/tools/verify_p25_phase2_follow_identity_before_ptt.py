@@ -13,11 +13,13 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-MAIN = ROOT / "src" / "main.cpp"
+from p25_orchestration_sources import orchestration_source_text
+# DEC-0040: search all orchestration TUs
+MAIN_TEXT = orchestration_source_text()
 
 
 def main() -> int:
-    text = MAIN.read_text(encoding="utf-8", errors="replace")
+    text = MAIN_TEXT
     marker = "static void p25CommitPhase2TrafficMetadataFollow"
     assert marker in text, "metadata follow helper missing"
     body = text.split(marker, 1)[1].split("static bool p25Phase2ShouldFreezeCqpskDiscrete", 1)[0]

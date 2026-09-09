@@ -3,7 +3,8 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
 receiver = (root / "src" / "Receiver.cpp").read_text(encoding="utf-8", errors="replace")
-main = (root / "src" / "main.cpp").read_text(encoding="utf-8", errors="replace")
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 
 begin = receiver.split("void p25Phase2BeginNewPtt", 1)[1].split("void p25Phase2RefreshGrantEpoch", 1)[0]
 commit = main.split("static void p25CommitPhase2TrafficMetadataFollow", 1)[1].split(

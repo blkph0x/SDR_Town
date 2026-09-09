@@ -1,9 +1,10 @@
 from pathlib import Path
+from p25_orchestration_sources import orchestration_source_text
 
 
 ROOT = Path(__file__).resolve().parents[2]
 decoder = (ROOT / "src" / "P25LiveDecoder.cpp").read_text(encoding="utf-8", errors="ignore")
-main = (ROOT / "src" / "main.cpp").read_text(encoding="utf-8", errors="ignore")
+main = orchestration_source_text()
 
 required = {
     "normalize stamps burst stream coordinate before offset normalization":

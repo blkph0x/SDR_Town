@@ -3,7 +3,8 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-main = (root / 'main.cpp').read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 
 checks = {
     'no one-rtl auto sustain': 'p25IndependentTrafficSource && rx.p25TrafficRetunesPrimary && rx.p25VoiceMaskParamsKnown' not in main,

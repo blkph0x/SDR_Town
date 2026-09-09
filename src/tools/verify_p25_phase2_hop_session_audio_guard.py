@@ -2,7 +2,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-MAIN = ROOT / "src" / "main.cpp"
+from p25_orchestration_sources import orchestration_source_text
+# DEC-0040: search all orchestration TUs
+MAIN_TEXT = orchestration_source_text()
 
 
 def require(condition: bool, message: str) -> None:
@@ -10,7 +12,7 @@ def require(condition: bool, message: str) -> None:
         raise SystemExit(f"FAIL: {message}")
 
 
-text = MAIN.read_text(encoding="utf-8")
+text = MAIN_TEXT
 
 reset_fn = text.split("static bool tryApplyP25VoiceResetLocked", 1)[1].split(
     "static void syncP25Phase2MaskParametersToLiveDecoder", 1

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
+from p25_orchestration_sources import orchestration_source_text
 
-text = Path("src/main.cpp").read_text(errors="ignore")
+text = orchestration_source_text()
 
 may = text.split("static bool p25Phase2MayAppendPlcBlock", 1)[1].split(
     "static bool p25Phase2AudioTailGraceActive", 1)[0]

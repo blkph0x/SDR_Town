@@ -10,9 +10,10 @@ and mutes.
 """
 
 from pathlib import Path
+from p25_orchestration_sources import orchestration_source_text
 
-src = Path(__file__).resolve().parents[1] / "main.cpp"
-text = src.read_text(encoding="utf-8", errors="replace")
+src_text = orchestration_source_text()
+text = src_text
 
 required = [
     "const bool grantUnknownProbe =",

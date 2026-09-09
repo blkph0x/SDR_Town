@@ -4,10 +4,12 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-MAIN = ROOT / "src" / "main.cpp"
+from p25_orchestration_sources import orchestration_source_text
+# DEC-0040: search all orchestration TUs
+MAIN_TEXT = orchestration_source_text()
 FOLLOW_H = ROOT / "include" / "P25FollowStateMachine.h"
 
-main = MAIN.read_text(encoding="utf-8", errors="replace")
+main = MAIN_TEXT
 follow_h = FOLLOW_H.read_text(encoding="utf-8", errors="replace")
 
 checks = [

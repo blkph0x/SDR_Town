@@ -3,7 +3,8 @@ import re
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-main = (root / 'main.cpp').read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 audio = (root / 'AudioEngine.cpp').read_text(encoding='utf-8', errors='replace')
 live_diag = (root / 'tools' / 'run_p25_live_clear_audio_diag.py').read_text(encoding='utf-8', errors='replace')
 deep_audit = (root / 'tools' / 'run_p25_capture_deep_audit.py').read_text(encoding='utf-8', errors='replace')

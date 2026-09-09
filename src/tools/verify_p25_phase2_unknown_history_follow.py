@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
-s = Path(__file__).resolve().parents[1].joinpath('main.cpp').read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+s = orchestration_source_text()
 # Stale encrypted TG history must not be allowed to open audio, but it also
 # must not prevent following the current Phase-2 allocation for MAC/ESS proof.
 assert 'tg.encryptionKnown && tg.encrypted' in s

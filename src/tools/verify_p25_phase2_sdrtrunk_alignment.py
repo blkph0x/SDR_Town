@@ -5,7 +5,8 @@ Static/regression checks for the sdrtrunk-aligned P25 Phase 2 chain.
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 p25 = (root / "P25LiveDecoder.cpp").read_text(errors='ignore')
-main = (root / "main.cpp").read_text(errors='ignore')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 recv = (root.parent / "include" / "Receiver.h").read_text(errors='ignore')
 for idx in range(12):
     assert f"case {idx}:" in p25, f"missing slot case {idx}"
