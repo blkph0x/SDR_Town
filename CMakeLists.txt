@@ -73,6 +73,8 @@ set(SDR_TOWN_SOURCES
     include/P25TalkgroupRegistry.h
     src/P25AppGlobals.cpp
     include/P25AppGlobals.h
+    src/P25RollingIq.cpp
+    include/P25RollingIq.h
     src/DeviceManager.cpp
     src/SpectrumWidget.cpp
     include/SpectrumWidget.h

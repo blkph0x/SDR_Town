@@ -17,6 +17,7 @@ ORCHESTRATION_CPP = [
     ROOT / "include" / "P25VoiceTiming.h",
     ROOT / "src" / "P25VoiceTiming.cpp",
     ROOT / "src" / "P25RollingIq.cpp",
+    ROOT / "include" / "P25RollingIq.h",
     ROOT / "src" / "P25VoiceDecode.cpp",
     ROOT / "src" / "P25VoiceTest.cpp",
     ROOT / "src" / "CliApp.cpp",

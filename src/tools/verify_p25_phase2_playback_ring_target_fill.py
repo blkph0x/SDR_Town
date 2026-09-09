@@ -66,8 +66,12 @@ checks = {
     'speaker sustain bounded lattice overlap': 'kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.280' in main,
     'speaker backlog catch-up uses catch-up constants': 'kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds' in main
         and 'kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds' in main,
-    'backlog helper uses effective decode cursor': 'p25Phase2UndecodedBacklogSamples' in main
-        and 'effectiveDecodeAbsolute()' in main.split('p25Phase2UndecodedBacklogSamples', 1)[1][:900],
+    'backlog helper uses effective decode cursor': (
+        'p25Phase2UndecodedBacklogSamples(const RollingIqWindow& rolling)' in main
+        and 'effectiveDecodeAbsolute()' in main.split(
+            'p25Phase2UndecodedBacklogSamples(const RollingIqWindow& rolling)', 1
+        )[1][:900]
+    ),
 }
 
 failed = [name for name, ok in checks.items() if not ok]
