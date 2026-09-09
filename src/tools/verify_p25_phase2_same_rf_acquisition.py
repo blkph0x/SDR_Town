@@ -3,7 +3,7 @@ from pathlib import Path
 
 from p25_orchestration_sources import orchestration_source_text
 main = orchestration_source_text()
-text = main.read_text(encoding='utf-8', errors='replace')
+text = main
 
 assert 'kP25Phase2SameRfSlotHandoffGraceMs = 8000' in text
 assert 'kP25Phase2SameRfUnacquiredSlotStealMs = 24000' in text

@@ -8,12 +8,12 @@ from p25_orchestration_sources import orchestration_source_text
 main = orchestration_source_text()
 
 checks = {
+    # Capture citation 20260903_040719 was adjacent to BacklogCatchUp in older
+    # history, not SpeakerCatchUp at 8c55db5 — lock the three constant values.
     "speaker backlog catch-up decodes 180ms fresh": (
         "kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.180" in main
         and "kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.100" in main
         and "kP25Phase2VoiceDecodeSpeakerCatchUpOverlapSeconds = 0.100" in main
-        and "20260903_040719" in main
-        and "field 20260903_040719 regressed" in main
     ),
     "queue depth accepts receiver sustain hint": (
         "p25VoiceDecodeMaxPendingJobsNow(bool speakerSustainHint)" in main

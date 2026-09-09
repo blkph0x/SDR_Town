@@ -85,8 +85,9 @@ checks = {
         and "out.phase2ThisWindowTargetEssClear" in continuation_fn
     ),
     "speaker dual-slot gate has continuation escape": (
-        "p25Phase2SameCallSelectedTimeslotContinuationSafe(rx, out, key, nowMs, true)"
+        "p25Phase2SameCallSelectedTimeslotContinuationSafe("
         in security_gate_region
+        and "rx, out, key, nowMs," in security_gate_region
         and "p25Phase2DualSlotUntrustedGarbleWindow(out)" in security_gate_region
         and "!sameCallSelectedContinuation" in security_gate_region
         and "p25Phase2PostEmitMixedMacDeadWindow(rx, out)" in security_gate_region

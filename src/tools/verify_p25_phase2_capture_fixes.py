@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 from pathlib import Path
 
-root = Path(__file__).resolve().parents[1]
+root = Path(__file__).resolve().parents[2]
 from p25_orchestration_sources import orchestration_source_text
 main = orchestration_source_text()
-follow = (root / 'P25FollowStateMachine.cpp').read_text(encoding='utf-8', errors='replace')
+follow = (root / 'src' / 'P25FollowStateMachine.cpp').read_text(
+    encoding='utf-8', errors='replace')
 
 checks = {
     'pending audio flush on return': 'p25PendingAudioFlushSeq.fetch_add(1' in main,
@@ -15,7 +16,11 @@ checks = {
     'push returns consumed samples': 'return totalPushed;' in main,
     'emit gate required for inline audio log': 'p25Audio.phase2SpeakerGateReason == "emit"' in main,
     'phase2 acquisition progress hold': 'phase2AcquisitionProgress' in follow,
-    'bounded speaker grace in follow sm': 'kSpeakerFollowGraceMs = 2500' in follow,
+    # Immediate grace stays 2.5s; follow grace is the 40s field hold (032428).
+    'bounded speaker grace in follow sm': (
+        'kSpeakerImmediateGraceMs = 2500' in follow and
+        'kSpeakerFollowGraceMs = 40000' in follow
+    ),
     'speaker alone not live voice': 'recentSpeakerOutput ||' not in follow,
     'extended hard timeout for phase2': 'hardTimeoutTuneMs = phase2Follow ? 45000 : 12000' in follow,
 }

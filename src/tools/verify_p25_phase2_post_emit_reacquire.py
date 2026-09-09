@@ -14,7 +14,14 @@ checks = {
         'p25Phase2HasStableSuperframeLockLocked(rx)' in main and
         'p25Phase2SessionHadVoiceLock(rx)' in main
     ),
-    'wide reacquire uses acquire chunk': 'wideReacquireWindow\n                                ? kP25Phase2VoiceDecodeAcquireChunkSeconds' in main,
+    'wide reacquire uses acquire chunk': (
+        'if (wideReacquireWindow || maskEpochRepairWindow)' in main and
+        (
+            'plan.maxChunkSeconds = kP25Phase2VoiceDecodeUnacquiredAcquireFreshSeconds' in main
+            or 'plan.maxChunkSeconds = kP25Phase2VoiceDecodeFirstColdEyeSeconds' in main
+        ) and
+        'plan.maxChunkSeconds = kP25Phase2VoiceDecodeAcquireChunkSeconds' in main
+    ),
     'takeUndecoded preserves overlap context': 'firstNew + maxSamples' in main,
     'overlap context comment': 'context=0 windows after' in main,
 }

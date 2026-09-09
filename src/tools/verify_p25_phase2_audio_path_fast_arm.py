@@ -3,8 +3,8 @@ from pathlib import Path
 from p25_orchestration_sources import orchestration_source_text
 s = orchestration_source_text()
 checks = {
-    'phase2 arm delay zero': 'static constexpr int kP25Phase2ArmDelayMs = 0;' in s,
-    'control cadence faster': 'static constexpr int kP25ControlDecodeCadenceMs = 70;' in s,
+    'phase2 arm delay zero': 'constexpr int kP25Phase2ArmDelayMs = 0;' in s,
+    'control cadence faster': 'constexpr int kP25ControlDecodeCadenceMs = 70;' in s,
     'unknown field diagnostic probe defaults off': 'kP25Phase2AllowUnknownGrantFieldAudioProbe = false' in s and 'fieldAudioProbeAllowed' in s and 'kP25Phase2UnknownGrantAudioProbeMinFrames = 2' in s,
     'unknown field diagnostic probe is cli opt-in': 'args.fieldAudioProbe = true;' in s and 'args.fieldAudioProbe = false;' in s and 'probe|noprobe' in s,
     'same rf metadata switch': 'same-RF slot metadata switch' in s and 'without retune/rearm' in s,

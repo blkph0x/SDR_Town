@@ -7,10 +7,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 # Keep in sync with CMake SDR_TOWN_SOURCES orchestration TUs extracted from main.cpp.
+# Headers are included when extracted constants live as inline constexpr (Phase 1+).
 ORCHESTRATION_CPP = [
     ROOT / "src" / "main.cpp",
     ROOT / "src" / "P25AppGlobals.cpp",
     ROOT / "src" / "P25TalkgroupRegistry.cpp",
+    ROOT / "include" / "P25VoiceTiming.h",
     ROOT / "src" / "P25VoiceTiming.cpp",
     ROOT / "src" / "P25RollingIq.cpp",
     ROOT / "src" / "P25VoiceDecode.cpp",

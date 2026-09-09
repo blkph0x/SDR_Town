@@ -67,6 +67,8 @@ endif()
 
 set(SDR_TOWN_SOURCES
     src/main.cpp
+    src/P25VoiceTiming.cpp
+    include/P25VoiceTiming.h
     src/DeviceManager.cpp
     src/SpectrumWidget.cpp
     include/SpectrumWidget.h

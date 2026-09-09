@@ -2,7 +2,7 @@
 from pathlib import Path
 from p25_orchestration_sources import orchestration_source_text
 main = orchestration_source_text()
-s = main.read_text(encoding='utf-8', errors='replace')
+s = main
 assert "uint32_t talkgroupId = 0;" in s, "AMBE emit de-dupe state must track talkgroup/call boundary"
 assert "state.slotKnown != currentSlotKnown" in s and "state.slot != currentSlot" in s, "AMBE emit de-dupe must reset on slot handoff"
 assert "std::abs(state.voiceFreqHz - currentVoiceFreqHz) > 25.0" in s, "AMBE emit de-dupe must reset on frequency handoff"

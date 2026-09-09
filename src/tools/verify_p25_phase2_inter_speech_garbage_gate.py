@@ -20,7 +20,7 @@ immediate_body = text.split("const bool immediateAmbeDecodeAllowed =", 1)[1].spl
     "const bool queueUnknownAmbe", 1)[0]
 
 checks = {
-    "bounded speaker tail grace": "static constexpr qint64 kP25Phase2SpeakerAudioTailGraceMs = 2500;" in text,
+    "bounded speaker tail grace": "constexpr qint64 kP25Phase2SpeakerAudioTailGraceMs = 2500;" in text,
     "trusted clear helper": "static bool p25Phase2BlockHasTrustedClearContext" in text,
     "current burst feed helper": "static bool p25Phase2CurrentSelectedBurstFeedTrusted" in text,
     "sticky mac cannot feed established clear noise": (

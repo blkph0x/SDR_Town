@@ -12,7 +12,18 @@ if "DEC-0032 / capture 20260909_081701" not in main:
     raise SystemExit("DEC-0032 regression failed: missing planner comment")
 
 fn = "p25Phase2PlanVoiceDecodeChunk"
-idx = main.find(fn)
+idx = main.find(fn + "(")
+if idx < 0:
+    idx = main.find(fn)
+# Prefer definition body (has '{') over a header prototype.
+def_idx = main.find(fn + "(")
+while def_idx >= 0:
+    brace = main.find("{", def_idx)
+    semi = main.find(";", def_idx)
+    if brace >= 0 and (semi < 0 or brace < semi):
+        idx = def_idx
+        break
+    def_idx = main.find(fn + "(", def_idx + 1)
 body = main[idx : idx + 4500]
 sustain = body.find("kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds")
 # First backlogCatchUp *return* after sustain (not the streaming branch).

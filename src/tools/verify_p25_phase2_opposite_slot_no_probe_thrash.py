@@ -5,8 +5,9 @@ text = orchestration_source_text()
 need = [
     'selectedSlotHasVoiceCodewords',
     'oppositeSlotHasVoiceCodewords',
-    "opposite slot's VCWs",
-    'Only call it wrong-slot when this',
+    # Comment wording drifted; lock the still-present companion-observe + wrong-slot path.
+    'never feeds',
+    'Observe/decode the companion',
     'if (!selectedSlotHasVoiceCodewords && oppositeSlotHasVoiceCodewords)'
 ]
 missing = [n for n in need if n not in text]

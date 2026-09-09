@@ -1,7 +1,7 @@
 from pathlib import Path
 from p25_orchestration_sources import orchestration_source_text
 main = orchestration_source_text()
-text = main.read_text(errors='ignore')
+text = main
 fn = text[text.index('static bool p25AmbeDecodeFrameLooksUsable'):text.index('static QString p25Phase2ValidationPath')]
 assert 'decoded.totalErrors > 3' in fn, 'fresh AMBE speech must reject mbelib repeat/erasure-grade frames'
 assert "decoded.message.find('R')" in fn and "decoded.message.find('E')" in fn, 'fresh AMBE speech must reject mbelib repeat/erasure markers'

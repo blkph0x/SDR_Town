@@ -109,10 +109,12 @@ if "explicitGrantTargetSlotSelected" in explicit_body:
     print("explicit clear pending-drain helper still accepts selected-slot evidence")
     raise SystemExit(1)
 
-if ("out.phase2OppositeVoiceCodewords > 0 &&\n            !targetTrafficClearEvidence &&" not in text or
-        "!explicitGrantTargetSlotSelected" not in text):
+if ("dualSlotUntrustedExplicitGrant" not in text or
+        "p25Phase2DualSlotUntrustedGarbleWindow(out)" not in text or
+        "!dualSlotUntrustedExplicitGrant" not in text or
+        "explicitClearGrantProbeAllowed" not in text):
     print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
-    print("explicit clear probe must block ambiguous dual-slot voice but allow a selected target slot")
+    print("explicit clear probe must fail-close ambiguous dual-slot voice")
     raise SystemExit(1)
 
 unknown_block = text.split("static bool p25Phase2UnknownGrantProbeVoiceReleaseEvidence", 1)

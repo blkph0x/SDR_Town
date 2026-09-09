@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""DEC-0036: rolling decode must not hold+purge when VCWs were not queued."""
+"""DEC-0036 accounted-unqueued advance, tempered by DEC-0037 recoverable hold."""
 from __future__ import annotations
 
 import pathlib
-import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -12,29 +11,48 @@ from p25_orchestration_sources import orchestration_source_text
 MAIN_TEXT = orchestration_source_text()
 
 
+def _brace_body(text: str, sig: str) -> str | None:
+    start = text.find(sig)
+    if start < 0:
+        return None
+    brace = text.find("{", start)
+    if brace < 0:
+        return None
+    depth = 0
+    for i in range(brace, len(text)):
+        ch = text[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
 def main() -> int:
     text = MAIN_TEXT
-    m = re.search(
-        r"static bool p25Phase2RollingDecodeWindowConsumed\(.*?\n\}",
-        text,
-        re.S,
-    )
-    if not m:
+    body = _brace_body(text, "static bool p25Phase2RollingDecodeWindowConsumed")
+    if not body:
         print("FAIL: p25Phase2RollingDecodeWindowConsumed not found")
         return 1
-    body = m.group(0)
-    if "DEC-0036" not in body:
-        print("FAIL: DEC-0036 marker missing")
+    # DEC-0036: when every selected VCW is already accounted and nothing was
+    # queued/fed, advance so a stale hold cannot purge newer live jobs.
+    if "selectedVoiceAlreadyAccounted" not in body:
+        print("FAIL: DEC-0036 accounted-unqueued advance path missing")
         return 1
-    # Final return must be true (advance), not the old hold-false.
-    tail = body.strip().splitlines()[-3:]
-    if not any("return true;" in line for line in tail):
-        print("FAIL: function must end by advancing (return true)")
+    if "selectedVoiceAlreadyAccounted >= selectedVoiceNeedingDisposition" not in body:
+        print("FAIL: accounted-unqueued advance condition missing")
         return 1
-    if re.search(r"return false;\s*\}\s*$", body):
-        print("FAIL: still returns false (hold) at end")
+    accounted = body.split("selectedVoiceAlreadyAccounted >= selectedVoiceNeedingDisposition", 1)[1][:400]
+    if "return true;" not in accounted:
+        print("FAIL: accounted-unqueued path must advance (return true)")
         return 1
-    print("PASS: rolling cursor advances when selected VCWs were not queued/fed")
+    # DEC-0037 restored hold for recoverable clear eyes after the advance path.
+    if "DEC-0037" not in body or "return false;" not in body:
+        print("FAIL: DEC-0037 recoverable hold missing")
+        return 1
+    print("PASS: rolling advances when selected VCWs were accounted unqueued; recoverable eyes hold")
     return 0
 
 

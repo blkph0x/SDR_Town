@@ -60,12 +60,12 @@ checks = {
         'explicitClearGrantHardVoiceRelease' in main and
         'explicitClearGrantSelectedVoiceRelease' not in main and
         '(targetTrafficClearEvidence || explicitClearGrantSelectedVoiceRelease)' not in main and
-        'targetTrafficClearEvidence &&' in main.split('const bool explicitClearGrantHardVoiceRelease', 1)[1].split(';', 1)[0] and
+        'freshTargetTrafficClearEvidence &&' in main.split('const bool explicitClearGrantHardVoiceRelease', 1)[1].split(';', 1)[0] and
         'explicit clear control-channel' in main
     ),
     'hot cqpsk search bounded for live voice': (
-        'kP25VoiceWorkerHotRealtimeBudgetMs = 70' in main and
-        'kP25VoiceWorkerHotMaxCqpskCandidates = 12' in main
+        'kP25VoiceWorkerHotRealtimeBudgetMs = 120' in main and
+        'kP25VoiceWorkerHotMaxCqpskCandidates = 8' in main
     ),
     'deep acch when mask applied': 'mask != nullptr' in p25 or '&& mask' in p25,
     'soft cqpsk hold before mac ess': (

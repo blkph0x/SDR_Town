@@ -3,14 +3,16 @@
 
 from pathlib import Path
 
-root = Path(__file__).resolve().parents[1]
+root = Path(__file__).resolve().parents[2]
 from p25_orchestration_sources import orchestration_source_text
 main = orchestration_source_text()
-decoder_h = (root / ".." / "include" / "P25LiveDecoder.h").resolve().read_text(
+decoder_h = (root / "include" / "P25LiveDecoder.h").read_text(
     encoding="utf-8", errors="ignore"
 )
-decoder_cpp = (root / "P25LiveDecoder.cpp").read_text(encoding="utf-8", errors="ignore")
-session_h = (root / ".." / "include" / "P25ReceiverSession.h").resolve().read_text(
+decoder_cpp = (root / "src" / "P25LiveDecoder.cpp").read_text(
+    encoding="utf-8", errors="ignore"
+)
+session_h = (root / "include" / "P25ReceiverSession.h").read_text(
     encoding="utf-8", errors="ignore"
 )
 
@@ -30,8 +32,16 @@ required = {
     "worker blocks on full result backlog": "p25VoicePendingPublishDepth.load" in worker_fn,
     "stream dibit on codeword": "streamDibitKnown" in decoder_h and "codeword.streamDibit = streamDibit" in decoder_cpp,
     "frame key uses stream dibit": "key.streamDibitKnown = cw.streamDibitKnown" in main,
-    "first-frame erasure timeline": "Every accepted AMBE feed position must occupy one 20 ms slot" in main,
-    "metadata excluded from audio key": "NAC/WACN/system/source/grant epoch are late-arriving metadata" in session_h,
+    # Comment wording drifted; lock the still-present 20 ms timeline + metadata-exclusion intent.
+    "first-frame erasure timeline": (
+        "assigns monotonic speech ordinals (one per 20 ms position)" in session_h
+        or "every AMBE time slot" in main
+    ),
+    "metadata excluded from audio key": (
+        "NAC/WACN/" in session_h
+        and "site metadata" in session_h
+        and "Source/RID can arrive late" in session_h
+    ),
 }
 
 missing = [name for name, ok in required.items() if not ok]

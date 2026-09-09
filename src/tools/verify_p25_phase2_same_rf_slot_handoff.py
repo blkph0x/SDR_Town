@@ -19,8 +19,8 @@ checks = {
     ),
     'quiet call dwell steal': 'allowPhase2DwellSteal' in text,
     'handoff log': 'P25 Phase 2 same-RF slot handoff' in text,
-    'phase2 post arm discard disabled': 'static constexpr int kP25Phase2PostArmDiscardWindows = 0;' in text,
-    'retune pre-arm discard disabled': 'static constexpr int kP25RetunePreArmDiscardWindows = 0;' in text,
+    'phase2 post arm discard disabled': 'constexpr int kP25Phase2PostArmDiscardWindows = 0;' in text,
+    'retune pre-arm discard disabled': 'constexpr int kP25RetunePreArmDiscardWindows = 0;' in text,
 }
 missing=[name for name,ok in checks.items() if not ok]
 if missing:

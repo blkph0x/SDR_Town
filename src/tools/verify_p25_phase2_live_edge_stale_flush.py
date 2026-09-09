@@ -2,7 +2,7 @@
 from pathlib import Path
 from p25_orchestration_sources import orchestration_source_text
 main = orchestration_source_text()
-s = main.read_text(encoding='utf-8', errors='replace')
+s = main
 assert 'p25Phase2ShouldFlushStaleVoicePipeline' in s, 'missing stale Phase-2 pipeline flush helper'
 assert 'out.diag == P25VoiceDiagCode::NoSync' in s, 'flush helper must key on hard no-sync'
 assert 'out.phase2VoiceCodewords == 0' in s, 'flush helper must not flush active VCW windows'
