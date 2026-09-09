@@ -76,6 +76,7 @@
 #include "P25SdrtrunkTune.h"
 #include "P25VoiceTiming.h"
 #include "P25TalkgroupRegistry.h"
+#include "P25AppGlobals.h"
 #include "P25TxSession.h"
 #include "P25TxConfig.h"
 #include "SignalClassifier.h"
@@ -165,8 +166,6 @@ static constexpr size_t kP25Phase2LateEntryStrongTargetMaskedBursts = 4;
 static constexpr size_t kP25Phase2LateEntryStrongTargetVoiceCodewords = 8;
 static constexpr long long kGuiP25ClearAudioMinAcceptedFrames = 10; // 200 ms at 20 ms/frame
 static constexpr long long kGuiP25ClearAudioMinSamples = 9600;      // 200 ms at 48 kHz
-
-static P25DebugStage gP25DebugStageFilter = P25DebugStage::All;
 
 int runCLI(int argc, char* argv[]);
 
@@ -617,102 +616,7 @@ static GuiRuntimeConfig parseGuiRuntimeConfig(int argc, char* argv[])
     return cfg;
 }
 
-// Shared live diagnostic updated by demod calls from GUI worker and CLI monitor thread (P1 audit diags)
-static std::atomic<long long> gLastDspMicros{0};
-std::atomic<long long> gP25AudioLastSpeakerOutputMs{0};
-static std::atomic<double> gLastRmsDb{-100.0};   // live RF signal level used by squelch calibration/Auto/indicator
-static std::atomic<double> gLastNoiseFloorDb{-120.0};
-static std::atomic<double> gLastSnrDb{0.0};
-static std::atomic<double> gLastAfcOffsetHz{0.0};
-static std::atomic<double> gLastAfcPpmDelta{std::numeric_limits<double>::quiet_NaN()};
-static std::atomic<double> gLastAfcConfidence{0.0};
-static std::atomic<double> gLastAfcBinHz{0.0};
-static std::atomic<double> gP25LastTrustedControlFreqHz{0.0};
-static std::atomic<double> gP25LastTrustedControlOffsetHz{0.0};
-static std::atomic<long long> gP25LastTrustedControlOffsetMs{0};
-
-// Lock-free mirror of the active Phase-2 voice diagnostics.  The GUI follow
-// status path uses try_to_lock on receiver state; when the voice worker owns
-// that mutex the UI otherwise freezes on the last CC/stale snapshot.
-struct P25VoiceDiagMirror {
-    std::atomic<long long> updatedMs{0};
-    std::atomic<uint32_t> talkgroupId{0};
-    std::atomic<int> diag{0};
-    std::atomic<long long> phase2Bursts{0};
-    std::atomic<long long> phase2VoiceCodewords{0};
-    std::atomic<long long> phase2SuperframeBursts{0};
-    std::atomic<long long> phase2MaskedBursts{0};
-    std::atomic<long long> phase2MacCrcValid{0};
-    std::atomic<long long> phase2MacPdus{0};
-    std::atomic<long long> decodedFrames{0};
-    std::atomic<long long> phase2ExpectedVoiceCodewords{0};
-    std::atomic<long long> phase2FedToMbelib{0};
-    std::atomic<long long> phase2EmittedPcmFrames{0};
-    std::atomic<long long> phase2DuplicateSuppressed{0};
-    std::atomic<long long> phase2FeedGaps{0};
-    std::atomic<int> tdmaSlot{-1};
-};
-static P25VoiceDiagMirror gP25VoiceDiagMirror;
-
-// Low-overhead session cadence rollup (relaxed atomics; logged at most ~1 Hz).
-struct P25Phase2CadenceRollup {
-    std::atomic<long long> windows{0};
-    std::atomic<long long> vcw{0};
-    std::atomic<long long> targetVcw{0};
-    std::atomic<long long> fed{0};
-    std::atomic<long long> emitted{0};
-    std::atomic<long long> dups{0};
-    std::atomic<long long> gaps{0};
-    std::atomic<long long> reject{0};
-    std::atomic<long long> lastLogMs{0};
-};
-static P25Phase2CadenceRollup gP25Phase2Cadence;
-
-// Defined after P25VoiceAudioBlock (see p25Phase2NoteCadenceWindow below).
-struct P25VoiceAudioBlock;
-static void p25Phase2NoteCadenceWindow(const P25VoiceAudioBlock& out) noexcept;
-
-static void publishP25VoiceDiagMirror(const P25VoiceDiagSnapshot& diag, uint8_t tdmaSlot, bool slotKnown)
-{
-    gP25VoiceDiagMirror.updatedMs.store(diag.updatedMs, std::memory_order_release);
-    gP25VoiceDiagMirror.talkgroupId.store(diag.talkgroupId, std::memory_order_release);
-    gP25VoiceDiagMirror.diag.store(diag.diag, std::memory_order_release);
-    gP25VoiceDiagMirror.phase2Bursts.store(diag.phase2Bursts, std::memory_order_release);
-    gP25VoiceDiagMirror.phase2VoiceCodewords.store(diag.phase2VoiceCodewords, std::memory_order_release);
-    gP25VoiceDiagMirror.phase2SuperframeBursts.store(diag.phase2SuperframeBursts, std::memory_order_release);
-    gP25VoiceDiagMirror.phase2MaskedBursts.store(diag.phase2MaskedBursts, std::memory_order_release);
-    gP25VoiceDiagMirror.phase2MacCrcValid.store(diag.phase2MacCrcValid, std::memory_order_release);
-    gP25VoiceDiagMirror.phase2MacPdus.store(diag.phase2MacPdus, std::memory_order_release);
-    gP25VoiceDiagMirror.decodedFrames.store(diag.decodedFrames, std::memory_order_release);
-    gP25VoiceDiagMirror.phase2ExpectedVoiceCodewords.store(diag.phase2ExpectedVoiceCodewords, std::memory_order_release);
-    gP25VoiceDiagMirror.phase2FedToMbelib.store(diag.phase2FedToMbelib, std::memory_order_release);
-    gP25VoiceDiagMirror.phase2EmittedPcmFrames.store(diag.phase2EmittedPcmFrames, std::memory_order_release);
-    gP25VoiceDiagMirror.phase2DuplicateSuppressed.store(diag.phase2DuplicateSuppressedVoiceCodewords, std::memory_order_release);
-    gP25VoiceDiagMirror.phase2FeedGaps.store(diag.phase2FeedGaps, std::memory_order_release);
-    gP25VoiceDiagMirror.tdmaSlot.store(slotKnown ? static_cast<int>(tdmaSlot & 0x01u) : -1,
-        std::memory_order_release);
-}
-
-static bool loadP25VoiceDiagMirror(P25VoiceDiagSnapshot& out, uint8_t& outSlot, bool& outSlotKnown)
-{
-    const long long updatedMs = gP25VoiceDiagMirror.updatedMs.load(std::memory_order_acquire);
-    if (updatedMs <= 0) return false;
-    out.updatedMs = updatedMs;
-    out.talkgroupId = gP25VoiceDiagMirror.talkgroupId.load(std::memory_order_acquire);
-    out.diag = gP25VoiceDiagMirror.diag.load(std::memory_order_acquire);
-    out.phase2Bursts = gP25VoiceDiagMirror.phase2Bursts.load(std::memory_order_acquire);
-    out.phase2VoiceCodewords = gP25VoiceDiagMirror.phase2VoiceCodewords.load(std::memory_order_acquire);
-    out.phase2SuperframeBursts = gP25VoiceDiagMirror.phase2SuperframeBursts.load(std::memory_order_acquire);
-    out.phase2MaskedBursts = gP25VoiceDiagMirror.phase2MaskedBursts.load(std::memory_order_acquire);
-    out.phase2MacCrcValid = gP25VoiceDiagMirror.phase2MacCrcValid.load(std::memory_order_acquire);
-    out.phase2MacPdus = gP25VoiceDiagMirror.phase2MacPdus.load(std::memory_order_acquire);
-    out.decodedFrames = gP25VoiceDiagMirror.decodedFrames.load(std::memory_order_acquire);
-    const int slot = gP25VoiceDiagMirror.tdmaSlot.load(std::memory_order_acquire);
-    outSlotKnown = slot >= 0;
-    outSlot = outSlotKnown ? static_cast<uint8_t>(slot & 0x01u) : 0u;
-    return true;
-}
-
+// Shared atomics / diag mirror / cadence: see P25AppGlobals.h (ISS-0004 Phase 3)
 
 enum class P25VoiceDiagCode : int {
     Idle = 0,
@@ -4355,7 +4259,7 @@ struct P25VoiceAudioBlock {
     std::vector<std::string> decoderWarnings;
 };
 
-static void p25Phase2NoteCadenceWindow(const P25VoiceAudioBlock& out) noexcept
+void p25Phase2NoteCadenceWindow(const P25VoiceAudioBlock& out) noexcept
 {
     gP25Phase2Cadence.windows.fetch_add(1, std::memory_order_relaxed);
     gP25Phase2Cadence.vcw.fetch_add(static_cast<long long>(out.phase2VoiceCodewords), std::memory_order_relaxed);

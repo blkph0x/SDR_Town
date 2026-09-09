@@ -71,6 +71,8 @@ set(SDR_TOWN_SOURCES
     include/P25VoiceTiming.h
     src/P25TalkgroupRegistry.cpp
     include/P25TalkgroupRegistry.h
+    src/P25AppGlobals.cpp
+    include/P25AppGlobals.h
     src/DeviceManager.cpp
     src/SpectrumWidget.cpp
     include/SpectrumWidget.h

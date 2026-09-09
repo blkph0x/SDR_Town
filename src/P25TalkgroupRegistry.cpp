@@ -1,5 +1,6 @@
 #include "P25TalkgroupRegistry.h"
 
+#include "P25AppGlobals.h"
 #include "P25VoiceTiming.h"
 
 #include <QDateTime>
@@ -12,15 +13,12 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
-#include <atomic>
 #include <cmath>
 #include <cctype>
 #include <fstream>
 
 using json = nlohmann::json;
 
-// Defined in main.cpp until ISS-0004 Phase 3 (P25AppGlobals).
-extern std::atomic<long long> gP25AudioLastSpeakerOutputMs;
 std::string trimCopy(const std::string& s);
 
 std::map<QString, qint64> gP25RecentExplicitEncryptedPhase2Grants;
