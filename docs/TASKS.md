@@ -11,7 +11,7 @@ Status: `open` | `in_progress` | `blocked` | `done`
 
 | ID | Status | REQ | Task |
 |---|---|---|---|
-| T-0010 | in_progress | ISS-0001 | DEC-0012 companion-louder mixed skip (041716 duty=0.87). 105622 file duty=0.645. Live drop **D** still 4.5× overlap CQPSK. |
+| T-0010 | in_progress | ISS-0001 | DEC-0038: stream env=1 still duty 0.23 on 060036 (block 0.705). Default-on off. Live path = block + DEC-0035/0037; re-prove ~095846. |
 
 ---
 

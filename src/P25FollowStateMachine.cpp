@@ -81,8 +81,18 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
     // processor still sees current TDMA voice/structure.  Without that, use a
     // short playout grace so a single-RTL receiver can return to the control
     // channel instead of sitting on a dead traffic frequency for tens of seconds.
+    // Capture 20260909_053448: after a clearTrusted emit island, empty eyes for
+    // ~5s expired the 2.5s immediate grace (no current structure) and activityGone
+    // tore the traffic source down mid-call; the next grant cold-rearmed and the
+    // operator heard only sparse islands. Once traffic has proved clear, keep the
+    // full 40s speaker grace (field 032428) without requiring a live VCW window.
     constexpr int64_t kSpeakerImmediateGraceMs = 2500;
     constexpr int64_t kSpeakerFollowGraceMs = 40000;
+    // Matches main.cpp kP25Phase2ClearTrustedUnacquiredDwellStealGraceMs.
+    constexpr int64_t kClearTrustedActivitySilenceMs = 15000;
+    const bool clearTrustedHold =
+        (snapshot.grantEncryptionKnown && !snapshot.grantEncrypted) ||
+        snapshot.phase2TrafficAudioOpen;
     const bool haveSpeakerOutputTimestamp =
         snapshot.recentSpeakerOutputMs > 0 &&
         snapshot.nowMs > 0 &&
@@ -103,7 +113,8 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         speakerOutputAgeMs >= 0 &&
         speakerOutputAgeMs <= kSpeakerFollowGraceMs &&
         (speakerOutputAgeMs <= kSpeakerImmediateGraceMs ||
-         currentTrafficEvidenceForSpeakerHold);
+         currentTrafficEvidenceForSpeakerHold ||
+         clearTrustedHold);
     bool hasCarrier = true;
     if (snapshot.rfMetricsPopulated) {
         hasCarrier = snapshot.recentSnrDb > 3.0 ||
@@ -236,8 +247,12 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
          snapshot.phase2TrafficCallActive)) {
         decision.voiceStillLooksActive = true;
     }
+    // Unknown / unproven follows still bail after 3.5s of true silence so one-RTL
+    // can return to CC. Clear-trusted calls need a longer hang across empty-eye
+    // gaps between emit islands (053448: quiet return 5s after clear emit).
     const int64_t activitySilenceLimitMs =
-        phase2StillAcquiring ? 30000 : 3500;
+        phase2StillAcquiring ? 30000
+        : (clearTrustedHold ? kClearTrustedActivitySilenceMs : 3500);
     decision.activityGone =
         !recentSpeakerOutput &&
         !phase2StillAcquiring &&

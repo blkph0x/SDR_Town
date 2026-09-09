@@ -6645,6 +6645,25 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
     if (m_cqpskDiscreteFrozen && m_cqpskLock.valid) {
         stopCqpskSearch = true;
     }
+    // Block-channelize clears Costas/Gardner every hop (see channelize path)
+    // but keeps m_blockCqpskHint from the prior eye. Capture 20260908_060221:
+    // hot hops reopened the full CQPSK grid → dsp median ~161 ms on 80 ms
+    // fresh, worker-busy drop D. Soft Phase 2 evidence alone is NOT enough to
+    // stop: that trial dropped 105622 duty 0.645→0.305 and 041716 0.87→0.5
+    // (wrong early hint froze the eye; 20260729). Require hard lock evidence
+    // this window, matching stopCqpskSearchOnHardLock on the streaming path.
+    if (!stopCqpskSearch &&
+        !m_config.enableStreamingChannelDdc &&
+        m_blockCqpskHint.valid &&
+        m_config.realtimeVoiceSearch &&
+        m_config.phase2CqpskTrafficDemod &&
+        m_config.stopCqpskSearchOnHardLock &&
+        best.stats.cqpskLockUsed &&
+        isCqpskPath(best.stats.demodPath) &&
+        hasCqpskHardLockEvidence(best)) {
+        stopCqpskSearch = true;
+        best.stats.cqpskStickyOverride = true;
+    }
     size_t cqpskCandidatesEvaluated = 0;
     const auto cqpskSearchStarted = std::chrono::steady_clock::now();
     auto cqpskBudgetReached = [&]() {
@@ -6658,14 +6677,35 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         const double phase = (static_cast<double>(phaseIndex) + 0.5) * sps / static_cast<double>(phaseSteps);
         const double phaseFraction = std::clamp(phase / std::max(sps, 1e-9), 0.0, 0.999);
         auto candidateTiming = timingStateStorage;
-        if (!m_cqpskLock.valid) candidateTiming.cqpskValid = false;
+        // Block-channelize eyes are independent: cold Gardner per candidate is
+        // fine. Streaming HDQPSK must keep Costas/Gardner across contiguous
+        // chunks (SDRTrunk P25P2DecoderHDQPSK.receive). Clearing cqpskValid here
+        // forced a cold timing acquire on every unlocked 80 ms eye and capped
+        // 060036 env=1 near duty 0.25; locking discrete params on top of that
+        // cold eye then froze a weak map (duty 0.12).
+        if (!m_cqpskLock.valid && !m_config.enableStreamingChannelDdc) {
+            candidateTiming.cqpskValid = false;
+        }
         auto complexSymbols = recoverComplexSymbols(channel.samples, channel.sampleRate, m_config, phase, &candidateTiming);
         if (complexSymbols.symbols.empty()) continue;
 
         for (bool differential : {true, false}) {
             if (stopCqpskSearch) break;
+            // SDRTrunk P25P2DecoderHDQPSK is π/4 DQPSK (differential). Once
+            // streaming Gardner/Costas is warm, do not also score absolute CQPSK
+            // maps — those win soft sync and poison the sticky eye (060036).
+            if (m_config.enableStreamingChannelDdc &&
+                timingStateStorage.cqpskValid &&
+                !differential) {
+                continue;
+            }
             for (bool conjugate : {false, true}) {
                 if (stopCqpskSearch) break;
+                if (m_config.enableStreamingChannelDdc &&
+                    timingStateStorage.cqpskValid &&
+                    conjugate) {
+                    continue;
+                }
                 for (double rotation : rotations) {
                     if (stopCqpskSearch) break;
                     const auto correction = estimateCqpskFineCorrection(complexSymbols.symbols,
@@ -6673,7 +6713,13 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
                                                                          conjugate,
                                                                          rotation,
                                                                          m_config.symbolRate);
-                    for (const auto& perm : cqpskDibitPermutations()) {
+                    const auto& permSet = cqpskDibitPermutations();
+                    const size_t permLimit =
+                        (m_config.enableStreamingChannelDdc && timingStateStorage.cqpskValid)
+                            ? std::min<size_t>(permSet.size(), 2u)
+                            : permSet.size();
+                    for (size_t permIndex = 0; permIndex < permLimit; ++permIndex) {
+                        const auto& perm = permSet[permIndex];
                         if (cqpskBudgetReached()) {
                             stopCqpskSearch = true;
                             break;
@@ -6954,7 +7000,12 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
                 auto framerBursts = m_phase2Framer.takeBursts();
                 m_dspProfile.framerSuperframesEmitted += m_phase2Framer.takeSuperframes().size();
                 m_dspProfile.framerBurstsEmitted += framerBursts.size();
-                if (m_demodStateMachine.state() >= p25dsp::P25DemodState::TrackingSoft ||
+                // DEC-0033: streaming HDQPSK must queue framer bursts for commit
+                // like SDRTrunk MessageFramer. Soft/hard / TrackingSoft gating
+                // left takeBursts counted in dspFramerBurstsEmitted while
+                // m_pendingFramerBursts stayed empty (060036 env=1 duty 0.25).
+                if (m_config.enableStreamingChannelDdc ||
+                    m_demodStateMachine.state() >= p25dsp::P25DemodState::TrackingSoft ||
                     hasPhase2SoftCqpskLockEvidence(best) ||
                     hasCqpskHardLockEvidence(best)) {
                     m_pendingFramerBursts.insert(m_pendingFramerBursts.end(),
@@ -6989,7 +7040,14 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
                     restorePhase1BitTail(normalTailAfterCommit);
                 }
             }
-            m_pendingFramerBursts.clear();
+            // After lattice commit, discard framer bursts that mirrored this
+            // hop's dibits. Keep deferred leftovers only when streaming still
+            // holds an unconsumed queue (should be empty here).
+            if (!(m_config.enableStreamingChannelDdc &&
+                  !m_pendingFramerBursts.empty() &&
+                  m_phase2SuperframeAnchorKnown)) {
+                m_pendingFramerBursts.clear();
+            }
             commitMs = elapsedMsSince(commitStarted);
             restoreSelectedDemodStats(committed, selectedStats);
             best = std::move(committed);
@@ -7012,6 +7070,15 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
         best.stats.cqpskLockTrustScore = m_cqpskLock.trustScore;
         best.stats.cqpskLockMisses = 0;
     }
+    // DEC-0038: keep telemetry honest when a discrete lock exists (block path
+    // or future streaming latch). Do not create streaming locks here — measured
+    // 060036 post-commit create froze a weak map at duty 0.12 even with sticky
+    // Gardner; sticky timing alone is the streaming continuity fix.
+    if (m_cqpskLock.valid) {
+        best.stats.cqpskLockActive = true;
+        best.stats.cqpskLockMisses = m_cqpskLock.misses;
+        best.stats.cqpskLockTrustScore = m_cqpskLock.trustScore;
+    }
     if (selectedCqpskTiming && isCqpskPath(best.stats.demodPath)) {
         timingStateStorage.cqpskValid = selectedCqpskTiming->cqpskValid;
         timingStateStorage.cqpskOmega = selectedCqpskTiming->cqpskOmega;
@@ -7028,8 +7095,22 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
     best.stats.dspFilterDesignCalls = m_dspProfile.filterDesignCalls;
     best.stats.dspStagedSyncRejections = m_dspProfile.stagedSyncRejections;
     best.stats.dspFullProtocolDecodes = m_dspProfile.fullProtocolDecodes;
-    m_demodStateMachine.noteCarrierStable(best.stats.cqpskCarrierLoopApplied);
-    m_demodStateMachine.noteTimingStable(best.stats.symbolConfidence > 0.35);
+    // DEC-0033: under streaming DDC, Phase-2 structure / CQPSK residual means the
+    // carrier eye is present even when fine carrier-loop Applied is false and
+    // discrete m_cqpskLock has not latched yet (060036 env=1 stayed Cold).
+    m_demodStateMachine.noteCarrierStable(
+        best.stats.cqpskCarrierLoopApplied ||
+        (m_config.enableStreamingChannelDdc &&
+         (m_cqpskLock.valid ||
+          best.stats.phase2Bursts > 0 ||
+          best.stats.phase2SuperframeBursts > 0 ||
+          best.stats.cqpskFineCorrectionSymbols > 0)));
+    m_demodStateMachine.noteTimingStable(
+        best.stats.symbolConfidence > 0.35 ||
+        (m_config.enableStreamingChannelDdc &&
+         (timingStateStorage.cqpskValid ||
+          best.stats.phase2Bursts > 0 ||
+          best.stats.symbols > 0)));
     if (best.stats.bestPhase2SyncErrors >= 0) {
         m_demodStateMachine.noteSyncHit(
             best.stats.bestPhase2SyncErrors,
@@ -7501,10 +7582,16 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailed(const std:
 
 P25Phase2DecodeResult P25LiveDecoder::processPhase2FromFramerBurstsInternal(
     std::vector<p25dsp::P25Phase2FramerBurst> framerBursts,
-    bool annotateSessionCodewords)
+    bool annotateSessionCodewords,
+    const std::vector<int>& sourceDibits,
+    const std::vector<double>* softDibitMinAbsLlr)
 {
     P25Phase2DecodeResult out;
     if (framerBursts.empty() || !annotateSessionCodewords) return out;
+    // Need a superframe lattice before framer bursts can be slot-mapped.
+    // Without it, return empty so the caller falls through to lock search
+    // (which establishes the anchor). Do not clear pending here — caller owns it.
+    if (!m_phase2SuperframeAnchorKnown) return out;
 
     const auto* mask = m_phase2MaskParams.valid ? &m_phase2XorMask : nullptr;
     std::array<Phase2SessionState, 2> slotSessions{};
@@ -7552,7 +7639,7 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2FromFramerBurstsInternal(
 
     for (const auto& fb : framerBursts) {
         if (decoded >= kPhase2MaxFramerBurstsPerCommit) break;
-        if (!m_phase2SuperframeAnchorKnown) continue;
+        if (!m_phase2SuperframeAnchorKnown) break;
 
         const uint64_t streamBurstStart =
             m_phase2FramerOriginStreamDibit + fb.absoluteStartDibit;
@@ -7560,7 +7647,8 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2FromFramerBurstsInternal(
             static_cast<int64_t>(m_phase2SuperframeAnchorDibit);
         if (delta < 0 ||
             (delta % static_cast<int64_t>(p25dsp::kPhase2BurstDibits)) != 0) {
-            m_phase2SuperframeAnchorKnown = false;
+            // DEC-0033: one misaligned framer burst must not wipe the lattice
+            // (that left later hops with p2bursts=0 after always-queueing).
             continue;
         }
 
@@ -7735,7 +7823,9 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2FromFramerBurstsInternal(
     m_phase2EssBSeenHypotheses = retainedSession->essBSeenHypotheses;
 
     if (!out.bursts.empty()) {
-        annotatePhase2SessionCodewords(out, {});
+        // DEC-0033: pass the CQPSK dibit chunk so stream cursor / dibit tail
+        // advance like the sticky-lattice path (empty {} starved later hops).
+        annotatePhase2SessionCodewords(out, sourceDibits, softDibitMinAbsLlr);
     }
     return out;
 }
@@ -7745,11 +7835,18 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
     bool annotateSessionCodewords,
     const std::vector<double>* softDibitMinAbsLlr)
 {
+    // DEC-0033 / SDRTrunk P25P2MessageFramer: when streaming DDC is on, consume
+    // pending framer bursts on annotate commit once a superframe anchor exists.
+    // Before the anchor, leave pending queued and fall through so lattice lock
+    // can establish it (always-consuming with no anchor wiped later hops to
+    // duty 0.02 on 060036).
     if (annotateSessionCodewords &&
         m_config.enablePersistentPhase2Framer &&
         m_config.phase2CqpskTrafficDemod &&
         !m_pendingFramerBursts.empty() &&
-        m_demodStateMachine.state() >= p25dsp::P25DemodState::TrackingSoft) {
+        (m_config.enableStreamingChannelDdc ||
+         m_demodStateMachine.state() >= p25dsp::P25DemodState::TrackingSoft) &&
+        m_phase2SuperframeAnchorKnown) {
         auto pending = std::move(m_pendingFramerBursts);
         m_pendingFramerBursts.clear();
         std::vector<p25dsp::P25Phase2FramerBurst> deferredBursts;
@@ -7762,7 +7859,11 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
                                   std::make_move_iterator(pending.end()));
             pending.erase(split, pending.end());
         }
-        auto framerOut = processPhase2FromFramerBurstsInternal(std::move(pending), annotateSessionCodewords);
+        auto framerOut = processPhase2FromFramerBurstsInternal(
+            std::move(pending),
+            annotateSessionCodewords,
+            dibits,
+            softDibitMinAbsLlr);
         if (!framerOut.bursts.empty()) {
             if (!deferredBursts.empty()) {
                 m_pendingFramerBursts.insert(m_pendingFramerBursts.begin(),
@@ -7770,6 +7871,11 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
                                              std::make_move_iterator(deferredBursts.end()));
             }
             return framerOut;
+        }
+        if (!deferredBursts.empty()) {
+            m_pendingFramerBursts.insert(m_pendingFramerBursts.end(),
+                                         std::make_move_iterator(deferredBursts.begin()),
+                                         std::make_move_iterator(deferredBursts.end()));
         }
     }
 
@@ -8163,6 +8269,8 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
             const uint64_t delta = workStartStream - anchor;
             firstBurstNum = (delta + kBurst - 1ull) / kBurst;
         }
+        size_t stickyPreferredVcw = 0;
+        size_t stickyOppositeVcw = 0;
         size_t fastBursts = 0;
         for (uint64_t burstNum = firstBurstNum;
              fastBursts < maxRealtimeStickyBursts;
@@ -8215,15 +8323,41 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
                 burst.syncOffsetAdjusted = true;
                 burst.syncOffsetDibits = phase2SignedSyncSlipDibits(hit->dibitOffset, workPos);
             }
+            if (m_config.phase2PreferredTdmaSlotKnown) {
+                const size_t vcw = burst.voiceCodewords.size();
+                if ((trafficSlot & 0x01u) == (m_config.phase2PreferredTdmaSlot & 0x01u)) {
+                    stickyPreferredVcw += vcw;
+                } else {
+                    stickyOppositeVcw += vcw;
+                }
+            }
             normalizePhase2BurstOffsets(burst);
             out.bursts.push_back(std::move(burst));
             ++fastBursts;
         }
-        if (!out.bursts.empty()) {
+        // DEC-0033/0034: companion-only sticky fallthrough is streaming-only.
+        // On block-channelize (default), early-return companion bursts so the
+        // lattice stays locked; feed/slot gates discard opposite VCWs. Ungated
+        // fallthrough on 092250-class dual-slot eyes trashed the sticky epoch
+        // that still had targetVcw for ~10 s before the first emit.
+        const bool companionOnlySticky =
+            m_config.enableStreamingChannelDdc &&
+            m_config.phase2PreferredTdmaSlotKnown &&
+            stickyPreferredVcw == 0 &&
+            stickyOppositeVcw > 0;
+        if (!out.bursts.empty() && !companionOnlySticky) {
             m_phase2SuperframeAnchorGeneration = m_phase2DecodeGeneration + 1;
             retainPhase2SlotSessions();
             annotatePhase2SessionCodewords(out, dibits, softDibitMinAbsLlr);
             return out;
+        }
+        if (companionOnlySticky) {
+            out.bursts.clear();
+            out.macPdus.clear();
+            // Slot session mutations from companion bursts must not stick.
+            for (size_t ts = 0; ts < slotSessions.size(); ++ts) {
+                slotSessions[ts] = {};
+            }
         }
     }
 
