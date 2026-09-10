@@ -4,6 +4,16 @@ Newest at the top.
 
 ---
 
+## 2026-09-10 — ISS-0004 Phase A–C: leftovers + MainWindow out-of-line
+
+- **Phase A:** session/decode-config/demod-mode/saved-freq leftovers → focused TUs;
+  `main.cpp` ~200 (bootstrap + `main()` only).
+- **Phase B:** `MainWindow.h` declaration-only (~520); bodies → `MainWindow.cpp` (~13k);
+  verifiers anchored on `MainWindow::` definitions where needed.
+- **Phase C:** ISS-0008 / ISS-0009 filed; CODE_NOTES / BN / LOG updated.
+- Gate: Release build + unit tests + `verify_p25_phase2_*.py` 129/129.
+- No hop/feed/CADENCE/audio algorithm changes (move-only).
+
 ## 2026-09-10 — ISS-0004 / T-0009 closed (DEC-0040); push + PR
 
 - Phases 0–8 complete on `refactor/iss-0004-split-main`.

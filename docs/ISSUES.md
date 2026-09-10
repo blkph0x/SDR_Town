@@ -205,8 +205,10 @@ Status: `open` | `closed`
   (`P25VoiceTiming` / Registry / AppGlobals / RollingIq / VoiceDecode / VoiceTest /
   CliApp / AppBootstrap / MainWindow; `main.cpp` ~2k leftovers + `main()`).
 - **REQ:** T-0009
-- **Follow-up:** leftover session/decoder helpers still in `main.cpp`; optional
-  further split of the large `MainWindow` header (not required to close ISS-0004).
+- **Follow-up (2026-09-10):** Phase A moved leftovers into `P25VoiceSession` /
+  `P25DecodeConfig` / `DemodModeUtils` / `SavedFrequencies` (`main.cpp` ~200).
+  Phase B made `MainWindow.h` declaration-only (~520 lines); bodies in
+  `MainWindow.cpp` (~13k). Further ctor/worker TU splits remain optional.
 - **Must not invent:** a rewrite in the same commit as a feed-gate change.
 
 ## ISS-0005 — Product docs claimed continuous audio done while field audio is partial
@@ -232,3 +234,40 @@ Status: `open` | `closed`
 - **Closed:** 2026-09-07 — used AppData `20260905_105622` TG 30003 slot 0
   skip=97334; `PASS_CONTINUOUS_AUDIO` on HEAD after DEC-0008/0009.
 - **REQ:** REQ-P2.0 gate “at least one IQ or live run”
+## ISS-0008 — Session cadence / tail-grace ownership spans multiple TUs
+
+- **Status:** open
+- **Opened:** 2026-09-10
+- **Evidence:** After ISS-0004 Phase A, adaptive cadence, speaker-sustain pending
+  depth, audio-tail grace (`kP25Phase2AudioTailGraceMs` /
+  `kP25Phase2SpeakerAudioTailGraceMs`), and streaming-DDC env gate live in
+  `P25VoiceSession`, while `P25AppGlobals` still owns cadence-mirror atomics and
+  `P25VoiceTiming` owns the named CADENCE constants. `P25DecodeConfig` reads the
+  streaming-DDC experiment flag when building voice decoder configs.
+- **Risk:** Editing only one side (constant vs adaptive helper vs AppGlobals
+  mirror) can mute, chirp, or starve clear Phase 2 without a single "audio
+  policy" file to audit.
+- **Must not invent:** new CADENCE numbers or tail-grace TTLs without a capture
+  id + DEC; do not "simplify" by deleting an overload that MainWindow still calls.
+- **Unblock by:** a CODE_NOTES ownership map for cadence/tail/streaming-DDC, or a
+  follow-up DEC that names one TU as SoT for those helpers.
+
+## ISS-0009 — Verifier first-occurrence anchors break after out-of-line moves
+
+- **Status:** open
+- **Opened:** 2026-09-10
+- **Evidence:** Phase B out-of-line `MainWindow` made
+  `bool p25VoiceWorkerCanAcceptJob()` match the **header declaration** before the
+  `.cpp` body. Three verifiers
+  (`verify_p25_phase2_forensic_timeline_p0.py`, `_p3.py`,
+  `verify_p25_phase2_retune_and_streaming.py`) failed until they anchored on
+  `bool MainWindow::…` definitions. Same class of bug hit Phase A when
+  `p25Phase2EstablishedClearVoiceStreamingLocked` call sites preceded the
+  definition in the orchestration corpus order.
+- **Risk:** A green-looking string lock can miss the real body and hide a mute /
+  backpressure / busy-gate regression.
+- **Must not invent:** weaker checks that only search the whole corpus for a
+  token without proving it sits inside the definition.
+- **Unblock by:** prefer `Class::method` definition anchors (or definition-ordered
+  corpus lists) for every worker/backpressure verifier; audit remaining
+  `split("bool foo()")` patterns.

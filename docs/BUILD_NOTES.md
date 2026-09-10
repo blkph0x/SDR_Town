@@ -4,6 +4,18 @@ Newest entry at the top. Record facts, not hopes.
 
 ---
 
+## BN-0029 — ISS-0004 Phase A–B MainWindow out-of-line (2026-09-10)
+
+- **Host:** Windows 10.0.22631 x64
+- **Compiler:** MSVC via VS 2022 MSBuild 17.14.40, config Release
+- **Command:** `cmake --build build --config Release --target SDR_Town sdr_town_tests -j 8`
+- **Result:** PASS; `ctest` UnitTests PASS; `verify_p25_phase2_*.py` 129/129
+- **Layout:** `main.cpp` ~200; `MainWindow.h` ~520 (decls); `MainWindow.cpp` ~13k;
+  plus `P25VoiceSession` / `P25DecodeConfig` / `DemodModeUtils` / `SavedFrequencies`
+- **Not proven:** live CADENCE re-prove (T-0010); further MainWindow ctor/worker TU split
+
+---
+
 ## BN-0028 — DEC-0040 / ISS-0004 split `main.cpp` (2026-09-10)
 
 - **Host:** Windows 10.0.22631 x64

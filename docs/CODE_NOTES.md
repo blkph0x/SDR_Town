@@ -9,17 +9,22 @@ become the active REQ.
 | `SOURCE_OF_TRUTH.md` | — | law | Product law L1–L8 |
 | `CAUSE_EFFECT_MAP.md` | — | gates | A–E buckets; REQ-P2.* |
 | `DEVELOPMENT_RULES.md` | — | method | Athanor process, not sovereignty law |
-| `src/main.cpp` | P2.* | DEC-0040 | Thin entry + leftover session/decoder/GUI-runtime helpers (~2k). Former mega-file split under ISS-0004. |
+| `src/main.cpp` | P2.* | DEC-0040 | Bootstrap + `main()` only (~200). |
+| `include/P25VoiceSession.h` `src/P25VoiceSession.cpp` | P2.* | DEC-0040 | Session/sustain/cadence/tail-grace/streaming-DDC helpers |
+| `include/P25DecodeConfig.h` `src/P25DecodeConfig.cpp` | P2.* | DEC-0040 | Live decoder configs, control offset probe, CLI decode report |
+| `include/DemodModeUtils.h` `src/DemodModeUtils.cpp` | — | DEC-0040 | Mode strings, voice diag labels, band plans |
+| `include/SavedFrequencies.h` `src/SavedFrequencies.cpp` | GUI | DEC-0040 | Saved-frequency JSON + table populate |
 | `include/P25VoiceTiming.h` `src/P25VoiceTiming.cpp` | P2.* | DEC-0040 | Timing constants, LO park, chunk planner |
 | `include/P25TalkgroupRegistry.h` `src/P25TalkgroupRegistry.cpp` | follow | DEC-0040 | Talkgroup/CC/channel-ID persistence + grant helpers |
 | `include/P25AppGlobals.h` `src/P25AppGlobals.cpp` | P2.* | DEC-0040 | Shared atomics / cadence mirror / diag-stage accessors |
 | `include/P25RollingIq.h` `src/P25RollingIq.cpp` | P2.* | DEC-0040 | RollingIqWindow + pull/prepare/backlog cursor |
 | `include/P25VoiceDecode.h` `src/P25VoiceDecode.cpp` | P2.* | DEC-0002…0039 / DEC-0040 | Decode/feed/emit/AMBE + shared RF helpers. Block-channelize default; streaming DDC env opt-in (DEC-0014/0038). Do not add gates without a named bucket. |
 | `include/P25VoiceTest.h` `src/P25VoiceTest.cpp` | P2.0 | DEC-0040 | SigMF/WAV + replay followtest/voicetest |
-| `include/CliApp.h` `src/CliApp.cpp` | — | DEC-0040 | `runCLI` + batch arg helpers |
+| `include/CliApp.h` `src/CliApp.cpp` | — | DEC-0040 | `runCLI` + GUI runtime parse + batch arg helpers |
 | `include/AppBootstrap.h` `src/AppBootstrap.cpp` | — | DEC-0040 | Logging, theme, instance guard |
-| `include/MainWindow.h` `src/MainWindow.cpp` | GUI | DEC-0040 | Qt MainWindow (large header; ctor split is follow-up) |
+| `include/MainWindow.h` `src/MainWindow.cpp` | GUI | DEC-0040 | Declaration-only header (~520); bodies in `.cpp` (~13k). Optional further ctor/worker split. |
 | `src/tools/p25_orchestration_sources.py` | — | DEC-0040 | Concat corpus for `verify_p25_phase2_*.py` |
+| `src/tools/_extract_mainwindow_out_of_line.py` | — | DEC-0040 | One-shot MainWindow out-of-line extractor (kept for re-runs) |
 | `include/P25SdrtrunkTune.h` | follow | DEC-0015/0016 / SDRTrunk CenterFrequencyCalculator | Follow LO is single-channel voice park (voice−11249). Two-channel set calculator is citation only — 115315 997 kHz edge. |
 | `include/P25AudioDropClass.h` `src/P25AudioDropClass.cpp` | REQ-P2.0 | DEC-0002 | Pure A–E classifier from CADENCE/voicetest counters |
 | `include/P25LiveDecoder.h` `src/P25LiveDecoder.cpp` | P2.1 | SDRTrunk HDQPSK / Voice2/4 / DEC-0033/0034/0038 | IQ → dibits → superframe/ISCH/XOR/MAC/ESS/Voice2/4. Streaming: persistent framer commit when anchor known; sticky Gardner during unlocked search (DEC-0038); companion-only sticky fallthrough **streaming-gated only**. |
