@@ -4,6 +4,15 @@ Newest at the top.
 
 ---
 
+## 2026-09-10 — ISS-0004: MainWindowP25Voice TU + ISS-0010/0011
+
+- Mechanical: live voice worker / submit / backpressure / take / purge / publish
+  → `src/MainWindowP25Voice.cpp` (~1.3k); `MainWindow.cpp` ~11.8k.
+- CMake + `p25_orchestration_sources.py` updated; no moc in split cpp.
+- Docs: ISS-0010 (mega-ctor), ISS-0011 (GUI vs CLI/voicetest dual path);
+  ISS-0004 follow-up refreshed; CODE_NOTES cadence/tail ownership table (ISS-0008).
+- No hop/feed/CADENCE/audio algorithm changes (move-only).
+
 ## 2026-09-10 — ISS-0004 Phase A–C: leftovers + MainWindow out-of-line
 
 - **Phase A:** session/decode-config/demod-mode/saved-freq leftovers → focused TUs;

@@ -22,8 +22,21 @@ become the active REQ.
 | `include/P25VoiceTest.h` `src/P25VoiceTest.cpp` | P2.0 | DEC-0040 | SigMF/WAV + replay followtest/voicetest |
 | `include/CliApp.h` `src/CliApp.cpp` | — | DEC-0040 | `runCLI` + GUI runtime parse + batch arg helpers |
 | `include/AppBootstrap.h` `src/AppBootstrap.cpp` | — | DEC-0040 | Logging, theme, instance guard |
-| `include/MainWindow.h` `src/MainWindow.cpp` | GUI | DEC-0040 | Declaration-only header (~520); bodies in `.cpp` (~13k). Optional further ctor/worker split. |
+| `include/MainWindow.h` `src/MainWindow.cpp` | GUI | DEC-0040 | Declaration-only header (~520); ctor/UI/DSP-timer bodies (~12k). Mega-ctor → ISS-0010. |
+| `src/MainWindowP25Voice.cpp` | GUI / P2.* | DEC-0040 | Live voice worker, job submit/backpressure, take/purge, decode publish + speaker push. |
 | `src/tools/p25_orchestration_sources.py` | — | DEC-0040 | Concat corpus for `verify_p25_phase2_*.py` |
+
+### Cadence / tail / streaming-DDC ownership (ISS-0008)
+
+| Concern | Owning file | Notes |
+|---|---|---|
+| Named CADENCE / pending-depth / completed-result **constants** | `include/P25VoiceTiming.h` | e.g. `kP25Phase2VoiceDecode*CadenceMs`, `kP25VoiceDecodeMaxPendingJobs*`, `kP25VoiceDecodeMaxCompletedResults` |
+| Adaptive cadence + speaker-sustain pending depth + **audio-tail grace** helpers | `include/P25VoiceSession.h` `src/P25VoiceSession.cpp` | `p25Phase2AdaptiveVoiceDecodeCadenceMs`, `p25VoiceDecodeMaxPendingJobsNow`, `kP25Phase2*AudioTailGraceMs` |
+| Cadence **mirror / rollup atomics** (GUI/CLI diag) | `include/P25AppGlobals.h` `src/P25AppGlobals.cpp` | `gP25Phase2Cadence`, `p25Phase2NoteCadenceWindow` |
+| Streaming-DDC **env gate** + experiment flag | `P25VoiceSession` (`p25Phase2StreamingDdc*`) | Opt-in `SDR_TOWN_P25_STREAMING_DDC=1`; DDC impl in `P25StreamingChannelDdc.cpp` |
+| Decoder configs that **read** streaming-DDC flag | `include/P25DecodeConfig.h` `src/P25DecodeConfig.cpp` | Builds live voice decoder configs; does not own the env parse |
+| Live GUI worker that **calls** cadence/backpressure | `src/MainWindowP25Voice.cpp` (+ ctor timers in `MainWindow.cpp` until ISS-0010) | Submit/can-accept use `p25VoiceDecodeMaxPendingJobsNow` |
+| CLI / voicetest replay path | `P25VoiceTest` / `CliApp` | Same constants/helpers; dual path → ISS-0011 |
 | `src/tools/_extract_mainwindow_out_of_line.py` | — | DEC-0040 | One-shot MainWindow out-of-line extractor (kept for re-runs) |
 | `include/P25SdrtrunkTune.h` | follow | DEC-0015/0016 / SDRTrunk CenterFrequencyCalculator | Follow LO is single-channel voice park (voice−11249). Two-channel set calculator is citation only — 115315 997 kHz edge. |
 | `include/P25AudioDropClass.h` `src/P25AudioDropClass.cpp` | REQ-P2.0 | DEC-0002 | Pure A–E classifier from CADENCE/voicetest counters |

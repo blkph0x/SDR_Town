@@ -205,10 +205,12 @@ Status: `open` | `closed`
   (`P25VoiceTiming` / Registry / AppGlobals / RollingIq / VoiceDecode / VoiceTest /
   CliApp / AppBootstrap / MainWindow; `main.cpp` ~2k leftovers + `main()`).
 - **REQ:** T-0009
-- **Follow-up (2026-09-10):** Phase A moved leftovers into `P25VoiceSession` /
-  `P25DecodeConfig` / `DemodModeUtils` / `SavedFrequencies` (`main.cpp` ~200).
-  Phase B made `MainWindow.h` declaration-only (~520 lines); bodies in
-  `MainWindow.cpp` (~13k). Further ctor/worker TU splits remain optional.
+- **Follow-up (2026-09-10):** Phase A leftovers extracted (`P25VoiceSession` /
+  `P25DecodeConfig` / `DemodModeUtils` / `SavedFrequencies`; `main.cpp` ~200).
+  MainWindow out-of-line done (`MainWindow.h` ~520 decls; bodies in
+  `MainWindow.cpp` + `MainWindowP25Voice.cpp` for the live voice worker /
+  submit / backpressure / publish path). Mega-ctor timer/lambda DSP
+  orchestration still open as **ISS-0010**.
 - **Must not invent:** a rewrite in the same commit as a feed-gate change.
 
 ## ISS-0005 — Product docs claimed continuous audio done while field audio is partial
@@ -271,3 +273,32 @@ Status: `open` | `closed`
 - **Unblock by:** prefer `Class::method` definition anchors (or definition-ordered
   corpus lists) for every worker/backpressure verifier; audit remaining
   `split("bool foo()")` patterns.
+
+## ISS-0010 — MainWindow constructor still owns ~7k lines of timer/lambda DSP
+
+- **Status:** open
+- **Opened:** 2026-09-10
+- **Evidence:** After the `MainWindowP25Voice.cpp` split, `MainWindow.cpp` is still
+  ~12k lines; the constructor alone still embeds rolling-IQ / CADENCE log / chunk
+  plan / decode-submit orchestration as nested timers and lambdas (~7k lines of
+  that DSP path).
+- **Risk:** Clear Phase 2 bugs require searching a mega-ctor; eye-lost / sustain /
+  streaming gates are hard to review in nested lambdas.
+- **Must not invent:** rewriting hop/feed/CADENCE behavior while extracting.
+- **Unblock by:** extract ctor lambdas into named private methods, or a
+  `P25GuiVoiceOrchestrator` helper class behind a DEC (follow-up; do not rewrite
+  behavior unless a clean mechanical extract of named methods already exists).
+
+## ISS-0011 — Dual live paths: GUI voice worker vs CLI/voicetest
+
+- **Status:** open
+- **Opened:** 2026-09-10
+- **Evidence:** Live clear-audio diagnosis runs through the GUI voice worker in
+  `MainWindow` / `MainWindowP25Voice.cpp`, while CLI and voicetest use
+  `P25VoiceTest` / `CliApp`. Both touch the same policy surface (eye-lost caps,
+  sustain, cadence helpers) but are separate call graphs.
+- **Risk:** File voicetest can stay green while live RF chirps or mutes if one
+  path drifts on constants or gates.
+- **Must not invent:** a unifying abstraction without a DEC.
+- **Unblock by:** a CODE_NOTES "live vs replay ownership" map naming which TU
+  owns GUI worker vs voicetest/CLI replay for each policy knob.
