@@ -23,6 +23,7 @@ ORCHESTRATION_CPP = [
     ROOT / "src" / "P25VoiceTest.cpp",
     ROOT / "include" / "P25VoiceTest.h",
     ROOT / "src" / "CliApp.cpp",
+    ROOT / "include" / "CliApp.h",
     ROOT / "src" / "MainWindow.cpp",
     ROOT / "src" / "AppBootstrap.cpp",
 ]
