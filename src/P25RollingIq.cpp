@@ -1,11 +1,10 @@
 #include "P25RollingIq.h"
+#include "P25VoiceSession.h"
 
 #include <algorithm>
 #include <cmath>
 
-// Session helpers: declared in P25VoiceDecode.h / still defined in main.cpp until moved.
-bool p25Phase2SessionHadBurstEye(const Receiver& rx) noexcept;
-bool p25Phase2SessionHadVoiceLock(const Receiver& rx) noexcept;
+// Session helpers: see P25VoiceSession.h (ISS-0004 Phase A).
 
 size_t p25Phase2UndecodedBacklogSamples(const RollingIqWindow& rolling) noexcept
 {

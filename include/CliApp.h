@@ -76,8 +76,5 @@ struct SavedFrequency {
 };
 
 GuiRuntimeConfig parseGuiRuntimeConfig(int argc, char* argv[]);
-const std::vector<BandPlanEntry>& builtInBandPlans();
-std::vector<SavedFrequency> loadSavedFrequencies();
-void saveSavedFrequencies(const std::vector<SavedFrequency>& freqs);
 
 int runCLI(int argc, char* argv[]);

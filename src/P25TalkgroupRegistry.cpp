@@ -1,4 +1,5 @@
 #include "P25TalkgroupRegistry.h"
+#include "DemodModeUtils.h"
 
 #include "P25AppGlobals.h"
 #include "P25VoiceTiming.h"
@@ -19,7 +20,6 @@
 
 using json = nlohmann::json;
 
-std::string trimCopy(const std::string& s);
 
 std::map<QString, qint64> gP25RecentExplicitEncryptedPhase2Grants;
 

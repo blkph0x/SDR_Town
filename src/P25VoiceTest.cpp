@@ -1,4 +1,7 @@
 #include "P25VoiceTest.h"
+#include "P25VoiceSession.h"
+#include "P25DecodeConfig.h"
+#include "DemodModeUtils.h"
 
 #include "P25AppGlobals.h"
 #include "P25AudioDropClass.h"
@@ -51,17 +54,6 @@ using json = nlohmann::json;
 #ifndef SDR_TOWN_P25_AUDIO_BASELINE
 #define SDR_TOWN_P25_AUDIO_BASELINE "p25-clear-continuous-20260810"
 #endif
-
-// Still defined in main.cpp until later ISS-0004 phases.
-std::string trimCopy(const std::string& s);
-std::string modeToString(DemodMode mode);
-const char* p25VoiceDiagLabel(P25VoiceDiagCode code);
-bool p25Phase2SessionSpeakerSustainActive(const Receiver& rx) noexcept;
-P25LiveDecoderConfig p25VoiceDecoderConfigForReceiver(const Receiver& rx,
-                                                      P25VoiceDecodeProfile profile = P25VoiceDecodeProfile::Realtime);
-P25LiveDecoderConfig p25CliControlGrantDecoderConfig();
-void p25SeedAnalyzerNacFromDecode(P25ControlChannelAnalyzer& analyzer,
-                                  const P25LiveDecodeResult& result);
 
 static QString sigmfSiblingPath(const QFileInfo& info, const QString& extension)
 {

@@ -1,4 +1,7 @@
 #include "P25VoiceDecode.h"
+#include "P25VoiceSession.h"
+#include "P25DecodeConfig.h"
+#include "DemodModeUtils.h"
 
 #include "P25AudioDropClass.h"
 #include "P25RollingIq.h"
@@ -26,20 +29,6 @@
 #include <optional>
 #include <sstream>
 
-std::string trimCopy(const std::string& s);
-std::string modeToString(DemodMode mode);
-QString modeToQString(DemodMode mode);
-const char* p25VoiceDiagLabel(P25VoiceDiagCode code);
-qint64 p25Phase2EffectiveAudioTailGraceMs() noexcept;
-bool p25Phase2SessionHasHardTargetAcquire(const Receiver& rx) noexcept;
-bool p25Phase2SessionSpeakerSustainActive(const Receiver& rx) noexcept;
-bool p25Phase2EstablishedClearVoiceStreamingLocked(const Receiver& rx) noexcept;
-double p25Phase2EffectiveRollingWindowSeconds(const Receiver& rx) noexcept;
-bool p25TrustedControlOffsetForPhase2Traffic(double controlFreqHz, qint64 nowMs, double* outOffsetHz) noexcept;
-bool p25Phase2SessionHadBurstEye(const Receiver& rx) noexcept;
-bool p25Phase2SessionHadVoiceLock(const Receiver& rx) noexcept;
-P25LiveDecoderConfig p25VoiceDecoderConfigForReceiver(const Receiver& rx,
-                                                      P25VoiceDecodeProfile profile = P25VoiceDecodeProfile::Realtime);
 void appendCliP25OppositeWavCapture(const std::vector<float>& samples);
 
 using json = nlohmann::json;

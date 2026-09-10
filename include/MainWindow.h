@@ -10,12 +10,14 @@
 #include "ClassifierModelBackend.h"
 #include "CliApp.h"
 #include "Demod.h"
+#include "DemodModeUtils.h"
 #include "DeviceManager.h"
 #include "IP25AmbeEncoder.h"
 #include "P25AppGlobals.h"
 #include "P25AudioDropClass.h"
 #include "P25Control.h"
 #include "P25DebugStage.h"
+#include "P25DecodeConfig.h"
 #include "P25FollowStateMachine.h"
 #include "P25LiveDecoder.h"
 #include "P25Phase2TxFramer.h"
@@ -26,8 +28,10 @@
 #include "P25TxConfig.h"
 #include "P25TxSession.h"
 #include "P25VoiceDecode.h"
+#include "P25VoiceSession.h"
 #include "P25VoiceTest.h"
 #include "P25VoiceTiming.h"
+#include "SavedFrequencies.h"
 #include "Receiver.h"
 #include "RemoteDiagnostics.h"
 #include "SignalClassifier.h"
@@ -116,58 +120,6 @@ inline constexpr long long kGuiP25ClearAudioMinSamples = 9600;      // 200 ms at
 #ifndef SDR_TOWN_P25_AUDIO_BASELINE
 #define SDR_TOWN_P25_AUDIO_BASELINE "p25-clear-continuous-20260810"
 #endif
-
-// Helpers still defined in main.cpp (ISS-0004 leftovers / Phase 9).
-std::string trimCopy(const std::string& s);
-std::string modeToString(DemodMode mode);
-QString modeToQString(DemodMode mode);
-DemodMode modeFromString(std::string text);
-const char* p25VoiceDiagLabel(P25VoiceDiagCode code);
-const BandPlanEntry* findBandPlanForFrequency(double freqHz);
-void populateSavedFrequencyTable(QTableWidget* table, const std::vector<SavedFrequency>& freqs);
-bool p25Phase2SessionHasHardTargetAcquire(const Receiver& rx) noexcept;
-bool p25Phase2SessionHadVoiceLock(const Receiver& rx) noexcept;
-bool p25Phase2SessionHadBurstEye(const Receiver& rx) noexcept;
-bool p25Phase2SessionSpeakerSustainActive(const Receiver& rx) noexcept;
-bool p25Phase2EstablishedClearVoiceStreamingLocked(const Receiver& rx) noexcept;
-bool p25TrustedControlOffsetForPhase2Traffic(double controlFreqHz, qint64 nowMs, double* outOffsetHz) noexcept;
-void p25SeedPhase2TrafficOffsetFromControl(Receiver& rx,
-                                           double offsetHz,
-                                           int trust = 1) noexcept;
-int p25Phase2AdaptiveVoiceDecodeCadenceMs() noexcept;
-int p25Phase2AdaptiveVoiceDecodeCadenceMs(const Receiver& rx) noexcept;
-bool p25Phase2SpeakerSustainDecodeActive() noexcept;
-size_t p25VoiceDecodeMaxPendingJobsNow(bool speakerSustainHint) noexcept;
-size_t p25VoiceDecodeMaxPendingJobsNow() noexcept;
-bool p25Phase2HasStableSuperframeLockLocked(const Receiver& rx) noexcept;
-bool p25Phase2NeedsWideReacquireWindowLocked(const Receiver& rx) noexcept;
-bool p25Phase2UseSustainDecodeWindowLocked(const Receiver& rx) noexcept;
-bool p25Phase2StreamingDdcExperimentEnabled();
-P25LiveDecoderConfig p25DiagnosticDecoderConfig();
-P25LiveDecoderConfig p25RealtimeControlDecoderConfig();
-P25LiveDecoderConfig p25CliControlGrantDecoderConfig();
-P25LiveDecoderConfig p25VoiceDecoderConfig(bool phase2,
-                                           P25VoiceDecodeProfile profile = P25VoiceDecodeProfile::Realtime);
-P25LiveDecoderConfig p25VoiceDecoderConfigForReceiver(const Receiver& rx,
-                                                      P25VoiceDecodeProfile profile = P25VoiceDecodeProfile::Realtime);
-int p25CliDecodeScore(const P25LiveDecodeResult& result);
-bool p25ControlDecodeHasTrustedPayload(const P25LiveDecodeResult& result);
-bool p25ControlDecodeHasValidatedNid(const P25LiveDecodeResult& result);
-P25LiveDecodeResult decodeP25ControlWithOffsetProbe(P25LiveDecoder& decoder,
-                                                    const std::vector<std::complex<float>>& iq,
-                                                    double sampleRateHz,
-                                                    double centerFreqHz,
-                                                    double nominalTargetHz,
-                                                    double* effectiveTargetHz = nullptr);
-void p25SeedAnalyzerNacFromDecode(P25ControlChannelAnalyzer& analyzer,
-                                  const P25LiveDecodeResult& result);
-void printP25CliDecodeReport(const std::string& label,
-                             int devIndex,
-                             double centerFreqHz,
-                             double sampleRateHz,
-                             double targetHz,
-                             const P25LiveDecodeResult& result,
-                             P25ControlChannelAnalyzer& analyzer);
 
 inline void populateP25Table(QTableWidget* table,
                              const std::vector<P25ControlCandidate>& hits,

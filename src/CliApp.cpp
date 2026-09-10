@@ -1,4 +1,9 @@
 #include "CliApp.h"
+#include "AppBootstrap.h"
+#include "SavedFrequencies.h"
+#include "P25DecodeConfig.h"
+#include "P25VoiceSession.h"
+#include "DemodModeUtils.h"
 
 #include "AudioEngine.h"
 #include "AudioCapture.h"
@@ -75,55 +80,8 @@ using json = nlohmann::json;
 #define SDR_TOWN_P25_AUDIO_BASELINE "p25-clear-continuous-20260810"
 #endif
 
-// Still defined in main.cpp until later ISS-0004 phases.
-void setupLogging();
-std::string trimCopy(const std::string& s);
-std::string modeToString(DemodMode mode);
-QString modeToQString(DemodMode mode);
-const char* p25VoiceDiagLabel(P25VoiceDiagCode code);
-bool p25Phase2SessionHasHardTargetAcquire(const Receiver& rx) noexcept;
-bool p25Phase2SessionHadVoiceLock(const Receiver& rx) noexcept;
-bool p25Phase2SessionHadBurstEye(const Receiver& rx) noexcept;
-bool p25Phase2SessionSpeakerSustainActive(const Receiver& rx) noexcept;
-bool p25Phase2EstablishedClearVoiceStreamingLocked(const Receiver& rx) noexcept;
-bool p25TrustedControlOffsetForPhase2Traffic(double controlFreqHz, qint64 nowMs, double* outOffsetHz) noexcept;
-P25LiveDecoderConfig p25VoiceDecoderConfigForReceiver(const Receiver& rx,
-                                                      P25VoiceDecodeProfile profile = P25VoiceDecodeProfile::Realtime);
-P25LiveDecoderConfig p25CliControlGrantDecoderConfig();
-void p25SeedAnalyzerNacFromDecode(P25ControlChannelAnalyzer& analyzer,
-                                  const P25LiveDecodeResult& result);
-
-GuiRuntimeConfig parseGuiRuntimeConfig(int argc, char* argv[]);
-const std::vector<BandPlanEntry>& builtInBandPlans();
-std::vector<SavedFrequency> loadSavedFrequencies();
-void saveSavedFrequencies(const std::vector<SavedFrequency>& freqs);
-int p25Phase2AdaptiveVoiceDecodeCadenceMs() noexcept;
-int p25Phase2AdaptiveVoiceDecodeCadenceMs(const Receiver& rx) noexcept;
-bool p25Phase2SpeakerSustainDecodeActive() noexcept;
-bool p25Phase2HasStableSuperframeLockLocked(const Receiver& rx) noexcept;
-bool p25Phase2NeedsWideReacquireWindowLocked(const Receiver& rx) noexcept;
-bool p25Phase2UseSustainDecodeWindowLocked(const Receiver& rx) noexcept;
-P25LiveDecoderConfig p25DiagnosticDecoderConfig();
-P25LiveDecoderConfig p25VoiceDecoderConfig(bool phase2,
-                                           P25VoiceDecodeProfile profile = P25VoiceDecodeProfile::Realtime);
-int p25CliDecodeScore(const P25LiveDecodeResult& result);
-bool p25ControlDecodeHasTrustedPayload(const P25LiveDecodeResult& result);
-bool p25ControlDecodeHasValidatedNid(const P25LiveDecodeResult& result);
-P25LiveDecodeResult decodeP25ControlWithOffsetProbe(P25LiveDecoder& decoder,
-                                                    const std::vector<std::complex<float>>& iq,
-                                                    double sampleRateHz,
-                                                    double centerFreqHz,
-                                                    double nominalTargetHz,
-                                                    double* effectiveTargetHz = nullptr);
-void printP25CliDecodeReport(const std::string& label,
-                             int devIndex,
-                             double centerFreqHz,
-                             double sampleRateHz,
-                             double targetHz,
-                             const P25LiveDecodeResult& result,
-                             P25ControlChannelAnalyzer& analyzer);
-bool startupHasArg(int argc, char* argv[], std::initializer_list<const char*> names,
-                   bool ignoreCommandPayload = false);
+// Symbols now in DemodModeUtils / P25VoiceSession / P25DecodeConfig /
+// SavedFrequencies / AppBootstrap (ISS-0004 Phase A).
 
 static std::deque<std::string> parseCliBatchCommandsFromRawArgs(const std::vector<std::string>& args)
 {
@@ -207,6 +165,402 @@ static bool cliBatchCanSkipStartupDeviceEnumeration(const std::deque<std::string
         if (cliCommandNeedsStartupDeviceEnumeration(command)) return false;
     }
     return true;
+}
+
+
+// parseGuiRuntimeConfig + helpers (ISS-0004 Phase A; moved from main.cpp)
+static bool guiRuntimeIsFlag(const std::string& text) noexcept
+{
+    return text.rfind("--", 0) == 0 || text.rfind("-", 0) == 0;
+}
+
+static std::optional<std::string> guiRuntimeArgValue(int& i, int argc, char* argv[], const std::string& arg)
+{
+    const size_t eq = arg.find('=');
+    if (eq != std::string::npos) return arg.substr(eq + 1);
+    if (i + 1 < argc && argv[i + 1] && !guiRuntimeIsFlag(argv[i + 1])) {
+        ++i;
+        return std::string(argv[i]);
+    }
+    return std::nullopt;
+}
+
+static bool guiRuntimeParseDouble(const std::string& text, double& out) noexcept
+{
+    char* end = nullptr;
+    out = std::strtod(text.c_str(), &end);
+    return end && *end == '\0' && std::isfinite(out);
+}
+
+static bool guiRuntimeParseInt(const std::string& text, int& out) noexcept
+{
+    char* end = nullptr;
+    const long v = std::strtol(text.c_str(), &end, 10);
+    if (!end || *end != '\0') return false;
+    out = static_cast<int>(std::clamp<long>(v, 0, std::numeric_limits<int>::max()));
+    return true;
+}
+
+static bool guiRuntimeParseSigned64(const std::string& text, int64_t& out) noexcept
+{
+    try {
+        size_t consumed = 0;
+        const long long value = std::stoll(text, &consumed, 0);
+        if (consumed != text.size()) return false;
+        out = static_cast<int64_t>(value);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+static bool guiRuntimeParseUnsigned32(const std::string& text, uint32_t& out) noexcept
+{
+    try {
+        size_t consumed = 0;
+        const unsigned long value = std::stoul(text, &consumed, 0);
+        if (consumed != text.size() || value > std::numeric_limits<uint32_t>::max()) return false;
+        out = static_cast<uint32_t>(value);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+static std::optional<double> guiRuntimeParseFrequencyHz(const std::string& text)
+{
+    double value = 0.0;
+    if (!guiRuntimeParseDouble(text, value) || value <= 0.0) return std::nullopt;
+    // Human command lines usually specify MHz; raw Hz remains available for
+    // automation by passing a value above 1 MHz.
+    return value >= 1000000.0 ? value : value * 1e6;
+}
+
+GuiRuntimeConfig parseGuiRuntimeConfig(int argc, char* argv[])
+{
+    GuiRuntimeConfig cfg;
+    for (int i = 1; i < argc; ++i) {
+        if (!argv[i]) continue;
+        std::string arg = argv[i];
+        std::string key = arg;
+        const size_t eq = key.find('=');
+        if (eq != std::string::npos) key = key.substr(0, eq);
+        std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+
+        auto requireValue = [&](const char* name) -> std::optional<std::string> {
+            auto value = guiRuntimeArgValue(i, argc, argv, arg);
+            if (!value.has_value()) {
+                cfg.warnings.push_back(std::string("missing value for ") + name);
+            }
+            return value;
+        };
+
+        if (key == "--gui-frequency" || key == "--gui-freq" ||
+            key == "--frequency" || key == "--freq") {
+            cfg.requested = true;
+            if (auto value = requireValue(key.c_str())) {
+                if (auto hz = guiRuntimeParseFrequencyHz(*value)) {
+                    cfg.frequencyHz = *hz;
+                    cfg.startDevice = true;
+                } else {
+                    cfg.warnings.push_back("invalid GUI frequency: " + *value);
+                }
+            }
+        } else if (key == "--gui-p25-control" || key == "--p25-control" ||
+                   key == "--p25-cc" || key == "--gui-p25-cc") {
+            cfg.requested = true;
+            if (auto value = requireValue(key.c_str())) {
+                if (auto hz = guiRuntimeParseFrequencyHz(*value)) {
+                    cfg.p25ControlHz = *hz;
+                    cfg.frequencyHz = cfg.frequencyHz > 0.0 ? cfg.frequencyHz : *hz;
+                    cfg.p25Monitor = true;
+                    cfg.startDevice = true;
+                } else {
+                    cfg.warnings.push_back("invalid P25 control frequency: " + *value);
+                }
+            }
+        } else if (key == "--gui-device" || key == "--device") {
+            cfg.requested = true;
+            if (auto value = requireValue(key.c_str())) {
+                std::string lower = *value;
+                std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+                    return static_cast<char>(std::tolower(c));
+                });
+                if (lower == "default" || lower == "first") {
+                    cfg.deviceIndex = 0;
+                    cfg.deviceIndexSet = true;
+                } else {
+                    int index = 0;
+                    if (guiRuntimeParseInt(*value, index)) {
+                        cfg.deviceIndex = static_cast<size_t>(std::max(0, index));
+                        cfg.deviceIndexSet = true;
+                    } else {
+                        cfg.warnings.push_back("invalid GUI device index: " + *value);
+                    }
+                }
+            }
+        } else if (key == "--gui-start-device" || key == "--start-device") {
+            cfg.requested = true;
+            cfg.startDevice = true;
+        } else if (key == "--gui-default-audio" || key == "--default-audio" ||
+                   key == "--gui-audio-default") {
+            cfg.requested = true;
+            cfg.defaultAudio = true;
+        } else if (key == "--gui-auto-follow" || key == "--auto-follow" ||
+                   key == "--p25-auto-follow") {
+            cfg.requested = true;
+            cfg.autoFollow = true;
+        } else if (key == "--gui-p25-monitor" || key == "--p25-monitor") {
+            cfg.requested = true;
+            cfg.p25Monitor = true;
+        } else if (key == "--gui-grant-test" || key == "--p25-grant-test" ||
+                   key == "--grant-test") {
+            cfg.requested = true;
+            cfg.p25GrantTest = true;
+            cfg.p25Monitor = true;
+            cfg.autoFollow = true;
+            cfg.defaultAudio = true;
+            cfg.openP25Log = true;
+        } else if (key == "--gui-open-p25-log" || key == "--p25-log") {
+            cfg.requested = true;
+            cfg.openP25Log = true;
+        } else if (key == "--gui-start-iq-capture" || key == "--gui-iq-capture" ||
+                   key == "--start-iq-capture") {
+            cfg.requested = true;
+            cfg.iqCapture = true;
+        } else if (key == "--gui-iq-replay" || key == "--iq-replay" ||
+                   key == "--gui-open-iq-replay") {
+            cfg.requested = true;
+            cfg.iqReplay = true;
+            if (auto value = guiRuntimeArgValue(i, argc, argv, arg)) {
+                cfg.iqReplayPath = *value;
+            }
+        } else if (key == "--gui-iq-replay-autoplay" || key == "--iq-replay-autoplay") {
+            cfg.requested = true;
+            cfg.iqReplay = true;
+            cfg.iqReplayAutoPlay = true;
+        } else if (key == "--gui-iq-replay-target" || key == "--iq-replay-target") {
+            cfg.requested = true;
+            cfg.iqReplay = true;
+            if (auto value = requireValue(key.c_str())) {
+                if (auto hz = guiRuntimeParseFrequencyHz(*value)) cfg.iqReplayTargetHz = *hz;
+                else cfg.warnings.push_back("invalid IQ replay target frequency: " + *value);
+            }
+        } else if (key == "--gui-iq-replay-center" || key == "--iq-replay-center") {
+            cfg.requested = true;
+            cfg.iqReplay = true;
+            if (auto value = requireValue(key.c_str())) {
+                if (auto hz = guiRuntimeParseFrequencyHz(*value)) cfg.iqReplayCenterHz = *hz;
+                else cfg.warnings.push_back("invalid IQ replay center frequency: " + *value);
+            }
+        } else if (key == "--gui-iq-replay-voice-center" || key == "--gui-iq-replay-voicecenter" ||
+                   key == "--gui-iq-replay-traffic-center" || key == "--gui-iq-replay-trafficcenter" ||
+                   key == "--iq-replay-voice-center" || key == "--iq-replay-voicecenter" ||
+                   key == "--iq-replay-traffic-center" || key == "--iq-replay-trafficcenter") {
+            cfg.requested = true;
+            cfg.iqReplay = true;
+            if (auto value = requireValue(key.c_str())) {
+                if (auto hz = guiRuntimeParseFrequencyHz(*value)) cfg.iqReplayVoiceCenterHz = *hz;
+                else cfg.warnings.push_back("invalid IQ replay voice center frequency: " + *value);
+            }
+        } else if (key == "--gui-iq-replay-start-ms" || key == "--gui-iq-replay-skip-ms" ||
+                   key == "--iq-replay-start-ms" || key == "--iq-replay-skip-ms") {
+            cfg.requested = true;
+            cfg.iqReplay = true;
+            if (auto value = requireValue(key.c_str())) {
+                int ms = 0;
+                if (guiRuntimeParseInt(*value, ms)) cfg.iqReplayStartMs = std::clamp(ms, 0, 36000000);
+                else cfg.warnings.push_back("invalid IQ replay start milliseconds: " + *value);
+            }
+        } else if (key == "--gui-iq-replay-ms" || key == "--gui-iq-replay-duration-ms" ||
+                   key == "--iq-replay-ms" || key == "--iq-replay-duration-ms") {
+            cfg.requested = true;
+            cfg.iqReplay = true;
+            if (auto value = requireValue(key.c_str())) {
+                int ms = 0;
+                if (guiRuntimeParseInt(*value, ms) && ms > 0) cfg.iqReplayDurationMs = std::clamp(ms, 100, 600000);
+                else cfg.warnings.push_back("invalid IQ replay duration milliseconds: " + *value);
+            }
+        } else if (key == "--gui-iq-replay-window-ms" || key == "--iq-replay-window-ms") {
+            cfg.requested = true;
+            cfg.iqReplay = true;
+            if (auto value = requireValue(key.c_str())) {
+                int ms = 0;
+                if (guiRuntimeParseInt(*value, ms) && ms > 0) cfg.iqReplayWindowMs = std::clamp(ms, 80, 5000);
+                else cfg.warnings.push_back("invalid IQ replay window milliseconds: " + *value);
+            }
+        } else if (key == "--gui-iq-replay-hop-ms" || key == "--iq-replay-hop-ms") {
+            cfg.requested = true;
+            cfg.iqReplay = true;
+            if (auto value = requireValue(key.c_str())) {
+                int ms = 0;
+                if (guiRuntimeParseInt(*value, ms) && ms >= 0) {
+                    cfg.iqReplayHopMs = ms == 0 ? 0 : std::clamp(ms, 10, 1000);
+                }
+                else cfg.warnings.push_back("invalid IQ replay hop milliseconds: " + *value);
+            }
+        } else if (key == "--gui-iq-replay-tg" || key == "--iq-replay-tg") {
+            cfg.requested = true;
+            cfg.iqReplay = true;
+            if (auto value = requireValue(key.c_str())) {
+                uint32_t tg = 0;
+                if (guiRuntimeParseUnsigned32(*value, tg) && tg <= static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+                    cfg.iqReplayTalkgroup = static_cast<int>(tg);
+                } else {
+                    cfg.warnings.push_back("invalid IQ replay talkgroup: " + *value);
+                }
+            }
+        } else if (key == "--gui-iq-replay-slot" || key == "--iq-replay-slot") {
+            cfg.requested = true;
+            cfg.iqReplay = true;
+            if (auto value = requireValue(key.c_str())) {
+                int slot = -1;
+                if (guiRuntimeParseInt(*value, slot) && slot >= 0 && slot <= 1) cfg.iqReplaySlot = slot;
+                else cfg.warnings.push_back("invalid IQ replay TDMA slot: " + *value);
+            }
+        } else if (key == "--gui-iq-replay-nac" || key == "--iq-replay-nac") {
+            cfg.requested = true;
+            cfg.iqReplay = true;
+            if (auto value = requireValue(key.c_str())) {
+                int64_t nac = -1;
+                if (guiRuntimeParseSigned64(*value, nac) && nac >= 0 && nac <= 0x0fff) cfg.iqReplayNac = static_cast<int>(nac);
+                else cfg.warnings.push_back("invalid IQ replay NAC: " + *value);
+            }
+        } else if (key == "--gui-iq-replay-wacn" || key == "--iq-replay-wacn") {
+            cfg.requested = true;
+            cfg.iqReplay = true;
+            if (auto value = requireValue(key.c_str())) {
+                int64_t wacn = -1;
+                if (guiRuntimeParseSigned64(*value, wacn) && wacn >= 0 && wacn <= 0x0fffff) cfg.iqReplayWacn = wacn;
+                else cfg.warnings.push_back("invalid IQ replay WACN: " + *value);
+            }
+        } else if (key == "--gui-iq-replay-system" || key == "--iq-replay-system") {
+            cfg.requested = true;
+            cfg.iqReplay = true;
+            if (auto value = requireValue(key.c_str())) {
+                int64_t systemId = -1;
+                if (guiRuntimeParseSigned64(*value, systemId) && systemId >= 0 && systemId <= 0x0fff) cfg.iqReplaySystemId = static_cast<int>(systemId);
+                else cfg.warnings.push_back("invalid IQ replay system id: " + *value);
+            }
+        } else if (key == "--gui-iq-replay-clear" || key == "--iq-replay-clear") {
+            cfg.requested = true;
+            cfg.iqReplay = true;
+            cfg.iqReplayClearGrant = true;
+            cfg.iqReplayEncryptedGrant = false;
+        } else if (key == "--gui-iq-replay-enc" || key == "--iq-replay-enc" ||
+                   key == "--gui-iq-replay-encrypted" || key == "--iq-replay-encrypted") {
+            cfg.requested = true;
+            cfg.iqReplay = true;
+            cfg.iqReplayEncryptedGrant = true;
+            cfg.iqReplayClearGrant = false;
+        } else if (key == "--gui-iq-replay-no-stt" || key == "--iq-replay-no-stt") {
+            cfg.requested = true;
+            cfg.iqReplay = true;
+            cfg.iqReplayStt = false;
+        } else if (key == "--gui-iq-replay-wav" || key == "--iq-replay-wav") {
+            cfg.requested = true;
+            cfg.iqReplay = true;
+            if (auto value = requireValue(key.c_str())) cfg.iqReplayWavPath = *value;
+        } else if (key == "--gui-iq-replay-result" || key == "--iq-replay-result") {
+            cfg.requested = true;
+            cfg.iqReplay = true;
+            if (auto value = requireValue(key.c_str())) cfg.iqReplayResultPath = *value;
+        } else if (key == "--gui-capture-label" || key == "--capture-label") {
+            cfg.requested = true;
+            if (auto value = requireValue(key.c_str())) {
+                cfg.iqCaptureLabel = *value;
+                cfg.iqCapture = true;
+            }
+        } else if (key == "--gui-capture-root" || key == "--capture-root") {
+            cfg.requested = true;
+            if (auto value = requireValue(key.c_str())) {
+                cfg.iqCaptureRoot = *value;
+                cfg.iqCapture = true;
+            }
+        } else if (key == "--gui-capture-seconds" || key == "--capture-seconds") {
+            cfg.requested = true;
+            if (auto value = requireValue(key.c_str())) {
+                double seconds = 0.0;
+                if (guiRuntimeParseDouble(*value, seconds) && seconds > 0.0) {
+                    const double clamped = std::clamp(seconds, 1.0, 3600.0);
+                    cfg.iqCaptureDurationMs = static_cast<int>(std::lround(clamped * 1000.0));
+                    cfg.iqCapture = true;
+                } else {
+                    cfg.warnings.push_back("invalid GUI capture seconds: " + *value);
+                }
+            }
+        } else if (key == "--gui-capture-ms" || key == "--capture-ms") {
+            cfg.requested = true;
+            if (auto value = requireValue(key.c_str())) {
+                int ms = 0;
+                if (guiRuntimeParseInt(*value, ms) && ms > 0) {
+                    cfg.iqCaptureDurationMs = std::clamp(ms, 1000, 3600000);
+                    cfg.iqCapture = true;
+                } else {
+                    cfg.warnings.push_back("invalid GUI capture milliseconds: " + *value);
+                }
+            }
+        } else if (key == "--gui-p25-late-entry-audio-probe" ||
+                   key == "--p25-late-entry-audio-probe" ||
+                   key == "--gui-p25-field-audio-probe" ||
+                   key == "--p25-field-audio-probe") {
+            cfg.requested = true;
+            cfg.p25LateEntryAudioProbe = true;
+        } else if (key == "--debug-stage" || key == "--p25-debug-stage") {
+            cfg.requested = true;
+            if (auto value = requireValue(key.c_str())) {
+                cfg.debugStage = *value;
+            }
+        } else if (key == "--gui-startup-dry-run" || key == "--gui-dry-run") {
+            cfg.requested = true;
+            cfg.dryRun = true;
+        } else if (key == "--gui-startup-self-test" || key == "--gui-self-test") {
+            cfg.requested = true;
+            cfg.selfTest = true;
+            if (auto value = guiRuntimeArgValue(i, argc, argv, arg)) {
+                cfg.selfTestPath = *value;
+            }
+        } else if (key == "--gui-exit-after-ms") {
+            cfg.requested = true;
+            if (auto value = requireValue(key.c_str())) {
+                int ms = 0;
+                if (guiRuntimeParseInt(*value, ms)) cfg.exitAfterMs = ms;
+                else cfg.warnings.push_back("invalid GUI exit timeout: " + *value);
+            }
+        } else if (key == "--gui-require-clear-audio") {
+            cfg.requested = true;
+            cfg.requireClearAudio = true;
+        } else if (key == "--gui-clear-audio-timeout-ms" ||
+                   key == "--gui-self-test-timeout-ms") {
+            cfg.requested = true;
+            if (auto value = requireValue(key.c_str())) {
+                int ms = 0;
+                if (guiRuntimeParseInt(*value, ms)) cfg.clearAudioTimeoutMs = ms;
+                else cfg.warnings.push_back("invalid GUI clear-audio timeout: " + *value);
+            }
+        }
+    }
+
+    if (cfg.p25GrantTest && cfg.p25ControlHz <= 0.0 && cfg.frequencyHz > 0.0) {
+        cfg.p25ControlHz = cfg.frequencyHz;
+    }
+    if (cfg.p25Monitor && cfg.p25ControlHz <= 0.0 && cfg.frequencyHz > 0.0) {
+        cfg.p25ControlHz = cfg.frequencyHz;
+    }
+    if (cfg.selfTest && cfg.exitAfterMs <= 0 && !cfg.requireClearAudio) {
+        cfg.exitAfterMs = (cfg.iqReplay && cfg.iqReplayAutoPlay)
+            ? std::clamp(cfg.iqReplayDurationMs + 4000, 2500, 900000)
+            : 1800;
+    }
+    if (cfg.requireClearAudio && cfg.clearAudioTimeoutMs <= 0) {
+        cfg.clearAudioTimeoutMs = 300000;
+    }
+    if (cfg.defaultAudio || cfg.p25GrantTest || cfg.requireClearAudio) {
+        cfg.requested = true;
+    }
+    return cfg;
 }
 
 int runCLI(int argc, char* argv[]) {

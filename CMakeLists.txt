@@ -79,6 +79,14 @@ set(SDR_TOWN_SOURCES
     include/P25VoiceDecode.h
     src/P25VoiceTest.cpp
     include/P25VoiceTest.h
+    src/P25VoiceSession.cpp
+    include/P25VoiceSession.h
+    src/P25DecodeConfig.cpp
+    include/P25DecodeConfig.h
+    src/DemodModeUtils.cpp
+    include/DemodModeUtils.h
+    src/SavedFrequencies.cpp
+    include/SavedFrequencies.h
     src/CliApp.cpp
     include/CliApp.h
     src/AppBootstrap.cpp
