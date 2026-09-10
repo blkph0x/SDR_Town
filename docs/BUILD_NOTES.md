@@ -4,6 +4,19 @@ Newest entry at the top. Record facts, not hopes.
 
 ---
 
+## BN-0028 — DEC-0040 / ISS-0004 split `main.cpp` (2026-09-10)
+
+- **Host:** Windows 10.0.22631 x64
+- **Compiler:** MSVC via VS 2022 MSBuild 17.14.40, config Release
+- **Command:** `cmake --build build --config Release --target SDR_Town sdr_town_tests -j 8`
+- **Result:** PASS; `sdr_town_tests.exe` 214 cases / 10194 assertions; `verify_p25_phase2_*.py` 129/129
+- **Layout:** `P25VoiceTiming` / `P25TalkgroupRegistry` / `P25AppGlobals` / `P25RollingIq` /
+  `P25VoiceDecode` / `P25VoiceTest` / `CliApp` / `AppBootstrap` / `MainWindow`;
+  `main.cpp` ~2k leftovers + entry. Corpus: `src/tools/p25_orchestration_sources.py`
+- **Not proven:** live CADENCE re-prove (T-0010); leftover helpers still in `main.cpp`
+
+---
+
 ## BN-0027 — DEC-0038 streaming sticky Gardner (2026-09-09)
 
 - **Host:** Windows 10.0.22631 x64

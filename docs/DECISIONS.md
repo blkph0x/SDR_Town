@@ -8,12 +8,12 @@ A decision is recorded **before** code that depends on it is written.
 ## DEC-0040 — Mechanical split of `main.cpp` (ISS-0004 / T-0009)
 
 - **Date:** 2026-09-09
-- **Status:** accepted (in progress)
+- **Status:** accepted (complete 2026-09-10)
 - **Evidence:**
-  - `src/main.cpp` ~35k lines: shared P25 helpers, voicetest, `MainWindow`,
-    `runCLI`, and `main()` in one TU (ISS-0004).
-  - String-lock verifiers hardcode `src/main.cpp`; extraction without a corpus
-    helper would false-fail every DEC verifier.
+  - `src/main.cpp` was ~35k lines: shared P25 helpers, voicetest, `MainWindow`,
+    `runCLI`, and `main()` in one TU (ISS-0004). After Phases 0–8: ~2k leftovers
+    + `main()`; orchestration in dedicated TUs.
+  - String-lock verifiers use `src/tools/p25_orchestration_sources.py`.
   - ISS-0004: must not mix a rewrite with feed-gate behavior changes.
 - **Decision:**
   1. Mechanical move-only split into focused TUs:
