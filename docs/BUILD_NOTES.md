@@ -4,6 +4,16 @@ Newest entry at the top. Record facts, not hopes.
 
 ---
 
+## BN-0031 — ISS-0008…0011 verifier/docs + live pipeline extract (2026-09-10)
+
+- **Host:** Windows 10.0.22631 x64
+- **Compiler:** MSVC via VS 2022 MSBuild 17.14.40, config Release
+- **Command:** `cmake --build build --config Release --target SDR_Town sdr_town_tests -j 8`
+- **Result:** PASS; `sdr_town_tests.exe` 214 cases / 10194 assertions; `verify_p25_phase2_*.py` 129/129
+- **Layout:** `MainWindowP25Orchestration.cpp` ~1.4k (`startP25LiveDecodePipeline`);
+  `MainWindow.cpp` ~10.4k; 14 verifiers on `definition_body` anchors
+- **Not proven:** live CADENCE re-prove (T-0010)
+
 ## BN-0030 — ISS-0004 MainWindowP25Voice TU split (2026-09-10)
 
 - **Host:** Windows 10.0.22631 x64

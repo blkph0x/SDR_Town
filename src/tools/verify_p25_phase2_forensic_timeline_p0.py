@@ -4,7 +4,7 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
-from p25_orchestration_sources import orchestration_source_text
+from p25_orchestration_sources import definition_body, orchestration_source_text
 main = orchestration_source_text()
 decoder_h = (root / "include" / "P25LiveDecoder.h").read_text(
     encoding="utf-8", errors="ignore"
@@ -16,11 +16,11 @@ session_h = (root / "include" / "P25ReceiverSession.h").read_text(
     encoding="utf-8", errors="ignore"
 )
 
-worker_fn = main.split("bool MainWindow::p25VoiceWorkerCanAcceptJob()", 1)[1].split(
-    "MainWindow::P25VoiceWorkerQueueSnapshot", 1
-)[0] if "bool MainWindow::p25VoiceWorkerCanAcceptJob()" in main else main.split(
-    "bool p25VoiceWorkerCanAcceptJob()", 1
-)[1].split("P25VoiceWorkerQueueSnapshot", 1)[0]
+worker_fn = definition_body(
+    main,
+    "bool MainWindow::p25VoiceWorkerCanAcceptJob()",
+    ["MainWindow::P25VoiceWorkerQueueSnapshot MainWindow::p25VoiceWorkerQueueSnapshot"],
+)
 publish_wait_section = main.split("// Block until the GUI DSP worker drains completed voice", 1)[1].split(
     "p25VoiceWorkerBusy.store", 1
 )[0]

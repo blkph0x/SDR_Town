@@ -4,6 +4,19 @@ Newest at the top.
 
 ---
 
+## 2026-09-10 — ISS-0008/0009/0010/0011 hygiene (no audio rewrite)
+
+- **ISS-0009:** `definition_body` / `require_definition` in
+  `p25_orchestration_sources.py`; migrated 14 high-risk verifiers
+  (worker/backpressure/session/unknown-probe/sustain-adjacent) to definition
+  anchors (`MainWindow::…` / `.cpp` free-function defs).
+- **ISS-0010:** `startP25LiveDecodePipeline()` → `MainWindowP25Orchestration.cpp`
+  (~1434 lines guiDspWorker rolling-IQ/chunk/submit/CADENCE). Ctor calls it;
+  UI/diagnostics/updater timers remain in ctor.
+- **ISS-0008/0011:** CODE_NOTES SoT sentence + live vs CLI/voicetest ownership map.
+- Gate: Release `SDR_Town` + `sdr_town_tests` 214/10194; verifiers 129/129.
+- No hop/feed/CADENCE/audio algorithm changes.
+
 ## 2026-09-10 — ISS-0004: MainWindowP25Voice TU + ISS-0010/0011
 
 - Mechanical: live voice worker / submit / backpressure / take / purge / publish

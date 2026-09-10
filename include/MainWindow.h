@@ -4,6 +4,7 @@
 // Spec:    docs/DECISIONS.md DEC-0040 / ISS-0004 Phase B + voice TU split
 // Invariants: no hop/TTL/CADENCE/feed-gate behavior changes — move-only.
 // Voice worker / submit / backpressure / publish: src/MainWindowP25Voice.cpp.
+// Live decode pipeline (guiDspWorker): src/MainWindowP25Orchestration.cpp.
 
 #include "AppBootstrap.h"
 #include "AudioCapture.h"
@@ -311,6 +312,8 @@ private:
     AudioEngine* peekAudioEngineIfReady() const noexcept;
 
     AudioEngine* ensureAudioOutputActive(const char* reason = "audio");
+
+    void startP25LiveDecodePipeline();
 
     void startP25VoiceWorker();
 

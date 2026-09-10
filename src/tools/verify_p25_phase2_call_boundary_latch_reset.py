@@ -3,13 +3,15 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
 receiver = (root / "src" / "Receiver.cpp").read_text(encoding="utf-8", errors="replace")
-from p25_orchestration_sources import orchestration_source_text
+from p25_orchestration_sources import definition_body, orchestration_source_text
 main = orchestration_source_text()
 
 begin = receiver.split("void p25Phase2BeginNewPtt", 1)[1].split("void p25Phase2RefreshGrantEpoch", 1)[0]
-commit = main.split("void p25CommitPhase2TrafficMetadataFollow", 1)[1].split(
-    "bool p25Phase2ShouldFreezeCqpskDiscrete", 1
-)[0]
+commit = definition_body(
+    main,
+    "void p25CommitPhase2TrafficMetadataFollow",
+    ["bool p25Phase2ShouldFreezeCqpskDiscrete"],
+)
 
 checks = {
     "new ptt clears pending raw ambe": "rx.p25SessionState.pendingAudio = {};" in begin,

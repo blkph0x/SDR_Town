@@ -3,7 +3,7 @@ from pathlib import Path
 import re
 
 root = Path(__file__).resolve().parents[2]
-from p25_orchestration_sources import orchestration_source_text
+from p25_orchestration_sources import definition_body, orchestration_source_text, require_definition
 main = orchestration_source_text()
 decoder = (root / 'src' / 'P25LiveDecoder.cpp').read_text(encoding='utf-8')
 header = (root / 'include' / 'P25LiveDecoder.h').read_text(encoding='utf-8')
@@ -11,9 +11,17 @@ header = (root / 'include' / 'P25LiveDecoder.h').read_text(encoding='utf-8')
 acquire_match = re.search(r'kP25Phase2VoiceDecodeAcquireChunkSeconds\s*=\s*([0-9.]+)', main)
 acquire_seconds = float(acquire_match.group(1)) if acquire_match else 999.0
 
+accept_fn = definition_body(
+    main,
+    'bool MainWindow::p25VoiceWorkerCanAcceptJob()',
+    ['MainWindow::P25VoiceWorkerQueueSnapshot MainWindow::p25VoiceWorkerQueueSnapshot'],
+)
+depth_fn = require_definition(main, 'bool MainWindow::p25VoiceWorkerCanAcceptJobForDepth')
+
 checks = {
-    'worker accept blocks while busy': 'p25VoiceWorkerBusy.load(std::memory_order_acquire)' in main and
+    'worker accept blocks while busy': 'p25VoiceWorkerBusy.load(std::memory_order_acquire)' in accept_fn and
         'p25VoiceWorkerCanAcceptJob' in main,
+    'worker accept definition anchored': 'inFlightJobs < p25VoiceDecodeMaxPendingJobsNow' in depth_fn,
     'worker dsp mutex wait instead of infinite block': 'dsp-mutex-timeout' in main and
         'kP25VoiceWorkerDspMutexWaitMs' in main,
     'smaller live acquire chunk': 0.0 < acquire_seconds <= 0.080,

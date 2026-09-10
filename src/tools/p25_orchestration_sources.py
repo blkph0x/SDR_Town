@@ -34,6 +34,7 @@ ORCHESTRATION_CPP = [
     ROOT / "include" / "CliApp.h",
     ROOT / "src" / "MainWindow.cpp",
     ROOT / "src" / "MainWindowP25Voice.cpp",
+    ROOT / "src" / "MainWindowP25Orchestration.cpp",
     ROOT / "include" / "MainWindow.h",
     ROOT / "src" / "AppBootstrap.cpp",
     ROOT / "include" / "AppBootstrap.h",
@@ -50,6 +51,70 @@ def orchestration_source_text() -> str:
         parts.append(f"\n/* ==== {path.relative_to(ROOT).as_posix()} ==== */\n")
         parts.append(path.read_text(encoding="utf-8", errors="replace"))
     return "".join(parts)
+
+
+def _definition_start(text: str, signature: str) -> int | None:
+    """Index of signature for a definition ({ before ;), else None."""
+    start = 0
+    while True:
+        idx = text.find(signature, start)
+        if idx < 0:
+            return None
+        after = text[idx + len(signature) : idx + len(signature) + 8192]
+        brace = after.find("{")
+        semi = after.find(";")
+        if brace >= 0 and (semi < 0 or brace < semi):
+            return idx
+        start = idx + 1
+
+
+def definition_body(
+    text: str,
+    signature: str,
+    next_signatures: list[str] | None = None,
+) -> str:
+    """Return text from a definition signature through the next signature (or reasonable end).
+
+    Skips prototypes/calls where ``;`` appears before ``{``. Prefer ``Class::method``
+    or free-function signatures that appear on .cpp definitions (ISS-0009).
+    """
+    idx = _definition_start(text, signature)
+    if idx is None:
+        raise ValueError(f"definition not found for signature: {signature!r}")
+    body = text[idx + len(signature) :]
+    if next_signatures:
+        end = len(body)
+        for nxt in next_signatures:
+            pos = body.find(nxt)
+            if pos >= 0:
+                end = min(end, pos)
+        return body[:end]
+    # No next marker: return through the matching closing brace of the definition.
+    brace = body.find("{")
+    if brace < 0:
+        return body[:4096]
+    depth = 0
+    for i in range(brace, len(body)):
+        ch = body[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return body[: i + 1]
+        if i - brace > 200000:
+            break
+    return body[: max(brace + 4096, 8192)]
+
+
+def require_definition(text: str, signature: str) -> str:
+    """Like definition_body without next markers; raises a clear error if missing."""
+    try:
+        return definition_body(text, signature)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"ISS-0009: required definition not found: {signature!r}"
+        ) from exc
 
 
 if __name__ == "__main__":

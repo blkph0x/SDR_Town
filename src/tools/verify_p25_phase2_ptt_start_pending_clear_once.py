@@ -1,7 +1,7 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-from p25_orchestration_sources import orchestration_source_text
+from p25_orchestration_sources import definition_body, orchestration_source_text
 # DEC-0040: search all orchestration TUs
 MAIN_TEXT = orchestration_source_text()
 SESSION = ROOT / "include" / "P25ReceiverSession.h"
@@ -17,9 +17,11 @@ required = {
     "new ptt resets ptt-start clear latch": "rx.p25SessionState.lastPttStartPendingClearCallSessionId = 0;" in receiver,
 }
 
-helper = main.split("void p25Phase2HandlePttStartForPendingQueue", 1)[1].split(
-    "size_t p25Phase2PendingAmbeFrameCount", 1
-)[0]
+helper = definition_body(
+    main,
+    "void p25Phase2HandlePttStartForPendingQueue",
+    ["size_t p25Phase2PendingAmbeFrameCount"],
+)
 required.update({
     "helper requires valid call key": "if (!audioKey.valid()) return;" in helper,
     "helper no-ops without pending voice": "if (!hasAnyPending) return;" in helper,

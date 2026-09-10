@@ -3,9 +3,14 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
-from p25_orchestration_sources import orchestration_source_text
+from p25_orchestration_sources import definition_body, orchestration_source_text
 main = orchestration_source_text()
 decoder = (root / "src" / "P25LiveDecoder.cpp").read_text(encoding="utf-8", errors="replace")
+
+freeze_body = definition_body(
+    main,
+    "bool p25Phase2ShouldFreezeCqpskDiscrete",
+)[:500]
 
 checks = {
     "clear cqpsk on block channelize": (
@@ -17,10 +22,8 @@ checks = {
         )[1][:1800]
     ),
     "cqpsk discrete freeze disabled for block channelize": (
-        "Never freeze. Capture 20260807_235726" in main.split(
-            "bool p25Phase2ShouldFreezeCqpskDiscrete", 1
-        )[1][:500]
-        and "return false;" in main.split("bool p25Phase2ShouldFreezeCqpskDiscrete", 1)[1][:500]
+        "Never freeze. Capture 20260807_235726" in freeze_body
+        and "return false;" in freeze_body
     ),
     "speaker sustain near-live hop": (
         "kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.080" in main

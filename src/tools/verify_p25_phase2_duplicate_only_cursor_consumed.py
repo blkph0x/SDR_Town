@@ -4,12 +4,14 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
-from p25_orchestration_sources import orchestration_source_text
+from p25_orchestration_sources import definition_body, orchestration_source_text
 main = orchestration_source_text()
 
-fn = main.split("bool p25Phase2RollingDecodeWindowConsumed", 1)[1].split(
-    "// Dual-slot carriers routinely carry two TGs", 1
-)[0]
+fn = definition_body(
+    main,
+    "bool p25Phase2RollingDecodeWindowConsumed",
+    ["// Dual-slot carriers routinely carry two TGs"],
+)
 
 required = {
     "expected-only/no-target windows are consumed": (

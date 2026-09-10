@@ -4,7 +4,7 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-from p25_orchestration_sources import orchestration_source_text
+from p25_orchestration_sources import definition_body, orchestration_source_text
 main = orchestration_source_text()
 decoder_h = (root / ".." / "include" / "P25LiveDecoder.h").resolve().read_text(
     encoding="utf-8", errors="ignore"
@@ -14,7 +14,11 @@ receiver_h = (root / ".." / "include" / "Receiver.h").resolve().read_text(
     encoding="utf-8", errors="ignore"
 )
 
-slot_probe_fn = main.split("bool applyP25Phase2SlotProbeLocked", 1)[1].split("void pushAudioFrames", 1)[0]
+slot_probe_fn = definition_body(
+    main,
+    "bool applyP25Phase2SlotProbeLocked",
+    ["void pushAudioFrames"],
+)
 
 required = {
     "single cursor settlement after publish": "outcome == P25VoicePublishOutcome::Published" in main,

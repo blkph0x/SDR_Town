@@ -4,7 +4,7 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
-from p25_orchestration_sources import orchestration_source_text
+from p25_orchestration_sources import definition_body, orchestration_source_text
 main = orchestration_source_text()
 
 
@@ -13,7 +13,10 @@ def expr_after(anchor: str, n: int = 400) -> str:
     return chunk.split(";", 1)[0]
 
 
-feed_fn = main.split("bool p25Phase2CurrentSelectedBurstFeedTrusted", 1)[1][:1600]
+feed_fn = definition_body(
+    main,
+    "bool p25Phase2CurrentSelectedBurstFeedTrusted",
+)[:1600]
 hard_epoch = expr_after("const bool hardEpochOnBurst =")
 dual_now = expr_after("const bool dualSlotUntrustedNow =")
 dual_explicit = expr_after("const bool dualSlotUntrustedExplicitGrant =")

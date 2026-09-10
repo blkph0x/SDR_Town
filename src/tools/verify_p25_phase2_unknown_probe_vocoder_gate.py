@@ -10,7 +10,7 @@ and mutes.
 """
 
 from pathlib import Path
-from p25_orchestration_sources import orchestration_source_text
+from p25_orchestration_sources import definition_body, orchestration_source_text
 
 src_text = orchestration_source_text()
 text = src_text
@@ -82,12 +82,16 @@ if len(release_block) != 2 or "p25Phase2StrongVoiceTimeslotPcm(out)" in release_
     print("explicit clear release must not use a PCM/probe-quality shortcut")
     raise SystemExit(1)
 
-explicit_helper = text.split("bool p25Phase2ExplicitClearGrantVoiceReleaseEvidence", 1)
-if len(explicit_helper) != 2:
+try:
+    explicit_body = definition_body(
+        text,
+        "bool p25Phase2ExplicitClearGrantVoiceReleaseEvidence",
+        ["bool p25Phase2UnknownGrantProbeVoiceReleaseEvidence"],
+    )
+except ValueError:
     print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
     print("missing explicit-clear release evidence helper")
     raise SystemExit(1)
-explicit_body = explicit_helper[1].split("bool p25Phase2UnknownGrantProbeVoiceReleaseEvidence", 1)[0]
 if "targetTrafficClearEvidence;" not in explicit_body:
     print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
     print("explicit clear pending-drain helper must end on target traffic proof")
@@ -117,12 +121,16 @@ if ("dualSlotUntrustedExplicitGrant" not in text or
     print("explicit clear probe must fail-close ambiguous dual-slot voice")
     raise SystemExit(1)
 
-unknown_block = text.split("bool p25Phase2UnknownGrantProbeVoiceReleaseEvidence", 1)
-if len(unknown_block) != 2:
+try:
+    unknown_body = definition_body(
+        text,
+        "bool p25Phase2UnknownGrantProbeVoiceReleaseEvidence",
+        ["bool p25Phase2WindowHasFreshTargetEvidence"],
+    )
+except ValueError:
     print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
     print("missing unknown-grant release evidence helper")
     raise SystemExit(1)
-unknown_body = unknown_block[1].split("bool p25Phase2WindowHasFreshTargetEvidence", 1)[0]
 if "return false;" not in unknown_body:
     print("P25 Phase 2 unknown-grant vocoder gate regression: FAIL")
     print("unknown-grant probe helper must be diagnostic-only")
