@@ -4,6 +4,17 @@ Newest at the top.
 
 ---
 
+## 2026-09-10 — ISS-0004 Phases 6–8: P25VoiceTest / CliApp / MainWindow thin main
+
+- Mechanical DEC-0040 split on `refactor/iss-0004-split-main` (no hop/feed/CADENCE changes).
+- **Phase 6:** SigMF/WAV + replay follow/voicetest → `P25VoiceTest`.
+- **Phase 7:** CLI batch helpers + `runCLI` → `CliApp` (`GuiRuntimeConfig`/`SavedFrequency` in header).
+- **Phase 8:** logging/theme/instance → `AppBootstrap`; GUI class + `populateP25Table` → `MainWindow.h` (Q_OBJECT); `main.cpp` ~2.1k lines leftovers + `main()`.
+- Build Release `SDR_Town` + `sdr_town_tests` green; 10194 assertions; 129/129 `verify_p25_phase2_*.py`.
+- **Phase 9 next:** move leftover session/decoder helpers out of `main.cpp` into `P25VoiceDecode` (or a small shared TU); optionally split giant `MainWindow` ctor; push + PR.
+
+---
+
 ## 2026-09-09 — Back to DEC-0035 live re-lock (DEC-0039)
 
 - Operator: not like the DEC-0035 / 095846 ~95% path.
