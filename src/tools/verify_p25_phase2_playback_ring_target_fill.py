@@ -68,8 +68,11 @@ checks = {
     'speaker sustain near-live hop': 'kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.080' in main,
     'speaker sustain frame-pair fresh': 'kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.040' in main,
     'speaker sustain bounded lattice overlap': 'kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.280' in main,
-    'speaker backlog catch-up uses catch-up constants': 'kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds' in main
-        and 'kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds' in main,
+    'speaker backlog catch-up uses backlog constants (ISS-0003)': (
+        'kP25Phase2VoiceDecodeBacklogCatchUpChunkSeconds' in main
+        and 'kP25Phase2VoiceDecodeBacklogCatchUpMinFreshSeconds' in main
+        and 'kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds' not in main
+    ),
     'backlog helper uses effective decode cursor': (
         'p25Phase2UndecodedBacklogSamples(const RollingIqWindow& rolling)' in main
         and 'effectiveDecodeAbsolute()' in main.split(

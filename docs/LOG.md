@@ -36,6 +36,15 @@ Newest at the top.
 - Gate: Release build + unit tests + `verify_p25_phase2_*.py` 129/129.
 - No hop/feed/CADENCE/audio algorithm changes (move-only).
 
+## 2026-09-10 — Close ISS-0002/0003/0008/0009/0010/0011 (leave 0001/0006)
+
+- **Still open (cannot clear without product evidence / external specs):**
+  - **ISS-0001** live clear Phase 2 continuity (T-0010)
+  - **ISS-0006** TIA-102 PDFs not in-tree
+- **Closed:** dead SpeakerCatchUp constants removed; verifier definition anchors;
+  live pipeline extract; ownership maps; string-verifier ≠ continuity process lock.
+- Gate: `verify_p25_phase2_*.py` 129/129 after ISS-0003 removals.
+
 ## 2026-09-10 — ISS-0004 / T-0009 closed (DEC-0040); push + PR
 
 - Phases 0–8 complete on `refactor/iss-0004-split-main`.

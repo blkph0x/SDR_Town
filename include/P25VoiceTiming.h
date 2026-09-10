@@ -119,9 +119,10 @@ inline constexpr double kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.28
 // duty 0.01→0.125) — still far below 0.65; reverted.
 inline constexpr double kP25Phase2StreamingLiveSliceSeconds = 0.080;
 inline constexpr double kP25Phase2StreamingLiveMinFreshSeconds = 0.040;
-inline constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.180;
-inline constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.100;
-inline constexpr double kP25Phase2VoiceDecodeSpeakerCatchUpOverlapSeconds = 0.100;
+// ISS-0003 / 20260903: removed dead 180/100/100 speaker live-edge catch-up
+// constants. Live planner must not skip to live-edge with 180 ms catch-up on
+// the speaker path (see p25Phase2PlanVoiceDecodeChunk: speaker-sustain 80+280,
+// then backlogCatchUp).
 // If the voice worker falls behind live RF, decode a larger near-live chunk
 // so one worker pass can refill the speaker ring. Cap fresh at 120 ms so a
 // single job cannot monopolize the worker before hard clear.

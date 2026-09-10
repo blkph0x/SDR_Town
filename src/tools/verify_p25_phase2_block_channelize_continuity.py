@@ -30,10 +30,12 @@ checks = {
         and "kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.040" in main
         and "kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.280" in main
     ),
-    "speaker catch-up constants present": (
-        "kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.180" in main
-        and "kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.100" in main
-        and "kP25Phase2VoiceDecodeSpeakerCatchUpOverlapSeconds = 0.100" in main
+    "speaker catch-up constants removed (ISS-0003)": (
+        "kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds" not in main
+        and "kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds" not in main
+        and "kP25Phase2VoiceDecodeSpeakerCatchUpOverlapSeconds" not in main
+        and "kP25Phase2VoiceDecodeBacklogCatchUpChunkSeconds = 0.120" in main
+        and "skip to live-edge with 180 ms catch-up" in main
     ),
     "voice config keeps streaming ddc off": (
         "cfg.enableStreamingChannelDdc = false" in main

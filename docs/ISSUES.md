@@ -180,22 +180,23 @@ Status: `open` | `closed`
 
 ## ISS-0002 — String-only `verify_p25_phase2_*.py` treated as continuity proof
 
-- **Status:** open
+- **Status:** closed
 - **Opened:** 2026-09-07
+- **Closed:** 2026-09-10 — Process locked in `DEVELOPMENT_RULES.md` §1/§8 and
+  `docs/CODE_NOTES.md` (verify scripts = invariant locks only). SoT checkboxes
+  require voicetest/CADENCE, never string presence. Definition anchors via
+  `definition_body` (`084ab27` + follow-up).
 - **REQ:** REQ-P2.0 / DEVELOPMENT_RULES §8
-- **Unknown:** none — the scripts assert substrings in `main.cpp`. They cannot measure dutySec.
-- **Must not invent:** adding more string guards instead of voicetest / CADENCE.
-- **Unblock by:** keep scripts as invariant locks if useful; never flip a SoT checkbox from them.
 
 ## ISS-0003 — Dead 180 ms speaker catch-up constants vs live planner
 
-- **Status:** open
+- **Status:** closed
 - **Opened:** 2026-09-07
+- **Closed:** 2026-09-10 — Confirmed unused by `p25Phase2PlanVoiceDecodeChunk`
+  (speaker path = sustain 80+280; backlog = BacklogCatchUp*). Removed
+  `kP25Phase2VoiceDecodeSpeakerCatchUp*` from `P25VoiceTiming.h`; verifiers
+  updated to lock absence + sustain/backlog SoT.
 - **REQ:** REQ-P2.4 (later)
-- **Unknown:** whether any remaining path still uses `kP25Phase2VoiceDecodeSpeakerCatchUp*` after README backed the 180 ms experiment out (20260903).
-- **Evidence:** `p25Phase2PlanVoiceDecodeChunk` routes active speaker to 80/40/80 sustain and refuses 180 ms live-edge skip (`src/main.cpp`). Verify scripts still assert the 180 ms names exist.
-- **Must not invent:** re-enabling 180 ms catch-up to “raise duty”.
-- **Unblock by:** after P2.0, either delete the dead constants or wire them only behind a DEC with a capture id.
 
 ## ISS-0004 — P25 orchestration lives in a ~34k-line `main.cpp`
 
@@ -208,9 +209,9 @@ Status: `open` | `closed`
 - **Follow-up (2026-09-10):** Phase A leftovers extracted (`P25VoiceSession` /
   `P25DecodeConfig` / `DemodModeUtils` / `SavedFrequencies`; `main.cpp` ~200).
   MainWindow out-of-line done (`MainWindow.h` ~520 decls; bodies in
-  `MainWindow.cpp` + `MainWindowP25Voice.cpp` for the live voice worker /
-  submit / backpressure / publish path). Mega-ctor timer/lambda DSP
-  orchestration still open as **ISS-0010**.
+  `MainWindow.cpp` + `MainWindowP25Voice.cpp` + `MainWindowP25Orchestration.cpp`
+  for live voice worker / submit / rolling-IQ pipeline). Mega-ctor DSP extract
+  closed under **ISS-0010**.
 - **Must not invent:** a rewrite in the same commit as a feed-gate change.
 
 ## ISS-0005 — Product docs claimed continuous audio done while field audio is partial
@@ -238,67 +239,37 @@ Status: `open` | `closed`
 - **REQ:** REQ-P2.0 gate “at least one IQ or live run”
 ## ISS-0008 — Session cadence / tail-grace ownership spans multiple TUs
 
-- **Status:** open
+- **Status:** closed
 - **Opened:** 2026-09-10
-- **Evidence:** After ISS-0004 Phase A, adaptive cadence, speaker-sustain pending
-  depth, audio-tail grace (`kP25Phase2AudioTailGraceMs` /
-  `kP25Phase2SpeakerAudioTailGraceMs`), and streaming-DDC env gate live in
-  `P25VoiceSession`, while `P25AppGlobals` still owns cadence-mirror atomics and
-  `P25VoiceTiming` owns the named CADENCE constants. `P25DecodeConfig` reads the
-  streaming-DDC experiment flag when building voice decoder configs.
-- **Risk:** Editing only one side (constant vs adaptive helper vs AppGlobals
-  mirror) can mute, chirp, or starve clear Phase 2 without a single "audio
-  policy" file to audit.
-- **Must not invent:** new CADENCE numbers or tail-grace TTLs without a capture
-  id + DEC; do not "simplify" by deleting an overload that MainWindow still calls.
-- **Unblock by:** a CODE_NOTES ownership map for cadence/tail/streaming-DDC, or a
-  follow-up DEC that names one TU as SoT for those helpers.
+- **Closed:** 2026-09-10 — CODE_NOTES ownership table + explicit SoT sentence:
+  adaptive cadence/tail/streaming-DDC helpers → `P25VoiceSession`; named
+  constants → `P25VoiceTiming.h`; mirror atomics → `P25AppGlobals` (`084ab27`).
+- **REQ:** maintainability / clear-audio diagnosis
 
 ## ISS-0009 — Verifier first-occurrence anchors break after out-of-line moves
 
-- **Status:** open
+- **Status:** closed
 - **Opened:** 2026-09-10
-- **Evidence:** Phase B out-of-line `MainWindow` made
-  `bool p25VoiceWorkerCanAcceptJob()` match the **header declaration** before the
-  `.cpp` body. Three verifiers
-  (`verify_p25_phase2_forensic_timeline_p0.py`, `_p3.py`,
-  `verify_p25_phase2_retune_and_streaming.py`) failed until they anchored on
-  `bool MainWindow::…` definitions. Same class of bug hit Phase A when
-  `p25Phase2EstablishedClearVoiceStreamingLocked` call sites preceded the
-  definition in the orchestration corpus order.
-- **Risk:** A green-looking string lock can miss the real body and hide a mute /
-  backpressure / busy-gate regression.
-- **Must not invent:** weaker checks that only search the whole corpus for a
-  token without proving it sits inside the definition.
-- **Unblock by:** prefer `Class::method` definition anchors (or definition-ordered
-  corpus lists) for every worker/backpressure verifier; audit remaining
-  `split("bool foo()")` patterns.
+- **Closed:** 2026-09-10 — `definition_body` / `require_definition` in
+  `p25_orchestration_sources.py`; 14 high-risk verifiers migrated; full batch
+  129/129 (`084ab27`).
+- **REQ:** invariant locks
 
 ## ISS-0010 — MainWindow constructor still owns ~7k lines of timer/lambda DSP
 
-- **Status:** open
+- **Status:** closed
 - **Opened:** 2026-09-10
-- **Evidence:** After the `MainWindowP25Voice.cpp` split, `MainWindow.cpp` is still
-  ~12k lines; the constructor alone still embeds rolling-IQ / CADENCE log / chunk
-  plan / decode-submit orchestration as nested timers and lambdas (~7k lines of
-  that DSP path).
-- **Risk:** Clear Phase 2 bugs require searching a mega-ctor; eye-lost / sustain /
-  streaming gates are hard to review in nested lambdas.
-- **Must not invent:** rewriting hop/feed/CADENCE behavior while extracting.
-- **Unblock by:** extract ctor lambdas into named private methods, or a
-  `P25GuiVoiceOrchestrator` helper class behind a DEC (follow-up; do not rewrite
-  behavior unless a clean mechanical extract of named methods already exists).
+- **Closed:** 2026-09-10 — Extracted `MainWindow::startP25LiveDecodePipeline()`
+  into `src/MainWindowP25Orchestration.cpp` (~1.4k lines: rolling-IQ / chunk
+  plan / submit / CADENCE). Ctor calls the named method; UI/diag timers remain
+  in ctor (`084ab27`).
+- **REQ:** maintainability / clear-audio diagnosis
 
 ## ISS-0011 — Dual live paths: GUI voice worker vs CLI/voicetest
 
-- **Status:** open
+- **Status:** closed
 - **Opened:** 2026-09-10
-- **Evidence:** Live clear-audio diagnosis runs through the GUI voice worker in
-  `MainWindow` / `MainWindowP25Voice.cpp`, while CLI and voicetest use
-  `P25VoiceTest` / `CliApp`. Both touch the same policy surface (eye-lost caps,
-  sustain, cadence helpers) but are separate call graphs.
-- **Risk:** File voicetest can stay green while live RF chirps or mutes if one
-  path drifts on constants or gates.
-- **Must not invent:** a unifying abstraction without a DEC.
-- **Unblock by:** a CODE_NOTES "live vs replay ownership" map naming which TU
-  owns GUI worker vs voicetest/CLI replay for each policy knob.
+- **Closed:** 2026-09-10 — CODE_NOTES "Live GUI vs CLI/voicetest ownership"
+  map names policy/session/decode owners and requires both paths call the same
+  helpers — no duplicated constants (`084ab27`).
+- **REQ:** maintainability / clear-audio diagnosis

@@ -8,12 +8,13 @@ from p25_orchestration_sources import orchestration_source_text
 main = orchestration_source_text()
 
 checks = {
-    # Capture citation 20260903_040719 was adjacent to BacklogCatchUp in older
-    # history, not SpeakerCatchUp at 8c55db5 — lock the three constant values.
-    "speaker backlog catch-up decodes 180ms fresh": (
-        "kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.180" in main
-        and "kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.100" in main
-        and "kP25Phase2VoiceDecodeSpeakerCatchUpOverlapSeconds = 0.100" in main
+    # ISS-0003: SpeakerCatchUp* removed — speaker path must stay on sustain 80+280;
+    # backlog catch-up uses BacklogCatchUp* (120/80/280), not 180 ms live-edge skip.
+    "speaker path uses sustain not 180ms catch-up": (
+        "kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.080" in main
+        and "kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds" not in main
+        and "kP25Phase2VoiceDecodeBacklogCatchUpChunkSeconds = 0.120" in main
+        and "skip to live-edge with 180 ms catch-up" in main
     ),
     "queue depth accepts receiver sustain hint": (
         "p25VoiceDecodeMaxPendingJobsNow(bool speakerSustainHint)" in main
