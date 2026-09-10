@@ -24,7 +24,6 @@ Status: `open` | `in_progress` | `blocked` | `done`
 | T-0006 | open | REQ-P2.4 | Playout duty after extract rate is honest (drop=D residual) |
 | T-0007 | open | REQ-P2.5 | Follow hold (only if drop=E) |
 | T-0008 | open | REQ-P2.6 | Isolation non-regression beside every P2 change |
-| T-0009 | open | ISS-0004 | Split P25 orchestration out of `main.cpp` (after voice gate is green) |
 
 ---
 
@@ -32,6 +31,7 @@ Status: `open` | `in_progress` | `blocked` | `done`
 
 | ID | Status | REQ | Task |
 |---|---|---|---|
+| T-0009 | done | ISS-0004 | DEC-0040: split orchestration out of mega-`main.cpp` into focused TUs; Release build + 214 tests + 129 string verifiers green |
 | T-0012 | done | ISS-0001 | DEC-0015 tuner LO = SDRTrunk CenterFrequencyCalculator. Units: voice−11249; 095450 pair → 420.21375 MHz. File voicetest 105622 duty=0.685 / 073304 duty=0.76 unchanged (capture `--center`). |
 | T-0001 | done | REQ-0.1 | Athanor-method desk: SoT, cause/effect, trackers; retract false continuous-done |
 | T-0002 | done | REQ-P2.0 | Classified AppData captures + HEAD voicetest (ISS-0001) |

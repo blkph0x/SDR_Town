@@ -199,12 +199,15 @@ Status: `open` | `closed`
 
 ## ISS-0004 — P25 orchestration lives in a ~34k-line `main.cpp`
 
-- **Status:** open
+- **Status:** closed
 - **Opened:** 2026-09-07
-- **REQ:** T-0009 (after voice gate)
-- **Unknown:** the exact split boundaries that will not break Qt thread/DSP ownership.
+- **Closed:** 2026-09-10 — DEC-0040 mechanical split on `refactor/iss-0004-split-main`
+  (`P25VoiceTiming` / Registry / AppGlobals / RollingIq / VoiceDecode / VoiceTest /
+  CliApp / AppBootstrap / MainWindow; `main.cpp` ~2k leftovers + `main()`).
+- **REQ:** T-0009
+- **Follow-up:** leftover session/decoder helpers still in `main.cpp`; optional
+  further split of the large `MainWindow` header (not required to close ISS-0004).
 - **Must not invent:** a rewrite in the same commit as a feed-gate change.
-- **Unblock by:** PASS_CONTINUOUS_AUDIO first, then a DEC for module split.
 
 ## ISS-0005 — Product docs claimed continuous audio done while field audio is partial
 

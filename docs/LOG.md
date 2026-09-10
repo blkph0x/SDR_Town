@@ -4,6 +4,13 @@ Newest at the top.
 
 ---
 
+## 2026-09-10 — ISS-0004 / T-0009 closed (DEC-0040); push + PR
+
+- Phases 0–8 complete on `refactor/iss-0004-split-main`.
+- Gate: Release `SDR_Town` + `sdr_town_tests` (214/10194); `verify_p25_phase2_*.py` 129/129.
+- Docs: ISS-0004 closed, T-0009 done; CODE_NOTES / SPEC_INDEX updated for new TUs.
+- Follow-ups (not blockers): leftover session/decoder helpers still in `main.cpp`; optional MainWindow header/ctor split.
+
 ## 2026-09-10 — ISS-0004 Phases 6–8: P25VoiceTest / CliApp / MainWindow thin main
 
 - Mechanical DEC-0040 split on `refactor/iss-0004-split-main` (no hop/feed/CADENCE changes).
@@ -11,7 +18,6 @@ Newest at the top.
 - **Phase 7:** CLI batch helpers + `runCLI` → `CliApp` (`GuiRuntimeConfig`/`SavedFrequency` in header).
 - **Phase 8:** logging/theme/instance → `AppBootstrap`; GUI class + `populateP25Table` → `MainWindow.h` (Q_OBJECT); `main.cpp` ~2.1k lines leftovers + `main()`.
 - Build Release `SDR_Town` + `sdr_town_tests` green; 10194 assertions; 129/129 `verify_p25_phase2_*.py`.
-- **Phase 9 next:** move leftover session/decoder helpers out of `main.cpp` into `P25VoiceDecode` (or a small shared TU); optionally split giant `MainWindow` ctor; push + PR.
 
 ---
 

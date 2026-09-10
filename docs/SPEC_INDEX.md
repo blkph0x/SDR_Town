@@ -20,7 +20,8 @@ list. If two references disagree, open a DEC — do not average.
 | OP25 multi_rx / costas | `_codex_refs/op25` | Hop resets frame sync, not Costas | DEC-0033 |
 | OP25 gr-op25_repeater | `_codex_refs/op25` | Cross-check burst/ISCH; do not treat OP25 dibit starts 11/48/96/133 as a second default (same absolute bits, different pointer) | P25LiveDecoder comments |
 | mbelib AMBE 3600×2450 | `external/mbelib` | Vocoder for clear frames only | feed/emit |
-| Voicetest continuousOk | `src/main.cpp` | duty ≥ 0.65 + cadence/sequencer/AMBE/concealment | SoT L3, DEC-0002, DEC-0004 |
+| Voicetest continuousOk | `src/P25VoiceTest.cpp` (+ orchestration corpus) | duty ≥ 0.65 + cadence/sequencer/AMBE/concealment | SoT L3, DEC-0002, DEC-0004 |
+| ISS-0004 module map | `docs/DECISIONS.md` DEC-0040 | Mechanical split of mega-`main.cpp` | T-0009 |
 | Late-entry strong target VCW | `kP25Phase2LateEntryStrongTargetVoiceCodewords` = 8 | Extract floor scaled per second in DEC-0002 | REQ-P2.0 |
 | Baseline 20260810 | `docs/P25_BASELINE_CLEAR_CONTINUOUS_20260810.md` | Isolation PASS / continuity PARTIAL | SoT historical marker |
 | Capture 20260808_034136 | regression tracker | Sticky ESS + dual-slot MAC-dead garble | DEC-0003 forbidden path |
