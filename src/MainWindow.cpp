@@ -256,6 +256,8 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 mgr.setEnabled(i, true);
                 try { mgr.startStreaming(i, true /* real SDR - no simulation, direct from hardware */); } catch (...) { spdlog::warn("startStreaming fault in scan (guarded)"); }
             }
+            syncMonitorVarsToReceiver(0);
+            setReceiverActive(0, true);
             statusBar()->showMessage("Scan: real streaming started on all devices (full smart scanner + hits table later)", 4000);
             spdlog::info("Scan: real streaming started on all devices");
             // Defer audio activation (and lazy engine creation) – see Add Receiver.
@@ -4393,6 +4395,17 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 monitorLpfHz = newLpfHz;
             }
             syncMonitorVarsToReceiver(0);
+            // Mode-only changes used to leave rx.active=false after Device Manager
+            // Apply (streaming/waterfall live, guiDspWorker idle → underrun buzz).
+            {
+                auto& mgr = DeviceManager::instance();
+                for (size_t i = 0; i < mgr.getDevices().size(); ++i) {
+                    if (mgr.isStreaming(i)) {
+                        setReceiverActive(0, true);
+                        break;
+                    }
+                }
+            }
             if (bwSpin) {
                 bwSpin->blockSignals(true);
                 bwSpin->setValue(newBwK);
@@ -7111,6 +7124,22 @@ void MainWindow::showDevicesDialog()
                     }
                 }
                 mgr.saveSettings();
+                // guiDspWorker only demodulates receivers with active==true. Streaming +
+                // waterfall can run without that flag; audio then underruns (buzz) and
+                // analog/P25 DSP looks "stalled". Arm the primary monitor path on Apply.
+                bool anyEnabledStreaming = false;
+                for (size_t i = 0; i < devs.size(); ++i) {
+                    if (enableChecks[i]->isChecked() && mgr.isStreaming(i)) {
+                        anyEnabledStreaming = true;
+                        break;
+                    }
+                }
+                if (anyEnabledStreaming) {
+                    syncMonitorVarsToReceiver(0);
+                    setReceiverActive(0, true);
+                } else {
+                    setReceiverActive(0, false);
+                }
                 statusBar()->showMessage(QString("Applied settings to %1 device(s)").arg(devs.size()), 3000);
                 spdlog::info("Device settings applied from dialog.");
 
