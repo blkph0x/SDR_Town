@@ -25,7 +25,9 @@ ORCHESTRATION_CPP = [
     ROOT / "src" / "CliApp.cpp",
     ROOT / "include" / "CliApp.h",
     ROOT / "src" / "MainWindow.cpp",
+    ROOT / "include" / "MainWindow.h",
     ROOT / "src" / "AppBootstrap.cpp",
+    ROOT / "include" / "AppBootstrap.h",
 ]
 
 

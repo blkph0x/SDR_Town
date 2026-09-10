@@ -81,6 +81,10 @@ set(SDR_TOWN_SOURCES
     include/P25VoiceTest.h
     src/CliApp.cpp
     include/CliApp.h
+    src/AppBootstrap.cpp
+    include/AppBootstrap.h
+    src/MainWindow.cpp
+    include/MainWindow.h
     src/DeviceManager.cpp
     src/SpectrumWidget.cpp
     include/SpectrumWidget.h

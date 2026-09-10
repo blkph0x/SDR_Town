@@ -21,9 +21,14 @@ checks = {
         and "P25 speaker playback cleared after same-call hop" in main
     ),
     "hop log mentions speaker playback": "speaker playback queue were reset" in main,
-    "voice-reset also clears ring": (
-        "tryApplyP25VoiceResetLocked(rx)" in main
-        and "peekAudioEngineIfReady()" in main.split("if (rx.p25VoiceResetPending)", 1)[1][:900]
+    "voice-reset also clears ring": any(
+        "tryApplyP25VoiceResetLocked(rx)" in main[i : i + 900]
+        and "peekAudioEngineIfReady()" in main[i : i + 900]
+        for i in (
+            idx
+            for idx in range(len(main))
+            if main.startswith("if (rx.p25VoiceResetPending)", idx)
+        )
     ),
     "context lock-out after first emit": (
         "contextAudioLockedOut" in main
