@@ -7,8 +7,8 @@ from p25_orchestration_sources import orchestration_source_text
 main = orchestration_source_text()
 
 begin = receiver.split("void p25Phase2BeginNewPtt", 1)[1].split("void p25Phase2RefreshGrantEpoch", 1)[0]
-commit = main.split("static void p25CommitPhase2TrafficMetadataFollow", 1)[1].split(
-    "static bool p25Phase2ShouldFreezeCqpskDiscrete", 1
+commit = main.split("void p25CommitPhase2TrafficMetadataFollow", 1)[1].split(
+    "bool p25Phase2ShouldFreezeCqpskDiscrete", 1
 )[0]
 
 checks = {

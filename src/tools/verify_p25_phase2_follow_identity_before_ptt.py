@@ -20,9 +20,9 @@ MAIN_TEXT = orchestration_source_text()
 
 def main() -> int:
     text = MAIN_TEXT
-    marker = "static void p25CommitPhase2TrafficMetadataFollow"
+    marker = "void p25CommitPhase2TrafficMetadataFollow"
     assert marker in text, "metadata follow helper missing"
-    body = text.split(marker, 1)[1].split("static bool p25Phase2ShouldFreezeCqpskDiscrete", 1)[0]
+    body = text.split(marker, 1)[1].split("bool p25Phase2ShouldFreezeCqpskDiscrete", 1)[0]
     helper = "stampIncomingCallIdentityForNewPtt"
     assert helper in body, "incoming grant identity helper missing"
     assert "rx.p25VoiceTalkgroupId = followTg.talkgroupId;" in body, "TG identity is not stamped"

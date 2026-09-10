@@ -5,7 +5,9 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[2]
 from p25_orchestration_sources import orchestration_source_text
 main = orchestration_source_text()
-take = main[main.find('std::vector<std::complex<float>> takeUndecoded'):main.find('static size_t p25Phase2UndecodedBacklogSamples')]
+_take_start = main.find('std::vector<std::complex<float>> takeUndecoded')
+_take_end = main.find('size_t p25Phase2UndecodedBacklogSamples', _take_start)
+take = main[_take_start:_take_end]
 
 checks = {
     'takeUndecoded exposes decode end absolute': 'outDecodeEndAbsolute' in take,

@@ -74,7 +74,9 @@ required = {
         "FrameOrderResult::Unorderable" in main and
         main.split("FrameOrderResult::Unorderable", 1)[1].split("return decodeQueue", 1)[0].count("reorderHeld") == 0
     ),
-    "condensed live streaming target fill": "outRate * 0.180" in main.split("pushP25LiveStreamingAudio", 1)[1][:3400],
+    "condensed live streaming target fill": "outRate * 0.180" in main.split(
+        "size_t pushP25LiveStreamingAudio", 1
+    )[1][:3400],
 }
 
 missing = [name for name, ok in required.items() if not ok]

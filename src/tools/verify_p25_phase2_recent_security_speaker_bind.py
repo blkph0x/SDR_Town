@@ -16,7 +16,7 @@ def main() -> None:
     text = MAIN_TEXT
     require(
         text,
-        "static void p25BindPhase2RecentSecurityEvidenceToCall",
+        "void p25BindPhase2RecentSecurityEvidenceToCall",
         "recent-security call binding helper",
     )
     require(

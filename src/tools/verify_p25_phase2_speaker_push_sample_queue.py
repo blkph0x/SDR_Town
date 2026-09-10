@@ -8,11 +8,11 @@ root = Path(__file__).resolve().parents[2]
 from p25_orchestration_sources import orchestration_source_text
 main = orchestration_source_text()
 
-push = main.split("static size_t pushP25LiveStreamingAudio", 1)[1].split(
-    "static size_t pushP25SpeakerAudio", 1
+push = main.split("size_t pushP25LiveStreamingAudio", 1)[1].split(
+    "size_t pushP25SpeakerAudio", 1
 )[0]
-bridge = main.split("static size_t pushP25Phase2PlayoutBridge", 1)[1].split(
-    "static size_t p25TopUpSpeakerPlaybackRing", 1
+bridge = main.split("size_t pushP25Phase2PlayoutBridge", 1)[1].split(
+    "size_t p25TopUpSpeakerPlaybackRing", 1
 )[0]
 
 checks = {

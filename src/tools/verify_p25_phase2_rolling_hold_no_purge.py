@@ -15,7 +15,7 @@ MAIN_TEXT = orchestration_source_text()
 def main() -> int:
     text = MAIN_TEXT
     m = re.search(
-        r"static bool p25Phase2RollingDecodeWindowConsumed\(.*?\n\}",
+        r"bool p25Phase2RollingDecodeWindowConsumed\(.*?\n\}",
         text,
         re.S,
     )

@@ -17,8 +17,8 @@ required = {
     "new ptt resets ptt-start clear latch": "rx.p25SessionState.lastPttStartPendingClearCallSessionId = 0;" in receiver,
 }
 
-helper = main.split("static void p25Phase2HandlePttStartForPendingQueue", 1)[1].split(
-    "static size_t p25Phase2PendingAmbeFrameCount", 1
+helper = main.split("void p25Phase2HandlePttStartForPendingQueue", 1)[1].split(
+    "size_t p25Phase2PendingAmbeFrameCount", 1
 )[0]
 required.update({
     "helper requires valid call key": "if (!audioKey.valid()) return;" in helper,

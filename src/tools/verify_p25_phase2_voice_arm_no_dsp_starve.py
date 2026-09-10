@@ -24,12 +24,12 @@ assert 'own dspMutex before decoder replacement' in arm
 assert 'if (attempt >= 600)' in text
 assert 'P25 voice arm retry:' in text
 assert 'enum class P25VoiceDecodeProfile' in text
-voice_cfg = text[text.index('static P25LiveDecoderConfig p25VoiceDecoderConfig'):text.index('static int p25CliDecodeScore')]
+voice_cfg = text[text.index('P25LiveDecoderConfig p25VoiceDecoderConfig'):text.index('int p25CliDecodeScore')]
 assert 'P25VoiceDecodeProfile::Realtime' in voice_cfg
 assert 'cfg.realtimeVoiceSearch = profile == P25VoiceDecodeProfile::Realtime;' in voice_cfg
 assert 'cfg.enableC4fmFixedPhaseSearch = false;' in voice_cfg
 assert 'cfg.maxC4fmFixedPhaseCandidates = 0;' in voice_cfg
-deep_trace = text[text.index('static bool p25Phase2DeepTraceEnabled'):text.index('static void rotateP25Phase2ValidationLogIfNeeded')]
+deep_trace = text[text.index('bool p25Phase2DeepTraceEnabled'):text.index('void rotateP25Phase2ValidationLogIfNeeded')]
 assert 'return value == "1" || value == "true" || value == "yes" || value == "on";' in deep_trace
 assert 'qgetenv("SDR_TOWN_P25_DEEP_TRACE")' in deep_trace
 assert 'return enabled;' in deep_trace

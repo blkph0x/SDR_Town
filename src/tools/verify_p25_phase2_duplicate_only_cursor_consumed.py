@@ -7,7 +7,7 @@ root = Path(__file__).resolve().parents[2]
 from p25_orchestration_sources import orchestration_source_text
 main = orchestration_source_text()
 
-fn = main.split("static bool p25Phase2RollingDecodeWindowConsumed", 1)[1].split(
+fn = main.split("bool p25Phase2RollingDecodeWindowConsumed", 1)[1].split(
     "// Dual-slot carriers routinely carry two TGs", 1
 )[0]
 

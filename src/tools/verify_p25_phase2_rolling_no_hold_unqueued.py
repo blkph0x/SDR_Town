@@ -32,7 +32,7 @@ def _brace_body(text: str, sig: str) -> str | None:
 
 def main() -> int:
     text = MAIN_TEXT
-    body = _brace_body(text, "static bool p25Phase2RollingDecodeWindowConsumed")
+    body = _brace_body(text, "bool p25Phase2RollingDecodeWindowConsumed")
     if not body:
         print("FAIL: p25Phase2RollingDecodeWindowConsumed not found")
         return 1

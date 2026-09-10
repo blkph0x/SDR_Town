@@ -9,7 +9,7 @@ session = (root / "include" / "P25ReceiverSession.h").read_text(encoding="utf-8"
 
 required = {
     "pending AMBE queue reports new frames": (
-        "static bool p25QueuePhase2PendingAmbeFrame" in main
+        "bool p25QueuePhase2PendingAmbeFrame" in main
         and "++out.phase2PendingAmbeFramesQueued" in main
     ),
     "rolling cursor commits only consumed p2 windows": (

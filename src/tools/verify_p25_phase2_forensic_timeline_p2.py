@@ -14,7 +14,7 @@ receiver_h = (root / ".." / "include" / "Receiver.h").resolve().read_text(
     encoding="utf-8", errors="ignore"
 )
 
-slot_probe_fn = main.split("static bool applyP25Phase2SlotProbeLocked", 1)[1].split("static void pushAudioFrames", 1)[0]
+slot_probe_fn = main.split("bool applyP25Phase2SlotProbeLocked", 1)[1].split("void pushAudioFrames", 1)[0]
 
 required = {
     "single cursor settlement after publish": "outcome == P25VoicePublishOutcome::Published" in main,

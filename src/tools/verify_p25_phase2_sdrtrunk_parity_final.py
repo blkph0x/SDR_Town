@@ -6,7 +6,7 @@ main = orchestration_source_text()
 follow = (root / 'src' / 'P25FollowStateMachine.cpp').read_text(encoding='utf-8', errors='replace')
 session = (root / 'include' / 'P25ReceiverSession.h').read_text(encoding='utf-8', errors='replace')
 call_key_eq = session[session.find('bool operator=='):session.find('};', session.find('bool operator=='))]
-pending_take = main[main.find('static std::vector<P25P2PendingAmbeFrame> p25TakePhase2PendingAmbeFrames'):main.find('static std::vector<P25P2PendingAmbeFrame> p25TakePhase2PendingAudio')]
+pending_take = main[main.find('std::vector<P25P2PendingAmbeFrame> p25TakePhase2PendingAmbeFrames'):main.find('std::vector<P25P2PendingAmbeFrame> p25TakePhase2PendingAudio')]
 fresh_traffic_idx = main.find('const bool freshTargetTrafficClearEvidence =')
 fresh_traffic_expr = main[fresh_traffic_idx:main.find(';', fresh_traffic_idx) + 1] if fresh_traffic_idx >= 0 else ''
 checks = {

@@ -15,11 +15,11 @@ def region_after(marker: str, chars: int) -> str:
 
 # Prefer the function body, not the forward declaration.
 body_marker = (
-    "static bool p25Phase2DualSlotUntrustedGarbleWindow(const P25VoiceAudioBlock& out) noexcept\n{"
+    "bool p25Phase2DualSlotUntrustedGarbleWindow(const P25VoiceAudioBlock& out) noexcept\n{"
 )
 if body_marker not in main:
     body_marker = (
-        "static bool p25Phase2DualSlotUntrustedGarbleWindow(const P25VoiceAudioBlock& out) noexcept\r\n{"
+        "bool p25Phase2DualSlotUntrustedGarbleWindow(const P25VoiceAudioBlock& out) noexcept\r\n{"
     )
 garble_fn = main.split(body_marker, 1)[1].split(
     "p25Phase2DualSlotPendingDrainUnsafeWindow", 1
@@ -35,10 +35,10 @@ pending_dual_branch = pending_drain_body.split(
     "if (out.phase2OppositeVoiceCodewords > 0) {", 2
 )[-1].split("}", 1)[0]
 continuation_fn = region_after(
-    "static bool p25Phase2SameCallSelectedTimeslotContinuationSafe", 3200
+    "bool p25Phase2SameCallSelectedTimeslotContinuationSafe", 3200
 )
 unsafe_mixed_fn = region_after(
-    "static bool p25Phase2UnsafeMixedSlotAudioWindow", 1200
+    "bool p25Phase2UnsafeMixedSlotAudioWindow", 1200
 )
 security_gate_region = region_after(
     "const bool sameCallSelectedContinuation =", 1600

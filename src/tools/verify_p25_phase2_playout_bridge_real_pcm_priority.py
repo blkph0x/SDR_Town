@@ -10,11 +10,11 @@ main = orchestration_source_text()
 session_h = (root / "include" / "P25ReceiverSession.h").read_text(encoding="utf-8", errors="replace")
 engine_h = (root / "include" / "AudioEngine.h").read_text(encoding="utf-8", errors="replace")
 engine_cpp = (root / "src" / "AudioEngine.cpp").read_text(encoding="utf-8", errors="replace")
-topup = main.split("static size_t p25TopUpSpeakerPlaybackRing", 1)[1].split(
-    "static size_t p25Phase2EffectiveMinFreshSamples", 1
+topup = main.split("size_t p25TopUpSpeakerPlaybackRing", 1)[1].split(
+    "size_t p25Phase2EffectiveMinFreshSamples", 1
 )[0]
-push = main.split("static size_t pushP25LiveStreamingAudio", 1)[1].split(
-    "static size_t pushP25SpeakerAudio", 1
+push = main.split("size_t pushP25LiveStreamingAudio", 1)[1].split(
+    "size_t pushP25SpeakerAudio", 1
 )[0]
 
 checks = {
@@ -61,23 +61,23 @@ checks = {
         and "p25Phase2RememberLastEmittedSample(rx, key, pcm, false)" in main
     ),
     "bridge anchors only on clean selected-slot windows": (
-        "static bool p25Phase2CleanPlayoutBridgeAnchorWindow" in main
+        "bool p25Phase2CleanPlayoutBridgeAnchorWindow" in main
         and "p25Phase2CompanionSlotAccounted(out)" in main.split(
-            "static bool p25Phase2CleanPlayoutBridgeAnchorWindow", 1
+            "bool p25Phase2CleanPlayoutBridgeAnchorWindow", 1
         )[1][:1200]
         and "out.phase2WrongSlotVoiceCodewords == 0" in main.split(
-            "static bool p25Phase2CleanPlayoutBridgeAnchorWindow", 1
+            "bool p25Phase2CleanPlayoutBridgeAnchorWindow", 1
         )[1][:1200]
         and "p25Phase2CleanPlayoutBridgeAnchorWindow(result.audio)" in main
     ),
     "ambiguous windows disarm bridge": (
-        "static bool p25Phase2WindowDisablesPlayoutBridge" in main
+        "bool p25Phase2WindowDisablesPlayoutBridge" in main
         and "tail.playoutBridgeEligible = false;" in main
         and "out.phase2WrongSlotVoiceCodewords > 0" in main.split(
-            "static bool p25Phase2WindowDisablesPlayoutBridge", 1
+            "bool p25Phase2WindowDisablesPlayoutBridge", 1
         )[1][:900]
         and "out.phase2WrongSlot" in main.split(
-            "static bool p25Phase2WindowDisablesPlayoutBridge", 1
+            "bool p25Phase2WindowDisablesPlayoutBridge", 1
         )[1][:900]
     ),
     "topup splits real and bridge diagnostics": (

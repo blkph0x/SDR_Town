@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-// Session helpers remain in main.cpp until ISS-0004 Phase 5 (P25VoiceDecode).
+// Session helpers: declared in P25VoiceDecode.h / still defined in main.cpp until moved.
 bool p25Phase2SessionHadBurstEye(const Receiver& rx) noexcept;
 bool p25Phase2SessionHadVoiceLock(const Receiver& rx) noexcept;
 

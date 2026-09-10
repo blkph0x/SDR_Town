@@ -14,8 +14,8 @@ def require(condition: bool, message: str) -> None:
 
 text = MAIN_TEXT
 
-reset_fn = text.split("static bool tryApplyP25VoiceResetLocked", 1)[1].split(
-    "static void syncP25Phase2MaskParametersToLiveDecoder", 1
+reset_fn = text.split("bool tryApplyP25VoiceResetLocked", 1)[1].split(
+    "void syncP25Phase2MaskParametersToLiveDecoder", 1
 )[0]
 require(
     "const uint64_t pttGeneration = rx.p25PttGeneration;" in reset_fn,
@@ -34,7 +34,7 @@ require(
     "tryApplyP25VoiceResetLocked must restore granted-slot immutability",
 )
 
-nonblocking_reset_fn = text.split("static bool tryResetP25TrafficSessionNonBlocking", 1)[1].split(
+nonblocking_reset_fn = text.split("bool tryResetP25TrafficSessionNonBlocking", 1)[1].split(
     "static P25Phase2AmbeEmitDedupeState& p25Phase2SyncAmbeEmitDedupeCallContext", 1
 )[0]
 for token, label in [

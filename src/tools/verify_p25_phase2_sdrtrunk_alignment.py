@@ -27,7 +27,7 @@ for needle in [
     "b.isch.channel <= 1",
 ]:
     assert needle in p25, f"missing I-ISCH mask phase anchor: {needle}"
-fn = main[main.index('static bool p25AmbeDecodeFrameLooksUsable'):main.index('static QString p25Phase2ValidationPath')]
+fn = main[main.index('bool p25AmbeDecodeFrameLooksUsable'):main.index('QString p25Phase2ValidationPath')]
 assert "decoded.totalErrors > 3" in fn, "fresh AMBE speech must reject mbelib repeat/erasure-grade frames"
 assert "decoded.message.find('R')" in fn and "decoded.message.find('E')" in fn, "fresh AMBE speech must reject mbelib repeat/erasure markers"
 assert "rms < 1.0e-6" not in fn, "AMBE gate must preserve valid low-energy/silence frames for cadence"

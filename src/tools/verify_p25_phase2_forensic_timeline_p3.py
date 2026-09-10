@@ -11,8 +11,8 @@ session_h = (root / ".." / "include" / "P25ReceiverSession.h").resolve().read_te
 )
 
 drain = main.split("auto drainP25VoiceResults = [&]() {", 1)[1].split("while (!stopDspWorker", 1)[0]
-close_burst = main.split("static void p25Phase2CloseActiveVoiceBurst", 1)[1].split(
-    "static void p25Phase2BeginVoiceBurst", 1
+close_burst = main.split("void p25Phase2CloseActiveVoiceBurst", 1)[1].split(
+    "void p25Phase2BeginVoiceBurst", 1
 )[0]
 
 worker_fn = main.split("bool p25VoiceWorkerCanAcceptJob()", 1)[1].split("P25VoiceWorkerQueueSnapshot", 1)[0]

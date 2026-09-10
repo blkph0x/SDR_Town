@@ -75,6 +75,8 @@ set(SDR_TOWN_SOURCES
     include/P25AppGlobals.h
     src/P25RollingIq.cpp
     include/P25RollingIq.h
+    src/P25VoiceDecode.cpp
+    include/P25VoiceDecode.h
     src/DeviceManager.cpp
     src/SpectrumWidget.cpp
     include/SpectrumWidget.h
