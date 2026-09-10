@@ -1,8 +1,9 @@
 #pragma once
 
-// Purpose: Primary Qt MainWindow declaration (bodies in MainWindow.cpp).
-// Spec:    docs/DECISIONS.md DEC-0040 / ISS-0004 Phase B (out-of-line method bodies)
+// Purpose: Primary Qt MainWindow declaration (bodies in MainWindow*.cpp).
+// Spec:    docs/DECISIONS.md DEC-0040 / ISS-0004 Phase B + voice TU split
 // Invariants: no hop/TTL/CADENCE/feed-gate behavior changes — move-only.
+// Voice worker / submit / backpressure / publish: src/MainWindowP25Voice.cpp.
 
 #include "AppBootstrap.h"
 #include "AudioCapture.h"

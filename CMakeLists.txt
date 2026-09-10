@@ -92,6 +92,7 @@ set(SDR_TOWN_SOURCES
     src/AppBootstrap.cpp
     include/AppBootstrap.h
     src/MainWindow.cpp
+    src/MainWindowP25Voice.cpp
     include/MainWindow.h
     src/DeviceManager.cpp
     src/SpectrumWidget.cpp
