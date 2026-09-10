@@ -16,7 +16,11 @@ session_h = (root / "include" / "P25ReceiverSession.h").read_text(
     encoding="utf-8", errors="ignore"
 )
 
-worker_fn = main.split("bool p25VoiceWorkerCanAcceptJob()", 1)[1].split("P25VoiceWorkerQueueSnapshot", 1)[0]
+worker_fn = main.split("bool MainWindow::p25VoiceWorkerCanAcceptJob()", 1)[1].split(
+    "MainWindow::P25VoiceWorkerQueueSnapshot", 1
+)[0] if "bool MainWindow::p25VoiceWorkerCanAcceptJob()" in main else main.split(
+    "bool p25VoiceWorkerCanAcceptJob()", 1
+)[1].split("P25VoiceWorkerQueueSnapshot", 1)[0]
 publish_wait_section = main.split("// Block until the GUI DSP worker drains completed voice", 1)[1].split(
     "p25VoiceWorkerBusy.store", 1
 )[0]

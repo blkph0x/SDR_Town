@@ -14,7 +14,7 @@ metadata_ready = re.search(
     re.DOTALL)
 metadata_ready_expr = metadata_ready.group(1) if metadata_ready else ''
 can_accept = re.search(
-    r'bool p25VoiceWorkerCanAcceptJobForDepth\(bool speakerSustainHint\)\s*\{(.*?)\n    \}',
+    r'bool (?:MainWindow::)?p25VoiceWorkerCanAcceptJobForDepth\(bool speakerSustainHint\)\s*\{(.*?)\n    \}',
     main,
     re.DOTALL)
 can_accept_body = can_accept.group(1) if can_accept else ''

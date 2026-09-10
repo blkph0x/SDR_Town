@@ -15,7 +15,11 @@ close_burst = main.split("void p25Phase2CloseActiveVoiceBurst", 1)[1].split(
     "void p25Phase2BeginVoiceBurst", 1
 )[0]
 
-worker_fn = main.split("bool p25VoiceWorkerCanAcceptJob()", 1)[1].split("P25VoiceWorkerQueueSnapshot", 1)[0]
+worker_fn = main.split("bool MainWindow::p25VoiceWorkerCanAcceptJob()", 1)[1].split(
+    "MainWindow::P25VoiceWorkerQueueSnapshot", 1
+)[0] if "bool MainWindow::p25VoiceWorkerCanAcceptJob()" in main else main.split(
+    "bool p25VoiceWorkerCanAcceptJob()", 1
+)[1].split("P25VoiceWorkerQueueSnapshot", 1)[0]
 
 required = {
     "publish outcome enum": "enum class P25VoicePublishOutcome" in main,
