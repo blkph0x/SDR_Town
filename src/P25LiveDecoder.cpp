@@ -2285,16 +2285,23 @@ bool phase2BurstKindCarriesAcch(P25Phase2BurstKind kind)
         kind == P25Phase2BurstKind::LcchClear;
 }
 
+bool phase2MacPduIsNominalLayoutCrc(const P25Phase2MacPdu& pdu)
+{
+    // CRC-valid MAC on the standards nominal ACCH bit layout.  DUID kind may
+    // differ (alt-kind rescue): noisy DUID often labels SACCH as FACCH while
+    // the body still CRC-validates as SACCH.  Swap/slip/invert stay rejected.
+    return pdu.crcValid &&
+        !pdu.acchBitOrderSwapped &&
+        !pdu.acchDibitInverted &&
+        pdu.acchSlipDibits == 0;
+}
+
 bool phase2MacPduIsNominalCrc(const P25Phase2MacPdu& pdu)
 {
     const bool nominalKind =
         pdu.detectedKind == P25Phase2BurstKind::Unknown ||
         pdu.detectedKind == pdu.source;
-    return pdu.crcValid &&
-        nominalKind &&
-        !pdu.acchBitOrderSwapped &&
-        !pdu.acchDibitInverted &&
-        pdu.acchSlipDibits == 0;
+    return phase2MacPduIsNominalLayoutCrc(pdu) && nominalKind;
 }
 
 uint64_t seedPhase2Scrambler(uint16_t nac, uint32_t wacn, uint16_t systemId)
@@ -4342,9 +4349,15 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
                 P25Phase2BurstKind::FacchClear,
                 P25Phase2BurstKind::LcchClear,
             };
+            // Locked+masked shallow path stays DUID-only (hot-path cost).
+            // Deep rescue always fans out ACCH kinds on the nominal layout so
+            // a wrong DUID can still recover CRC-valid MAC (field 20202-class
+            // p2sf/p2mask high, p2mac=0/N).  Swap/slip/invert remain gated by
+            // alternateAcchHypotheses inside decodePhase2Acch.
             const bool allowAlternateKindFanout =
-                alternateAcchHypotheses &&
-                (deepAcchSearch || !superframeLocked || xorMask == nullptr);
+                deepAcchSearch ||
+                (alternateAcchHypotheses &&
+                 (!superframeLocked || xorMask == nullptr));
             std::array<int, 16> seen{};
             size_t seenCount = 0;
             auto tryKind = [&](P25Phase2BurstKind k, bool deep) -> std::optional<P25Phase2MacPdu> {
@@ -4645,11 +4658,11 @@ Phase2MaskPhaseWindow scorePhase2MaskPhaseWindow(const std::vector<int>& dibits,
                                                    &rescueSession, &rescueMacPdus,
                                                    true,
                                                    false);
-            const bool nominalRescueCrc = std::any_of(
+            const bool rescueCrc = std::any_of(
                 rescueMacPdus.begin(),
                 rescueMacPdus.end(),
-                phase2MacPduIsNominalCrc);
-            if (rescueBurst.valid && nominalRescueCrc &&
+                phase2MacPduIsNominalLayoutCrc);
+            if (rescueBurst.valid && rescueCrc &&
                 (rescueBurst.macCrcValid ||
                  rescueBurst.sessionAudioRelease ||
                  rescueBurst.essKnown ||
@@ -7731,20 +7744,11 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2FromFramerBurstsInternal(
                 false,
                 true,
                 burstSoftDibitMinAbsLlrPtr);
-            const bool nominalRescueCrc = std::any_of(
+            const bool rescueCrc = std::any_of(
                 rescueMacPdus.begin(),
                 rescueMacPdus.end(),
-                [](const P25Phase2MacPdu& pdu) {
-                    const bool nominalKind =
-                        pdu.detectedKind == P25Phase2BurstKind::Unknown ||
-                        pdu.detectedKind == pdu.source;
-                    return pdu.crcValid &&
-                        nominalKind &&
-                        !pdu.acchBitOrderSwapped &&
-                        !pdu.acchDibitInverted &&
-                        pdu.acchSlipDibits == 0;
-                });
-            if (rescueBurst.valid && nominalRescueCrc &&
+                phase2MacPduIsNominalLayoutCrc);
+            if (rescueBurst.valid && rescueCrc &&
                 (rescueBurst.macCrcValid ||
                  rescueBurst.sessionAudioRelease ||
                  rescueBurst.essKnown ||
@@ -8482,10 +8486,15 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
                             return betterPhase2MaskPhaseWindow(a, b);
                         });
                     const size_t maxRescueCandidates =
-                        m_config.realtimeVoiceSearch ? std::min<size_t>(phaseWindows.size(), 1u)
-                                                     : phaseWindows.size();
+                        m_config.realtimeVoiceSearch
+                            ? std::min<size_t>(phaseWindows.size(), 4u)
+                            : phaseWindows.size();
                     const size_t rescueScoreSlots = 12u;
-                    size_t rescueDeepBudget = m_config.realtimeVoiceSearch ? 1u : 8u;
+                    // One deep ACCH burst per candidate phase is enough to
+                    // prove/deny that XOR segment via MAC CRC.  Trying only the
+                    // soft-AMBE #1 phase left 20260911_082310 TG20202 at
+                    // p2sf/p2mask high, ambeProbe OK, p2mac=0/N forever.
+                    size_t rescueDeepBudget = m_config.realtimeVoiceSearch ? 2u : 8u;
                     if (m_phase2ExtraDeepAcchBudget > 0) {
                         rescueDeepBudget += static_cast<size_t>(m_phase2ExtraDeepAcchBudget);
                         m_phase2ExtraDeepAcchBudget = 0;
@@ -8550,9 +8559,19 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
                     bestWindow.ambeSamples >= 2 &&
                     bestWindow.ambeLowError >= 1 &&
                     candidateMaskScore > 0;
-                if (standardsPhaseEvidence || softAmbePhaseEvidence) {
+                // Soft AMBE may rank a wrong XOR segment first (same Voice2/4
+                // DUID count every phase).  Only standards evidence (MAC/ESS/
+                // I-ISCH) or an explicit soft-lock experiment may select the
+                // commit phase.  Telemetry softAmbePhaseEvidence alone must not
+                // descramble the sustain window (20260911_082310 drop=B class).
+                if (standardsPhaseEvidence) {
                     selectedMaskPhase = candidateMaskPhase;
-                    selectedMaskScore = standardsPhaseEvidence ? candidateMaskScore : 0;
+                    selectedMaskScore = candidateMaskScore;
+                    selectedMacCrc = candidateMacCrc;
+                } else if (softAmbePhaseEvidence &&
+                           m_config.allowPhase2SoftAmbeMaskPhaseLock) {
+                    selectedMaskPhase = candidateMaskPhase;
+                    selectedMaskScore = 0;
                     selectedMacCrc = candidateMacCrc;
                 }
                 if (annotateSessionCodewords &&
@@ -8636,20 +8655,11 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
                                                         false,
                                                         true,
                                                         workingSoftDibitMinAbsLlr);
-                const bool nominalRescueCrc = std::any_of(
+                const bool rescueCrc = std::any_of(
                     rescueMacPdus.begin(),
                     rescueMacPdus.end(),
-                    [](const P25Phase2MacPdu& pdu) {
-                        const bool nominalKind =
-                            pdu.detectedKind == P25Phase2BurstKind::Unknown ||
-                            pdu.detectedKind == pdu.source;
-                        return pdu.crcValid &&
-                            nominalKind &&
-                            !pdu.acchBitOrderSwapped &&
-                            !pdu.acchDibitInverted &&
-                            pdu.acchSlipDibits == 0;
-                    });
-                if (rescueBurst.valid && nominalRescueCrc &&
+                    phase2MacPduIsNominalLayoutCrc);
+                if (rescueBurst.valid && rescueCrc &&
                     (rescueBurst.macCrcValid ||
                      rescueBurst.sessionAudioRelease ||
                      rescueBurst.essKnown ||

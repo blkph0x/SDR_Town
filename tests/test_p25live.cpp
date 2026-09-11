@@ -2016,6 +2016,63 @@ TEST_CASE("P25 live decoder decodes clear Phase 2 LCCH without XOR mask")
     REQUIRE(pdu->detectedKind == pdu->source);
 }
 
+TEST_CASE("P25 live decoder deep ACCH rescue recovers MAC when DUID kind mismatches", "[p25]")
+{
+    // Field class (20260911_082310 TG20202): SF+mask already locked, then
+    // noisy DUID labels a SACCH body as FACCH.  Shallow locked path stays
+    // DUID-only; deep rescue must fan out ACCH kinds and accept CRC on the
+    // nominal layout even when detectedKind != source.
+    constexpr uint16_t nac = 0x2d2;
+    constexpr uint32_t wacn = 0xbee00;
+    constexpr uint16_t systemId = 0x2d1;
+    constexpr uint8_t maskPhase = 5;
+
+    const auto goodClear = makeSyntheticPhase2SuperframeWithSacchForTest();
+    const auto goodMasked =
+        maskSyntheticPhase2SuperframeForTest(goodClear, nac, wacn, systemId, maskPhase);
+
+    P25LiveDecoderConfig cfg;
+    cfg.enablePhase1Decode = false;
+    cfg.enablePhase2Decode = true;
+    cfg.realtimeVoiceSearch = true;
+    cfg.realtimeDecodeBudgetMs = 0; // unbounded for the unit fixture
+    P25LiveDecoder decoder(cfg);
+    decoder.setPhase2MaskParameters(nac, wacn, systemId);
+
+    const auto locked = decoder.processHardDibits(goodMasked);
+    REQUIRE(locked.stats.phase2MaskPhaseKnown);
+    REQUIRE(locked.stats.phase2MaskPhase == maskPhase);
+    REQUIRE(locked.stats.phase2MacCrcValid >= 1);
+
+    auto badClear = goodClear;
+    const size_t sacchSlot = 2;
+    const size_t payload =
+        sacchSlot * P25LiveDecoder::Phase2BurstDibits + P25LiveDecoder::Phase2FrameSyncDibits;
+    const uint8_t facchDuid = encodePhase2DuidForTest(0x9); // SCRAMBLED_FACCH
+    badClear[payload + 0] = (facchDuid >> 6) & 0x03;
+    badClear[payload + 37] = (facchDuid >> 4) & 0x03;
+    badClear[payload + 122] = (facchDuid >> 2) & 0x03;
+    badClear[payload + 159] = facchDuid & 0x03;
+    const auto badMasked =
+        maskSyntheticPhase2SuperframeForTest(badClear, nac, wacn, systemId, maskPhase);
+
+    const auto result = decoder.processHardDibits(badMasked);
+
+    REQUIRE(result.stats.phase2MacCrcValid >= 1);
+    REQUIRE(result.stats.phase2MacAltKindCrcValid >= 1);
+
+    const auto pdu = std::find_if(result.phase2MacPdus.begin(), result.phase2MacPdus.end(),
+                                  [](const P25Phase2MacPdu& p) {
+                                      return p.crcValid &&
+                                          p.source == P25Phase2BurstKind::SacchScrambled &&
+                                          p.detectedKind == P25Phase2BurstKind::FacchScrambled;
+                                  });
+    REQUIRE(pdu != result.phase2MacPdus.end());
+    REQUIRE_FALSE(pdu->acchBitOrderSwapped);
+    REQUIRE_FALSE(pdu->acchDibitInverted);
+    REQUIRE(pdu->acchSlipDibits == 0);
+}
+
 TEST_CASE("P25 live decoder repairs SDRTrunk-layout Phase 2 ACCH RS symbol errors", "[p25]")
 {
     auto dibits = makeSyntheticPhase2SuperframeWithLcchForTest();

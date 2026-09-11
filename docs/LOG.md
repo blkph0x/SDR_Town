@@ -4,6 +4,43 @@ Newest at the top.
 
 ---
 
+## 2026-09-12 — Operator live listen (gapless IQ `234224`, ~372 s)
+
+- Operator report: when P25 emits, sound is much better / few gaps; some
+  followed grants stay silent or only short &lt;1 s islands.
+- Capture `20260911_234224` (CC 420.475, gapless, SNR ~12.5 dB) with HEAD
+  Release including ACCH alt-kind branch binary:
+  - Follows: TG **30003** unk, **10120** unk, **30302** clear, **10010**
+    clear, **30314** unk.
+  - CADENCE n=338: emit&gt;0 **123**; drop **A=211 / D=101 / B=18**;
+    duty mean **0.134**, median **0**, max **1.07**.
+  - Per-TG max duty: 30003 **0.56**, 10120 **1.07**, 30302 **0.52**,
+    10010 **0.64**, 30314 **0.86**.
+  - Dominant blocks: `no-vcw-from-live-window`, then
+    `traffic-processor-audio-open` / `clear-grant-vcw-not-fed` under
+    worker-busy. Matches ears: short islands = **A+D** thrash after brief
+    `gate=emit`; mute follows = long **A**/occasional **B**.
+- Do **not** soften DEC-0012. Next: cut live drop **D** (worker-busy while
+  audio open) and eye-loss **A** on follow; ACCH/MAC still for residual **B**.
+
+## 2026-09-11 — ACCH alt-kind rescue + soft-AMBE phase select fix
+
+- **Root cause class (20202 IQ):** drop=B with `p2sf/p2mask` high,
+  `ambeProbe` OK, `p2mac=0/N`, `essKnown=no`. Deep/forensic rescue across
+  phases still `p2macCrc=0` — this follow IQ has no recoverable ACCH CRC
+  (SNR ~5.5 dB). Do **not** soften DEC-0012 / feed without MAC|ESS proof.
+- **Shipped on `fix/acch-rescue-clear-grant-mac`:**
+  1. Deep ACCH rescue fans out ACCH **kinds** on nominal layout; accept
+     CRC when layout is nominal even if DUID≠source (`altKind`).
+  2. Soft AMBE no longer selects the commit XOR phase unless
+     `allowPhase2SoftAmbeMaskPhaseLock` (matches prior sticky policy).
+  3. Realtime score rescue tries top **4** mask phases (was 1).
+  4. Unit test: sticky lock then Facch-mislabeled Sacch recovers
+     `phase2MacAltKindCrcValid`.
+- **Bars held:** 060036 duty **0.705**; 095846 TG10301 duty **0.84**.
+- **Still open:** B-0001/B-0002 need a follow IQ that actually carries
+  recoverable MAC/ESS (or ESS recovery improvement with evidence).
+
 ## 2026-09-11 — Live CLI clearaudio + capture hygiene
 
 - **Space:** trimmed `iq_test_captures` from ~29 GB → ~8.6 GB keep-set
