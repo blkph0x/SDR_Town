@@ -14,6 +14,7 @@
 #include <cmath>
 #include <algorithm>
 #include <array>
+#include <set>
 #include <QCoreApplication>
 #include <cstdlib>
 #ifdef _WIN32

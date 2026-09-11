@@ -1,0 +1,102 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [master, main, 'ci/**', 'refactor/**']
+  pull_request:
+    branches: [master, main]
+
+concurrency:
+  group: windows-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: MSVC Release build + tests
+    runs-on: windows-2022
+    timeout-minutes: 180
+
+    env:
+      VCPKG_DEFAULT_TRIPLET: x64-windows
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        # Do not use submodules: recursive — `_codex_refs/*` gitlinks lack .gitmodules URLs.
+
+      - name: Checkout build submodules (miniaudio + mbelib only)
+        shell: pwsh
+        run: |
+          git submodule update --init --depth 1 -- external/miniaudio external/mbelib
+          if (-not (Test-Path external/miniaudio/miniaudio.h)) {
+            throw "external/miniaudio/miniaudio.h missing after submodule update"
+          }
+          if (-not (Test-Path external/mbelib/CMakeLists.txt)) {
+            throw "external/mbelib/CMakeLists.txt missing after submodule update"
+          }
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.3'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2019_64'
+          cache: true
+          setup-python: false
+
+      - name: Bootstrap vcpkg (current master)
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git "${{ github.workspace }}/vcpkg"
+          & "${{ github.workspace }}/vcpkg/bootstrap-vcpkg.bat" -disableMetrics
+
+      - name: Configure CMake (VS 2022 + vcpkg manifest)
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" `
+            -DBUILD_TESTS=ON `
+            -DSDR_TOWN_ENABLE_MBELIB=ON
+
+      - name: Build SDR_Town + tests
+        shell: pwsh
+        run: cmake --build build --config Release --target SDR_Town sdr_town_tests -j 4
+
+      - name: Run unit tests
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "build/bin/Release/sdr_town_tests.exe",
+            "build/bin/sdr_town_tests.exe",
+            "build/Release/sdr_town_tests.exe"
+          )
+          $exe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $exe) { throw "sdr_town_tests.exe not found" }
+          Write-Host "Running $exe"
+          & $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Phase 2 string verifiers
+        shell: pwsh
+        run: |
+          $fail = 0
+          $ok = 0
+          Get-ChildItem src/tools/verify_p25_phase2_*.py | Sort-Object Name | ForEach-Object {
+            python $_.FullName
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "FAIL $($_.Name)"
+              $fail++
+            } else {
+              $ok++
+            }
+          }
+          Write-Host "PASS=$ok FAIL=$fail"
+          if ($fail -gt 0) { exit 1 }
