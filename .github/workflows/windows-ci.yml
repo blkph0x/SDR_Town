@@ -18,12 +18,20 @@ jobs:
 
     env:
       VCPKG_DEFAULT_TRIPLET: x64-windows
+      # GitHub Actions binary cache for vcpkg (read/write)
+      VCPKG_BINARY_SOURCES: 'clear;x-gha,readwrite'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        # Do not recurse submodules: `_codex_refs/*` are citation trees with
-        # broken/missing .gitmodules URLs and are not required to build.
+        # Skip submodules: `_codex_refs/*` have broken gitlinks and are cite-only.
+
+      - name: Export GitHub Actions cache env for vcpkg
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
       - name: Install Qt 6
         uses: jurplel/install-qt-action@v4
@@ -35,16 +43,14 @@ jobs:
           cache: true
           setup-python: false
 
-      - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
-        id: runvcpkg
-        with:
-          vcpkgDirectory: ${{ github.workspace }}/vcpkg
-          # 2024.12.16 release tag commit
-          vcpkgGitCommitId: 'b2cb0da531c2f1f740045bfe7c4dac59f0b2b69c'
-          runVcpkgInstall: true
+      - name: Bootstrap vcpkg (current master)
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git "${{ github.workspace }}/vcpkg"
+          & "${{ github.workspace }}/vcpkg/bootstrap-vcpkg.bat" -disableMetrics
 
-      - name: Configure CMake (VS 2022)
+      - name: Configure CMake (VS 2022 + vcpkg manifest)
+        shell: pwsh
         run: |
           cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
             -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
@@ -52,13 +58,13 @@ jobs:
             -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" `
             -DBUILD_TESTS=ON `
             -DSDR_TOWN_ENABLE_MBELIB=ON
-        shell: pwsh
 
       - name: Build SDR_Town + tests
-        run: cmake --build build --config Release --target SDR_Town sdr_town_tests -j 4
         shell: pwsh
+        run: cmake --build build --config Release --target SDR_Town sdr_town_tests -j 4
 
       - name: Run unit tests
+        shell: pwsh
         run: |
           $candidates = @(
             "build/bin/Release/sdr_town_tests.exe",
@@ -70,7 +76,6 @@ jobs:
           Write-Host "Running $exe"
           & $exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        shell: pwsh
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -78,6 +83,7 @@ jobs:
           python-version: '3.12'
 
       - name: Phase 2 string verifiers
+        shell: pwsh
         run: |
           $fail = 0
           $ok = 0
@@ -92,4 +98,3 @@ jobs:
           }
           Write-Host "PASS=$ok FAIL=$fail"
           if ($fail -gt 0) { exit 1 }
-        shell: pwsh
