@@ -36,6 +36,13 @@ Newest at the top.
 - Gate: Release build + unit tests + `verify_p25_phase2_*.py` 129/129.
 - No hop/feed/CADENCE/audio algorithm changes (move-only).
 
+## 2026-09-11 — Backlog + Windows CI
+
+- Added `docs/BACKLOG.md`: ordered P0–P3 walk-through (ISS-0001 live gate,
+  REQ-P2.2–P2.6, TIA gap, CI, hygiene).
+- Added `.github/workflows/windows-ci.yml` (Windows 2022 Release build + unit
+  tests + Phase 2 string verifiers). T-0013 / B-0020 in progress until green.
+
 ## 2026-09-10 — Close ISS-0002/0003/0008/0009/0010/0011 (leave 0001/0006)
 
 - **Still open (cannot clear without product evidence / external specs):**

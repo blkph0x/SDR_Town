@@ -4,6 +4,16 @@ Newest entry at the top. Record facts, not hopes.
 
 ---
 
+## BN-0032 — GitHub Actions Windows CI added (2026-09-11)
+
+- **Workflow:** `.github/workflows/windows-ci.yml`
+- **Gate:** MSVC/Ninja Release `SDR_Town` + `sdr_town_tests`, then all
+  `verify_p25_phase2_*.py`
+- **Deps:** jurplel Qt 6.7.3 + lukka/run-vcpkg (manifest `vcpkg.json`) + bundled mbelib
+- **Backlog:** `docs/BACKLOG.md` (B-0020)
+
+---
+
 ## BN-0031 — ISS-0008…0011 verifier/docs + live pipeline extract (2026-09-10)
 
 - **Host:** Windows 10.0.22631 x64
