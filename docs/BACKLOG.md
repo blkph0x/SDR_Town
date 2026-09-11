@@ -11,8 +11,8 @@ Status: `open` | `in_progress` | `blocked` | `done`
 
 | ID | Status | Tracker | What | Notes / must not invent |
 |---|---|---|---|---|
-| B-0001 | open | ISS-0001 / T-0010 / GH#9 | **Live** clear P25 continuous audio re-prove (~095846 class) | Block-channelize + DEC-0035/0037/0039 path. Do **not** default-on streaming DDC (DEC-0038 duty 0.23). Classify mute A–E before hop/TTL. |
-| B-0002 | open | T-0004 / REQ-P2.2 | Mixed MAC-dead first hop (`target=6 opp=28` on 105622 hop 1) | DEC-0012 post-emit mixed skip stays. Do not reopen dual-slot 034136. |
+| B-0001 | open | ISS-0001 / T-0010 / GH#9 | **Live** clear P25 continuous audio re-prove (~095846 class) | 2026-09-11 CLI: still partial / drop=B feed starve on live 20202 IQ. File bars OK. Do **not** default-on streaming DDC. Classify mute A–E before hop/TTL. |
+| B-0002 | open | T-0004 / REQ-P2.2 | Mixed MAC-dead / cold-eye first hop feed starve | Live 20260911_082310 TG20202: drop=B targetVcw=94 fed=0. DEC-0012 post-emit mixed skip stays. Do not reopen dual-slot 034136. |
 | B-0003 | open | T-0005 / REQ-P2.3 | Emit proven PCM only when drop=C | No dual-slot MAC-dead mute regression. |
 | B-0004 | open | T-0006 / REQ-P2.4 | Honest playout duty (drop=D residual / worker-busy) | Bridge must not be the product. |
 | B-0005 | open | T-0007 / REQ-P2.5 | Follow hold during proven call (drop=E only) | |
@@ -27,7 +27,7 @@ Status: `open` | `in_progress` | `blocked` | `done`
 | ID | Status | Tracker | What | Notes |
 |---|---|---|---|---|
 | B-0010 | open | ISS-0006 / GH#10 | TIA-102 Phase 2 PDF not in-tree | Cite `_codex_refs` until operator supplies excerpts. Never invent bit offsets/LFSR/MAC from memory. |
-| B-0011 | open | field | Golden IQ not in git clone | Captures live under AppData; CI cannot run voicetest without a fixture DEC. Optional follow-up: sanitized short IQ in `tests/fixtures/` behind DEC. |
+| B-0011 | open | field | Golden IQ not in git clone | **Keep-set (AppData):** `060036`, `094846`, `095846`, plus latest live follow IQ only. Delete older startstops after documenting. Cap new CLI `record=` ≤15–20 s. |
 | B-0012 | open | DEC-0038 | Streaming DDC default-on still rejected | Reopen only if env=1 duty ≥ 0.65 on named capture. |
 
 ---

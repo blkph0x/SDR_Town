@@ -4,6 +4,23 @@ Newest at the top.
 
 ---
 
+## 2026-09-11 — Live CLI clearaudio + capture hygiene
+
+- **Space:** trimmed `iq_test_captures` from ~29 GB → ~8.6 GB keep-set
+  (`060036`, `094846`, `095846`) + new live follow IQ (~125 MB). Rotated
+  `sdr_town.*.log` and old voicetest WAVs removed. Free disk ~44 GB.
+- **Merged:** PR #12 Add Receiver `rx.active` arm (`f7c201e`).
+- **Live CLI** `p25 clearaudio 420.475` (HEAD Release):
+  - TG **10301** clear slot0 @ 417.675: ~3 s target WAV / ~4 s companion;
+    intermittent decode, `speakerRecent=no` then cliff to `no voice sync`.
+  - TG **20202** clear slot0 @ 417.675: **target WAV empty**, companion
+    ~47 KB; follow IQ `…082310…deadline…15.0s`.
+  - File voicetest that IQ: slot0 **drop=B** `targetVcw=94 fed=0`; slot1
+    drop=A. Class: **B (feed)** — VCWs present, mbelib not fed. Do **not**
+    soften DEC-0012. Do not invent hop/TTL.
+- **Still open:** ISS-0001 / B-0001 live duty ≥0.65; B-0002 cold-eye
+  first-hop feed starve (this live drop=B is same class).
+
 ## 2026-09-10 — ISS-0008/0009/0010/0011 hygiene (no audio rewrite)
 
 - **ISS-0009:** `definition_body` / `require_definition` in
