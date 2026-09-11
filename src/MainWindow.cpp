@@ -210,6 +210,11 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     newRx->active = true;
                     receivers.push_back(std::move(newRx));
                 }
+                // Same class as Device Apply / Scan (ecf9303): streaming alone does not
+                // feed guiDspWorker — primary monitor must be armed or DSP stalls / P25
+                // orchestration (always receivers[0]) stays idle while waterfall runs.
+                syncMonitorVarsToReceiver(0);
+                setReceiverActive(0, true);
 
                 statusBar()->showMessage(QString("Added receiver #%1 (dev 0, %.3f MHz, %2) - streaming + audio")
                     .arg(receivers.size()).arg(currentMonitorFreq/1e6, 0, 'f', 3), 3000);
