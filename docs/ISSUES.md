@@ -11,6 +11,14 @@ Status: `open` | `closed`
 - **Status:** open
 - **Opened:** 2026-09-07
 - **REQ:** REQ-P2.0 … P2.6
+- **Measured 2026-09-11 live CLI `p25 clearaudio` (HEAD after PR #12):**
+  - CC 420.475, RTL real Soapy. TG **10301** clear slot0 @ 417.675:
+    target WAV ~3 s, companion ~4 s; decode islands then `no voice sync`.
+  - TG **20202** clear slot0 @ 417.675: target WAV **0**; companion ~47 KB.
+    Follow IQ `20260911_082310_…deadline…15.0s`. Voicetest: slot0
+    **drop=B** `targetVcw=94 fed=0 emit=0` (feed starve); slot1 drop=A.
+  - File bars still hold: 060036 duty **0.705**; 095846 TG10301 duty **0.84**.
+  - Capture keep-set trimmed (~29 GB → ~9 GB) to avoid disk pressure.
 - **Measured 2026-09-09 streaming DDC (DEC-0038):**
   - 060036 stream env=1 after sticky Gardner: duty **0.23** (lock-create
     trial 0.12). Block still **0.705**. Default-on still rejected.
