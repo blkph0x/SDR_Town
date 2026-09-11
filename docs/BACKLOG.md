@@ -40,7 +40,7 @@ Status: `open` | `in_progress` | `blocked` | `done`
 | B-0021 | open | maintainability | Further shrink `MainWindow.cpp` UI vs remaining timers | Voice path already in `MainWindowP25Voice` / `MainWindowP25Orchestration`. |
 | B-0022 | open | maintainability | Delete one-shot extract scripts under `src/tools/_extract_*` / `_migrate_*` when no longer needed | |
 | B-0023 | open | ISS-0002 closed process | Keep verifier anchors on **definitions** (`definition_body`) | Never flip SoT from string locks alone. |
-| B-0024 | open | ops | Device Apply must keep `rx.active` armed when streaming | Fixed `ecf9303`; watch for regressions on Scan/mode-only paths. |
+| B-0024 | done | ops | Device Apply must keep `rx.active` armed when streaming | Fixed `ecf9303` (Apply/Scan/mode); Add Receiver arms primary too (`fix/p0-dsp-arm-add-receiver`). |
 
 ---
 

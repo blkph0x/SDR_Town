@@ -4,6 +4,18 @@ Newest entry at the top. Record facts, not hopes.
 
 ---
 
+## BN-0033 — Add Receiver arms primary DSP (2026-09-11)
+
+- **Host:** Windows 10.0.22631 x64
+- **Change:** `MainWindow` Add Receiver now `syncMonitorVarsToReceiver(0)` +
+  `setReceiverActive(0, true)` after `startStreaming` (same class as Apply/Scan
+  `ecf9303`).
+- **File bar:** 060036 TG 10301 skip=261000 block path
+  `PASS_CONTINUOUS_AUDIO duty=0.705` (HEAD rebuild).
+- **Not proven:** live CADENCE re-prove (T-0010 / B-0001).
+
+---
+
 ## BN-0032 — GitHub Actions Windows CI added (2026-09-11)
 
 - **Workflow:** `.github/workflows/windows-ci.yml`
