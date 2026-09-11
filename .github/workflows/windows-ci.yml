@@ -22,8 +22,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
+        # Do not recurse submodules: `_codex_refs/*` are citation trees with
+        # broken/missing .gitmodules URLs and are not required to build.
 
       - name: Install Qt 6
         uses: jurplel/install-qt-action@v4
