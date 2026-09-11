@@ -36,7 +36,7 @@ Status: `open` | `in_progress` | `blocked` | `done`
 
 | ID | Status | Tracker | What | Notes |
 |---|---|---|---|---|
-| B-0020 | in_progress | — | **GitHub Actions Windows CI** (Release build + `sdr_town_tests` + string verifiers) | This batch. Fix until green. |
+| B-0020 | done | — | **GitHub Actions Windows CI** (Release build + `sdr_town_tests` + string verifiers) | Green on PR #11; workflow `.github/workflows/windows-ci.yml`. |
 | B-0021 | open | maintainability | Further shrink `MainWindow.cpp` UI vs remaining timers | Voice path already in `MainWindowP25Voice` / `MainWindowP25Orchestration`. |
 | B-0022 | open | maintainability | Delete one-shot extract scripts under `src/tools/_extract_*` / `_migrate_*` when no longer needed | |
 | B-0023 | open | ISS-0002 closed process | Keep verifier anchors on **definitions** (`definition_body`) | Never flip SoT from string locks alone. |
@@ -74,7 +74,6 @@ From `SOURCE_OF_TRUTH.md` roadmap / TX shells — parked until clear continuous 
 
 ## Suggested next sessions (in order)
 
-1. Finish **B-0020** CI green on `master`.
-2. **B-0001** live re-prove on HEAD after Apply-arm fix (`ecf9303`) — capture + CADENCE / voicetest.
-3. Only then touch **B-0002…B-0006** with named A–E evidence.
-4. Spec gap **B-0010** when operator has TIA excerpts.
+1. **B-0001** live re-prove on HEAD after Apply-arm fix (`ecf9303`) — capture + CADENCE / voicetest.
+2. Only then touch **B-0002…B-0006** with named A–E evidence.
+3. Spec gap **B-0010** when operator has TIA excerpts.
