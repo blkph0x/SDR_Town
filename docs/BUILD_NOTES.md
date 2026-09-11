@@ -7,9 +7,11 @@ Newest entry at the top. Record facts, not hopes.
 ## BN-0032 — GitHub Actions Windows CI added (2026-09-11)
 
 - **Workflow:** `.github/workflows/windows-ci.yml`
-- **Gate:** MSVC/Ninja Release `SDR_Town` + `sdr_town_tests`, then all
+- **Gate:** MSVC Release `SDR_Town` + `sdr_town_tests`, then all
   `verify_p25_phase2_*.py`
-- **Deps:** jurplel Qt 6.7.3 + lukka/run-vcpkg (manifest `vcpkg.json`) + bundled mbelib
+- **Deps:** jurplel Qt 6.7.3 + bootstrap vcpkg (manifest) + `external/miniaudio` +
+  `external/mbelib` only (skip broken `_codex_refs` gitlinks)
+- **CI fix notes:** missing `#include <set>` in `DeviceManager::getAvailableDrivers`
 - **Backlog:** `docs/BACKLOG.md` (B-0020)
 
 ---
