@@ -7,6 +7,7 @@ Do not edit `C:\Users\Blkph0x\source\repos\SovereignFoundry` from here.
 
 | File | Job |
 |---|---|
+| [BACKLOG.md](BACKLOG.md) | Ordered walk-through queue (P0–P3). Start here. |
 | [TASKS.md](TASKS.md) | Living task list. Always current. |
 | [ISSUES.md](ISSUES.md) | Defects, ambiguities, blockers. Never deleted. |
 | [DECISIONS.md](DECISIONS.md) | Choices made with evidence, **before** code depends on them. |
