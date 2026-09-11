@@ -3,14 +3,15 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
-main = (root / 'src' / 'main.cpp').read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 p25 = (root / 'src' / 'P25LiveDecoder.cpp').read_text(encoding='utf-8', errors='replace')
-bootstrap_block = main.split('static bool p25Phase2BootstrappedMaskTargetVoiceEvidence', 1)[1][:500] if 'static bool p25Phase2BootstrappedMaskTargetVoiceEvidence' in main else ''
+bootstrap_block = main.split('bool p25Phase2BootstrappedMaskTargetVoiceEvidence', 1)[1][:500] if 'bool p25Phase2BootstrappedMaskTargetVoiceEvidence' in main else ''
 
 checks = {
     'fixed speaker sustain cadence': (
         'During active speaker sustain, keep a fixed near-live cadence' in main and
-        'gLastDspMicros' not in main.split('p25Phase2AdaptiveVoiceDecodeCadenceMs', 1)[1].split('static bool p25Phase2SpeakerSustainDecodeActive', 1)[0]
+        'gLastDspMicros' not in main.split('p25Phase2AdaptiveVoiceDecodeCadenceMs', 1)[1].split('bool p25Phase2SpeakerSustainDecodeActive', 1)[0]
     ),
     'speaker gate requires target vcw': 'phase2-no-target-slot-vcw' in main,
     'bootstrap requires target vcw': (
@@ -23,14 +24,14 @@ checks = {
     ),
     'bounded p25 speaker push helper': (
         'pushP25SpeakerAudio' in main and
-        'phase2FrameSamples' in main.split('pushP25SpeakerAudio', 1)[1][:900] and
+        'phase2FrameSamples' in main.split('size_t pushP25SpeakerAudio', 1)[1][:900] and
         'pushP25LiveStreamingAudio(engine, pending, audio, activeOutputIndices,' in
-            main.split('pushP25SpeakerAudio', 1)[1][:1200] and
+            main.split('size_t pushP25SpeakerAudio', 1)[1][:1200] and
         'phase2FrameSamples, ringFillPercent,' in
-            main.split('pushP25SpeakerAudio', 1)[1][:1200] and
+            main.split('size_t pushP25SpeakerAudio', 1)[1][:1200] and
         'warmPendingRealAudio, pushedRealAudio);' in
-            main.split('pushP25SpeakerAudio', 1)[1][:1200] and
-        'pushAudioFrames(engine, pending, audio' not in main.split('pushP25SpeakerAudio', 1)[1][:900]
+            main.split('size_t pushP25SpeakerAudio', 1)[1][:1200] and
+        'pushAudioFrames(engine, pending, audio' not in main.split('size_t pushP25SpeakerAudio', 1)[1][:900]
     ),
     'sustain decode on successful emit': 'sustain.hadSuccessfulEmit' in main.split('p25Phase2UseSustainDecodeWindowLocked', 1)[1][:3500],
     'selected clear streaming before first pcm': (
@@ -59,12 +60,12 @@ checks = {
         'explicitClearGrantHardVoiceRelease' in main and
         'explicitClearGrantSelectedVoiceRelease' not in main and
         '(targetTrafficClearEvidence || explicitClearGrantSelectedVoiceRelease)' not in main and
-        'targetTrafficClearEvidence &&' in main.split('const bool explicitClearGrantHardVoiceRelease', 1)[1].split(';', 1)[0] and
+        'freshTargetTrafficClearEvidence &&' in main.split('const bool explicitClearGrantHardVoiceRelease', 1)[1].split(';', 1)[0] and
         'explicit clear control-channel' in main
     ),
     'hot cqpsk search bounded for live voice': (
-        'kP25VoiceWorkerHotRealtimeBudgetMs = 70' in main and
-        'kP25VoiceWorkerHotMaxCqpskCandidates = 12' in main
+        'kP25VoiceWorkerHotRealtimeBudgetMs = 120' in main and
+        'kP25VoiceWorkerHotMaxCqpskCandidates = 8' in main
     ),
     'deep acch when mask applied': 'mask != nullptr' in p25 or '&& mask' in p25,
     'soft cqpsk hold before mac ess': (

@@ -2,7 +2,8 @@
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 p25 = (root / 'P25LiveDecoder.cpp').read_text(errors='ignore')
-main = (root / 'main.cpp').read_text(errors='ignore')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 main_l = main.lower()
 main_compact = ''.join(main.split())
 p25_compact = ''.join(p25.split())

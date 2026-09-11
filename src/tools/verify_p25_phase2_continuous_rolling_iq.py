@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
-main = (root / 'main.cpp').read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 assert 'P25 DSP VOICE LOOP:' in main, 'missing DSP voice loop diagnostic'
 assert 'getNewIQWindowForReceiver(i, rx, pullWindow)' in main, 'GUI Phase2 path must use continuous cursor IQ'
 assert 'getNewIQWindowForReceiver(di, rx, pullWindow)' in main, 'CLI Phase2 path must use continuous cursor IQ'

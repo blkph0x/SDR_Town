@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
-main = (root / 'main.cpp').read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 audio = (root / 'AudioEngine.cpp').read_text(encoding='utf-8', errors='replace')
 checks = {
     'phase2 rolling window keeps two-superframe cold context': 'kP25Phase2VoiceDecodeWindowSeconds = 0.720' in main,
@@ -17,8 +18,8 @@ checks = {
         'sustainContextMs=' in main
     ),
     'phase2 post-eye acquire does not wait for a full superframe': 'kP25Phase2VoiceDecodeMinFreshSeconds = 0.020' in main,
-    'cold cqpsk search is bounded for live traffic': 'kP25VoiceWorkerColdMaxCqpskCandidates = 32' in main,
-    'hot phase2 commit work is bounded': 'kP25VoiceWorkerHotMaxPhase2SyncHits = 24' in main and 'setMaxPhase2SyncHits' in main,
+    'cold cqpsk search is bounded for live traffic': 'kP25VoiceWorkerColdMaxCqpskCandidates = 64' in main,
+    'hot phase2 commit work is bounded': 'kP25VoiceWorkerHotMaxPhase2SyncHits = 96' in main and 'setMaxPhase2SyncHits' in main,
     'wide reacquire does not override current streaming eye': 'currentStreamingEye' in main,
     'audio jitter cap bounded for continuity without excessive lag': 'kDigitalVoiceJitterSeconds = 0.65' in audio,
     'overflow preserves SPSC read cursor ownership': 'producer must not advance' in audio and 'rb.readPos.store(newRead' not in audio,

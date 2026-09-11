@@ -5,7 +5,8 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 dm = (root / 'DeviceManager.cpp').read_text(encoding='utf-8', errors='replace')
 dmh = (root / '../include/DeviceManager.h').resolve().read_text(encoding='utf-8', errors='replace')
-main = (root / 'main.cpp').read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 
 checks = {
     'markStreamRetune declared': 'markStreamRetune' in dmh,

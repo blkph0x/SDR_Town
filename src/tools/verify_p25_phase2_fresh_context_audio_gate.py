@@ -4,7 +4,8 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
-main = (root / "src" / "main.cpp").read_text(encoding="utf-8", errors="ignore")
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 # Prefer the AMBE feed loop that owns fresh/context speaker gating.
 _gate_anchor = main.find("contextAudioLockedOut")
 if _gate_anchor < 0:

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
-main = (root / 'main.cpp').read_text(errors='ignore')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 recv_path = root.parent / 'include' / 'Receiver.h'
 recv = recv_path.read_text(errors='ignore') if recv_path.exists() else main
 p25 = (root / 'P25LiveDecoder.cpp').read_text(errors='ignore')
@@ -23,14 +24,14 @@ feed_region = main.split(
     'if (lateEntryStrongTargetReleaseDecoded', 1
 )[0]
 dedupe_sync_region = main.split(
-    'static P25Phase2AmbeEmitDedupeState& p25Phase2SyncAmbeEmitDedupeCallContext', 1
+    'P25Phase2AmbeEmitDedupeState& p25Phase2SyncAmbeEmitDedupeCallContext', 1
 )[1].split(
-    'static bool p25Phase2ShouldEmitAmbeFrame', 1
+    'bool p25Phase2ShouldEmitAmbeFrame', 1
 )[0]
 recent_security_region = main.split(
-    'static bool p25Phase2RecentSecurityEvidenceMatches', 1
+    'bool p25Phase2RecentSecurityEvidenceMatches', 1
 )[1].split(
-    'static void p25Phase2AdoptGrantSourceIdForCurrentCall', 1
+    'void p25Phase2AdoptGrantSourceIdForCurrentCall', 1
 )[0]
 same_call_update_region = main.split(
     'const bool incomingSourceKnown = followTg.lastSourceId != 0;', 1
@@ -70,7 +71,7 @@ checks = {
     'MAC_IDLE resets session': 'case 3: // MAC_IDLE' in p25 and 'phase2ClearCallSession(*session);' in p25,
     'MAC_HANGTIME resets session': 'case 6: // MAC_HANGTIME' in p25 and 'phase2ClearCallSession(*session);' in p25 and 'MAC_HANGTIME' in ctrl,
     'MAC_HANGTIME still promotes target encryption evidence': 'pduType != 4 && pduType != 6' in p25 and 'session->hangtimeSeen = true;' in p25 and 'session->trafficSecurityKnown = true;' in p25,
-    'known mismatched TG helper exists': 'static bool p25Phase2TrafficTalkgroupKnownMismatch' in main,
+    'known mismatched TG helper exists': 'bool p25Phase2TrafficTalkgroupKnownMismatch' in main,
     'known mismatched TG is not target evidence': (
         'trafficTalkgroupKnownMismatch' in target_evidence_region and
         'out.phase2OppositeVoiceCodewords += burst.voiceCodewords.size();' in target_evidence_region and

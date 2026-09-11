@@ -3,7 +3,8 @@ from pathlib import Path
 
 
 root = Path(__file__).resolve().parents[2]
-main = (root / "src" / "main.cpp").read_text(encoding="utf-8")
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 audit = (root / "src" / "tools" / "p25_capture_audit.py").read_text(encoding="utf-8")
 
 checks = {

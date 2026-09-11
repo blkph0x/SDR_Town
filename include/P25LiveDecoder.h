@@ -521,6 +521,10 @@ public:
     // epoch so the next annotate can re-hunt, without wiping CQPSK lock / dibit
     // stream continuity. Full reset() is reserved for true eye-loss reacquire.
     void invalidatePhase2StickyMaskEpoch();
+    // Block-channelize keeps a prior-eye CQPSK hint across hops. After post-emit
+    // empty-eye streaks the hint can poison the next search (DEC-0032 / 081701);
+    // clear it without a full decoder reset.
+    void clearBlockCqpskHint() noexcept { m_blockCqpskHint = {}; }
     bool phase2MaskParametersKnown() const;
     bool phase2MaskParametersMatch(uint16_t nac, uint32_t wacn, uint16_t systemId) const;
     const P25LiveDecoderConfig& config() const { return m_config; }
@@ -622,7 +626,9 @@ private:
                                                                   const std::vector<double>* softDibitMinAbsLlr = nullptr);
     P25Phase2DecodeResult processPhase2FromFramerBurstsInternal(
         std::vector<p25dsp::P25Phase2FramerBurst> framerBursts,
-        bool annotateSessionCodewords);
+        bool annotateSessionCodewords,
+        const std::vector<int>& sourceDibits = {},
+        const std::vector<double>* softDibitMinAbsLlr = nullptr);
     void annotatePhase2SessionCodewords(P25Phase2DecodeResult& out,
                                         const std::vector<int>& dibits,
                                         const std::vector<double>* softDibitMinAbsLlr = nullptr);

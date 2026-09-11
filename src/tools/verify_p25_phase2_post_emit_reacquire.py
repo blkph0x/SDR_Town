@@ -3,7 +3,8 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-main = (root / 'main.cpp').read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 
 checks = {
     'no one-rtl auto sustain': 'p25IndependentTrafficSource && rx.p25TrafficRetunesPrimary && rx.p25VoiceMaskParamsKnown' not in main,
@@ -13,7 +14,14 @@ checks = {
         'p25Phase2HasStableSuperframeLockLocked(rx)' in main and
         'p25Phase2SessionHadVoiceLock(rx)' in main
     ),
-    'wide reacquire uses acquire chunk': 'wideReacquireWindow\n                                ? kP25Phase2VoiceDecodeAcquireChunkSeconds' in main,
+    'wide reacquire uses acquire chunk': (
+        'if (wideReacquireWindow || maskEpochRepairWindow)' in main and
+        (
+            'plan.maxChunkSeconds = kP25Phase2VoiceDecodeUnacquiredAcquireFreshSeconds' in main
+            or 'plan.maxChunkSeconds = kP25Phase2VoiceDecodeFirstColdEyeSeconds' in main
+        ) and
+        'plan.maxChunkSeconds = kP25Phase2VoiceDecodeAcquireChunkSeconds' in main
+    ),
     'takeUndecoded preserves overlap context': 'firstNew + maxSamples' in main,
     'overlap context comment': 'context=0 windows after' in main,
 }

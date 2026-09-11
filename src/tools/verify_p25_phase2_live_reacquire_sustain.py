@@ -5,17 +5,18 @@ from pathlib import Path
 import re
 
 root = Path(__file__).resolve().parents[2]
-main = (root / "src" / "main.cpp").read_text(encoding="utf-8", errors="ignore")
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 
 hard_acquire = main.split(
-    "static bool p25Phase2SessionHasHardTargetAcquire", 1
+    "bool p25Phase2SessionHasHardTargetAcquire", 1
 )[1].split(
-    "static bool p25Phase2SessionHadVoiceLock", 1
+    "bool p25Phase2SessionHadVoiceLock", 1
 )[0]
 burst_eye = main.split(
-    "static bool p25Phase2SessionHadBurstEye", 1
+    "bool p25Phase2SessionHadBurstEye", 1
 )[1].split(
-    "static bool p25Phase2SessionSpeakerSustainActive", 1
+    "bool p25Phase2SessionSpeakerSustainActive", 1
 )[0]
 
 checks = {

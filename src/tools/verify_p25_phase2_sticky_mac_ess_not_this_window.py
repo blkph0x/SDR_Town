@@ -6,7 +6,8 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[2]
 decoder = (root / "src" / "P25LiveDecoder.cpp").read_text(encoding="utf-8", errors="ignore")
 header = (root / "include" / "P25LiveDecoder.h").read_text(encoding="utf-8", errors="ignore")
-main = (root / "src" / "main.cpp").read_text(encoding="utf-8", errors="ignore")
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 
 # Sticky paint region after session fields copied onto burst.
 paint_anchor = "burst.essKnown = session->ess.known && session->essTrusted;"

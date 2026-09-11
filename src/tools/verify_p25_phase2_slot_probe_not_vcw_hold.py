@@ -1,5 +1,6 @@
 from pathlib import Path
-s = (Path(__file__).resolve().parents[1] / 'main.cpp').read_text(errors='ignore')
+from p25_orchestration_sources import orchestration_source_text
+s = orchestration_source_text()
 assert 'currentSlotHasUsefulAudio' in s
 assert 'decoded > 0 && voiceDiag.audioSamples > 0' in s, 'GUI slot hold should use any current accepted PCM, not stale VCW activity'
 assert 'diag.decodedFrames > 0 && diag.audioSamples > 0' in s, 'CLI slot hold should use any current accepted PCM'

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 from pathlib import Path
 
-main = Path(__file__).resolve().parents[1] / 'main.cpp'
-session = Path(__file__).resolve().parents[2] / 'include' / 'P25ReceiverSession.h'
-main_text = main.read_text(encoding='utf-8', errors='replace')
-session_text = session.read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+root = Path(__file__).resolve().parents[2]
+main = orchestration_source_text()
+main_text = main
+session_text = (root / 'include' / 'P25ReceiverSession.h').read_text(
+    encoding='utf-8', errors='replace')
 
 assert 'P25Phase2AudioTailState' in session_text, 'missing audio tail tracker state'
 assert 'p25Phase2FinalizeAudioTailState' in main_text, 'missing audio tail finalize helper'

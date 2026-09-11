@@ -10,7 +10,8 @@ CQPSK acquisition on that path.
 """
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
-main = (root / 'main.cpp').read_text(errors='ignore')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 checks = {
     'inband predicate retained for diagnostics': 'p25TrafficInCurrentSamplePassband' in main and 'sampleRateHz * 0.42' in main,
     'single receiver retune note': 'forcing physical retune' in main,

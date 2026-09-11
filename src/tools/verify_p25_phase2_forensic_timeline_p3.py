@@ -4,17 +4,24 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-main = (root / "main.cpp").read_text(encoding="utf-8", errors="ignore")
+from p25_orchestration_sources import definition_body, orchestration_source_text
+main = orchestration_source_text()
 session_h = (root / ".." / "include" / "P25ReceiverSession.h").resolve().read_text(
     encoding="utf-8", errors="ignore"
 )
 
 drain = main.split("auto drainP25VoiceResults = [&]() {", 1)[1].split("while (!stopDspWorker", 1)[0]
-close_burst = main.split("static void p25Phase2CloseActiveVoiceBurst", 1)[1].split(
-    "static void p25Phase2BeginVoiceBurst", 1
-)[0]
+close_burst = definition_body(
+    main,
+    "void p25Phase2CloseActiveVoiceBurst",
+    ["void p25Phase2BeginVoiceBurst"],
+)
 
-worker_fn = main.split("bool p25VoiceWorkerCanAcceptJob()", 1)[1].split("P25VoiceWorkerQueueSnapshot", 1)[0]
+worker_fn = definition_body(
+    main,
+    "bool MainWindow::p25VoiceWorkerCanAcceptJob()",
+    ["MainWindow::P25VoiceWorkerQueueSnapshot MainWindow::p25VoiceWorkerQueueSnapshot"],
+)
 
 required = {
     "publish outcome enum": "enum class P25VoicePublishOutcome" in main,

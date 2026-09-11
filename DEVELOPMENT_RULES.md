@@ -118,8 +118,12 @@ nlohmann/json, spdlog) stay. Adding a **new** third-party dependency requires
 a DEC. Do not pull a vocoder, equalizer, or "P25 SDK" to dodge a gate.
 
 Static `verify_p25_phase2_*.py` scripts may guard invariants. They are **not**
-proof of continuous audio. Proof is CLI `p25 voicetest` `PASS_CONTINUOUS_AUDIO`
-and/or live CADENCE `dutySec` near 1.0 during talk, with STT/listen.
+proof of continuous audio (**ISS-0002**). Proof is CLI `p25 voicetest`
+`PASS_CONTINUOUS_AUDIO` with duty ≥ 0.65 and/or live CADENCE `dutySec` near 1.0
+during talk, with STT/listen — never a SoT checkbox flip from string presence
+alone. After out-of-line moves, anchors must target **definitions**
+(`definition_body` in `p25_orchestration_sources.py`), not the first header
+prototype.
 
 ---
 
@@ -143,7 +147,7 @@ A REQ is done only when all are true:
 5. `docs/TASKS.md` and the SoT checkbox are updated: evidence first, checkbox second.
 
 For Phase 2 voice, the gate includes `PASS_CONTINUOUS_AUDIO` (duty ≥ 0.65 plus
-cadence/sequencer/AMBE/concealment checks in `src/main.cpp`) on a real clear
+cadence/sequencer/AMBE/concealment checks in `src/P25VoiceTest.cpp`) on a real clear
 capture — not a string-presence script.
 
 ---

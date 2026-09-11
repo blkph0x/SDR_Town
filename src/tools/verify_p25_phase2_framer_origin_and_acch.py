@@ -8,7 +8,8 @@ import sys
 root = Path(__file__).resolve().parents[2]
 decoder = (root / "src" / "P25LiveDecoder.cpp").read_text(encoding="utf-8", errors="ignore").replace("\r\n", "\n")
 header = (root / "include" / "P25LiveDecoder.h").read_text(encoding="utf-8", errors="ignore")
-main_cpp = (root / "src" / "main.cpp").read_text(encoding="utf-8", errors="ignore")
+from p25_orchestration_sources import orchestration_source_text
+main_cpp = orchestration_source_text()
 
 checks = {
     "framer origin latch helper": "latchPhase2FramerOriginIfNeeded" in decoder,

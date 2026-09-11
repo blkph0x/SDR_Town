@@ -67,6 +67,34 @@ endif()
 
 set(SDR_TOWN_SOURCES
     src/main.cpp
+    src/P25VoiceTiming.cpp
+    include/P25VoiceTiming.h
+    src/P25TalkgroupRegistry.cpp
+    include/P25TalkgroupRegistry.h
+    src/P25AppGlobals.cpp
+    include/P25AppGlobals.h
+    src/P25RollingIq.cpp
+    include/P25RollingIq.h
+    src/P25VoiceDecode.cpp
+    include/P25VoiceDecode.h
+    src/P25VoiceTest.cpp
+    include/P25VoiceTest.h
+    src/P25VoiceSession.cpp
+    include/P25VoiceSession.h
+    src/P25DecodeConfig.cpp
+    include/P25DecodeConfig.h
+    src/DemodModeUtils.cpp
+    include/DemodModeUtils.h
+    src/SavedFrequencies.cpp
+    include/SavedFrequencies.h
+    src/CliApp.cpp
+    include/CliApp.h
+    src/AppBootstrap.cpp
+    include/AppBootstrap.h
+    src/MainWindow.cpp
+    src/MainWindowP25Voice.cpp
+    src/MainWindowP25Orchestration.cpp
+    include/MainWindow.h
     src/DeviceManager.cpp
     src/SpectrumWidget.cpp
     include/SpectrumWidget.h

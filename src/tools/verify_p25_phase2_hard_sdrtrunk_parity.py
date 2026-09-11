@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
-main = (root / 'main.cpp').read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 dec = (root / 'P25LiveDecoder.cpp').read_text(encoding='utf-8', errors='replace')
 hdr = (root.parent / 'include' / 'P25LiveDecoder.h').read_text(encoding='utf-8', errors='replace')
 assert 'm_phase2SlotEss' in hdr

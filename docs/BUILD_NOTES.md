@@ -4,6 +4,301 @@ Newest entry at the top. Record facts, not hopes.
 
 ---
 
+## BN-0031 — ISS-0008…0011 verifier/docs + live pipeline extract (2026-09-10)
+
+- **Host:** Windows 10.0.22631 x64
+- **Compiler:** MSVC via VS 2022 MSBuild 17.14.40, config Release
+- **Command:** `cmake --build build --config Release --target SDR_Town sdr_town_tests -j 8`
+- **Result:** PASS; `sdr_town_tests.exe` 214 cases / 10194 assertions; `verify_p25_phase2_*.py` 129/129
+- **Layout:** `MainWindowP25Orchestration.cpp` ~1.4k (`startP25LiveDecodePipeline`);
+  `MainWindow.cpp` ~10.4k; 14 verifiers on `definition_body` anchors
+- **Not proven:** live CADENCE re-prove (T-0010)
+
+## BN-0030 — ISS-0004 MainWindowP25Voice TU split (2026-09-10)
+
+- **Host:** Windows 10.0.22631 x64
+- **Compiler:** MSVC via VS 2022 MSBuild 17.14.40, config Release
+- **Command:** `cmake --build build --config Release --target SDR_Town sdr_town_tests -j 8`
+- **Result:** PASS; `sdr_town_tests.exe` 214 cases / 10194 assertions; `verify_p25_phase2_*.py` 129/129
+- **Layout:** `MainWindowP25Voice.cpp` ~1.3k (worker/submit/backpressure/publish);
+  `MainWindow.cpp` ~11.8k (ctor/UI remainder); ISS-0010 / ISS-0011 filed
+- **Not proven:** live CADENCE re-prove (T-0010)
+
+---
+
+## BN-0029 — ISS-0004 Phase A–B MainWindow out-of-line (2026-09-10)
+
+- **Host:** Windows 10.0.22631 x64
+- **Compiler:** MSVC via VS 2022 MSBuild 17.14.40, config Release
+- **Command:** `cmake --build build --config Release --target SDR_Town sdr_town_tests -j 8`
+- **Result:** PASS; `ctest` UnitTests PASS; `verify_p25_phase2_*.py` 129/129
+- **Layout:** `main.cpp` ~200; `MainWindow.h` ~520 (decls); `MainWindow.cpp` ~13k;
+  plus `P25VoiceSession` / `P25DecodeConfig` / `DemodModeUtils` / `SavedFrequencies`
+- **Not proven:** live CADENCE re-prove (T-0010); further MainWindow ctor/worker TU split
+
+---
+
+## BN-0028 — DEC-0040 / ISS-0004 split `main.cpp` (2026-09-10)
+
+- **Host:** Windows 10.0.22631 x64
+- **Compiler:** MSVC via VS 2022 MSBuild 17.14.40, config Release
+- **Command:** `cmake --build build --config Release --target SDR_Town sdr_town_tests -j 8`
+- **Result:** PASS; `sdr_town_tests.exe` 214 cases / 10194 assertions; `verify_p25_phase2_*.py` 129/129
+- **Layout:** `P25VoiceTiming` / `P25TalkgroupRegistry` / `P25AppGlobals` / `P25RollingIq` /
+  `P25VoiceDecode` / `P25VoiceTest` / `CliApp` / `AppBootstrap` / `MainWindow`;
+  `main.cpp` ~2k leftovers + entry. Corpus: `src/tools/p25_orchestration_sources.py`
+- **Not proven:** live CADENCE re-prove (T-0010); leftover helpers still in `main.cpp`
+
+---
+
+## BN-0027 — DEC-0038 streaming sticky Gardner (2026-09-09)
+
+- **Host:** Windows 10.0.22631 x64
+- **Command:** `cmake --build build --config Release --target SDR_Town`
+- **Result:** PASS; `verify_p25_phase2_streaming_cqpsk_lock_create.py` PASS
+- **Voicetest 060036 TG 10301 skip=261000 center=421.96375:**
+  - Block unset: `PASS_CONTINUOUS duty=0.705`
+  - Stream env=1 sticky Gardner: `PASS_PARTIAL duty=0.23`
+  - Stream + discrete lock create (rejected): duty **0.12**
+- **Not shipped:** default-on streaming (still ≪0.65)
+
+---
+
+## BN-0026 — DEC-0037 restore clear hold, no purge (2026-09-09)
+
+- **Host:** Windows 10.0.22631 x64
+- **Command:** `cmake --build build --config Release --target SDR_Town`
+- **Result:** PASS; `verify_p25_phase2_rolling_hold_no_purge.py` PASS
+- **Evidence:** 100909 chirp regression (duty 0.40) vs 095846 duty 0.947
+- **Not proven:** live CADENCE after GUI reopen
+
+---
+
+## BN-0025 — DEC-0036 no rolling hold when unqueued (2026-09-09)
+
+- **Host:** Windows 10.0.22631 x64
+- **Command:** `cmake --build build --config Release --target SDR_Town`
+- **Result:** PASS; `verify_p25_phase2_rolling_no_hold_unqueued.py` PASS
+- **Evidence:** 095846 start TG 30302 cursor hold after targetVcw=14;
+  later TG 10301 max duty 0.947
+- **Not proven:** live start-unknown follow after GUI reopen
+
+---
+
+## BN-0024 — DEC-0035 live eye-lost uses replay CQPSK caps (2026-09-09)
+
+- **Host:** Windows 10.0.22631 x64
+- **Command:** `cmake --build build --config Release --target SDR_Town`
+- **Result:** PASS; `verify_p25_phase2_live_eyelost_replay_caps.py` PASS
+- **Evidence:**
+  - Live 094846: drop A 60/62; max duty 0.338 (DEC-0034 exe)
+  - Same IQ voicetest TG 30302: duty 0.43 targetVcw=652
+  - Live/replay split = hot cand 8 vs 16 after speak
+- **Not proven:** live CADENCE after GUI reopen (T-0010)
+
+---
+
+## BN-0023 — DEC-0034 keep block CQPSK hint after emit (2026-09-09)
+
+- **Host:** Windows 10.0.22631 x64
+- **Command:** `cmake --build build --config Release --target SDR_Town sdr_town_tests`
+- **Result:** PASS; `verify_p25_phase2_post_emit_keep_block_cqpsk_hint.py` PASS;
+  `sdr_town_tests "[p25][follow]"` PASS (186 assertions / 49 cases)
+- **Voicetest 060036 TG 10301 skip=261000 center=421.96375:**
+  `PASS_CONTINUOUS_AUDIO duty=0.705` (held)
+- **Evidence:** 092250 post-emit `clearBlockCqpskHint` cliff; companion-only
+  gated to streaming
+- **Not proven:** live CADENCE on new exe (T-0010). Default-on streaming still off.
+
+---
+
+## BN-0022 — DEC-0033 sticky HDQPSK / persistent framer (2026-09-09)
+
+- **Host:** Windows 10.0.22631 x64
+- **Command:** `cmake --build build --config Release --target SDR_Town sdr_town_tests`
+- **Result:** PASS; `verify_p25_phase2_streaming_framer_commit.py` PASS;
+  `sdr_town_tests "[p25][follow]"` PASS (186 assertions / 49 cases)
+- **Voicetest 060036 TG 10301 skip=261000 center=421.96375:**
+  - Block (env unset): `PASS_CONTINUOUS_AUDIO duty=0.705`
+  - Stream `SDR_TOWN_P25_STREAMING_DDC=1`: `PASS_PARTIAL_AUDIO drop=D duty=0.25`
+    (improved vs DEC-0014/0018 ~0.09–0.16 class; still ≪0.65)
+- **Evidence:** 083254 extract cliff; framer Cold-gated + companion sticky
+- **Not proven:** env=1 duty≥0.65; 105622 (IQ absent); live CADENCE (T-0010).
+  Default-on still off (DEC-0014).
+
+---
+
+## BN-0021 — DEC-0032 post-emit sustain before catch-up (2026-09-09)
+
+- **Host:** Windows 10.0.22631 x64
+- **Command:** `cmake --build build --config Release --target SDR_Town sdr_town_tests`
+- **Result:** PASS; `verify_p25_phase2_post_emit_sustain_before_catchup.py` PASS;
+  `sdr_town_tests "[p25][follow]"` PASS
+- **Voicetest:** 060036 TG 10301 skip≈261000: `PASS_CONTINUOUS_AUDIO duty=0.705` (held)
+- **Evidence:** 081701 post-emit fresh=120 ms → no voice sync hang
+- **Not proven:** live CADENCE after GUI reopen (T-0010)
+
+---
+
+## BN-0020 — DEC-0031 backlog catch-up + once-clear continuation (2026-09-09)
+
+- **Host:** Windows 10.0.22631 x64
+- **Command:** `cmake --build build --config Release --target SDR_Town sdr_town_tests`
+- **Result:** PASS; `verify_p25_phase2_backlog_catchup_before_speaker_sustain.py` PASS;
+  `sdr_town_tests "[p25][follow]"` PASS
+- **Voicetest:** 062006 TG 30003 slot1 skip=0: duty **0.46** (unchanged; DEC-0012
+  companion-louder holes). 060036 TG 10301 skip≈261000: duty **0.705** (held).
+- **Evidence:** planner ignored backlogCatchUp after speak; security
+  requireFedAudio chicken-egg vs dual-slot mute
+- **Not proven:** live CADENCE after GUI reopen (T-0010); soft PostEmitMixedMacDead
+
+---
+
+## BN-0019 — DEC-0030 active rolling 4s clamp (2026-09-09)
+
+- **Host:** Windows 10.0.22631 x64
+- **Command:** `cmake --build build --config Release --target SDR_Town sdr_town_tests`
+- **Result:** PASS; `verify_p25_phase2_active_rolling_4s_clamp.py` PASS
+- **Voicetest:** 060036 TG 10301 skip≈261000 center=421.96375:
+  `PASS_CONTINUOUS_AUDIO duty=0.705` (proves live starve, not RF)
+- **Evidence:** live rolling capped 4194304 after emit; file continuous
+- **Not proven:** live CADENCE after GUI reopen (T-0010)
+
+---
+
+## BN-0018 — DEC-0029 clear-trusted hold + structure cold-exit (2026-09-09)
+
+- **Host:** Windows 10.0.22631 x64
+- **Command:** `cmake --build build --config Release --target SDR_Town sdr_town_tests`
+- **Result:** PASS; `sdr_town_tests "[p25][follow]"` 49 cases / 186 assertions;
+  `verify_p25_phase2_clear_trusted_hold_and_structure_cold_exit.py` PASS;
+  `verify_p25_phase2_no_post_emit_cold_escalate.py` PASS
+- **Voicetest:** pending (re-run 105622 skip=97334 after GUI live prove)
+- **Evidence:** 053448 quiet-return +5s after clear emit; structureNoVcw ~484 ms
+- **Not proven:** live CADENCE after GUI reopen (T-0010)
+
+---
+
+## BN-0017 — DEC-0028 no post-emit cold escalate (2026-09-08)
+
+- **Host:** Windows 10.0.22631 x64
+- **Command:** `cmake --build build --config Release --target SDR_Town`
+- **Result:** PASS; `verify_p25_phase2_no_post_emit_cold_escalate.py` PASS
+- **Voicetest:** 105622 skip=97334: duty **0.645** (unchanged; PASS_PARTIAL drop=D)
+- **Evidence:** 115603 first emit 0.553 then dsp 470–605 ms; emptyStreakReacq removed
+- **Not proven:** live CADENCE after GUI reopen (T-0010)
+
+---
+
+## BN-0016 — DEC-0027 emptyEye-only cold escalate (2026-09-08)
+
+- **Host:** Windows 10.0.22631 x64
+- **Command:** `cmake --build build --config Release --target SDR_Town`
+- **Result:** PASS; `verify_p25_phase2_empty_eye_only_cold_escalate.py` PASS;
+  `verify_p25_phase2_opposite_slot_no_cold_escalate.py` PASS
+- **Voicetest:**
+  - 105622 skip=97334: duty **0.645** (unchanged; PASS_PARTIAL drop=D)
+  - 112922 TG 30302 slot 0 skip=164000 center=421.21375: `PASS_CONTINUOUS duty=0.735`
+- **Evidence:** 112922 structureNoVcw dsp med ~462 ms; CADENCE peak 0.639 drop D;
+  file continuous proves live starvation not RF
+- **Not proven:** live CADENCE after GUI reopen (T-0010)
+
+---
+
+## BN-0015 — DEC-0026 opposite-slot no cold escalate (2026-09-08)
+
+- **Host:** Windows 10.0.22631 x64
+- **Command:** `cmake --build build --config Release --target SDR_Town`
+- **Result:** PASS; `verify_p25_phase2_opposite_slot_no_cold_escalate.py` PASS
+- **Voicetest:** 105622 skip=97334: duty **0.645** (unchanged)
+- **Evidence:** 110146 wrong-slot dsp p90 ~434 ms; 20202 file 0.85 / live 5 ok
+- **Not proven:** live CADENCE after GUI reopen (T-0010)
+
+---
+
+## BN-0014 — DEC-0025 Clear→Encrypted MAC bar (2026-09-08)
+
+- **Host:** Windows 10.0.22631 x64
+- **Command:** `cmake --build build --config Release --target SDR_Town`
+- **Result:** PASS; `verify_p25_phase2_clear_to_encrypted_mac_bar.py` PASS
+- **Voicetest:**
+  - 105622 skip=97334: duty **0.645** (unchanged)
+  - 103955 RID 0x1F83FF skip=98700: duty **0.46** PARTIAL (RF-limited)
+  - 103955 RID 0x1F95EB skip=119800: duty **0.83** CONTINUOUS
+- **Not proven:** live CADENCE after GUI reopen (T-0010)
+
+---
+
+## BN-0013 — DEC-0024 backlog catch-up overlap 280 ms (2026-09-08)
+
+- **Host:** Windows 10.0.22631 x64
+- **Command:** `cmake --build build --config Release --target SDR_Town`
+- **Result:** PASS; `verify_p25_phase2_backlog_catchup_overlap.py` PASS
+- **Voicetest:** 105622 skip=97334: duty **0.645** (unchanged)
+- **Evidence:** 101644 first-call `context=81920` spiral; late 10330 280 ms
+- **Not proven:** live CADENCE after GUI reopen (T-0010)
+
+---
+
+## BN-0012 — DEC-0023 rolling protect 280 ms (2026-09-08)
+
+- **Host:** Windows 10.0.22631 x64
+- **Command:** `cmake --build build --config Release --target SDR_Town`
+- **Result:** PASS; `verify_p25_phase2_rolling_protect_overlap.py` PASS
+- **Voicetest:**
+  - 105622 skip=97334: duty **0.645** (unchanged)
+  - 095936 TG 30302 slot 0 skip=11000 center=421.21375:
+    `PASS_CONTINUOUS_AUDIO duty=0.685`
+- **Not proven:** live CADENCE after GUI reopen on new desktop exe (T-0010)
+
+---
+
+## BN-0011 — Live speed trials rejected; hard hint stop only (2026-09-08)
+
+- **Host:** Windows 10.0.22631 x64
+- **Command:** `cmake --build build --config Release --target SDR_Town`
+- **Result:** PASS compile after reverts
+- **Voicetest (streaming DDC unset, block 80+280):**
+  - 105622 skip=97334: duty **0.645**, wall **~17 s** / 8 s span
+- **Rejected (duty collapse):**
+  - DEC-0020 80/0 after emit: wall 2.8 s, 105622 duty **0.055** drop=A
+  - Hot cand=3 after speak (live proxy): wall ~7 s, duty **0.055** drop=A
+  - Streaming env=1 @ 80 ms: duty ~0.01; @ 160 ms (DEC-0022): **0.125**
+- **Kept:** DEC-0019 hard CQPSK hint early-stop; live hot cand=**8**
+- **Not proven:** live CADENCE on desktop HEAD (operator still on 0.2.51)
+
+---
+
+## BN-0010 — DEC-0019 hard CQPSK hint stop (2026-09-08)
+
+- **Host:** Windows 10.0.22631 x64
+- **Command:** `cmake --build build --config Release --target SDR_Town`
+- **Result:** PASS; `verify_p25_phase2_block_cqpsk_hint_early_stop.py` PASS
+- **Voicetest (streaming DDC unset):**
+  - Soft early-stop trial: 105622 duty=0.305 / 041716=0.5 — **rejected**
+  - Hard-only (cand still 8/16): 105622 **0.645**, 073304 **0.795**, 041716
+    **0.87**, 060221 peak **0.922** (parity with 0.2.51)
+  - Later: cand=3 after speak **rejected** (see BN-0011)
+- **Not proven:** live CADENCE drop D after GUI reopen (T-0010)
+
+---
+
+## BN-0009 — 053241 context-only DEC-0012 trial rejected (2026-09-08)
+
+- **Host:** Windows 10.0.22631 x64
+- **Trial:** PostEmit skip only when `codewordEndsBeforeFresh` (fresh selected
+  still feeds on companion-louder mixed MAC-dead).
+- **Voicetest (file `--center`, streaming DDC unset):**
+  - 053241 TG 30003 slot 0 skip=0 center=421.96375: duty=0.715 continuous;
+    companion-louder `fed>0` returned.
+  - 105622 TG 30003 slot 0 skip=97334: duty=**0.62** (two reruns; was 0.645).
+  - 073304 TG 10330 slot 1 skip=107597: duty=**0.72** (was 0.795).
+  - 041716 TG 10330 slot 1 skip=32111: duty=0.875 but **0**
+    `unknown-waiting-clear`; 8 companion-louder fresh emits (isolation regress).
+- **Action:** reverted to hop-wide DEC-0012 (v0.2.51). No release bump.
+
+---
+
 ## BN-0008 — DEC-0012 companion-louder mixed MAC-dead skip (2026-09-08)
 
 - **Host:** Windows 10.0.22631 x64

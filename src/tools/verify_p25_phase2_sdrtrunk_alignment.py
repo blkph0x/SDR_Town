@@ -5,7 +5,8 @@ Static/regression checks for the sdrtrunk-aligned P25 Phase 2 chain.
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 p25 = (root / "P25LiveDecoder.cpp").read_text(errors='ignore')
-main = (root / "main.cpp").read_text(errors='ignore')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 recv = (root.parent / "include" / "Receiver.h").read_text(errors='ignore')
 for idx in range(12):
     assert f"case {idx}:" in p25, f"missing slot case {idx}"
@@ -26,7 +27,7 @@ for needle in [
     "b.isch.channel <= 1",
 ]:
     assert needle in p25, f"missing I-ISCH mask phase anchor: {needle}"
-fn = main[main.index('static bool p25AmbeDecodeFrameLooksUsable'):main.index('static QString p25Phase2ValidationPath')]
+fn = main[main.index('bool p25AmbeDecodeFrameLooksUsable'):main.index('QString p25Phase2ValidationPath')]
 assert "decoded.totalErrors > 3" in fn, "fresh AMBE speech must reject mbelib repeat/erasure-grade frames"
 assert "decoded.message.find('R')" in fn and "decoded.message.find('E')" in fn, "fresh AMBE speech must reject mbelib repeat/erasure markers"
 assert "rms < 1.0e-6" not in fn, "AMBE gate must preserve valid low-energy/silence frames for cadence"

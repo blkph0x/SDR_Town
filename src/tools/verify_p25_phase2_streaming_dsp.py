@@ -7,7 +7,8 @@ root = Path(__file__).resolve().parents[2]
 cmake = (root / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
 decoder_h = (root / "include" / "P25LiveDecoder.h").read_text(encoding="utf-8", errors="ignore")
 decoder_cpp = (root / "src" / "P25LiveDecoder.cpp").read_text(encoding="utf-8", errors="ignore")
-main_cpp = (root / "src" / "main.cpp").read_text(encoding="utf-8", errors="ignore")
+from p25_orchestration_sources import orchestration_source_text
+main_cpp = orchestration_source_text()
 
 required = {
     "sdr_town_dsp static library": "add_library(sdr_town_dsp STATIC" in cmake,

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
-s = Path(__file__).resolve().parents[1].joinpath('main.cpp').read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+s = orchestration_source_text()
 checks = [
     'gP25RecentExplicitEncryptedPhase2Grants',
     'auto-skip-p2-unknown-after-current-encrypted',

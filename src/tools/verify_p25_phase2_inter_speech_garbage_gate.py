@@ -1,16 +1,26 @@
 #!/usr/bin/env python3
 from pathlib import Path
+from p25_orchestration_sources import definition_body, orchestration_source_text
 
-text = Path("src/main.cpp").read_text(errors="ignore")
+text = orchestration_source_text()
 
-may = text.split("static bool p25Phase2MayAppendPlcBlock", 1)[1].split(
-    "static bool p25Phase2AudioTailGraceActive", 1)[0]
-gate = text.split("static std::string p25VoiceBlockSpeakerGateReason", 1)[1].split(
-    "static bool p25VoiceBlockMayEmitAudio", 1)[0]
-opp = text.split("static void p25Phase2AppendOppositeSlotSustainPlc", 1)[1].split(
-    "static bool p25Phase2AmbeProbeScoreLooksFinite", 1)[0]
-gap = text.split("static void p25Phase2FillFeedGapWithPlc", 1)[1].split(
-    "static void p25RecordPhase2AmbeFeedCadence", 1)[0]
+may = definition_body(
+    text,
+    "bool p25Phase2MayAppendPlcBlock",
+    ["bool p25Phase2AudioTailGraceActive"],
+)
+gate = text.split("std::string p25VoiceBlockSpeakerGateReason", 1)[1].split(
+    "bool p25VoiceBlockMayEmitAudio", 1)[0]
+opp = definition_body(
+    text,
+    "void p25Phase2AppendOppositeSlotSustainPlc",
+    ["bool p25Phase2AmbeProbeScoreLooksFinite"],
+)
+gap = definition_body(
+    text,
+    "void p25Phase2FillFeedGapWithPlc",
+    ["void p25RecordPhase2AmbeFeedCadence"],
+)
 sustain_body = text.split("const bool sameCallClearSustainFeed =", 1)[1].split(
     "const bool explicitGrantTargetSlotSelected", 1)[0]
 continuous_body = text.split("const bool continuousSelectedClearFeed =", 1)[1].split(
@@ -19,14 +29,16 @@ immediate_body = text.split("const bool immediateAmbeDecodeAllowed =", 1)[1].spl
     "const bool queueUnknownAmbe", 1)[0]
 
 checks = {
-    "bounded speaker tail grace": "static constexpr qint64 kP25Phase2SpeakerAudioTailGraceMs = 2500;" in text,
-    "trusted clear helper": "static bool p25Phase2BlockHasTrustedClearContext" in text,
-    "current burst feed helper": "static bool p25Phase2CurrentSelectedBurstFeedTrusted" in text,
+    "bounded speaker tail grace": "constexpr qint64 kP25Phase2SpeakerAudioTailGraceMs = 2500;" in text,
+    "trusted clear helper": "bool p25Phase2BlockHasTrustedClearContext" in text,
+    "current burst feed helper": "bool p25Phase2CurrentSelectedBurstFeedTrusted" in text,
     "sticky mac cannot feed established clear noise": (
         "if (out.phase2TargetMacCrcValid || recentMacEvidenceForCall) return true;" not in text and
-        "p25Phase2CurrentSelectedBurstFeedTrusted(burst)" in text.split(
-            "static bool p25Phase2EstablishedClearNoiseFeedAllowed", 1
-        )[1].split("static void p25Phase2UpdateAudioTailTracker", 1)[0]
+        "p25Phase2CurrentSelectedBurstFeedTrusted(burst)" in definition_body(
+            text,
+            "bool p25Phase2EstablishedClearNoiseFeedAllowed",
+            ["void p25Phase2UpdateAudioTailTracker"],
+        )
     ),
     "sustain feed needs current burst proof": (
         "const bool currentBurstFeedTrusted =" in text and
@@ -63,7 +75,7 @@ checks = {
     "fresh selected-slot dual-slot windows can pass when companion accounted": (
         "p25Phase2CompanionSlotAccounted" in text and
         "p25Phase2StrongSelectedSlotStructure" in text and
-        "static bool p25Phase2DualSlotPendingDrainUnsafeWindow" in text
+        "bool p25Phase2DualSlotPendingDrainUnsafeWindow" in text
     ),
     "plc helper hard-denies invent audio": "return false;" in may and "never synthesizes" in may,
     "opposite-slot PLC disabled": "Intentionally disabled" in opp and "return;" not in opp.split("{", 1)[1][:80] or "(void)rx;" in opp,
@@ -75,7 +87,11 @@ checks = {
     "fragmented tail no longer mutes on feed gap alone": "out.phase2FeedGaps > 0 ||" not in text,
     "no rf-gap plc injection": "p25RecordPhase2AmbeFeedCadence(P25VoiceAudioBlock& out" in text and
                                "p25Phase2AppendPlcBlock(rx, outputRateHz, out);" not in
-                               text.split("static void p25RecordPhase2AmbeFeedCadence", 1)[1].split("static json p25Phase2EssJson", 1)[0],
+                               definition_body(
+                                   text,
+                                   "void p25RecordPhase2AmbeFeedCadence",
+                                   ["static json p25Phase2EssJson"],
+                               ),
     "phase2 empty-audio buffer preserve requires trusted clear context": "hasTrustedPhase2ClearContext" in text and "rx.p25VoiceMaskParamsKnown ||" not in text,
 }
 

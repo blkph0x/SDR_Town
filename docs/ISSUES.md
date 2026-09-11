@@ -11,6 +11,107 @@ Status: `open` | `closed`
 - **Status:** open
 - **Opened:** 2026-09-07
 - **REQ:** REQ-P2.0 … P2.6
+- **Measured 2026-09-09 streaming DDC (DEC-0038):**
+  - 060036 stream env=1 after sticky Gardner: duty **0.23** (lock-create
+    trial 0.12). Block still **0.705**. Default-on still rejected.
+- **Measured 2026-09-09 capture `20260909_100909` (desktop after DEC-0036):**
+  - Operator: full flip — little chirps instead of ~95% continuous.
+  - max duty **0.40**, 0× ≥0.65 (095846 was **0.947**). DEC-0036 always-advance.
+  - **DEC-0037:** restore clear-eye hold; advance only waiting-clear; no purge on hold.
+- **Measured 2026-09-09 capture `20260909_095846` (desktop after DEC-0035):**
+  - Later clear TG 10301: max duty **0.947**, 10× ≥0.65; emit>0 26/78.
+  - Start TG 30302 unknown: `targetVcw=14` then rolling cursor hold → silent.
+  - **DEC-0036:** do not hold rolling cursor when VCWs were not queued/fed
+    (**superseded in part by DEC-0037**).
+- **Measured 2026-09-09 capture `20260909_094846` (desktop after DEC-0034):**
+  - Live still one-emit cliff: drop **A=60**/62; emit>0 **5**; max duty **0.338**.
+  - Same IQ voicetest TG 30302 skip=1300: **duty 0.43** targetVcw=652 (RF OK).
+  - Root: live hot cand=8/120 vs replay cand=16/240 after speak (DEC-0035).
+- **Measured 2026-09-09 capture `20260909_092250` (desktop after DEC-0033):**
+  - Operator: one small emit then nothing (worse than near-continuous clear).
+  - CADENCE drop **A=116**/131; emit>0 **9**/131; max duty **0.416**; 80+280 held.
+  - TG 12014: ~10 s high `targetVcw` with `fed=0`, one emit, then permanent
+    `p2bursts=0`. Root: DEC-0032 `clearBlockCqpskHint()` on empty-eye streak
+    wiped block Costas continuity; DEC-0033 companion-only sticky was ungated.
+  - **DEC-0034:** keep block CQPSK hint on empty-eye; gate companion-only to
+    streaming. File 060036 still **duty=0.705**. Live re-prove on new exe.
+- **Measured 2026-09-09 capture `20260909_083254` (desktop after DEC-0032):**
+  - Post-emit **80+280** held (284/284 on first 30302 follow). Rolling **4 s**.
+  - CADENCE drop **A=147**/152; emit>0 **5**/152; max duty **0.416**.
+  - First TG 30302 emit then ~0.6 s `no voice sync`. ForceMask **0** log hits.
+  - File same island `PASS_ENCRYPTED_GATED` duty≈0.067 (short clear then enc).
+  - **DEC-0033:** stop hop CPR; sticky streaming HDQPSK / persistent framer path
+    (SDRTrunk/OP25). env=1 on 060036 duty **0.25** (improved vs ~0.09–0.16
+    class; still ≪0.65). Block 060036 still **0.705**. Default-on still off.
+- **Measured 2026-09-09 capture `20260909_081701` (desktop after DEC-0031):**
+  - Single emit then hang `no voice sync`. Drop A 234; emit>0 7/241.
+  - Post-emit hops `fresh=120ms` (DEC-0031 backlogCatchUp before sustain).
+  - DEC-0032: restore 80+280 after speak; soft empty-eye rehunt (no MaskEpoch
+    steal); keep once-clear continuation.
+- **Measured 2026-09-09 capture `20260909_062006` (desktop after DEC-0030):**
+  - LO park correct (421.96375). Rolling 4 s OK. Drain ~70 ms DSP / 80 ms fresh.
+  - Live: drop A dominant; one emit then `no voice sync`. File: duty **0.46**
+    drop D; dual-slot companion-louder / `unknown-waiting-clear` (DEC-0012).
+  - DEC-0031: backlogCatchUp before speaker-sustain; once-clear continuation
+    without fed chicken-egg. Do not soften PostEmitMixedMacDead.
+  - Open: live extract cliff vs file on same IQ (block-channelize eye sustain).
+- **Measured 2026-09-09 capture `20260909_060036` (desktop after DEC-0029):**
+  - Sparse still: 10 emit s / 215; max duty 0.639 then cliff. Drop A / worker-busy.
+  - File voicetest same IQ duty **0.705**; live rolling stuck at 4194304 (2 s).
+  - DEC-0030: honor DEC-0023 4.0 s active rolling clamp.
+- **Measured 2026-09-09 capture `20260909_053448` (desktop after DEC-0028):**
+  - Sparse islands: 16 emit seconds / 176; 0× duty≥0.65. Drop A dominant.
+  - Clear emit then `ended or went quiet` +5s while clearTrusted → cold re-arm.
+  - DEC-0029: clear-trusted follow hold + structure exits coldAcquire.
+- **Measured 2026-09-08 capture `20260908_115603` (desktop after DEC-0027):**
+  - First TG 30302 emit perfect (duty 0.553), then dsp 470–605 ms cold poison
+    on next hops; rest of call unheard / drop D+B. DEC-0028 removes post-emit
+    emptyStreak cold escalate.
+- **Measured 2026-09-08 capture `20260908_112922` (desktop after DEC-0026):**
+  - Eyes OK; 0 ReturnEncrypted. CADENCE peak **0.639** (0× ≥0.65); drop **D**.
+    worker-busy **417**. structureNoVcw eyes cold-escalated CQPSK (med
+    **462 ms**, 40× ≥400 ms) despite soft mask rehunt. DEC-0027.
+- **Measured 2026-09-08 capture `20260908_110146` (desktop after DEC-0025):**
+  - Eyes OK; 0 ReturnEncrypted. File continuous (20202 0.85, 30017 0.74) but
+    live islands only (12 ok s). Wrong-slot hops cold-escalated CQPSK
+    (dsp p90 ~434 ms). DEC-0026. Residual worker-busy drop D.
+- **Measured 2026-09-08 capture `20260908_103955` (desktop after DEC-0024):**
+  - Eyes fixed (0× 40 ms). Same TG 20202: RID 0x1F83FF file duty 0.46 (weak
+    RF) vs RID 0x1F95EB file duty 0.83; live cut good call with ReturnEncrypted
+    while ess=clear. DEC-0025 MAC bar. Residual drop D on live.
+- **Measured 2026-09-08 capture `20260908_101644` (desktop after DEC-0023):**
+  - Soft-trim fixed (573440 dominant). Start/middle BAD; last voice ~90%.
+  - First TG 30302: ~8 s of catch-up `context=81920` (40 ms) → drop **A** /
+    no voice sync. Late 10330 stayed on 280 ms eyes. DEC-0024.
+- **Measured 2026-09-08 capture `20260908_095936` (desktop exe):**
+  - TG 30302 slot 0 @ 421.225. Good start (dutySec≤0.60) then cliff. Drop **D**
+    while talking; then drop **A**. Companion-louder 0. Voice SNR ~17 dB.
+  - Root: rolling soft-trim protected 80 ms → live eyes became 160 ms (DEC-0009
+    failure mode). File skip=11000 `PASS_CONTINUOUS duty=0.685`. DEC-0023.
+- **Measured 2026-09-08 capture `20260908_082235` (stock v0.2.51):**
+  - CC improved vs earlier same-day. Talk median dutySec **~0.24**; drop **D**;
+    worker-busy **54**; eyes 80+280; `cqpskCand=32`. Companion-louder active.
+  - File path of same decoder class still hits duty 0.645 only because CLI
+    waits (~17 s wall / 8 s). Live cannot.
+  - Speed trials DEC-0020 / cand=3 / streaming 80&160 ms all **rejected**
+    (duty → 0.01–0.125). Hard CQPSK hint stop kept. See BN-0011 / LOG.
+- **Measured 2026-09-08 capture `20260908_075858` (stock v0.2.51 GUI):**
+  - SNR **10.9 dB**. CC worse (BCH/NID gaps; ~86 s to first follow). Voice
+    still drop-D ~0.31 talk duty — not a new failure mode. File TG 30017
+    duty=0.66; late 10330 file `PASS_ENCRYPTED_GATED` while grant said clear.
+  - Not DEC-0019 (`cqpskCand=32`). Do not blame uncommitted desktop build.
+- **Measured 2026-09-08 capture `20260908_060221`:**
+  - 148.8 s gapless, SNR ~17 dB. Dual-TG stretches + drop D (worker-busy
+    100, dsp med 161 ms). Companion-louder 14/14 `fed=0` (DEC-0012).
+  - File peak TG 30302 slot 1 skip=128500 center=420.21375 duty=**0.922**.
+  - DEC-0019 hard hint early-stop kept; cand=3 after speak later rejected
+    (BN-0011). Live re-prove pending on desktop HEAD.
+- **Measured 2026-09-08 capture `20260908_053241` (v0.2.51 live):**
+  - Dual-TG same RF: 12068 slot 1 + 30003 slot 0 @ 421.975 (LO ok, DEC-0016).
+  - Operator: less garble, short emit islands. CADENCE median talk duty ~0.30;
+    12 companion-louder hops `fed=0` (DEC-0012). Also heavy drop **D**
+    (worker-busy). Context-only DEC-0012 trial rejected (105622 duty 0.62;
+    041716 isolation regression). Stays on hop-wide DEC-0012.
 - **Measured 2026-09-08 capture `20260908_041716` + DEC-0012 voicetest:**
   - Live: 70.75 s gapless, SNR ~18 dB. Operator: one good emit then wrong-slot
     garble. Call 2 seq=131 `opp=0 p2mac=5/6`; seq=134 `target=6 opp=12
@@ -79,31 +180,39 @@ Status: `open` | `closed`
 
 ## ISS-0002 — String-only `verify_p25_phase2_*.py` treated as continuity proof
 
-- **Status:** open
+- **Status:** closed
 - **Opened:** 2026-09-07
+- **Closed:** 2026-09-10 — Process locked in `DEVELOPMENT_RULES.md` §1/§8 and
+  `docs/CODE_NOTES.md` (verify scripts = invariant locks only). SoT checkboxes
+  require voicetest/CADENCE, never string presence. Definition anchors via
+  `definition_body` (`084ab27` + follow-up).
 - **REQ:** REQ-P2.0 / DEVELOPMENT_RULES §8
-- **Unknown:** none — the scripts assert substrings in `main.cpp`. They cannot measure dutySec.
-- **Must not invent:** adding more string guards instead of voicetest / CADENCE.
-- **Unblock by:** keep scripts as invariant locks if useful; never flip a SoT checkbox from them.
 
 ## ISS-0003 — Dead 180 ms speaker catch-up constants vs live planner
 
-- **Status:** open
+- **Status:** closed
 - **Opened:** 2026-09-07
+- **Closed:** 2026-09-10 — Confirmed unused by `p25Phase2PlanVoiceDecodeChunk`
+  (speaker path = sustain 80+280; backlog = BacklogCatchUp*). Removed
+  `kP25Phase2VoiceDecodeSpeakerCatchUp*` from `P25VoiceTiming.h`; verifiers
+  updated to lock absence + sustain/backlog SoT.
 - **REQ:** REQ-P2.4 (later)
-- **Unknown:** whether any remaining path still uses `kP25Phase2VoiceDecodeSpeakerCatchUp*` after README backed the 180 ms experiment out (20260903).
-- **Evidence:** `p25Phase2PlanVoiceDecodeChunk` routes active speaker to 80/40/80 sustain and refuses 180 ms live-edge skip (`src/main.cpp`). Verify scripts still assert the 180 ms names exist.
-- **Must not invent:** re-enabling 180 ms catch-up to “raise duty”.
-- **Unblock by:** after P2.0, either delete the dead constants or wire them only behind a DEC with a capture id.
 
 ## ISS-0004 — P25 orchestration lives in a ~34k-line `main.cpp`
 
-- **Status:** open
+- **Status:** closed
 - **Opened:** 2026-09-07
-- **REQ:** T-0009 (after voice gate)
-- **Unknown:** the exact split boundaries that will not break Qt thread/DSP ownership.
+- **Closed:** 2026-09-10 — DEC-0040 mechanical split on `refactor/iss-0004-split-main`
+  (`P25VoiceTiming` / Registry / AppGlobals / RollingIq / VoiceDecode / VoiceTest /
+  CliApp / AppBootstrap / MainWindow; `main.cpp` ~2k leftovers + `main()`).
+- **REQ:** T-0009
+- **Follow-up (2026-09-10):** Phase A leftovers extracted (`P25VoiceSession` /
+  `P25DecodeConfig` / `DemodModeUtils` / `SavedFrequencies`; `main.cpp` ~200).
+  MainWindow out-of-line done (`MainWindow.h` ~520 decls; bodies in
+  `MainWindow.cpp` + `MainWindowP25Voice.cpp` + `MainWindowP25Orchestration.cpp`
+  for live voice worker / submit / rolling-IQ pipeline). Mega-ctor DSP extract
+  closed under **ISS-0010**.
 - **Must not invent:** a rewrite in the same commit as a feed-gate change.
-- **Unblock by:** PASS_CONTINUOUS_AUDIO first, then a DEC for module split.
 
 ## ISS-0005 — Product docs claimed continuous audio done while field audio is partial
 
@@ -128,3 +237,39 @@ Status: `open` | `closed`
 - **Closed:** 2026-09-07 — used AppData `20260905_105622` TG 30003 slot 0
   skip=97334; `PASS_CONTINUOUS_AUDIO` on HEAD after DEC-0008/0009.
 - **REQ:** REQ-P2.0 gate “at least one IQ or live run”
+## ISS-0008 — Session cadence / tail-grace ownership spans multiple TUs
+
+- **Status:** closed
+- **Opened:** 2026-09-10
+- **Closed:** 2026-09-10 — CODE_NOTES ownership table + explicit SoT sentence:
+  adaptive cadence/tail/streaming-DDC helpers → `P25VoiceSession`; named
+  constants → `P25VoiceTiming.h`; mirror atomics → `P25AppGlobals` (`084ab27`).
+- **REQ:** maintainability / clear-audio diagnosis
+
+## ISS-0009 — Verifier first-occurrence anchors break after out-of-line moves
+
+- **Status:** closed
+- **Opened:** 2026-09-10
+- **Closed:** 2026-09-10 — `definition_body` / `require_definition` in
+  `p25_orchestration_sources.py`; 14 high-risk verifiers migrated; full batch
+  129/129 (`084ab27`).
+- **REQ:** invariant locks
+
+## ISS-0010 — MainWindow constructor still owns ~7k lines of timer/lambda DSP
+
+- **Status:** closed
+- **Opened:** 2026-09-10
+- **Closed:** 2026-09-10 — Extracted `MainWindow::startP25LiveDecodePipeline()`
+  into `src/MainWindowP25Orchestration.cpp` (~1.4k lines: rolling-IQ / chunk
+  plan / submit / CADENCE). Ctor calls the named method; UI/diag timers remain
+  in ctor (`084ab27`).
+- **REQ:** maintainability / clear-audio diagnosis
+
+## ISS-0011 — Dual live paths: GUI voice worker vs CLI/voicetest
+
+- **Status:** closed
+- **Opened:** 2026-09-10
+- **Closed:** 2026-09-10 — CODE_NOTES "Live GUI vs CLI/voicetest ownership"
+  map names policy/session/decode owners and requires both paths call the same
+  helpers — no duplicated constants (`084ab27`).
+- **REQ:** maintainability / clear-audio diagnosis

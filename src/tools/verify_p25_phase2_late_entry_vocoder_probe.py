@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 from pathlib import Path
+from p25_orchestration_sources import orchestration_source_text
 root = Path(__file__).resolve().parents[1]
-text = (root / 'main.cpp').read_text(errors='ignore')
+text = orchestration_source_text()
 needles = [
     'const bool grantMayProbeVoice = grantClearTrusted || grantUnknownProbe;',
     'const bool grantMayReleaseVoice =',
     'sdrtrunkLateEntryVoiceRelease',
     'if (!burst.xorMaskApplied)',
     'raw scrambled AMBE must',
-    'if (!maskPhaseTrusted && !grantMayProbeVoice)',
+    'if (!maskPhaseTrusted && !forceEstablishedFeed)',
+    'if (grantMayProbeVoice && burst.grantSlotKnown)',
     'late-entry-audio-probe-diagnostic-only',
     'targetVoiceForLateEntryProbe',
     'macEvidenceForLateEntryProbe',

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
-main = (Path(__file__).resolve().parents[1] / 'main.cpp').read_text(errors='ignore')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 assert 'currentSlotHasUsefulAudio' in main, 'GUI slot probe should hold slot after current accepted PCM'
 assert 'decoded > 0 && voiceDiag.audioSamples > 0' in main, 'GUI hold must suppress flips after any accepted PCM, not wait for a full speaker block'
 assert 'cliCurrentSlotHasUsefulAudio' in main, 'CLI slot probe should use the same current-audio guard'

@@ -1,6 +1,8 @@
 from pathlib import Path
-main = Path(__file__).resolve().parents[1] / 'main.cpp'
-text = main.read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+root = Path(__file__).resolve().parents[2]
+main = orchestration_source_text()
+text = main
 assert 'takeUndecoded(size_t maxSamples,' in text and 'size_t overlapSamples,' in text, 'Rolling IQ decode must accept overlapSamples'
 assert 'absolute dibit de-duplication' in text, 'Overlap rationale/de-duplication comment missing'
 assert 'kP25Phase2VoiceDecodeWindowSeconds = 0.720' in text, 'Phase 2 rolling window should cover two full superframes for MAC/ESS recovery'
@@ -22,8 +24,8 @@ assert 'kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.280' in text, 'Spe
 assert 'phase2SustainDecodeWindow' in text and 'p25Phase2UseSustainDecodeWindowLocked' in text, 'Phase 2 decode path must switch between acquire and sustained windows'
 assert 'hasTrustedCallState && (hasStableSuperframeMask' in text, 'Sustain decode must wait for trusted target call state before dropping below acquisition context'
 assert 'p25Phase2EstablishedClearVoiceStreamingLocked' in text, 'Established clear voice must stay on the low-latency streaming path'
-assert 'currentStreamingEye' in text and 'return false;' in text[text.find('currentStreamingEye'):text.find('static bool p25Phase2UseSustainDecodeWindowLocked')], 'Wide reacquire must not override streaming while Phase 2 bursts/CQPSK lock are present'
-decoder = (main.parent / 'P25LiveDecoder.cpp').read_text(encoding='utf-8', errors='replace')
+assert 'currentStreamingEye' in text and 'return false;' in text[text.find('currentStreamingEye'):text.find('bool p25Phase2UseSustainDecodeWindowLocked')], 'Wide reacquire must not override streaming while Phase 2 bursts/CQPSK lock are present'
+decoder = (root / 'src' / 'P25LiveDecoder.cpp').read_text(encoding='utf-8', errors='replace')
 assert 'phase2SyncTailDibits = m_config.realtimeVoiceSearch' in decoder, 'Realtime Phase 2 must trim the internal dibit tail after acquisition'
 assert 'Phase2BurstDibits * 4' in decoder and 'Phase2BurstDibits * 12' in decoder, 'Realtime keeps a 4-burst tail while forensic/cold decode keeps full-superframe context'
 assert 'armedTrafficSource && hasRecentTrafficEvidence' not in text, 'Soft recent traffic evidence must not trigger premature sustain decode'

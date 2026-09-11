@@ -24,7 +24,7 @@ Target end-state (user requirements, 2026-08):
 - Streaming sustain after first emit (short hops; no dual-call mix).
 
 ## Implementation order (when scheduled)
-1. Continuous clear audio on selected TG/slot (streaming quality) — **done** (dual-slot this-window fail-closed; CLI/GUI sustain parity).
+1. Continuous clear audio on selected TG/slot (streaming quality) — **open (ISS-0001)**. Not done: README ~50% clear; baseline 20260810 continuity PARTIAL. Gate is `PASS_CONTINUOUS_AUDIO` / CADENCE `dutySec` near 1.0 (SoT L3). Dual-slot MAC-dead mute is isolation, not continuity.
 2. Dual-slot parallel decode (both slots decoded; one selected for speaker) — **done** (`p25AmbeVoiceDecoderOpposite` / `pendingAudioOpposite` + observe).
 3. Priority list UI + auto most-active promotion — **foundation live** (`userPriority` / `activityScore` + preempt + Set Priority UI).
 4. Per-TG/slot WAV writers — **live** (`oppwav=` / companion CLI WAV; selected+companion when follow records).

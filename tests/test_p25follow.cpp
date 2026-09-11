@@ -746,6 +746,43 @@ TEST_CASE("P25 follow returns after short speaker grace when traffic stream is q
     REQUIRE(decision.action == P25FollowAction::ReturnNoVoiceCodewords);
 }
 
+TEST_CASE("P25 follow holds clear-trusted call across empty-eye gaps after emit", "[p25][follow]")
+{
+    // Capture 20260909_053448 / DEC-0029: clearTrusted emit then ~5s empty eyes
+    // must not activityGone / return-to-control (that cold-rearmed sparse islands).
+    P25FollowSnapshot snapshot;
+    snapshot.autoActive = true;
+    snapshot.phase2Voice = true;
+    snapshot.nowMs = 33'500;
+    snapshot.tunedAtMs = 27'000;
+    snapshot.lastActiveMs = 28'500;
+    snapshot.recentSpeakerOutputMs = 28'470;
+    snapshot.diagUpdatedMs = 33'300;
+    snapshot.diag = diag(P25FollowDiagCode::NoSync);
+    snapshot.decodedFrames = 0;
+    snapshot.phase2VoiceCodewords = 0;
+    snapshot.phase2Bursts = 0;
+    snapshot.phase2SuperframeBursts = 0;
+    snapshot.phase2MaskedBursts = 0;
+    snapshot.phase2MacPdus = 0;
+    snapshot.phase2TrafficProcessorActive = true;
+    snapshot.grantEncryptionKnown = true;
+    snapshot.grantEncrypted = false;
+
+    const auto holdDecision = evaluateP25Follow(snapshot);
+    REQUIRE(holdDecision.action == P25FollowAction::None);
+    REQUIRE_FALSE(holdDecision.activityGone);
+    REQUIRE_FALSE(holdDecision.tdmaNoVcwTimeout);
+
+    // After clear-trusted 40s speaker grace expires with no refresh, return.
+    snapshot.nowMs = 70'000;
+    snapshot.lastActiveMs = 28'500;
+    snapshot.recentSpeakerOutputMs = 28'470;
+    snapshot.diagUpdatedMs = 69'900;
+    const auto expiredDecision = evaluateP25Follow(snapshot);
+    REQUIRE(expiredDecision.action != P25FollowAction::None);
+}
+
 TEST_CASE("P25 follow keeps speaker grace when current TDMA structure remains alive", "[p25][follow]")
 {
     P25FollowSnapshot snapshot;

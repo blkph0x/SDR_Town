@@ -1,6 +1,7 @@
 from pathlib import Path
 root = Path(__file__).resolve().parents[2]
-main = (root / 'src' / 'main.cpp').read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 follow_cpp = (root / 'src' / 'P25FollowStateMachine.cpp').read_text(encoding='utf-8', errors='replace')
 follow_h = (root / 'include' / 'P25FollowStateMachine.h').read_text(encoding='utf-8', errors='replace')
 recv_h = (root / 'include' / 'Receiver.h').read_text(encoding='utf-8', errors='replace')

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
 root = Path(__file__).resolve().parents[2]
-main = (root / 'src' / 'main.cpp').read_text(errors='ignore')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 dec = (root / 'src' / 'P25LiveDecoder.cpp').read_text(errors='ignore')
 hdr = (root / 'include' / 'P25LiveDecoder.h').read_text(errors='ignore')
 assert 'p25Phase2AmbeFrameVariantCount' in hdr

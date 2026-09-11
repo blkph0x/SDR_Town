@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
+from p25_orchestration_sources import orchestration_source_text
 
-main = (Path(__file__).resolve().parents[1] / "main.cpp").read_text(
-    encoding="utf-8",
-    errors="replace",
-)
+main = orchestration_source_text()
 
 assert "post-acquire hop a cold reacquire" in main
 assert "cliWideReacquireHoldWindows > 0" in main

@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
-main = (root / 'main.cpp').read_text(errors='ignore')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 required = [
     'const bool grantMayProbeVoice = grantClearTrusted || grantUnknownProbe;',
     'if (!epochTrusted && !grantMayProbeVoice && !forceEstablishedFeed)',
     'if (!epochTrusted && grantMayProbeVoice)',
-    'const uint8_t effectiveBurstSlot = burst.grantSlotKnown',
-    'if (burst.grantSlotKnown && effectiveBurstSlot != followedGrantSlot)',
-    'if (!burst.grantSlotKnown && !grantMayProbeVoice && !forceEstablishedFeed)',
-    'if (!burst.grantSlotKnown && grantMayProbeVoice)',
-    'if (acceptedVoice) {',
+    'const uint8_t effectiveBurstSlot =',
+    # Hard slot ownership: unlabeled bursts reject before slot compare (20365fb).
+    'if (!burst.grantSlotKnown) {',
+    'if (effectiveBurstSlot != followedGrantSlot)',
+    'else if (acceptedVoice) {',
     'out.phase2AudioLockMissing = false;',
     'out.phase2MetadataMissing = false;',
     'out.phase2MaskMissing = false;',

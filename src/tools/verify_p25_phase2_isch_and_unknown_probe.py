@@ -2,7 +2,8 @@
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 p25 = (root / 'P25LiveDecoder.cpp').read_text(errors='ignore')
-main = (root / 'main.cpp').read_text(errors='ignore')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 assert 'for (uint16_t info = 0; info < 512; ++info)' in p25, 'I-ISCH decoder must enumerate all 9-bit information words'
 assert 'info & 0x01ffu' in p25, 'I-ISCH encoder must preserve 9-bit information word'
 assert 'out.channel = static_cast<uint8_t>((v >> 5) & 0x03u);' in p25, 'I-ISCH channel field must be parsed from bits 2..3'

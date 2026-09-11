@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
 root = Path(__file__).resolve().parents[2]
-main = (root / 'src' / 'main.cpp').read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 take = main[main.find('std::vector<std::complex<float>> takeUndecoded'):main.find('struct P25AudioResamplerState')]
 assert 'Cap fresh tail length while preserving overlap pre-roll' in take, 'missing capped-tail continuity comment'
 assert '*outDecodeEndAbsolute = startAbsolute + static_cast<uint64_t>(returnedEnd);' in take, 'takeUndecoded must expose returned chunk end'

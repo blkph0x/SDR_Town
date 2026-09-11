@@ -7,15 +7,16 @@ receiver_h = (root / "include" / "Receiver.h").read_text(encoding="utf-8", error
 session_h = (root / "include" / "P25ReceiverSession.h").read_text(
     encoding="utf-8", errors="replace"
 )
-main = (root / "src" / "main.cpp").read_text(encoding="utf-8", errors="replace")
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 
 observe_parts = main.split(
-    "static void p25Phase2ObserveOppositeSlotAmbe", 1
+    "void p25Phase2ObserveOppositeSlotAmbe", 1
 )
 observe_fn = ""
 if len(observe_parts) > 1:
     observe_fn = observe_parts[1].split(
-        "static P25VoiceAudioBlock decodeP25Phase2VoiceBlock", 1
+        "P25VoiceAudioBlock decodeP25Phase2VoiceBlock", 1
     )[0]
 
 feed = main.split("orderedBurstsForFeed", 1)
@@ -24,10 +25,10 @@ reject = feed_region.split("effectiveBurstSlot != followedGrantSlot", 1)
 reject_site = reject[1][:900] if len(reject) > 1 else ""
 
 promote_fn = ""
-body_marker = "static bool p25Phase2PromoteCompanionModules(Receiver& rx, const char* why) noexcept\n{"
+body_marker = "bool p25Phase2PromoteCompanionModules(Receiver& rx, const char* why) noexcept\n{"
 if body_marker not in main:
     body_marker = (
-        "static bool p25Phase2PromoteCompanionModules(Receiver& rx, const char* why) noexcept\r\n{"
+        "bool p25Phase2PromoteCompanionModules(Receiver& rx, const char* why) noexcept\r\n{"
     )
 if body_marker in main:
     promote_fn = main.split(body_marker, 1)[1][:1200]

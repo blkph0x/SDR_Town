@@ -2,7 +2,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-MAIN = ROOT / "src" / "main.cpp"
+from p25_orchestration_sources import definition_body, orchestration_source_text
+# DEC-0040: search all orchestration TUs
+MAIN_TEXT = orchestration_source_text()
 
 
 def require(condition: bool, message: str) -> None:
@@ -10,11 +12,13 @@ def require(condition: bool, message: str) -> None:
         raise SystemExit(f"FAIL: {message}")
 
 
-text = MAIN.read_text(encoding="utf-8")
+text = MAIN_TEXT
 
-reset_fn = text.split("static bool tryApplyP25VoiceResetLocked", 1)[1].split(
-    "static void syncP25Phase2MaskParametersToLiveDecoder", 1
-)[0]
+reset_fn = definition_body(
+    text,
+    "bool tryApplyP25VoiceResetLocked",
+    ["void syncP25Phase2MaskParametersToLiveDecoder"],
+)
 require(
     "const uint64_t pttGeneration = rx.p25PttGeneration;" in reset_fn,
     "tryApplyP25VoiceResetLocked must save p25PttGeneration before resetP25VoiceState",
@@ -32,9 +36,11 @@ require(
     "tryApplyP25VoiceResetLocked must restore granted-slot immutability",
 )
 
-nonblocking_reset_fn = text.split("static bool tryResetP25TrafficSessionNonBlocking", 1)[1].split(
-    "static P25Phase2AmbeEmitDedupeState& p25Phase2SyncAmbeEmitDedupeCallContext", 1
-)[0]
+nonblocking_reset_fn = definition_body(
+    text,
+    "bool tryResetP25TrafficSessionNonBlocking",
+    ["static P25Phase2AmbeEmitDedupeState& p25Phase2SyncAmbeEmitDedupeCallContext"],
+)
 for token, label in [
     ("const int64_t grantEpochMs = rx.p25VoiceGrantEpochMs;", "grant epoch"),
     ("const uint64_t currentCallSessionId = rx.p25CurrentCallSessionId;", "call session"),

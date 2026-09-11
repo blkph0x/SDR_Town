@@ -3,8 +3,14 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
-main = (root / "src" / "main.cpp").read_text(encoding="utf-8", errors="replace")
+from p25_orchestration_sources import definition_body, orchestration_source_text
+main = orchestration_source_text()
 decoder = (root / "src" / "P25LiveDecoder.cpp").read_text(encoding="utf-8", errors="replace")
+
+freeze_body = definition_body(
+    main,
+    "bool p25Phase2ShouldFreezeCqpskDiscrete",
+)[:500]
 
 checks = {
     "clear cqpsk on block channelize": (
@@ -16,20 +22,20 @@ checks = {
         )[1][:1800]
     ),
     "cqpsk discrete freeze disabled for block channelize": (
-        "Never freeze. Capture 20260807_235726" in main.split(
-            "p25Phase2ShouldFreezeCqpskDiscrete", 1
-        )[1][:500]
-        and "return false;" in main.split("p25Phase2ShouldFreezeCqpskDiscrete", 1)[1][:500]
+        "Never freeze. Capture 20260807_235726" in freeze_body
+        and "return false;" in freeze_body
     ),
     "speaker sustain near-live hop": (
         "kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds = 0.080" in main
         and "kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds = 0.040" in main
         and "kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds = 0.280" in main
     ),
-    "speaker catch-up constants present": (
-        "kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds = 0.180" in main
-        and "kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds = 0.100" in main
-        and "kP25Phase2VoiceDecodeSpeakerCatchUpOverlapSeconds = 0.100" in main
+    "speaker catch-up constants removed (ISS-0003)": (
+        "kP25Phase2VoiceDecodeSpeakerCatchUpChunkSeconds" not in main
+        and "kP25Phase2VoiceDecodeSpeakerCatchUpMinFreshSeconds" not in main
+        and "kP25Phase2VoiceDecodeSpeakerCatchUpOverlapSeconds" not in main
+        and "kP25Phase2VoiceDecodeBacklogCatchUpChunkSeconds = 0.120" in main
+        and "skip to live-edge with 180 ms catch-up" in main
     ),
     "voice config keeps streaming ddc off": (
         "cfg.enableStreamingChannelDdc = false" in main

@@ -3,7 +3,8 @@ from pathlib import Path
 import re
 
 root = Path(__file__).resolve().parents[2]
-main = (root / "src" / "main.cpp").read_text(encoding="utf-8")
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 
 checks = {
     "cold acquire waits for the full two-superframe eye in GUI and CLI": (

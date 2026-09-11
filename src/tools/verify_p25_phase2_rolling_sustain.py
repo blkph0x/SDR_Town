@@ -3,7 +3,8 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-main = (root / 'main.cpp').read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 dm_h = (root / '../include/DeviceManager.h').resolve().read_text(encoding='utf-8', errors='replace')
 dm_cpp = (root / 'DeviceManager.cpp').read_text(encoding='utf-8', errors='replace')
 

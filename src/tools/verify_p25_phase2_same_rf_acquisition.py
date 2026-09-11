@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 from pathlib import Path
 
-main = Path(__file__).resolve().parents[1] / 'main.cpp'
-text = main.read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
+text = main
 
 assert 'kP25Phase2SameRfSlotHandoffGraceMs = 8000' in text
 assert 'kP25Phase2SameRfUnacquiredSlotStealMs = 24000' in text

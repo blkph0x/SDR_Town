@@ -2,7 +2,8 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-main = (root / "main.cpp").read_text(errors="ignore")
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 session = (root.parent / "include" / "P25ReceiverSession.h").read_text(errors="ignore")
 
 assert "phase2InputQualityRejectedVoiceCodewords" in main, (
@@ -14,14 +15,14 @@ assert "p25Phase2AmbeInputQualityBlockReason" in main, (
 assert "p25Phase2AmbeInputQualityForCodeword" in main, (
     "Phase-2 AMBE quality gating must prefer per-codeword soft reliability, not whole-window softQ"
 )
-codeword_gate = main[main.index("static P25Phase2AmbeInputQuality p25Phase2AmbeInputQualityForCodeword"):
-                     main.index("static P25Phase2AmbeInputQuality p25Phase2AmbeInputQualityFromPending")]
+codeword_gate = main[main.index("P25Phase2AmbeInputQuality p25Phase2AmbeInputQualityForCodeword"):
+                     main.index("P25Phase2AmbeInputQuality p25Phase2AmbeInputQualityFromPending")]
 assert "codeword.inputSoftDecisionSymbols" in codeword_gate and "burst.syncErrors" in codeword_gate, (
     "Per-codeword quality must carry exact 36-dibit reliability and burst-local sync errors"
 )
-gate = main[main.index("static std::string p25Phase2AmbeInputQualityBlockReason"):
-            main.index("static void p25Phase2AppendPlcBlock",
-                       main.index("static std::string p25Phase2AmbeInputQualityBlockReason"))]
+gate = main[main.index("std::string p25Phase2AmbeInputQualityBlockReason"):
+            main.index("void p25Phase2AppendPlcBlock",
+                       main.index("std::string p25Phase2AmbeInputQualityBlockReason"))]
 assert "softDecisionQuality < 0.42" in gate, (
     "Collapsed softQ windows must be blocked before mbelib"
 )
@@ -34,8 +35,8 @@ assert "marginalSynchronizedEye" in gate and "cqpskPhaseErrorRmsRad <= 0.34" in 
 assert "softLowConfidenceRatio > 0.20" in gate, (
     "Low-confidence symbol ratio must participate in AMBE input gating"
 )
-decode = main[main.index("static bool p25DecodePhase2AmbeFrameToAudio"):
-              main.index("static bool p25ProbePhase2AmbeFrameForDiagnostics")]
+decode = main[main.index("bool p25DecodePhase2AmbeFrameToAudio"):
+              main.index("bool p25ProbePhase2AmbeFrameForDiagnostics")]
 assert "p25Phase2AmbeInputQualityBlockReason(inputQuality)" in decode, (
     "Live speaker decode must evaluate input quality before mbelib"
 )
@@ -60,7 +61,7 @@ assert "concealSelectedSlotTimeline(frame.inputQualityBlockReason, true);" in de
 assert main.count("if (ok || speechFrame.timelineEmitted)") >= 2, (
     "Sequenced selected-slot PLC frames must keep their speech ordinals through speaker filtering"
 )
-bypass = gate[gate.index("static bool p25Phase2AmbeInputQualityBypassAllowed"):
+bypass = gate[gate.index("bool p25Phase2AmbeInputQualityBypassAllowed"):
               gate.index("// Input-quality concealment")]
 assert "targetClearEstablished" in bypass and "selectedSlotStructured" in bypass, (
     "SoftQ bypass must require established clear target-slot structure, not just a grant"
@@ -71,8 +72,8 @@ assert "catastrophicallyWeak" in bypass and "softDecisionQuality < 0.20" in bypa
 assert "out.phase2TargetEssEncrypted" in bypass and "out.phase2WrongSlot" in bypass, (
     "SoftQ bypass must stay fail-closed for encrypted or wrong-slot traffic"
 )
-plc = main[main.index("static void p25Phase2AppendPlcBlock"):
-           main.index("static void p25Phase2AppendOppositeSlotSustainPlc")]
+plc = main[main.index("void p25Phase2AppendPlcBlock"):
+           main.index("void p25Phase2AppendOppositeSlotSustainPlc")]
 assert "p25Phase2LastGoodPcm" not in plc, (
     "Input-quality rejects must soft-mute, not repeat stale speech into the speaker"
 )
@@ -96,10 +97,10 @@ assert "m_phase2SoftDibitTail" in live_header and "m_phase2SoftDibitTail" in liv
 assert "inputQualityBlockReason" in main and "inputSoftLowConfidenceRatio" in main, (
     "Validation JSON must expose per-frame quality-gate evidence"
 )
-assert "static bool p25Phase2TrustedConcealmentOnlyWindow" in main, (
+assert "bool p25Phase2TrustedConcealmentOnlyWindow" in main, (
     "Quality-gated selected-slot frames need a single trusted concealment predicate"
 )
-assert "static bool p25VoiceBlockHasSpeakerTimelineAudio" in main, (
+assert "bool p25VoiceBlockHasSpeakerTimelineAudio" in main, (
     "CLI/GUI speaker gates must share a timeline-audio predicate"
 )
 assert main.count("p25VoiceBlockHasSpeakerTimelineAudio(audio)") >= 3, (

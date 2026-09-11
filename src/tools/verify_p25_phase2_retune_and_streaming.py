@@ -3,7 +3,8 @@ import re
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-main = (root / 'main.cpp').read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import definition_body, orchestration_source_text
+main = orchestration_source_text()
 audio = (root / 'AudioEngine.cpp').read_text(encoding='utf-8', errors='replace')
 live_diag = (root / 'tools' / 'run_p25_live_clear_audio_diag.py').read_text(encoding='utf-8', errors='replace')
 deep_audit = (root / 'tools' / 'run_p25_capture_deep_audit.py').read_text(encoding='utf-8', errors='replace')
@@ -12,11 +13,10 @@ metadata_ready = re.search(
     main,
     re.DOTALL)
 metadata_ready_expr = metadata_ready.group(1) if metadata_ready else ''
-can_accept = re.search(
-    r'bool p25VoiceWorkerCanAcceptJobForDepth\(bool speakerSustainHint\)\s*\{(.*?)\n    \}',
+can_accept_body = definition_body(
     main,
-    re.DOTALL)
-can_accept_body = can_accept.group(1) if can_accept else ''
+    'bool MainWindow::p25VoiceWorkerCanAcceptJobForDepth',
+)
 still_current = re.search(
     r'auto stillCurrent = .*?\};',
     main,

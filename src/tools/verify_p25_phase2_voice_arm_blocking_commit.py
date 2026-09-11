@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
-text = (Path(__file__).resolve().parents[1] / 'main.cpp').read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+text = orchestration_source_text()
 start = text.index('auto armP25VoiceFollowState = [this]')
 end = text.index('auto scheduleP25VoiceFollowArm', start)
 arm = text[start:end]

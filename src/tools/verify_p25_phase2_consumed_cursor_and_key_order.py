@@ -3,12 +3,13 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
-main = (root / "src" / "main.cpp").read_text(encoding="utf-8", errors="replace")
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 session = (root / "include" / "P25ReceiverSession.h").read_text(encoding="utf-8", errors="replace")
 
 required = {
     "pending AMBE queue reports new frames": (
-        "static bool p25QueuePhase2PendingAmbeFrame" in main
+        "bool p25QueuePhase2PendingAmbeFrame" in main
         and "++out.phase2PendingAmbeFramesQueued" in main
     ),
     "rolling cursor commits only consumed p2 windows": (

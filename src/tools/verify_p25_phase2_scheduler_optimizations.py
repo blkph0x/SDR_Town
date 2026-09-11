@@ -3,7 +3,8 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-main = (root / 'main.cpp').read_text(encoding='utf-8', errors='replace')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 
 checks = {
     'effective minFresh helper': 'p25Phase2EffectiveMinFreshSamples' in main,
@@ -20,9 +21,9 @@ checks = {
         and 'plan.minFreshFloorSamples = 16384.0' in main
     ),
     'waiting-fresh logs effective minFresh': 'effMinFresh' in main,
-    '180ms cold playback prime': '0.180' in main.split('pushP25LiveStreamingAudio', 1)[1][:2200],
-    '120ms hot restart prime': '0.120' in main.split('pushP25LiveStreamingAudio', 1)[1][:2600],
-    '180ms p25 live target': '0.180' in main.split('pushP25LiveStreamingAudio', 1)[1][:3400],
+    '180ms cold playback prime': '0.180' in main.split('size_t pushP25LiveStreamingAudio', 1)[1][:2200],
+    '120ms hot restart prime': '0.120' in main.split('size_t pushP25LiveStreamingAudio', 1)[1][:2600],
+    '180ms p25 live target': '0.180' in main.split('size_t pushP25LiveStreamingAudio', 1)[1][:3400],
     'ring already primed bypass': 'ringAlreadyPrimed' in main,
     'trust emitted pcm for carrier gate': (
         'p25Audio.phase2EmittedPcmFrames > 0' in main

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
-main = (root / 'main.cpp').read_text(errors='ignore')
+from p25_orchestration_sources import orchestration_source_text
+main = orchestration_source_text()
 sm = (root / 'P25FollowStateMachine.cpp').read_text(errors='ignore')
 checks = {
     'decoded audio outranks wrong-slot diagnostic': 'if (out.decodedFrames > 0 && !out.audio.empty()) return P25VoiceDiagCode::Decoding;' in main,
