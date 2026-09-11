@@ -18,18 +18,12 @@ jobs:
 
     env:
       VCPKG_DEFAULT_TRIPLET: x64-windows
-      CMAKE_BUILD_PARALLEL_LEVEL: 4
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
-
-      - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
 
       - name: Install Qt 6
         uses: jurplel/install-qt-action@v4
@@ -38,22 +32,21 @@ jobs:
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2019_64'
-          modules: ''
           cache: true
           setup-python: false
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
+        id: runvcpkg
         with:
           vcpkgDirectory: ${{ github.workspace }}/vcpkg
-          vcpkgGitCommitId: '2024.12.16'
+          # 2024.12.16 release tag commit
+          vcpkgGitCommitId: 'b2cb0da531c2f1f740045bfe7c4dac59f0b2b69c'
           runVcpkgInstall: true
-          vcpkgJsonGlob: 'vcpkg.json'
 
-      - name: Configure CMake
+      - name: Configure CMake (VS 2022)
         run: |
-          cmake -S . -B build -G "Ninja" `
-            -DCMAKE_BUILD_TYPE=Release `
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
             -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" `
@@ -67,9 +60,16 @@ jobs:
 
       - name: Run unit tests
         run: |
-          $exe = "build/bin/Release/sdr_town_tests.exe"
-          if (-not (Test-Path $exe)) { $exe = "build/bin/sdr_town_tests.exe" }
+          $candidates = @(
+            "build/bin/Release/sdr_town_tests.exe",
+            "build/bin/sdr_town_tests.exe",
+            "build/Release/sdr_town_tests.exe"
+          )
+          $exe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $exe) { throw "sdr_town_tests.exe not found" }
+          Write-Host "Running $exe"
           & $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         shell: pwsh
 
       - name: Setup Python
