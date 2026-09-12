@@ -110,6 +110,8 @@ inline constexpr size_t kP25LiveHealthySustainCqpskCandidates = 4;
 // eyes finishing >105 ms were stamped decode-wall-timeout and wiped speaker
 // pending → continuous audio death. Keep global wall 320; never clear
 // pending on wall stamps alone (see p25Phase2WallTimeoutMayClearSpeakerPending).
+// DEC-0051 adds cooperative mid-decode abort inside processIq — wall stays
+// 320; do not revive DEC-0045 clamps.
 inline constexpr int kP25LiveHealthySustainWallMs = kP25VoiceWorkerMaxDecodeWallMs;
 inline constexpr int kP25LiveEyeLostSustainWallMs = kP25VoiceWorkerMaxDecodeWallMs;
 // DEC-0044: auto PPM from sustained CC AFC (never mid-voice).

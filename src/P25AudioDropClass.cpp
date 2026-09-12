@@ -64,6 +64,8 @@ bool p25Phase2WallTimeoutMayClearSpeakerPending(const std::string& staleReason,
     if (keepWallTimeoutEvidence) return false;
     // Wall is checked after decode returns — it does not cooperatively abort.
     // Empty overruns must keep pending / publish diags (DEC-0045 regression).
+    // DEC-0051 adds mid-decode cancel inside processIq; wall stamps still must
+    // never wipe speaker pending (DEC-0046).
     if (staleReason == "decode-wall-timeout" ||
         staleReason == "decode-wall-overbudget-kept") {
         return false;

@@ -4,6 +4,28 @@ Newest at the top.
 
 ---
 
+## 2026-09-12 — DEC-0051 cooperative mid-decode budget abort (`044651`)
+
+- **Forensic (no listen):** `run_p25_capture_full_forensic.py` on `044651`;
+  `p25_logscan --audit` on `041612`. No `*_live_speaker.wav` yet (pre-0050
+  builds).
+- **Dominant live failure:** emit dsp p50≈212 ms / empty max 642 ms under
+  budget 80 → worker-busy 135 → rolling ~16 s. Wall stamps never fired.
+- **Fix:** shared processIq deadline + abort in sync/lock/mask/sticky loops;
+  Catch budget ceiling 350 ms; verifier
+  `verify_p25_phase2_cooperative_budget_abort.py`.
+- **Not softened:** DEC-0012, DEC-0046 wall, streaming DDC default-off.
+- **Next:** rebuild Release; one start/stop listen; PPM≈−2; harvester.
+
+## 2026-09-12 — DEC-0050 PCM listen classifier (live vs file)
+
+- **Gap:** File replay “pretty good”; live islands/garble/silence. Duty≠clear.
+- **Add:** `p25_pcm_listen_classify.py` CLEAR/GARBLED/SILENT; start/stop
+  `*_live_speaker.wav`; `p25 listenclassify`; forensic + listen bar harvester.
+- **Use:** after next live start/stop →
+  `python src/tools/run_p25_listen_bar_harvester.py <capture>`
+  (flags `LIVE_WORSE_THAN_FILE` when file CLEAR + live bad).
+
 ## 2026-09-12 — Forensic `044651` + DEC-0049 Auto PPM harden
 
 - **Live:** mixed — TG10120 duty up to 0.909; TG20202 stuck ~0.64 drop D;

@@ -6008,7 +6008,41 @@ P25LiveDecoder P25LiveDecoder::createIndependentProbeCopy(bool retainPhase2MaskP
         copy.m_phase2MaskParams = m_phase2MaskParams;
         copy.m_phase2XorMask = m_phase2XorMask;
     }
+    // DEC-0051: probe copies must not inherit a parent processIq deadline.
+    copy.disarmRealtimeDecodeBudget();
     return copy;
+}
+
+void P25LiveDecoder::armRealtimeDecodeBudget(int budgetMs) noexcept
+{
+    m_realtimeBudgetTripped = false;
+    if (budgetMs <= 0) {
+        m_realtimeBudgetArmed = false;
+        return;
+    }
+    m_realtimeBudgetArmed = true;
+    m_realtimeBudgetDeadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(budgetMs);
+}
+
+void P25LiveDecoder::disarmRealtimeDecodeBudget() noexcept
+{
+    m_realtimeBudgetArmed = false;
+    m_realtimeBudgetTripped = false;
+}
+
+bool P25LiveDecoder::realtimeDecodeBudgetExceeded() const noexcept
+{
+    if (!m_realtimeBudgetArmed) return false;
+    return std::chrono::steady_clock::now() >= m_realtimeBudgetDeadline;
+}
+
+void P25LiveDecoder::noteRealtimeDecodeBudgetTrip(std::vector<std::string>& warnings)
+{
+    if (m_realtimeBudgetTripped) return;
+    m_realtimeBudgetTripped = true;
+    warnings.push_back(
+        "Realtime P25 voice decode budget exhausted; using best bounded result for this window.");
 }
 
 void P25LiveDecoder::latchPhase2FramerOriginIfNeeded() noexcept
@@ -6213,16 +6247,35 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
 {
     P25DecoderTraceScope trace("P25LiveDecoder::processIq");
     const auto realtimeStarted = std::chrono::steady_clock::now();
+    // DEC-0051: arm a shared deadline so CQPSK search, probe dibit scans, and
+    // annotate/commit (incl. 12-phase mask hunt) can abort cooperatively.
+    // Capture 20260912_044651: emit-gate dsp p50≈212 ms / empty max 641 ms while
+    // healthy budget was 80 — wall is post-hoc (DEC-0046); only mid-decode
+    // checks free the single-flight worker (worker-busy 135, rolling→15 s).
+    struct RealtimeBudgetScope {
+        P25LiveDecoder* self = nullptr;
+        explicit RealtimeBudgetScope(P25LiveDecoder* decoder, bool arm, int budgetMs)
+            : self(decoder)
+        {
+            if (arm && self) self->armRealtimeDecodeBudget(budgetMs);
+            else if (self) self->disarmRealtimeDecodeBudget();
+        }
+        ~RealtimeBudgetScope()
+        {
+            if (self) self->disarmRealtimeDecodeBudget();
+        }
+        RealtimeBudgetScope(const RealtimeBudgetScope&) = delete;
+        RealtimeBudgetScope& operator=(const RealtimeBudgetScope&) = delete;
+    };
     const bool realtimeBudgetActive =
         m_config.realtimeVoiceSearch && m_config.realtimeDecodeBudgetMs > 0;
-    auto realtimeBudgetExceeded = [&]() {
-        if (!realtimeBudgetActive) return false;
-        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - realtimeStarted).count();
-        return elapsed >= m_config.realtimeDecodeBudgetMs;
+    const RealtimeBudgetScope realtimeBudgetScope(
+        this, realtimeBudgetActive, m_config.realtimeDecodeBudgetMs);
+    auto realtimeBudgetExceeded = [this]() {
+        return realtimeDecodeBudgetExceeded();
     };
-    auto noteRealtimeBudget = [&](P25LiveDecodeResult& result) {
-        result.warnings.push_back("Realtime P25 voice decode budget exhausted; using best bounded result for this window.");
+    auto noteRealtimeBudget = [this](P25LiveDecodeResult& result) {
+        noteRealtimeDecodeBudgetTrip(result.warnings);
     };
     auto elapsedMsSince = [&](std::chrono::steady_clock::time_point t0) {
         return static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -7580,6 +7633,9 @@ P25LiveDecodeResult P25LiveDecoder::processHardDibitsInternal(
             " directRejected=" + std::to_string(result.stats.phase2MacDirectCrcRejected) +
             " pdus=" + std::to_string(result.stats.phase2MacPdus));
     }
+    if (realtimeDecodeBudgetExceeded()) {
+        noteRealtimeDecodeBudgetTrip(result.warnings);
+    }
     return result;
 }
 
@@ -7989,6 +8045,10 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
     std::vector<Phase2SyncHit> hits;
     std::array<StreamingDibitCorrelator40, kSyncWords.size()> correlators{};
     for (size_t i = 0; i < workingDibits.size(); ++i) {
+        // DEC-0051: abort sync scan mid-window once live budget is gone.
+        if ((i & 0x3FFu) == 0 && realtimeDecodeBudgetExceeded()) {
+            break;
+        }
         int bestErrors = 41;
         for (size_t j = 0; j < kSyncWords.size(); ++j) {
             bestErrors = std::min(bestErrors, correlators[j].push(workingDibits[i], kSyncWords[j]));
@@ -8029,6 +8089,24 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
         m_phase2SuperframeAnchorGeneration = 0;
         m_phase2SuperframeAnchorMaskParams = {};
     }
+    // DEC-0051: probe path already has sync telemetry; skip lock/mask work when
+    // the live budget is gone (commit path still runs but aborts in lock loops).
+    if (!annotateSessionCodewords && realtimeDecodeBudgetExceeded()) {
+        for (const auto& hit : hits) {
+            if (hit.dibitOffset + Phase2BurstDibits > workingDibits.size()) continue;
+            P25Phase2Burst burst;
+            burst.valid = true;
+            burst.dibitOffset = hit.dibitOffset >= phase2PrefixDibits
+                ? hit.dibitOffset - phase2PrefixDibits
+                : 0;
+            burst.syncErrors = hit.errors;
+            out.bursts.push_back(std::move(burst));
+            if (out.bursts.size() >= 8) break;
+        }
+        out.ess = m_phase2Ess;
+        return out;
+    }
+
     auto locks = findPhase2SuperframeLocks(workingDibits, hits, workingDibits.size());
 
     // If we already have a validated Phase-2 superframe epoch, keep later rolling
@@ -8283,6 +8361,9 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
         for (uint64_t burstNum = firstBurstNum;
              fastBursts < maxRealtimeStickyBursts;
              ++burstNum) {
+            if (realtimeDecodeBudgetExceeded()) {
+                break;
+            }
             const uint64_t streamPos = anchor + burstNum * kBurst;
             if (streamPos + kBurst > workEndStream) break;
             if (streamPos < workStartStream) continue;
@@ -8370,6 +8451,9 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
     }
 
     for (const auto& lock : locks) {
+        if (realtimeDecodeBudgetExceeded()) {
+            break;
+        }
         lockedWindows.push_back({lock.dibitOffset, P25LiveDecoder::Phase2BurstDibits * 12});
 
         uint8_t selectedMaskPhase = m_phase2MaskPhaseKnown ? m_phase2MaskPhase : 0;
@@ -8433,6 +8517,9 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
                 const uint8_t phaseEnd = cheapProbeMask ? uint8_t{1} : uint8_t{12};
             phaseWindows.reserve(phaseEnd - phaseBegin);
             for (uint8_t phaseIdx = phaseBegin; phaseIdx < phaseEnd; ++phaseIdx) {
+                if (realtimeDecodeBudgetExceeded()) {
+                    break;
+                }
                 const uint8_t phase = cheapProbeMask ? uint8_t{0} : phaseIdx;
                 const bool sticky = false;
                 // Realtime follows need bounded work per rolling hop.  Score a
@@ -8505,6 +8592,7 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
                     }
                     size_t rescueCandidates = 0;
                     for (const auto& candidate : phaseWindows) {
+                        if (realtimeDecodeBudgetExceeded()) break;
                         if (rescueCandidates++ >= maxRescueCandidates) break;
                         auto rescued = scorePhase2MaskPhaseWindow(
                             workingDibits, hits, lock, mask,

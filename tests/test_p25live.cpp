@@ -12,6 +12,8 @@
 #include <cstdint>
 #include <iomanip>
 #include <sstream>
+#include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -2431,10 +2433,34 @@ TEST_CASE("P25 Phase 2 6000 baud CQPSK processIq stays inside realtime budget on
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - t0).count();
     REQUIRE(result.stats.symbolRate == Catch::Approx(6000.0));
-    // Hard ceiling: realtime budget is 110ms but channelize+search overhead may
-    // exceed it slightly.  Minutes-long hangs must never return.
-    REQUIRE(ms < 2500);
+    // DEC-0051: cooperative mid-decode abort must keep noise eyes near budget.
+    // Capture 044651 emit p50≈212 / empty max 641 under budget 80 without this.
+    // Allow channelize + one in-flight candidate slack (not the old 2500 ms ceiling).
+    REQUIRE(ms < 350);
+    const bool sawBudgetTrip = std::any_of(
+        result.warnings.begin(),
+        result.warnings.end(),
+        [](const std::string& w) {
+            return w.find("Realtime P25 voice decode budget exhausted") != std::string::npos;
+        });
+    // Wide CQPSK grid on noise should trip the budget (or finish under it).
+    REQUIRE((sawBudgetTrip || ms <= cfg.realtimeDecodeBudgetMs + 40));
     (void)result;
+}
+
+TEST_CASE("DEC-0051 realtime budget helpers arm and trip once", "[p25][budget][dec0051]")
+{
+    P25LiveDecoder decoder;
+    decoder.armRealtimeDecodeBudget(1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    REQUIRE(decoder.realtimeDecodeBudgetExceeded());
+    std::vector<std::string> warnings;
+    decoder.noteRealtimeDecodeBudgetTrip(warnings);
+    decoder.noteRealtimeDecodeBudgetTrip(warnings);
+    REQUIRE(warnings.size() == 1);
+    REQUIRE(warnings.front().find("budget exhausted") != std::string::npos);
+    decoder.disarmRealtimeDecodeBudget();
+    REQUIRE_FALSE(decoder.realtimeDecodeBudgetExceeded());
 }
 
 TEST_CASE("P25 AMBE Phase 2 voice decoder reports backend availability explicitly")

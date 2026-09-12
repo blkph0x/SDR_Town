@@ -5,6 +5,53 @@ A decision is recorded **before** code that depends on it is written.
 
 ---
 
+## DEC-0051 — Cooperative mid-decode realtime budget abort (`044651`)
+
+- **Date:** 2026-09-12
+- **Status:** accepted
+- **Evidence (capture `20260912_044651`, automated full forensic):**
+  - Live CADENCE A=86 D=35 ok=5; TG10120 max duty **0.909**; TG20202 max
+    **0.639**; worker-busy **135**; rolling grew to **~15.9 s** while busy.
+  - Worker dsp: emit p50≈**212 ms** / p90≈**491 ms**; empty p90≈**228 ms** /
+    max **642 ms** under healthy budget **80** / eye-lost **120**.
+  - Wall-timeout **0** — DEC-0046 post-hoc wall never fired; jobs still held
+    single-flight for hundreds of ms (CQPSK stop ≠ commit/mask abort).
+  - File path still recovers RF/mbelib; PRIMARY class FEED_GATE + slow worker.
+- **Decision:**
+  1. Arm a processIq-scoped deadline (`armRealtimeDecodeBudget`) shared by
+     CQPSK search, Phase-2 sync scan, lock walk, 12-phase mask hunt, and
+     sticky burst walk.
+  2. Abort those loops cooperatively when exceeded; keep best-so-far; still
+     run annotate/commit when Phase-2 traffic requires it, but commit itself
+     is budget-gated (fixes “mustAnnotateCommit always unbounded”).
+  3. Do **not** clamp decode wall (DEC-0046 stands). Do **not** soften
+     DEC-0012. Streaming DDC stays default-off.
+  4. Catch `[p25][cqpsk][budget]` ceiling **350 ms** (was 2500); verifier
+     `verify_p25_phase2_cooperative_budget_abort.py`.
+- **Consequences:** Live worker should release near budget so the next 80+280
+  eye can run; expect fewer worker-busy cliffs and less rolling explosion.
+  Operator still resets PPM≈−2 after DEC-0049; re-prove with start/stop +
+  DEC-0050 listen classifier.
+
+## DEC-0050 — PCM listen classifier (CLEAR / GARBLED / SILENT) for live vs file
+
+- **Date:** 2026-09-12
+- **Status:** accepted
+- **Evidence:** File IQ replay is repeatedly “pretty good” (duty≥0.65 / PASS) while
+  live same-day captures are islands then nothing / subjective garble. CADENCE
+  duty, drop A–E, and STT chars/words do **not** score perceptual clear speech;
+  duty can pass on blocky/garbled PCM.
+- **Decision:**
+  1. Add `p25_pcm_listen_classify.py` — frame RMS / ZCR / spectral flatness /
+     envelope CV → **CLEAR | GARBLED | SILENT** (orthogonal to duty).
+  2. Dump `*_live_speaker.wav` during start/stop IQ capture (speaker-push PCM).
+  3. Wire classify into `run_p25_capture_full_forensic.py` +
+     `run_p25_listen_bar_harvester.py`; CLI `p25 listenclassify <wav>`.
+  4. Fixtures: file-replay WAV goldens + live/file mismatch flag
+     `LIVE_WORSE_THAN_FILE`.
+- **Consequences:** Automation can fail a “PASS duty” bar when listen=GARBLED,
+  and prove live-path regressions without relying on operator ears alone.
+
 ## DEC-0049 — Harden Auto PPM after 1250 Hz overshoot (`044651`)
 
 - **Date:** 2026-09-12

@@ -9627,6 +9627,15 @@ LiveIqCaptureResult MainWindow::startLiveIqCapture(const std::string& label,  in
             out.message = "Could not open one or more IQ capture output files.";
             return out;
         }
+        {
+            QString wavErr;
+            const QString speakerWavPath = base + "_live_speaker.wav";
+            if (!startLiveIqSpeakerWavCapture(speakerWavPath, 48000.0, &wavErr)) {
+                session.p25LogStream << "# live_speaker_wav_open_failed=" << wavErr.toStdString() << "\n";
+            } else {
+                session.p25LogStream << "# live_speaker_wav=" << speakerWavPath.toStdString() << "\n";
+            }
+        }
         session.ringCsv << "utc,poll,window_start_abs,window_end_abs,cursor_before_abs,append_start_abs,append_end_abs,samples_appended,gap_samples,total_written,bytes_written,zero_append_polls,max_single_gap_samples,file_write_error_polls,signal_level_db,noise_floor_db,snr_db,afc_offset_hz,ring_epoch_resets,ring_epoch_reset_skipped_samples\n";
         session.startP25LogSnapshot.clear();
         session.p25LogDuringCapture.clear();
@@ -10020,6 +10029,13 @@ LiveIqCaptureResult MainWindow::stopLiveIqCapture()
         };
         writeLiveIqCaptureEvent(endRow);
 
+        const CliP25WavCaptureSummary speakerWav = stopLiveIqSpeakerWavCapture();
+        if (speakerWav.samples > 0) {
+            appendP25LogLine(QString("IQ capture live_speaker WAV closed samples=%1 path=%2")
+                .arg(static_cast<qulonglong>(speakerWav.samples))
+                .arg(speakerWav.path));
+        }
+
         if (liveIqCapture.data.is_open()) liveIqCapture.data.close();
         if (liveIqCapture.events.is_open()) { liveIqCapture.events.flush(); liveIqCapture.events.close(); }
         if (liveIqCapture.ringCsv.is_open()) { liveIqCapture.ringCsv.flush(); liveIqCapture.ringCsv.close(); }
@@ -10066,7 +10082,10 @@ LiveIqCaptureResult MainWindow::stopLiveIqCapture()
             {"sdrtown:signal_level_db", liveIqCapture.lastSignalLevelDb},
             {"sdrtown:noise_floor_db", liveIqCapture.lastNoiseFloorDb},
             {"sdrtown:snr_db", liveIqCapture.lastSnrDb},
-            {"sdrtown:afc_offset_hz", liveIqCapture.lastAfcOffsetHz}
+            {"sdrtown:afc_offset_hz", liveIqCapture.lastAfcOffsetHz},
+            {"sdrtown:live_speaker_wav", speakerWav.path.toStdString()},
+            {"sdrtown:live_speaker_samples", speakerWav.samples},
+            {"sdrtown:live_speaker_sample_rate", speakerWav.sampleRate}
         };
         meta["captures"] = json::array({
             {

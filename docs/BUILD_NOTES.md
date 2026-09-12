@@ -4,6 +4,24 @@ Newest entry at the top. Record facts, not hopes.
 
 ---
 
+## BN-0042 — DEC-0051 cooperative budget abort (2026-09-12)
+
+- **Evidence:** `044651` emit dsp p50≈212 ms, worker-busy 135, rolling→15.9 s;
+  wall-timeout 0 (DEC-0046 post-hoc insufficient).
+- **Change:** `armRealtimeDecodeBudget` + mid-decode aborts in
+  `P25LiveDecoder::processIq` / Phase-2 sync-lock-mask loops; Catch `<350 ms`.
+- **Gate:** Release rebuilt; `[p25]` **114/114**; verifiers **133/133**
+  (incl. `verify_p25_phase2_cooperative_budget_abort.py`)
+- **Operator:** PPM≈−2; one start/stop capture; run listen-bar harvester.
+
+## BN-0041 — DEC-0050 PCM listen classifier (2026-09-12)
+
+- **Why:** Replay duty passes while live sounds bad/silent — need automated
+  CLEAR vs GARBLED vs SILENT on speaker PCM, plus live WAV sidecar.
+- **Tools:** `p25_pcm_listen_classify.py`, `run_p25_listen_bar_harvester.py`,
+  `p25 listenclassify`, forensic wav= + live_listen.
+- **Capture:** start/stop writes `*_live_speaker.wav` from speaker-push path.
+
 ## BN-0040 — DEC-0049 Auto PPM harden after `044651` (2026-09-12)
 
 - **Evidence:** Auto PPM AFC=1250 conf=0.45 → device ppm −7.88; CC TSBK

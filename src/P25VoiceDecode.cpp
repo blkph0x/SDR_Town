@@ -31,6 +31,7 @@
 #include <sstream>
 
 void appendCliP25OppositeWavCapture(const std::vector<float>& samples);
+void appendLiveIqSpeakerWavCapture(const float* samples, size_t count);
 
 using json = nlohmann::json;
 
@@ -4137,6 +4138,8 @@ size_t pushP25LiveStreamingAudio(AudioEngine* engine,
                                     pending.begin() + static_cast<std::ptrdiff_t>(totalPushed + batch));
         }
         engine->pushAudioToActiveOutputs(pending.data() + totalPushed, batch, activeOutputIndices);
+        // DEC-0050: record what the speaker actually heard during start/stop IQ capture.
+        appendLiveIqSpeakerWavCapture(pending.data() + totalPushed, batch);
         totalPushed += batch;
         queuedNow = engine->getRingQueuedSamples();
     }

@@ -18,13 +18,27 @@ sys.path.insert(0, str(TOOLS))
 
 import p25_capture_audit as audit  # noqa: E402
 import p25_logscan as logscan  # noqa: E402
+import p25_pcm_listen_classify as listen  # noqa: E402
 
 
 def default_exe() -> Path:
     return ROOT / "build" / "bin" / "Release" / "SDR_Town.exe"
 
 
-def run_voicetest(exe: Path, cmd: str, out_path: Path, timeout_s: float = 120.0) -> dict:
+def find_live_speaker_wav(cap: Path) -> Path | None:
+    for p in sorted(cap.glob("*_live_speaker.wav")):
+        if p.is_file() and p.stat().st_size > 44:
+            return p
+    return None
+
+
+def run_voicetest(
+    exe: Path,
+    cmd: str,
+    out_path: Path,
+    wav_path: Path | None = None,
+    timeout_s: float = 120.0,
+) -> dict:
     # Stretch recommended 1800ms bars to 8000ms for continuous duty evidence.
     cmd8 = re.sub(r"\b1800\b", "8000", cmd, count=1)
     if "clear" not in cmd8 and " enc" not in cmd8 and not cmd8.endswith(" enc"):
@@ -32,6 +46,10 @@ def run_voicetest(exe: Path, cmd: str, out_path: Path, timeout_s: float = 120.0)
             cmd8 = cmd8 + " clear"
     if "stream" not in cmd8:
         cmd8 = cmd8 + " stream noprobe"
+    if wav_path is not None:
+        cmd8 = re.sub(r'\bwav="[^"]*"', "", cmd8)
+        cmd8 = re.sub(r"\bwav=\S+", "", cmd8)
+        cmd8 = cmd8.strip() + f' wav="{wav_path.as_posix()}"'
     full = [str(exe), "--cli", "--allow-multiple", "--cmd", cmd8]
     proc = subprocess.run(full, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout_s)
     out_path.write_text(proc.stdout or "", encoding="utf-8", errors="replace")
@@ -43,9 +61,18 @@ def run_voicetest(exe: Path, cmd: str, out_path: Path, timeout_s: float = 120.0)
             proc.stdout or "",
         )
         if m:
-            return {"cmd": cmd8, "result": m.group(1), "drop": m.group(2), "duty": float(m.group(3)), "rc": proc.returncode}
-        return {"cmd": cmd8, "result": "NO_RESULT", "drop": None, "duty": None, "rc": proc.returncode}
-    return {"cmd": cmd8, "result": m.group(1), "duty": float(m.group(2)), "drop": m.group(3), "rc": proc.returncode}
+            row = {"cmd": cmd8, "result": m.group(1), "drop": m.group(2), "duty": float(m.group(3)), "rc": proc.returncode}
+        else:
+            row = {"cmd": cmd8, "result": "NO_RESULT", "drop": None, "duty": None, "rc": proc.returncode}
+    else:
+        row = {"cmd": cmd8, "result": m.group(1), "duty": float(m.group(2)), "drop": m.group(3), "rc": proc.returncode}
+    if wav_path is not None and wav_path.is_file() and wav_path.stat().st_size > 44:
+        try:
+            row["file_listen"] = listen.result_to_dict(listen.classify_wav(wav_path))
+            row["wav"] = str(wav_path)
+        except Exception as ex:  # pragma: no cover
+            row["file_listen_error"] = str(ex)
+    return row
 
 
 def main() -> int:
@@ -73,12 +100,33 @@ def main() -> int:
         if c.startswith("p25 voicetest") and " enc" not in c and not c.rstrip().endswith(" enc")
     ][: args.max_voicetests]
     out_dir = cap
+    live_wav = find_live_speaker_wav(cap)
+    live_listen = None
+    if live_wav:
+        try:
+            live_listen = listen.result_to_dict(listen.classify_wav(live_wav))
+            print("LIVE_SPEAKER:", live_wav.name, live_listen["label"])
+        except Exception as ex:  # pragma: no cover
+            live_listen = {"error": str(ex), "path": str(live_wav)}
+            print("LIVE_SPEAKER classify ERROR", ex)
+    report["live_speaker_wav"] = str(live_wav) if live_wav else None
+    report["live_listen"] = live_listen
+
     for i, cmd in enumerate(cmds):
         out = out_dir / f"auto_forensic_vt_{i}.txt"
+        wav = out_dir / f"auto_forensic_vt_{i}.wav"
         print(f"VOICETEST[{i}]: {cmd[:100]}...")
         try:
-            vt_results.append(run_voicetest(exe, cmd, out))
-            print(" ", vt_results[-1])
+            row = run_voicetest(exe, cmd, out, wav_path=wav)
+            if live_listen and row.get("file_listen"):
+                fl = row["file_listen"].get("label")
+                ll = live_listen.get("label")
+                if fl == "CLEAR" and ll in ("SILENT", "GARBLED"):
+                    row["mismatch"] = "LIVE_WORSE_THAN_FILE"
+                elif ll == "CLEAR" and fl in ("SILENT", "GARBLED"):
+                    row["mismatch"] = "FILE_WORSE_THAN_LIVE"
+            vt_results.append(row)
+            print(" ", {k: row.get(k) for k in ("result", "duty", "drop", "file_listen", "mismatch") if k in row or k == "file_listen"})
         except Exception as ex:  # pragma: no cover
             vt_results.append({"cmd": cmd, "error": str(ex)})
             print("  ERROR", ex)
@@ -91,7 +139,16 @@ def main() -> int:
     if report["primary_failure_class"].startswith("FEED_GATE"):
         actions.append("Live VCWs exist but dup/reject starve feed — keep eye-lost escalate; watch worker-busy.")
     if (report.get("worker_dsp_ms") or {}).get("emit_p50", 0) and report["worker_dsp_ms"]["emit_p50"] > 150:
-        actions.append("Emit-gate dsp p50>>budget — cooperative abort still open.")
+        actions.append("Emit-gate dsp p50>>budget — re-check after DEC-0051 cooperative abort (expect fewer worker-busy).")
+    if any(r.get("mismatch") == "LIVE_WORSE_THAN_FILE" for r in vt_results):
+        actions.append("File listen=CLEAR but live speaker SILENT/GARBLED — live path bug (not RF/mbelib).")
+    if live_wav is None:
+        actions.append("No *_live_speaker.wav yet — rebuild DEC-0050 exe and re-capture with start/stop.")
+    for r in vt_results:
+        fl = (r.get("file_listen") or {}).get("label")
+        if fl == "GARBLED" and (r.get("duty") or 0) >= 0.65:
+            actions.append("File duty>=0.65 but listen=GARBLED — continuity ≠ clear speech; keep fixture.")
+            break
     report["operator_actions"] = actions
     print("ACTIONS:")
     for a in actions:

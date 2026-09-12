@@ -11,8 +11,8 @@ Status: `open` | `in_progress` | `blocked` | `done`
 
 | ID | Status | Tracker | What | Notes / must not invent |
 |---|---|---|---|---|
-| B-0001 | open | ISS-0001 / T-0010 / GH#9 | **Live** clear P25 continuous audio re-prove | After DEC-0049: reset PPM≈−2, listen+startstop, `p25 logscan` / `run_p25_capture_full_forensic.py`. |
-| B-0004 | in_progress | T-0006 / REQ-P2.4 | Honest playout duty (drop=D / worker-busy) | `044651` emit p50≈212 ms, worker-busy 135; cooperative abort still open. |
+| B-0001 | open | ISS-0001 / T-0010 / GH#9 | **Live** clear P25 continuous audio re-prove | DEC-0050: start/stop → `*_live_speaker.wav` + `run_p25_listen_bar_harvester.py` (CLEAR vs GARBLED vs SILENT). Reset PPM≈−2. |
+| B-0004 | done | T-0006 / REQ-P2.4 | Honest playout duty (drop=D / worker-busy) | DEC-0051 cooperative abort on `044651` emit p50≈212 / busy 135. Live re-prove still B-0001. |
 | B-0005 | open | T-0007 / REQ-P2.5 | Follow hold during proven call (drop=E only) | |
 | B-0006 | open | T-0008 / REQ-P2.6 | Isolation non-regression (encrypted + wrong-slot) | Beside every P2 change. |
 
