@@ -4,6 +4,12 @@ Newest entry at the top. Record facts, not hopes.
 
 ---
 
+## BN-0045 — DEC-0054 restore cold full-commit (`081416`) (2026-09-12)
+
+- **Evidence:** post-0053 capture 0.36s SILENT / 1 emit; 061217 had 92s CLEAR.
+- **Fix:** drop CQPSK headroom; cold full annotate +200ms; sticky cheap 120ms.
+- **Gate:** budget verifier + Release rebuild.
+
 ## BN-0044 — DEC-0053 sticky cheap-commit not skip (`064509`) (2026-09-12)
 
 - **Evidence:** post-0052 capture: 2 cold CLEAR emits then permanent no-vcw.

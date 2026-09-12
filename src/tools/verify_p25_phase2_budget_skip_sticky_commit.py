@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DEC-0053: sticky+budgetGone must cheap-commit (not skip-commit)."""
+"""DEC-0054: restore cold full-commit; sticky cheap only; no CQPSK headroom."""
 from __future__ import annotations
 
 import pathlib
@@ -7,37 +7,39 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DECODER = (ROOT / "src" / "P25LiveDecoder.cpp").read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
-VOICE = (ROOT / "src" / "MainWindowP25Voice.cpp").read_text(encoding="utf-8", errors="replace")
 TIMING = (ROOT / "include" / "P25VoiceTiming.h").read_text(encoding="utf-8", errors="replace")
-HEADER = (ROOT / "include" / "P25LiveDecoder.h").read_text(encoding="utf-8", errors="replace")
 
 
 def main() -> int:
     fail = False
+    if "leave commit headroom on live Phase-2" in DECODER:
+        print("FAIL: DEC-0052 CQPSK half-budget headroom must be removed (081416)")
+        fail = True
     if "skip-commit sticky-sustain" in DECODER:
-        print("FAIL: DEC-0052 skip-commit sticky path must be removed (064509 silence)")
+        print("FAIL: sticky skip-commit must stay removed")
         fail = True
-    if "cheap-commit sticky-sustain budget-exhausted" not in DECODER:
-        print("FAIL: DEC-0053 sticky cheap-commit path missing")
+    if "full-commit cold-acquire budget-rearm" not in DECODER:
+        print("FAIL: DEC-0054 cold full-commit re-arm missing")
         fail = True
-    if "kP25LiveCheapCommitAllowanceMs" not in TIMING:
-        print("FAIL: cheap-commit allowance constant missing")
+    if "cheap-commit sticky-sustain budget-rearm" not in DECODER:
+        print("FAIL: DEC-0054 sticky cheap-commit re-arm missing")
         fail = True
-    if "armRealtimeDecodeBudget(kP25LiveCheapCommitAllowanceMs)" not in DECODER:
-        print("FAIL: must re-arm cheap-commit allowance after CQPSK deadline")
+    if "kP25LiveColdCommitAllowanceMs" not in TIMING:
+        print("FAIL: cold commit allowance missing")
         fail = True
-    if "m_phase2ForceCheapRealtimeCommit" not in HEADER:
-        print("FAIL: force-cheap flag missing")
+    if "kP25LiveStickyCheapCommitAllowanceMs" not in TIMING:
+        print("FAIL: sticky cheap allowance missing")
         fail = True
-    if "leave commit headroom on live Phase-2" not in DECODER:
-        print("FAIL: CQPSK headroom reserve missing")
+    # Cold must not forceCheap via cold-acquire cheap-commit tag
+    if "cheap-commit cold-acquire" in DECODER:
+        print("FAIL: cold must not forceCheap (081416 SILENT scraps)")
         fail = True
-    if "cheap-commit" not in VOICE:
-        print("FAIL: p25_log budget logger must prefer cheap-commit tags")
+    if "armRealtimeDecodeBudget(kP25LiveColdCommitAllowanceMs)" not in DECODER:
+        print("FAIL: cold re-arm must use ColdCommitAllowance")
         fail = True
     if fail:
         return 1
-    print("PASS: DEC-0053 sticky cheap-commit (no skip) + allowance re-arm")
+    print("PASS: DEC-0054 cold full-commit + sticky cheap; no CQPSK headroom")
     return 0
 
 

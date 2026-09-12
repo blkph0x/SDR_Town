@@ -105,9 +105,12 @@ inline constexpr int kP25LiveEyeLostReplayCandStreak = 1;
 // path (eye present); keep DEC-0041 eye-lost escalate width.
 inline constexpr int kP25LiveHealthySustainBudgetMs = 80;
 inline constexpr size_t kP25LiveHealthySustainCqpskCandidates = 4;
-// DEC-0053: after CQPSK burns the sustain budget, re-arm this short allowance
-// so sticky/cold cheap-commit can still emit VCWs (064509 skip-commit silence).
-inline constexpr int kP25LiveCheapCommitAllowanceMs = 50;
+// DEC-0054 (081416 no-audio): cold first-eye must NOT forceCheap — re-arm a
+// generous full-annotate window. Sticky sustain may cheap-commit with hot budget.
+inline constexpr int kP25LiveColdCommitAllowanceMs = 200;
+inline constexpr int kP25LiveStickyCheapCommitAllowanceMs = 120;
+// Legacy alias (DEC-0053); sticky path uses StickyCheap above.
+inline constexpr int kP25LiveCheapCommitAllowanceMs = kP25LiveStickyCheapCommitAllowanceMs;
 // DEC-0045 proposed clamping decode wall to 105/145 near these budgets.
 // DEC-0046 REJECTED that: wall is post-hoc (no cooperative abort). Empty
 // eyes finishing >105 ms were stamped decode-wall-timeout and wiped speaker

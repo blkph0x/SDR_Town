@@ -5,6 +5,28 @@ A decision is recorded **before** code that depends on it is written.
 
 ---
 
+## DEC-0054 — Restore cold full-commit; sticky cheap only (`081416`)
+
+- **Date:** 2026-09-12
+- **Status:** accepted
+- **Evidence:**
+  - `061217` (pre-0052): ~**92 s** CLEAR WAV, many emits — almost fully clear.
+  - `064509` (0052 skip): ~0.6 s golden then silence.
+  - `081416` (0053): **0.36 s SILENT** WAV, **1** audio emit, cheap-commit
+    log hits **0**, budget trips generic only, worker-busy 147.
+  - Root: CQPSK half-budget headroom stopped search before
+    `realtimeBudgetExceeded()`, so forceCheap never re-armed; when cold
+    forceCheap did run it poisoned first eye (phase0 / no deep rescue).
+- **Decision:**
+  1. **Remove** DEC-0052 CQPSK commit-headroom reserve.
+  2. **Cold / non-sticky:** never forceCheap; re-arm
+     `kP25LiveColdCommitAllowanceMs` (**200**) and full annotate.
+  3. **Sticky only:** cheap-commit + re-arm
+     `kP25LiveStickyCheapCommitAllowanceMs` (**120**).
+  4. Never skip-commit (064509). Keep DEC-0051 mid-loop aborts.
+- **Consequences:** Aim to restore 061217-class continuous CLEAR follows.
+  Worker may again run >80 ms on cold acquires — acceptable vs silence.
+
 ## DEC-0053 — Sticky budget path cheap-commits (not skip) (`064509`)
 
 - **Date:** 2026-09-12

@@ -4,6 +4,12 @@ Newest at the top.
 
 ---
 
+## 2026-09-12 — DEC-0054 restore cold full-commit (`081416` no audio)
+
+- **Regression:** 0.36s SILENT after DEC-0053; cheap-commit never logged.
+- **Cause:** CQPSK headroom + cold forceCheap poisoned first eye.
+- **Fix:** remove headroom; cold full-commit +200ms re-arm; sticky cheap 120ms.
+
 ## 2026-09-12 — DEC-0053 sticky cheap-commit (`064509` golden→silence)
 
 - **Symptom:** first ~0.6 s CLEAR then nothing; WAV 1.24 s / 2 emits.

@@ -11,7 +11,7 @@ Status: `open` | `in_progress` | `blocked` | `done`
 
 | ID | Status | Tracker | What | Notes / must not invent |
 |---|---|---|---|---|
-| B-0001 | open | ISS-0001 / T-0010 / GH#9 | **Live** clear P25 continuous audio re-prove | After DEC-0053: start/stop; expect cheap-commit sticky lines + multi-second CLEAR (not 0.6s then silence). |
+| B-0001 | open | ISS-0001 / T-0010 / GH#9 | **Live** clear P25 continuous audio re-prove | After DEC-0054: expect multi-second CLEAR again (not 0.36s SILENT). Log may show `full-commit cold-acquire`. |
 | B-0004 | done | T-0006 / REQ-P2.4 | Honest playout duty (drop=D / worker-busy) | DEC-0051 abort + DEC-0052 skip sticky commit (`061217` busy 690). |
 | B-0005 | open | T-0007 / REQ-P2.5 | Follow hold during proven call (drop=E only) | |
 | B-0006 | open | T-0008 / REQ-P2.6 | Isolation non-regression (encrypted + wrong-slot) | Beside every P2 change. |

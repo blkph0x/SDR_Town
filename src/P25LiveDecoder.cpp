@@ -6735,19 +6735,9 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
     size_t cqpskCandidatesEvaluated = 0;
     const auto cqpskSearchStarted = std::chrono::steady_clock::now();
     auto cqpskBudgetReached = [&]() {
-        // DEC-0052: leave commit headroom on live Phase-2 — 061217 emit p50≈223
-        // with budget 80 because CQPSK consumed the whole deadline then
-        // mustAnnotateCommit still forced a full annotate/commit.
-        if (m_realtimeBudgetArmed &&
-            m_config.phase2CqpskTrafficDemod &&
-            m_config.realtimeVoiceSearch) {
-            const int budgetMs = std::max(1, m_config.realtimeDecodeBudgetMs);
-            const int reserveMs = std::clamp(budgetMs / 2, 25, 60);
-            if (std::chrono::steady_clock::now() + std::chrono::milliseconds(reserveMs) >=
-                m_realtimeBudgetDeadline) {
-                return true;
-            }
-        }
+        // DEC-0054: drop DEC-0052 half-budget CQPSK headroom — it stopped the
+        // grid before realtimeBudgetExceeded(), so forceCheap never re-armed
+        // and cold annotate starved (081416: 0.36s SILENT, cheap-commit=0).
         if (realtimeBudgetExceeded()) return true;
         return m_config.maxCqpskSearchCandidates > 0 &&
             cqpskCandidatesEvaluated >= m_config.maxCqpskSearchCandidates;
@@ -7059,11 +7049,12 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
     long long commitMs = 0;
     if (!best.dibits.empty()) {
         const auto selectedStats = best.stats;
-        // DEC-0052 closed the mustAnnotateCommit hole (061217 emit p50≈223).
-        // DEC-0053 (064509): sticky+budgetGone must NOT skip-commit — that made
-        // follows golden for ~0.6s (cold emit) then permanent no-vcw silence
-        // (WAV 1.24s / 2 emits vs 061217's 92s CLEAR). Sticky sustain uses the
-        // same cheap-commit path as cold (sticky phase, no 12-phase/deep rescue).
+        // DEC-0054 (081416): restore cold full annotate. DEC-0052/0053 forceCheap
+        // on cold + CQPSK headroom → 0.36s SILENT scraps / almost no emits.
+        // 061217 (pre-0052) had ~92s CLEAR with unbounded commit after CQPSK.
+        // Keep: never skip-commit on sticky (064509); mid-decode aborts (0051).
+        // Sticky+budgetGone → cheap-commit with hot allowance; cold → full
+        // annotate with cold allowance re-arm (no forceCheap).
         const bool stickySustainReady =
             m_phase2MaskPhaseKnown &&
             (m_phase2SessionMacCrcSeen ||
@@ -7072,38 +7063,26 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
              std::any_of(m_phase2SlotSessionMacCrcSeen.begin(),
                          m_phase2SlotSessionMacCrcSeen.end(),
                          [](bool seen) { return seen; }));
-        const bool coldTrafficNeedsCommit =
-            m_config.phase2CqpskTrafficDemod && !stickySustainReady;
         const bool budgetGone =
             realtimeBudgetExceeded() && m_config.realtimeVoiceSearch;
-        if (budgetGone &&
-            hasPhase2TrafficTelemetry(best) &&
-            !coldTrafficNeedsCommit &&
-            !stickySustainReady &&
-            !hasPhase2SoftCqpskLockEvidence(best) &&
-            !hasCqpskHardLockEvidence(best)) {
-            restorePhase1BitTail(phase1TailSnapshot);
+        restorePhase1BitTail(phase1TailSnapshot);
+        bool forceCheapCommit = false;
+        if (budgetGone && stickySustainReady) {
+            forceCheapCommit = true;
+            m_phase2ForceCheapRealtimeCommit = true;
+            armRealtimeDecodeBudget(kP25LiveStickyCheapCommitAllowanceMs);
+            m_phase2ForceCheapRealtimeCommit = true;
+            best.warnings.push_back(
+                "[p25][budget][dec0054] cheap-commit sticky-sustain budget-rearm");
             noteRealtimeBudget(best);
-        } else {
-            restorePhase1BitTail(phase1TailSnapshot);
-            // Budget gone on sticky sustain OR cold first-eye: cheap annotate
-            // only (sticky phase / no 12-phase / no deep rescue). Never skip
-            // commit on sticky — that zeroed VCWs after the first cold emit.
-            const bool forceCheapCommit =
-                budgetGone && (coldTrafficNeedsCommit || stickySustainReady);
-            if (forceCheapCommit) {
-                m_phase2ForceCheapRealtimeCommit = true;
-                // CQPSK already burned the processIq deadline; without a short
-                // re-arm, annotate loops hit exceeded() on entry and emit 0 VCW
-                // — same symptom as skip-commit (064509 golden then silence).
-                armRealtimeDecodeBudget(kP25LiveCheapCommitAllowanceMs);
-                m_phase2ForceCheapRealtimeCommit = true;
-                best.warnings.push_back(
-                    stickySustainReady
-                        ? "[p25][budget][dec0053] cheap-commit sticky-sustain budget-exhausted"
-                        : "[p25][budget][dec0052] cheap-commit cold-acquire budget-exhausted");
-                noteRealtimeBudget(best);
-            }
+        } else if (budgetGone && m_config.phase2CqpskTrafficDemod) {
+            // Cold / non-sticky: full annotate — do NOT forceCheap (081416).
+            armRealtimeDecodeBudget(kP25LiveColdCommitAllowanceMs);
+            best.warnings.push_back(
+                "[p25][budget][dec0054] full-commit cold-acquire budget-rearm");
+            noteRealtimeBudget(best);
+        }
+        {
             if (m_config.enablePersistentPhase2Framer && !best.dibits.empty()) {
                 feedPhase2FramerDibits(
                     best.dibits,
