@@ -98,6 +98,11 @@ def scan_log(log_path: Path) -> dict:
         "not_fed": sum(1 for l in lines if "phase2-clear-target-vcw-not-fed" in l),
         "gate_emit": sum(1 for l in lines if "gate=emit" in l),
         "wrong_tdma": sum(1 for l in lines if "wrong-TDMA" in l or "wrongSlot=" in l and "wrongSlot=0" not in l),
+        "budget_trip": sum(
+            1
+            for l in lines
+            if "[p25][budget]" in l or "P25 budget trip:" in l or "budget exhausted" in l
+        ),
     }
 
     # Prefer audit classifiers when available (live logs don't print issue tags).

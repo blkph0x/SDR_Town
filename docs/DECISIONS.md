@@ -5,6 +5,34 @@ A decision is recorded **before** code that depends on it is written.
 
 ---
 
+## DEC-0052 — Close mustAnnotateCommit budget hole (`061217`)
+
+- **Date:** 2026-09-12
+- **Status:** accepted
+- **Evidence (capture `20260912_061217`, ~713 s, gapless, SNR≈17.9):**
+  - Live listen overall **CLEAR** (3 brief GARBLED 2 s islands) — almost fully
+    clear subjectively.
+  - CADENCE n=676: A=446 D=197 ok=**20**; duty mean 0.135 max 1.038.
+  - Emit dsp p50≈**223** / p90≈**562** (worse than 044651’s 212); worker-busy
+    **690** (~0.97/s); rolling busy max still **~15.9 s**; wall-timeout **0**.
+  - DEC-0051 budget-trip log hits: **0** — early-out never ran.
+  - Root cause: `mustAnnotateCommit = phase2CqpskTrafficDemod || …` is always
+    true on live Phase-2 follow, so processIq still ran full annotate/commit
+    after the deadline; CQPSK also consumed the whole 80 ms budget before
+    commit.
+  - File bars on clear islands: duty 0.67–0.78 listen=CLEAR; LIVE_WORSE is
+    continuity (busy cliffs), not RF/mbelib.
+- **Decision:**
+  1. Sticky sustain + budget gone → **skip full commit** (free worker; next hop
+     continues lattice). Log `[p25][budget][dec0052] skip-commit…`.
+  2. Cold first-eye + budget gone → **cheap commit** only (no 12-phase /
+     deep rescue); flag `m_phase2ForceCheapRealtimeCommit`.
+  3. Reserve ~half of realtime budget as CQPSK→commit headroom (25–60 ms).
+  4. Surface budget trips into p25_log (`P25 budget trip:`) + logscan
+     `budget_trip` signature.
+- **Consequences:** Expect emit p50≪120, busy/sec down, ok→D cliffs fewer;
+  listen should stay CLEAR. Do not soften DEC-0012; streaming DDC stays off.
+
 ## DEC-0051 — Cooperative mid-decode realtime budget abort (`044651`)
 
 - **Date:** 2026-09-12

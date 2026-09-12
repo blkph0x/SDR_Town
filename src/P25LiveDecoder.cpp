@@ -6016,6 +6016,7 @@ P25LiveDecoder P25LiveDecoder::createIndependentProbeCopy(bool retainPhase2MaskP
 void P25LiveDecoder::armRealtimeDecodeBudget(int budgetMs) noexcept
 {
     m_realtimeBudgetTripped = false;
+    m_phase2ForceCheapRealtimeCommit = false;
     if (budgetMs <= 0) {
         m_realtimeBudgetArmed = false;
         return;
@@ -6029,6 +6030,7 @@ void P25LiveDecoder::disarmRealtimeDecodeBudget() noexcept
 {
     m_realtimeBudgetArmed = false;
     m_realtimeBudgetTripped = false;
+    m_phase2ForceCheapRealtimeCommit = false;
 }
 
 bool P25LiveDecoder::realtimeDecodeBudgetExceeded() const noexcept
@@ -6042,7 +6044,7 @@ void P25LiveDecoder::noteRealtimeDecodeBudgetTrip(std::vector<std::string>& warn
     if (m_realtimeBudgetTripped) return;
     m_realtimeBudgetTripped = true;
     warnings.push_back(
-        "Realtime P25 voice decode budget exhausted; using best bounded result for this window.");
+        "[p25][budget][dec0052] Realtime P25 voice decode budget exhausted; using best bounded result for this window.");
 }
 
 void P25LiveDecoder::latchPhase2FramerOriginIfNeeded() noexcept
@@ -6733,10 +6735,24 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
     size_t cqpskCandidatesEvaluated = 0;
     const auto cqpskSearchStarted = std::chrono::steady_clock::now();
     auto cqpskBudgetReached = [&]() {
+        // DEC-0052: leave commit headroom on live Phase-2 — 061217 emit p50≈223
+        // with budget 80 because CQPSK consumed the whole deadline then
+        // mustAnnotateCommit still forced a full annotate/commit.
+        if (m_realtimeBudgetArmed &&
+            m_config.phase2CqpskTrafficDemod &&
+            m_config.realtimeVoiceSearch) {
+            const int budgetMs = std::max(1, m_config.realtimeDecodeBudgetMs);
+            const int reserveMs = std::clamp(budgetMs / 2, 25, 60);
+            if (std::chrono::steady_clock::now() + std::chrono::milliseconds(reserveMs) >=
+                m_realtimeBudgetDeadline) {
+                return true;
+            }
+        }
         if (realtimeBudgetExceeded()) return true;
         return m_config.maxCqpskSearchCandidates > 0 &&
             cqpskCandidatesEvaluated >= m_config.maxCqpskSearchCandidates;
     };
+    (void)cqpskSearchStarted;
     for (int phaseIndex : cqpskPhaseOrder) {
         if (stopCqpskSearch) break;
         if (cqpskBudgetReached()) break;
@@ -7043,20 +7059,47 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
     long long commitMs = 0;
     if (!best.dibits.empty()) {
         const auto selectedStats = best.stats;
-        // Phase-2 traffic (SDRTrunk HDQPSK model): never publish probe-only
-        // telemetry without an annotate/commit pass.  Skipping commit after the
-        // CQPSK grid burned the realtime budget produced the live signature
-        // p2bursts>0 p2vcw=0 while RF was locked (capture 080701 TG30302).
-        const bool mustAnnotateCommit =
-            m_config.phase2CqpskTrafficDemod ||
-            hasPhase2SoftCqpskLockEvidence(best) ||
-            hasCqpskHardLockEvidence(best);
-        if (realtimeBudgetExceeded() && m_config.realtimeVoiceSearch &&
-            hasPhase2TrafficTelemetry(best) && !mustAnnotateCommit) {
+        // DEC-0052 (capture 061217): DEC-0051 early-out never fired on live
+        // Phase-2 because mustAnnotateCommit included phase2CqpskTrafficDemod
+        // alone (always true on follow). Emit p50≈223 / worker-busy 690 / 0
+        // budget-trip logs. Sticky sustain may skip full annotate once the
+        // deadline is gone; cold first-eye still commits (cheap / inner abort).
+        const bool stickySustainReady =
+            m_phase2MaskPhaseKnown &&
+            (m_phase2SessionMacCrcSeen ||
+             m_phase2Ess.known ||
+             m_phase2SuperframeAnchorKnown ||
+             std::any_of(m_phase2SlotSessionMacCrcSeen.begin(),
+                         m_phase2SlotSessionMacCrcSeen.end(),
+                         [](bool seen) { return seen; }));
+        const bool coldTrafficNeedsCommit =
+            m_config.phase2CqpskTrafficDemod && !stickySustainReady;
+        const bool budgetGone =
+            realtimeBudgetExceeded() && m_config.realtimeVoiceSearch;
+        if (budgetGone && stickySustainReady) {
+            // Free the single-flight worker; next 80+280 hop continues lattice.
+            restorePhase1BitTail(phase1TailSnapshot);
+            noteRealtimeBudget(best);
+            best.warnings.push_back(
+                "[p25][budget][dec0052] skip-commit sticky-sustain budget-exhausted");
+        } else if (budgetGone &&
+                   hasPhase2TrafficTelemetry(best) &&
+                   !coldTrafficNeedsCommit &&
+                   !hasPhase2SoftCqpskLockEvidence(best) &&
+                   !hasCqpskHardLockEvidence(best)) {
             restorePhase1BitTail(phase1TailSnapshot);
             noteRealtimeBudget(best);
         } else {
             restorePhase1BitTail(phase1TailSnapshot);
+            // Cold first-eye with deadline already gone: force cheap annotate
+            // (no 12-phase hunt / deep rescue). Inner loops still honor deadline.
+            const bool forceCheapCommit = budgetGone && coldTrafficNeedsCommit;
+            if (forceCheapCommit) {
+                m_phase2ForceCheapRealtimeCommit = true;
+                noteRealtimeBudget(best);
+                best.warnings.push_back(
+                    "[p25][budget][dec0052] cheap-commit cold-acquire budget-exhausted");
+            }
             if (m_config.enablePersistentPhase2Framer && !best.dibits.empty()) {
                 feedPhase2FramerDibits(
                     best.dibits,
@@ -7087,7 +7130,8 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
                     ? &best.softDibitMinAbsLlr
                     : nullptr);
             const bool allowCleanTailCommitRetry =
-                !(m_config.realtimeVoiceSearch && m_config.phase2CqpskTrafficDemod);
+                !(m_config.realtimeVoiceSearch && m_config.phase2CqpskTrafficDemod) &&
+                !forceCheapCommit;
             if (allowCleanTailCommitRetry &&
                 isCqpskPath(selectedStats.demodPath) &&
                 !hasCqpskHardLockEvidence(committed)) {
@@ -7118,6 +7162,7 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
             restoreSelectedDemodStats(committed, selectedStats);
             best = std::move(committed);
             if (realtimeBudgetExceeded()) noteRealtimeBudget(best);
+            m_phase2ForceCheapRealtimeCommit = false;
         }
     } else {
         restorePhase1BitTail(phase1TailSnapshot);
@@ -8508,7 +8553,13 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
                     m_phase2DecodeGeneration > m_phase2LastFullMaskPhaseHuntGeneration &&
                     (m_phase2DecodeGeneration - m_phase2LastFullMaskPhaseHuntGeneration) <
                         kRealtimeFullMaskPhaseHuntSpacingGenerations;
-                const bool cheapProbeMask = !annotateSessionCodewords || realtimeMaskHuntThrottledForLock;
+                const bool cheapProbeMask =
+                    !annotateSessionCodewords ||
+                    realtimeMaskHuntThrottledForLock ||
+                    m_phase2ForceCheapRealtimeCommit ||
+                    (annotateSessionCodewords &&
+                     m_config.realtimeVoiceSearch &&
+                     realtimeDecodeBudgetExceeded());
                 if (!cheapProbeMask && annotateSessionCodewords && m_config.realtimeVoiceSearch) {
                     m_phase2LastFullMaskPhaseHuntGeneration = m_phase2DecodeGeneration;
                 }
@@ -8586,12 +8637,16 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
                     // covers 20202-class soft-rank misses without the 4×2
                     // cost that fed 234224 worker-busy drop D.
                     size_t rescueDeepBudget = m_config.realtimeVoiceSearch ? 1u : 8u;
+                    if (m_phase2ForceCheapRealtimeCommit) {
+                        rescueDeepBudget = 0;
+                    }
                     if (m_phase2ExtraDeepAcchBudget > 0) {
                         rescueDeepBudget += static_cast<size_t>(m_phase2ExtraDeepAcchBudget);
                         m_phase2ExtraDeepAcchBudget = 0;
                     }
                     size_t rescueCandidates = 0;
                     for (const auto& candidate : phaseWindows) {
+                        if (rescueDeepBudget == 0) break;
                         if (realtimeDecodeBudgetExceeded()) break;
                         if (rescueCandidates++ >= maxRescueCandidates) break;
                         auto rescued = scorePhase2MaskPhaseWindow(

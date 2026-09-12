@@ -4,6 +4,13 @@ Newest entry at the top. Record facts, not hopes.
 
 ---
 
+## BN-0043 — DEC-0052 sticky skip-commit after budget (`061217`) (2026-09-12)
+
+- **Evidence:** emit p50≈223, busy 690, 0 DEC-0051 trip lines; listen CLEAR.
+- **Fix:** skip commit on sticky sustain when deadline gone; cheap cold commit;
+  CQPSK headroom; log `P25 budget trip:`.
+- **Gate:** verifiers for DEC-0052 + rebuild Release.
+
 ## BN-0042 — DEC-0051 cooperative budget abort (2026-09-12)
 
 - **Evidence:** `044651` emit dsp p50≈212 ms, worker-busy 135, rolling→15.9 s;

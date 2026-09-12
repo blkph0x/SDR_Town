@@ -4,6 +4,14 @@ Newest at the top.
 
 ---
 
+## 2026-09-12 — DEC-0052 mustAnnotateCommit hole (`061217`)
+
+- **Capture:** ~713 s gapless; live listen CLEAR; CADENCE ok only 20/676.
+- **Worker:** emit p50≈223, busy 690 — DEC-0051 never tripped (0 log hits).
+- **Cause:** `phase2CqpskTrafficDemod` forced unbounded commit after deadline.
+- **Fix:** sticky skip-commit + cold cheap-commit + CQPSK headroom + p25_log
+  budget trips. Verifier `verify_p25_phase2_budget_skip_sticky_commit.py`.
+
 ## 2026-09-12 — DEC-0051 cooperative mid-decode budget abort (`044651`)
 
 - **Forensic (no listen):** `run_p25_capture_full_forensic.py` on `044651`;

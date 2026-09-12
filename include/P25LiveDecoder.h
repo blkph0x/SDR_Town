@@ -739,6 +739,8 @@ private:
     bool m_realtimeBudgetArmed = false;
     bool m_realtimeBudgetTripped = false;
     std::chrono::steady_clock::time_point m_realtimeBudgetDeadline{};
+    // DEC-0052: cold first-eye commit after deadline — cheap hunt only.
+    bool m_phase2ForceCheapRealtimeCommit = false;
 };
 
 class P25ImbeVoiceDecoder {
