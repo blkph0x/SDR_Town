@@ -5,6 +5,27 @@ A decision is recorded **before** code that depends on it is written.
 
 ---
 
+## DEC-0053 — Sticky budget path cheap-commits (not skip) (`064509`)
+
+- **Date:** 2026-09-12
+- **Status:** accepted
+- **Evidence (capture `20260912_064509`, ~257 s, post–DEC-0052):**
+  - First follow emit ~0.6 s **CLEAR**, then permanent silence; only **2** emits
+    total (WAV **1.24 s**) vs `061217` **91.96 s** CLEAR / **478** emits.
+  - CADENCE ok≥0.65=**0**; no_vcw **470**; budget_trip **4**; emit p50 **170**
+    (improved) but continuity collapsed.
+  - eye-lost **0** — not DEC-0048. Skip-commit after sticky ready zeroed VCWs.
+  - Cheap-commit with already-expired CQPSK deadline also emits 0 VCW (annotate
+    loops break on entry) — need a short re-arm allowance.
+- **Decision:**
+  1. **Reject** sticky skip-commit. Sticky+budgetGone → **cheap-commit** on
+     sticky lattice (same forceCheap path as cold).
+  2. Re-arm `kP25LiveCheapCommitAllowanceMs` (**50**) before cheap annotate.
+  3. Prefer `cheap-commit` tags in p25_log budget-trip lines.
+  4. Keep CQPSK headroom (DEC-0052); do not soften DEC-0012; streaming DDC off.
+- **Consequences:** Expect multi-second CLEAR follows again with bounded dsp;
+  logscan should show `cheap-commit sticky-sustain` not silence after first emit.
+
 ## DEC-0052 — Close mustAnnotateCommit budget hole (`061217`)
 
 - **Date:** 2026-09-12

@@ -927,28 +927,41 @@ P25VoicePublishOutcome MainWindow::publishP25VoiceDecodeResult(const MainWindow:
 
         publishP25VoiceDiagnostics(rx, result.audio, publishVoiceDiag);
 
-        // DEC-0052: surface cooperative budget trips into the capture p25_log
-        // (061217 had 0 budget-trip lines because warnings never reached the log).
-        for (const auto& warning : result.audio.decoderWarnings) {
-            if (warning.find("[p25][budget]") == std::string::npos &&
-                warning.find("budget exhausted") == std::string::npos) {
-                continue;
+        // DEC-0052/0053: surface budget trips; prefer specific cheap-commit tags.
+        {
+            std::string chosen;
+            for (const auto& warning : result.audio.decoderWarnings) {
+                if (warning.find("cheap-commit") != std::string::npos ||
+                    warning.find("skip-commit") != std::string::npos) {
+                    chosen = warning;
+                    break;
+                }
             }
-            const QString warningText = QString::fromStdString(warning).left(220);
-            const uint64_t seqLog = result.sequence;
-            const uint32_t tgLog = result.talkgroupId;
-            const long long dspMsLog = result.dspMicros / 1000;
-            QTimer::singleShot(0, this, [this, warningText, seqLog, tgLog, dspMsLog]() {
-                appendP25LogLineKeyed(
-                    QString("p25-budget-trip:%1").arg(static_cast<qulonglong>(seqLog)),
-                    QString("P25 budget trip: seq=%1 tg=%2 dspMs=%3 %4")
-                        .arg(static_cast<qulonglong>(seqLog))
-                        .arg(tgLog)
-                        .arg(dspMsLog)
-                        .arg(warningText),
-                    750);
-            });
-            break;
+            if (chosen.empty()) {
+                for (const auto& warning : result.audio.decoderWarnings) {
+                    if (warning.find("[p25][budget]") != std::string::npos ||
+                        warning.find("budget exhausted") != std::string::npos) {
+                        chosen = warning;
+                        break;
+                    }
+                }
+            }
+            if (!chosen.empty()) {
+                const QString warningText = QString::fromStdString(chosen).left(220);
+                const uint64_t seqLog = result.sequence;
+                const uint32_t tgLog = result.talkgroupId;
+                const long long dspMsLog = result.dspMicros / 1000;
+                QTimer::singleShot(0, this, [this, warningText, seqLog, tgLog, dspMsLog]() {
+                    appendP25LogLineKeyed(
+                        QString("p25-budget-trip:%1").arg(static_cast<qulonglong>(seqLog)),
+                        QString("P25 budget trip: seq=%1 tg=%2 dspMs=%3 %4")
+                            .arg(static_cast<qulonglong>(seqLog))
+                            .arg(tgLog)
+                            .arg(dspMsLog)
+                            .arg(warningText),
+                        750);
+                });
+            }
         }
 
         AudioEngine* audioOutputEngine = result.speakerAudio.empty()

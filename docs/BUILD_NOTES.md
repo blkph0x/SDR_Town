@@ -4,6 +4,12 @@ Newest entry at the top. Record facts, not hopes.
 
 ---
 
+## BN-0044 — DEC-0053 sticky cheap-commit not skip (`064509`) (2026-09-12)
+
+- **Evidence:** post-0052 capture: 2 cold CLEAR emits then permanent no-vcw.
+- **Fix:** remove sticky skip-commit; re-arm 50 ms cheap-commit allowance.
+- **Gate:** `verify_p25_phase2_budget_skip_sticky_commit.py` + Release rebuild.
+
 ## BN-0043 — DEC-0052 sticky skip-commit after budget (`061217`) (2026-09-12)
 
 - **Evidence:** emit p50≈223, busy 690, 0 DEC-0051 trip lines; listen CLEAR.

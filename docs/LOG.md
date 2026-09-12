@@ -4,6 +4,12 @@ Newest at the top.
 
 ---
 
+## 2026-09-12 — DEC-0053 sticky cheap-commit (`064509` golden→silence)
+
+- **Symptom:** first ~0.6 s CLEAR then nothing; WAV 1.24 s / 2 emits.
+- **Cause:** DEC-0052 sticky skip-commit (+ expired deadline aborting cheap path).
+- **Fix:** sticky+budget → cheap-commit with 50 ms allowance re-arm; no skip.
+
 ## 2026-09-12 — DEC-0052 mustAnnotateCommit hole (`061217`)
 
 - **Capture:** ~713 s gapless; live listen CLEAR; CADENCE ok only 20/676.
