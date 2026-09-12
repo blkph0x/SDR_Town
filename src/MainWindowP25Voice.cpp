@@ -282,6 +282,8 @@ void MainWindow::startP25VoiceWorker()
                              p25Phase2SessionHadBurstEye(rx) ||
                              rx.p25SessionState.sustain.peakPhase2MaskedBursts >= 1 ||
                              rx.p25SessionState.sustain.peakPhase2SuperframeBursts >= 2);
+                        // Global decode wall (320/400). Do not clamp to healthy
+                        // budget without cooperative mid-decode abort (DEC-0046).
                         const int decodeWallMs = coldAcquireJob
                             ? kP25VoiceWorkerColdDecodeWallMs
                             : kP25VoiceWorkerMaxDecodeWallMs;
@@ -374,14 +376,31 @@ void MainWindow::startP25VoiceWorker()
                                     // duty 0.43 vs live max duty 0.338 then all-A).
                                     // When the previous hop already has a target
                                     // eye, keep DEC-0019 cand=8 (060221 worker-busy).
-                                    // When the target eye is gone, match replay
-                                    // caps so block-channelize can re-lock Costas.
+                                    // When the target eye is gone, widen candidates
+                                    // toward replay so block-channelize can re-lock.
                                     //
                                     // DEC-0039 / capture 20260909_110941: after
                                     // speak, hops with companion/structure bursts
                                     // but targetVcw=0 kept cand=8 and never
                                     // matched the 095846 re-lock. Treat post-emit
                                     // no-target (and no decode) as eye-lost too.
+                                    //
+                                    // DEC-0041 / capture 20260911_234224: live must
+                                    // not also inherit the 240 ms replay wall —
+                                    // eye-lost jobs at cand=16/240 ran dsp p90
+                                    // ~461 ms under pending=1 → worker-busy drop D
+                                    // (short islands). Keep cand=16 after a short
+                                    // streak, but cap live budget at hot 120 ms.
+                                    //
+                                    // DEC-0042 / capture 20260912_002128 (~54 min,
+                                    // all TGs): healthy emit-gate dsp p50≈199 ms
+                                    // with cand=8/120; CADENCE mean duty 0.115,
+                                    // drop D feedRatio≈ok feedRatio, hard cliffs
+                                    // always co-timed with worker-busy then eye
+                                    // collapse to A. Same IQ file TG30017 slot1
+                                    // duty 0.83. Shrink only healthy sustain
+                                    // search — do not touch eye-lost escalate,
+                                    // hop geometry, or DEC-0012.
                                     const auto& liveDiag = rx.p25VoiceDiagnostics;
                                     const bool noTargetEye =
                                         liveDiag.phase2TargetVoiceCodewords == 0 &&
@@ -393,14 +412,35 @@ void MainWindow::startP25VoiceWorker()
                                         noTargetEye &&
                                         (noStructureEye ||
                                          rx.p25SessionState.sustain.hadSuccessfulEmit);
+                                    auto& sustainMut = rx.p25SessionState.sustain;
                                     if (eyeLost) {
-                                        hotBudgetMs = kP25ReplayHotBudgetMs;
+                                        sustainMut.postEmitEyeLostStreak =
+                                            std::min(sustainMut.postEmitEyeLostStreak + 1, 64);
+                                    } else {
+                                        sustainMut.postEmitEyeLostStreak = 0;
+                                    }
+                                    const bool escalateReplayCands =
+                                        eyeLost &&
+                                        sustainMut.postEmitEyeLostStreak >=
+                                            kP25LiveEyeLostReplayCandStreak;
+                                    if (escalateReplayCands) {
+                                        hotBudgetMs = kP25LiveEyeLostReplayBudgetMs;
                                         hotCands = kP25ReplayHotCqpskCandidates;
                                         hotSyncHits = kP25ReplayHotSyncHits;
                                         hotSfLocks = kP25ReplayHotSuperframeLocks;
-                                    } else {
+                                    } else if (eyeLost) {
+                                        // First miss: DEC-0041 cheap challenge.
                                         hotBudgetMs = kP25VoiceWorkerHotRealtimeBudgetMs;
                                         hotCands = kP25VoiceWorkerHotMaxCqpskCandidates;
+                                        hotSyncHits = kP25VoiceWorkerHotMaxPhase2SyncHits;
+                                        hotSfLocks = kP25VoiceWorkerHotMaxPhase2SuperframeLocks;
+                                    } else {
+                                        // DEC-0042 healthy sustain search only.
+                                        // DEC-0045 tried wall=105 here; rejected
+                                        // DEC-0046 — post-hoc wall stamps wiped
+                                        // pending on empty eyes and killed audio.
+                                        hotBudgetMs = kP25LiveHealthySustainBudgetMs;
+                                        hotCands = kP25LiveHealthySustainCqpskCandidates;
                                         hotSyncHits = kP25VoiceWorkerHotMaxPhase2SyncHits;
                                         hotSfLocks = kP25VoiceWorkerHotMaxPhase2SuperframeLocks;
                                     }
@@ -833,42 +873,56 @@ P25VoicePublishOutcome MainWindow::publishP25VoiceDecodeResult(const MainWindow:
                  result.audio.decodedFrames > 0 ||
                  !result.audio.audio.empty());
             if (!keepWallTimeoutEvidence) {
-                p25Phase2ClearStaleResultSpeakerPending(pendingAudioByRx,
-                    result.receiverSessionKey,
-                    result.callSessionId,
-                    rx,
-                    P25PendingClearReason::RetuneOrGeneration);
-                const uintptr_t rxKey = reinterpret_cast<uintptr_t>(&rx);
-                const uint64_t seqLog = result.sequence;
-                const QString reason = QString::fromStdString(
-                    staleReason.empty() ? std::string("stale") : staleReason);
-                const uint32_t tgLog = result.talkgroupId;
-                const uint32_t sourceLogValue = result.sourceId;
-                const bool slotKnownLog = result.tdmaSlotKnown;
-                const int slotLog = static_cast<int>(result.tdmaSlot & 0x01u);
-                const qulonglong genLog = static_cast<qulonglong>(result.trafficGeneration);
-                QTimer::singleShot(0, this, [this, rxKey, seqLog, reason, tgLog, sourceLogValue, slotKnownLog, slotLog, genLog]() {
-                    appendP25LogLineKeyed(QString("p25-voice-worker-stale:%1").arg(static_cast<qulonglong>(rxKey)),
-                        QString("P25 voice worker stale/drop: seq=%1 reason=%2 tg=%3 src=%4 slot=%5 generation=%6.")
-                            .arg(static_cast<qulonglong>(seqLog))
-                            .arg(reason)
-                            .arg(tgLog)
-                            .arg(sourceLogValue != 0 ? p25HexId(sourceLogValue, 6) : QStringLiteral("unknown"))
-                            .arg(slotKnownLog ? QString::number(slotLog) : QStringLiteral("unknown"))
-                            .arg(genLog),
+                if (p25Phase2WallTimeoutMayClearSpeakerPending(result.staleReason,
+                                                               keepWallTimeoutEvidence)) {
+                    p25Phase2ClearStaleResultSpeakerPending(pendingAudioByRx,
+                        result.receiverSessionKey,
+                        result.callSessionId,
+                        rx,
+                        P25PendingClearReason::RetuneOrGeneration);
+                    const uintptr_t rxKey = reinterpret_cast<uintptr_t>(&rx);
+                    const uint64_t seqLog = result.sequence;
+                    const QString reason = QString::fromStdString(
+                        staleReason.empty() ? std::string("stale") : staleReason);
+                    const uint32_t tgLog = result.talkgroupId;
+                    const uint32_t sourceLogValue = result.sourceId;
+                    const bool slotKnownLog = result.tdmaSlotKnown;
+                    const int slotLog = static_cast<int>(result.tdmaSlot & 0x01u);
+                    const qulonglong genLog = static_cast<qulonglong>(result.trafficGeneration);
+                    QTimer::singleShot(0, this, [this, rxKey, seqLog, reason, tgLog, sourceLogValue, slotKnownLog, slotLog, genLog]() {
+                        appendP25LogLineKeyed(QString("p25-voice-worker-stale:%1").arg(static_cast<qulonglong>(rxKey)),
+                            QString("P25 voice worker stale/drop: seq=%1 reason=%2 tg=%3 src=%4 slot=%5 generation=%6.")
+                                .arg(static_cast<qulonglong>(seqLog))
+                                .arg(reason)
+                                .arg(tgLog)
+                                .arg(sourceLogValue != 0 ? p25HexId(sourceLogValue, 6) : QStringLiteral("unknown"))
+                                .arg(slotKnownLog ? QString::number(slotLog) : QStringLiteral("unknown"))
+                                .arg(genLog),
+                            1000);
+                    });
+                    return P25VoicePublishOutcome::DiscardedStale;
+                }
+                // DEC-0046: empty wall stamp — keep pending, publish diags only.
+                stale = false;
+                publishVoiceDiag = true;
+                QTimer::singleShot(0, this, [this, seq = result.sequence, tg = result.talkgroupId]() {
+                    appendP25LogLineKeyed(QString("p25-voice-worker-wall-empty:%1").arg(static_cast<qulonglong>(seq)),
+                        QString("P25 voice worker empty over-budget hop kept pending: seq=%1 tg=%2 (wall stamp must not wipe playout).")
+                            .arg(static_cast<qulonglong>(seq))
+                            .arg(tg),
                         1000);
                 });
-                return P25VoicePublishOutcome::DiscardedStale;
+            } else {
+                stale = false;
+                publishVoiceDiag = true;
+                QTimer::singleShot(0, this, [this, seq = result.sequence, tg = result.talkgroupId]() {
+                    appendP25LogLineKeyed(QString("p25-voice-worker-wall-kept:%1").arg(static_cast<qulonglong>(seq)),
+                        QString("P25 voice worker kept over-budget decode evidence: seq=%1 tg=%2 (not hard-dropping Phase-2 bursts/VCW).")
+                            .arg(static_cast<qulonglong>(seq))
+                            .arg(tg),
+                        1000);
+                });
             }
-            stale = false;
-            publishVoiceDiag = true;
-            QTimer::singleShot(0, this, [this, seq = result.sequence, tg = result.talkgroupId]() {
-                appendP25LogLineKeyed(QString("p25-voice-worker-wall-kept:%1").arg(static_cast<qulonglong>(seq)),
-                    QString("P25 voice worker kept over-budget decode evidence: seq=%1 tg=%2 (not hard-dropping Phase-2 bursts/VCW).")
-                        .arg(static_cast<qulonglong>(seq))
-                        .arg(tg),
-                    1000);
-            });
         }
 
         publishP25VoiceDiagnostics(rx, result.audio, publishVoiceDiag);

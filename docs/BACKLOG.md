@@ -11,10 +11,8 @@ Status: `open` | `in_progress` | `blocked` | `done`
 
 | ID | Status | Tracker | What | Notes / must not invent |
 |---|---|---|---|---|
-| B-0001 | open | ISS-0001 / T-0010 / GH#9 | **Live** clear P25 continuous audio re-prove (~095846 class) | 2026-09-12 live `234224`: duty mean 0.13, max 1.07; drop A/D dominate short islands. File bars OK. Do **not** default-on streaming DDC. |
-| B-0002 | in_progress | T-0004 / REQ-P2.2 | Mixed MAC-dead / cold-eye first hop feed starve | ACCH alt-kind branch uncommitted. Live B=18/338 on `234224`; residual. DEC-0012 stays. |
-| B-0003 | open | T-0005 / REQ-P2.3 | Emit proven PCM only when drop=C | No dual-slot MAC-dead mute regression. |
-| B-0004 | open | T-0006 / REQ-P2.4 | Honest playout duty (drop=D residual / worker-busy) | `234224`: D=101 with `traffic-processor-audio-open` / clear-grant-vcw-not-fed — primary short-island class when audio already open. |
+| B-0001 | open | ISS-0001 / T-0010 / GH#9 | **Live** clear P25 continuous audio re-prove | After DEC-0049: reset PPM≈−2, listen+startstop, `p25 logscan` / `run_p25_capture_full_forensic.py`. |
+| B-0004 | in_progress | T-0006 / REQ-P2.4 | Honest playout duty (drop=D / worker-busy) | `044651` emit p50≈212 ms, worker-busy 135; cooperative abort still open. |
 | B-0005 | open | T-0007 / REQ-P2.5 | Follow hold during proven call (drop=E only) | |
 | B-0006 | open | T-0008 / REQ-P2.6 | Isolation non-regression (encrypted + wrong-slot) | Beside every P2 change. |
 

@@ -5,6 +5,204 @@ A decision is recorded **before** code that depends on it is written.
 
 ---
 
+## DEC-0049 — Harden Auto PPM after 1250 Hz overshoot (`044651`)
+
+- **Date:** 2026-09-12
+- **Status:** accepted
+- **Evidence (capture `20260912_044651`, ~268 s):**
+  - Live: TG10120 ok duty up to **0.909** (5 windows); TG20202 max **0.639**
+    drop D; CADENCE A=86 D=35 ok=5; worker-busy **135**.
+  - Auto PPM applied **twice** from AFC=**1250.0**Hz conf=**0.45**:
+    ppm −1.93 → −4.91 → **−7.88**. Summary residual AFC ~874 Hz. CC TSBK
+    showed high dibit corrections / CRC notes after overshoot.
+  - File voicetest TG10120 duty **0.64**; TG20202 **0.615** — RF+mbelib OK;
+    live “nothing” after good islands is eye/worker, not codec.
+- **Decision:**
+  1. Reject AFC samples on soft-probe rail ±1250 (±5 Hz).
+  2. Min conf **0.55**, max |AFC| **2000**, max step **1.5** ppm, cooldown
+     **120 s**.
+  3. Apply only from **trusted CC offset** — never fall back to
+     `gLastAfcOffsetHz` after Phase 2.
+  4. `p25AutoPpmAfcSampleAcceptable` + Catch `[p25][ppm][dec0049]`.
+- **Consequences:** Stops LO walk-off. Operator should reset device PPM
+  near **−2.0** before next listen. Worker-busy / feedRatio still open.
+
+---
+
+## DEC-0048 — Escalate eye-lost cand=16 on first post-emit miss (`041612`)
+
+- **Date:** 2026-09-12
+- **Status:** accepted (implemented; live re-prove pending)
+- **Evidence (capture `20260912_041612`, ~215 s, DEC-0046 exe):**
+  - Live CADENCE n=100: drop A=82 D=13 B=5; duty max **0.399**; ok≥0.65 **0**;
+    worker-busy **103**; Auto PPM **0**; wall-timeout **0**.
+  - **Same IQ file** `p25 voicetest` TG20202 slot1 8s:
+    `PASS_PARTIAL` **duty=0.805** drop=ok ambe=322/322 — RF+mbelib fine.
+  - Live emits briefly then permanent `no-vcw` under healthy cand=4; eye-lost
+    waited streak≥2 before cand=16.
+- **Decision:** `kP25LiveEyeLostReplayCandStreak = 1` (first post-emit eye-lost
+  hop uses cand=16 / 120 ms). Keep healthy cand=4/80. No mbelib-neo, hop/TTL,
+  DEC-0012 soften, or streaming default-on.
+- **Consequences:** Faster live re-lock toward file duty. Worker emit dsp
+  p50≈227 ms still open (cooperative abort).
+
+---
+
+## DEC-0047 — Automated `p25 logscan` deep forensic CLI
+
+- **Date:** 2026-09-12
+- **Status:** accepted
+- **Evidence:** Live “no audio” invisible to voicetest; need CADENCE /
+  worker-busy / wall / Auto PPM / reject-before-feed rollup from startstop logs.
+- **Decision:** `python src/tools/p25_logscan.py` + CLI `p25 logscan <dir>`
+  prints primary failure class and mbelib-neo advice (only when CADENCE ok).
+- **Consequences:** Every listen with startstop is automatable.
+
+---
+
+## DEC-0046 — Do not clamp live decode wall / wipe pending on wall stamps
+
+- **Date:** 2026-09-12
+- **Status:** accepted (reverts DEC-0045 clamp; hardens publish path)
+- **Evidence:**
+  - Operator: after DEC-0044/0045 Release, audio “really bad” again
+    (almost-worked → next gap-fix kills it).
+  - Wall is checked **after** `decodeP25VoiceAudioBlock` returns — it does
+    not cooperatively abort. Jobs can still run ≫ budget.
+  - Publish path: `decode-wall-timeout` without keepEvidence called
+    `p25Phase2ClearStaleResultSpeakerPending` → wiped playout mid-call.
+  - Clamping healthy wall to **105** made empty eyes (>105 ms) hit that
+    path constantly → continuous audio death.
+- **Decision:**
+  1. **Reject** DEC-0045 wall clamp; healthy/eye-lost keep global wall **320**.
+  2. Wall stamps (`decode-wall-timeout` / `overbudget-kept`) must **never**
+     clear speaker pending; empty overruns publish diags only.
+  3. Keep DEC-0044 auto PPM (return-to-control only).
+  4. No hop/TTL / DEC-0012 soften / streaming default-on.
+- **Consequences:** Restores pre-0045 pending continuity. Worker-busy when
+  dsp ≫80 remains open — needs cooperative budget abort, not wall stamps.
+  Catch `[p25][dec0046]` + verifiers lock the invariant.
+
+---
+
+## DEC-0045 — Cap live healthy/eye-lost decode walls (`032907`)
+
+- **Date:** 2026-09-12
+- **Status:** **rejected** (superseded by DEC-0046)
+- **Evidence (capture `20260912_032907`):** emit-gate dsp p50≈451 vs budget 80;
+  wall 320. Intent was to yield single-flight sooner.
+- **Decision (original):** clamp healthy wall 105 / eye-lost 145.
+- **Why rejected:** wall is post-hoc; clamp increased empty-timeout pending
+  wipes without shortening jobs. See DEC-0046.
+
+---
+
+## DEC-0044 — Auto PPM from sustained CC AFC (return-to-control only)
+
+- **Date:** 2026-09-12
+- **Status:** accepted (implemented; live re-prove pending)
+- **Evidence:** `032907` / prior captures: ppm device **0.0** while CC AFC
+  sits near **~884 Hz**. Soft-AFC cold seed exists; live still acquires then
+  cliffs on worker throughput. Manual PPM only today (`setFrequencyCorrection`
+  / CLI `ppm`). Baking CC AFC into LO mid-voice fights DEC-0016 park.
+- **Decision:**
+  1. On **return-to-control** (not warm-standby / not mid-voice), optionally
+     apply `estimatePpmCorrectionDelta(CC AFC, CC Hz)` via
+     `DeviceManager::setFrequencyCorrection`.
+  2. Gates: |AFC| 200–3500 Hz, conf ≥0.45 (or trusted CC offset ≤5 min),
+     |Δppm| ≥0.40, step clamp ±5, cooldown 30 s.
+  3. Prefer `gP25LastTrustedControlOffsetHz` over live AFC globals after
+     Phase 2 park.
+- **Consequences:** First follows start closer to LO; does not by itself fix
+  worker-busy drop D (that is DEC-0045).
+
+---
+
+## DEC-0043 — Post-speak opp-dominant sticky wipe debounced (twin rescue reverted)
+
+- **Date:** 2026-09-12
+- **Status:** accepted (debounce kept; ±1 twin rescue reverted after `024000`)
+- **Evidence:**
+  - `20260912_020758` TG20201 clear: post-speak opp-dominant sticky invalidate
+    wiped proven XOR/epoch → permanent `no-vcw` (file duty ~0.80).
+  - `20260912_024000` live: clear TG30003 @421.975 file
+    `PASS_CONTINUOUS duty=0.705` but live max **0.649**, wrong-TDMA /
+    `no-sf-mask` / worker-busy. Soft DUID ±1 twin rescue + debounce stuck
+    bad epochs — twin path reverted.
+- **Decision:**
+  1. After speak, opp-dominant sticky invalidate requires streak **≥3**.
+     Pre-speak keeps immediate invalidate.
+  2. **Do not** prefer ±1-burst lock twins via soft DUID scores on block path.
+  3. No hop/TTL / DEC-0012 soften / streaming default-on.
+- **Consequences:** Live clear continuity still open (worker drop D). Re-prove
+  on ENC=clear follows after rebuild.
+
+---
+
+## DEC-0042 — Healthy live sustain uses cand=4 / 80 ms (002128 forensic)
+
+- **Date:** 2026-09-12
+- **Status:** accepted (implemented; live re-prove pending)
+- **Evidence (capture `20260912_002128`, ~54 min, SNR ~15 dB, DEC-0041 exe):**
+  - CADENCE n=2731: mean duty **0.115**, ok≥0.65 only **99**; drops
+    A=1891 / D=650 / B=91 / ok=99. worker-busy **2782**.
+  - **Same failure on every TG** (30017/30302/30003/10301/10330/20201/…):
+    not a one-site grant quirk.
+  - Drop D feedRatio **0.445** ≈ ok feedRatio **0.427** — playout duty is
+    low because fewer VCWs/windows complete per second (tv 50 vs 117,
+    windows 6.4 vs 10.2), not because the feed gate newly blocks.
+  - Hard cliffs (duty≥0.50→&lt;0.15, n=27): **every** example co-timed with
+    worker-busy in the prior 2.5 s; then targetVcw collapses → drop A.
+  - Emit-gate WORKER dsp p50 **199** / p90 **535** ms on 80+280 eyes while
+    sustain needs ~80 ms hops under pending=1.
+  - **File voicetest** same capture TG **30017** slot1 skip=0 8s:
+    `PASS_CONTINUOUS duty=0.83` — RF/MAC are continuous; live extract starves.
+  - DEC-0041 eye-lost budget cap alone did not move the mean-duty class vs
+    `234224` (0.134 → 0.115 on a longer sample).
+- **Decision:**
+  1. When post-emit eye is **healthy** (`!eyeLost`): live hot caps
+     **cand=4 / budget=80** (`kP25LiveHealthySustain*`).
+  2. Keep DEC-0041: first eye-lost miss cand=8/120; streak≥2 → cand=16/120.
+  3. No hop/TTL change. No DEC-0012 soften. No streaming default-on.
+- **Consequences:** Re-prove file bars 060036/095846. New live CADENCE must
+  raise ok seconds / cut worker-busy without collapsing any TG’s peak duty.
+
+---
+
+## DEC-0041 — Live eye-lost re-lock keeps cand=16 inside hot 120 ms wall
+
+- **Date:** 2026-09-12
+- **Status:** accepted (implemented; file bars + live re-prove pending)
+- **Evidence:**
+  - Capture `20260911_234224` (~372 s gapless CC IQ, SNR ~12.5 dB) on ACCH
+    branch Release: CADENCE drop **D=101**/338 with `worker-busy` while
+    `pendingJobs=0` / `busy=yes`; operator heard short &lt;1 s islands after
+    brief emit.
+  - WORKER (rate-limited): dsp p50 **69.5** / p90 **461** / max **1515** ms;
+    emit-gate dsp p50 **202** / p90 **590**; submit interval p50 **159** ms
+    vs DEC-0009 sustain fresh **80** ms.
+  - DEC-0035/0039 live eye-lost used full replay caps **cand=16 / budget=240**.
+    That matches CLI/voicetest width but on the single-flight GUI worker the
+    240 ms wall + block-channelize produced multi-hundred-ms jobs → scheduler
+    skips → drop D death spiral. Healthy eye correctly stayed cand=8/120
+    (DEC-0019 / 060221).
+  - Do **not** soften DEC-0012. Do not invent hop/TTL. Do not default-on
+    streaming DDC (DEC-0038).
+- **Decision:**
+  1. Keep DEC-0039 definition of eye-lost (post-emit no-target counts).
+  2. First consecutive post-emit eye-lost hop stays **cand=8 / 120** (cheap
+     challenge). Streak ≥2 escalates to **cand=16** (replay width).
+  3. Live escalate budget is **`kP25LiveEyeLostReplayBudgetMs` = hot 120**,
+     not `kP25ReplayHotBudgetMs` (240). CLI/voicetest may still use 240.
+  4. Realtime unknown-mask deep ACCH rescue stays alt-kind capable but is
+     bounded to top **2** phases × deep budget **1** (was 4×2 on the ACCH
+     branch) so acquisition cost cannot re-feed drop D.
+- **Consequences:** Re-prove file bars 060036 / 095846. Live CADENCE on a
+  new GUI follow should cut worker-busy drop D without losing DEC-0035-class
+  re-lock width after a short miss streak.
+
+---
+
 ## DEC-0040 — Mechanical split of `main.cpp` (ISS-0004 / T-0009)
 
 - **Date:** 2026-09-09

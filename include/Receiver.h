@@ -189,6 +189,10 @@ struct Receiver {
     // Consecutive decode windows with Phase-2 bursts but zero selected-slot VCW
     // after a successful emit — triggers soft sticky mask/SF rehunt.
     int p25Phase2StructureNoTargetVoiceWindows = 0;
+    // DEC-0043 / capture 20260912_020758: consecutive opp-dominant (wrong-TDMA)
+    // windows after the call has spoken. Immediate sticky invalidate on a single
+    // companion-slot island wiped a proven XOR/epoch and starved clear audio.
+    int p25Phase2OppDominantEpochWindows = 0;
     // Consecutive post-emit empty eyes (no bursts/VCW). Soft-rehunt + clear
     // block CQPSK hint; do not steal speaker-sustain geometry (DEC-0032).
     int p25Phase2PostEmitEmptyEyeWindows = 0;
@@ -298,6 +302,7 @@ struct Receiver {
         p25Phase2ForceMaskEpochRehunt = false;
         p25Phase2MaskEpochRepairHoldWindows = 0;
         p25Phase2StructureNoTargetVoiceWindows = 0;
+        p25Phase2OppDominantEpochWindows = 0;
         p25Phase2PostEmitEmptyEyeWindows = 0;
     }
     void resetP25TrafficSessionFieldsLocked(bool fullClear = true)
@@ -327,6 +332,7 @@ struct Receiver {
         p25Phase2ForceMaskEpochRehunt = false;
         p25Phase2MaskEpochRepairHoldWindows = 0;
         p25Phase2StructureNoTargetVoiceWindows = 0;
+        p25Phase2OppDominantEpochWindows = 0;
         p25Phase2PostEmitEmptyEyeWindows = 0;
         p25Phase2LastEmittedAbsDibit = 0;
         p25Phase2StickySlotLabelInvert = false;

@@ -14,6 +14,8 @@ std::atomic<double> gLastAfcBinHz{0.0};
 std::atomic<double> gP25LastTrustedControlFreqHz{0.0};
 std::atomic<double> gP25LastTrustedControlOffsetHz{0.0};
 std::atomic<long long> gP25LastTrustedControlOffsetMs{0};
+std::atomic<long long> gP25LastAutoPpmApplyMs{0};
+std::atomic<double> gP25LastAutoPpmValue{0.0};
 
 P25VoiceDiagMirror gP25VoiceDiagMirror;
 P25Phase2CadenceRollup gP25Phase2Cadence;

@@ -2,6 +2,7 @@
 #define _USE_MATH_DEFINES
 #include <catch2/catch_all.hpp>
 #include "Demod.h"
+#include "P25VoiceTiming.h"
 #include "SignalClassifier.h"
 #include "ClassifierModelBackend.h"
 #include <complex>
@@ -223,6 +224,24 @@ TEST_CASE("Signal offset estimator resolves fractional-bin narrow carriers") {
 TEST_CASE("PPM correction delta follows app tuning convention") {
     REQUIRE(estimatePpmCorrectionDelta(-4200.0, 420.0e6) == Catch::Approx(10.0).margin(0.01));
     REQUIRE(estimatePpmCorrectionDelta(4200.0, 420.0e6) == Catch::Approx(-10.0).margin(0.01));
+}
+
+TEST_CASE("PPM delta from 032907-class CC AFC is ~2 ppm at 420 MHz", "[p25][ppm][dec0044]") {
+    // Capture 20260912_032907: afc≈884 Hz, device ppm=0 @ ~420.475 MHz.
+    const double delta = estimatePpmCorrectionDelta(884.0, 420.475e6);
+    REQUIRE(delta == Catch::Approx(-884.0 / 420.475e6 * 1.0e6).margin(0.01));
+    REQUIRE(std::abs(delta) > 0.40); // clears kP25AutoPpmMinAbsDelta
+    REQUIRE(std::abs(delta) < 5.0);
+}
+
+TEST_CASE("DEC-0049 auto PPM rejects soft-probe rail and floor confidence", "[p25][ppm][dec0049]") {
+    REQUIRE_FALSE(p25AutoPpmAfcSampleAcceptable(1250.0, 0.45)); // 044651 poison
+    REQUIRE_FALSE(p25AutoPpmAfcSampleAcceptable(1250.0, 0.90)); // rail blocked even if conf high
+    REQUIRE_FALSE(p25AutoPpmAfcSampleAcceptable(884.0, 0.45));  // conf below 0.55
+    REQUIRE(p25AutoPpmAfcSampleAcceptable(884.0, 0.55));
+    REQUIRE(p25AutoPpmAfcSampleAcceptable(-874.0, 0.70));
+    REQUIRE(kP25AutoPpmMaxStep == Catch::Approx(1.50));
+    REQUIRE(kP25AutoPpmCooldownMs == 120000);
 }
 
 TEST_CASE("Advanced classifier recommends exact AM workflow from carrier and balanced sidebands") {

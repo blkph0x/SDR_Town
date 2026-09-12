@@ -57,3 +57,29 @@ const char* p25AudioDropBucketLabel(P25AudioDropBucket bucket) noexcept
         return "ok";
     }
 }
+
+bool p25Phase2WallTimeoutMayClearSpeakerPending(const std::string& staleReason,
+                                                bool keepWallTimeoutEvidence) noexcept
+{
+    if (keepWallTimeoutEvidence) return false;
+    // Wall is checked after decode returns — it does not cooperatively abort.
+    // Empty overruns must keep pending / publish diags (DEC-0045 regression).
+    if (staleReason == "decode-wall-timeout" ||
+        staleReason == "decode-wall-overbudget-kept") {
+        return false;
+    }
+    return true;
+}
+
+bool p25Phase2LiveSustainBudgetWallSane(int healthyBudgetMs,
+                                        int healthyWallMs,
+                                        int globalWallMs) noexcept
+{
+    if (healthyBudgetMs <= 0 || healthyWallMs <= 0 || globalWallMs <= 0) return false;
+    // Wall must never be clamped below the search budget without a cooperative
+    // abort path — that only stamps more timeouts. Healthy wall must equal the
+    // global live wall until mid-decode cancel exists (DEC-0046).
+    if (healthyWallMs < healthyBudgetMs) return false;
+    if (healthyWallMs != globalWallMs) return false;
+    return true;
+}

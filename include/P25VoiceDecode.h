@@ -429,6 +429,16 @@ double applyNfmAfcFromSpectrum(Receiver& rx,
                                       double channelBwHz,
                                       DemodMode mode);
 
+// DEC-0044: apply device PPM from sustained CC AFC while idle on control.
+// Never call during Phase 2 voice follow (mid-park retune fights DEC-0016).
+// Returns true when setFrequencyCorrection was invoked.
+bool p25MaybeAutoApplyPpmFromControlAfc(size_t deviceIndex,
+                                               double controlFreqHz,
+                                               double afcOffsetHz,
+                                               double afcConfidence,
+                                               qint64 nowMs,
+                                               QString* logLine);
+
 double p25VoiceAfcTargetHz(const Receiver& rx, double nominalFreqHz, double channelBwHz);
 
 ReceiverSessionKey p25ReceiverSessionKey(const Receiver& rx);

@@ -3,6 +3,7 @@
 #include "P25DecodeConfig.h"
 #include "DemodModeUtils.h"
 
+#include "DeviceManager.h"
 #include "P25AudioDropClass.h"
 #include "P25RollingIq.h"
 #include "P25SdrtrunkTune.h"
@@ -372,6 +373,49 @@ double applyNfmAfcFromSpectrum(Receiver& rx,
     }
 
     return nominalFreqHz + rx.afcOffsetHz;
+}
+
+
+bool p25MaybeAutoApplyPpmFromControlAfc(size_t deviceIndex,
+                                        double controlFreqHz,
+                                        double afcOffsetHz,
+                                        double afcConfidence,
+                                        qint64 nowMs,
+                                        QString* logLine)
+{
+    if (logLine) logLine->clear();
+    if (!std::isfinite(controlFreqHz) || controlFreqHz < 1.0e6) return false;
+    if (!p25AutoPpmAfcSampleAcceptable(afcOffsetHz, afcConfidence)) return false;
+
+    const long long lastApply = gP25LastAutoPpmApplyMs.load(std::memory_order_relaxed);
+    if (lastApply > 0 && nowMs >= lastApply && (nowMs - lastApply) < kP25AutoPpmCooldownMs) {
+        return false;
+    }
+
+    const double deltaPpm = estimatePpmCorrectionDelta(afcOffsetHz, controlFreqHz);
+    if (!std::isfinite(deltaPpm) || std::abs(deltaPpm) < kP25AutoPpmMinAbsDelta) return false;
+
+    auto& mgr = DeviceManager::instance();
+    const auto devices = mgr.getDevices();
+    if (deviceIndex >= devices.size()) return false;
+    const double currentPpm = devices[deviceIndex].frequencyCorrectionPpm;
+    const double stepped = std::clamp(deltaPpm, -kP25AutoPpmMaxStep, kP25AutoPpmMaxStep);
+    const double suggested = std::clamp(currentPpm + stepped, -200.0, 200.0);
+    if (std::abs(suggested - currentPpm) < kP25AutoPpmMinAbsDelta) return false;
+
+    mgr.setFrequencyCorrection(deviceIndex, suggested);
+    gP25LastAutoPpmApplyMs.store(nowMs, std::memory_order_relaxed);
+    gP25LastAutoPpmValue.store(suggested, std::memory_order_relaxed);
+    if (logLine) {
+        *logLine = QString("Auto PPM: CC AFC=%1Hz conf=%2 → device %3 ppm %4 → %5 (delta=%6). Applied on return-to-control only.")
+            .arg(afcOffsetHz, 0, 'f', 1)
+            .arg(afcConfidence, 0, 'f', 2)
+            .arg(static_cast<qulonglong>(deviceIndex))
+            .arg(currentPpm, 0, 'f', 2)
+            .arg(suggested, 0, 'f', 2)
+            .arg(stepped, 0, 'f', 2);
+    }
+    return true;
 }
 
 
@@ -2356,11 +2400,33 @@ void p25Phase2UpdateSessionSustainState(Receiver& rx,
     }
     // Sticky mask/SF retained across block-channelize hops can lock onto the
     // wrong epoch (opp-slot dominant). Soft-repair without full CQPSK wipe.
-    if (out.phase2OppositeVoiceCodewords >= 4 &&
+    //
+    // DEC-0043 / capture 20260912_020758 TG20201: after clear emits, single
+    // wrong-TDMA / companion-only hops (normal TDMA silence or ±1 lock flip)
+    // immediately invalidated the sticky epoch → thrash → permanent no-vcw
+    // while the same IQ file stayed duty ~0.80. Before the call has spoken,
+    // keep immediate invalidate so cold acquisition can escape a bad epoch.
+    // After speak, require a short streak (same bar as structureNoTarget).
+    const bool oppDominantWrongEpoch =
+        out.phase2OppositeVoiceCodewords >= 4 &&
         out.phase2TargetVoiceCodewords == 0 &&
         out.phase2FedToMbelib == 0 &&
-        out.phase2WrongSlotVoiceCodewords >= out.phase2OppositeVoiceCodewords / 2) {
-        rx.p25VoiceLiveDecoder.invalidatePhase2StickyMaskEpoch();
+        out.phase2WrongSlotVoiceCodewords >= out.phase2OppositeVoiceCodewords / 2;
+    const bool callHasSpoken =
+        sustain.hadSuccessfulEmit || rx.p25Phase2CallHadSpeakerAudio;
+    if (oppDominantWrongEpoch) {
+        if (!callHasSpoken) {
+            rx.p25VoiceLiveDecoder.invalidatePhase2StickyMaskEpoch();
+            rx.p25Phase2OppDominantEpochWindows = 0;
+        } else {
+            ++rx.p25Phase2OppDominantEpochWindows;
+            if (rx.p25Phase2OppDominantEpochWindows >= 3) {
+                rx.p25VoiceLiveDecoder.invalidatePhase2StickyMaskEpoch();
+                rx.p25Phase2OppDominantEpochWindows = 0;
+            }
+        }
+    } else if (out.phase2TargetVoiceCodewords > 0 || out.phase2FedToMbelib > 0) {
+        rx.p25Phase2OppDominantEpochWindows = 0;
     }
     // Capture 20260808_022809: long runs of p2bursts>0 with targetVcw=0 after
     // real emits (structure without selected-slot Voice2/4) — sticky lattice

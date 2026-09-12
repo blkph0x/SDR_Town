@@ -1217,6 +1217,46 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         auto returnP25AutoFollowToControl = [this, p25Status, p25TgFollowBtn, tuneP25Path, clearP25VoiceFollowState, setP25ControlChannelMute]() {
             const auto retStart = std::chrono::steady_clock::now();
             const qint64 returnNowMs = QDateTime::currentMSecsSinceEpoch();
+            // DEC-0044: bake sustained CC AFC into device PPM only when idle on
+            // control (never mid-voice / warm-standby). Crystal ~2 ppm with ppm=0
+            // still acquires briefly; this stops fighting LO every follow.
+            auto maybeAutoPpmOnControlReturn = [this, returnNowMs](double controlHz, bool onControlNotVoice) {
+                if (!onControlNotVoice || !(controlHz > 0.0)) return;
+                // DEC-0049: prefer trusted CC offset only. Do not fall back to
+                // gLastAfcOffsetHz after Phase 2 — soft-probe rails (±1250) and
+                // frozen voice AFC poisoned LO (−1.93→−7.88) on 044651.
+                double afcHz = 0.0;
+                double afcConf = 0.0;
+                double trustedHz = 0.0;
+                bool haveSample = false;
+                if (p25TrustedControlOffsetForPhase2Traffic(controlHz, returnNowMs, &trustedHz)) {
+                    afcHz = trustedHz;
+                    afcConf = std::max(gLastAfcConfidence.load(std::memory_order_relaxed),
+                                       kP25AutoPpmMinConfidence);
+                    haveSample = true;
+                } else {
+                    const double storedHz = gP25LastTrustedControlOffsetHz.load(std::memory_order_acquire);
+                    const long long storedMs = gP25LastTrustedControlOffsetMs.load(std::memory_order_acquire);
+                    const double storedFreq = gP25LastTrustedControlFreqHz.load(std::memory_order_acquire);
+                    if (storedMs > 0 &&
+                        returnNowMs >= static_cast<qint64>(storedMs) &&
+                        (returnNowMs - static_cast<qint64>(storedMs)) <= kP25AutoPpmTrustedOffsetMaxAgeMs &&
+                        std::isfinite(storedFreq) &&
+                        std::abs(storedFreq - controlHz) <= 50.0 &&
+                        std::isfinite(storedHz)) {
+                        afcHz = storedHz;
+                        afcConf = std::max(gLastAfcConfidence.load(std::memory_order_relaxed),
+                                           kP25AutoPpmMinConfidence);
+                        haveSample = true;
+                    }
+                }
+                if (!haveSample || !p25AutoPpmAfcSampleAcceptable(afcHz, afcConf)) return;
+                QString ppmLine;
+                if (p25MaybeAutoApplyPpmFromControlAfc(
+                        guiRuntimeDeviceIndex(), controlHz, afcHz, afcConf, returnNowMs, &ppmLine)) {
+                    appendP25LogLine(ppmLine);
+                }
+            };
             const double releasedVoiceHz = p25AutoFollowVoiceFreqHz;
             const qint64 lastSpeakerBeforeReturnMs =
                 guiP25AudioLastOutputMs.load(std::memory_order_relaxed);
@@ -1337,6 +1377,8 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             p25Status->setText(QString("Monitoring CC %1 MHz").arg(ccHz / 1e6, 0, 'f', 5));
                         }
                     }
+                    maybeAutoPpmOnControlReturn(
+                        ccHz, p25AutoFollowWarmStandbyUntilMs <= returnNowMs);
                 } else if (p25Status) {
                     p25Status->setText("Auto follow idle");
                 }
@@ -1356,6 +1398,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 p25LastDiagSignature.clear();
                 appendP25LogLine(QString("P25 follow returned to muted control channel %1MHz.").arg(ccHz / 1e6, 0, 'f', 5));
                 appendP25LogLine("AFC unlock: returned to control channel; live AFC adaptation resumed.");
+                maybeAutoPpmOnControlReturn(ccHz, true);
                 if (p25Status) p25Status->setText(QString("Monitoring CC %1 MHz").arg(ccHz / 1e6, 0, 'f', 5));
                 // Per-rx publish + disable paths below drain the live voice path when decoding stops.
             } else if (p25Status) {

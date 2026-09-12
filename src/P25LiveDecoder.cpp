@@ -8067,6 +8067,10 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
             locks = std::move(anchoredLocks);
         }
     }
+    // DEC-0043 twin rescue (±1 lock DUID score) was reverted after capture
+    // 20260912_024000: clear TG30003 @421.975 file duty 0.705 but live stayed
+    // wrong-TDMA / no-sf-mask / worker-busy. Soft DUID twin flips plus post-speak
+    // invalidate debounce stuck bad epochs. Keep debounce only.
 
     const size_t lockCap = !annotateSessionCodewords
         ? std::min(m_config.maxPhase2SuperframeLocks == 0 ? size_t{1} : m_config.maxPhase2SuperframeLocks, size_t{1})
@@ -8486,15 +8490,15 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
                             return betterPhase2MaskPhaseWindow(a, b);
                         });
                     const size_t maxRescueCandidates =
-                        m_config.realtimeVoiceSearch
-                            ? std::min<size_t>(phaseWindows.size(), 4u)
-                            : phaseWindows.size();
+                        m_config.realtimeVoiceSearch ? std::min<size_t>(phaseWindows.size(), 2u)
+                                                     : phaseWindows.size();
                     const size_t rescueScoreSlots = 12u;
                     // One deep ACCH burst per candidate phase is enough to
-                    // prove/deny that XOR segment via MAC CRC.  Trying only the
-                    // soft-AMBE #1 phase left 20260911_082310 TG20202 at
-                    // p2sf/p2mask high, ambeProbe OK, p2mac=0/N forever.
-                    size_t rescueDeepBudget = m_config.realtimeVoiceSearch ? 2u : 8u;
+                    // prove/deny that XOR segment via MAC CRC once alt-kind
+                    // fanout runs inside deepAcchSearch. Top-2 (not only #1)
+                    // covers 20202-class soft-rank misses without the 4×2
+                    // cost that fed 234224 worker-busy drop D.
+                    size_t rescueDeepBudget = m_config.realtimeVoiceSearch ? 1u : 8u;
                     if (m_phase2ExtraDeepAcchBudget > 0) {
                         rescueDeepBudget += static_cast<size_t>(m_phase2ExtraDeepAcchBudget);
                         m_phase2ExtraDeepAcchBudget = 0;

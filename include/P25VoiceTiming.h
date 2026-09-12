@@ -88,6 +88,59 @@ inline constexpr int kP25ReplayHotBudgetMs = 240;
 inline constexpr size_t kP25ReplayHotCqpskCandidates = 16;
 inline constexpr size_t kP25ReplayHotSyncHits = 160;
 inline constexpr size_t kP25ReplayHotSuperframeLocks = 16;
+// DEC-0041 / capture 20260911_234224: live GUI eye-lost re-lock keeps replay
+// candidate width (16) but must not inherit the 240 ms CLI/voicetest wall —
+// that produced dsp p90 ~461 ms / job gaps ~800 ms and drop D under
+// single-flight. Live escalate uses the same 120 ms hot wall as DEC-0019.
+inline constexpr int kP25LiveEyeLostReplayBudgetMs = kP25VoiceWorkerHotRealtimeBudgetMs;
+// First post-emit eye-lost hop stays on hot cand=8; escalate cand=16 at streak.
+// DEC-0048 / capture 20260912_041612: file voicetest TG20202 duty 0.805 while
+// live CADENCE max 0.399 then permanent no-vcw + worker-busy. Waiting for
+// streak≥2 left one more empty hop under cand=8 before widen — escalate on
+// the first post-emit eye-lost hop (streak≥1).
+inline constexpr int kP25LiveEyeLostReplayCandStreak = 1;
+// DEC-0042 / capture 20260912_002128: healthy post-emit eyes still ran
+// emit-gate dsp p50≈199 ms (budget 120) → worker-busy on every TG while the
+// *same* IQ file voicetest hits duty≥0.83. Tighten only the healthy sustain
+// path (eye present); keep DEC-0041 eye-lost escalate width.
+inline constexpr int kP25LiveHealthySustainBudgetMs = 80;
+inline constexpr size_t kP25LiveHealthySustainCqpskCandidates = 4;
+// DEC-0045 proposed clamping decode wall to 105/145 near these budgets.
+// DEC-0046 REJECTED that: wall is post-hoc (no cooperative abort). Empty
+// eyes finishing >105 ms were stamped decode-wall-timeout and wiped speaker
+// pending → continuous audio death. Keep global wall 320; never clear
+// pending on wall stamps alone (see p25Phase2WallTimeoutMayClearSpeakerPending).
+inline constexpr int kP25LiveHealthySustainWallMs = kP25VoiceWorkerMaxDecodeWallMs;
+inline constexpr int kP25LiveEyeLostSustainWallMs = kP25VoiceWorkerMaxDecodeWallMs;
+// DEC-0044: auto PPM from sustained CC AFC (never mid-voice).
+// DEC-0049 / capture 20260912_044651: AFC=1250Hz conf=0.45 (floor) stepped
+// -2.97 ppm twice (−1.93→−7.88) while summary residual was ~874 Hz and CC
+// TSBK dibit corrections climbed. Tighten gates + prefer trusted offset.
+inline constexpr double kP25AutoPpmMinAbsAfcHz = 200.0;
+inline constexpr double kP25AutoPpmMaxAbsAfcHz = 2000.0; // was 3500; reject soft-probe rails
+inline constexpr double kP25AutoPpmMinAbsDelta = 0.40;
+inline constexpr double kP25AutoPpmMaxStep = 1.50; // was 5.0 — one gentle step per apply
+inline constexpr double kP25AutoPpmMinConfidence = 0.55; // match CLI ppm apply
+inline constexpr qint64 kP25AutoPpmCooldownMs = 120000; // was 30s — let CC re-lock
+// Trusted CC offset may be older than carry-fresh (30s) after a long PTT;
+// still bake PPM from it if within this window and magnitude gates pass.
+inline constexpr qint64 kP25AutoPpmTrustedOffsetMaxAgeMs = 300000;
+// Refuse auto-apply when |AFC| looks like a soft-probe rail (±1250 class).
+inline constexpr double kP25AutoPpmSoftProbeRailHz = 1250.0;
+inline constexpr double kP25AutoPpmSoftProbeRailTolHz = 5.0;
+
+// Pure gate used by auto-PPM and Catch (DEC-0049).
+inline bool p25AutoPpmAfcSampleAcceptable(double afcOffsetHz, double afcConfidence) noexcept
+{
+    if (!std::isfinite(afcOffsetHz) || !std::isfinite(afcConfidence)) return false;
+    const double absAfc = std::abs(afcOffsetHz);
+    if (absAfc < kP25AutoPpmMinAbsAfcHz || absAfc > kP25AutoPpmMaxAbsAfcHz) return false;
+    if (afcConfidence < kP25AutoPpmMinConfidence) return false;
+    if (std::abs(absAfc - kP25AutoPpmSoftProbeRailHz) <= kP25AutoPpmSoftProbeRailTolHz) {
+        return false;
+    }
+    return true;
+}
 inline constexpr double kP25Phase2VoiceDecodeAcquireOverlapSeconds = 0.160;
 // Sustain: stream like SDRTrunk SuperFrameDetector — frequent short advances
 // along a locked superframe lattice, not one giant re-lock every 1.5s.

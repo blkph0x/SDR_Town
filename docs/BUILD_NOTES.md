@@ -4,6 +4,78 @@ Newest entry at the top. Record facts, not hopes.
 
 ---
 
+## BN-0040 — DEC-0049 Auto PPM harden after `044651` (2026-09-12)
+
+- **Evidence:** Auto PPM AFC=1250 conf=0.45 → device ppm −7.88; CC TSBK
+  corrections climbed; TG10120 live ok≤0.909 vs TG20202 drop D
+- **Change:** reject ±1250 rail; conf≥0.55; step≤1.5; cooldown 120s; trusted
+  offset only; full forensic script
+- **Result:** `[p25]` 113/113; verifiers 131/131
+- **Operator:** set PPM near **−2.0** before next listen (undo −7.88)
+
+## BN-0039 — DEC-0047/0048 logscan + eye-lost streak=1 (2026-09-12)
+
+- **Host:** Windows 10.0.22631 x64
+- **Evidence:** `041612` live A-cliff vs file TG20202 duty 0.805
+- **Change:** `p25 logscan`; `kP25LiveEyeLostReplayCandStreak=1`
+- **Result:** `[p25]` 112/112; verifiers 131/131; Release rebuilt
+- **CLI:** `SDR_Town.exe --cli --cmd "p25 logscan <capture_dir> --audit"`
+
+## BN-0038 — DEC-0046 wall clamp rejected / pending guard (2026-09-12)
+
+- **Host:** Windows 10.0.22631 x64
+- **Trigger:** post-0045 “really bad audio” regression
+- **Change:** revert healthy/eye-lost wall clamp; never clear speaker pending
+  on decode-wall stamps; keep DEC-0044 auto PPM
+- **Result:** `[p25]` **112/112**; verifiers **131/131**; Release rebuilt
+- **Not proven:** live CADENCE recovery (operator listen + startstop)
+
+## BN-0037 — DEC-0044/0045 auto PPM + healthy wall (2026-09-12)
+
+- **Host:** Windows 10.0.22631 x64
+- **Trigger:** `032907` — promising then lose-it; emit-gate dsp p50≈451 ms;
+  ppm=0 with AFC≈884 Hz
+- **Change:** auto PPM on return-to-control; healthy wall 105 / eye-lost 145
+- **Result:** `[p25]` 109/109; verifiers **131/131** (new auto-ppm/wall
+  verifier). Release `SDR_Town.exe` rebuilt.
+- **Not proven:** live CADENCE / `Auto PPM:` log line (operator listen)
+
+## BN-0036 — DEC-0043 twin rescue reverted after `024000` (2026-09-12)
+
+- **Host:** Windows 10.0.22631 x64
+- **Trigger:** live `024000` clear TG30003 @421.975 file duty 0.705 vs live
+  max 0.649 / wrong-TDMA / worker-busy
+- **Change:** remove ±1 DUID lock-twin rescue; keep post-speak opp-dominant
+  invalidate debounce ≥3
+- **Result:** `[p25]` 109/109; verifiers 130/130
+- **Not proven:** live CADENCE recovery (operator re-listen required)
+
+---
+
+## BN-0035 — DEC-0043 wrong-TDMA sticky debounce (2026-09-12)
+
+- **Host:** Windows 10.0.22631 x64
+- **Command:** `cmake --build build --config Release --target SDR_Town sdr_town_tests -j 8`
+- **Result:** PASS; `sdr_town_tests "[p25]"` 109 cases; `verify_p25_phase2_*.py` 130/130
+- **Voicetest (`020758`):** TG20201 clear slot1 skip=18439 8s
+  `PASS_CONTINUOUS_AUDIO duty=0.715`; TG12069
+  `PASS_ENCRYPTED_GATED` essEncrypted=yes
+- **Missing on disk:** keep-set 060036 / 095846 (only `020758` present)
+- **Not proven:** live CADENCE continuity on new GUI follow (B-0001 / T-0010)
+
+---
+
+## BN-0034 — DEC-0041 live eye-lost budget (2026-09-12)
+
+- **Host:** Windows 10.0.22631 x64
+- **Command:** `cmake --build build --config Release --target SDR_Town sdr_town_tests -j 8`
+- **Result:** PASS; `sdr_town_tests "[p25]"` 109 cases; `verify_p25_phase2_*.py` 129/129
+- **Voicetest:** 060036 TG10301 slot0 skip=261000 8s `PASS_CONTINUOUS duty=0.705`;
+  095846 TG10301 slot1 skip=68700 `PASS_CONTINUOUS duty=0.8`
+- **Not proven:** live CADENCE drop-D cut on new GUI follow (B-0004 / T-0010)
+
+---
+
 ## BN-0033 — Add Receiver arms primary DSP (2026-09-11)
 
 - **Host:** Windows 10.0.22631 x64
