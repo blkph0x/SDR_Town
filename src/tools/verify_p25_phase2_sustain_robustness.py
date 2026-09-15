@@ -87,7 +87,7 @@ checks = {
     ),
     'bounded realtime mask rescue': (
         'maxRescueCandidates' in p25 and
-        'm_config.realtimeVoiceSearch ? std::min<size_t>(phaseWindows.size(), 1u)' in p25 and
+        'm_config.realtimeVoiceSearch ? std::min<size_t>(phaseWindows.size(), 2u)' in p25 and
         'rescueScoreSlots = 12u' in p25 and
         'rescueDeepBudget = m_config.realtimeVoiceSearch ? 1u : 8u' in p25 and
         '? size_t{2}' in p25
@@ -102,9 +102,11 @@ checks = {
         '!throttleRealtimeUnknownSecurityAcchRescue' in p25
     ),
     'realtime acch uses exact duid before rescue fanout': (
-        '(deepAcchSearch || !superframeLocked || xorMask == nullptr)' in p25 and
+        'allowAlternateKindFanout' in p25 and
+        'deepAcchSearch ||' in p25 and
+        '(!superframeLocked || xorMask == nullptr)' in p25 and
         'if (!allowAlternateKindFanout && k != burst.kind) break;' in p25 and
-        'Alternate-kind ACCH fanout is' in p25
+        'Deep rescue always fans out ACCH kinds' in p25
     ),
     'realtime acch de-dupes overlapping bursts': (
         'm_phase2RecentAcchDecodeBurstDibits' in p25 and

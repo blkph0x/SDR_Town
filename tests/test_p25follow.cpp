@@ -390,6 +390,40 @@ TEST_CASE("P25 follow treats pre-audio Phase 2 acquisition as call activity", "[
     REQUIRE(decision.action == P25FollowAction::None);
 }
 
+TEST_CASE("P25 follow does not abandon spoken clear grant on traffic-encrypted alone", "[p25][follow]")
+{
+    // DEC-0059 / 145139: companion sticky traffic.encrypted must not force
+    // ReturnEncrypted while target ESS stays clear on an explicit clear grant.
+    P25FollowSnapshot snapshot;
+    snapshot.autoActive = true;
+    snapshot.phase2Voice = true;
+    snapshot.nowMs = 10'000;
+    snapshot.tunedAtMs = 1'000;
+    snapshot.lastActiveMs = 9'800;
+    snapshot.recentSpeakerOutputMs = 9'700;
+    snapshot.talkgroupId = 30302;
+    snapshot.diag = diag(P25FollowDiagCode::Decoding);
+    snapshot.grantEncryptionKnown = true;
+    snapshot.grantEncrypted = false;
+    snapshot.phase2TrafficProcessorActive = true;
+    snapshot.phase2TrafficEncrypted = true; // companion sticky
+    snapshot.phase2TrafficCallActive = true;
+    snapshot.phase2TrafficAudioOpen = true;
+    snapshot.phase2EssKnown = true;
+    snapshot.phase2EssEncrypted = false; // target clear
+    snapshot.phase2MacCrcValid = 2;
+    snapshot.phase2VoiceCodewords = 12;
+    snapshot.decodedFrames = 6;
+    snapshot.rfMetricsPopulated = true;
+    snapshot.recentSnrDb = 12.0;
+    snapshot.recentSignalLevelDb = -50.0;
+    snapshot.recentNoiseFloorDb = -70.0;
+
+    const auto decision = evaluateP25Follow(snapshot);
+    REQUIRE_FALSE(decision.encryptedOnVoice);
+    REQUIRE(decision.action == P25FollowAction::None);
+}
+
 TEST_CASE("P25 follow returns when the traffic processor proves encryption", "[p25][follow]")
 {
     P25FollowSnapshot snapshot;
@@ -774,13 +808,43 @@ TEST_CASE("P25 follow holds clear-trusted call across empty-eye gaps after emit"
     REQUIRE_FALSE(holdDecision.activityGone);
     REQUIRE_FALSE(holdDecision.tdmaNoVcwTimeout);
 
-    // After clear-trusted 40s speaker grace expires with no refresh, return.
-    snapshot.nowMs = 70'000;
+    // DEC-0056: after post-speech quiet timers (not 40s grant-only grace), return.
+    snapshot.nowMs = 42'000;
     snapshot.lastActiveMs = 28'500;
     snapshot.recentSpeakerOutputMs = 28'470;
-    snapshot.diagUpdatedMs = 69'900;
+    snapshot.diagUpdatedMs = 41'900;
     const auto expiredDecision = evaluateP25Follow(snapshot);
     REQUIRE(expiredDecision.action != P25FollowAction::None);
+}
+
+TEST_CASE("P25 follow returns on dead clear channel without grant-only 40s hang", "[p25][follow]")
+{
+    // Capture 20260912_134135: clear grant + stale speaker must not block return
+    // for ~minute when there is no current traffic evidence.
+    P25FollowSnapshot snapshot;
+    snapshot.autoActive = true;
+    snapshot.phase2Voice = true;
+    snapshot.nowMs = 40'000;
+    snapshot.tunedAtMs = 10'000;
+    snapshot.lastActiveMs = 12'000;
+    snapshot.recentSpeakerOutputMs = 12'000;
+    snapshot.diagUpdatedMs = 39'500;
+    snapshot.diag = diag(P25FollowDiagCode::NoSync);
+    snapshot.decodedFrames = 0;
+    snapshot.phase2VoiceCodewords = 0;
+    snapshot.phase2Bursts = 0;
+    snapshot.phase2SuperframeBursts = 0;
+    snapshot.phase2MaskedBursts = 0;
+    snapshot.phase2MacPdus = 0;
+    snapshot.phase2TrafficProcessorActive = true;
+    snapshot.phase2TrafficCallActive = false;
+    snapshot.phase2TrafficAudioOpen = false;
+    snapshot.grantEncryptionKnown = true;
+    snapshot.grantEncrypted = false;
+
+    const auto decision = evaluateP25Follow(snapshot);
+    REQUIRE(decision.action != P25FollowAction::None);
+    REQUIRE_FALSE(decision.encryptedOnVoice);
 }
 
 TEST_CASE("P25 follow keeps speaker grace when current TDMA structure remains alive", "[p25][follow]")

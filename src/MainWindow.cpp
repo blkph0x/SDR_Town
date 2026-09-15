@@ -90,6 +90,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
 
         // Spectrum (the star visual for now)
         SpectrumWidget* spectrum = new SpectrumWidget(this);
+        spectrumWidget = spectrum;
         spectrum->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         connect(spectrum, &SpectrumWidget::frequencySelected, this, [this, spectrum](double f) {
             classifierRoiBuilder.clear();
@@ -291,10 +292,12 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         monFreq->setDecimals(5);
         monFreq->setValue(100.0);
         monFreq->setSingleStep(0.0125);
+        monitorFreqSpin = monFreq;
         QPushButton* setMonBtn = new QPushButton("Set & Tune Device");
         QComboBox* modeBox = new QComboBox();
         modeBox->addItem("AUTO"); modeBox->addItem("NFM"); modeBox->addItem("WFM"); modeBox->addItem("AM"); modeBox->addItem("USB"); modeBox->addItem("LSB"); modeBox->addItem("CW");
         modeBox->setCurrentText("AUTO");
+        monitorModeCombo = modeBox;
         bwSpin = new QDoubleSpinBox();
         bwSpin->setRange(0.5, 500); bwSpin->setValue(180.0); bwSpin->setSuffix(" kHz"); bwSpin->setDecimals(1); bwSpin->setSingleStep(0.5);
         bwSpin->setToolTip("Receiver/channel bandwidth. NFM CB/PMR often uses 12.5 kHz; WFM broadcast uses ~180 kHz.");
@@ -325,12 +328,14 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         QDoubleSpinBox* gainSpin = new QDoubleSpinBox();
         gainSpin->setRange(0, 50); gainSpin->setDecimals(1); gainSpin->setValue(20);
         gainSpin->setToolTip("Manual SDR RF gain / sensitivity. 0 = minimum gain; higher values increase sensitivity and overload risk. This writes directly to the SDR hardware when a real device is active.");
+        rfGainSpin = gainSpin;
         gainLay->addWidget(gainSpin);
         gainLay->addSpacing(12);
         gainLay->addWidget(new QLabel("Squelch (dB):"));
         QDoubleSpinBox* squelchSpin = new QDoubleSpinBox();
         squelchSpin->setRange(-130, 40); squelchSpin->setDecimals(0); squelchSpin->setValue(-105);
         squelchSpin->setToolTip("RF squelch threshold in spectrum dB. Put SQ a few dB above the green noise-floor line; signals above SQ open audio. Values below -115 disable squelch.");
+        squelchSpinBox = squelchSpin;
         gainLay->addWidget(squelchSpin);
 
         QPushButton* autoSquelchBtn = new QPushButton("Auto");
@@ -1217,6 +1222,46 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         auto returnP25AutoFollowToControl = [this, p25Status, p25TgFollowBtn, tuneP25Path, clearP25VoiceFollowState, setP25ControlChannelMute]() {
             const auto retStart = std::chrono::steady_clock::now();
             const qint64 returnNowMs = QDateTime::currentMSecsSinceEpoch();
+            // DEC-0044: bake sustained CC AFC into device PPM only when idle on
+            // control (never mid-voice / warm-standby). Crystal ~2 ppm with ppm=0
+            // still acquires briefly; this stops fighting LO every follow.
+            auto maybeAutoPpmOnControlReturn = [this, returnNowMs](double controlHz, bool onControlNotVoice) {
+                if (!onControlNotVoice || !(controlHz > 0.0)) return;
+                // DEC-0049: prefer trusted CC offset only. Do not fall back to
+                // gLastAfcOffsetHz after Phase 2 — soft-probe rails (±1250) and
+                // frozen voice AFC poisoned LO (−1.93→−7.88) on 044651.
+                double afcHz = 0.0;
+                double afcConf = 0.0;
+                double trustedHz = 0.0;
+                bool haveSample = false;
+                if (p25TrustedControlOffsetForPhase2Traffic(controlHz, returnNowMs, &trustedHz)) {
+                    afcHz = trustedHz;
+                    afcConf = std::max(gLastAfcConfidence.load(std::memory_order_relaxed),
+                                       kP25AutoPpmMinConfidence);
+                    haveSample = true;
+                } else {
+                    const double storedHz = gP25LastTrustedControlOffsetHz.load(std::memory_order_acquire);
+                    const long long storedMs = gP25LastTrustedControlOffsetMs.load(std::memory_order_acquire);
+                    const double storedFreq = gP25LastTrustedControlFreqHz.load(std::memory_order_acquire);
+                    if (storedMs > 0 &&
+                        returnNowMs >= static_cast<qint64>(storedMs) &&
+                        (returnNowMs - static_cast<qint64>(storedMs)) <= kP25AutoPpmTrustedOffsetMaxAgeMs &&
+                        std::isfinite(storedFreq) &&
+                        std::abs(storedFreq - controlHz) <= 50.0 &&
+                        std::isfinite(storedHz)) {
+                        afcHz = storedHz;
+                        afcConf = std::max(gLastAfcConfidence.load(std::memory_order_relaxed),
+                                           kP25AutoPpmMinConfidence);
+                        haveSample = true;
+                    }
+                }
+                if (!haveSample || !p25AutoPpmAfcSampleAcceptable(afcHz, afcConf)) return;
+                QString ppmLine;
+                if (p25MaybeAutoApplyPpmFromControlAfc(
+                        guiRuntimeDeviceIndex(), controlHz, afcHz, afcConf, returnNowMs, &ppmLine)) {
+                    appendP25LogLine(ppmLine);
+                }
+            };
             const double releasedVoiceHz = p25AutoFollowVoiceFreqHz;
             const qint64 lastSpeakerBeforeReturnMs =
                 guiP25AudioLastOutputMs.load(std::memory_order_relaxed);
@@ -1337,6 +1382,8 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             p25Status->setText(QString("Monitoring CC %1 MHz").arg(ccHz / 1e6, 0, 'f', 5));
                         }
                     }
+                    maybeAutoPpmOnControlReturn(
+                        ccHz, p25AutoFollowWarmStandbyUntilMs <= returnNowMs);
                 } else if (p25Status) {
                     p25Status->setText("Auto follow idle");
                 }
@@ -1356,6 +1403,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 p25LastDiagSignature.clear();
                 appendP25LogLine(QString("P25 follow returned to muted control channel %1MHz.").arg(ccHz / 1e6, 0, 'f', 5));
                 appendP25LogLine("AFC unlock: returned to control channel; live AFC adaptation resumed.");
+                maybeAutoPpmOnControlReturn(ccHz, true);
                 if (p25Status) p25Status->setText(QString("Monitoring CC %1 MHz").arg(ccHz / 1e6, 0, 'f', 5));
                 // Per-rx publish + disable paths below drain the live voice path when decoding stops.
             } else if (p25Status) {
@@ -4505,6 +4553,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                            "Other sources (AM / ADS-B / ACARS / POCSAG) can register later."));
 
         createMenus();
+        installSdrTownControlServer();
 
         // Initial device enumeration (PR2) for status — use probeHardware=false so we do ZERO
         // Soapy Device::make / hardware opens at startup. This is the #1 thing that was causing
@@ -5477,26 +5526,31 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                     voiceStateMaskKnown = voiceStateMaskKnown ||
                                         voiceDiag.phase2MaskedBursts > 0 ||
                                         voiceDiag.phase2SuperframeBursts > 0;
-                                    if (voiceDiag.phase2EssKnown) {
-                                        // DEC-0025 / 103955: do not promote grantEncrypted from
-                                        // ESS-diag alone while the call is latched clear. That
-                                        // made follow ReturnEncrypted via grantProvesEncrypted
-                                        // without the macCrc bar trustedEncryptedEss already has.
-                                        if (voiceDiag.phase2EssEncrypted) {
-                                            const bool strongEssEnc =
-                                                voiceStateCallSecurityLatch !=
-                                                    P25CallSecurityLatch::Clear ||
-                                                voiceDiag.phase2MacCrcValid > 0 ||
-                                                voiceDiag.phase2TargetMacCrcValid;
-                                            if (strongEssEnc) {
-                                                voiceStateEncrypted = true;
-                                                voiceStateClearKnown = false;
+                                        if (voiceDiag.phase2EssKnown || voiceDiag.phase2TargetEssKnown) {
+                                            // DEC-0025 / 103955 + DEC-0059 / 145139: do not
+                                            // promote grantEncrypted from companion sticky ESS.
+                                            const bool targetEssEnc =
+                                                voiceDiag.phase2TargetEssKnown
+                                                    ? voiceDiag.phase2TargetEssEncrypted
+                                                    : voiceDiag.phase2EssEncrypted;
+                                            if (targetEssEnc) {
+                                                const bool strongEssEnc =
+                                                    voiceStateCallSecurityLatch !=
+                                                        P25CallSecurityLatch::Clear ||
+                                                    voiceDiag.phase2MacCrcValid > 0 ||
+                                                    voiceDiag.phase2TargetMacCrcValid;
+                                                if (strongEssEnc &&
+                                                    voiceStateCallSecurityLatch !=
+                                                        P25CallSecurityLatch::Clear) {
+                                                    voiceStateEncrypted = true;
+                                                    voiceStateClearKnown = false;
+                                                }
+                                            } else if (voiceDiag.phase2TargetEssKnown ||
+                                                       voiceDiag.phase2EssKnown) {
+                                                voiceStateEncrypted = false;
+                                                voiceStateClearKnown = true;
                                             }
-                                        } else {
-                                            voiceStateEncrypted = false;
-                                            voiceStateClearKnown = true;
                                         }
-                                    }
                                 }
                                 if (!haveVoiceDiag) {
                                     if (p25FollowAutoActive &&
@@ -5577,10 +5631,18 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                     : voiceDiag.phase2MacCrcValid;
                                 const long long p2AmbeAttempts = voiceDiag.phase2AmbeDecodeAttempts;
                                 const long long p2AmbeAccepted = voiceDiag.phase2AmbeAcceptedFrames;
-                                const bool p2EssKnown = voiceDiag.phase2EssKnown ||
-                                    (trafficStatus.present && trafficStatus.diag.essTrusted);
-                                const bool p2EssEncrypted = voiceDiag.phase2EssEncrypted ||
-                                    (trafficStatus.present && trafficStatus.diag.encrypted);
+                                // DEC-0059: follow ESS must describe the *target* timeslot.
+                                // Do not OR trafficStatus.diag.encrypted — companion-slot
+                                // sticky ESS made clear TG30302 ReturnEncrypted mid-emit
+                                // (145139 RID 0x2391D7) while voice follow still said clear.
+                                const bool p2EssKnown = voiceDiag.phase2TargetEssKnown ||
+                                    voiceDiag.phase2EssKnown;
+                                const bool p2EssEncrypted =
+                                    (voiceDiag.phase2TargetEssKnown &&
+                                     voiceDiag.phase2TargetEssEncrypted) ||
+                                    (!voiceDiag.phase2TargetEssKnown &&
+                                     voiceDiag.phase2EssKnown &&
+                                     voiceDiag.phase2EssEncrypted);
                                 const QString p2ess = p2EssKnown
                                     ? (p2EssEncrypted ? "enc" : "clear")
                                     : "unknown";
@@ -5621,9 +5683,11 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                     followSnapshot.phase2TrafficAudioOpen =
                                         voiceStateCallSecurityLatch == P25CallSecurityLatch::Clear &&
                                         trafficStatus.callActive;
+                                    // DEC-0059: traffic-encrypted follow proof is the call
+                                    // latch / target ESS only — not companion sticky diag.
                                     followSnapshot.phase2TrafficEncrypted =
                                         voiceStateCallSecurityLatch == P25CallSecurityLatch::Encrypted ||
-                                        (trafficStatus.present && trafficStatus.diag.encrypted);
+                                        (p2EssKnown && p2EssEncrypted);
                                     followSnapshot.grantEncryptionKnown =
                                         voiceStateClearKnown || voiceStateEncrypted;
                                     followSnapshot.grantEncrypted = voiceStateEncrypted;
@@ -5642,15 +5706,22 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                     // traffic channel can need several windows for mask/MAC/ESS
                                     // and AMBE to line up; gating lastActive only on speaker PCM
                                     // repeatedly restarted real calls as fragmented audio.
+                                    // DEC-0056: after speaker/clear latch, do NOT refresh lastActive
+                                    // on structure-only (bursts/sf/mask). That kept clear follows
+                                    // hung on dead traffic RF for ~minute (134135 TG30302).
+                                    const bool hadClearSpeechOrLatch =
+                                        voiceStateCallSecurityLatch == P25CallSecurityLatch::Clear ||
+                                        guiP25AudioLastOutputMs.load(std::memory_order_relaxed) > 0;
                                     const bool freshFollowAcquireEvidence =
                                         voiceStatePhase2 &&
                                         !voiceStateEncrypted &&
                                         (p2vcw > 0 ||
                                          decoded > 0 ||
                                          p2crc > 0 ||
-                                         p2EssKnown ||
-                                         (p2bursts > 0 && p2sf > 0 && p2mask > 0) ||
-                                         (trafficStatus.callActive && p2bursts > 0));
+                                         (!hadClearSpeechOrLatch &&
+                                          (p2EssKnown ||
+                                           (p2bursts > 0 && p2sf > 0 && p2mask > 0) ||
+                                           (trafficStatus.callActive && p2bursts > 0))));
                                     // Only refresh the follow "last active" on actual voice/acquire evidence,
                                     // to avoid keeping an inactive TG alive forever from loose telemetry.
                                     const bool freshFollowVoiceEvidence =
@@ -8682,6 +8753,324 @@ void MainWindow::recordGuiRuntimeError(const QString& message)
         }
     }
 
+void MainWindow::installSdrTownControlServer()
+{
+        if (statusBar() && !controlStatusLabel) {
+            controlStatusLabel = new QLabel("Local control: starting", this);
+            controlStatusLabel->setToolTip("SdrTownControl.dll loopback bridge status for companion apps such as FUBAR.");
+            statusBar()->addPermanentWidget(controlStatusLabel);
+        }
+
+        if (!guiRuntimeConfig.controlServer) {
+            if (controlStatusLabel) {
+                controlStatusLabel->setText("Local control: off");
+                controlStatusLabel->setToolTip("Loopback control server disabled by --no-control-server.");
+            }
+            return;
+        }
+
+        SdrTownControlServer::Config cfg;
+        cfg.port = static_cast<quint16>(std::clamp(guiRuntimeConfig.controlPort, 1, 65535));
+        cfg.token = QString::fromStdString(guiRuntimeConfig.controlToken).trimmed();
+        if (cfg.token.isEmpty()) {
+            cfg.token = qEnvironmentVariable("SDR_TOWN_CONTROL_TOKEN").trimmed();
+        }
+        cfg.allowUnauthenticated = !guiRuntimeConfig.controlAuthRequired && cfg.token.isEmpty();
+
+        m_controlServer = std::make_unique<SdrTownControlServer>(this);
+        m_controlServer->setRequestHandler([this](const QString& method,
+                                                  const QString& path,
+                                                  const QJsonObject& body) {
+            return handleSdrTownControlRequest(method, path, body);
+        });
+
+        QString error;
+        if (!m_controlServer->start(cfg, &error)) {
+            recordGuiRuntimeError(QString("SDR Town control server failed to start on 127.0.0.1:%1: %2")
+                .arg(cfg.port)
+                .arg(error));
+            if (controlStatusLabel) {
+                controlStatusLabel->setText(QString("Local control: failed %1").arg(cfg.port));
+                controlStatusLabel->setToolTip(error);
+            }
+            m_controlServer.reset();
+            return;
+        }
+
+        appendP25LogLine(QString("SDR Town local control server listening on 127.0.0.1:%1 auth=%2.")
+            .arg(m_controlServer->port())
+            .arg(cfg.allowUnauthenticated ? "loopback-open" : "token-required"));
+        if (statusBar()) {
+            if (controlStatusLabel) {
+                controlStatusLabel->setText(QString("Local control: 127.0.0.1:%1")
+                    .arg(m_controlServer->port()));
+                controlStatusLabel->setToolTip(QString("Ready for FUBAR/SdrTownControl.dll (%1).")
+                    .arg(cfg.allowUnauthenticated ? "loopback open" : "token required"));
+            }
+            statusBar()->showMessage(QString("Local SDR control enabled on 127.0.0.1:%1")
+                .arg(m_controlServer->port()), 4500);
+        }
+    }
+
+QJsonObject MainWindow::sdrTownControlStatusSnapshot()
+{
+        QJsonObject state;
+        {
+            std::lock_guard<std::mutex> lk(monitorParamsMutex);
+            state.insert("frequencyHz", currentMonitorFreq);
+            state.insert("frequencyMHz", currentMonitorFreq / 1e6);
+            state.insert("mode", modeToQString(currentMonitorMode));
+            state.insert("autoMode", autoDetectMode);
+            state.insert("bandwidthHz", monitorChannelBwHz);
+            state.insert("lpfHz", monitorLpfHz);
+            state.insert("audioLpfEnabled", monitorAudioLpfEnabled);
+            state.insert("squelchDb", monitorSquelchDb);
+            state.insert("rfGainDb", monitorRfGainDb);
+            state.insert("volume", monitorMasterVolume);
+        }
+
+        auto& mgr = DeviceManager::instance();
+        QJsonArray devices;
+        const auto devs = mgr.getDevices();
+        for (size_t i = 0; i < devs.size(); ++i) {
+            QJsonObject dev;
+            dev.insert("index", static_cast<int>(i));
+            dev.insert("label", QString::fromStdString(devs[i].label));
+            dev.insert("streaming", mgr.isStreaming(i));
+            dev.insert("enabled", devs[i].enabled);
+            dev.insert("gainDb", devs[i].gain);
+            devices.append(dev);
+        }
+        state.insert("devices", devices);
+
+        QJsonObject p25;
+        p25.insert("controlFrequencyHz", p25MonitoredControlFreqHz);
+        p25.insert("autoFollow", p25AutoFollowEnabled);
+        p25.insert("followEnabled", p25FollowEnabled);
+        p25.insert("followTalkgroupId", static_cast<int>(p25FollowTalkgroupId));
+        p25.insert("trafficActive", p25IndependentTrafficActive);
+        p25.insert("trafficRetunedPrimary", p25IndependentTrafficRetunedPrimary);
+        state.insert("p25", p25);
+
+        QJsonObject caps;
+        caps.insert("readStatus", true);
+        caps.insert("setFrequency", true);
+        caps.insert("setMode", true);
+        caps.insert("setBandwidth", true);
+        caps.insert("setLpf", true);
+        caps.insert("setRfGain", true);
+        caps.insert("setSquelch", true);
+        caps.insert("startP25Control", true);
+        state.insert("capabilities", caps);
+
+        return state;
+    }
+
+QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
+{
+        double freqHz = body.value("frequencyHz").toDouble(0.0);
+        if (freqHz <= 0.0) {
+            const double mhz = body.value("frequencyMHz").toDouble(0.0);
+            if (mhz > 0.0) freqHz = mhz * 1e6;
+        }
+        if (!std::isfinite(freqHz) || freqHz < 1000.0 || freqHz > 6000000000.0) {
+            return {{"ok", false}, {"status", 400}, {"error", "frequencyHz/frequencyMHz is invalid"}};
+        }
+
+        const QString requestedMode = body.value("mode").toString().trimmed().toUpper();
+        const bool p25Control = body.value("p25Control").toBool(false) ||
+            requestedMode == "P25" || requestedMode == "P25P1" || requestedMode == "P25P2";
+        if (p25Control) {
+            const bool autoFollow = body.contains("autoFollow")
+                ? body.value("autoFollow").toBool(false)
+                : body.value("p25AutoFollow").toBool(false);
+            const bool oldAutoFollow = guiRuntimeConfig.autoFollow;
+            guiRuntimeConfig.autoFollow = autoFollow;
+            const bool ok = armGuiRuntimeP25Control(freqHz, false);
+            guiRuntimeConfig.autoFollow = oldAutoFollow;
+            if (!ok) {
+                return {{"ok", false}, {"status", 500}, {"error", "could not arm P25 control monitor"}};
+            }
+            return {{"ok", true}, {"state", sdrTownControlStatusSnapshot()}};
+        }
+
+        DemodMode newMode = currentMonitorMode;
+        bool newAuto = autoDetectMode;
+        if (!requestedMode.isEmpty()) {
+            newMode = modeFromString(requestedMode.toStdString());
+            newAuto = newMode == DemodMode::AUTO;
+        }
+
+        const double bwHz = body.value("bandwidthHz").toDouble(0.0);
+        const double lpfHz = body.value("lpfHz").toDouble(0.0);
+        const double rfGain = body.value("rfGainDb").toDouble(std::numeric_limits<double>::quiet_NaN());
+        const double squelch = body.value("squelchDb").toDouble(std::numeric_limits<double>::quiet_NaN());
+        const bool hasAudioLpf = body.contains("audioLpfEnabled");
+        const bool audioLpfEnabled = hasAudioLpf ? body.value("audioLpfEnabled").toBool(true) : monitorAudioLpfEnabled;
+
+        {
+            std::lock_guard<std::mutex> lk(monitorParamsMutex);
+            currentMonitorFreq = freqHz;
+            currentMonitorMode = newMode;
+            autoDetectMode = newAuto;
+            if (bwHz > 0.0 && bwHz <= 10000000.0) monitorChannelBwHz = bwHz;
+            else if (!requestedMode.isEmpty()) monitorChannelBwHz = defaultBandwidthForMode(newMode);
+            if (lpfHz > 0.0 && lpfHz <= 200000.0) monitorLpfHz = lpfHz;
+            else if (!requestedMode.isEmpty()) monitorLpfHz = lpfForModeAndBandwidth(newMode, monitorChannelBwHz);
+            monitorAudioLpfEnabled = audioLpfEnabled;
+            if (std::isfinite(rfGain) && rfGain >= 0.0 && rfGain <= 120.0) monitorRfGainDb = rfGain;
+            if (std::isfinite(squelch) && squelch >= -160.0 && squelch <= 60.0) monitorSquelchDb = squelch;
+        }
+
+        if (monitorFreqSpin) {
+            monitorFreqSpin->blockSignals(true);
+            monitorFreqSpin->setValue(freqHz / 1e6);
+            monitorFreqSpin->blockSignals(false);
+        }
+        if (monitorModeCombo && !requestedMode.isEmpty()) {
+            monitorModeCombo->blockSignals(true);
+            monitorModeCombo->setCurrentText(modeToQString(newMode));
+            monitorModeCombo->blockSignals(false);
+        }
+        if (bwSpin) {
+            bwSpin->blockSignals(true);
+            bwSpin->setValue(monitorChannelBwHz / 1000.0);
+            bwSpin->blockSignals(false);
+        }
+        if (lpfSpin) {
+            lpfSpin->blockSignals(true);
+            lpfSpin->setValue(monitorLpfHz / 1000.0);
+            lpfSpin->blockSignals(false);
+            lpfSpin->setEnabled(monitorAudioLpfEnabled);
+        }
+        if (lpfEnableCheck) {
+            lpfEnableCheck->blockSignals(true);
+            lpfEnableCheck->setChecked(monitorAudioLpfEnabled);
+            lpfEnableCheck->blockSignals(false);
+        }
+        if (rfGainSpin && std::isfinite(rfGain)) {
+            rfGainSpin->blockSignals(true);
+            rfGainSpin->setValue(std::clamp(rfGain, rfGainSpin->minimum(), rfGainSpin->maximum()));
+            rfGainSpin->blockSignals(false);
+        }
+        if (squelchSpinBox && std::isfinite(squelch)) {
+            squelchSpinBox->blockSignals(true);
+            squelchSpinBox->setValue(std::clamp(squelch, squelchSpinBox->minimum(), squelchSpinBox->maximum()));
+            squelchSpinBox->blockSignals(false);
+        }
+
+        classifierRoiBuilder.clear();
+        if (spectrumWidget) spectrumWidget->setCenterFreq(freqHz);
+        p25FollowEnabled = false;
+        p25FollowAutoActive = false;
+        p25FollowTalkgroupId = 0;
+        p25AutoFollowVoiceFreqHz = 0.0;
+        p25AutoFollowTunedAtMs = 0;
+        p25AutoFollowLastGrantMs = 0;
+        p25AutoFollowLastActiveMs = 0;
+        p25AutoFollowLastMHzHopMs = 0;
+        p25AutoFollowReturnControlFreqHz = 0.0;
+        p25IndependentTrafficActive = false;
+        p25IndependentTrafficRetunedPrimary = false;
+        {
+            std::lock_guard<std::mutex> lk(receiversMutex);
+            receivers.erase(std::remove_if(receivers.begin(), receivers.end(),
+                [](const std::shared_ptr<Receiver>& rx) {
+                    return rx && rx->p25IndependentTrafficSource;
+                }), receivers.end());
+            ensureReceiver();
+            if (!receivers.empty() && receivers[0]) {
+                auto& rx = *receivers[0];
+                std::lock_guard<std::mutex> rxLock(rx.stateMutex);
+                clearP25VoiceFollowFieldsLocked(rx, false);
+                rx.p25ControlChannelMute = false;
+                rx.p25IndependentTrafficSource = false;
+            }
+        }
+        syncMonitorVarsToReceiver(0);
+        const bool startDevice = !body.contains("startDevice") || body.value("startDevice").toBool(true);
+        bool ok = true;
+        if (startDevice) {
+            ok = startGuiRuntimeDeviceAt(freqHz, false);
+        } else {
+            auto& mgr = DeviceManager::instance();
+            for (size_t i = 0; i < mgr.getDevices().size(); ++i) {
+                if (mgr.isStreaming(i)) {
+                    mgr.setCenterFreq(i, freqHz);
+                    break;
+                }
+            }
+        }
+
+        if (std::isfinite(rfGain) && rfGain >= 0.0) {
+            auto& mgr = DeviceManager::instance();
+            if (!mgr.getDevices().empty()) mgr.setLiveGain(0, rfGain);
+        }
+
+        if (!ok) {
+            return {{"ok", false}, {"status", 500}, {"error", "tune failed"}};
+        }
+        if (statusBar()) {
+            statusBar()->showMessage(QString("Local control tuned SDR Town to %1 MHz %2")
+                .arg(freqHz / 1e6, 0, 'f', 5)
+                .arg(modeToQString(newMode)), 2500);
+        }
+        return {{"ok", true}, {"state", sdrTownControlStatusSnapshot()}};
+    }
+
+QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
+                                                    const QString& path,
+                                                    const QJsonObject& body)
+{
+        if (path == "/v1/health") {
+            return {{"ok", true}, {"app", "SDR Town"}, {"version", SDR_TOWN_VERSION}};
+        }
+        if (path == "/v1/status" && method == "GET") {
+            return {{"ok", true}, {"state", sdrTownControlStatusSnapshot()}};
+        }
+        if (path == "/v1/capabilities" && method == "GET") {
+            return {{"ok", true}, {"capabilities", sdrTownControlStatusSnapshot().value("capabilities").toObject()}};
+        }
+        if (path == "/v1/tune" && method == "POST") {
+            return applySdrTownControlTune(body);
+        }
+        if (path == "/v1/mode" && method == "POST") {
+            QJsonObject tune = body;
+            {
+                std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                tune.insert("frequencyHz", currentMonitorFreq);
+            }
+            tune.insert("startDevice", false);
+            return applySdrTownControlTune(tune);
+        }
+        if (path == "/v1/rf-gain" && method == "POST") {
+            const double gain = body.value("rfGainDb").toDouble(std::numeric_limits<double>::quiet_NaN());
+            if (!std::isfinite(gain) || gain < 0.0 || gain > 120.0) {
+                return {{"ok", false}, {"status", 400}, {"error", "rfGainDb is invalid"}};
+            }
+            {
+                std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                monitorRfGainDb = gain;
+            }
+            syncMonitorVarsToReceiver(0);
+            auto& mgr = DeviceManager::instance();
+            if (!mgr.getDevices().empty()) mgr.setLiveGain(0, gain);
+            if (rfGainSpin) {
+                rfGainSpin->blockSignals(true);
+                rfGainSpin->setValue(std::clamp(gain, rfGainSpin->minimum(), rfGainSpin->maximum()));
+                rfGainSpin->blockSignals(false);
+            }
+            return {{"ok", true}, {"state", sdrTownControlStatusSnapshot()}};
+        }
+        if (path == "/v1/p25/control" && method == "POST") {
+            QJsonObject tune = body;
+            tune.insert("mode", "P25");
+            tune.insert("p25Control", true);
+            return applySdrTownControlTune(tune);
+        }
+        return {{"ok", false}, {"status", 404}, {"error", "unknown SDR Town control endpoint"}};
+    }
+
 bool MainWindow::selectDefaultAudioOutputForGuiStartup(const char* reason)
 {
         if (guiRuntimeConfig.dryRun) {
@@ -8786,6 +9175,20 @@ bool MainWindow::startGuiRuntimeDeviceAt(double freqHz,  bool p25Defaults)
             mgr.setEnabled(devIndex, true);
             const bool started = mgr.isStreaming(devIndex) || mgr.startStreaming(devIndex, true);
             mgr.setCenterFreq(devIndex, freqHz);
+            if (spectrumWidget) spectrumWidget->setCenterFreq(freqHz);
+            QTimer::singleShot(120, this, [this]() {
+                AudioEngine* eng = getOrCreateAudioEngine();
+                if (eng && eng->activeOutputCount() == 0) {
+                    try {
+                        auto outs = eng->enumeratePlaybackDevices();
+                        if (!outs.empty()) {
+                            std::vector<size_t> idxs{0};
+                            if (outs.size() > 1) idxs.push_back(1);
+                            eng->setActiveOutputs(idxs);
+                        }
+                    } catch (...) {}
+                }
+            });
             appendP25LogLine(QString("GUI startup tuned device %1 to %2MHz start=%3.")
                 .arg(static_cast<qulonglong>(devIndex))
                 .arg(freqHz / 1e6, 0, 'f', 5)
@@ -9584,6 +9987,15 @@ LiveIqCaptureResult MainWindow::startLiveIqCapture(const std::string& label,  in
             out.message = "Could not open one or more IQ capture output files.";
             return out;
         }
+        {
+            QString wavErr;
+            const QString speakerWavPath = base + "_live_speaker.wav";
+            if (!startLiveIqSpeakerWavCapture(speakerWavPath, 48000.0, &wavErr)) {
+                session.p25LogStream << "# live_speaker_wav_open_failed=" << wavErr.toStdString() << "\n";
+            } else {
+                session.p25LogStream << "# live_speaker_wav=" << speakerWavPath.toStdString() << "\n";
+            }
+        }
         session.ringCsv << "utc,poll,window_start_abs,window_end_abs,cursor_before_abs,append_start_abs,append_end_abs,samples_appended,gap_samples,total_written,bytes_written,zero_append_polls,max_single_gap_samples,file_write_error_polls,signal_level_db,noise_floor_db,snr_db,afc_offset_hz,ring_epoch_resets,ring_epoch_reset_skipped_samples\n";
         session.startP25LogSnapshot.clear();
         session.p25LogDuringCapture.clear();
@@ -9977,6 +10389,13 @@ LiveIqCaptureResult MainWindow::stopLiveIqCapture()
         };
         writeLiveIqCaptureEvent(endRow);
 
+        const CliP25WavCaptureSummary speakerWav = stopLiveIqSpeakerWavCapture();
+        if (speakerWav.samples > 0) {
+            appendP25LogLine(QString("IQ capture live_speaker WAV closed samples=%1 path=%2")
+                .arg(static_cast<qulonglong>(speakerWav.samples))
+                .arg(speakerWav.path));
+        }
+
         if (liveIqCapture.data.is_open()) liveIqCapture.data.close();
         if (liveIqCapture.events.is_open()) { liveIqCapture.events.flush(); liveIqCapture.events.close(); }
         if (liveIqCapture.ringCsv.is_open()) { liveIqCapture.ringCsv.flush(); liveIqCapture.ringCsv.close(); }
@@ -10023,7 +10442,10 @@ LiveIqCaptureResult MainWindow::stopLiveIqCapture()
             {"sdrtown:signal_level_db", liveIqCapture.lastSignalLevelDb},
             {"sdrtown:noise_floor_db", liveIqCapture.lastNoiseFloorDb},
             {"sdrtown:snr_db", liveIqCapture.lastSnrDb},
-            {"sdrtown:afc_offset_hz", liveIqCapture.lastAfcOffsetHz}
+            {"sdrtown:afc_offset_hz", liveIqCapture.lastAfcOffsetHz},
+            {"sdrtown:live_speaker_wav", speakerWav.path.toStdString()},
+            {"sdrtown:live_speaker_samples", speakerWav.samples},
+            {"sdrtown:live_speaker_sample_rate", speakerWav.sampleRate}
         };
         meta["captures"] = json::array({
             {

@@ -12,6 +12,8 @@
 #include <cstdint>
 #include <iomanip>
 #include <sstream>
+#include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -1612,6 +1614,35 @@ TEST_CASE("P25 live decoder preserves final-fragment slot order when I-ISCH is u
     REQUIRE(bursts[11].grantSlot == 0);
 }
 
+TEST_CASE("P25 live decoder rebases grantSlot from I-ISCH absolute origin (DEC-0055/0057)", "[p25]")
+{
+    // Agreeing A/B I-ISCH with location=2 on buffer slots 4/5 rebases local C
+    // (phys slot 6) to absolute index 10 → grantSlot 1 (final-fragment C/D swap).
+    // Lock may slip (field: sfOff!=0) when I-ISCH disagrees with lock-rel epoch;
+    // grantSlot must still follow absolute index, not lock-rel parity.
+    auto dibits = makeSyntheticPhase2Superframe();
+    const auto ischA = makeSyntheticPhase2Isch(0, 2, true, 0);
+    const auto ischB = makeSyntheticPhase2Isch(1, 2, true, 0);
+    const size_t aBase = 4 * P25LiveDecoder::Phase2BurstDibits;
+    const size_t bBase = 5 * P25LiveDecoder::Phase2BurstDibits;
+    std::copy(ischA.begin(), ischA.end(),
+              dibits.begin() + static_cast<std::ptrdiff_t>(aBase));
+    std::copy(ischB.begin(), ischB.end(),
+              dibits.begin() + static_cast<std::ptrdiff_t>(bBase));
+
+    P25LiveDecoder decoder;
+    const auto bursts = decoder.processPhase2HardDibits(dibits);
+    REQUIRE_FALSE(bursts.empty());
+    const auto cIt = std::find_if(bursts.begin(), bursts.end(), [](const P25Phase2Burst& b) {
+        return b.dibitOffset == 6 * P25LiveDecoder::Phase2BurstDibits;
+    });
+    REQUIRE(cIt != bursts.end());
+    REQUIRE(cIt->grantSlotKnown);
+    REQUIRE(cIt->superframeBurstIndexKnown);
+    REQUIRE(cIt->superframeBurstIndex == 10);
+    REQUIRE(cIt->grantSlot == 1);
+}
+
 TEST_CASE("P25 live decoder emits stable Phase 2 session codeword IDs")
 {
     P25LiveDecoder decoder;
@@ -2016,6 +2047,63 @@ TEST_CASE("P25 live decoder decodes clear Phase 2 LCCH without XOR mask")
     REQUIRE(pdu->detectedKind == pdu->source);
 }
 
+TEST_CASE("P25 live decoder deep ACCH rescue recovers MAC when DUID kind mismatches", "[p25]")
+{
+    // Field class (20260911_082310 TG20202): SF+mask already locked, then
+    // noisy DUID labels a SACCH body as FACCH.  Shallow locked path stays
+    // DUID-only; deep rescue must fan out ACCH kinds and accept CRC on the
+    // nominal layout even when detectedKind != source.
+    constexpr uint16_t nac = 0x2d2;
+    constexpr uint32_t wacn = 0xbee00;
+    constexpr uint16_t systemId = 0x2d1;
+    constexpr uint8_t maskPhase = 5;
+
+    const auto goodClear = makeSyntheticPhase2SuperframeWithSacchForTest();
+    const auto goodMasked =
+        maskSyntheticPhase2SuperframeForTest(goodClear, nac, wacn, systemId, maskPhase);
+
+    P25LiveDecoderConfig cfg;
+    cfg.enablePhase1Decode = false;
+    cfg.enablePhase2Decode = true;
+    cfg.realtimeVoiceSearch = true;
+    cfg.realtimeDecodeBudgetMs = 0; // unbounded for the unit fixture
+    P25LiveDecoder decoder(cfg);
+    decoder.setPhase2MaskParameters(nac, wacn, systemId);
+
+    const auto locked = decoder.processHardDibits(goodMasked);
+    REQUIRE(locked.stats.phase2MaskPhaseKnown);
+    REQUIRE(locked.stats.phase2MaskPhase == maskPhase);
+    REQUIRE(locked.stats.phase2MacCrcValid >= 1);
+
+    auto badClear = goodClear;
+    const size_t sacchSlot = 2;
+    const size_t payload =
+        sacchSlot * P25LiveDecoder::Phase2BurstDibits + P25LiveDecoder::Phase2FrameSyncDibits;
+    const uint8_t facchDuid = encodePhase2DuidForTest(0x9); // SCRAMBLED_FACCH
+    badClear[payload + 0] = (facchDuid >> 6) & 0x03;
+    badClear[payload + 37] = (facchDuid >> 4) & 0x03;
+    badClear[payload + 122] = (facchDuid >> 2) & 0x03;
+    badClear[payload + 159] = facchDuid & 0x03;
+    const auto badMasked =
+        maskSyntheticPhase2SuperframeForTest(badClear, nac, wacn, systemId, maskPhase);
+
+    const auto result = decoder.processHardDibits(badMasked);
+
+    REQUIRE(result.stats.phase2MacCrcValid >= 1);
+    REQUIRE(result.stats.phase2MacAltKindCrcValid >= 1);
+
+    const auto pdu = std::find_if(result.phase2MacPdus.begin(), result.phase2MacPdus.end(),
+                                  [](const P25Phase2MacPdu& p) {
+                                      return p.crcValid &&
+                                          p.source == P25Phase2BurstKind::SacchScrambled &&
+                                          p.detectedKind == P25Phase2BurstKind::FacchScrambled;
+                                  });
+    REQUIRE(pdu != result.phase2MacPdus.end());
+    REQUIRE_FALSE(pdu->acchBitOrderSwapped);
+    REQUIRE_FALSE(pdu->acchDibitInverted);
+    REQUIRE(pdu->acchSlipDibits == 0);
+}
+
 TEST_CASE("P25 live decoder repairs SDRTrunk-layout Phase 2 ACCH RS symbol errors", "[p25]")
 {
     auto dibits = makeSyntheticPhase2SuperframeWithLcchForTest();
@@ -2374,10 +2462,34 @@ TEST_CASE("P25 Phase 2 6000 baud CQPSK processIq stays inside realtime budget on
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - t0).count();
     REQUIRE(result.stats.symbolRate == Catch::Approx(6000.0));
-    // Hard ceiling: realtime budget is 110ms but channelize+search overhead may
-    // exceed it slightly.  Minutes-long hangs must never return.
-    REQUIRE(ms < 2500);
+    // DEC-0051: cooperative mid-decode abort must keep noise eyes near budget.
+    // Capture 044651 emit p50≈212 / empty max 641 under budget 80 without this.
+    // Allow channelize + one in-flight candidate slack (not the old 2500 ms ceiling).
+    REQUIRE(ms < 350);
+    const bool sawBudgetTrip = std::any_of(
+        result.warnings.begin(),
+        result.warnings.end(),
+        [](const std::string& w) {
+            return w.find("Realtime P25 voice decode budget exhausted") != std::string::npos;
+        });
+    // Wide CQPSK grid on noise should trip the budget (or finish under it).
+    REQUIRE((sawBudgetTrip || ms <= cfg.realtimeDecodeBudgetMs + 40));
     (void)result;
+}
+
+TEST_CASE("DEC-0051 realtime budget helpers arm and trip once", "[p25][budget][dec0051]")
+{
+    P25LiveDecoder decoder;
+    decoder.armRealtimeDecodeBudget(1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    REQUIRE(decoder.realtimeDecodeBudgetExceeded());
+    std::vector<std::string> warnings;
+    decoder.noteRealtimeDecodeBudgetTrip(warnings);
+    decoder.noteRealtimeDecodeBudgetTrip(warnings);
+    REQUIRE(warnings.size() == 1);
+    REQUIRE(warnings.front().find("budget exhausted") != std::string::npos);
+    decoder.disarmRealtimeDecodeBudget();
+    REQUIRE_FALSE(decoder.realtimeDecodeBudgetExceeded());
 }
 
 TEST_CASE("P25 AMBE Phase 2 voice decoder reports backend availability explicitly")

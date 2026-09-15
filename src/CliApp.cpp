@@ -38,6 +38,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcess>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QString>
 #include <QStringList>
@@ -513,6 +515,44 @@ GuiRuntimeConfig parseGuiRuntimeConfig(int argc, char* argv[])
             if (auto value = requireValue(key.c_str())) {
                 cfg.debugStage = *value;
             }
+        } else if (key == "--control-server" || key == "--sdr-control" ||
+                   key == "--sdrtown-control") {
+            cfg.requested = true;
+            cfg.controlServer = true;
+        } else if (key == "--no-control-server" || key == "--no-sdr-control" ||
+                   key == "--no-sdrtown-control") {
+            cfg.requested = true;
+            cfg.controlServer = false;
+        } else if (key == "--control-port" || key == "--sdr-control-port" ||
+                   key == "--sdrtown-control-port") {
+            cfg.requested = true;
+            cfg.controlServer = true;
+            if (auto value = requireValue(key.c_str())) {
+                int port = 0;
+                if (guiRuntimeParseInt(*value, port) && port > 0 && port <= 65535) {
+                    cfg.controlPort = port;
+                } else {
+                    cfg.warnings.push_back("invalid SDR Town control port: " + *value);
+                }
+            }
+        } else if (key == "--control-token" || key == "--sdr-control-token" ||
+                   key == "--sdrtown-control-token") {
+            cfg.requested = true;
+            cfg.controlServer = true;
+            cfg.controlAuthRequired = true;
+            if (auto value = requireValue(key.c_str())) {
+                cfg.controlToken = *value;
+            }
+        } else if (key == "--control-auth-required" ||
+                   key == "--sdr-control-auth-required") {
+            cfg.requested = true;
+            cfg.controlServer = true;
+            cfg.controlAuthRequired = true;
+        } else if (key == "--control-allow-unauthenticated" ||
+                   key == "--sdr-control-allow-unauthenticated") {
+            cfg.requested = true;
+            cfg.controlServer = true;
+            cfg.controlAuthRequired = false;
         } else if (key == "--gui-startup-dry-run" || key == "--gui-dry-run") {
             cfg.requested = true;
             cfg.dryRun = true;
@@ -1471,6 +1511,8 @@ int runCLI(int argc, char* argv[]) {
                       << "  p25 clearaudio <cc_mhz> [dev] [seconds] [record=<seconds>] [tg=<id>] - wait/follow/save IQ+WAV for repeatable clear-audio diagnostics\n"
                       << "  p25 replay <sigmf-meta|sigmf-data|dir> [target_mhz] [ms] [phase2] [skip=<ms>] [center=<mhz>] [nac=<id> wacn=<id> system=<id>] - replay saved IQ through P25 decoder\n"
                       << "  p25 followtest <sigmf-meta|sigmf-data|dir> <cc_mhz> [ms] [skip=<ms>] [center=<mhz>] [voicecenter=<mhz>] [followms=<ms>] [tg=<id>] [nac= wacn= system=] - replay CC grants and test retuned voice follow/audio gates\n"
+                      << "  p25 logscan <capture_dir|p25_log> [--json] [--audit] - deep forensic CADENCE/worker/wall/AutoPPM scan (DEC-0047)\n"
+                      << "  p25 listenclassify <wav> [--json] [--expect CLEAR|GARBLED|SILENT] - PCM clear vs garbled vs silent (DEC-0050)\n"
                       << "  p25 audit                 - run static P25 parity verify scripts\n"
                       << "  p25 test                  - build + run P25 unit/verify suite\n"
                       << "  test                      - alias for p25 test\n"
@@ -4167,6 +4209,159 @@ int runCLI(int argc, char* argv[]) {
                     label << "P25 replay best start_ms="
                           << (static_cast<double>(bestStart) * 1000.0 / capture.sampleRateHz);
                     printP25CliDecodeReport(label.str(), -1, capture.centerFreqHz, capture.sampleRateHz, targetHz, bestResult, analyzer);
+                }
+            } else if (sub == "listenclassify" || sub == "listen" || sub == "pcmclassify") {
+                std::string rest;
+                std::getline(iss, rest);
+                while (!rest.empty() && (rest.front() == ' ' || rest.front() == '\t')) rest.erase(rest.begin());
+                if (rest.empty()) {
+                    std::cout << "usage: p25 listenclassify <wav> [--json] [--expect CLEAR|GARBLED|SILENT]\n";
+                    continue;
+                }
+                QString scriptPath;
+                const QStringList candidates = {
+                    QDir::current().absoluteFilePath("src/tools/p25_pcm_listen_classify.py"),
+                    QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../../../src/tools/p25_pcm_listen_classify.py"),
+                    QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../../src/tools/p25_pcm_listen_classify.py"),
+                    QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../src/tools/p25_pcm_listen_classify.py"),
+                };
+                for (const QString& cand : candidates) {
+                    if (QFileInfo::exists(cand)) {
+                        scriptPath = QFileInfo(cand).absoluteFilePath();
+                        break;
+                    }
+                }
+                if (scriptPath.isEmpty()) {
+                    std::cout << "P25 listenclassify: cannot find src/tools/p25_pcm_listen_classify.py\n";
+                    continue;
+                }
+                QStringList args;
+                args << scriptPath;
+                const QString trimmed = QString::fromStdString(rest).trimmed();
+                // First token is wav path (may be quoted); remainder are flags.
+                QString wavArg;
+                QString flags;
+                if (trimmed.startsWith('"')) {
+                    const int endQuote = trimmed.indexOf('"', 1);
+                    if (endQuote > 1) {
+                        wavArg = trimmed.mid(1, endQuote - 1);
+                        flags = trimmed.mid(endQuote + 1).trimmed();
+                    } else {
+                        wavArg = trimmed;
+                    }
+                } else {
+                    const int sp = trimmed.indexOf(QRegularExpression("\\s"));
+                    if (sp > 0) {
+                        wavArg = trimmed.left(sp);
+                        flags = trimmed.mid(sp + 1).trimmed();
+                    } else {
+                        wavArg = trimmed;
+                    }
+                }
+                args << wavArg;
+                if (!flags.isEmpty()) {
+                    for (const QString& tok : flags.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts)) {
+                        args << tok;
+                    }
+                }
+                std::cout << "P25 listenclassify: python \"" << scriptPath.toStdString() << "\" "
+                          << wavArg.toStdString();
+                if (!flags.isEmpty()) std::cout << " " << flags.toStdString();
+                std::cout << "\n";
+                QProcess proc;
+                proc.setProcessChannelMode(QProcess::MergedChannels);
+                proc.start(QStringLiteral("python"), args);
+                if (!proc.waitForStarted(5000)) {
+                    std::cout << "P25 listenclassify: FAIL (could not start python)\n";
+                    continue;
+                }
+                if (!proc.waitForFinished(60000)) {
+                    proc.kill();
+                    std::cout << "P25 listenclassify: FAIL (timeout)\n";
+                    continue;
+                }
+                const QByteArray out = proc.readAll();
+                if (!out.isEmpty()) std::cout << out.constData();
+                if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
+                    std::cout << "P25 listenclassify: FAIL (exit " << proc.exitCode() << ")\n";
+                }
+            } else if (sub == "logscan" || sub == "forensicscan" || sub == "scanlog") {
+                std::string rest;
+                std::getline(iss, rest);
+                while (!rest.empty() && (rest.front() == ' ' || rest.front() == '\t')) rest.erase(rest.begin());
+                if (rest.empty()) {
+                    std::cout << "usage: p25 logscan <capture_dir|*_p25_log.txt> [--json] [--audit]\n";
+                    continue;
+                }
+                QString scriptPath;
+                const QStringList candidates = {
+                    QDir::current().absoluteFilePath("src/tools/p25_logscan.py"),
+                    QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../../../src/tools/p25_logscan.py"),
+                    QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../../src/tools/p25_logscan.py"),
+                    QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../src/tools/p25_logscan.py"),
+                };
+                for (const QString& cand : candidates) {
+                    if (QFileInfo::exists(cand)) {
+                        scriptPath = QFileInfo(cand).absoluteFilePath();
+                        break;
+                    }
+                }
+                if (scriptPath.isEmpty()) {
+                    std::cout << "P25 logscan: cannot find src/tools/p25_logscan.py "
+                                 "(run from repo root or keep Release tree under build/bin/Release)\n";
+                    continue;
+                }
+                // Quote the capture path (often contains "SDR Town" spaces).
+                QString pathArg;
+                QString flags;
+                {
+                    QString trimmed = QString::fromStdString(rest).trimmed();
+                    if (trimmed.startsWith('"')) {
+                        pathArg = trimmed;
+                    } else {
+                        const int flagAt = trimmed.indexOf(" --");
+                        if (flagAt > 0) {
+                            pathArg = QString("\"%1\"").arg(trimmed.left(flagAt).trimmed());
+                            flags = trimmed.mid(flagAt + 1).trimmed();
+                        } else {
+                            pathArg = QString("\"%1\"").arg(trimmed);
+                        }
+                    }
+                }
+                const QString program = QStringLiteral("python");
+                QStringList args;
+                args << scriptPath;
+                // Strip wrapping quotes for QProcess argv (no shell).
+                QString pathForArg = pathArg;
+                if (pathForArg.startsWith('"') && pathForArg.endsWith('"') && pathForArg.size() >= 2) {
+                    pathForArg = pathForArg.mid(1, pathForArg.size() - 2);
+                }
+                args << pathForArg;
+                if (!flags.isEmpty()) {
+                    for (const QString& tok : flags.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts)) {
+                        args << tok;
+                    }
+                }
+                std::cout << "P25 logscan: python \"" << scriptPath.toStdString() << "\" "
+                          << pathForArg.toStdString();
+                if (!flags.isEmpty()) std::cout << " " << flags.toStdString();
+                std::cout << "\n";
+                QProcess proc;
+                proc.setProcessChannelMode(QProcess::MergedChannels);
+                proc.start(program, args);
+                if (!proc.waitForStarted(5000)) {
+                    std::cout << "P25 logscan: FAIL (could not start python)\n";
+                    continue;
+                }
+                if (!proc.waitForFinished(120000)) {
+                    proc.kill();
+                    std::cout << "P25 logscan: FAIL (timeout)\n";
+                    continue;
+                }
+                const QByteArray out = proc.readAll();
+                if (!out.isEmpty()) std::cout << out.constData();
+                if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
+                    std::cout << "P25 logscan: FAIL (exit " << proc.exitCode() << ")\n";
                 }
             } else if (sub == "audit") {
                 std::cout << "P25 audit: running static verify scripts...\n";

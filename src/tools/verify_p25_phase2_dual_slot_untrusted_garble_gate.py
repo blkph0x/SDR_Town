@@ -93,7 +93,13 @@ checks = {
         and "p25Phase2PostEmitMixedMacDeadWindow(rx, out)" in security_gate_region
         and "dual-slot-untrusted-garble-drop" in main.split(
             "if (dualSlotUntrustedGate)", 1
-        )[1][:900]
+        )[1][:2200]
+        and "dual-slot-untrusted-keep-selected-pcm" in main.split(
+            "if (dualSlotUntrustedGate)", 1
+        )[1][:2200]
+        and "keepLabelledSelectedClearPcm" in main.split(
+            "if (dualSlotUntrustedGate)", 1
+        )[1][:2200]
         and "postEmitMixedMacDeadGate" not in main.split(
             "if (dualSlotUntrustedGate)", 1
         )[1][:900]

@@ -11,10 +11,8 @@ Status: `open` | `in_progress` | `blocked` | `done`
 
 | ID | Status | Tracker | What | Notes / must not invent |
 |---|---|---|---|---|
-| B-0001 | open | ISS-0001 / T-0010 / GH#9 | **Live** clear P25 continuous audio re-prove (~095846 class) | 2026-09-11 CLI: still partial / drop=B feed starve on live 20202 IQ. File bars OK. Do **not** default-on streaming DDC. Classify mute A–E before hop/TTL. |
-| B-0002 | open | T-0004 / REQ-P2.2 | Mixed MAC-dead / cold-eye first hop feed starve | Live 20260911_082310 TG20202: drop=B targetVcw=94 fed=0. DEC-0012 post-emit mixed skip stays. Do not reopen dual-slot 034136. |
-| B-0003 | open | T-0005 / REQ-P2.3 | Emit proven PCM only when drop=C | No dual-slot MAC-dead mute regression. |
-| B-0004 | open | T-0006 / REQ-P2.4 | Honest playout duty (drop=D residual / worker-busy) | Bridge must not be the product. |
+| B-0001 | open | ISS-0001 / T-0010 / GH#9 | **Live** clear P25 continuous audio re-prove | After DEC-0062: expect VOCODER_RESET on mid-grant MAC_PTT; catch-up still 240+280 (0061). |
+| B-0004 | done | T-0006 / REQ-P2.4 | Honest playout duty (drop=D / worker-busy) | DEC-0051 abort + DEC-0052 skip sticky commit (`061217` busy 690). |
 | B-0005 | open | T-0007 / REQ-P2.5 | Follow hold during proven call (drop=E only) | |
 | B-0006 | open | T-0008 / REQ-P2.6 | Isolation non-regression (encrypted + wrong-slot) | Beside every P2 change. |
 

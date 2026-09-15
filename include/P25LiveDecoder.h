@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <complex>
 #include <cstddef>
 #include <cstdint>
@@ -529,6 +530,11 @@ public:
     bool phase2MaskParametersMatch(uint16_t nac, uint32_t wacn, uint16_t systemId) const;
     const P25LiveDecoderConfig& config() const { return m_config; }
     void setRealtimeDecodeBudgetMs(int budgetMs) { m_config.realtimeDecodeBudgetMs = std::max(0, budgetMs); }
+    // DEC-0051 cooperative mid-decode abort (processIq arms these; Catch tests them).
+    void armRealtimeDecodeBudget(int budgetMs) noexcept;
+    void disarmRealtimeDecodeBudget() noexcept;
+    bool realtimeDecodeBudgetExceeded() const noexcept;
+    void noteRealtimeDecodeBudgetTrip(std::vector<std::string>& warnings);
     void setMaxCqpskSearchCandidates(size_t maxCandidates) { m_config.maxCqpskSearchCandidates = maxCandidates; }
     void setMaxPhase2SyncHits(size_t maxSyncHits) { m_config.maxPhase2SyncHits = maxSyncHits; }
     void setMaxPhase2SuperframeLocks(size_t maxLocks) { m_config.maxPhase2SuperframeLocks = maxLocks; }
@@ -729,6 +735,12 @@ private:
     bool m_frontEndDcEstimateValid = false;
     double m_frontEndDcSampleRate = 0.0;
     std::complex<double> m_frontEndDcEstimate{0.0, 0.0};
+    // DEC-0051 processIq-scoped cooperative budget (not copied across probes).
+    bool m_realtimeBudgetArmed = false;
+    bool m_realtimeBudgetTripped = false;
+    std::chrono::steady_clock::time_point m_realtimeBudgetDeadline{};
+    // DEC-0052: cold first-eye commit after deadline — cheap hunt only.
+    bool m_phase2ForceCheapRealtimeCommit = false;
 };
 
 class P25ImbeVoiceDecoder {

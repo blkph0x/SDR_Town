@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 // Purpose: Name the earliest P25 Phase 2 pipeline stage that dropped audio
 //          in a CADENCE / voicetest window so we stop guessing timeouts.
@@ -46,3 +47,14 @@ inline constexpr double kP25AudioDropAmbeFrameSeconds = 0.020;
 P25AudioDropBucket classifyP25AudioDrop(const P25AudioDropSample& sample) noexcept;
 
 const char* p25AudioDropBucketLabel(P25AudioDropBucket bucket) noexcept;
+
+// DEC-0046: post-hoc decode-wall stamps must not wipe speaker pending.
+// DEC-0045 clamped wall to 105 ms; empty eyes finishing >105 ms were stamped
+// decode-wall-timeout and cleared pending → continuous audio death.
+bool p25Phase2WallTimeoutMayClearSpeakerPending(const std::string& staleReason,
+                                                       bool keepWallTimeoutEvidence) noexcept;
+
+// Live sustain budget/wall invariants (string-locked + Catch).
+bool p25Phase2LiveSustainBudgetWallSane(int healthyBudgetMs,
+                                               int healthyWallMs,
+                                               int globalWallMs) noexcept;

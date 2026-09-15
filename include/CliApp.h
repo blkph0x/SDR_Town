@@ -31,6 +31,8 @@ struct GuiRuntimeConfig {
     bool iqReplayStt = true;
     bool iqReplayClearGrant = false;
     bool iqReplayEncryptedGrant = false;
+    bool controlServer = true;
+    bool controlAuthRequired = false;
     double frequencyHz = 0.0;
     double p25ControlHz = 0.0;
     double iqReplayTargetHz = 0.0;
@@ -46,6 +48,7 @@ struct GuiRuntimeConfig {
     int iqReplayTalkgroup = 0;
     int iqReplaySlot = -1;
     int iqReplayNac = -1;
+    int controlPort = 8765;
     int64_t iqReplayWacn = -1;
     int iqReplaySystemId = -1;
     std::string iqCaptureLabel;
@@ -55,12 +58,14 @@ struct GuiRuntimeConfig {
     std::string iqReplayPath;
     std::string iqReplayWavPath;
     std::string iqReplayResultPath;
+    std::string controlToken;
     std::vector<std::string> warnings;
 
     bool hasStartupWork() const noexcept
     {
         return requested || startDevice || defaultAudio || autoFollow || p25Monitor ||
-            p25GrantTest || openP25Log || iqCapture || iqReplay || selfTest || exitAfterMs > 0;
+            p25GrantTest || openP25Log || iqCapture || iqReplay || selfTest ||
+            exitAfterMs > 0;
     }
 };
 

@@ -313,6 +313,10 @@ struct P25Phase2SessionSustainState {
     // Counts cold acquire processIq passes so the first post-retune eye can be
     // a wider contiguous window while later passes stream like SDRTrunk.
     int coldAcquirePasses = 0;
+    // DEC-0041: consecutive post-emit eye-lost hops (targetVcw=0 / no decode).
+    // First miss stays on hot cand=8/120; streak>=2 escalates to replay cand=16
+    // inside the same 120 ms live wall (not 240 — 234224 worker-busy drop D).
+    int postEmitEyeLostStreak = 0;
 };
 
 struct P25ReceiverSessionState {

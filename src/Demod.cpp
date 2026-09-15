@@ -452,7 +452,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
 
     // Channel FIR (same design as before)
     if (channelBwHz <= 0) {
-        channelBwHz = (mode == DemodMode::WFM || mode == DemodMode::AUTO) ? 180000.0
+        channelBwHz = (mode == DemodMode::WFM || mode == DemodMode::AUTO) ? 220000.0
             : (mode == DemodMode::AM ? 20000.0 : (mode == DemodMode::CW ? 1000.0 : 12500.0));
     }
     if (std::abs(channelBwHz - lastBw) > 50 || std::abs(sr - lastS) > 100) {

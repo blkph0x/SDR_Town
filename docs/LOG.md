@@ -4,6 +4,290 @@ Newest at the top.
 
 ---
 
+## 2026-09-13 — DEC-0062 talkspurt vocoder reset (225923)
+
+- **Evidence:** TG30304; one RID clear, later talk unintelligible; src=unknown;
+  BAD uniqueFreshR≈1.0 (overlap tax) while mbelib never reset mid-grant.
+- **Fix:** MAC_PTT / post-END talkspurt resets selected vocoder (keep abs-dedupe).
+
+## 2026-09-13 — DEC-0061 catch-up overlap restore (153932 jitter)
+
+- **Evidence:** After DEC-0060 280+80, emit WAV islands p50=40 ms / chop=76;
+  workers 160+80 & 280+80 empty-audio heavy; bridge top-ups 68/69 @ ~11% fill.
+- **Fix:** speaker backlog catch-up **240+280** (restore DEC-0024 overlap;
+  keep fresh ≥ emit wall). Sustain 80+280 unchanged. Supersedes DEC-0060 sizes.
+
+## 2026-09-13 — DEC-0060 half-audio catch-up pace (152348)
+
+- **Evidence:** TG11108 RID 0x243754 pcm_vs_wall≈0.5; absDup≈missing feed;
+  160+280 catch-up with emit dsp p50≈220 ms > fresh; budget burned on context.
+- **Fix:** speaker backlog catch-up **280+80** (amends DEC-0058 sizes). Sustain
+  80+280 unchanged.
+
+## 2026-09-13 — DEC-0059 companion ESS aborting clear RIDs (145139)
+
+- **Evidence:** Some clear RIDs perfect, others vanish/garble. TG30302 RID
+  0x2391D7 ReturnEncrypted mid-emit while ess=clear; companion enc TG12068
+  opposite slot; sticky traffic.encrypted ORed into follow.
+- **Fix:** this-burst ESS only (traffic + target paint); recent clear clears
+  sticky enc; MainWindow follow uses target ESS; no opposite-only pending drain.
+
+## 2026-09-13 — DEC-0058 weak/choppy clear follow (142104)
+
+- **Evidence:** TG10301 CLEAR; 80+280 sustain while dsp~200–600 ms → emit gaps ~1s;
+  dual-slot MAC-dead waiting-clear after latch.
+- **Fix:** speaker backlog catch-up 160+280; latched selected-dominant dual-slot
+  continuation (feed + security). DEC-0012 companion-louder unchanged.
+
+## 2026-09-13 — DEC-0057 TG30003 wrong-TDMA spam (`135857`)
+
+- **Evidence:** 29s CLEAR audio; grant slot=1 correct; 75 wrong-TDMA status lines
+  on companion-only windows. Catch showed lock-rel-only mislabels final-fragment C.
+- **Fix:** no wrong-slot diag when grant immutable; keep I-ISCH absolute grantSlot
+  (DEC-0055.3). Status spam was companion dwell, not absolute rebase.
+
+## 2026-09-12 — DEC-0056 clear hang + WFM BW (`134135`)
+
+- **Capture:** Enc returns fast; Clear TG30302 ~57s hang; WAV 5.64s CLEAR;
+  CADENCE ok=2/64; budget/worker heavy; FEED_GATE primary.
+- **BW/LPF:** P25 arm 12.5 kHz, LPF off, AMBE speaker — not the crackle path.
+  WFM default raised 180→220 kHz for analog.
+- **Hang fix:** grant-clear no longer extends 40s speaker grace; post-speech
+  no-VCW 12s/6s; no structure-only lastActive after clear speech.
+
+## 2026-09-12 — DEC-0055 epoch + dual-slot keep + I-ISCH origin
+
+- **Audit (code-only):** DualSlot `audio.clear()`, soft `epochTrusted`, lock-relative
+  slot map were the continuous-clear breakers.
+- **Fix:** keep labelled Clear selected PCM on dual-slot; drop bare
+  establishedClear+xor epoch; rebase absolute 0..11 when A/B I-ISCH agree.
+- **Gates:** `verify_p25_phase2_dec0055_epoch_dual_slot_origin.py` + Catch rotate
+  I-ISCH case; dual-slot verifier updated for keep path.
+- **Not claimed:** live 100% — needs B-0001 start/stop + listen harvester.
+
+## 2026-09-12 — DEC-0054 restore cold full-commit (`081416` no audio)
+
+- **Regression:** 0.36s SILENT after DEC-0053; cheap-commit never logged.
+- **Cause:** CQPSK headroom + cold forceCheap poisoned first eye.
+- **Fix:** remove headroom; cold full-commit +200ms re-arm; sticky cheap 120ms.
+
+## 2026-09-12 — DEC-0053 sticky cheap-commit (`064509` golden→silence)
+
+- **Symptom:** first ~0.6 s CLEAR then nothing; WAV 1.24 s / 2 emits.
+- **Cause:** DEC-0052 sticky skip-commit (+ expired deadline aborting cheap path).
+- **Fix:** sticky+budget → cheap-commit with 50 ms allowance re-arm; no skip.
+
+## 2026-09-12 — DEC-0052 mustAnnotateCommit hole (`061217`)
+
+- **Capture:** ~713 s gapless; live listen CLEAR; CADENCE ok only 20/676.
+- **Worker:** emit p50≈223, busy 690 — DEC-0051 never tripped (0 log hits).
+- **Cause:** `phase2CqpskTrafficDemod` forced unbounded commit after deadline.
+- **Fix:** sticky skip-commit + cold cheap-commit + CQPSK headroom + p25_log
+  budget trips. Verifier `verify_p25_phase2_budget_skip_sticky_commit.py`.
+
+## 2026-09-12 — DEC-0051 cooperative mid-decode budget abort (`044651`)
+
+- **Forensic (no listen):** `run_p25_capture_full_forensic.py` on `044651`;
+  `p25_logscan --audit` on `041612`. No `*_live_speaker.wav` yet (pre-0050
+  builds).
+- **Dominant live failure:** emit dsp p50≈212 ms / empty max 642 ms under
+  budget 80 → worker-busy 135 → rolling ~16 s. Wall stamps never fired.
+- **Fix:** shared processIq deadline + abort in sync/lock/mask/sticky loops;
+  Catch budget ceiling 350 ms; verifier
+  `verify_p25_phase2_cooperative_budget_abort.py`.
+- **Not softened:** DEC-0012, DEC-0046 wall, streaming DDC default-off.
+- **Next:** rebuild Release; one start/stop listen; PPM≈−2; harvester.
+
+## 2026-09-12 — DEC-0050 PCM listen classifier (live vs file)
+
+- **Gap:** File replay “pretty good”; live islands/garble/silence. Duty≠clear.
+- **Add:** `p25_pcm_listen_classify.py` CLEAR/GARBLED/SILENT; start/stop
+  `*_live_speaker.wav`; `p25 listenclassify`; forensic + listen bar harvester.
+- **Use:** after next live start/stop →
+  `python src/tools/run_p25_listen_bar_harvester.py <capture>`
+  (flags `LIVE_WORSE_THAN_FILE` when file CLEAR + live bad).
+
+## 2026-09-12 — Forensic `044651` + DEC-0049 Auto PPM harden
+
+- **Live:** mixed — TG10120 duty up to 0.909; TG20202 stuck ~0.64 drop D;
+  A=86/132; worker-busy 135; CC high TSBK dibit corrections.
+- **Auto PPM bug:** AFC=1250 conf=0.45 stepped ppm to **−7.88** (twice).
+- **File bars:** TG10120 duty 0.64; TG20202 0.615; proves RF/mbelib.
+- **Fix:** reject ±1250 rail; conf≥0.55; step≤1.5; cooldown 120s; trusted
+  offset only. Full pipeline script `run_p25_capture_full_forensic.py`.
+- **Operator:** set device PPM back near **−2.0** before next listen.
+
+## 2026-09-12 — Automated forensic `041612` + DEC-0048 eye-lost streak=1
+
+- **Capture:** `20260912_041612` (~215 s) after DEC-0046 listen (“no audio”).
+- **CLI:** `p25_logscan` + `p25_capture_audit` + voicetest.
+- **Live:** CADENCE A=82/100, duty max 0.399, worker-busy 103, Auto PPM 0.
+- **File same IQ TG20202:** duty **0.805** ambe=322/322 — **not mbelib**.
+- **Fix:** eye-lost escalate cand=16 on streak≥1; add `p25 logscan`.
+- **Next:** live listen + startstop; logscan should show fewer permanent A cliffs.
+
+## 2026-09-12 — DEC-0046: wall clamp killed almost-working audio
+
+- **Operator:** regressed to “really bad audio” after DEC-0044/0045.
+- **Root cause:** decode wall is **post-hoc**. DEC-0045 clamped healthy wall
+  to 105 ms → empty eyes finishing >105 ms stamped `decode-wall-timeout` →
+  publish path **wiped speaker pending** mid-call. Classic
+  almost-works → gap-fix → total break.
+- **Fix:** reject wall clamp; wall stamps never clear pending (diags only);
+  keep auto PPM on CC return. Catch `[p25][dec0046]` + verifier update.
+- **Still open:** cooperative realtime abort so dsp cannot sit at ~451 ms
+  under budget 80 (worker-busy class from `032907`).
+- **Next:** live listen with capture started; look for continuous clear,
+  `Auto PPM:` on return, **no** pending wipe after empty wall hops.
+
+## 2026-09-12 — DEC-0044/0045 auto PPM + healthy wall (`032907`)
+
+- **Operator:** “started promising then losing it” — suspected PPM.
+- **Forensic `20260912_032907`:** CADENCE mean **0.060**; worker-busy **500**;
+  emit-gate healthy dsp p50≈**451 ms** vs budget 80 / wall 320. Device ppm
+  **0.0**, AFC≈**884 Hz** (~2.1 ppm). Cliffs co-timed with worker-busy; clear
+  grants exist (TG20201/20202 ENC=clear). PPM is real LO bias; cliff class is
+  still drop **D** / throughput.
+- **Fix:** DEC-0044 auto-apply device PPM from trusted CC AFC on
+  return-to-control only; DEC-0045 clamp healthy wall **105** / eye-lost
+  **145** and refresh deadline.
+- **Gate:** Release rebuild; `[p25]` + verifiers (new
+  `verify_p25_phase2_auto_ppm_and_healthy_wall.py`).
+- **Next:** live listen — look for `Auto PPM:` on CC return, CADENCE ok≥0.65
+  on clear follows, emit-gate dsp near budget (not ~450 ms).
+
+## 2026-09-12 — Forensic `024000` + twin-rescue revert
+
+- **Operator:** audio “nonexistent / disconnected.”
+- **Mixed RF in one capture:**
+  1. TG **30003** @420.225: file **encrypted** (`PASS_ENCRYPTED_GATED`).
+  2. TG **12068** @421.975: live ReturnEncrypted (correct).
+  3. TG **30003** @421.975 slot1: file **clear**
+     `PASS_CONTINUOUS duty=0.705` — live max **0.649**, **0** ok≥0.65,
+     wrong-TDMA / `no-sf-mask` / worker-busy **80**. Real clear miss.
+- **CADENCE:** n=78 mean **0.074**; A=61 D=17.
+- **Action:** revert DEC-0043 ±1 DUID lock-twin rescue (kept post-speak
+  invalidate debounce ≥3). Soft twin + debounce stuck bad epochs on live.
+- **Next:** new Release live listen on clear follows; worker drop D still open.
+
+## 2026-09-12 — DEC-0043 clear sticky vs wrong-TDMA thrash (`020758`)
+
+- **Evidence:** TG20201 clear almost-works then permanent `no-vcw` after
+  wrong-TDMA islands; file duty **0.795**. Immediate post-speak opp-dominant
+  sticky invalidate + ±1 lock flip on block path. Encrypted unknowns stay
+  gated (DEC-0012).
+- **Fix:** debounce opp-dominant invalidate after speak (streak≥3); block-path
+  preferred-slot ±1 lock twin rescue under sticky XOR phase. No hop/TTL /
+  streaming default-on / DEC-0012 soften.
+- **Gate:** Release rebuild; `[p25]` 109/109; verifiers **130/130** (new
+  `verify_p25_phase2_opp_dominant_sticky_debounce.py`). File `020758`
+  TG20201 skip=18439 8s: `PASS_CONTINUOUS_AUDIO duty=0.715`; TG12069:
+  `PASS_ENCRYPTED_GATED` essEncrypted=yes. Keep-set 060036/095846 not on
+  disk this host.
+- **Next:** operator live listen on new Release (CADENCE clear follows vs
+  `020758`/`002128`).
+
+## 2026-09-12 — Forensic `020758` (DEC-0042 live listen, ~138 s)
+
+- **Capture:** gapless, SNR ~10.6 dB, CC 420.475. Binary after DEC-0042.
+- **Operator ears match three follow classes exactly:**
+  1. **TG20201 clear** slot1 @421.225 — “almost works / choppy”: live max
+     duty **0.943** but only **2** ok seconds; then D islands → cliff to A
+     (`vcw-soft` + **wrong TDMA** storm) → permanent `no-vcw`. File same
+     slice: **duty 0.795**. Still live worker-busy + eye-loss (emit dsp
+     p50~145 ms, still all emit jobs &gt;80 ms).
+  2. **TG12069 unknown** slot0 @420.225 — “nonexistent”: live all **B**
+     `metadata-gate-waiting-traffic-mac-ess`. File:
+     `PASS_ENCRYPTED_GATED` **essEncrypted=yes**. Correct mute — not a
+     continuity miss.
+  3. **TG12068 unknown** slot1 same RF — “brief choppy”: live B then ~3 s
+     D (0.52/0.34/0.36) then A. File: **encrypted gated**; forced-clear
+     only duty **0.23**. Do **not** soften encrypt/DEC-0012 to chase this.
+- **Cross-TG:** clear follows = worker throughput / wrong-TDMA eye loss;
+  unknown/encrypted follows = gate (correct). No hop/TTL invention.
+- **Next fix target (clear only):** cut healthy emit below ~80 ms further
+  and/or stop wrong-TDMA thrash from killing sticky eye after speak
+  (without softening dual-slot mute).
+
+## 2026-09-12 — Forensic `002128` + DEC-0042 healthy sustain (cand=4/80)
+
+- **Capture:** `20260912_002128` (~54 min / ~50 GB, SNR ~15.1 dB, ring
+  overrun only ~48 ms). Stopped on disk reserve. Binary mtime after
+  DEC-0041.
+- **CADENCE:** n=2731 mean duty **0.115**; A=1891 D=650 B=91 ok=99;
+  worker-busy **2782**. Pattern **identical across TGs**.
+- **Mechanism (named):**
+  1. Drop D ≈ ok on feedRatio; D has ~half the windows/targetVcw →
+     single-flight worker under-samples RF (emit dsp p50≈199 ms).
+  2. Hard cliffs always co-timed with worker-busy, then eye collapse → A.
+  3. Drop B residual (91) = tv>0 fed=0 (DEC-0012 class; do not soften).
+  4. File TG30017 slot1 same IQ: **duty 0.83** → not RF/MAC absence.
+- **DEC-0042:** healthy sustain **cand=4/80**; keep DEC-0041 eye-lost
+  escalate. No hop/TTL / DEC-0012 / streaming default-on.
+- **Gate:** Release rebuild; `[p25]` 109/109; verifiers 129/129.
+- **File bars held:** 060036 duty **0.705**; 095846 duty **0.84**;
+  `002128` TG30017 file duty **0.83**.
+- **Next:** operator live listen on new Release (CADENCE vs `002128`).
+
+## 2026-09-12 — DEC-0041 live eye-lost budget (drop D on `234224`)
+
+- **Named evidence:** `20260911_234224` CADENCE D=101, worker-busy while
+  single-flight busy; dsp p90 ~461 ms on 80+280 eyes; submit p50 ~159 ms.
+- **Root class:** DEC-0035/0039 live eye-lost inherited replay **240 ms**
+  wall with cand=16 → multi-hundred-ms jobs starve the next live windows
+  (drop D), not hop geometry / DEC-0012.
+- **Fix:** streak debounce (first miss stays cand=8/120; streak≥2 →
+  cand=16) + live escalate budget **120** (`kP25LiveEyeLostReplayBudgetMs`).
+  Realtime ACCH score rescue bounded to top **2** phases × deep **1**
+  (keep alt-kind fanout on deep). No hop/TTL; no DEC-0012 soften; no
+  streaming default-on.
+- **Gate:** Release build; `sdr_town_tests` `[p25]` 109/109; verifiers
+  129/129.
+- **File bars:** 060036 TG10301 slot0 skip=261000 8s
+  `PASS_CONTINUOUS duty=0.705`; 095846 TG10301 slot1 skip=68700
+  `PASS_CONTINUOUS duty=0.8`.
+- **Next:** operator live listen on new Release (CADENCE drop D vs
+  `234224`); then commit + PR.
+
+## 2026-09-12 — Operator live listen (gapless IQ `234224`, ~372 s)
+
+- Operator report: when P25 emits, sound is much better / few gaps; some
+  followed grants stay silent or only short &lt;1 s islands.
+- Capture `20260911_234224` (CC 420.475, gapless, SNR ~12.5 dB) with HEAD
+  Release including ACCH alt-kind branch binary:
+  - Follows: TG **30003** unk, **10120** unk, **30302** clear, **10010**
+    clear, **30314** unk.
+  - CADENCE n=338: emit&gt;0 **123**; drop **A=211 / D=101 / B=18**;
+    duty mean **0.134**, median **0**, max **1.07**.
+  - Per-TG max duty: 30003 **0.56**, 10120 **1.07**, 30302 **0.52**,
+    10010 **0.64**, 30314 **0.86**.
+  - Dominant blocks: `no-vcw-from-live-window`, then
+    `traffic-processor-audio-open` / `clear-grant-vcw-not-fed` under
+    worker-busy. Matches ears: short islands = **A+D** thrash after brief
+    `gate=emit`; mute follows = long **A**/occasional **B**.
+- Do **not** soften DEC-0012. Next: cut live drop **D** (worker-busy while
+  audio open) and eye-loss **A** on follow; ACCH/MAC still for residual **B**.
+
+## 2026-09-11 — ACCH alt-kind rescue + soft-AMBE phase select fix
+
+- **Root cause class (20202 IQ):** drop=B with `p2sf/p2mask` high,
+  `ambeProbe` OK, `p2mac=0/N`, `essKnown=no`. Deep/forensic rescue across
+  phases still `p2macCrc=0` — this follow IQ has no recoverable ACCH CRC
+  (SNR ~5.5 dB). Do **not** soften DEC-0012 / feed without MAC|ESS proof.
+- **Shipped on `fix/acch-rescue-clear-grant-mac`:**
+  1. Deep ACCH rescue fans out ACCH **kinds** on nominal layout; accept
+     CRC when layout is nominal even if DUID≠source (`altKind`).
+  2. Soft AMBE no longer selects the commit XOR phase unless
+     `allowPhase2SoftAmbeMaskPhaseLock` (matches prior sticky policy).
+  3. Realtime score rescue tries top **2** mask phases (cost-bounded;
+     was briefly 4 on this branch) with deep budget **1**.
+  4. Unit test: sticky lock then Facch-mislabeled Sacch recovers
+     `phase2MacAltKindCrcValid`.
+- **Bars held:** 060036 duty **0.705**; 095846 TG10301 duty **0.84**.
+- **Still open:** B-0001/B-0002 need a follow IQ that actually carries
+  recoverable MAC/ESS (or ESS recovery improvement with evidence).
+- **Follow-up same day:** DEC-0041 caps live eye-lost budget (drop D).
+
 ## 2026-09-11 — Live CLI clearaudio + capture hygiene
 
 - **Space:** trimmed `iq_test_captures` from ~29 GB → ~8.6 GB keep-set

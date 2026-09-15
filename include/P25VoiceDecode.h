@@ -429,6 +429,16 @@ double applyNfmAfcFromSpectrum(Receiver& rx,
                                       double channelBwHz,
                                       DemodMode mode);
 
+// DEC-0044: apply device PPM from sustained CC AFC while idle on control.
+// Never call during Phase 2 voice follow (mid-park retune fights DEC-0016).
+// Returns true when setFrequencyCorrection was invoked.
+bool p25MaybeAutoApplyPpmFromControlAfc(size_t deviceIndex,
+                                               double controlFreqHz,
+                                               double afcOffsetHz,
+                                               double afcConfidence,
+                                               qint64 nowMs,
+                                               QString* logLine);
+
 double p25VoiceAfcTargetHz(const Receiver& rx, double nominalFreqHz, double channelBwHz);
 
 ReceiverSessionKey p25ReceiverSessionKey(const Receiver& rx);
@@ -437,6 +447,13 @@ P25P2CallAudioKey p25CurrentPhase2AudioKey(const Receiver& rx, double targetFreq
 
 void p25Phase2AdoptGrantSourceIdForCurrentCall(Receiver& rx,
                                                       uint32_t sourceId) noexcept;
+
+// DEC-0062 talkspurt vocoder reset (abs-dedupe preserved).
+void p25Phase2ResetVocoderForNewTalkspurt(Receiver& rx, const char* why, qint64 nowMs);
+void p25Phase2ObserveTargetTalkspurtMac(Receiver& rx,
+                                               const P25Phase2Burst& burst,
+                                               bool targetSlot,
+                                               qint64 nowMs);
 
 P25Phase2SpeakerPendingQueue& p25SpeakerPendingFor(P25SpeakerPendingMap& map,
                                                             const Receiver& rx);

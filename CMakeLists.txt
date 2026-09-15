@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.51 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.52 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -112,6 +112,8 @@ set(SDR_TOWN_SOURCES
     src/P25TrafficChannelProcessor.cpp
     include/P25TrafficChannelProcessor.h
     src/Receiver.cpp
+    src/SdrTownControlServer.cpp
+    include/SdrTownControlServer.h
     src/RemoteDiagnostics.cpp
     include/RemoteDiagnostics.h
     src/UpdateManager.cpp   # professional GitHub release + safe in-app updater
@@ -145,8 +147,30 @@ add_executable(${PROJECT_NAME} WIN32
     # ${SDR_TOWN_RESOURCES}
 )
 
+add_library(sdrtown_control_client SHARED
+    src/SdrTownControlClient.cpp
+    include/SdrTownControlClient.h
+)
+target_include_directories(sdrtown_control_client PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_compile_definitions(sdrtown_control_client PRIVATE SDRTOWN_CONTROL_BUILD)
+set_target_properties(sdrtown_control_client PROPERTIES OUTPUT_NAME "SdrTownControl")
+if(WIN32)
+    target_compile_definitions(sdrtown_control_client PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(sdrtown_control_client PRIVATE ws2_32)
+endif()
+if(MSVC)
+    target_compile_options(sdrtown_control_client PRIVATE /EHsc /utf-8)
+endif()
+
 # Install rules (so cpack / make install knows what to package)
 install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION bin)
+install(TARGETS sdrtown_control_client
+    RUNTIME DESTINATION bin
+    LIBRARY DESTINATION bin
+    ARCHIVE DESTINATION lib
+)
 # Deployed Qt DLLs, plugins, and other runtime files from the build dir will be picked up if you run windeployqt before packaging, or manually copy them into the install prefix.
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
@@ -386,7 +410,7 @@ add_custom_target(deploy
             "${DEPLOY_STAGING}/*test*.exe"
     COMMAND ${CMAKE_COMMAND} -P "${DEPLOY_CLEAN_SCRIPT}"
     COMMAND ${CMAKE_COMMAND} -E echo "Clean deploy staging ready at: ${DEPLOY_STAGING}"
-    DEPENDS SDR_Town
+    DEPENDS SDR_Town sdrtown_control_client
     COMMENT "Creating clean, release-ready deploy staging (no stale binaries)"
 )
 

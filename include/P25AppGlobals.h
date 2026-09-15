@@ -24,6 +24,9 @@ extern std::atomic<double> gLastAfcBinHz;
 extern std::atomic<double> gP25LastTrustedControlFreqHz;
 extern std::atomic<double> gP25LastTrustedControlOffsetHz;
 extern std::atomic<long long> gP25LastTrustedControlOffsetMs;
+// DEC-0044: last successful auto PPM apply (ms since epoch); 0 = never.
+extern std::atomic<long long> gP25LastAutoPpmApplyMs;
+extern std::atomic<double> gP25LastAutoPpmValue;
 
 // Lock-free mirror of the active Phase-2 voice diagnostics.  The GUI follow
 // status path uses try_to_lock on receiver state; when the voice worker owns
