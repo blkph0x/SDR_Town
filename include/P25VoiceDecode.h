@@ -448,6 +448,13 @@ P25P2CallAudioKey p25CurrentPhase2AudioKey(const Receiver& rx, double targetFreq
 void p25Phase2AdoptGrantSourceIdForCurrentCall(Receiver& rx,
                                                       uint32_t sourceId) noexcept;
 
+// DEC-0062 talkspurt vocoder reset (abs-dedupe preserved).
+void p25Phase2ResetVocoderForNewTalkspurt(Receiver& rx, const char* why, qint64 nowMs);
+void p25Phase2ObserveTargetTalkspurtMac(Receiver& rx,
+                                               const P25Phase2Burst& burst,
+                                               bool targetSlot,
+                                               qint64 nowMs);
+
 P25Phase2SpeakerPendingQueue& p25SpeakerPendingFor(P25SpeakerPendingMap& map,
                                                             const Receiver& rx);
 

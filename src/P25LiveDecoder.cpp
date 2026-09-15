@@ -3943,13 +3943,41 @@ uint8_t phase2TrafficSlotForSuperframeBurst(const std::vector<int>& dibits,
 {
     // SDRTrunk binds A/B/C/D timeslot ownership to the physical fragment position.
     // I-ISCH fragment location is used for epoch scoring / scrambling-segment
-    // selection — not for re-labeling grant slots.  Field 20260720_063846 showed
-    // I-ISCH override flipping C/D ownership on a clear slot-0 call: target VCWs
-    // were counted as oppVcw/wrongSlot, invent-PLC was correctly disabled, and
-    // the speaker got empty-audio holes.  Keep physical mapping here.
+    // selection — not for re-labeling grant slots here.  DEC-0055.3 rebases the
+    // absolute 0..11 index inside decodePhase2BurstAt when A/B I-ISCH agree;
+    // do not flip an already-aligned grant slot from I-ISCH alone (20260720).
     (void)dibits;
     (void)superframeOffset;
     return phase2TrafficSlotFromSuperframeBurstIndex(superframeBurstIndex);
+}
+
+// DEC-0055.3: when a 720-dibit fragment's A/B I-ISCH locations agree, return the
+// standards absolute burst index (location*4 + local). Missing/disagree → nullopt
+// so callers keep lock-relative %12 (no slot flip). Require both A and B (not a
+// single I-ISCH word) so framer single-burst buffers cannot false-rebase.
+std::optional<size_t> phase2AbsoluteSuperframeBurstIndexFromIisch(
+    const std::vector<int>& dibits,
+    size_t burstPos) noexcept
+{
+    for (size_t local = 0; local < 4u; ++local) {
+        const size_t localBytes = local * P25LiveDecoder::Phase2BurstDibits;
+        if (burstPos < localBytes) continue;
+        const size_t fragmentStart = burstPos - localBytes;
+        const size_t aPos = fragmentStart;
+        const size_t bPos = fragmentStart + P25LiveDecoder::Phase2BurstDibits;
+        if (bPos + P25LiveDecoder::Phase2FrameSyncDibits > dibits.size()) {
+            continue;
+        }
+        const auto ischA = decodePhase2IschAt(dibits, aPos);
+        const auto ischB = decodePhase2IschAt(dibits, bPos);
+        if (!ischA.valid || ischA.sync || ischA.location > 2) continue;
+        if (!ischB.valid || ischB.sync || ischB.location > 2) continue;
+        if (ischA.errors >= 0 && ischA.errors >= 3) continue;
+        if (ischB.errors >= 0 && ischB.errors >= 3) continue;
+        if (ischA.location != ischB.location) continue;
+        return static_cast<size_t>(ischA.location) * 4u + local;
+    }
+    return std::nullopt;
 }
 
 // Per logical traffic slot, voice ESS fragments progress in channel order.
@@ -4248,14 +4276,25 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
     burst.tdmaSyncLock = syncErrors >= 0 && syncErrors <= 2;
     burst.superframeLock = superframeLocked && superframeSyncScore >= 4;
     burst.superframeBurstIndexKnown = superframeLocked;
-    burst.superframeBurstIndex = static_cast<uint8_t>(superframeBurstIndex & 0x0fu);
     const bool canApplyMask = (xorMask != nullptr);
-    const size_t trafficSuperframeBurstIndex = superframeBurstIndex % 12u;
+    // DEC-0055.3: when A/B I-ISCH agree, rebase to absolute 0..11 (location*4+local)
+    // for mask lattice AND grantSlot. Final-fragment C/D are swapped vs lock-rel
+    // parity (abs 10 → TS2, abs 11 → TS1). Capture 135857 forensic: wrong-TDMA
+    // status spam was companion dwell (DEC-0057.1), not absolute grantSlot —
+    // lock-rel-only mislabeled final-fragment C as TS1 while CC grant was TS2.
+    const size_t lockRelativeBurstIndex = superframeBurstIndex % 12u;
+    size_t trafficSuperframeBurstIndex = lockRelativeBurstIndex;
+    if (superframeLocked) {
+        if (auto absoluteIndex =
+                phase2AbsoluteSuperframeBurstIndexFromIisch(dibits, pos)) {
+            trafficSuperframeBurstIndex = (*absoluteIndex) % 12u;
+        }
+    }
+    burst.superframeBurstIndex = static_cast<uint8_t>(trafficSuperframeBurstIndex & 0x0fu);
     const size_t maskSuperframeBurstIndex =
-        (superframeBurstIndex + (canApplyMask ? static_cast<size_t>(xorMaskPhase) : 0u)) % 12u;
+        (trafficSuperframeBurstIndex + (canApplyMask ? static_cast<size_t>(xorMaskPhase) : 0u)) % 12u;
     burst.isch = decodePhase2IschAt(dibits, pos);
     burst.grantSlotKnown = superframeLocked;
-    // Physical A/B/C/D map only (see phase2TrafficSlotForSuperframeBurst).
     burst.grantSlot = phase2TrafficSlotFromSuperframeBurstIndex(trafficSuperframeBurstIndex);
 
     // sdrtrunk SuperFrameFragment separates each 360-bit Phase-2 burst into a
@@ -7848,7 +7887,10 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2FromFramerBurstsInternal(
         burst.stickySuperframe = superframeLocked;
         burst.superframeLock = superframeLocked;
         burst.superframeBurstIndexKnown = true;
+        // Framer lattice index from stream anchor is already absolute 0..11.
         burst.superframeBurstIndex = static_cast<uint8_t>(superframeIndex);
+        burst.grantSlotKnown = true;
+        burst.grantSlot = phase2TrafficSlotFromSuperframeBurstIndex(superframeIndex);
         burst.streamBurstStartDibitKnown = true;
         burst.streamBurstStartDibit = streamBurstStart;
         for (auto& cw : burst.voiceCodewords) {

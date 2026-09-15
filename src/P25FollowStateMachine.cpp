@@ -82,14 +82,18 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
     // short playout grace so a single-RTL receiver can return to the control
     // channel instead of sitting on a dead traffic frequency for tens of seconds.
     // Capture 20260909_053448: after a clearTrusted emit island, empty eyes for
-    // ~5s expired the 2.5s immediate grace (no current structure) and activityGone
-    // tore the traffic source down mid-call; the next grant cold-rearmed and the
-    // operator heard only sparse islands. Once traffic has proved clear, keep the
-    // full 40s speaker grace (field 032428) without requiring a live VCW window.
+    // ~5s must not tear down mid-call. Activity silence (15s clear-trusted) and
+    // post-speech no-VCW (6s/12s) cover gaps; grant-clear alone must not invent
+    // a 40s speaker hold (DEC-0056 / capture 134135).
     constexpr int64_t kSpeakerImmediateGraceMs = 2500;
     constexpr int64_t kSpeakerFollowGraceMs = 40000;
     // Matches main.cpp kP25Phase2ClearTrustedUnacquiredDwellStealGraceMs.
     constexpr int64_t kClearTrustedActivitySilenceMs = 15000;
+    // After a clear call has already spoken, do not sit 45–60s on a dead channel
+    // (capture 20260912_134135 TG30302 ~57s hang). Mid-call empty eyes still use
+    // the longer clearTrusted activity silence when lastActive is fresh.
+    constexpr int64_t kClearPostSpeechNoVcwTunedMs = 12000;
+    constexpr int64_t kClearPostSpeechNoVcwSilenceMs = 6000;
     const bool clearTrustedHold =
         (snapshot.grantEncryptionKnown && !snapshot.grantEncrypted) ||
         snapshot.phase2TrafficAudioOpen;
@@ -109,12 +113,15 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
          snapshot.phase2SuperframeBursts > 0 &&
          snapshot.phase2MaskedBursts > 0 &&
          snapshot.phase2MacPdus > 0);
+    // DEC-0056: grant-clear alone must NOT extend the 40s speaker grace. Capture
+    // 134135 hung ~57s after clear speech died because clearTrustedHold kept
+    // recentSpeakerOutput true with no current traffic evidence. Extended grace
+    // requires live structure/call/VCW; otherwise only the 2.5s playout grace.
     const bool recentSpeakerOutput =
         speakerOutputAgeMs >= 0 &&
         speakerOutputAgeMs <= kSpeakerFollowGraceMs &&
         (speakerOutputAgeMs <= kSpeakerImmediateGraceMs ||
-         currentTrafficEvidenceForSpeakerHold ||
-         clearTrustedHold);
+         currentTrafficEvidenceForSpeakerHold);
     bool hasCarrier = true;
     if (snapshot.rfMetricsPopulated) {
         hasCarrier = snapshot.recentSnrDb > 3.0 ||
@@ -285,24 +292,38 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         snapshot.phase2VoiceCodewords == 0 &&
         snapshot.phase2OppositeVoiceCodewords > 0 &&
         snapshot.phase2Bursts > 0;
+    // DEC-0056: after clear speech / activity, shorten no-VCW hang so dead
+    // traffic channels return to CC in ~6–12s instead of 45–60s (134135).
+    const bool clearPostSpeechQuiet =
+        clearGrantKnown &&
+        (effectiveLastActiveMs > snapshot.tunedAtMs + 2000 ||
+         (haveSpeakerOutputTimestamp &&
+          snapshot.recentSpeakerOutputMs > snapshot.tunedAtMs)) &&
+        !snapshot.phase2TrafficCallActive &&
+        snapshot.phase2VoiceCodewords == 0 &&
+        snapshot.decodedFrames == 0;
     const int64_t tdmaNoVcwTunedMs = waitingUnknownClearGrant
         ? 45000
         : (phase2UntrustedClearAcquire
             ? untrustedClearAcquireLimitMs
             : (clearGrantKnown && snapshot.phase2TrafficCallActive
             ? 60000
-            : (clearGrantKnown
+            : (clearPostSpeechQuiet
+                ? kClearPostSpeechNoVcwTunedMs
+                : (clearGrantKnown
                 ? 45000
-                : (wrongSlotNoTargetVcw ? 30000 : (phase2RecentContinuation ? 18000 : 9000)))));
+                : (wrongSlotNoTargetVcw ? 30000 : (phase2RecentContinuation ? 18000 : 9000))))));
     const int64_t tdmaNoVcwSilenceMs = waitingUnknownClearGrant
         ? 40000
         : (phase2UntrustedClearAcquire
             ? (phase2CurrentStructureEvidence ? 2500 : 1200)
             : (clearGrantKnown && snapshot.phase2TrafficCallActive
             ? 45000
-            : (clearGrantKnown
+            : (clearPostSpeechQuiet
+                ? kClearPostSpeechNoVcwSilenceMs
+                : (clearGrantKnown
                 ? 30000
-                : (wrongSlotNoTargetVcw ? 25000 : (phase2RecentContinuation ? 10000 : 3500)))));
+                : (wrongSlotNoTargetVcw ? 25000 : (phase2RecentContinuation ? 10000 : 3500))))));
     const int64_t tdmaNoMacEssTunedMs = phase2UntrustedClearAcquire
         ? untrustedClearAcquireLimitMs
         : (phase2RecentContinuation ? 30000 : 15000);
@@ -388,7 +409,10 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         clearGrantKnown &&
         strongTrafficCarrier &&
         snapshot.tunedAtMs > 0 &&
-        tunedDurationMs <= (phase2UntrustedClearAcquire ? untrustedClearAcquireLimitMs : 45000);
+        tunedDurationMs <= (phase2UntrustedClearAcquire ? untrustedClearAcquireLimitMs : 45000) &&
+        // DEC-0056: only during early acquire. Once lastActive has moved past the
+        // first couple seconds, strong leftover RF must not block no-VCW return.
+        effectiveLastActiveMs <= snapshot.tunedAtMs + 2500;
 
     decision.tdmaNoVcwTimeout =
         !recentSpeakerOutput &&

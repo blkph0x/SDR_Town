@@ -515,6 +515,44 @@ GuiRuntimeConfig parseGuiRuntimeConfig(int argc, char* argv[])
             if (auto value = requireValue(key.c_str())) {
                 cfg.debugStage = *value;
             }
+        } else if (key == "--control-server" || key == "--sdr-control" ||
+                   key == "--sdrtown-control") {
+            cfg.requested = true;
+            cfg.controlServer = true;
+        } else if (key == "--no-control-server" || key == "--no-sdr-control" ||
+                   key == "--no-sdrtown-control") {
+            cfg.requested = true;
+            cfg.controlServer = false;
+        } else if (key == "--control-port" || key == "--sdr-control-port" ||
+                   key == "--sdrtown-control-port") {
+            cfg.requested = true;
+            cfg.controlServer = true;
+            if (auto value = requireValue(key.c_str())) {
+                int port = 0;
+                if (guiRuntimeParseInt(*value, port) && port > 0 && port <= 65535) {
+                    cfg.controlPort = port;
+                } else {
+                    cfg.warnings.push_back("invalid SDR Town control port: " + *value);
+                }
+            }
+        } else if (key == "--control-token" || key == "--sdr-control-token" ||
+                   key == "--sdrtown-control-token") {
+            cfg.requested = true;
+            cfg.controlServer = true;
+            cfg.controlAuthRequired = true;
+            if (auto value = requireValue(key.c_str())) {
+                cfg.controlToken = *value;
+            }
+        } else if (key == "--control-auth-required" ||
+                   key == "--sdr-control-auth-required") {
+            cfg.requested = true;
+            cfg.controlServer = true;
+            cfg.controlAuthRequired = true;
+        } else if (key == "--control-allow-unauthenticated" ||
+                   key == "--sdr-control-allow-unauthenticated") {
+            cfg.requested = true;
+            cfg.controlServer = true;
+            cfg.controlAuthRequired = false;
         } else if (key == "--gui-startup-dry-run" || key == "--gui-dry-run") {
             cfg.requested = true;
             cfg.dryRun = true;

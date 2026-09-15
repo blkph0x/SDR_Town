@@ -235,6 +235,10 @@ struct Receiver {
     // Capture 20260811_021036 L35906: hop reset hadSuccessfulEmit → context VCWs
     // replayed (ctxVcw>ctxDrop) as short dual-voice / syllable repeats.
     bool p25Phase2CallHadSpeakerAudio = false;
+    // DEC-0062: mid-grant talkspurt boundaries (MAC_PTT / post-END voice) must
+    // reset mbelib without wiping abs-dedupe. Debounce + END-pending flags.
+    int64_t p25Phase2LastTalkspurtVocoderResetMs = 0;
+    bool p25Phase2TalkspurtEndedPendingVocoderReset = false;
     P25VoiceDiagSnapshot p25VoiceDiagnostics;
     P25LiveDecoder p25VoiceLiveDecoder{p25RealtimeVoiceDecoderConfig()};
     std::unique_ptr<P25TrafficChannelProcessor> p25TrafficProcessor;
@@ -350,6 +354,8 @@ struct Receiver {
         p25DiagSlotProbeBlocked = 0;
         p25DiagSecurityChanged = 0;
         p25DiagVocoderReset = 0;
+        p25Phase2LastTalkspurtVocoderResetMs = 0;
+        p25Phase2TalkspurtEndedPendingVocoderReset = false;
         p25DiagPendingAudioCleared = 0;
         p25DiagVariantChanged = 0;
         p25DiagRingUnderrun = 0;

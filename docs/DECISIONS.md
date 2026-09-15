@@ -5,6 +5,198 @@ A decision is recorded **before** code that depends on it is written.
 
 ---
 
+## DEC-0062 — Mid-grant talkspurt must reset mbelib (225923 RID garble)
+
+- **Date:** 2026-09-13
+- **Status:** accepted
+- **Evidence (capture 20260912_225923 TG30304 clear @421.225 slot=1):**
+  - Live WAV CLEAR ~24 s; CADENCE ok=18/71 (TG30304 mean duty 0.55).
+  - `src=unknown` on all emits — grant SRC never painted; cannot split RIDs in log.
+  - GOOD emits (41): feedR≈1.0, absDup=0, push p50=**360 ms**.
+  - BAD emits (37): raw feedR≈0.30 but **uniqueFreshR p50=1.0** (absDup==ctxDrop
+    always) with fresh_tgt p50=**6** (~120 ms) — overlap tax, not fresh kill.
+  - Operator: one RID perfect, other talk on same grant unintelligible.
+  - Vocoder / preferred-AMBE / sequencer reset only on call/slot/freq change
+    (`p25Phase2SyncAmbeEmitDedupeCallContext`); MAC_PTT only cleared pending
+    AMBE queue. Predictor state survived mid-grant talker changes.
+  - DEC-0061 240+280 held (workers ctx=280); not a thin-overlap regression.
+- **Decision:**
+  1. On target-slot **MAC_PTT** after this call has spoken: reset selected
+     mbelib + resampler + audioTail + frame sequencer + preferred AMBE
+     variants (**keep** abs-dibit de-dupe + security latch + opposite module).
+  2. On target **END_PTT / IDLE / HANGTIME** after spoken: set pending flag;
+     reset on next target voice or on following MAC_PTT.
+  3. Debounce 400 ms against retransmitted MAC_PTT.
+- **Out of scope:** inventing MAC_PTT source-address offsets; thinning overlap;
+  streaming DDC; DEC-0012.
+- **Consequences:** New talkspurts on the same TG grant should not inherit the
+  prior RID's AMBE predictor. Re-prove live; expect `VOCODER_RESET
+  why=mac-ptt-*` between talkers when MAC is visible.
+
+## DEC-0061 — Restore catch-up overlap 280 ms (153932 jitter)
+
+- **Date:** 2026-09-13
+- **Status:** accepted (amends DEC-0060 sizes; restores DEC-0024 overlap)
+- **Evidence (capture 20260912_153932 after DEC-0060 280+80):**
+  - Live WAV CLEAR but **97** active islands, len p50=**40 ms**, mean≈94 ms;
+    short≤80 ms=**75**; chop pairs (island≤120 & gap≤120)=**76**.
+  - Worker shapes dominated by **160+80 / 280+80** (ctx=163840); empty-audio
+    majority on those eyes; sustain 80+280 almost absent while speaking.
+  - Audio top-up **68/69 bridge** (960/1920) at ringFill≈10–12%; underrun
+    path inventing continuity between short emits.
+  - pcm_vs_wall p50≈0.70 — pace improved vs 152348 half-audio, but thin
+    overlap recreated the DEC-0024 eye-death / stutter class.
+- **Decision:** Speaker `backlogCatchUp` → **240 ms fresh + 280 ms overlap**
+  (minFresh 160). Idle sustain stays 80+280. Dual-slot latch (0058.2) unchanged.
+- **Out of scope:** streaming DDC default-on; DEC-0012; absDup budget waste
+  (still B-0001).
+- **Consequences:** Catch-up keeps DEC-0009 lock surface while advancing ≈
+  emit wall (~200–230 ms). Re-prove live duty; expect ctx=573440 on catch-up.
+
+## DEC-0060 — Speaker backlog catch-up must pace RF (152348 half-audio)
+
+- **Date:** 2026-09-13
+- **Status:** superseded by DEC-0061 (thin overlap caused 153932 jitter)
+- **Evidence (capture 20260912_152348 TG11108 RID 0x243754 clear):**
+  - Live WAV CLEAR but longest active run **0.84 s**; active_ratio≈0.52.
+  - Emit islands **pcm_vs_wall ≈ 0.45–0.65** (literally ~half wall speech).
+  - SRC 0x243754 feed_ratio **0.624** with absDup=184 ≈ missing feed; median
+    targetVcw=18 fed=10–12.
+  - Worker shapes **99× fresh=160 ms + ctx=280 ms**; emit dsp p50≈**220 ms** >
+    fresh 160 ms on **20/28** emit jobs; budget trips while ctxDrop/absDup
+    dominate (fed/tgt collapses to ~0.22 on high-absDup hops).
+  - pcm_per_fed median **960** — vocoder fine when fed; failure is pre-vocoder
+    under-advance + budget spent on context that absDup discards.
+  - DEC-0059 ReturnEncrypted only on enc TGs 12068/12069 — not this bug.
+- **Decision:** Speaker `backlogCatchUp` geometry → **280 ms fresh + 80 ms
+  overlap** (360 ms total, same surface as sustain 80+280). Idle sustain stays
+  80+280. Dual-slot latched continuation (DEC-0058.2) unchanged.
+- **Out of scope:** streaming DDC default-on; DEC-0012; inventing PLC.
+- **Consequences:** Catch-up advances ≥ emit dsp p50 so RF backlog drains and
+  CQPSK budget lands on new voice. **Superseded:** 153932 proved 80 ms overlap
+  → 40 ms WAV islands / bridge top-ups; DEC-0061 restored 280 ms overlap.
+
+## DEC-0059 — Companion ESS must not abort clear follows (145139)
+
+- **Date:** 2026-09-13
+- **Status:** accepted
+- **Evidence (capture 20260912_145139):**
+  - Live WAV ~14.3 s CLEAR / fragmented (longest run 1.32 s); CADENCE ok=7/60;
+    primary FEED_GATE; TG30302 mean duty ~0.25.
+  - Clear TG **30302** RID **0x2391D7** emitted ess=clear / targetEss=clear, then
+    `ReturnEncrypted trustedEss=yes … ess=enc macCrc=2` while grantLatch=no —
+    abandoned mid-call. Encrypted hold then blocked re-follow; RID **0x2353DA**
+    later recovered better (absDup=0).
+  - Same RF dual-slot: encrypted TG **12068** companion on opposite slot.
+  - Root: sticky session-painted ESS / `trafficStatus.diag.encrypted` ORed into
+    follow ESS, plus monotonic `RecentTargetEssEncrypted` OR that never cleared
+    on later clear observations. Pending drain also released opposite-only
+    (targetVcw=0 pendingRel=8).
+- **Decision:**
+  1. Traffic processor security flags only from **this-burst** ESS/traffic-SO.
+  2. Voice target ESS encrypted only from observed this-burst paint; sticky
+     clear may keep known, never promote encrypted.
+  3. Recent target ESS: this-window clear **clears** sticky encrypted.
+  4. MainWindow follow ESS uses target-slot fields; do **not** OR traffic
+     `diag.encrypted`. Do not Clear→Encrypted promote while latch is Clear.
+  5. Refuse pending AMBE drain on opposite-only windows (targetVcw=0, opp>0).
+- **Out of scope:** DEC-0012 softening; streaming DDC default-on; budget/worker.
+- **Consequences:** Clear RIDs should survive companion encrypted ESS on the
+  opposite timeslot. Still open: absDup/ctxDrop underpush, budget trips (B-0001).
+
+## DEC-0058 — Speaker backlog catch-up + latched dual-slot continuity (142104)
+
+- **Date:** 2026-09-13
+- **Status:** accepted
+- **Evidence (capture 20260912_142104 TG10301 clear @417.675 ~57s):**
+  - Live WAV listen=CLEAR but only **~15 s** / 436 s; longest active run **2.24 s**.
+  - Worker windows **63×** iq=737280 fresh=163840 context=573440 (80+280).
+  - dsp p50≈**198 ms** / p90≈**585 ms**; worker-busy **56**; budget trips **154**.
+  - Emit gaps mean≈**0.9 s** max≈**3 s** — weak/strange choppy islands.
+  - Mid-call waiting clear grant with p2ess=clear / callClearTrusted=yes on
+    dual-slot MAC-dead hops (target≈opp, mac≈0) after Clear latch.
+  - DEC-0032 absolute ban on backlog overriding speaker 80+280 under-advanced RF.
+- **Decision:**
+  1. When speaker-sustain/active-clear **and** acklogCatchUp: keep **280 ms**
+     overlap; advance **160 ms** fresh (minFresh 80). Idle sustain stays 80+280.
+  2. Latched/spoken clear + selected-dominant + companion accounted + target ESS
+     known clear → do not dual-slot-garble-drop / feed-starve (DEC-0012 companion-
+     louder PostEmitMixedMacDead unchanged).
+- **Consequences:** Catch-up while lagging without shrinking overlap; fewer
+  waiting-clear holes after Clear latch. Budget/worker cost still open under B-0001.
+  **Amended by DEC-0060 then DEC-0061:** catch-up sizes are now **240+280**.
+
+## DEC-0057 — Wrong-TDMA status on clear immutable grant
+
+- **Date:** 2026-09-13
+- **Status:** accepted (amended after Catch/forensic)
+- **Evidence (capture 20260912_135857 TG30003):**
+  - Listen WAV **29.2 s CLEAR**; CADENCE ok=16/83; **wrong_tdma=47**; 75 follow
+    lines Phase 2 wrong TDMA slot with p2vcw&gt;0 decoded=0 (no concurrent emit).
+  - CC grant **SLOT=1** immutable; emit avg targetVcw≈13.7 opp≈6.9 — dual-slot
+    RF with companion talker. Slot probe correctly refuses flip when mask known.
+  - Logic: phase2WrongSlot set whenever opposite has VCWs and selected has none
+    — brands normal companion dwell as wrong slot.
+  - Catch with planted final-fragment I-ISCH: lock slips (sfOff=180) and absolute
+    index for phys C is **10 → grantSlot 1** (standards C/D swap). Lock-relative
+    parity for index 6 would have labelled TS1 and fought the CC grant.
+- **Decision:**
+  1. Do not set phase2WrongSlot when p25Phase2GrantedSlotImmutable (companion
+     dwell / opposite-only silence on our timeslot). Pending drain same rule.
+  2. Keep DEC-0055.3: **grantSlot** from I-ISCH absolute index when A/B agree;
+     else lock-relative %12. Do **not** force lock-rel-only (that mislabels
+     final-fragment C/D and does not stop companion-dwell status spam).
+- **Consequences:** Status should stop spamming wrong-TDMA on clear grants while
+  slot labels stay standards-aligned when I-ISCH is present. Remaining continuity
+  holes still FEED_GATE/budget/worker.
+
+
+## DEC-0056 — Clear follow hang + WFM default BW
+
+- **Date:** 2026-09-12
+- **Status:** accepted
+- **Evidence (capture `20260912_134135`):**
+  - Enc TGs return in &lt;1 s (`ReturnEncrypted`). Clear TG30302 hung ~57 s after
+    speech; live WAV only **5.64 s** CLEAR; CADENCE ok=2/64, budget_trip=47,
+    worker_busy=63, primary FEED_GATE.
+  - Meta: NFM **12.5 kHz**, `audio_lpf_enabled=false` — P25 speaker is AMBE PCM;
+    Demod LPF/WFM BW are **not** on this path.
+  - Root hang: `clearTrustedHold` extended 40 s speaker grace with no traffic;
+    structure-only `lastActive` refresh; clear no-VCW timers 45–60 s; carrier
+    acquire hold after speech.
+- **Decision:**
+  1. Extended speaker grace requires **current** traffic evidence (not grant-clear alone).
+  2. After clear speech, no-VCW return in **12 s tuned / 6 s silence**.
+  3. Carrier-acquire hold only in early acquire (`lastActive` ≤ tune+2.5 s).
+  4. After speaker/clear latch, do not refresh `lastActive` on structure-only.
+  5. WFM/AUTO default BW **220 kHz** (snap 180–250); separate from P25.
+- **Not fixed here:** clear mid-call blocky islands (dual-slot/epoch/budget/worker)
+  — still open under B-0001; BW/LPF not the cause on Phase-2 follow.
+
+## DEC-0055 — Epoch identity + dual-slot keep-selected PCM
+
+- **Date:** 2026-09-12
+- **Status:** accepted
+- **Evidence:** Code audit of IQ→mbelib→speaker: (1) DualSlot MAC-dead
+  `audio.clear()` punched holes after Clear latch with labelled selected VCWs;
+  (2) `epochTrusted` soft arm `establishedClear && xorApplied && grantSlotKnown`
+  fed wrong sticky phase as continuous garble; (3) grantSlot used lock-relative
+  `%12` only — I-ISCH flip rejected (20260720) but absolute **origin** unused.
+- **Decision:**
+  1. **Dual-slot:** Clear latch + labelled selected (`targetVcw>0`, fed,
+     strong/trusted) → keep PCM (`dual-slot-untrusted-keep-selected-pcm`); else
+     still `audio.clear()`. Feed mute / DEC-0012 companion-louder unchanged.
+  2. **epochTrusted:** remove bare establishedClear+xor+grantSlot. Continuity via
+     this-burst SF/mask/MAC or `forceEstablishedFeed` only. Prefer hole over garble.
+  3. **I-ISCH origin:** when A/B I-ISCH agree, rebase absolute index
+     `location*4+local` for grantSlot/mask; missing/disagree → lock-relative.
+     Do not flip via I-ISCH alone without origin rebase.
+- **Out of scope:** streaming DDC default-on (DEC-0038); DEC-0012 softening;
+  invent PLC; budget DEC-0052–0054.
+- **Consequences:** Fewer post-clear dual-slot silence holes; wrong-phase feed
+  rejects instead of garble; mid-lock slot labels track standards when I-ISCH
+  present. Live 100% still needs B-0001 start/stop + listen harvester.
+
 ## DEC-0054 — Restore cold full-commit; sticky cheap only (`081416`)
 
 - **Date:** 2026-09-12

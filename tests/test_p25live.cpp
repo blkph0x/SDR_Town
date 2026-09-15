@@ -1614,6 +1614,35 @@ TEST_CASE("P25 live decoder preserves final-fragment slot order when I-ISCH is u
     REQUIRE(bursts[11].grantSlot == 0);
 }
 
+TEST_CASE("P25 live decoder rebases grantSlot from I-ISCH absolute origin (DEC-0055/0057)", "[p25]")
+{
+    // Agreeing A/B I-ISCH with location=2 on buffer slots 4/5 rebases local C
+    // (phys slot 6) to absolute index 10 → grantSlot 1 (final-fragment C/D swap).
+    // Lock may slip (field: sfOff!=0) when I-ISCH disagrees with lock-rel epoch;
+    // grantSlot must still follow absolute index, not lock-rel parity.
+    auto dibits = makeSyntheticPhase2Superframe();
+    const auto ischA = makeSyntheticPhase2Isch(0, 2, true, 0);
+    const auto ischB = makeSyntheticPhase2Isch(1, 2, true, 0);
+    const size_t aBase = 4 * P25LiveDecoder::Phase2BurstDibits;
+    const size_t bBase = 5 * P25LiveDecoder::Phase2BurstDibits;
+    std::copy(ischA.begin(), ischA.end(),
+              dibits.begin() + static_cast<std::ptrdiff_t>(aBase));
+    std::copy(ischB.begin(), ischB.end(),
+              dibits.begin() + static_cast<std::ptrdiff_t>(bBase));
+
+    P25LiveDecoder decoder;
+    const auto bursts = decoder.processPhase2HardDibits(dibits);
+    REQUIRE_FALSE(bursts.empty());
+    const auto cIt = std::find_if(bursts.begin(), bursts.end(), [](const P25Phase2Burst& b) {
+        return b.dibitOffset == 6 * P25LiveDecoder::Phase2BurstDibits;
+    });
+    REQUIRE(cIt != bursts.end());
+    REQUIRE(cIt->grantSlotKnown);
+    REQUIRE(cIt->superframeBurstIndexKnown);
+    REQUIRE(cIt->superframeBurstIndex == 10);
+    REQUIRE(cIt->grantSlot == 1);
+}
+
 TEST_CASE("P25 live decoder emits stable Phase 2 session codeword IDs")
 {
     P25LiveDecoder decoder;

@@ -38,6 +38,7 @@
 #include "RemoteDiagnostics.h"
 #include "SignalClassifier.h"
 #include "SpectrumWidget.h"
+#include "SdrTownControlServer.h"
 #include "SttEngine.h"
 #include "TranscriptHub.h"
 #include "TranscriptWindow.h"
@@ -169,6 +170,16 @@ private slots:
     void showDevicesDialog();
 
 private:
+    void installSdrTownControlServer();
+
+    QJsonObject handleSdrTownControlRequest(const QString& method,
+                                            const QString& path,
+                                            const QJsonObject& body);
+
+    QJsonObject sdrTownControlStatusSnapshot();
+
+    QJsonObject applySdrTownControlTune(const QJsonObject& body);
+
     struct P25VoiceDecodeJob {
         std::shared_ptr<Receiver> rx;
         std::vector<std::complex<float>> iq;
@@ -275,6 +286,7 @@ private:
     QStringList guiIqReplayRecentStatus;
 
     UpdateManager* m_updateManager = nullptr;   // professional GitHub release + in-app updater (state-of-the-art, safe)
+    std::unique_ptr<SdrTownControlServer> m_controlServer;
     TranscriptHub* m_transcriptHub = nullptr;
     SttEngine* m_sttEngine = nullptr;
     P25TranscriptSource* m_p25TranscriptSource = nullptr;
@@ -448,11 +460,16 @@ private:
     QString p25LastDiagSignature;
     qint64 p25LastDiagLogMs = 0;
     std::map<std::string, qint64> p25LogThrottleByKey;
+    QDoubleSpinBox* monitorFreqSpin = nullptr;
+    QComboBox* monitorModeCombo = nullptr;
+    QDoubleSpinBox* rfGainSpin = nullptr;
+    QDoubleSpinBox* squelchSpinBox = nullptr;
     QDoubleSpinBox* bwSpin = nullptr;
     QDoubleSpinBox* lpfSpin = nullptr;
     QCheckBox* lpfEnableCheck = nullptr;
+    SpectrumWidget* spectrumWidget = nullptr;
+    QLabel* controlStatusLabel = nullptr;
     WaterfallRoiBuilder classifierRoiBuilder{128};
-    // spectrumWidget kept for future if needed
 
     void appendP25LogLine(const QString& text);
 

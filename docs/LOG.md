@@ -4,6 +4,67 @@ Newest at the top.
 
 ---
 
+## 2026-09-13 — DEC-0062 talkspurt vocoder reset (225923)
+
+- **Evidence:** TG30304; one RID clear, later talk unintelligible; src=unknown;
+  BAD uniqueFreshR≈1.0 (overlap tax) while mbelib never reset mid-grant.
+- **Fix:** MAC_PTT / post-END talkspurt resets selected vocoder (keep abs-dedupe).
+
+## 2026-09-13 — DEC-0061 catch-up overlap restore (153932 jitter)
+
+- **Evidence:** After DEC-0060 280+80, emit WAV islands p50=40 ms / chop=76;
+  workers 160+80 & 280+80 empty-audio heavy; bridge top-ups 68/69 @ ~11% fill.
+- **Fix:** speaker backlog catch-up **240+280** (restore DEC-0024 overlap;
+  keep fresh ≥ emit wall). Sustain 80+280 unchanged. Supersedes DEC-0060 sizes.
+
+## 2026-09-13 — DEC-0060 half-audio catch-up pace (152348)
+
+- **Evidence:** TG11108 RID 0x243754 pcm_vs_wall≈0.5; absDup≈missing feed;
+  160+280 catch-up with emit dsp p50≈220 ms > fresh; budget burned on context.
+- **Fix:** speaker backlog catch-up **280+80** (amends DEC-0058 sizes). Sustain
+  80+280 unchanged.
+
+## 2026-09-13 — DEC-0059 companion ESS aborting clear RIDs (145139)
+
+- **Evidence:** Some clear RIDs perfect, others vanish/garble. TG30302 RID
+  0x2391D7 ReturnEncrypted mid-emit while ess=clear; companion enc TG12068
+  opposite slot; sticky traffic.encrypted ORed into follow.
+- **Fix:** this-burst ESS only (traffic + target paint); recent clear clears
+  sticky enc; MainWindow follow uses target ESS; no opposite-only pending drain.
+
+## 2026-09-13 — DEC-0058 weak/choppy clear follow (142104)
+
+- **Evidence:** TG10301 CLEAR; 80+280 sustain while dsp~200–600 ms → emit gaps ~1s;
+  dual-slot MAC-dead waiting-clear after latch.
+- **Fix:** speaker backlog catch-up 160+280; latched selected-dominant dual-slot
+  continuation (feed + security). DEC-0012 companion-louder unchanged.
+
+## 2026-09-13 — DEC-0057 TG30003 wrong-TDMA spam (`135857`)
+
+- **Evidence:** 29s CLEAR audio; grant slot=1 correct; 75 wrong-TDMA status lines
+  on companion-only windows. Catch showed lock-rel-only mislabels final-fragment C.
+- **Fix:** no wrong-slot diag when grant immutable; keep I-ISCH absolute grantSlot
+  (DEC-0055.3). Status spam was companion dwell, not absolute rebase.
+
+## 2026-09-12 — DEC-0056 clear hang + WFM BW (`134135`)
+
+- **Capture:** Enc returns fast; Clear TG30302 ~57s hang; WAV 5.64s CLEAR;
+  CADENCE ok=2/64; budget/worker heavy; FEED_GATE primary.
+- **BW/LPF:** P25 arm 12.5 kHz, LPF off, AMBE speaker — not the crackle path.
+  WFM default raised 180→220 kHz for analog.
+- **Hang fix:** grant-clear no longer extends 40s speaker grace; post-speech
+  no-VCW 12s/6s; no structure-only lastActive after clear speech.
+
+## 2026-09-12 — DEC-0055 epoch + dual-slot keep + I-ISCH origin
+
+- **Audit (code-only):** DualSlot `audio.clear()`, soft `epochTrusted`, lock-relative
+  slot map were the continuous-clear breakers.
+- **Fix:** keep labelled Clear selected PCM on dual-slot; drop bare
+  establishedClear+xor epoch; rebase absolute 0..11 when A/B I-ISCH agree.
+- **Gates:** `verify_p25_phase2_dec0055_epoch_dual_slot_origin.py` + Catch rotate
+  I-ISCH case; dual-slot verifier updated for keep path.
+- **Not claimed:** live 100% — needs B-0001 start/stop + listen harvester.
+
 ## 2026-09-12 — DEC-0054 restore cold full-commit (`081416` no audio)
 
 - **Regression:** 0.36s SILENT after DEC-0053; cheap-commit never logged.

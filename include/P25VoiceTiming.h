@@ -196,6 +196,17 @@ inline constexpr double kP25Phase2StreamingLiveMinFreshSeconds = 0.040;
 inline constexpr double kP25Phase2VoiceDecodeBacklogCatchUpChunkSeconds = 0.120;
 inline constexpr double kP25Phase2VoiceDecodeBacklogCatchUpMinFreshSeconds = 0.080;
 inline constexpr double kP25Phase2VoiceDecodeBacklogCatchUpOverlapSeconds = 0.280;
+// DEC-0058 / capture 20260912_142104 TG10301: speaker-sustain stayed on
+// 80+280 while dsp≈200–600 ms → emit gaps. DEC-0058 first tried 160+280.
+// DEC-0060 / 152348 thinned overlap to 80 ms (280+80) to pace RF — that
+// violated DEC-0024. Capture 20260912_153932 after 0060: WAV islands p50=40 ms,
+// chop pairs=76, bridge top-ups 68/69 at ringFill~11%, workers dominant
+// 160+80/280+80 with empty-audio majority. DEC-0061 restores 280 ms overlap
+// and advances 240 ms fresh (≥ emit wall~200–230 ms / dsp p50~220) so pace
+// and lock both hold. Idle sustain stays 80+280.
+inline constexpr double kP25Phase2VoiceDecodeSpeakerBacklogCatchUpChunkSeconds = 0.240;
+inline constexpr double kP25Phase2VoiceDecodeSpeakerBacklogCatchUpMinFreshSeconds = 0.160;
+inline constexpr double kP25Phase2VoiceDecodeSpeakerBacklogCatchUpOverlapSeconds = 0.280;
 inline constexpr double kP25Phase2VoicePullWindowSeconds = 0.100;
 inline constexpr int kP25Phase2VoiceDecodeCadenceMs = 10;
 inline constexpr int kP25Phase2VoiceDecodeColdCadenceMs = 8;

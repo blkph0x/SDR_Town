@@ -4,6 +4,63 @@ Newest entry at the top. Record facts, not hopes.
 
 ---
 
+## BN-0053 — DEC-0062 talkspurt vocoder reset (225923) (2026-09-13)
+
+- **Evidence:** same-grant multi-RID; uniqueFreshR≈1 on BAD; no mid-grant mbelib reset.
+- **Fix:** MAC_PTT / post-END resets selected vocoder; abs-dedupe kept.
+- **Gate:** DEC-0062 verifier; `[p25]`; Release rebuild.
+
+## BN-0052 — DEC-0061 speaker backlog 240+280 (153932) (2026-09-13)
+
+- **Evidence:** post-0060 jitter — WAV island p50=40 ms; bridge top-ups; ctx=80 ms.
+- **Fix:** catch-up 240 ms fresh + 280 ms overlap; sustain 80+280 unchanged.
+- **Gate:** DEC-0061/0060-supersede/0058/0059 verifiers; `[p25]`; Release rebuild.
+
+## BN-0051 — DEC-0060 speaker backlog 280+80 (152348) (2026-09-13)
+
+- **Evidence:** half-audio pcm_vs_wall≈0.5; dsp p50>160 ms fresh; absDup=context waste.
+- **Fix:** catch-up 280 ms fresh + 80 ms overlap; sustain 80+280 unchanged.
+- **Gate:** DEC-0060/0058/0059 verifiers PASS; `[p25]` **118/118**; Release rebuilt.
+
+## BN-0050 — DEC-0059 companion ESS / ReturnEncrypted (145139) (2026-09-13)
+
+- **Evidence:** Clear RID aborted mid-emit (`ReturnEncrypted ess=enc`) while
+  follow still clear; companion enc opposite slot; pending targetVcw=0.
+- **Fix:** this-burst ESS; recent clear clears sticky enc; target-only follow ESS;
+  refuse opposite-only pending drain.
+- **Gate:** verifier PASS; `[p25]` **118/118**; Release `SDR_Town.exe` rebuilt.
+
+## BN-0049 — DEC-0058 speaker backlog / dual-slot (142104) (2026-09-13)
+
+- **Evidence:** 80 ms fresh / 200–600 ms dsp; waiting-clear islands after Clear latch.
+- **Fix:** backlog catch-up 160+280 on speaker path; latched selected-dominant keep.
+- **Gate:** verifier erify_p25_phase2_dec0058_speaker_backlog_dual_slot.py; [p25]; Release.
+
+## BN-0048 — DEC-0057 wrong-TDMA companion dwell (`135857`) (2026-09-13)
+
+- **Evidence:** TG30003 CLEAR ~29s; wrong_tdma 47; companion oppVcw during silence.
+  Catch: I-ISCH absolute index 10 → grantSlot 1 (final C); lock-rel-only was wrong.
+- **Fix:** immutable grant → no wrong-slot brand; keep DEC-0055.3 absolute grantSlot.
+- **Gate:** Catch I-ISCH absolute case; verifiers 0055+0057; Release rebuild.
+
+## BN-0047 — DEC-0056 clear hang + WFM default BW (`134135`) (2026-09-12)
+
+- **Evidence:** Clear hang ~57s vs Enc &lt;1s; P25 meta 12.5 kHz LPF off.
+- **Fix:** speaker grace needs live traffic; post-speech no-VCW 12/6s;
+  lastActive not structure-only after clear speech; WFM default 220 kHz.
+- **Gate:** `[p25][follow]` Catch + Release rebuild.
+- **Still open:** mid-call clear blocky (feed/budget/worker) — B-0001.
+
+## BN-0046 — DEC-0055 epoch / dual-slot keep / I-ISCH origin (2026-09-12)
+
+- **Evidence:** forensic code audit — DualSlot clear after Clear latch; soft
+  epochTrusted garble arm; lock-relative grantSlot without I-ISCH origin.
+- **Fix:** keep-selected PCM on dual-slot Clear; tight epochTrusted;
+  absolute index rebase when A/B I-ISCH agree (no flip-only).
+- **Gate:** Release rebuild; `[p25]` Catch; verifiers incl.
+  `verify_p25_phase2_dec0055_epoch_dual_slot_origin.py`.
+- **Not proven:** live listen CLEAR multi-second (B-0001).
+
 ## BN-0045 — DEC-0054 restore cold full-commit (`081416`) (2026-09-12)
 
 - **Evidence:** post-0053 capture 0.36s SILENT / 1 emit; 061217 had 92s CLEAR.
