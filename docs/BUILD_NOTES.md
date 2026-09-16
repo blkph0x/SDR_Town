@@ -4,6 +4,47 @@ Newest entry at the top. Record facts, not hopes.
 
 ---
 
+## BN-0057 — DEC-0066 dead-grant timeout (131458) (2026-09-15)
+
+- **Evidence:** 0 emits; unknown-grant ACQ hangs ~45s with no VCW.
+- **Fix:** unknown cold no-VCW 8s/6s; WaitingForClearGrant alone no longer
+  keeps acquire for 30s; clear cold 10s/7s.
+- **Gate:** DEC-0066 verifier PASS; `[p25]` **118/118**; Release rebuilt.
+
+## BN-0056 — DEC-0065 RF-home return (125341) (2026-09-15)
+
+- **Evidence:** return claimed CC without retune while cf still on voice low-IF.
+- **Fix:** force retune/warm-standby when RF away from CC; latch RetunedPrimary
+  on physical LO leave.
+- **Gate:** `verify_p25_phase2_dec0065_rf_home_return.py` PASS; DEC-0064/0063 PASS;
+  `[p25]` **118/118**; Release `SDR_Town.exe` rebuilt.
+- **Audio note (same capture):** TG10120 had a short clear stretch then drop=A /
+  ACQ watchdog; sparse emits are a separate duty track (absDup/feedRatio).
+
+## BN-0055 — DEC-0064 warm-standby return-to-CC (2026-09-15)
+
+- **Evidence:** after bridge follow, return claimed CC while RF on voice → validation
+  disable → P25 log stopped.
+- **Fix:** pause CC decode/validation in warm-standby; reset validation on real CC
+  retune; idle arm requires RF on CC; expire uses returnControlFreqHz fallback.
+- **Gate:** `verify_p25_phase2_dec0064_warm_standby_return_cc.py` PASS;
+  DEC-0063/0055 PASS; `[p25]` **118/118**; Release `SDR_Town.exe` rebuilt.
+- **Residual:** live bridge Monitor-CC → follow → return must show
+  `validation armed` / continued CC lines (no `CC disabled` after warm-standby).
+
+## BN-0054 — DEC-0063 idempotent control arm / refuse tune (2026-09-15)
+
+- **Evidence:** FUBAR DLL follow → snap to Monitor CC 420.350 mid-call.
+- **Fix:** same-CC arm keeps live follow; analog tune 409 unless force; FUBAR
+  Tune status guard; control tune logging + voiceFrequencyHz status.
+- **Gate:** `verify_p25_phase2_dec0063_idempotent_control_arm.py` PASS;
+  DEC-0055 PASS; dual-slot garble PASS; `[p25]` **118/118**; Release
+  `SDR_Town.exe` + `SdrTownControl.dll` rebuilt.
+- **Residual:** live follow stick + RID audio need a post-0063 start/stop
+  capture (no new keep-set IQ in this pass). FUBAR `sdr_town_bridge.cpp`
+  edited; rebuild that app so Tune refuses client-side too (server 409 still
+  protects with old FUBAR).
+
 ## BN-0053 — DEC-0062 talkspurt vocoder reset (225923) (2026-09-13)
 
 - **Evidence:** same-grant multi-RID; uniqueFreshR≈1 on BAD; no mid-grant mbelib reset.

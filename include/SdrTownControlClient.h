@@ -65,6 +65,11 @@ SDRTOWN_CONTROL_API int SdrTownControl_SetRfGain(const SdrTownControlConfig* con
                                                  char* responseJson,
                                                  size_t responseJsonBytes);
 
+SDRTOWN_CONTROL_API int SdrTownControl_SetVolume(const SdrTownControlConfig* config,
+                                                 double volume,
+                                                 char* responseJson,
+                                                 size_t responseJsonBytes);
+
 SDRTOWN_CONTROL_API int SdrTownControl_StartP25Control(const SdrTownControlConfig* config,
                                                        double controlFrequencyHz,
                                                        int autoFollow,

@@ -4,6 +4,34 @@ Newest at the top.
 
 ---
 
+## 2026-09-15 — DEC-0066 dead unknown-grant ~45s hang (131458)
+
+- **Evidence:** 0 emits; TG12068/10326 unknown parks ~45s no-VCW each.
+- **Fix:** unknown/cold no-VCW timeouts → ~8s/6s; clear cold → ~10s/7s;
+  hard-timeout covers unknown dead.
+
+## 2026-09-15 — DEC-0065 return without RF retune while LO on voice (125341)
+
+- **Evidence:** TG10120; return `without RF retune` at cf=421.33875 claiming
+  CC 420.350; P25 log stopped. retunesPrimary=false despite LO move.
+- **Fix:** return forces RF-home when |cf−cc|>75 kHz; start latches
+  RetunedPrimary when primary LO leaves CC.
+
+## 2026-09-15 — DEC-0064 warm-standby return kills CC watch
+
+- **Evidence:** Bridge Monitor-CC → follow → return; P25 log stops after warm-standby
+  while RF still on voice; validation disable zeros CC.
+- **Fix:** pause CC decode/validation in warm-standby; reset validation on real CC
+  RF return; harden idle arm; persist bridge autoFollow; status warmStandbyActive.
+
+## 2026-09-15 — DEC-0063 FUBAR follow snap-back (420.350)
+
+- **Evidence:** DLL Monitor-CC / Tune re-armed same CC mid-grant → RF back to
+  420.350; voice follow cleared; P25 receive stopped.
+- **Fix:** idempotent `armGuiRuntimeP25Control` on same-CC+follow; analog
+  `/v1/tune` 409 while follow live; FUBAR Tune refuses on follow status;
+  control-tune request logging + `voiceFrequencyHz` in status.
+
 ## 2026-09-13 — DEC-0062 talkspurt vocoder reset (225923)
 
 - **Evidence:** TG30304; one RID clear, later talk unintelligible; src=unknown;

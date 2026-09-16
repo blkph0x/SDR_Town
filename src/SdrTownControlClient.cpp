@@ -265,6 +265,21 @@ SDRTOWN_CONTROL_API int SdrTownControl_SetRfGain(const SdrTownControlConfig* con
     return requestJson(config, "POST", "/v1/rf-gain", body.str(), responseJson, responseJsonBytes);
 }
 
+SDRTOWN_CONTROL_API int SdrTownControl_SetVolume(const SdrTownControlConfig* config,
+                                                 double volume,
+                                                 char* responseJson,
+                                                 size_t responseJsonBytes)
+{
+    if (!std::isfinite(volume) || volume < 0.0 || volume > 1.0) {
+        copyResponse("{\"ok\":false,\"error\":\"volume is out of range\"}",
+                     responseJson, responseJsonBytes);
+        return SDRTOWN_CONTROL_BAD_ARGUMENT;
+    }
+    std::ostringstream body;
+    body << "{\"volume\":" << volume << "}";
+    return requestJson(config, "POST", "/v1/volume", body.str(), responseJson, responseJsonBytes);
+}
+
 SDRTOWN_CONTROL_API int SdrTownControl_StartP25Control(const SdrTownControlConfig* config,
                                                        double controlFrequencyHz,
                                                        int autoFollow,

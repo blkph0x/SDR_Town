@@ -1329,8 +1329,48 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     }
                 });
             };
+            auto onSuccessfulReturnToControlChannel = [this](double controlHz, const char* reason) {
+                if (!(controlHz > 0.0) || !reason) return;
+                p25LiveControlAnalyzer.reset();
+                p25PendingVoiceGrants.clear();
+                p25RepeatedVoiceGrants.clear();
+                resetP25ControlMonitorValidation(controlHz, QString::fromUtf8(reason));
+                const size_t seededIdentifiers =
+                    seedP25AnalyzerFromCachedChannelIdentifiers(p25LiveControlAnalyzer, controlHz);
+                if (seededIdentifiers > 0) {
+                    appendP25LogLine(QString("Seeded %1 cached P25 channel identifier table(s) after return to %2MHz.")
+                        .arg(static_cast<qulonglong>(seededIdentifiers))
+                        .arg(controlHz / 1e6, 0, 'f', 5));
+                }
+            };
             if (wasIndependentTraffic) {
                 p25IndependentTrafficActive = false;
+                // Capture 20260915_125341: selectP25IndependentTrafficSource can
+                // mark retunesPrimary=false (CC "fits" on voice-park LO) while
+                // startP25IndependentTrafficSource still moves primary LO to the
+                // voice low-IF. Return then took dual-SDR "without RF retune" and
+                // claimed CC watch with RF still on ~421.35 — P25 log went quiet.
+                double rfCenterHz = 0.0;
+                {
+                    std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                    rfCenterHz = currentMonitorFreq;
+                }
+                try {
+                    auto& mgr = DeviceManager::instance();
+                    std::vector<float> pwr;
+                    double cf = 0.0;
+                    double sr = 0.0;
+                    if (mgr.getLatestSpectrum(0, pwr, cf, sr) && cf > 0.0) {
+                        rfCenterHz = cf;
+                    }
+                } catch (...) {
+                }
+                const bool rfAwayFromControl =
+                    ccHz > 0.0 &&
+                    rfCenterHz > 0.0 &&
+                    std::abs(rfCenterHz - ccHz) > 75e3;
+                const bool mustRetunePrimaryHome =
+                    trafficRetunedPrimary || rfAwayFromControl;
                 p25IndependentTrafficRetunedPrimary = false;
                 p25LiveDecoder.reset();
                 p25ControlWorkerResetPending.store(true, std::memory_order_release);
@@ -1340,11 +1380,19 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 }
                 p25LastDiagSignature.clear();
                 if (ccHz > 0.0) {
-                    p25MonitoredControlFreqHz = ccHz;
-                    if (trafficRetunedPrimary) {
+                    if (mustRetunePrimaryHome) {
+                        if (rfAwayFromControl && !trafficRetunedPrimary) {
+                            appendP25LogLine(QString("P25 return: primary RF still off control (cf=%1MHz cc=%2MHz); forcing retune home despite retunesPrimary=false.")
+                                .arg(rfCenterHz / 1e6, 0, 'f', 5)
+                                .arg(ccHz / 1e6, 0, 'f', 5));
+                        }
                         if (releasedVoiceHz > 0.0 &&
                             std::isfinite(releasedVoiceHz) &&
                             recentSpeakerBeforeReturn) {
+                            // Claim monitored CC for grant matching, but RF stays on voice until
+                            // warm-standby expires. Decode/validation must stay paused (DEC-0064).
+                            p25MonitoredControlFreqHz = ccHz;
+                            p25AutoFollowReturnControlFreqHz = ccHz;
                             p25AutoFollowWarmStandbyVoiceHz = releasedVoiceHz;
                             p25AutoFollowWarmStandbyUntilMs =
                                 returnNowMs + kP25Phase2WarmStandbyMs;
@@ -1354,6 +1402,10 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                 .arg(kP25Phase2WarmStandbyMs)
                                 .arg(ccHz / 1e6, 0, 'f', 5));
                         } else if (tuneP25Path(ccHz)) {
+                            p25MonitoredControlFreqHz = ccHz;
+                            p25AutoFollowReturnControlFreqHz = ccHz;
+                            p25AutoFollowWarmStandbyUntilMs = 0;
+                            p25AutoFollowWarmStandbyVoiceHz = 0.0;
                             if (releasedVoiceHz > 0.0 && std::isfinite(releasedVoiceHz)) {
                                 appendP25LogLine(QString("P25 warm standby skipped: TG traffic had no recent selected-slot speaker audio, so RF retuned immediately from voice=%1MHz to control=%2MHz.")
                                     .arg(releasedVoiceHz / 1e6, 0, 'f', 5)
@@ -1363,16 +1415,22 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                     .arg(ccHz / 1e6, 0, 'f', 5));
                             }
                             ensureMute();
+                            onSuccessfulReturnToControlChannel(ccHz, "return-to-control immediate");
                         } else {
+                            // Do not claim CC monitor while RF is still on voice.
+                            p25MonitoredControlFreqHz = 0.0;
                             appendP25LogLine(QString("P25 one-RTL traffic source released, but RF retune back to control channel %1MHz failed; not claiming CC monitor is active.")
                                 .arg(ccHz / 1e6, 0, 'f', 5));
                             if (p25Status) p25Status->setText("Auto follow idle");
                             return;
                         }
                     } else {
+                        p25MonitoredControlFreqHz = ccHz;
+                        p25AutoFollowReturnControlFreqHz = ccHz;
                         appendP25LogLine(QString("P25 independent traffic source released; continuing muted control-channel monitor on %1MHz without RF retune.")
                             .arg(ccHz / 1e6, 0, 'f', 5));
                         ensureMute();
+                        onSuccessfulReturnToControlChannel(ccHz, "return-to-control dual-sdr");
                     }
                     if (p25Status) {
                         if (p25AutoFollowWarmStandbyUntilMs > returnNowMs) {
@@ -1391,6 +1449,9 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             }
             if (ccHz > 0.0 && tuneP25Path(ccHz)) {
                 p25MonitoredControlFreqHz = ccHz;
+                p25AutoFollowReturnControlFreqHz = ccHz;
+                p25AutoFollowWarmStandbyUntilMs = 0;
+                p25AutoFollowWarmStandbyVoiceHz = 0.0;
                 ensureMute();
                 p25LiveDecoder.reset();
                 // Do not block the Qt/UI thread behind an in-flight P25 control decode.
@@ -1403,6 +1464,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 p25LastDiagSignature.clear();
                 appendP25LogLine(QString("P25 follow returned to muted control channel %1MHz.").arg(ccHz / 1e6, 0, 'f', 5));
                 appendP25LogLine("AFC unlock: returned to control channel; live AFC adaptation resumed.");
+                onSuccessfulReturnToControlChannel(ccHz, "return-to-control follow");
                 maybeAutoPpmOnControlReturn(ccHz, true);
                 if (p25Status) p25Status->setText(QString("Monitoring CC %1 MHz").arg(ccHz / 1e6, 0, 'f', 5));
                 // Per-rx publish + disable paths below drain the live voice path when decoding stops.
@@ -1980,6 +2042,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             }
 
             uint64_t primaryRetuneSeq = 0;
+            bool primaryLoMovedAwayFromCc = false;
             if (source.retunesPrimary) {
                 try {
                     auto& mgr = DeviceManager::instance();
@@ -1999,12 +2062,18 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                         std::abs(currentCenterHz - desiredCenterHz) <= 50.0;
                     if (!alreadyCenteredOnTrafficSource) {
                         primaryRetuneSeq = mgr.setCenterFreq(source.deviceIndex, desiredCenterHz);
+                        primaryLoMovedAwayFromCc =
+                            ccHz > 0.0 &&
+                            std::abs(desiredCenterHz - ccHz) > 75e3;
                         appendP25LogLine(QString("P25 one-RTL traffic source retuned primary tuner low-IF: rfCenter=%1MHz voice=%2MHz offset=%3kHz control=%4MHz. Control-channel decode is paused until call teardown/return, matching sdrtrunk single-tuner trunking semantics.")
                             .arg(desiredCenterHz / 1e6, 0, 'f', 5)
                             .arg(tg.lastVoiceFreqHz / 1e6, 0, 'f', 5)
                             .arg((tg.lastVoiceFreqHz - desiredCenterHz) / 1000.0, 0, 'f', 1)
                             .arg(ccHz / 1e6, 0, 'f', 5));
                     } else {
+                        primaryLoMovedAwayFromCc =
+                            ccHz > 0.0 &&
+                            std::abs(desiredCenterHz - ccHz) > 75e3;
                         appendP25LogLine(QString("P25 one-RTL traffic source already at low-IF center=%1MHz for voice=%2MHz; reusing tuner without physical retune (control=%3MHz).")
                             .arg(desiredCenterHz / 1e6, 0, 'f', 5)
                             .arg(tg.lastVoiceFreqHz / 1e6, 0, 'f', 5)
@@ -2039,11 +2108,22 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     if (!std::isfinite(currentCenterHz) ||
                         std::abs(currentCenterHz - source.centerHz) > 50.0) {
                         mgr.setCenterFreq(source.deviceIndex, source.centerHz);
+                        // DEC-0065: even with retunesPrimary=false, moving primary LO
+                        // off the CC must be treated as one-RTL for return-to-CC.
+                        if (source.deviceIndex == 0 &&
+                            ccHz > 0.0 &&
+                            std::abs(source.centerHz - ccHz) > 75e3) {
+                            primaryLoMovedAwayFromCc = true;
+                        }
                         appendP25LogLine(QString("P25 tuner center aligned (SDRTrunk CenterFrequencyCalculator): rfCenter=%1MHz voice=%2MHz offset=%3kHz control=%4MHz.")
                             .arg(source.centerHz / 1e6, 0, 'f', 5)
                             .arg(tg.lastVoiceFreqHz / 1e6, 0, 'f', 5)
                             .arg((tg.lastVoiceFreqHz - source.centerHz) / 1000.0, 0, 'f', 1)
                             .arg(ccHz / 1e6, 0, 'f', 5));
+                    } else if (source.deviceIndex == 0 &&
+                               ccHz > 0.0 &&
+                               std::abs(source.centerHz - ccHz) > 75e3) {
+                        primaryLoMovedAwayFromCc = true;
                     }
                 } catch (const std::exception& ex) {
                     appendP25LogLine(QString("P25 tuner center align failed for voice=%1MHz: %2")
@@ -2117,7 +2197,12 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     }
 
                     p25IndependentTrafficActive = true;
-                    p25IndependentTrafficRetunedPrimary = source.retunesPrimary;
+                    p25IndependentTrafficRetunedPrimary =
+                        source.retunesPrimary ||
+                        (source.deviceIndex == 0 &&
+                         ccHz > 0.0 &&
+                         source.centerHz > 0.0 &&
+                         std::abs(source.centerHz - ccHz) > 75e3);
                     p25AutoFollowReturnControlFreqHz = ccHz;
                     p25AutoFollowVoiceFreqHz = tg.lastVoiceFreqHz;
                     p25AutoFollowTunedAtMs = nowMs;
@@ -2306,7 +2391,10 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             }
 
             p25IndependentTrafficActive = true;
-            p25IndependentTrafficRetunedPrimary = source.retunesPrimary;
+            // DEC-0065: physical LO away from CC ⇒ one-RTL return semantics even
+            // when select marked retunesPrimary=false (wideband "fits" lie).
+            p25IndependentTrafficRetunedPrimary =
+                source.retunesPrimary || primaryLoMovedAwayFromCc;
             {
                 std::unique_lock<std::mutex> lock(p25VoiceWorkerMutex, std::try_to_lock);
                 if (lock.owns_lock()) {
@@ -2360,14 +2448,38 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             if (p25IndependentTrafficActive || p25AutoFollowWarmStandbyUntilMs <= 0) return;
             const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
             if (nowMs < p25AutoFollowWarmStandbyUntilMs) return;
-            const double ccHz = p25MonitoredControlFreqHz;
+            const double ccHz = p25MonitoredControlFreqHz > 0.0
+                ? p25MonitoredControlFreqHz
+                : p25AutoFollowReturnControlFreqHz;
             p25AutoFollowWarmStandbyUntilMs = 0;
             p25AutoFollowWarmStandbyVoiceHz = 0.0;
             if (ccHz > 0.0 && tuneP25Path(ccHz)) {
+                p25MonitoredControlFreqHz = ccHz;
+                p25AutoFollowReturnControlFreqHz = ccHz;
                 setP25ControlChannelMute(true);
+                p25LiveDecoder.reset();
+                p25ControlWorkerResetPending.store(true, std::memory_order_release);
+                {
+                    std::unique_lock<std::mutex> pendingLock(p25ControlPendingMutex, std::try_to_lock);
+                    if (pendingLock.owns_lock()) p25ControlPendingResult.reset();
+                }
+                p25LiveControlAnalyzer.reset();
+                p25PendingVoiceGrants.clear();
+                p25RepeatedVoiceGrants.clear();
+                p25LastDiagSignature.clear();
+                resetP25ControlMonitorValidation(ccHz, "warm-standby expired");
+                const size_t seededIdentifiers =
+                    seedP25AnalyzerFromCachedChannelIdentifiers(p25LiveControlAnalyzer, ccHz);
                 appendP25LogLine(QString("P25 warm standby expired; RF retuned back to control channel %1MHz.")
                     .arg(ccHz / 1e6, 0, 'f', 5));
+                if (seededIdentifiers > 0) {
+                    appendP25LogLine(QString("Seeded %1 cached P25 channel identifier table(s) after warm-standby return.")
+                        .arg(static_cast<qulonglong>(seededIdentifiers)));
+                }
                 if (p25Status) p25Status->setText(QString("Monitoring CC %1 MHz").arg(ccHz / 1e6, 0, 'f', 5));
+            } else if (ccHz > 0.0) {
+                appendP25LogLine(QString("P25 warm standby expired, but RF retune back to control channel %1MHz failed; not claiming CC monitor.")
+                    .arg(ccHz / 1e6, 0, 'f', 5));
             }
         };
 
@@ -3925,6 +4037,8 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             p25AutoFollowLastGrantMs = 0;
             p25AutoFollowLastActiveMs = 0;
             p25AutoFollowLastMHzHopMs = 0;
+            p25AutoFollowWarmStandbyUntilMs = 0;
+            p25AutoFollowWarmStandbyVoiceHz = 0.0;
             p25LiveDecoder.reset();
             // Do not block the Qt/UI thread behind an in-flight P25 control decode.
             // Request a reset and let the worker apply it when it next owns the decoder.
@@ -3933,6 +4047,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             p25LiveControlAnalyzer.reset();
             p25PendingVoiceGrants.clear();
             p25RepeatedVoiceGrants.clear();
+            resetP25ControlMonitorValidation(ccHz, "Monitor CC button");
             const size_t seededIdentifiers = seedP25AnalyzerFromCachedChannelIdentifiers(p25LiveControlAnalyzer, ccHz);
             p25LastDiagSignature.clear();
             clearP25VoiceFollowState();
@@ -3969,6 +4084,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             p25LiveControlAnalyzer.reset();
             p25PendingVoiceGrants.clear();
             p25RepeatedVoiceGrants.clear();
+            resetP25ControlMonitorValidation(ccHz, "Grant Test button");
             const size_t seededIdentifiers = seedP25AnalyzerFromCachedChannelIdentifiers(p25LiveControlAnalyzer, ccHz);
             p25LastDiagSignature.clear();
             clearP25VoiceFollowState();
@@ -4710,7 +4826,12 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             // One-RTL traffic follow retunes the physical tuner to voice MHz.  Decoding the
                             // control channel from that wideband IQ only sees CC bleed (+250 kHz here) and
                             // re-triggers same-RF slot grants while starving the traffic follow/ACQ path.
+                            // DEC-0064: warm-standby also parks RF on voice while follow flags are clear —
+                            // do not feed validation or claim CC decode until RF is actually back on CC.
                             const double ccOffsetFromDeviceHz = std::abs(p25MonitoredControlFreqHz - cf);
+                            const qint64 nowMsForCcGate = QDateTime::currentMSecsSinceEpoch();
+                            const bool warmStandbyTunerAwayFromCc =
+                                p25AutoFollowWarmStandbyUntilMs > nowMsForCcGate;
                             const bool oneRtlTrafficTunerAwayFromCc =
                                 p25IndependentTrafficActive &&
                                 (p25IndependentTrafficRetunedPrimary || ccOffsetFromDeviceHz > 75e3);
@@ -4718,6 +4839,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                 p25MonitoredControlFreqHz > 0.0 &&
                                 p25CcInPassband &&
                                 !oneRtlTrafficTunerAwayFromCc &&
+                                !warmStandbyTunerAwayFromCc &&
                                 (!p25FollowEnabled ||
                                  (p25IndependentTrafficActive && !p25IndependentTrafficRetunedPrimary));
                             if (decodeControlFromThisDevice) {
@@ -5327,6 +5449,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                             QString("P25 control worker dropped %1 stale result(s) while GUI was busy; latest result kept.").arg(dropped),
                                             5000);
                                     }
+                                    noteP25ControlMonitorDecodeWindow(live, hasTrustedControl);
                                     } // end stale-control-result guard else
                                     }
                                 }
@@ -8829,6 +8952,19 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
             state.insert("volume", monitorMasterVolume);
         }
 
+        QJsonArray knownControlChannels;
+        for (const auto& cc : loadP25KnownControlChannels()) {
+            if (!std::isfinite(cc.freqHz) || cc.freqHz <= 0.0) continue;
+            QJsonObject item;
+            item.insert("frequencyHz", cc.freqHz);
+            item.insert("frequencyMHz", cc.freqHz / 1e6);
+            item.insert("label", QString::fromStdString(cc.label));
+            item.insert("createdMs", static_cast<double>(cc.createdMs));
+            item.insert("lastUsedMs", static_cast<double>(cc.lastUsedMs));
+            knownControlChannels.append(item);
+        }
+        state.insert("knownControlChannels", knownControlChannels);
+
         auto& mgr = DeviceManager::instance();
         QJsonArray devices;
         const auto devs = mgr.getDevices();
@@ -8848,8 +8984,19 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
         p25.insert("autoFollow", p25AutoFollowEnabled);
         p25.insert("followEnabled", p25FollowEnabled);
         p25.insert("followTalkgroupId", static_cast<int>(p25FollowTalkgroupId));
+        p25.insert("voiceFrequencyHz", p25AutoFollowVoiceFreqHz);
         p25.insert("trafficActive", p25IndependentTrafficActive);
         p25.insert("trafficRetunedPrimary", p25IndependentTrafficRetunedPrimary);
+        const qint64 statusNowMs = QDateTime::currentMSecsSinceEpoch();
+        const bool warmStandbyActive = p25AutoFollowWarmStandbyUntilMs > statusNowMs;
+        p25.insert("warmStandbyActive", warmStandbyActive);
+        p25.insert("warmStandbyUntilMs", static_cast<double>(p25AutoFollowWarmStandbyUntilMs));
+        p25.insert("warmStandbyVoiceHz", p25AutoFollowWarmStandbyVoiceHz);
+        p25.insert("returnControlFrequencyHz", p25AutoFollowReturnControlFreqHz);
+        p25.insert("monitorArmedMs", static_cast<double>(p25ControlMonitorArmedMs));
+        p25.insert("monitorLastTrustedMs", static_cast<double>(p25ControlMonitorLastTrustedMs));
+        p25.insert("monitorBadWindows", p25ControlMonitorBadWindows);
+        p25.insert("monitorDisabledReason", p25ControlMonitorDisabledReason);
         state.insert("p25", p25);
 
         QJsonObject caps;
@@ -8860,10 +9007,137 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
         caps.insert("setLpf", true);
         caps.insert("setRfGain", true);
         caps.insert("setSquelch", true);
+        caps.insert("setVolume", true);
+        caps.insert("listP25ControlChannels", true);
         caps.insert("startP25Control", true);
         state.insert("capabilities", caps);
 
         return state;
+    }
+
+QJsonObject MainWindow::applySdrTownControlVolume(const QJsonObject& body)
+{
+        double volume = body.value("volume").toDouble(std::numeric_limits<double>::quiet_NaN());
+        if (!std::isfinite(volume)) {
+            const double pct = body.value("volumePercent").toDouble(std::numeric_limits<double>::quiet_NaN());
+            if (std::isfinite(pct)) volume = pct / 100.0;
+        }
+        if (!std::isfinite(volume) || volume < 0.0 || volume > 1.0) {
+            return {{"ok", false}, {"status", 400}, {"error", "volume must be 0.0-1.0"}};
+        }
+        monitorMasterVolume = std::clamp(volume, 0.0, 1.0);
+        if (AudioEngine* eng = peekAudioEngineIfReady()) {
+            eng->setMasterVolume(static_cast<float>(monitorMasterVolume));
+        }
+        return {{"ok", true}, {"state", sdrTownControlStatusSnapshot()}};
+    }
+
+void MainWindow::resetP25ControlMonitorValidation(double ccHz, const QString& reason)
+{
+        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        p25ControlMonitorArmedMs = nowMs;
+        p25ControlMonitorLastTrustedMs = 0;
+        p25ControlMonitorBadWindows = 0;
+        p25ControlMonitorDisabledReason.clear();
+        appendP25LogLine(QString("P25 control validation armed for %1MHz (%2).")
+            .arg(ccHz / 1e6, 0, 'f', 5)
+            .arg(reason));
+    }
+
+void MainWindow::disableP25ControlMonitorDueToValidation(const QString& reason)
+{
+        const double oldCcHz = p25MonitoredControlFreqHz;
+        p25ControlMonitorDisabledReason = reason;
+        p25MonitoredControlFreqHz = 0.0;
+        p25AutoFollowEnabled = false;
+        p25FollowEnabled = false;
+        p25FollowAutoActive = false;
+        p25FollowTalkgroupId = 0;
+        p25AutoFollowVoiceFreqHz = 0.0;
+        p25AutoFollowReturnControlFreqHz = 0.0;
+        p25AutoFollowWarmStandbyUntilMs = 0;
+        p25AutoFollowWarmStandbyVoiceHz = 0.0;
+        p25IndependentTrafficActive = false;
+        p25IndependentTrafficRetunedPrimary = false;
+        p25LiveControlAnalyzer.reset();
+        p25PendingVoiceGrants.clear();
+        p25RepeatedVoiceGrants.clear();
+        p25ControlWorkerResetPending.store(true, std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> pendingLock(p25ControlPendingMutex);
+            p25ControlPendingResult.reset();
+        }
+        {
+            std::lock_guard<std::mutex> lk(receiversMutex);
+            if (!receivers.empty() && receivers[0]) {
+                auto& rx = *receivers[0];
+                std::lock_guard<std::mutex> rxLock(rx.stateMutex);
+                rx.p25ControlChannelMute = false;
+                clearP25VoiceFollowFieldsLocked(rx, false);
+            }
+        }
+        if (p25AutoFollowCheckBox) {
+            p25AutoFollowCheckBox->blockSignals(true);
+            p25AutoFollowCheckBox->setChecked(false);
+            p25AutoFollowCheckBox->blockSignals(false);
+        }
+        if (p25StatusLabel) {
+            p25StatusLabel->setText(QString("CC disabled: %1").arg(reason));
+        }
+        appendP25LogLine(QString("P25 control monitor disabled for %1MHz: %2. Press Monitor CC to retry.")
+            .arg(oldCcHz > 0.0 ? oldCcHz / 1e6 : 0.0, 0, 'f', 5)
+            .arg(reason));
+        if (statusBar()) {
+            statusBar()->showMessage(QString("P25 Monitor CC disabled: %1").arg(reason), 5000);
+        }
+    }
+
+void MainWindow::noteP25ControlMonitorDecodeWindow(const P25LiveDecodeResult& result,
+                                                   bool hasTrustedControl)
+{
+        if (p25MonitoredControlFreqHz <= 0.0 || p25ControlMonitorArmedMs <= 0) return;
+        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        // DEC-0064: warm-standby parks RF on voice — never count those windows
+        // against CC validation (would disable Monitor CC after long follows).
+        if (p25AutoFollowWarmStandbyUntilMs > nowMs) return;
+        if (p25IndependentTrafficActive && p25IndependentTrafficRetunedPrimary) return;
+        const bool hasValidatedNid = p25ControlDecodeHasValidatedNid(result);
+        const bool hasCrcValidMac = result.stats.phase2MacCrcValid > 0;
+        const bool hasRealP25 = hasTrustedControl || hasValidatedNid || hasCrcValidMac;
+        if (hasRealP25) {
+            p25ControlMonitorLastTrustedMs = nowMs;
+            p25ControlMonitorBadWindows = 0;
+            p25ControlMonitorDisabledReason.clear();
+            return;
+        }
+
+        ++p25ControlMonitorBadWindows;
+        constexpr qint64 kStartupGraceMs = 15000;
+        constexpr qint64 kTrustedStaleMs = 30000;
+        constexpr int kStartupBadWindowLimit = 16;
+        constexpr int kStaleBadWindowLimit = 28;
+        const qint64 armedAgeMs = nowMs - p25ControlMonitorArmedMs;
+        const bool neverTrustedTooLong =
+            p25ControlMonitorLastTrustedMs <= 0 &&
+            armedAgeMs >= kStartupGraceMs &&
+            p25ControlMonitorBadWindows >= kStartupBadWindowLimit;
+        const bool staleTrustedTooLong =
+            p25ControlMonitorLastTrustedMs > 0 &&
+            nowMs - p25ControlMonitorLastTrustedMs >= kTrustedStaleMs &&
+            p25ControlMonitorBadWindows >= kStaleBadWindowLimit;
+        if (neverTrustedTooLong || staleTrustedTooLong) {
+            const QString bestErr = result.stats.bestFrameSyncBitErrors >= 0
+                ? QString::number(result.stats.bestFrameSyncBitErrors)
+                : QString("-");
+            const QString bestNid = result.stats.bestNidBchDistance >= 0
+                ? QString::number(result.stats.bestNidBchDistance)
+                : QString("-");
+            disableP25ControlMonitorDueToValidation(QString("no validated P25 control data after %1 bad windows (sync=%2 bestErr=%3 bestNidDist=%4)")
+                .arg(p25ControlMonitorBadWindows)
+                .arg(result.syncs.size())
+                .arg(bestErr)
+                .arg(bestNid));
+        }
     }
 
 QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
@@ -8880,18 +9154,51 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
         const QString requestedMode = body.value("mode").toString().trimmed().toUpper();
         const bool p25Control = body.value("p25Control").toBool(false) ||
             requestedMode == "P25" || requestedMode == "P25P1" || requestedMode == "P25P2";
+        appendP25LogLineKeyed(
+            QStringLiteral("sdr-town-control-tune"),
+            QString("SDR Town control tune: freq=%1MHz mode=%2 p25Control=%3 autoFollow=%4 followLive=%5.")
+                .arg(freqHz / 1e6, 0, 'f', 5)
+                .arg(requestedMode.isEmpty() ? QStringLiteral("-") : requestedMode)
+                .arg(p25Control ? "yes" : "no")
+                .arg(body.value("autoFollow").toBool(body.value("p25AutoFollow").toBool(false)) ? "yes" : "no")
+                .arg((p25FollowEnabled || p25IndependentTrafficActive) ? "yes" : "no"),
+            1500);
         if (p25Control) {
+            // Bridge Monitor-CC intent owns autoFollow for this session — do not
+            // restore a stale GUI-config value that would diverge from the latch.
             const bool autoFollow = body.contains("autoFollow")
                 ? body.value("autoFollow").toBool(false)
                 : body.value("p25AutoFollow").toBool(false);
-            const bool oldAutoFollow = guiRuntimeConfig.autoFollow;
             guiRuntimeConfig.autoFollow = autoFollow;
             const bool ok = armGuiRuntimeP25Control(freqHz, false);
-            guiRuntimeConfig.autoFollow = oldAutoFollow;
             if (!ok) {
                 return {{"ok", false}, {"status", 500}, {"error", "could not arm P25 control monitor"}};
             }
             return {{"ok", true}, {"state", sdrTownControlStatusSnapshot()}};
+        }
+
+        // DEC-0063/0064: analog /v1/tune must not tear down a live grant follow or
+        // warm-standby hold unless the caller explicitly forces it.
+        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        const bool followLive =
+            p25FollowEnabled ||
+            p25FollowAutoActive ||
+            p25IndependentTrafficActive ||
+            (p25AutoFollowVoiceFreqHz > 0.0) ||
+            (p25AutoFollowWarmStandbyUntilMs > nowMs);
+        if (followLive && !body.value("force").toBool(false)) {
+            appendP25LogLineKeyed(
+                QStringLiteral("sdr-town-control-tune-refused-follow"),
+                QString("SDR Town control tune refused: P25 follow/warm-standby active TG=%1 voice=%2MHz (pass force=true to override).")
+                    .arg(p25FollowTalkgroupId)
+                    .arg(p25AutoFollowVoiceFreqHz > 0.0
+                             ? p25AutoFollowVoiceFreqHz / 1e6
+                             : p25AutoFollowWarmStandbyVoiceHz / 1e6, 0, 'f', 5),
+                2000);
+            return {{"ok", false},
+                    {"status", 409},
+                    {"error", "P25 follow is active; refuse analog tune (pass force=true to override)"},
+                    {"state", sdrTownControlStatusSnapshot()}};
         }
 
         DemodMode newMode = currentMonitorMode;
@@ -9062,6 +9369,9 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             }
             return {{"ok", true}, {"state", sdrTownControlStatusSnapshot()}};
         }
+        if (path == "/v1/volume" && method == "POST") {
+            return applySdrTownControlVolume(body);
+        }
         if (path == "/v1/p25/control" && method == "POST") {
             QJsonObject tune = body;
             tune.insert("mode", "P25");
@@ -9214,6 +9524,67 @@ bool MainWindow::armGuiRuntimeP25Control(double ccHz,  bool grantTest)
             return false;
         }
 
+        // DEC-0063 / FUBAR DLL: re-arming the same CC while a grant follow is
+        // live must not retune to CC or clear voice state — that snapped RF back
+        // to 420.350 mid-call and stopped P25 receive.
+        constexpr double kSameControlChannelTolHz = 75.0;
+        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        const bool sameControlChannel =
+            p25MonitoredControlFreqHz > 0.0 &&
+            std::abs(p25MonitoredControlFreqHz - ccHz) <= kSameControlChannelTolHz;
+        const bool warmStandbyHold = p25AutoFollowWarmStandbyUntilMs > nowMs;
+        const bool followLive =
+            p25FollowEnabled ||
+            p25FollowAutoActive ||
+            p25IndependentTrafficActive ||
+            (p25AutoFollowVoiceFreqHz > 0.0) ||
+            warmStandbyHold;
+        double monitorFreqHz = 0.0;
+        {
+            std::lock_guard<std::mutex> lk(monitorParamsMutex);
+            monitorFreqHz = currentMonitorFreq;
+        }
+        const bool rfOnControlChannel =
+            monitorFreqHz > 0.0 &&
+            std::abs(monitorFreqHz - ccHz) <= kSameControlChannelTolHz;
+        if (!grantTest && sameControlChannel && followLive) {
+            p25AutoFollowEnabled = guiRuntimeConfig.autoFollow;
+            p25AutoFollowReturnControlFreqHz = ccHz;
+            if (p25AutoFollowCheckBox) {
+                p25AutoFollowCheckBox->blockSignals(true);
+                p25AutoFollowCheckBox->setChecked(p25AutoFollowEnabled);
+                p25AutoFollowCheckBox->blockSignals(false);
+            }
+            appendP25LogLineKeyed(
+                QStringLiteral("p25-control-arm-idempotent"),
+                QString("P25 control arm idempotent: keeping active follow TG=%1 voice=%2MHz; CC=%3MHz autoFollow=%4 warmStandby=%5.")
+                    .arg(p25FollowTalkgroupId)
+                    .arg(p25AutoFollowVoiceFreqHz / 1e6, 0, 'f', 5)
+                    .arg(ccHz / 1e6, 0, 'f', 5)
+                    .arg(p25AutoFollowEnabled ? "on" : "off")
+                    .arg(warmStandbyHold ? "yes" : "no"),
+                2000);
+            return true;
+        }
+        // DEC-0064: idle same-CC early-out only when RF is physically on CC and
+        // not in warm-standby. Otherwise fall through to full arm (recover after
+        // poisoned return / bridge re-arm while parked on voice).
+        if (!grantTest && sameControlChannel && !followLive && rfOnControlChannel &&
+            p25AutoFollowEnabled == (guiRuntimeConfig.autoFollow || grantTest)) {
+            p25AutoFollowReturnControlFreqHz = ccHz;
+            appendP25LogLineKeyed(
+                QStringLiteral("p25-control-arm-idempotent-idle"),
+                QString("P25 control arm idempotent idle: already monitoring CC %1MHz autoFollow=%2.")
+                    .arg(ccHz / 1e6, 0, 'f', 5)
+                    .arg(p25AutoFollowEnabled ? "on" : "off"),
+                2000);
+            return true;
+        }
+
+        // Full arm clears any leftover warm-standby claim.
+        p25AutoFollowWarmStandbyUntilMs = 0;
+        p25AutoFollowWarmStandbyVoiceHz = 0.0;
+
         if (!startGuiRuntimeDeviceAt(ccHz, true)) return false;
 
         p25MonitoredControlFreqHz = ccHz;
@@ -9241,6 +9612,7 @@ bool MainWindow::armGuiRuntimeP25Control(double ccHz,  bool grantTest)
         p25PendingVoiceGrants.clear();
         p25RepeatedVoiceGrants.clear();
         p25LastDiagSignature.clear();
+        resetP25ControlMonitorValidation(ccHz, grantTest ? "runtime grant test" : "runtime monitor");
 
         {
             std::lock_guard<std::mutex> lk(receiversMutex);

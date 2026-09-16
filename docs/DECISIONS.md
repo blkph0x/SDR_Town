@@ -5,6 +5,95 @@ A decision is recorded **before** code that depends on it is written.
 
 ---
 
+## DEC-0066 — Dead unknown-grant parks must return in ~8s (not ~45s)
+
+- **Date:** 2026-09-15
+- **Status:** accepted
+- **Evidence (capture 20260915_131458):**
+  - Return-to-CC stick fixed (0065); monitoring continued.
+  - **Zero** `P25 audio output` lines; live_speaker.wav ~30 KB empty.
+  - Unknown-enc follows TG12068/10326/… sat **~45s** each with `drop=A`
+    `no-vcw-from-live-window` until ACQ watchdog.
+  - FSM used `waitingUnknownClearGrant` no-VCW **45000/40000** ms.
+- **Decision:**
+  1. Unknown-grant + cold dead (no bursts/VCW/speech): **8s tuned / 6s silence**.
+  2. Unknown-grant with some structure but still no VCW: **12s / 8s**.
+  3. Clear-grant cold dead: **10s / 7s** (was 45s/30s).
+  4. Keep long holds only when call was already live (continuation / speech).
+  5. Hard-timeout also covers unknown/cold dead (~12s), was excluded before.
+- **Out of scope:** why those grants had zero VCWs (RF/slot/enc) — next after
+  hangs stop starving CC of follow opportunities.
+- **Consequences:** Dead parks free the tuner quickly so the next clear grant
+  can be followed. Expect ACQ watchdog ~8–12s on empty voice, not ~45s.
+
+## DEC-0065 — Return-to-CC must follow physical RF, not retunesPrimary flag
+
+- **Date:** 2026-09-15
+- **Status:** accepted
+- **Evidence (capture 20260915_125341 TG10120 @421.350):**
+  - Live clear emits for ~few seconds (CADENCE duty≈0.7–1.0) then drop=A /
+    no-vcw; ACQ watchdog returned.
+  - Return logged: `continuing muted control-channel monitor on 420.350 …
+    without RF retune` while cf was still **421.33875** (voice low-IF).
+  - `retunesPrimary=false` because select thought CC "fits" on voice-park LO,
+    but start still moved primary LO off CC → P25 log went quiet (no CC in
+    passband).
+- **Decision:**
+  1. On independent-traffic release: if primary RF center is >75 kHz from CC,
+     take one-RTL return/warm-standby path even when `retunesPrimary` was false.
+  2. When start moves primary LO away from CC (DEC-0015 align path), latch
+     `p25IndependentTrafficRetunedPrimary=true`.
+- **Out of scope:** sparse mid-call feedRatio/absDup (separate audio duty track).
+- **Consequences:** Return after one-RTL voice must retune home and keep watching
+  CC. Prove: no `without RF retune` while cf≠cc; expect retune/warm-standby +
+  continued stage-lock lines.
+
+## DEC-0064 — Warm-standby must not kill CC monitor on return
+
+- **Date:** 2026-09-15
+- **Status:** accepted (amends DEC-0063 idle early-out)
+- **Evidence (bridge Monitor-CC → follow → return):**
+  - Voice ends; one-RTL warm-standby holds RF on voice while follow flags clear.
+  - CC decode/validation resumed off-frequency (`p25CcInPassband` true at 2.048 Msps).
+  - After follows >30s, ~28 bad windows → `disableP25ControlMonitorDueToValidation`
+    zeros `p25MonitoredControlFreqHz` → P25 log stops; not watching CC.
+  - DEC-0063 idle same-CC early-out could skip recovery re-arm while RF still on voice.
+- **Decision:**
+  1. Pause CC decode + validation while `warmStandbyUntilMs` is active (and while
+     one-RTL traffic retuned primary).
+  2. On real RF return to CC (immediate / follow / warm-standby expire): reset
+     validation + reseed analyzer (same spirit as Monitor CC button).
+  3. Failed retune must **not** claim `p25MonitoredControlFreqHz`.
+  4. Idle arm early-out only if RF is physically on CC and not in warm-standby.
+  5. Status exposes `warmStandbyActive`; analog tune / FUBAR refuse during it.
+  6. Bridge P25 control **persists** `autoFollow` (no restore of stale GUI config).
+- **Out of scope:** RID/TG decode quality; streaming DDC; DEC-0012.
+- **Consequences:** Return-to-CC after bridge follow must resume muted CC watch
+  like the normal GUI path. Prove via warm-standby log then
+  `P25 control validation armed` / continued CC NAC lines (no disable).
+
+## DEC-0063 — Idempotent P25 control arm + refuse analog tune while follow live
+
+- **Date:** 2026-09-15
+- **Status:** accepted
+- **Evidence (FUBAR ↔ SdrTownControl.dll):**
+  - Follow snaps back to Monitor CC **420.350** mid-call; P25 receive stops.
+  - `armGuiRuntimeP25Control` always retuned to CC, cleared
+    `p25AutoFollowVoiceFreqHz` / follow flags, and reset the live decoder —
+    so a repeated `/v1/p25/control` (or Monitor-CC re-arm) killed the grant.
+  - FUBAR analog `Tune` posts `/v1/tune` with `p25AutoFollow=0`, which took
+    the non-P25 path and could retune RF off the voice channel.
+- **Decision:**
+  1. Same-CC re-arm while follow/traffic/voice-freq live → **idempotent**
+     (refresh autoFollow + return-CC only; keep RF/voice/decoder).
+  2. Same-CC idle re-arm with matching autoFollow → no decoder wipe.
+  3. Analog `/v1/tune` while follow live → **409** unless `force=true`.
+  4. Status exposes `voiceFrequencyHz`; log control tune requests.
+  5. FUBAR bridge refuses Tune when status shows follow/traffic active.
+- **Out of scope:** RID/TG decode quality (DEC-0062+); streaming DDC; DEC-0012.
+- **Consequences:** FUBAR Monitor-CC / poll must not snap RF to CC mid-grant.
+  Prove with `p25-control-arm-idempotent` / `tune-refused-follow` log lines.
+
 ## DEC-0062 — Mid-grant talkspurt must reset mbelib (225923 RID garble)
 
 - **Date:** 2026-09-13

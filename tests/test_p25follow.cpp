@@ -663,15 +663,16 @@ TEST_CASE("P25 follow does not let stale clear ESS hold a no-VCW traffic channel
     REQUIRE(decision.action == P25FollowAction::ReturnNoVoiceCodewords);
 }
 
-TEST_CASE("P25 follow holds unknown clear-grant acquisition longer before no-VCW return", "[p25][follow]")
+TEST_CASE("P25 follow returns quickly from unknown clear-grant with no VCWs", "[p25][follow]")
 {
+    // DEC-0066 / capture 20260915_131458: unknown grants parked ~45s dead.
     P25FollowSnapshot snapshot;
     snapshot.autoActive = true;
     snapshot.phase2Voice = true;
-    snapshot.nowMs = 20'000;
+    snapshot.nowMs = 5'000;
     snapshot.tunedAtMs = 1'000;
     snapshot.lastActiveMs = 1'000;
-    snapshot.diagUpdatedMs = 19'500;
+    snapshot.diagUpdatedMs = 4'500;
     snapshot.diag = diag(P25FollowDiagCode::WaitingForClearGrant);
     snapshot.grantEncryptionKnown = false;
     snapshot.grantEncrypted = false;
@@ -683,7 +684,7 @@ TEST_CASE("P25 follow holds unknown clear-grant acquisition longer before no-VCW
     REQUIRE_FALSE(midDecision.tdmaNoVcwTimeout);
     REQUIRE(midDecision.action == P25FollowAction::None);
 
-    snapshot.nowMs = 46'500;
+    snapshot.nowMs = 10'000;
     snapshot.lastActiveMs = 1'000;
     const auto lateDecision = evaluateP25Follow(snapshot);
     REQUIRE(lateDecision.tdmaNoVcwTimeout);

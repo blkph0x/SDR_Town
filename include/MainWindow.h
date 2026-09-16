@@ -180,6 +180,13 @@ private:
 
     QJsonObject applySdrTownControlTune(const QJsonObject& body);
 
+    QJsonObject applySdrTownControlVolume(const QJsonObject& body);
+
+    void resetP25ControlMonitorValidation(double ccHz, const QString& reason);
+    void noteP25ControlMonitorDecodeWindow(const P25LiveDecodeResult& result,
+                                           bool hasTrustedControl);
+    void disableP25ControlMonitorDueToValidation(const QString& reason);
+
     struct P25VoiceDecodeJob {
         std::shared_ptr<Receiver> rx;
         std::vector<std::complex<float>> iq;
@@ -404,6 +411,10 @@ private:
     double p25AutoFollowLastReturnVoiceHz = 0.0;
     qint64 p25AutoFollowWarmStandbyUntilMs = 0;
     double p25AutoFollowWarmStandbyVoiceHz = 0.0;
+    qint64 p25ControlMonitorArmedMs = 0;
+    qint64 p25ControlMonitorLastTrustedMs = 0;
+    int p25ControlMonitorBadWindows = 0;
+    QString p25ControlMonitorDisabledReason;
     qint64 p25LastSameRfMetadataSwitchMs = 0;
     qint64 p25SameRfClearGrantHoldUntilMs = 0;
     P25LiveDecoder p25LiveDecoder;
