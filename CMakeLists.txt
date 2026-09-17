@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.59 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.60 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -81,6 +81,8 @@ target_link_libraries(sdr_town_decoders PRIVATE nlohmann_json::nlohmann_json)
 include(cmake/RdsBackend.cmake)
 
 set(SDR_TOWN_SOURCES
+    src/P25Aliases.cpp
+    src/P25AliasDialog.cpp
     src/SstvImageFile.cpp
     src/SstvStreamWorker.cpp
     src/SstvLiveSession.cpp
@@ -404,6 +406,7 @@ if(BUILD_TESTS)
   add_test(NAME UnitTests COMMAND sdr_town_tests)
 
   add_executable(sdr_town_workspace_tests tests/test_workspace.cpp src/WorkspaceLayout.cpp
+    tests/test_p25_aliases.cpp src/P25Aliases.cpp src/P25AliasDialog.cpp
     tests/test_sstv_gui.cpp tests/sstv_miniaudio.cpp src/SstvWindow.cpp include/SstvWindow.h src/SstvImageFile.cpp
     tests/test_sstv_progress.cpp src/SstvProgress.cpp
     tests/test_sstv_stream_worker.cpp src/SstvStreamWorker.cpp src/SstvRateConverter.cpp src/SstvLiveInput.cpp

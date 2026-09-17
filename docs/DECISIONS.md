@@ -2,6 +2,24 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0100 - System-scoped P25 alias lists (2026-09-18)
+
+Evidence: SDRTrunk Playlist-Editor wiki (accessed2026-09-18), Aliases and
+Channel General sections: named alias lists label identifiers independently
+of decoding, attached to channels. Local P25TalkgroupEntry already stores
+WACN/System ID and manual alphaTag. Implement independent presentation-only
+lists keyed by WACN+System ID; never infer a system from TGID or frequency.
+Unknown system identity gets no imported label. Existing alphaTag takes priority.
+JSON version1 import/export uses Qt's structured parser; no new dependency or
+claim of SDRTrunk XML/RadioReference API compatibility. One list per system,
+bounded to1MiB/10000 aliases per document, with strict integer ranges, duplicate
+rejection, bounded UTF-8 text and explicit source/date. Review before saving.
+Editable names/groups become protected manual overrides on subsequent imports.
+All imported metadata stays outside scanner/encryption/priority/voice decisions.
+Persist atomically via QSaveFile; reject external changes while editing rather
+than overwrite. Never erase an unreadable database. Tests cover malformed input,
+system isolation, manual precedence, merge, roundtrip, storage and GUI workflow.
+
 ## DEC-0099 - Experimental live NFM SSTV session and window (2026-09-18)
 
 Attach one bounded SSTV queue to the main receiver's existing raw NFM tap.

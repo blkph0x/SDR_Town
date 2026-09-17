@@ -2,6 +2,14 @@
 
 Newest at the top.
 
+## 2026-09-18 - P25 alias-list manager
+
+DEC-0100 implements system-isolated labels with create/edit/search/import/export,
+staged review, manual-name precedence and atomic conflict-aware persistence.
+Structured JSON avoids a new parser dependency. Unit and GUI workflow tests
+pass; application layouts remain valid. RF/audio logic unchanged. README and
+P25_ALIASES explain format and deferred integrations. Preparing0.2.60 assets.
+
 ## 2026-09-18 - 0.2.59 published
 
 Source, tag and eight release assets published for experimental live NFM SSTV

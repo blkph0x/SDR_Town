@@ -3,6 +3,9 @@ SDR TOWN — CAUSE / EFFECT EXECUTION MAP
 ================================================================================
 VERSION: 1.0.0  |  COMPANION TO: SOURCE_OF_TRUTH.md
 STATUS RULE: Flip [ ] to [X] only after the verification gate for that REQ is met.
+DEC-0100 checkpoint: system-scoped presentation aliases pass schema/isolation,
+manual-override, storage conflict and actual GUI workflow tests. No grant or
+audio-path mutation; directory sourcing and external formats remain separate.
 DEC-0099 checkpoint: live NFM receiver attachment and GUI session are wired;
 recording-driven worker/GUI parity and lifecycle gates pass. Known-image live
 RF acceptance remains open; do not mark full SSTV coverage complete.

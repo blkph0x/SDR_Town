@@ -2,6 +2,19 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-18 - DEC-0100 system-scoped alias lists
+
+VS2022 MSVC/x64 Release app and workspace targets build PASS. Initial alias
+suite46 assertions/3 cases PASS; expanded validation and actual modal GUI
+New/Add/Edit/Reimport/Save workflow70 assertions/4 cases PASS. Full CTest3/3
+PASS in42.25s. Four actual application workspace layouts PASS, no startup
+errors or hardware RX; Trunking screenshot confirms Aliases button fits.
+Compact560x380 alias dialog screenshot reviewed: labels/actions fit.
+Final plain-text status assertion and packaged QA follow below. No user alias
+database modified; tests use temporary directories and fictional system IDs.
+Final incremental app/workspace build PASS; alias suite71 assertions/4 cases
+PASS with plain-text status enforced. No new compiler/test failures this pass.
+
 ## 2026-09-18 - 0.2.59 publication verification
 
 Pushed branch and annotated v0.2.59 tag at aa5e766. All eight assets uploaded

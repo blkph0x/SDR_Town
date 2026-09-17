@@ -1,4 +1,5 @@
 #include "P25TalkgroupRegistry.h"
+#include "P25Aliases.h"
 #include "DemodModeUtils.h"
 
 #include "P25AppGlobals.h"
@@ -1180,6 +1181,10 @@ QString p25FollowDetailLogText(const P25TalkgroupEntry& tg)
 void populateP25TalkgroupTable(QTableWidget* table, const std::vector<P25TalkgroupEntry>& talkgroups)
 {
     if (!table) return;
+    P25AliasLists aliases;
+    QString aliasError;
+    try { aliases=loadP25AliasDatabase(readP25AliasFile(p25AliasesPath())); }
+    catch(const std::exception& e) { aliasError=QString::fromUtf8(e.what()); }
     table->setRowCount(static_cast<int>(talkgroups.size()));
     for (int row = 0; row < static_cast<int>(talkgroups.size()); ++row) {
         const auto& tg = talkgroups[static_cast<size_t>(row)];
@@ -1192,7 +1197,14 @@ void populateP25TalkgroupTable(QTableWidget* table, const std::vector<P25Talkgro
         if (protocol != "-") status = protocol + " / " + status;
         table->setItem(row, 0, new QTableWidgetItem(QString::number(tg.controlFreqHz / 1e6, 'f', 5)));
         table->setItem(row, 1, new QTableWidgetItem(QString::number(tg.talkgroupId)));
-        table->setItem(row, 2, new QTableWidgetItem(QString::fromStdString(tg.alphaTag)));
+        // Presentation only: aliases never mutate grant, scanner or encryption fields.
+        auto* aliasItem=new QTableWidgetItem(resolveP25Alias(aliases,tg.p25MaskParamsKnown,
+            tg.wacn,tg.systemId,tg.talkgroupId,QString::fromStdString(tg.alphaTag)));
+        aliasItem->setToolTip(aliasError.isEmpty()
+            ? QString("WACN %1 / System %2; manual Alpha Tag takes precedence")
+                .arg(tg.wacn,5,16,QChar('0')).arg(tg.systemId,3,16,QChar('0'))
+            : "Alias database error: "+aliasError);
+        table->setItem(row, 2, aliasItem);
         table->setItem(row, 3, new QTableWidgetItem(tg.lastVoiceFreqHz > 0.0 ? QString::number(tg.lastVoiceFreqHz / 1e6, 'f', 5) : "-"));
         table->setItem(row, 4, new QTableWidgetItem(tg.lastSourceId ? p25HexId(tg.lastSourceId, 6) : "-"));
         table->setItem(row, 5, new QTableWidgetItem(QString::number(tg.hitCount)));

@@ -1,6 +1,6 @@
 # Task list (canonical)
 
-T-0031 | in progress | Live SSTV ingress | DEC-0095 bounded queue and
+T-0031 | pending RF acceptance | Live SSTV ingress | DEC-0095 bounded queue and
 discontinuity tests first. No RF/UI wiring until streaming conversion and
 independent full/partial recording equivalence are qualified.
 Queue stage verified: six cases, 20 repeat runs, full CTest and recorded GUI
@@ -15,10 +15,16 @@ DEC-0099 adds receiver attach/detach and Live NFM GUI controls. Combined GUI
 recording parity and lifecycle tests are the implementation gates; actual
 known-transmission RF image acceptance remains open.
 
-T-0032 | planned | Talkgroup aliases | Existing Add TG Alpha Tag is persisted
+T-0032 | done | Talkgroup alias lists (JSON baseline) | Existing Add TG Alpha Tag is persisted
 and displayed. Add validated system-scoped alias imports with source/date and
 manual override preservation; never use labels as encryption/audio evidence.
 Do not assume the same numeric TGID denotes the same group on another system.
+DEC-0100 implements New/Add/Edit/Search/Import/Export/Save with system isolation,
+source/date and protected manual overrides. Schema/storage/GUI tests and app
+layouts pass. CSV/XML, RadioReference and radio-ID/transcript labels deferred.
+
+T-0034 | in progress | Release 0.2.60 | Package and verify alias-list feature,
+signed manifest and downloaded assets before publishing Latest experimental.
 
 T-0033 | done | Release 0.2.59 | Experimental live NFM SSTV UI/feed.
 Build, combined recording/lifecycle tests, GUI review and package QA before

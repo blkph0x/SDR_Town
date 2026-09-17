@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Current version** | **0.2.59** (experimental channel) |
+| **Current version** | **0.2.60** (experimental channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
@@ -12,6 +12,11 @@
 | **Repo** | https://github.com/Blkph0x/SDR_Town |
 
 Formerly *MaulAudio Pro*. Branding, binaries, installer, AppData paths, and release assets all use **SDR Town** / `SDR_Town`.
+
+P25 friendly names: **P25 Calls > Aliases...** manages named system-specific
+talkgroup lists, JSON import/export, search, groups and protected manual edits.
+Existing Alpha Tags win; labels never change decoding or encrypted-audio gates.
+See [alias setup and import format](docs/P25_ALIASES.md).
 
 Workspace development: the current source adds detachable/tabbed panels and
 Listening, Trunking, HF/DX and Analysis layouts under **View > Workspace**.

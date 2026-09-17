@@ -2,6 +2,7 @@
 #include "SstvWindow.h"
 #include "SstvImageFile.h"
 #include "SstvLiveSession.h"
+#include "P25AliasDialog.h"
 #include "BandPlanDialog.h"
 #include "RdsStatusWidget.h"
 
@@ -647,6 +648,8 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
 
         QHBoxLayout* p25TgBtnLay = new QHBoxLayout();
         QPushButton* p25TgManualBtn = new QPushButton("Add TG...");
+        QPushButton* p25AliasesBtn = new QPushButton("Aliases...");
+        p25AliasesBtn->setObjectName("p25AliasesButton");
         QPushButton* p25TgVerifyBtn = new QPushButton("Verify");
         QPushButton* p25TgScannerBtn = new QPushButton("Add to Scanner");
         QPushButton* p25TgPriorityBtn = new QPushButton("Set Priority...");
@@ -657,6 +660,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         QPushButton* p25TgRefreshBtn = new QPushButton("Refresh TGs");
         p25TgBtnLay->addWidget(new QLabel("Talkgroups:"));
         p25TgBtnLay->addWidget(p25TgManualBtn);
+        p25TgBtnLay->addWidget(p25AliasesBtn);
         p25TgBtnLay->addWidget(p25TgVerifyBtn);
         p25TgBtnLay->addWidget(p25TgScannerBtn);
         p25TgBtnLay->addWidget(p25TgPriorityBtn);
@@ -1025,6 +1029,11 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             populateP25TalkgroupTable(p25TgTable, loadP25Talkgroups());
         };
         refreshP25Talkgroups();
+        connect(p25AliasesBtn,&QPushButton::clicked,this,[this,refreshP25Talkgroups] {
+            try {P25AliasDialog dialog(p25AliasesPath(),this);
+                if(dialog.exec()==QDialog::Accepted) refreshP25Talkgroups();
+            } catch(const std::exception& e) {QMessageBox::warning(this,"P25 Alias Lists",QString::fromUtf8(e.what()));}
+        });
 
         auto selectedP25ControlHz = [this, p25Table]() -> double {
             const int row = p25Table ? p25Table->currentRow() : -1;
