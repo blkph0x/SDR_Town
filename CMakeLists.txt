@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.55 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.56 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -65,6 +65,21 @@ if(SDR_TOWN_IPO_SUPPORTED)
     set_property(TARGET sdr_town_dsp PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
+add_library(sdr_town_rds STATIC
+    src/RdsDecoder.cpp
+    src/RdsMpxDecoder.cpp
+    external/redsea-block/src/block_sync.cc
+    external/redsea-block/src/group.cc
+)
+target_include_directories(sdr_town_rds PUBLIC include PRIVATE external/redsea-block external/miniaudio)
+add_library(sdr_town_tones STATIC src/CtcssDecoder.cpp src/DcsDecoder.cpp)
+target_include_directories(sdr_town_tones PUBLIC include PRIVATE external/miniaudio)
+add_library(sdr_town_decoders STATIC src/ReceiveDecoder.cpp src/RdsMpxFile.cpp)
+target_include_directories(sdr_town_decoders PUBLIC include PRIVATE external/miniaudio)
+target_link_libraries(sdr_town_decoders PUBLIC sdr_town_rds sdr_town_tones)
+target_link_libraries(sdr_town_decoders PRIVATE nlohmann_json::nlohmann_json)
+include(cmake/RdsBackend.cmake)
+
 set(SDR_TOWN_SOURCES
     src/main.cpp
     src/P25VoiceTiming.cpp
@@ -76,6 +91,7 @@ set(SDR_TOWN_SOURCES
     src/P25RollingIq.cpp
     include/P25RollingIq.h
     src/P25VoiceDecode.cpp
+    src/P25AudioResampler.cpp
     include/P25VoiceDecode.h
     src/P25VoiceTest.cpp
     include/P25VoiceTest.h
@@ -84,6 +100,8 @@ set(SDR_TOWN_SOURCES
     src/P25DecodeConfig.cpp
     include/P25DecodeConfig.h
     src/DemodModeUtils.cpp
+    src/BandPlan.cpp
+    src/BandPlanDialog.cpp
     include/DemodModeUtils.h
     src/SavedFrequencies.cpp
     include/SavedFrequencies.h
@@ -92,11 +110,13 @@ set(SDR_TOWN_SOURCES
     src/AppBootstrap.cpp
     include/AppBootstrap.h
     src/MainWindow.cpp
+    src/WorkspaceLayout.cpp
     src/MainWindowP25Voice.cpp
     src/MainWindowP25Orchestration.cpp
     include/MainWindow.h
     src/DeviceManager.cpp
     src/SpectrumWidget.cpp
+    src/RdsStatusWidget.cpp
     include/SpectrumWidget.h
     src/AudioEngine.cpp
     src/Demod.cpp
@@ -147,6 +167,10 @@ add_executable(${PROJECT_NAME} WIN32
     # ${SDR_TOWN_RESOURCES}
 )
 
+if(SDR_TOWN_BUILD_RDS_DSP)
+    add_dependencies(${PROJECT_NAME} rds_runtime)
+endif()
+
 add_library(sdrtown_control_client SHARED
     src/SdrTownControlClient.cpp
     include/SdrTownControlClient.h
@@ -174,6 +198,7 @@ install(TARGETS sdrtown_control_client
 # Deployed Qt DLLs, plugins, and other runtime files from the build dir will be picked up if you run windeployqt before packaging, or manually copy them into the install prefix.
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
+    sdr_town_decoders
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
@@ -202,7 +227,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/external/miniaudio
 )
 
-# liquid-dsp is present as submodule (per original DESIGN) but currently disabled for MSVC
+# liquid-dsp is isolated in the MinGW RDS runtime; legacy MSVC DSP is unchanged.
 # header macro compatibility in this environment. The DSP below implements state-of-the-art
 # quality using hand-crafted but high-grade algorithms (windowed-sinc FIR, proper rate math,
 # AGC, high-quality resample, automatic bitrate calculations for SDR / internal / output).
@@ -224,6 +249,22 @@ if(WIN32)
 endif()
 
 # Install rules (basic)
+if(WIN32 AND (SoapySDR_FOUND OR SOAPY_FOUND))
+    # DEC-0089: do not silently reuse an arbitrary old RTL DLL in the output tree.
+    find_package(rtlsdr CONFIG REQUIRED)
+    get_target_property(SDR_TOWN_RTL_TARGET_TYPE rtlsdr::rtlsdr TYPE)
+    if(NOT SDR_TOWN_RTL_TARGET_TYPE STREQUAL "SHARED_LIBRARY")
+        message(FATAL_ERROR "Soapy RTL runtime deployment requires a shared rtlsdr target")
+    endif()
+    add_custom_target(stage_rtl_runtime
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:rtlsdr::rtlsdr>" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>/rtlsdr.dll"
+        COMMENT "Staging configured RTL-SDR runtime"
+        VERBATIM)
+    add_dependencies(SDR_Town stage_rtl_runtime)
+endif()
+
 install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
 )
@@ -278,8 +319,16 @@ if(BUILD_TESTS)
   # Simple unit tests for core classes (no full GUI)
   # Link against the implementation sources for the tested classes
   add_executable(sdr_town_tests
+    tests/test_rds.cpp
+    tests/test_ctcss.cpp
+    tests/test_dcs.cpp
+    tests/test_receive_decoder.cpp
     tests/test_devicemanager.cpp
     tests/test_audioengine.cpp
+    tests/test_p25_audio_resampler.cpp
+    src/P25AudioResampler.cpp
+    tests/test_bandplan.cpp
+    src/BandPlan.cpp
     tests/test_audiocapture.cpp
     tests/test_demod.cpp
     tests/test_p25control.cpp
@@ -309,6 +358,7 @@ if(BUILD_TESTS)
   )
   # Real Demodulator (full body, member state) is now always linked.
   target_link_libraries(sdr_town_tests PRIVATE
+    sdr_town_decoders
     Catch2::Catch2WithMain
     Qt6::Core
     Qt6::Network
@@ -316,6 +366,11 @@ if(BUILD_TESTS)
     nlohmann_json::nlohmann_json
     sdr_town_dsp
   )
+  if(SDR_TOWN_BUILD_RDS_DSP)
+    add_dependencies(sdr_town_tests rds_runtime)
+    target_compile_definitions(sdr_town_tests PRIVATE SDR_TOWN_TEST_RDS_DSP=1
+        SDR_TOWN_RDS_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/rds-mpx-yksi.flac")
+  endif()
   if(SoapySDR_FOUND)
     target_link_libraries(sdr_town_tests PRIVATE SoapySDR)
     target_compile_definitions(sdr_town_tests PRIVATE HAVE_SOAPYSDR)
@@ -338,6 +393,12 @@ if(BUILD_TESTS)
   endif()
 
   add_test(NAME UnitTests COMMAND sdr_town_tests)
+
+  add_executable(sdr_town_workspace_tests tests/test_workspace.cpp src/WorkspaceLayout.cpp
+    src/BandPlan.cpp src/BandPlanDialog.cpp src/SpectrumWidget.cpp include/SpectrumWidget.h src/RdsStatusWidget.cpp)
+  target_include_directories(sdr_town_workspace_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(sdr_town_workspace_tests PRIVATE Catch2::Catch2 Qt6::Widgets nlohmann_json::nlohmann_json)
+  add_test(NAME WorkspaceTests COMMAND sdr_town_workspace_tests)
 
   # CLI black-box tests via PowerShell harness (run manually or in CI)
   message(STATUS "Tests enabled. Run 'ctest' for C++ units. Use tests/run_cli_tests.ps1 for end-to-end CLI tests.")
@@ -390,6 +451,12 @@ add_custom_target(deploy
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/tools/diagnostics"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/scripts"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/external/redsea-block"
+            "${DEPLOY_STAGING}/licenses/redsea-block"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/external/liquid-dsp/LICENSE"
+            "${DEPLOY_STAGING}/licenses/liquid-dsp-LICENSE.txt"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Release/SDR_Town.exe" "${DEPLOY_STAGING}/"
     COMMAND ${CMAKE_COMMAND}
             "-DSOURCE=${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Release"
@@ -417,6 +484,15 @@ add_custom_target(deploy
 )
 
 # For CPack we prefer the clean staging when it exists (Big Caveat / audit prerequisite).
+if(TARGET stage_rtl_runtime AND EXISTS "${rtlsdr_DIR}/copyright")
+    add_custom_command(TARGET deploy POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/licenses"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${rtlsdr_DIR}/copyright"
+            "${DEPLOY_STAGING}/licenses/rtlsdr-COPYRIGHT.txt"
+        VERBATIM)
+    install(FILES "${rtlsdr_DIR}/copyright" DESTINATION licenses RENAME rtlsdr-COPYRIGHT.txt)
+endif()
+
 # MUST run the deploy target first for a pristine tree (no Maul*, no *test* exes, only SDR_Town + windeployqt).
 #   cmake --build build --config Release --target deploy
 #   then (in build/bin/Release) windeployqt ... then re-run deploy target, then cpack.
@@ -451,6 +527,10 @@ if(WIN32)
             PATTERN "styles/*" PATTERN "iconengines/*" PATTERN "generic/*"
             PATTERN "networkinformation/*" PATTERN "translations/*"
   )
+  install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/external/redsea-block/"
+          DESTINATION licenses/redsea-block)
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/external/liquid-dsp/LICENSE"
+          DESTINATION licenses RENAME liquid-dsp-LICENSE.txt)
   install(FILES
           "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/remote_diag_server.py"
           DESTINATION tools/diagnostics)

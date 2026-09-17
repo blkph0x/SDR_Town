@@ -2,6 +2,348 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-17 - DEC-0090 release hardening
+
+Initial verifier tests: 11 errors because host Python lacks hashlib.file_digest
+(introduced after this interpreter). Replaced with bounded streaming SHA-256;
+no Python environment replacement. PowerShell parser passes all three release/
+signing scripts. Full release/asset gates recorded below after execution.
+
+0.2.56 Release build PASS. CTest: 270 core cases / 189087 assertions and nine
+Qt cases / 87 assertions PASS. RDS, CTCSS, DCS and registry CLI tests PASS;
+four workspace GUI sizes/layouts PASS (build/release_0256_workspace). Live
+30-second GUI RDS under CDB PASS: 262 groups, PI 0x2981, PS i98FM, zero adapter
+differences across 960 blocks, no AV; this run's final radiotext was empty, not
+a text-acceptance claim. Evidence: build/release_0256_live. Verifier 11 tests
+PASS after Python compatibility fix. test_release_commands.ps1 PASS: actual
+native exit failure, real signing, unchanged embedded key, mismatch rejection.
+Initial diff check caught Markdown trailing spaces and signing EOF blank line;
+removed before commit. Packages/upload verification still pending at this entry.
+
+## 2026-09-17 - DEC-0088/0089 reproduced native fault and deployment fix
+
+Baseline CDB runs build/shutdown_probe_01..05.log: first four clean; fifth
+captures first-chance AV in libusb add_to_flying_list -> submit/control transfer
+-> RTL driver -> Soapy Device::unmake -> GUI shutdown. Export-only RTL offsets
+do not identify exact RTL source lines. Caught exception is still a failed gate.
+Standalone probe_rtlsdr_lifecycle.py with shipped DLL failed cycle 2: async
+read returned -5 after cancellation; rtlsdr_close raised access violation
+writing 0x24. No Qt/Soapy/application DSP involved. Legacy DLL retained under
+build/rtl_runtime_evidence/rtlsdr-legacy.dll (Windows resource v0.7.0-190-gdfd8).
+
+Configured vcpkg rtlsdr package 2.0.2 passed 10 native lifecycle cycles. Its
+libusb file is byte-identical to the executable folder's existing libusb
+(SHA256 b8a4895ad50645ad5757931ccf97d9e2b3873f7906aeaf42305f8a633d7cf3c1).
+CMake stage_rtl_runtime now installs the configured imported shared RTL target
+on executable builds. Deployed DLL passes another 10 native cycles. No
+application teardown, P25, gain or timing changes used to hide the fault.
+
+Release build and deploy PASS, MSVC 14.44.35207 x64. Configured/executable/
+deploy_staging rtlsdr hashes all match:
+b0a46ed5ed803764e42e37d9a3eb3ba6af003a1d4b27ccf1f55e37ff9fa7cec5.
+licenses/rtlsdr-COPYRIGHT.txt present in deploy staging. No installer/release
+publication performed. Deployed copy only replaced by declared CMake dependency.
+
+build/rds_runtime_fixed_cdb: 30-second actual GUI under CDB PASS: 257 groups
+in GUI final report, 258 in final parity snapshot, PI 0x2981, PS i98FM, RT,
+zero differences over 960 blocks, no AV, normal exit. Different report moments
+explain one additional group at teardown; all per-block results match.
+build/shutdown_fixed_qa: five 12-second real-hardware GUI starts/stops PASS,
+zero first-chance AVs, no native teardown warnings, audio destruction verified.
+Full CTest PASS (279 core/Qt cases); actual RDS CLI tests PASS. Local R820T only;
+other devices/driver failure modes and physical V4/HF tests remain unverified.
+
+## 2026-09-17 - DEC-0087 gain isolation and successful RDS acceptance
+
+Independent rtl_sdr (radioconda) five-second captures at 98.1 MHz, 2.048 MS/s:
+requested gain 40 -> actual 40.2 dB, zero groups; gain 20 -> actual 19.7 dB,
+53 groups, zero corrected/rejected groups, PI 0x2981, PS i98FM and full RT.
+High-gain repeat: zero groups again. Raw byte rail incidence (0 or 255) is
+32.1695%, 0%, 31.8193% respectively. Artifacts build/rds_direct_gain*.cu8/.wav.
+Thus high gain demonstrably damages this strong-station capture. No universal
+gain recommendation or automatic AGC/DSP change is inferred. Earlier cf32
+non-clipping observation was insufficient to rule out input overload.
+Widening the earlier saved IQ analysis to 240 kHz still produced zero groups.
+
+Actual GUI with temporary requested 20 dB through authenticated loopback API:
+- build/rds_gain20_gui_01: 399 groups in final GUI JSON, correct metadata;
+  parity summary 400 groups, zero mismatches/failures. Overall FAIL: process
+  exit 3221225477 (0xC0000005) after logging normal application exit intent.
+  Windows Event 1000 records ntdll.dll offset 0x3fbb8. Previous 40 dB restored.
+- build/rds_gain20_gui_02: PASS 396 groups, PI 0x2981, PS i98FM, RT, normal
+  process exit; parity zero mismatches over 1,434 blocks. CDB attached near
+  shutdown; saw a first-chance AV but no unhandled fault stack. Not crash proof.
+- build/rds_gain20_gui_03: FAIL hardware enumeration (USB strings failed,
+  safe stub only), no reception claim. Added explicit runtimeState=='live hardware'
+  assertion; streaming alone is not sufficient. Direct RTL recheck succeeded.
+- build/rds_gain20_gui_04: PASS 261 groups in 30 seconds, correct PI/PS/RT,
+  real hardware, normal exit; previous gain restored. CTest ran during this
+  last probe; not a performance benchmark.
+
+CDB 8-second hardware shutdown probe exited normally without reproducing the
+unhandled fault. Logs build/rds_shutdown_firstchance.log and
+build/rds_shutdown_gain_stack.log retained; no speculative teardown edit.
+No C++ changes this pass; existing Release build used. Full CTest PASS (279
+core/Qt cases). Python diagnostic tests PASS including exact cu8/cf32 parity,
+MPX units, short/nonfinite input and incomplete complex-byte rejection.
+No packages installed, no P25 changes, no release/push. T-0021 gate met;
+T-0026 records intermittent shutdown/driver follow-up separately.
+
+## 2026-09-17 - DEC-0086 same-input RDS isolation
+
+Release app/core build PASS, configured MSVC 14.44.35207 x64. Full CTest PASS
+(279 core/Qt cases). test_rds_cli.py PASS including new JSONL diagnostic.
+Instrumented `[decoder]` PASS: 5 cases / 24,909 assertions; three recorded
+partition runs with explicit source/cursor/rate/epoch changes have zero parity
+or reset mismatches. test_rds_iq_diagnostic.py PASS normalization/sample counts
+and invalid IQ rejection. No production DSP or P25 change.
+
+Live `--parity` result build/rds_live_parity_01/parity.jsonl: 1,446 blocks,
+7,372,596 total input samples, zero adapter/native mismatches, zero reset
+mismatches or adapter failures. Both produce 41,978 bits and zero valid groups;
+live station gate still FAIL. Rate 204,800 Hz, target 98.1 MHz, 3 resets.
+Thus the new adapter does not explain this run's acquisition failure.
+CTest briefly ran during this probe; this is not a CPU/performance measurement.
+
+Independent bounded GUI IQ capture:
+build/rds_rf_capture/20260917_122423_080_rds-parity_98.10000MHz_startstop.
+5.024 seconds, 82,313,216 bytes, cf32_le at 2,048,000 Hz, no gaps/overruns/
+epoch resets, gain 40 dB, PPM 0. Sample extrema -0.97969..0.96563; no components
+>=0.99 magnitude. This does not exclude RF front-end compression/interference.
+Independent FFT-filter/angle FM diagnostic at 180 kHz bandwidth produces
+build/rds_rf_mpx.wav: replay has 5,936 bits, zero groups. Its relative spectrum
+has a pilot-band peak but does not by itself establish RDS presence or quality.
+No antenna, gain, filters or thresholds changed to force a pass.
+
+Rate check: known 192 kHz fixture Fourier-interpolated to 204.8 kHz and replayed
+through actual CLI still produces 2 valid groups (143,360 samples, 831 bits).
+Initial SciPy analysis attempt failed because installed SciPy is incompatible
+with NumPy 2; used NumPy FFT instead. No global package modifications.
+Root RF/shared-decoder cause remains unproven. User asked whether antenna/cabling
+changed; preserve evidence and do not advertise a reception fix.
+
+## 2026-09-17 - DEC-0085 receive decoder contract
+
+Initial Release core build passed. Five adapter tests / 24,909 assertions pass,
+including direct-versus-adapter RDS recorded MPX comparison at every block for
+137/1000/8192-sample partitions and source/gap/rate/target/epoch changes. DCS
+adapter parity and schema/domain/metadata rejection pass. RDS GUI and file replay
+adoption follows this gate; full application/live regression still to run.
+
+Final Release app/core/Qt build PASS (Windows, configured MSVC toolchain).
+`ctest --test-dir build -C Release --output-on-failure`: PASS, 270 core cases /
+189,087 assertions and 9 Qt cases / 87 assertions. Actual CLI registry, RDS,
+CTCSS and DCS Python tests PASS. `test_workspace_gui.py --output
+build/workspace_contract_qa`: PASS all four presets/sizes; Listening screenshot
+visually reviewed. `git diff --check`: PASS (line-ending notices only).
+
+Live acceptance FAIL, not waived: `test_rds_live_gui.py --frequency-mhz 98.1
+--expect-pi 0x2981 --expect-ps i98FM`, two 45-second GUI/hardware runs.
+`build/rds_contract_live_qa/result.json`: 7,244,800 samples, 41,988 bits,
+1 group, 46 rejected groups, 3 resets, no identified station.
+`build/rds_contract_live_repeat/result.json`: 7,265,280 samples, 42,121 bits,
+0 groups, 11 rejected groups, 3 resets, no identified station.
+Both report the new raw-fm-multiplex v1 contract and correct 98.1 MHz target.
+First failing assertion: identified && groups >= 3. Prior DEC-0084 run received
+355 groups at this frequency. No cause established: neither RF variation nor
+an interface regression is proven. Recorded-input parity is not live acceptance.
+T-0021 remains in progress; next diagnostic needs identical live MPX through
+native and adapted backends plus raw input evidence, without DSP retuning.
+
+## 2026-09-17 - DEC-0084 DCS
+
+First core build failed C1075 in test_dcs.cpp: unclosed helper namespace.
+Fixed the test namespace; decoder library itself compiled successfully.
+First six DCS tests: five passed; catalogue size assertion failed (105 actual
+versus 104 assumed from upstream comment). Direct extraction/comparison verified
+105 values in both lists, no differences. Corrected count, not protocol data.
+Remaining 72,720 assertions passed including shaped/noisy waveform cases.
+Initial actual-CLI harness incorrectly assumed aliases was the first JSON key;
+output correctly detected 023N/047I but harness failed to select it. Fixed harness
+to parse JSON and select decoder field. Existing CTCSS and RDS CLI tests pass.
+Release app/core/Qt build succeeded. Eight DCS cases / 74,727 assertions pass:
+all 105 codes x two polarities x 23 rotations, repeated-word gates, malformed
+bits, chunking, rates, synthetic shaping/DC/speech/baud error, two-minute noise,
+tone rejection and bit-identical speaker PCM with raw FM data decoding.
+Actual DCS CLI tests pass for all eight independent WAVs and bitstreams, alias
+equivalence, input limits and malformed/missing files. Full/live gates underway.
+
+Full CTest PASS: 265 core cases / 164,178 assertions; 9 Qt cases / 87 assertions.
+Actual GUI matrix PASS at 960x720, 1280x900, 800x700 and 1600x900. Listening
+screenshot visually inspected: status strip/controls readable. 45-second live
+NFM GUI PASS at 476.4625 MHz: both decoders consumed exactly 1,687,219 samples
+and had three startup resets; CTCSS completed 35 windows, neither reported a
+confirmed tone/code. This proves integration, not known-code RF sensitivity.
+No RX audio logic changed. CTCSS/RDS CLI regressions pass. Live 98.1 MHz WFM
+regression PASS: 355 RDS groups, PI 0x2981, PS " i98FM  ", RadioText
+"Feel Good - i98FM", 12 rejected groups and three startup resets. GUI closed
+normally. Known-code DCS RF and adaptive-clock/fading qualification remain open.
+
+## 2026-09-17 - CTCSS implementation and live failure investigation
+
+Release application/core/Qt builds pass. Full CTest: 257 core cases / 89,451
+assertions; 8 Qt cases / 83 assertions. CTCSS CLI generated WAV/error tests,
+RDS CLI regression and four GUI workspace launches pass. Seven CTCSS cases
+cover 38 frequencies, rates, gain, interference, two-minute noise, source gaps
+and audio parity. Live 476.4625 MHz checks failed three times: initial reset
+count 22, first fix 15, instrumented 15-second run 5. Actual radio connected;
+no false claim of tone verification. Changing BW synthetic regression failed
+before the fix, passes afterward. Instrumented source identified additional
+speech AFC reset propagation (reason 2); NFM mixer isolation is under retest.
+
+Mixer-isolation retest passed: build/ctcss_live_qa_isolated, 385358 samples and
+eight complete windows in final stream, zero confirmed tones (no known live
+tone reference). Logs exposed three further bandwidth-only GUI cursor resets;
+their fix is under retest. CTest still passes 257 core/8 Qt cases.
+DCS reference script passes four independent standard vectors, all 512 payload
+parities and single-bit error checks; generated eight bounded ideal WAVs.
+
+Final 45-second GUI NFM run (build/ctcss_live_qa_final): PASS, 1,688,410
+discriminator samples, 35 complete windows, three startup/hardware-handoff
+resets and no subsequent data reset logged. No known tone present/verified.
+Full CTest passes again (257 core + 8 Qt). Actual CTCSS/RDS CLI scripts pass
+after the GUI closes. Attempts during GUI RX exited 2 due to the single-instance
+guard; these were test scheduling errors, not decoder failures. Live WFM/RDS
+regression passed separately after the NFM test: 363 groups, PI 0x2981,
+PS " i98FM  ", RadioText identifying Roxette / Listen to Your Heart, three
+startup resets, 39 rejected groups. Hardware teardown again emitted its existing
+recoverable Soapy warning and exited 0; not claimed fixed by this work.
+
+## 2026-09-17 - DEC-0080 live RDS / waterfall
+
+Release application and test targets build. Core: 250 cases / 81,460 assertions;
+Qt: seven cases / 79 assertions, including actual mouse-event drag/squelch tests,
+RDS stale/retune/plain-text presentation and clipped priority band sections.
+RDS data-only reset preserves exact speech output in regression tests.
+CLI bit/MPX fixture/error checks pass. Four actual GUI screenshot/layout runs
+pass at 800x700, 960x720, 1280x900 and 1600x900; screenshots inspected.
+
+Actual RTL hardware GUI at 98.1 MHz displayed i98FM / PI 2981 / PTY 10 and
+"On Air Now - Ned and Josh at Night". Official https://i98fm.com.au/shows
+independently lists that programme (not independent RF/PI validation).
+Native drag from waterfall retuned to 98.178614 MHz, cleared station metadata
+and left squelch unchanged. Revealed stale frequency field, fixed and rechecked
+visually at 98.10000 MHz. Preview axis now snapshots under the spectrum mutex.
+
+Repeat automated 45-second live result: build/rds_live_qa/result.json, streaming
+real hardware, zero startup errors, samples=7249920, bits=42038, groups=402,
+rejectedGroups=1, resets=3, PI=10625 (0x2981), PS=" i98FM  ", radiotext
+"i98FM - Calm Down - Rema , Selena Gomez". Run log has no ring-overrun warning.
+Three initializations are reported cumulatively; do not claim zero resets.
+Exit 0 with recoverable Soapy teardown warning, recorded as open in ISSUES.
+CLI test initially attempted during live GUI was blocked (exit 2) by existing
+single-instance guard; rerun after GUI shutdown passed. No P25 decoder or
+audio scheduling changes, no release/push, no universal RF acceptance claim.
+
+## 2026-09-17 - DEC-0079 recorded MPX and continuity
+
+Release app, native tests and isolated Redsea/liquid-dsp DLL built successfully.
+CTest: 250 core cases / 81,456 assertions and four Qt cases / 59 assertions.
+Targeted RDS: nine cases / 210 assertions. Actual CLI script passes bit-reference,
+recorded MPX, identity gate, malformed-input and missing-file cases. The recorded
+fixture produces two complete groups; native checks match PI 0x6201 and PTY 14.
+137/1000/4096-sample DSP partitions match counts and final group payload.
+Optional WFM data tap preserves audio and survives irregular IQ partitions.
+objdump DLL imports: KERNEL32.dll and msvcrt.dll only. git diff --check passes.
+
+Failures retained: original tap test failed continuity at the second 137-sample
+block; separate causal tap fixed it without changing speech DSP. Initial fixture
+test incorrectly expected three groups; upstream test explicitly requires two,
+so test now validates payload without weakening our three-observation PI gate.
+Initial ExternalProject probe reused a differently named compiler cache and lost
+make configuration; dedicated rds-dsp-runtime directory solved it. First app link
+failed LNK1104 opening SDR_Town.exe. Process inspection found no running app;
+retry linked successfully. Existing Vulkan-header and mbelib-CMake warnings remain.
+
+Not claimed: live RF RDS reception, GUI RDS metadata, frequency-offset/noise
+characterization, release packaging execution, or new P25 audio validation.
+
+## 2026-09-17 - DEC-0078 RDS protocol foundation
+
+Release SDR_Town and sdr_town_tests build successfully. CTest passes 247 core
+cases / 81,295 assertions and four Qt cases / 59 assertions. Six new RDS/MPX
+cases contribute 49 assertions: upstream reference group, independent encoder,
+FEC correction/rejection, noise, PI/PS/text lifecycle and audio equivalence.
+Optional tap preserves 57 kHz content before the 3 kHz audio LPF and gives
+sample-grid/reset provenance; enabled/disabled audio vectors compare exactly.
+
+First CLI smoke failed because std::quoted consumed Windows backslashes.
+Fixed only the new command's path parser; rebuilt. test_rds_cli.py now passes
+with an absolute Windows path, missing file and malformed bits. Offline CLI
+log confirms device enumeration skipped. All nine vendored source/license
+files hash-match pinned redsea revision. git diff --check passes.
+Initial bool/int comparison warning removed; existing mbelib CMake and LTCG
+notices remain. No RF RDS or GUI station-metadata claim; no new P25 tuning.
+
+## 2026-09-17 - DEC-0077 jitter repair and replay verification
+
+The new PCM partition test failed before the repair (maximum discrepancy
+0.179083526 full scale, 160-sample chunks versus one batch). With the causal
+cubic stencil it passes all 18 assertions, including single-sample chunks
+and 44.1/48 kHz output. Release build passed. CTest: 241 core cases / 81,246
+assertions and 4 Qt cases / 59 assertions, both pass. Four actual GUI layout
+launches pass in build/workspace_jitter_qa; Listening screenshot inspected.
+Spectrum dB labels now follow the spectrum coordinate transform.
+
+Captured 89.968 seconds live at 420.350 MHz (20260917_084229): no IQ overruns,
+no producer drops, but 19 underrun rises and missing/rejected voice frames.
+The TG30003 slot-1 47.5-59.5-second replay retains exactly the pre-repair
+456 decoded frames / 437760 output samples / duty 0.76, including 67
+concealment frames. GUI replay also emits 437760 samples with zero discarded
+tail. This does NOT prove subjective clarity or full live continuity.
+
+Sample-level comparison finds GUI/CLI PCM is NOT equivalent on this fixture:
+max absolute difference 0.301809931, RMS difference 0.010476168, 327/456
+20-ms frames differ beyond 0.000062. First 18 frames agree within that bound.
+Do not infer parity from equal counts. Artifacts: build/jitter_tg30003_after.*,
+build/jitter_tg30003_gui_after.*, build/live_jitter_baseline_audit.json.
+scripts/compare_pcm_wav.py compares RIFF PCM16/float32 without dependencies.
+System Python SciPy/NumPy is ABI-incompatible; the project STT venv works,
+but plausible transcripts are not known-reference intelligibility proof.
+
+## 2026-09-17 - REQ-BP.1 receive profile verification
+
+Release builds of SDR_Town, sdr_town_tests and sdr_town_workspace_tests pass.
+Removed C++20-deprecated shared_ptr atomic free functions in favour of atomic
+shared_ptr. Existing external mbelib CMake compatibility and /LTCG messages
+remain. CTest: 240 core cases / 81,228 assertions, 4 Qt cases / 58 assertions.
+AU data channel overrides, conflict resolution, import rejection, thread-safe
+selection and GUI preview/Apply/cancel are exercised. GUI tests use temporary
+settings and do not persist into the user's profile selection.
+
+Actual GUI automation: `build/bandplan_qa/` contains four passing startup
+reports/screenshots, 800x700 through 1600x900, AU/GB/US selected as requested,
+no RF streaming. Compact waterfall banner inspected and readable.
+CLI TG30003 reference replay: `p25_bandplan_regression.wav`, 506,924 bytes,
+byte-identical to `p25_060515_audio_cursor.wav`. This verifies output stability
+for that capture, not worldwide plan accuracy or all-call audio acceptance.
+
+GUI TG10120 replay: `p25_bandplan_gui.wav`, 579,884 bytes, byte-identical to
+`p25_103841_geometry_gui.wav`; startup/processing/exit completed successfully.
+No live RF or new speech-intelligibility claim is made by these regression checks.
+
+## 2026-09-17 - REQ-UI.1 workspace gate
+
+Windows / existing MSVC Release toolchain. Built SDR_Town, sdr_town_tests and
+sdr_town_workspace_tests. CTest: both targets pass, 235 core cases / 81,154
+assertions plus 3 workspace cases / 44 assertions. Workspace tests exercise
+preset transitions without losing edited fields, panel lifecycle, lock/reset,
+state persistence and corrupt-state fallback.
+
+Initial GUI test runner requested an undeployed offscreen Qt plugin and hung;
+terminated only that test process, switched to installed Windows platform.
+An intermediate hidden-panel tab-group assertion failed; fixed grouping to
+tabify only visible panels and assert against the visible group. Final tests
+pass. `scripts/test_workspace_gui.py`: actual GUI, no RF streaming, no startup
+errors across Listening 960x720, Trunking 1280x900, HF 800x700 and Analysis
+1600x900. Screenshots visually inspected in `build/workspace_qa`.
+
+P25 CLI 060515 reference: `build/p25_workspace_regression.wav` byte-identical
+to `build/p25_060515_audio_cursor.wav` (506924 bytes). Actual GUI 103841 replay:
+`build/p25_workspace_gui.wav` byte-identical to `build/p25_103841_geometry_gui.wav`
+(579884 bytes), exit 0. These establish fixture non-regression, not universal
+P25 audio acceptance. No decoder or timing policy changed. No release published.
+
 ## 2026-09-17 - v0.2.55 release gate
 
 Versioned Release rebuilt after gracefully closing the running GUI which had

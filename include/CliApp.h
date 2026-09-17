@@ -54,6 +54,11 @@ struct GuiRuntimeConfig {
     std::string iqCaptureLabel;
     std::string iqCaptureRoot;
     std::string selfTestPath;
+    std::string workspacePreset;
+    std::string bandPlanId;
+    std::string screenshotPath;
+    int windowWidth = 0;
+    int windowHeight = 0;
     std::string debugStage;
     std::string iqReplayPath;
     std::string iqReplayWavPath;

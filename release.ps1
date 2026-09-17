@@ -4,8 +4,8 @@
 #   .\release.ps1 0.2.18 experimental
 
 param(
-    [string]$Version = "0.2.18",
-    [string]$Channel = "stable"
+    [Parameter(Mandatory = $true)][string]$Version,
+    [ValidateSet("stable", "experimental")][string]$Channel = "experimental"
 )
 
 & "$PSScriptRoot\scripts\release.ps1" -Version $Version -Channel $Channel

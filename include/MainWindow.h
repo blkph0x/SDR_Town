@@ -43,6 +43,7 @@
 #include "TranscriptHub.h"
 #include "TranscriptWindow.h"
 #include "UpdateManager.h"
+#include "WorkspaceLayout.h"
 
 #include <QAction>
 #include <QApplication>
@@ -276,6 +277,7 @@ private:
     std::thread p25ControlWorkerThread;
     std::thread p25VoiceWorkerThread;
     GuiRuntimeConfig guiRuntimeConfig;
+    WorkspaceLayout* workspaceLayout = nullptr;
     QStringList guiRuntimeStartupErrors;
     qint64 guiRuntimeStartupAppliedMs = 0;
     std::atomic<long long> guiP25AudioOutputEvents{0};
@@ -549,5 +551,6 @@ private:
     void closeEvent(QCloseEvent* event) override;
 
     void createMenus();
+    void showBandPlanDialog();
 };
 

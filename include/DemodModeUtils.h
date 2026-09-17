@@ -17,4 +17,3 @@ std::string modeToString(DemodMode mode);
 QString modeToQString(DemodMode mode);
 DemodMode modeFromString(std::string text);
 const char* p25VoiceDiagLabel(P25VoiceDiagCode code);
-const std::vector<BandPlanEntry>& builtInBandPlans();

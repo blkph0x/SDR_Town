@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Current version** | **0.2.54** (experimental channel) |
+| **Current version** | **0.2.56** (experimental channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
@@ -12,6 +12,41 @@
 | **Repo** | https://github.com/Blkph0x/SDR_Town |
 
 Formerly *MaulAudio Pro*. Branding, binaries, installer, AppData paths, and release assets all use **SDR Town** / `SDR_Town`.
+
+Workspace development: the current source adds detachable/tabbed panels and
+Listening, Trunking, HF/DX and Analysis layouts under **View > Workspace**.
+Included in v0.2.56 installer and portable assets.
+See [workspace controls, automation and decoder roadmap](docs/WORKSPACE_AND_DECODERS.md).
+
+Receive band plans: **Scan > Band Plans** selects region/country/location and
+labels the tuned service on the waterfall. Initial AU/GB/US coverage is partial;
+validated local JSON imports extend it. AUTO uses band priors, not guaranteed
+protocol identification. See [coverage, sources and CLI options](docs/BAND_PLANS.md).
+
+RDS development: a redsea-backed bitstream/FEC decoder and raw WFM
+multiplex tap are now available for integration tests. `rds bits "file.bits"`
+decodes already-demodulated bits to station metadata. WFM now automatically
+displays validated RDS station information above the spectrum; `rds mpx` handles
+recorded multiplex files. See [RDS scope, commands and next gates](docs/RDS.md).
+
+NFM tone development: experimental CTCSS/DCS identification appears above the
+spectrum without changing squelch or speaker audio. DCS reports equivalent
+code/polarity labels together. Offline CLI: `tones file`, `tones dcs` and
+`tones dcs-bits`. Known-tone/code RF acceptance is pending; these features are
+included in v0.2.56 as experimental identification, not tone squelch.
+See [NFM tone tests and limits](docs/NFM_TONES.md).
+
+Decoder development: `decoders` lists compiled adapters and their input/rate
+requirements without opening an SDR. GUI RDS and CLI MPX replay share the new
+receive-session contract. See [decoder contracts and validation](docs/RECEIVE_DECODERS.md).
+
+Runtime hardening: the release now stages the configured RTL-SDR DLL instead of
+retaining an old copy. The reproduced local shutdown access violation is fixed;
+see [native debugger tests and hardware limits](docs/NATIVE_RUNTIME_QA.md).
+
+SSTV and public/weather satellite decoding are **planned, not implemented**.
+The [staged roadmap](docs/SATELLITE_AND_SSTV.md) starts with independently verified
+recorded-audio SSTV before live reception and satellite scheduling.
 
 ---
 
@@ -38,7 +73,7 @@ This is **active experimental software**. It is useful for real RF testing and d
 | **Updater** | Fetches `update.json` + `update.json.sig` from GitHub **latest** release, verifies Ed25519 signature (when a release public key is configured) and SHA-256 of the installer, user consent only—no silent install. |
 | **CLI** | Full interactive shell + one-shot `--cli --cmd "..."`. Replay/voicetest/followtest/waitgrant for lab and field diagnostics. |
 
-### P25 Phase 2 clear audio — about ~50% of the time
+### P25 Phase 2 clear audio - experimental
 
 As of **v0.2.51**, file voicetest of the 2026-09-08 `041716` call (TG 10330 slot 1) is `PASS_CONTINUOUS_AUDIO duty=0.87` after DEC-0012 stopped companion-louder mixed MAC-dead hops from reaching the speaker. Live CADENCE is still often drop **D** (worker-busy independent CQPSK). Treat Phase 2 as experimental.
 
@@ -86,7 +121,7 @@ Tester builds: https://github.com/Blkph0x/SDR_Town/releases
 **How shipping works (code path):**
 
 1. Bump `project(SDR_Town VERSION …)` in `CMakeLists.txt`.
-2. `scripts/release.ps1 -Version X.Y.Z -Channel experimental` builds deploy + windeployqt + CPack NSIS + portable zip, rewrites `update.json` / `SHA256SUMS.txt`, commits, tags `vX.Y.Z`, pushes, uploads assets with `gh release create`.
+2. Commit reviewed source first. `scripts/release.ps1 -Version X.Y.Z -Channel experimental` checks the clean attached branch, builds/tests, deploys Qt, packages NSIS/ZIP/control DLL, signs and verifies the manifest/assets, commits release metadata, tags and pushes the current branch, then uploads assets. Native command failures stop the process. See [release gates and manual publication](docs/RELEASING.md).
 3. App `UpdateManager` fetches  
    `https://github.com/Blkph0x/SDR_Town/releases/latest/download/update.json`  
    then downloads only HTTPS GitHub release installer URLs, verifies `update.json.sig` (Ed25519) when a release public key is configured, and verifies installer SHA-256 before launch.
@@ -387,28 +422,32 @@ Useful docs (may be denser than this README):
 
 ---
 
-## Direction — what’s next (priority order)
+## Direction - current implementation order
 
-1. **P25 Phase 2 continuity → production clarity**  
-   Raise clear-audio reliability well past ~50%: continuous 20 ms frame feed (order + amount), MAC recovery when sf/mask are high, slot stability, joined PCM without repeats/gaps. Keep security gates strict. Use `expVcw/fed/emit/gaps` logs + capture audits.
+1. **SSTV recorded reception, then live images**
+   Independent reference fixtures, VIS/line synchronization, initially Robot 36,
+   then validated Martin/Scottie/PD modes, progressive preview and PNG export.
 
-2. **Operational hardening**  
-   Split mega-`main.cpp` into GUI / CLI / P25 / settings modules; SDR helper process isolation; reduce freeze/retune edge cases on one-RTL follow.
+2. **Public satellite and weather reception**
+   Source-dated catalogue, SGP4 pass/Doppler planning, AX.25/public telemetry,
+   Meteor LRPT and archived NOAA APT. Hardware and mission coverage stay explicit.
 
-3. **Trust & packaging**  
-   Authenticode for binaries; release signing key rotation for Ed25519 manifests.
+3. **Analog and data polish**
+   Broader RDS character/region support, known-tone CTCSS/DCS RF acceptance,
+   SSB/CW filtering/AGC, then separately validated DMR/NXDN/DRM receive chains.
 
-4. **Classifier**  
-   Real ONNX contract + training pipeline; keep deterministic path until then.
+4. **Operational hardening and trust**
+   More hardware/debugger cycles, SDR process isolation, Authenticode and
+   reproducible release gates. GUI/CLI/P25 modules have already been split.
 
-5. **Analog polish**  
-   SSB/CW AGC/filtering; WFM/NFM/AM already primary “daily drivers.”
+5. **P25 follow-up (deferred by user)**
+   Preserve security/slot isolation and capture-based regression tests. Remaining
+   live continuity qualification is open; decoder expansion is not proof it is solved.
 
-6. **Scanner product features**  
-   Priority TGs, lockout, hold, recording history, multi-output per TG—after Phase 2 audio is reliable.
+6. **Scanner and classifier extensions**
+   Recording history, multi-output per TG and a measured ONNX classifier backend;
+   the current classifier remains deterministic.
 
-7. **Other digital modes**  
-   DMR/NXDN/etc. only after trunking audio quality is stable.
 
 ---
 
@@ -442,4 +481,6 @@ See `LICENSE.txt`.
 - Include DEEP DIAG / DSP VOICE lines with `expVcw`, `fed`, `emit`, `gaps`, `p2sf`, `p2mask`, `p2mac`, gate reason.
 - Issues and PRs: https://github.com/Blkph0x/SDR_Town  
 
-**Bottom line:** Analog (especially **WFM / AM / NFM**) is in good shape for real use. **P25 Phase 2 clear audio is close—about half the time in field conditions—and still the primary focus until it is continuous, ordered, and trustworthy.**
+**Bottom line:** WFM/AM/NFM, RDS, workspaces and region band plans are available.
+Tone identification and P25 remain experimental. SSTV and satellite work are next;
+no universal reception or clear-audio percentage is claimed.

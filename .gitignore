@@ -92,6 +92,8 @@ logs/
 # Local release artifacts are uploaded to GitHub releases, not committed.
 SDR_Town-*-win64-portable.zip
 SDR_Town-*-win64-setup.exe.sha256
+SdrTownControl-*-win64.dll.sha256
+_codex_refs/redsea/
 _CPack_Packages/
 
 # OS / other

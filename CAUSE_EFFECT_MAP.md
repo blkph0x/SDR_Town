@@ -7,6 +7,51 @@ THIS FILE DOES NOT REPLACE THE SoT. It explains why each REQ exists, how to
 finish it, what it causes, and what breaks if it is skipped.
 ================================================================================
 
+DEC-0084 checkpoint: experimental NFM DCS uses the independent raw FM tap.
+Gate passed: 105 payloads/polarities/rotations, independent waveform/bit CLI
+fixtures, 274 core/Qt cases, GUI layouts and live stream-routing checks.
+Known-code RF sensitivity remains OPEN; DCS does not gate audio. P25 untouched.
+
+DEC-0085 checkpoint: shared RDS/CTCSS/DCS receive contracts implemented.
+DEC-0089 checkpoint: reproduced native RTL teardown fault corrected through
+deterministic runtime deployment. Twenty native lifecycle cycles, five CDB GUI
+cycles, live RDS parity/reception and full suite pass; T-0026 closed locally.
+DEC-0087 update: live station gate now passes with controlled lower RF gain;
+native/adapter equality and correct PI/PS/RT proven, T-0021 complete. Earlier
+open statement below is historical. Intermittent shutdown T-0026 remains open.
+Recorded native/adapter parity, 279 core/Qt cases, CLI and GUI layout gates pass.
+Live RDS acceptance OPEN: two 45-second 98.1 MHz tests failed PI/PS acquisition.
+See BUILD_NOTES/ISSUES. No RF cause assumed, no P25 processing change, and no
+dependent decoder milestone marked complete on recorded parity alone.
+
+REQ-BP.1 (2026-09-17 user-authorized receive profile infrastructure)
+STATUS: [X] (BUILD_NOTES: 244 tests, four GUI checks, identical CLI/GUI replay)
+CAUSE: Mixed-country priors and no visible selected location/service context.
+HOW: Immutable selected profiles, validated imports, specific/ambiguous lookup,
+     existing AUTO priors and waterfall labels; manual/P25 trust unchanged.
+GATE: Boundary/import/concurrency tests, GUI selection/cancel/persistence,
+      actual GUI startup profiles/screenshots and unchanged P25 reference WAVs.
+EFFECT: Explicit, extensible country/location context; partial data labelled.
+REQ-BP.2 remains OPEN: complete sourced country/HF/local coverage and routing
+     to implemented, validated decoders. Infrastructure is not world coverage.
+
+DEC-0080 checkpoint: visible band sections use the same clipped frequency axis
+and priority/ambiguity lookup; drag previews commit one retune on release.
+WFM RDS now runs automatically from chronological pre-audio MPX with source-gap
+resets and stale-aware GUI metadata. Gate: 257 native/Qt cases, four GUI layouts,
+actual waterfall drag and 45-second live RTL run with 402 groups / i98FM PI+PS+RT.
+General decoder registry and broader RF/character-set coverage remain open.
+
+REQ-UI.1 (2026-09-17 user-authorized independent presentation milestone)
+STATUS: [X] (2026-09-17 - BUILD_NOTES, 238 tests, GUI QA and replay equivalence)
+CAUSE: One stacked window cannot accommodate additional decoder panels.
+HOW: Reuse existing widgets in named dock panels; save/restore/reset layouts,
+     four presets; keep live processing independent of panel visibility.
+GATE: Interaction/persistence tests, small/large GUI screenshots, existing unit
+      suite, byte-identical reference P25 replay. No dependency on closing
+      REQ-P2 audio acceptance, because decoder/timing paths do not change.
+EFFECT: Space for real decoder modules without expanding the monolithic form.
+
 HOW TO USE THIS FILE
 --------------------
 1. Read SOURCE_OF_TRUTH.md first. That document is law.
@@ -334,3 +379,10 @@ PHASE P2
 ================================================================================
 END OF CAUSE / EFFECT MAP — OBEY SOURCE_OF_TRUTH.md, TRACK GATES HERE
 ================================================================================
+# Release gate (DEC-0090 / T-0027)
+
+Unchecked native failures and hard-coded master could publish stale assets or
+the wrong branch. Checked commands, clean-source preflight, current-branch push
+and independent package/signature validation fail closed. Gate: negative verifier
+tests, full CTest/CLI/GUI gates, signed package check and uploaded checksum match.
+This does not close P25 continuity or future SSTV/satellite reception gates.

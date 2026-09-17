@@ -9,6 +9,11 @@
 #include "AudioCapture.h"
 #include "DeviceManager.h"
 #include "Demod.h"
+#include "RdsDecoder.h"
+#include "RdsMpxFile.h"
+#include "CtcssDecoder.h"
+#include "DcsDecoder.h"
+#include "ReceiveDecoder.h"
 #include "IP25AmbeEncoder.h"
 #include "P25AppGlobals.h"
 #include "P25AudioDropClass.h"
@@ -146,7 +151,11 @@ static bool cliCommandNeedsStartupDeviceEnumeration(const std::string& command)
     if (lower.empty()) return false;
     if (lower == "quit" || lower == "exit" || lower == "q" ||
         lower == "help" || lower == "h" || lower == "?" ||
-        lower == "test") {
+        lower == "test" || lower == "bandplans" || lower == "plans" ||
+        lower == "decoders" || lower.rfind("decoders ", 0) == 0 ||
+        lower == "rds" || lower.rfind("rds ", 0) == 0 ||
+        lower == "tones" || lower.rfind("tones ", 0) == 0 ||
+        lower.rfind("bandplans ", 0) == 0 || lower.rfind("plans ", 0) == 0) {
         return false;
     }
     if (lower.rfind("p25 audit", 0) == 0 ||
@@ -561,6 +570,32 @@ GuiRuntimeConfig parseGuiRuntimeConfig(int argc, char* argv[])
             cfg.selfTest = true;
             if (auto value = guiRuntimeArgValue(i, argc, argv, arg)) {
                 cfg.selfTestPath = *value;
+            }
+        } else if (key == "--gui-bandplan") {
+            cfg.requested = true;
+            if (auto value = requireValue(key.c_str())) cfg.bandPlanId = *value;
+        } else if (key == "--gui-workspace") {
+            cfg.requested = true;
+            if (auto value = requireValue(key.c_str())) {
+                if (*value == "listening" || *value == "trunking" || *value == "hf" || *value == "analysis")
+                    cfg.workspacePreset = *value;
+                else cfg.warnings.push_back("invalid workspace preset: " + *value);
+            }
+        } else if (key == "--gui-screenshot") {
+            cfg.requested = true;
+            if (auto value = requireValue(key.c_str())) cfg.screenshotPath = *value;
+        } else if (key == "--gui-window-size") {
+            cfg.requested = true;
+            if (auto value = requireValue(key.c_str())) {
+                const auto split = value->find('x');
+                int width = 0, height = 0;
+                if (split != std::string::npos &&
+                    guiRuntimeParseInt(value->substr(0, split), width) &&
+                    guiRuntimeParseInt(value->substr(split + 1), height) &&
+                    width >= 640 && width <= 7680 && height >= 480 && height <= 4320) {
+                    cfg.windowWidth = width;
+                    cfg.windowHeight = height;
+                } else cfg.warnings.push_back("invalid GUI window size (expected WIDTHxHEIGHT): " + *value);
             }
         } else if (key == "--gui-exit-after-ms") {
             cfg.requested = true;
@@ -1481,7 +1516,13 @@ int runCLI(int argc, char* argv[]) {
                 cliStop = true;
                 break;
             } else if (cmd == "help" || cmd == "h" || cmd == "?") {
-            std::cout << "Commands:\n"
+              std::cout << "Commands:\n"
+                        << "  decoders               List compiled receive adapters and input requirements\n"
+                        << "  tones file <quoted-path> CTCSS in mono discriminator WAV/FLAC, 8..96 kHz, max 120 s\n"
+                        << "  tones dcs <quoted-path> Experimental DCS from mono discriminator WAV/FLAC\n"
+                        << "  tones dcs-bits <quoted-path> DCS chronological ASCII bits; max 120 s\n"
+                      << "  rds bits <quoted-path>  Decode MSB-first differential-decoded RDS bits\n"
+                      << "  rds mpx <quoted-path>   Decode mono MPX WAV/FLAC (128..384 kHz, max 120 s)\n"
                       << "  list | devices          - show enumerated devices\n"
                       << "  enable <i>              - enable + start real streaming on device i\n"
                       << "  disable <i>             - stop streaming on device i\n"
@@ -1616,7 +1657,7 @@ int runCLI(int argc, char* argv[]) {
                 else if (m=="usb") newMode=DemodMode::USB;
                 else if (m=="lsb") newMode=DemodMode::LSB;
                 else if (m=="cw") newMode=DemodMode::CW;
-                if (const auto* plan = findBandPlanForFrequency(rx.freqHz); plan && (newMode == DemodMode::AUTO || newMode == plan->mode)) {
+                if (const auto plan = findBandPlanForFrequency(rx.freqHz); plan && (newMode == DemodMode::AUTO || newMode == plan->mode)) {
                     newBw = plan->bandwidthHz;
                     newLpf = plan->lpfHz;
                 } else {
@@ -1845,7 +1886,7 @@ int runCLI(int argc, char* argv[]) {
                     name = os.str();
                 }
                 sf.name = name;
-                if (const auto* plan = findBandPlanForFrequency(sf.freqHz)) sf.tags = plan->name;
+                if (const auto plan = findBandPlanForFrequency(sf.freqHz)) sf.tags = plan->name;
                 auto freqs = loadSavedFrequencies();
                 freqs.push_back(sf);
                 saveSavedFrequencies(freqs);
@@ -2228,14 +2269,124 @@ int runCLI(int argc, char* argv[]) {
                 cliReceivers.back()->active = false;
                 std::cout << "Added RX" << newi << "\n";
             }
+        } else if (cmd == "decoders") {
+            std::string extra;
+            if (iss>>extra) { std::cout<<"decoders: no arguments expected\n"; continue; }
+            auto entries=nlohmann::json::array();
+            for (const auto& entry:receiveDecoderRegistry()) {
+                entries.push_back({{"id",std::string(entry.id)},{"name",std::string(entry.name)},
+                    {"contractVersion",entry.contractVersion},{"input",std::string(decoderInputName(entry.input))},
+                    {"minimumRateHz",entry.minimumRateHz},{"maximumRateHz",entry.maximumRateHz},
+                    {"maximumBlockSamples",entry.maximumBlockSamples},{"experimental",entry.experimental},
+                    {"adapterCompiled",true},{"requiredModule",std::string(entry.requiredModule)},
+                    {"backendProbe","not-performed"}});
+            }
+            std::cout<<nlohmann::json{{"receiveDecoders",entries}}.dump()<<'\n';
+            continue;
+        } else if (cmd == "tones") {
+            std::string action, path; iss >> action; std::getline(iss,path);
+            QString input=QString::fromStdString(path).trimmed();
+            if (input.startsWith('"') && input.endsWith('"') && input.size()>=2) input=input.mid(1,input.size()-2);
+            if ((action!="file" && action!="dcs" && action!="dcs-bits") || input.isEmpty()) {
+                std::cout << "tones file|dcs|dcs-bits <quoted-path>\n"; continue;
+            }
+            try {
+                if (action!="file") {
+                    DcsSnapshot dcs;
+                    if (action=="dcs") dcs=decodeDcsFile(input.toStdString());
+                    else { dcs.identities=decodeDcsBitsFile(input.toStdString()); dcs.status="Bitstream decoded"; }
+                    std::vector<std::string> aliases;
+                    for (const auto& id:dcs.identities) aliases.push_back(dcsLabel(id));
+                    std::cout << nlohmann::json{{"decoder","dcs"},{"input",action},{"aliases",aliases},
+                        {"samples",dcs.samples},{"agreeingPhases",dcs.agreeingPhases},{"status",dcs.status}}.dump() << '\n';
+                    continue;
+                }
+                const auto tone=decodeCtcssFile(input.toStdString());
+                const nlohmann::json result{{"decoder","ctcss"},{"frequencyHz",tone.frequencyHz},
+                    {"samples",tone.samples},{"windows",tone.windows},{"confirmedWindows",tone.confirmedWindows},
+                    {"purity",tone.purity},{"status",tone.status}};
+                std::cout << result.dump() << '\n';
+            } catch (const std::exception& error) { std::cout << "Tone error: " << error.what() << '\n'; }
+            continue;
+        } else if (cmd == "rds") {
+            std::string action, path;
+            iss >> action;
+            std::getline(iss, path);
+            // std::quoted treats Windows backslashes as escapes. This command
+            // has one trailing path argument, so remove only outer quotes.
+            QString inputPath = QString::fromStdString(path).trimmed();
+            if (inputPath.startsWith('"') && inputPath.endsWith('"') && inputPath.size() >= 2)
+                inputPath = inputPath.mid(1, inputPath.size()-2);
+            path = inputPath.toStdString();
+            if (action == "mpx" && !path.empty()) {
+                try {
+                    const auto result=decodeRdsMpxFile(path);
+                    const auto& station=result.station;
+                    const nlohmann::json json{{"decoder","redsea-mpx"},{"input","mpx"},
+                        {"samples",result.samples},{"sampleRate",result.sampleRate},{"bits",result.bits},
+                        {"completeGroups",result.groups},{"correctedBlocks",result.correctedBlocks},
+                        {"rejectedGroups",result.rejectedGroups},{"identified",station.identified},
+                        {"pi",station.pi},{"pty",station.pty},{"ps",station.programmeService},
+                        {"radiotext",station.radioText},{"status",result.status}};
+                    std::cout << json.dump() << '\n';
+                } catch(const std::exception& error) { std::cout << "RDS error: " << error.what() << '\n'; }
+                continue;
+            }
+            if (action != "bits" || path.empty()) {
+                std::cout << "rds bits <quoted-path>: ASCII 0/1 plus whitespace, max 2 MiB; not IQ/audio\n";
+                continue;
+            }
+            QFile file(QString::fromStdString(path));
+            if (!file.open(QIODevice::ReadOnly) || file.size() > 2*1024*1024) {
+                std::cout << "RDS error: cannot open file or exceeds 2 MiB\n"; continue;
+            }
+            const auto bytes = file.read(2*1024*1024 + 1);
+            const auto allowed = [](char c) { return c == '0' || c == '1' || c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+            if (file.error() != QFileDevice::NoError || bytes.size() > 2*1024*1024 ||
+                !std::all_of(bytes.begin(), bytes.end(), allowed)) {
+                std::cout << "RDS error: invalid bit file\n"; continue;
+            }
+            RdsDecoder decoder;
+            uint64_t bits = 0, groups = 0, corrected = 0;
+            for (char c : bytes) if (c == '0' || c == '1') {
+                ++bits;
+                if (auto event = decoder.pushBit(c == '1')) { ++groups; corrected += event->correctedBlocks; }
+            }
+            const auto& station = decoder.station();
+            nlohmann::json result{{"decoder", "redsea-block"}, {"input", "rds-bits"},
+                {"bits", bits}, {"completeGroups", groups}, {"rejectedGroups", decoder.rejectedGroups()},
+                {"correctedBlocks", corrected},
+                {"identified", station.identified}, {"pi", station.pi}, {"pty", station.pty},
+                {"ps", station.programmeService}, {"radiotext", station.radioText},
+                {"tp", station.trafficProgramme}, {"ta", station.trafficAnnouncement}};
+            std::cout << result.dump() << '\n';
         } else if (cmd == "plans" || cmd == "bandplans") {
+            std::string action;
+            iss >> action;
+            auto& catalog = BandPlanCatalog::instance();
+            if (action == "list") {
+                for (const auto& p : catalog.profiles())
+                    std::cout << p->id << " | " << p->region << " | " << p->country << " | " << p->location << " | " << p->coverage << "\n";
+                continue;
+            }
+            if (action == "select") {
+                std::string id; iss >> id;
+                if (!catalog.select(id)) { std::cout << "Unknown band-plan id\n"; continue; }
+                catalog.persist();
+            } else if (!action.empty()) {
+                std::cout << "bandplans [list | select ID]\n";
+                continue;
+            }
+            const auto selected = catalog.active();
+            std::cout << selected->id << " | " << selected->country << " | " << selected->location << "\n" << selected->coverage << "\n";
             for (const auto& p : builtInBandPlans()) {
                 std::cout << p.name
                           << " " << (p.startHz / 1e6) << "-" << (p.endHz / 1e6) << " MHz"
                           << " mode=" << modeToString(p.mode)
                           << " bw=" << (p.bandwidthHz / 1000.0) << "kHz"
                           << " lpf=" << (p.lpfHz / 1000.0) << "kHz"
-                          << " step=" << (p.stepHz / 1000.0) << "kHz\n";
+                          << " step=" << (p.stepHz / 1000.0) << "kHz"
+                          << " decoder-hint=" << p.decoder << " source=" << p.source << "\n";
             }
         } else if (cmd == "classify" || cmd == "classifier") {
             int devIndex = 0;

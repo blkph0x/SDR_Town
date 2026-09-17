@@ -2,6 +2,131 @@
 
 Never delete a row. Close with a commit hash and a sentence.
 
+2026-09-17 DEC-0089 CLOSES reproduced T-0026 native teardown fault: legacy
+rtlsdr.dll in the executable folder failed a standalone lifecycle probe on
+cycle 2, independent of Qt/Soapy/DSP. Configured dependency passes 20 native
+cycles across source/deployed locations and five CDB real-GUI shutdown cycles;
+live RDS and parity pass too. CMake now stages the configured RTL shared target,
+and deploy hash/license validation prevents carrying this stale DLL forward.
+This closes the reproduced failure, not all possible native hardware crashes.
+The duplicate Pothos/bundled module loading observation was NOT proven causal
+and was not changed speculatively.
+
+2026-09-17 DEC-0087 CLOSES live RDS acquisition issue for this regression:
+independent gain 40/20/40 captures yielded 0/53/0 valid groups, with ~32%/0%/~32%
+raw ADC-rail incidence. GUI requested 20 dB passes twice with 396/261 groups,
+correct PI/PS/RT and normal exit; adapter/native parity passes. Do not fix RF
+overload by altering RDS synchronization constants or changing all-mode defaults.
+
+2026-09-17 T-0026 OPEN: first gain-controlled GUI run suffered unhandled AV
+0xC0000005 in ntdll.dll at shutdown despite successfully receiving RDS. Windows
+Event 1000 report 4d71ce74-6f8c-4922-8d3a-f80430aba21b. Subsequent CDB probes
+and GUI exits did not reproduce that unhandled fault. Native Soapy teardown
+warnings remain; a first-chance event is not enough to locate root cause.
+Need exception stack/dump before changing teardown. One subsequent run could
+not enumerate RTL hardware; standalone RTL recheck succeeded. Keep failures
+visible and require real hardware, not merely a streaming stub, in live QA.
+
+2026-09-17 DEC-0086 update to the RDS issue: identical live-input comparison
+proves zero differences across 1,446 blocks between native and adapted paths,
+including resets. Both fail RDS acquisition. Independent demod of a gapless
+5.024-second IQ capture also yields zero groups; known reference decodes at
+the actual 204.8 kHz live MPX rate. Adapter corruption is not supported by this
+evidence; RF impairment versus shared backend limitation remains OPEN. See
+BUILD_NOTES for exact artifacts. No DSP threshold/timing changes justified.
+
+2026-09-17 DEC-0085 OPEN: live RDS acceptance failed twice after registry
+adoption. On 98.1 MHz the 45-second runs recovered 1 and 0 groups; neither
+identified PI/PS. Both had only 3 startup resets and over 7.2 million samples.
+Prior DEC-0084 live test recovered 355 groups. Adapter/native parity passes
+on recorded MPX at every block and three partitions, but this does not isolate
+the live failure. Preserve build/rds_contract_live_qa and
+build/rds_contract_live_repeat evidence. Next: compare native and adapter on
+identical captured live MPX, then inspect acquisition/RF only as evidence
+requires. Do not assume weak reception or change PLL/filter thresholds.
+No P25 changes, release, or claim of live non-regression from this gate.
+
+2026-09-17 DEC-0084 closes the DCS framing/polarity implementation gap below:
+independent ETSI waveform/bit tests now validate physical inversion and report
+cyclic equivalent labels together. 105 enumerated payloads tested, not the 104
+claimed by the reference's comment. Live routing works; independent RF code
+accuracy, broader fading/clock recovery and sensitivity remain unverified.
+No audio squelch is controlled by this experimental detector.
+
+2026-09-17 DEC-0081/0082: CTCSS live QA exposed repeated resets; first
+45-second run ended with 22 resets and zero current-stream windows. Varying-BW
+regression reproduced loss of tone (0 instead of 123 Hz); data-only history fix
+passes it. Second live run still failed (15 resets); instrumentation then proved
+speech-only AFC reset propagation with adjacent IQ and constant bandwidth.
+Independent NFM data mixer fix passed live retest; final bandwidth-only GUI
+fix leaves only three startup resets and 35 complete windows. Known-tone RF acceptance
+is explicitly deferred by user until their radio is available. No tone squelch.
+
+2026-09-17 DCS polarity reference ambiguity: SDRTrunk DCSCode.java describes
+normal as bit-reversed ETSI words and inverted as unreversed words, whereas
+ETSI 103236 section 4.2.3 defines polarity by positive/negative deviation.
+Bit order reversal is not polarity inversion. Before reusing those labels,
+require independently generated/recorded normal/inverted discriminator fixtures
+and verify cyclic-code aliases. test_dcs_reference.py now proves the bit-reversal
+versus polarity distinction against independent standard vectors; live symbol
+timing/filtering and full cyclic-alias handling remain to implement. Do not present a table lookup as validated live
+DCS. Physical RF tests can use the user's radio when available; independent
+bitstream vectors are the next implementation gate, not guessed DSP constants.
+
+2026-09-17 DEC-0080: live RDS routing/display proven on 98.1 MHz with 402
+complete groups and validated PS/RT. Supersedes live-integration limitation below;
+multi-station/weak-signal/character-set acceptance and general registry remain.
+Actual UI test exposed stale monitor frequency input after startup/waterfall
+tune. Fixed by signal-blocked field synchronization; preview marker now uses
+frequency rather than stale pixel position after hardware recentering.
+Live test shutdown logged "Soapy teardown reported a recoverable non-standard
+native issue"; process exited 0 and reception passed. Teardown remains an open
+device-driver investigation, not hidden or changed in this decoder feature pass.
+
+2026-09-17 DEC-0079: reproduced MPX partition discontinuity with 137-sample
+input blocks. Fixed in the data tap with separate causal FIR/decimator history;
+whole-vs-chunk regression now passes. Speech output remains unchanged.
+The short upstream MPX fixture yields two groups, not the three initially
+assumed by our test: checked upstream's own two-group contract and retained
+our stricter identity confirmation. No identity-threshold relaxation.
+Recorded MPX support supersedes the bit-only limitation below. Live source-loss
+propagation, GUI metadata, offset/noise characterization and RF validation remain
+open; do not advertise live RDS or close T-0018 from file replay alone.
+
+2026-09-17, T-0017 scope (open follow-up): RDS consumes validated bitstreams,
+not RF/MPX yet. Basic-Latin station text only. Carrier/timing recovery, Unicode
+RDS text conversion, RBDS labels, GUI stale metadata and real-station validation
+are required before enabling live RDS. Existing WFM decimator restarts its grid
+per chunk; optional tap reports discontinuity for non-divisible chunk lengths
+instead of feeding a future timing loop a falsely continuous stream. This is
+documented, not silently fixed by changing the shared analog audio path.
+
+2026-09-17, DEC-0077 (fixed in working tree, not released): PCM interpolation
+depended on producer partition because its stencil read future samples and
+clamped block tails. Failing regression reproduced; causal stencil passes.
+The associated dB label transform and Qt profile-test settings leak are fixed.
+
+2026-09-17, T-0016 (open): live 084229 has underruns and missing/rejected
+voice frames despite no IQ overruns/producer drops. Replay still conceals 67
+frames. GUI/CLI match output counts, not PCM; 327/456 frames differ. Investigate
+vocoder state/random-number lifetime and per-window inputs before attributing
+this to any one cause. mbelib uses rand(); GUI replay launches worker threads,
+but this is a lead, NOT proof of cause. Likewise budget-aborted burst parsing
+needs a deterministic loss test before modifying commit/deadline behavior.
+Do not change security, slot rules, grace periods or buffers speculatively.
+
+2026-09-17, REQ-BP.1 coverage limitation (open): receive profile infrastructure
+does not constitute complete worldwide/national band plans. Partial AU/GB/US
+data is labelled; sourced HF sub-bands, more countries and local transmitter
+inventories remain. Old generic HF priors are removed rather than asserted to
+be correct for every country. Decoder hints do not instantiate unimplemented
+decoders. See BAND_PLANS.md. Existing monitor tuning limits remain unchanged.
+
+2026-09-17, REQ-UI.1: workspace foundation tested independently of ISS-0001;
+CLI and GUI P25 reference output remains byte-identical. RDS and the decoder
+registry are next work, not present/working decoders. Existing receiver-table
+and experimental TX limitations remain; the layout does not complete them.
+
 2026-09-17, ISS-0001 evidence update (still open): DEC-0074 repairs a
 source-confirmed callback/clear/discard cursor race. The new live capture has
 no producer drops or control-lease collisions, so this race is not established
@@ -310,3 +435,10 @@ audibly continuous speech. See DEC-0067 and the 20260917 forensic report.
   map names policy/session/decode owners and requires both paths call the same
   helpers — no duplicated constants (`084ab27`).
 - **REQ:** maintainability / clear-audio diagnosis
+# Release hardening (DEC-0090 / T-0027)
+
+Observed: release helper ignored native failure status, hard-coded master,
+and signing rewrote the public trust anchor after building. Corrected with
+checked commands, current-branch publication and matching-key enforcement.
+Verification pending package/negative gates. Initial verifier used a Python
+API absent on this host; replaced with streaming hashing before publication.

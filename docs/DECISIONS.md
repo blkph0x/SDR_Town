@@ -2,6 +2,281 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0090 - Checked release publication (2026-09-17)
+
+T-0027: release.ps1 currently ignores native failures and pushes master although
+the working branch is fix/acch-rescue-clear-grant-mac. Require an explicit version,
+default to experimental, check each native command, run CTest before packaging,
+and push the actual attached branch. Require committed source before packaging;
+release metadata is committed only after successful packaging/signing. Validate
+portable contents, installer/manifest hashes and detached signature before upload.
+Publish 0.2.56 with the accumulated tested decoder/workspace/runtime work; do not
+claim SSTV or satellite reception implemented. Those reference gates remain open.
+No P25 tuning/security changes in this release-hardening pass.
+
+## DEC-0089 - Deploy the configured RTL runtime (2026-09-17)
+
+T-0026 evidence: CDB shutdown_probe_05 captures AV in libusb control transfer
+under RTL/Soapy unmake. Standalone probe_rtlsdr_lifecycle.py (no Qt/Soapy/DSP)
+reproduces close AV with shipped rtlsdr.dll on cycle 2; the configured vcpkg
+rtlsdr 2.0.2 package passes 10 cycles. Both libusb DLL hashes are identical.
+The executable folder contained a legacy v0.7.0-190-gdfd8 DLL not the manifest's
+configured dependency. Make executable builds stage the imported rtlsdr target
+deterministically, retain the old binary under build for forensic comparison,
+and include its dependency licence in staging. No driver API, gain, DSP, slot,
+queue or teardown timeout changes. Validate deployed native probe and actual
+GUI under CDB, then reception. Physical Blog V4/RSP testing remains unperformed;
+do not equate the Generic R820T acceptance with all hardware certification.
+
+## DEC-0088 - Debugger-backed GUI acceptance (2026-09-17)
+
+T-0026 intermittent shutdown AV has no root-cause stack yet. Extend existing
+RDS GUI acceptance with an explicit CDB executable option, first-chance AV
+stack logging and a strict failure if any AV occurs, even if application code
+catches it. No system-wide debugger settings, registry edits, driver replacement
+or speculative teardown patch. Retain normal real-hardware/station gates and
+bounded process waits. Debugger exit alone is not application acceptance.
+
+## DEC-0087 - Independent RTL capture comparison (2026-09-17)
+
+DEC-0086 established native/adapter parity but not RF acquisition. Existing
+rtl_sdr CLI can capture the same device without SDR Town/Soapy. Compare short
+98.1 MHz captures at requested 40 and 20 dB, with identical offline analysis.
+These are controlled diagnostic gain settings, not new app defaults or a
+presumed fix. Extend the diagnostic to explicit unsigned 8-bit IQ, centered
+at 127.5 and scaled by 128, with size validation and independent tests. Preserve
+the sample rate/gain/tool output and decoded groups. No P25 changes.
+
+## DEC-0086 - Same-input live RDS parity diagnostic (2026-09-17)
+
+Two DEC-0085 live runs failed PI/PS identification while recorded adapter/native
+parity passed. Add an opt-in SDR_TOWN_RDS_PARITY_LOG diagnostic wrapper: feed
+identical borrowed MPX to the native backend and adapter, compare all published
+decode fields except wall-clock timestamp values, count disagreements and
+write one JSONL summary per exercised receiver at destruction. Reset/source
+semantics match the adapter's documented contract. No sample logging, queues,
+threads, DSP threshold changes or default extra decoding. Diagnostic overhead
+is explicitly double RDS decoding and is not a performance benchmark. Never
+treat agreement alone as successful reception. CLI fixture tests must validate
+the report before the actual GUI live test uses it.
+
+## DEC-0085 - Shared receive decoder contract, RDS-first adoption (2026-09-17)
+
+T-0021: existing RdsMpxDecoder, CtcssDecoder and DcsDecoder already have bounded
+synchronous input and thread-safe native snapshots. Wrap them behind a small
+versioned receive interface; immutable registry lists only these implemented
+decoders. Explicit float-domain (raw MPX vs discriminator), source ID, sample
+clock, frequency identity, epoch, absolute cursor and gap flag accompany every
+borrowed block. No retained spans, added queue, hidden resampling or new thread.
+Reject wrong domain/version/invalid metadata, clear backend state, and force
+reacquisition. Source changes force discontinuity even if epochs/cursors match.
+Concrete snapshot variants preserve existing typed fields; factory selection
+is allowlisted. Registration means compiled adapter, not guaranteed DLL/RF
+availability. Backends still perform their own content validation and loading.
+Adopt RDS in both GUI and CLI MPX file replay only after direct/adapter parity
+on the independent recorded MPX fixture and synthetic tone adapters. Existing
+tone file paths remain intact; P25 is not registered or migrated. No nominal
+SSTV/satellite support entry until a real decoder exists. New libraries are
+internal CMake organization, not new third-party dependencies.
+
+## DEC-0084 - Experimental receive-only DCS (2026-09-17)
+
+ETSI 103236 section 4.2 specifies 23 bits, 134.4 baud, LSB-first and physical
+deviation polarity. test_dcs_reference.py independently checks codewords and
+Golay polynomial 0xC75. Use SDRTrunk's enumerated payload values as protocol
+data, not its reversed-bit I labels. Generate words algebraically and index
+cyclic alignments and actual complements, retaining ALL equivalent labels.
+Engineering profile, not certified squelch: three identical words spaced 23
+bits confirm; expire after 46 bits without repeated-word evidence. Exact parity
+only, no error correction. Test every code/polarity/rotation and malformed input.
+Experimental recovery: eight staggered integrate/dump phases at nominal 134.4
+baud, 2 Hz DC removal, two 300 Hz low-pass poles. Require two agreeing timing
+hypotheses and a unique vote winner. These design choices require shaped/noisy/
+clock-offset fixtures; no RF performance claim. Preserve all speech and P25 DSP.
+Known-radio acceptance remains deferred by user; informational output only.
+Catalogue test found 105 values in both our list and the reference, despite the
+reference comment claiming 104; exact list comparison showed no differences.
+
+## DEC-0083 - SSTV and public satellite receive roadmap (2026-09-17)
+
+User requests SSTV, public satellites and weather satellites in the expansion
+plan. Track per-downlink capabilities and hardware/coverage requirements, not
+an unsupported promise of every spacecraft. Preserve the working P25 path and
+finish DCS continuity/validation before adding another live decoder.
+Sources reviewed: SatDump pipeline documentation and GPL-3.0 license;
+gr-satellites supported-satellite documentation; ON4QZ/QSSTV; NOAA POES status
+page search result (direct page fetch returned 403). Links and gates are in
+SATELLITE_AND_SSTV.md. These references identify candidates, not dependencies
+approved for bundling or proof of current transmitter operation.
+Prefer a proven backend where appropriate, with pinned versions, explicit
+input/output contracts, license review, bounded worker queues and cancellation.
+An external process can isolate faults; it does not waive license obligations.
+No network catalogue import may execute arbitrary commands. No automatic
+transmit, decrypt, or private-traffic collection is part of this milestone.
+
+## DEC-0082 - Preserve NFM data history during same-rate bandwidth updates (2026-09-17)
+
+Live CTCSS GUI QA failed: 22 resets, zero complete windows at exit, with
+automatic bandwidth 7605.46875 Hz. Inspection found exact bandwidth inequality
+restarting the data stream even when its sample clock and FIR length agree.
+FIR delay stores input IQ, not coefficient-dependent output: retain that history
+on NFM coefficient updates when rate and length are unchanged. Continue resetting
+on source gaps, rate/length/mode/center/identity changes and explicit DSP resets.
+Do not change WFM behavior or speech DSP. Require varying-bandwidth regression,
+bit-identical tapped/untapped speech, and repeated live GUI measurement.
+User deferred independent known-tone RF acceptance until their radio is available.
+
+Follow-up measurement: build/ctcss_reset_qa/run.log shows mid-stream reset
+reason 2 only (explicit/automatic speech DSP reset), unchanged 12500 Hz bandwidth,
+unchanged IQ epoch and exactly adjacent cursor. Demod's cumulative >5 kHz AFC
+target test resets its speech oscillator. Isolate the NFM data mixer phase;
+its nominal identity, source cursor and explicit resetState() define continuity,
+not the speech-only automatic target threshold. Retain WFM behavior. Regression
+must cross that threshold while proving unchanged speech output.
+
+Final live isolation run passes with eight current-stream windows, but logs
+three bandwidth-only GUI resets jumping source cursors (21:01:09/11/18).
+syncMonitorVarsToReceiver conflates analog NFM bandwidth adjustments with a
+retune, resetting the input cursor and audio ring. Preserve analog NFM stream
+when only bandwidth changes; Demod already rebuilds coefficients and resets
+data history when its clock/FIR length changes. Keep old reset behavior for
+actual frequency/mode changes, P25 voice/control and all other modes.
+
+## DEC-0081 - Receive-only CTCSS identification (2026-09-17)
+
+Next user-approved decoder milestone. Start with informational CTCSS; do not
+gate or reshape working audio before independent RF validation. GNU Radio's
+gr-analog/lib/ctcss_squelch_ff_impl.cc documents the classic 38-tone set and
+adjacent/edge guard-frequency approach. TI SPRA096 documents Goertzel energy
+evaluation. Implement our own bounded streaming bank using that mathematics,
+not copied GNU Radio code. Link references in docs/NFM_TONES.md.
+Engineering acceptance profile (not a certification claim): one-second Hann
+windows resolve the closest supported tones, two matching windows confirm,
+DC removal and four cascaded 300 Hz low-pass poles suppress voice; >=65% tonal
+purity, 4:1 strongest/runner-up energy and +/-1% guard comparisons reject
+ambiguous/noisy/off-frequency windows. Test all supported frequencies, gain,
+speech interference, noise, missing samples, switches and arbitrary partitions.
+Tune/rate/mode/source-gap reset all data-only state. No invented DCS decoder
+or tone squelch UI: defer these until reference codewords and RF captures exist.
+Nominal channel identity is explicit for the NFM tap so phase-continuous AFC
+updates do not erase a tone window. Preserve source-epoch and true retune resets.
+GUI tone freshness is two seconds without input (presentation only).
+
+## DEC-0080 - Live RDS and waterfall interaction (2026-09-17)
+
+User requests automatic WFM RDS display, frequency-aligned band sections and
+drag tuning while preserving improved audio. Use existing chronological IQ
+window provenance (DeviceManager's vector wrapper previously discarded it),
+reset only MPX/RDS state on gaps, and run the bounded decoder on the receiver
+DSP owner. No RDS processing in P25 branches. UI reads short snapshot locks;
+hide identity on inactive/non-WFM/retuned receivers and mark no recent RDS
+after five seconds (presentation policy only, never a decoding/audio gate).
+Draw disjoint visible band sections using existing priority/ambiguity lookup.
+Drag previews on a frozen frequency axis, commits once on release: existing
+frequencySelected handler retunes hardware, so emitting on each mouse movement
+would queue repeated retunes. Click still commits on release; squelch stays
+independent and only owns its spectrum region. Test actual mouse events,
+section clipping and metadata lifecycle, plus recorded DSP and full regressions.
+
+## DEC-0079 - RDS DSP integration and measured live gate (2026-09-17)
+
+Partition gate reproduced: [mpx-partition] fails at the second 137-sample
+block. Inspection also finds the shared audio FIR reads future input and
+zero-pads block tails. Rather than alter audible analog output in this task,
+the optional RDS tap will use a separate causal FIR/decimation state over the
+same downmixed IQ and existing channel coefficients. Preserve phase across
+all chunks; no future samples, no guessed gap filling. Disabled path remains
+unchanged and enabled/disabled audio must still compare bit-for-bit.
+
+Use pinned redsea subcarrier/liquid wrappers, not a newly invented carrier or
+clock recovery. Existing liquid-dsp submodule is 9e00870e25ce9ecf473b7474875a19a3dfc52ce9;
+main CMake explicitly disables MSVC integration. Probe installed GCC 11.3
+MinGW to build an isolated DLL with a versioned C ABI: opaque handle, floats
+in and byte bits out, caller-owned buffers, exceptions caught at the boundary.
+Never pass std::complex, STL objects or ownership of allocations across CRTs.
+If successful, reproducible CMake helper build and local absolute-path loading
+are required; static MinGW runtime linking avoids hidden runtime DLLs.
+
+Vendor pinned redsea DSP with documented minimal adaptations only: extract
+MPXBuffer from file-reader dependencies and widen stream counters to avoid
+the documented seven-hour timing jump. Full recreation on discontinuity resets
+all DSP state, not just the upstream partial reset. Test real upstream MPX
+fixture PI 0x6201, chunk invariance, reset/rate errors, noise and bounded input.
+
+Live GUI integration is gated on those tests. Keep decoded metadata separate
+from speech PCM and P25; bounded work, receiver identity and stale-state rules
+must be explicit. Repair WFM decimation timing only after a failing partition
+test, preserving original aligned-block audio. Do not claim RF validation from
+synthetic or MPX replay alone. No P25 timeout, gate or vocoder changes.
+
+## DEC-0078 - RDS foundation without changing P25 (2026-09-17)
+
+User explicitly defers further P25 optimisation and approves the decoder
+roadmap. Reuse redsea BlockStream/group at commit
+7555c9f6259d50718697ee8c9f218ea012c6892c (windytan/redsea), retaining upstream
+license and file notices. These modules provide bit sync, CRC and burst FEC
+without the full executable's liquid-dsp/libsndfile/iconv dependencies.
+No new RF decoder is claimed: this milestone consumes already-demodulated
+MSB-first RDS bits, with a CLI fixture path and strict complete-group metadata.
+Incomplete groups cannot publish station text; retune/reset clears all state.
+Use bounded assembly and explicit PI / radiotext A-B lifecycle.
+
+Add an opt-in WFM multiplex output before audio LPF/de-emphasis/squelch with
+actual rate, frequency and reset/overwrite provenance. Disabled by default;
+one retained block, no background thread and no audio mutation. First prove
+audio equivalence enabled/disabled. Live 57 kHz extraction, carrier/timing
+recovery and GUI metadata are next and require reference RF tests. A decoder
+registry should follow a working MPX consumer, not list unavailable decoders.
+
+## DEC-0077 - Partition-invariant P25 PCM interpolation and feature QA (2026-09-17)
+
+Live GUI capture 20260917_084229 has five follows, zero IQ overruns and zero
+producer drops, but underrun rises and rejected/missing VCWs. These are not
+proof that interpolation causes all gaps. Source inspection separately finds
+resampleDecodedP25PcmWithState reads idx+1/idx+2 and clamps them to the current
+block tail. Therefore identical PCM split into frames differs from one batch.
+Extract this function unchanged for a failing partition-invariance test. If
+reproduced, use a two-input-sample causal delay so its cubic stencil uses only
+available samples, retaining phase/DC state and exact frame counts. No new
+vocoder, smoothing, gates or buffering thresholds. Test 8 kHz to 48/44.1 kHz,
+20 ms and irregular partitions. Delay is stencil support, not guessed jitter.
+
+Visual QA also found dB tick labels mapped upside-down over the entire widget
+instead of using the spectrum curve transform. Correct that mapping. Band-plan
+Qt tests must use explicitly selected settings format: the org/app constructor
+does not follow setDefaultFormat, so it persisted the test's US selection.
+Repair test isolation and restore AU. Report coverage/remaining RF gaps honestly.
+
+## DEC-0076 - Explicit receive-band profiles, not inferred protocols (2026-09-17)
+
+Replace the mixed-country first-match table with immutable selected profiles
+and value-returning lookup. Region/country/location are explicit metadata;
+local profiles can be imported from bounded validated JSON. Use half-open
+intervals, priority then narrowest span; equal-rank incompatible overlaps must
+not force a mode. Most-specific mixed/data entries block broader analog hints.
+Band-derived defaults apply through existing AUTO paths, not forced changes to
+manual modes or P25 follow. No plan grants encryption/decoder trust. Label
+decoder hints separately from decoder availability. No IP/geolocation lookup.
+
+Primary references checked 2026-09-17: ACMA Australian spectrum plan and CB
+class licence, Ofcom UKFAT/PMR446 guidance, CAA aeronautical stations, USCG
+marine channel table, NOAA NWR frequency list. Sources and partial coverage
+travel with each profile. Receive bandwidths are application defaults, not
+channel spacing or regulatory limits. New dependencies: none.
+
+## DEC-0075 - Presentation-only workspace foundation (2026-09-17)
+
+User approved the next-feature roadmap. MainWindow currently stacks receiver,
+saved-frequency, P25, TX and capture controls in one QVBoxLayout. Reparent the
+existing widgets into named Qt docks; retain all signal handlers and DSP paths.
+Use a small WorkspaceLayout owner for presets, versioned QSettings state,
+visibility/lock actions and reset. No custom docking dependency, decoder rewrite,
+or pretend RDS implementation. Keep runtime-automated sessions from overwriting
+the normal saved layout. Expose preset and screenshot arguments for GUI QA.
+Gate: Qt interaction/persistence tests, real GUI screenshots at different sizes,
+full existing tests, unchanged P25 reference replay. This presentation work is
+independent of unresolved all-call P25 audio acceptance.
+
 ## DEC-0074 - Serialize exceptional audio cursor mutation (2026-09-17)
 
 AudioEngine callback loads r, copies PCM, then stores advanced r. clearBuffers

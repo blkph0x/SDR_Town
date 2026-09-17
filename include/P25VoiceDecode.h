@@ -5,6 +5,7 @@
 // Invariants: no hop/TTL/CADENCE/feed-gate behavior changes — move-only.
 
 #include "AudioEngine.h"
+#include "BandPlan.h"
 #include "Demod.h"
 #include "P25AppGlobals.h"
 #include "P25Control.h"
@@ -75,18 +76,6 @@ struct RfSquelchMetrics {
     double snrDb = 0.0;
     bool valid = false;
 };
-
-struct BandPlanEntry {
-    std::string name;
-    double startHz = 0.0;
-    double endHz = 0.0;
-    DemodMode mode = DemodMode::NFM;
-    double bandwidthHz = 12500.0;
-    double lpfHz = 3000.0;
-    double stepHz = 12500.0;
-};
-
-const BandPlanEntry* findBandPlanForFrequency(double freqHz);
 
 struct SmartModeSelection {
     DemodMode mode = DemodMode::NFM;

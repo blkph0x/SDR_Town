@@ -1,6 +1,10 @@
 #pragma once
 
 #include "Demod.h"
+#include "RdsMpxDecoder.h"
+#include "CtcssDecoder.h"
+#include "DcsDecoder.h"
+#include "ReceiveDecoder.h"
 #include "P25LiveDecoder.h"
 #include "P25ReceiverSession.h"
 #include "P25TrafficChannelProcessor.h"
@@ -84,6 +88,10 @@ struct Receiver {
 
     size_t deviceIndex = 0;           // which DeviceManager device this receiver uses
     Demodulator demod;                // own demod instance (already per-state)
+    const std::unique_ptr<ReceiveDecoder> rds = createReceiveDecoder("rds"); // DEC-0085; DSP owner, snapshots safe for UI.
+    CtcssDecoder ctcss;               // Informational; never opens/closes audio.
+    DcsDecoder dcs;                   // Independent subaudible data, no audio gate.
+    uint64_t rdsIqEpoch = 0, rdsNextIq = 0;
 
     double freqHz = 100e6;
     DemodMode mode = DemodMode::NFM;

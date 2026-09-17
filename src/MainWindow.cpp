@@ -1,4 +1,6 @@
 #include "MainWindow.h"
+#include "BandPlanDialog.h"
+#include "RdsStatusWidget.h"
 
 #include <QCloseEvent>
 #include <QSizePolicy>
@@ -76,6 +78,8 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
 {
         setWindowTitle("SDR Town");
         resize(1280, 800);
+        if (!guiRuntimeConfig.bandPlanId.empty() && !BandPlanCatalog::instance().select(guiRuntimeConfig.bandPlanId))
+            guiRuntimeConfig.warnings.push_back("Unknown band-plan profile: " + guiRuntimeConfig.bandPlanId);
 
         // Real main UI area (PR2/PR3) - spectrum + receivers
         QWidget* central = new QWidget(this);
@@ -83,18 +87,19 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         mainLayout->setContentsMargins(4,4,4,4);
         mainLayout->setSpacing(4);
 
-        // Top info bar
-        QLabel* topBar = new QLabel("SDR Town  •  Multi-SDR  •  Smart Scan  •  Unencrypted Voice/Data  •  Advanced Analyzer");
-        topBar->setStyleSheet("font-size: 12px; color: #88ddff; padding: 2px 6px; background: #1f2228; border-radius: 2px;");
-        mainLayout->addWidget(topBar);
-
         // Spectrum (the star visual for now)
         SpectrumWidget* spectrum = new SpectrumWidget(this);
         spectrumWidget = spectrum;
+        auto* rdsStatus = new RdsStatusWidget(this);
+        mainLayout->addWidget(rdsStatus);
         spectrum->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         connect(spectrum, &SpectrumWidget::frequencySelected, this, [this, spectrum](double f) {
             classifierRoiBuilder.clear();
-            const BandPlanEntry* plan = autoDetectMode ? findBandPlanForFrequency(f) : nullptr;
+            if (monitorFreqSpin) {
+                const QSignalBlocker blocker(monitorFreqSpin);
+                monitorFreqSpin->setValue(f/1e6);
+            }
+            const auto plan = autoDetectMode ? findBandPlanForFrequency(f) : std::nullopt;
             {
                 std::lock_guard<std::mutex> lk(monitorParamsMutex);
                 currentMonitorFreq = f;
@@ -162,7 +167,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         // S0-7 (P2): removed hardcoded APT/DMR/NFM demo rows (was claiming live receiver table).
         // The vector<Receiver> + snapshot in DSP is the real foundation; full live QTable + per-rx persistence
         // (receivers.json) + rich editor comes in the receiver management work after stabilization.
-        QGroupBox* rxBox = new QGroupBox("Active Receivers (Phase 0 vector foundation — live table + persistence next)");
+        QGroupBox* rxBox = new QGroupBox("Receiver Controls");
         rxBox->setStyleSheet("QGroupBox { font-size: 11px; }");
         QVBoxLayout* rxLay = new QVBoxLayout(rxBox);
 
@@ -313,13 +318,19 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         monLay->addWidget(setMonBtn);
         monLay->addWidget(new QLabel("Mode:"));
         monLay->addWidget(modeBox);
-        monLay->addWidget(new QLabel("BW:"));
-        monLay->addWidget(bwSpin);
-        monLay->addWidget(autoBwBtn);
-        monLay->addWidget(lpfEnableCheck);
-        monLay->addWidget(lpfSpin);
         monLay->addStretch();
         rxLay->addLayout(monLay);
+        auto* filterLay = new QHBoxLayout;
+        filterLay->addWidget(new QLabel("Channel BW:"));
+        filterLay->addWidget(bwSpin);
+        filterLay->addWidget(autoBwBtn);
+        filterLay->addWidget(lpfEnableCheck);
+        filterLay->addWidget(lpfSpin);
+        auto* bandPlanButton = new QPushButton("Band Plan...");
+        filterLay->addWidget(bandPlanButton);
+        connect(bandPlanButton, &QPushButton::clicked, this, &MainWindow::showBandPlanDialog);
+        filterLay->addStretch();
+        rxLay->addLayout(filterLay);
 
         // New UI for sensitivity (RF gain / noise floor), squelch, and heat map color range (for waterfall/spectrum).
         // These directly address user request for adjusting SDR sensitivity, squelch, and good heat map / noise floor visualization.
@@ -327,6 +338,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         gainLay->addWidget(new QLabel("RF Gain (dB):"));
         QDoubleSpinBox* gainSpin = new QDoubleSpinBox();
         gainSpin->setRange(0, 50); gainSpin->setDecimals(1); gainSpin->setValue(20);
+        gainSpin->setMaximumWidth(110);
         gainSpin->setToolTip("Manual SDR RF gain / sensitivity. 0 = minimum gain; higher values increase sensitivity and overload risk. This writes directly to the SDR hardware when a real device is active.");
         rfGainSpin = gainSpin;
         gainLay->addWidget(gainSpin);
@@ -334,6 +346,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         gainLay->addWidget(new QLabel("Squelch (dB):"));
         QDoubleSpinBox* squelchSpin = new QDoubleSpinBox();
         squelchSpin->setRange(-130, 40); squelchSpin->setDecimals(0); squelchSpin->setValue(-105);
+        squelchSpin->setMaximumWidth(110);
         squelchSpin->setToolTip("RF squelch threshold in spectrum dB. Put SQ a few dB above the green noise-floor line; signals above SQ open audio. Values below -115 disable squelch.");
         squelchSpinBox = squelchSpin;
         gainLay->addWidget(squelchSpin);
@@ -348,6 +361,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         QLabel* classifierStatus = new QLabel("Classifier: deterministic ---");
         classifierStatus->setToolTip("Deterministic ROI classifier is active. ONNX model loading is an experimental placeholder until a trained model contract is validated.");
         gainLay->addWidget(classifierStatus);
+        gainLay->addStretch();
         rxLay->addLayout(gainLay);
 
         QHBoxLayout* audioLay = new QHBoxLayout();
@@ -440,13 +454,16 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         colorLay->addWidget(new QLabel("WF Color Min (dB):"));
         QDoubleSpinBox* colorMinSpin = new QDoubleSpinBox();
         colorMinSpin->setRange(-150, -20); colorMinSpin->setValue(-120);
+        colorMinSpin->setMaximumWidth(110);
         colorMinSpin->setToolTip("Lower end of waterfall/spectrum heat map (noise floor). Lower values make weak signals visible.");
         colorLay->addWidget(colorMinSpin);
         colorLay->addWidget(new QLabel("Max:"));
         QDoubleSpinBox* colorMaxSpin = new QDoubleSpinBox();
         colorMaxSpin->setRange(-60, 40); colorMaxSpin->setValue(-10);
+        colorMaxSpin->setMaximumWidth(110);
         colorMaxSpin->setToolTip("Upper end of heat map. Adjust to make strong signals 'hot' red.");
         colorLay->addWidget(colorMaxSpin);
+        colorLay->addStretch();
         rxLay->addLayout(colorLay);
 
         QHBoxLayout* trainingLay = new QHBoxLayout();
@@ -516,7 +533,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             if (!ok) return;
             sf.name = trimCopy(name.toStdString());
             if (sf.name.empty()) sf.name = defaultName.toStdString();
-            if (const auto* plan = findBandPlanForFrequency(sf.freqHz)) sf.tags = plan->name;
+            if (const auto plan = findBandPlanForFrequency(sf.freqHz)) sf.tags = plan->name;
             auto freqs = loadSavedFrequencies();
             freqs.push_back(sf);
             saveSavedFrequencies(freqs);
@@ -620,7 +637,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         p25Table->setEditTriggers(QAbstractItemView::NoEditTriggers);
         p25Table->setSelectionBehavior(QAbstractItemView::SelectRows);
         p25Table->verticalHeader()->setVisible(false);
-        p25Table->setMaximumHeight(130);
+        p25Table->setMaximumHeight(100);
         p25Table->horizontalHeader()->setStretchLastSection(true);
         p25Lay->addWidget(p25Table);
         populateP25Table(p25Table, {}, loadP25KnownControlChannels());
@@ -652,7 +669,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         p25TgTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
         p25TgTable->setSelectionBehavior(QAbstractItemView::SelectRows);
         p25TgTable->verticalHeader()->setVisible(false);
-        p25TgTable->setMaximumHeight(150);
+        p25TgTable->setMinimumHeight(85);
         p25TgTable->horizontalHeader()->setStretchLastSection(true);
         p25Lay->addWidget(p25TgTable);
         rxLay->addWidget(p25Box);
@@ -4548,7 +4565,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 std::lock_guard<std::mutex> lk(monitorParamsMutex);
                 tunedHz = currentMonitorFreq;
             }
-            const auto* plan = findBandPlanForFrequency(tunedHz);
+            const auto plan = findBandPlanForFrequency(tunedHz);
             const double newBwHz = (plan && (newMode == DemodMode::AUTO || newMode == plan->mode))
                 ? plan->bandwidthHz
                 : defaultBandwidthForMode(newMode);
@@ -4590,7 +4607,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         connect(setMonBtn, &QPushButton::clicked, this, [this, monFreq]() {
             classifierRoiBuilder.clear();
             const double tunedHz = monFreq->value() * 1e6;
-            const BandPlanEntry* plan = autoDetectMode ? findBandPlanForFrequency(tunedHz) : nullptr;
+            const auto plan = autoDetectMode ? findBandPlanForFrequency(tunedHz) : std::nullopt;
             {
                 std::lock_guard<std::mutex> lk(monitorParamsMutex);
                 currentMonitorFreq = tunedHz;
@@ -4648,6 +4665,50 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
 
         setCentralWidget(central);
 
+        // DEC-0075: move existing widgets, never recreate receivers or handlers.
+        workspaceLayout = new WorkspaceLayout(this);
+        auto* receiverPanel = new QWidget;
+        auto* receiverLayout = new QVBoxLayout(receiverPanel);
+        rxLay->removeWidget(rxTable);
+        rxLay->removeItem(rxBtnLay);
+        receiverLayout->addWidget(rxTable);
+        receiverLayout->addLayout(rxBtnLay);
+        workspaceLayout->addPanel("receivers", "Receivers", receiverPanel);
+        rxLay->removeWidget(savedBox);
+        savedBox->setTitle({});
+        workspaceLayout->addPanel("saved", "Saved Frequencies", savedBox);
+        rxLay->removeWidget(p25Box);
+        p25Box->setTitle({});
+        workspaceLayout->addPanel("p25", "P25 Calls", p25Box);
+        rxLay->removeWidget(p25TxBox);
+        workspaceLayout->addPanel("tx", "Experimental TX", p25TxBox);
+        auto* capturePanel = new QWidget;
+        auto* captureLayout = new QVBoxLayout(capturePanel);
+        rxLay->removeItem(colorLay);
+        rxLay->removeItem(trainingLay);
+        captureLayout->addLayout(colorLay);
+        captureLayout->addLayout(trainingLay);
+        captureLayout->addStretch();
+        workspaceLayout->addPanel("capture", "Capture / Display", capturePanel);
+        rxBox->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+        mainLayout->setStretch(mainLayout->indexOf(rxBox), 0);
+        rmsLabel->setWordWrap(true);
+        classifierStatus->setWordWrap(true);
+        outputsLabel->setWordWrap(true);
+        p25Status->setWordWrap(true);
+        // Status text must not make the P25 toolbar wider on each update.
+        p25BtnLay->removeWidget(p25Status);
+        p25Lay->insertWidget(1, p25Status);
+        workspaceLayout->applyPreset("listening");
+        if (!guiRuntimeConfig.hasStartupWork()) {
+            QSettings settings;
+            workspaceLayout->restore(settings);
+        }
+        if (!guiRuntimeConfig.workspacePreset.empty())
+            workspaceLayout->applyPreset(QString::fromStdString(guiRuntimeConfig.workspacePreset));
+        if (guiRuntimeConfig.windowWidth > 0 && guiRuntimeConfig.windowHeight > 0)
+            resize(guiRuntimeConfig.windowWidth, guiRuntimeConfig.windowHeight);
+
         // Decode Log / voice-to-text hub (P25 STT first; AM/ADS-B/ACARS/POCSAG plug in later).
         m_transcriptHub = new TranscriptHub(this);
         m_sttEngine = new SttEngine(this);
@@ -4669,6 +4730,29 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                            "Other sources (AM / ADS-B / ACARS / POCSAG) can register later."));
 
         createMenus();
+        auto* bandPlanTimer = new QTimer(this);
+        connect(bandPlanTimer, &QTimer::timeout, this, [this, spectrum, rdsStatus] {
+            double target;
+            { std::lock_guard<std::mutex> lock(monitorParamsMutex); target = currentMonitorFreq; }
+            spectrum->setBandPlanMonitorFrequency(target);
+            std::shared_ptr<Receiver> rx;
+            { std::lock_guard<std::mutex> lock(receiversMutex); if (!receivers.empty()) rx = receivers.front(); }
+            bool eligible = false;
+            bool toneEligible = false, explicitNfm = false;
+            if (rx) {
+                std::lock_guard<std::mutex> lock(rx->stateMutex);
+                eligible = rx->active && !rx->p25VoiceDecodeEnabled && !rx->p25ControlChannelMute &&
+                    (rx->mode == DemodMode::WFM || rx->mode == DemodMode::AUTO);
+                explicitNfm = rx->mode == DemodMode::NFM;
+                toneEligible = rx->active && !rx->p25VoiceDecodeEnabled && !rx->p25ControlChannelMute &&
+                    (explicitNfm || rx->mode == DemodMode::AUTO);
+            }
+            const auto tone = rx ? rx->ctcss.snapshot() : CtcssSnapshot{};
+            if (explicitNfm || (toneEligible && tone.status != "Inactive"))
+                rdsStatus->presentTone(tone,toneEligible,target,RdsMpxDecoder::monotonicMs(),rx ? rx->dcs.snapshot() : DcsSnapshot{});
+            else rdsStatus->present(rx ? std::get<RdsMpxSnapshot>(rx->rds->snapshot()) : RdsMpxSnapshot{}, eligible, target, RdsMpxDecoder::monotonicMs());
+        });
+        bandPlanTimer->start(250); // UI overlay refresh only; no DSP/tuning work
         installSdrTownControlServer();
 
         // Initial device enumeration (PR2) for status — use probeHardware=false so we do ZERO
@@ -9451,6 +9535,10 @@ bool MainWindow::startGuiRuntimeDeviceAt(double freqHz,  bool p25Defaults)
         }
 
         const size_t devIndex = guiRuntimeDeviceIndex();
+        if (monitorFreqSpin) {
+            const QSignalBlocker blocker(monitorFreqSpin);
+            monitorFreqSpin->setValue(freqHz/1e6);
+        }
         {
             std::lock_guard<std::mutex> lk(monitorParamsMutex);
             currentMonitorFreq = freqHz;
@@ -9755,6 +9843,32 @@ void MainWindow::writeGuiRuntimeSelfTestResult(const char* phase)
                 {"clearAudioTimeoutMs", guiRuntimeConfig.clearAudioTimeoutMs},
             };
             record["warnings"] = guiRuntimeConfig.warnings;
+            {
+                std::shared_ptr<Receiver> rx;
+                { std::lock_guard<std::mutex> lock(receiversMutex); if (!receivers.empty()) rx=receivers.front(); }
+                const auto rds = rx ? std::get<RdsMpxSnapshot>(rx->rds->snapshot()) : RdsMpxSnapshot{};
+                if (rx) record["rdsContract"] = {{"id",std::string(rx->rds->descriptor().id)},
+                    {"version",rx->rds->descriptor().contractVersion},
+                    {"input",std::string(decoderInputName(rx->rds->descriptor().input))}};
+                const auto tone = rx ? rx->ctcss.snapshot() : CtcssSnapshot{};
+                record["ctcss"] = {{"frequencyHz",tone.frequencyHz},{"targetHz",tone.targetHz},
+                    {"windows",tone.windows},{"samples",tone.samples},{"confirmedWindows",tone.confirmedWindows},
+                    {"resets",tone.resets},{"status",tone.status},{"purity",tone.purity}};
+                const auto dcs = rx ? rx->dcs.snapshot() : DcsSnapshot{};
+                std::vector<std::string> dcsAliases;
+                for (const auto& id:dcs.identities) dcsAliases.push_back(dcsLabel(id));
+                record["dcs"] = {{"aliases",dcsAliases},{"samples",dcs.samples},{"resets",dcs.resets},
+                    {"targetHz",dcs.targetHz},{"agreeingPhases",dcs.agreeingPhases},{"status",dcs.status}};
+                record["rds"] = {{"status",rds.status},{"frequencyHz",rds.targetHz},
+                    {"samples",rds.samples},{"bits",rds.bits},{"groups",rds.groups},
+                    {"resets",rds.resets},{"rejectedGroups",rds.rejectedGroups},
+                    {"identified",rds.station.identified},{"pi",rds.station.pi},
+                    {"ps",rds.station.programmeService},{"radioText",rds.station.radioText}};
+            }
+            const auto bandPlan = BandPlanCatalog::instance().active();
+            record["bandPlan"] = {{"id", bandPlan->id}, {"region", bandPlan->region},
+                {"country", bandPlan->country}, {"location", bandPlan->location},
+                {"coverage", bandPlan->coverage}, {"entries", bandPlan->entries.size()}};
             record["errors"] = json::array();
             for (const auto& err : guiRuntimeStartupErrors) record["errors"].push_back(err.toStdString());
 
@@ -10024,6 +10138,12 @@ void MainWindow::scheduleGuiRuntimeIqReplay()
 
 void MainWindow::scheduleGuiRuntimeSelfTest()
 {
+        if (!guiRuntimeConfig.screenshotPath.empty()) {
+            QTimer::singleShot(0, this, [this] {
+                const auto path = QString::fromStdString(guiRuntimeConfig.screenshotPath);
+                if (!grab().save(path)) recordGuiRuntimeError("Could not save GUI screenshot: " + path);
+            });
+        }
         const bool shouldExit = guiRuntimeConfig.selfTest || guiRuntimeConfig.exitAfterMs > 0;
         if (guiRuntimeConfig.requireClearAudio) {
             const qint64 deadline = QDateTime::currentMSecsSinceEpoch() +
@@ -10154,10 +10274,15 @@ void MainWindow::syncMonitorVarsToReceiver(size_t idx)
         if (idx >= receivers.size()) return;
         auto& rx = *receivers[idx];  // deref the shared_ptr (S0-2 vector of shared_ptr)
         std::lock_guard<std::mutex> rxLock(rx.stateMutex);
+        // DEC-0082: same-channel analog NFM bandwidth updates are coefficient
+        // updates, not retunes. Resetting the cursor here discards live IQ.
+        const bool continuousNfmBandwidth = rx.mode == DemodMode::NFM &&
+            currentMonitorMode == DemodMode::NFM &&
+            !rx.p25VoiceDecodeEnabled && !rx.p25ControlChannelMute;
         const bool rfOrModeChanged =
             std::abs(rx.freqHz - currentMonitorFreq) > 1.0 ||
             rx.mode != currentMonitorMode ||
-            std::abs(rx.channelBwHz - monitorChannelBwHz) > 1.0;
+            (!continuousNfmBandwidth && std::abs(rx.channelBwHz - monitorChannelBwHz) > 1.0);
 
         if (rfOrModeChanged) {
             rx.resetDemodState();
@@ -11149,9 +11274,24 @@ void MainWindow::stopAllStreaming()
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+        if (workspaceLayout && !guiRuntimeConfig.hasStartupWork()) {
+            QSettings settings;
+            workspaceLayout->save(settings);
+        }
         stopAllStreaming();
         QMainWindow::closeEvent(event);
     }
+
+void MainWindow::showBandPlanDialog()
+{
+    BandPlanDialog dialog([this] {
+        if (autoDetectMode) classifierRoiBuilder.clear();
+        if (spectrumWidget) spectrumWidget->update();
+        const auto p = BandPlanCatalog::instance().active();
+        statusBar()->showMessage(QString::fromStdString("Receive plan: " + p->country + " / " + p->location), 4000);
+    }, this);
+    dialog.exec();
+}
 
 void MainWindow::createMenus()
 {
@@ -11174,7 +11314,7 @@ void MainWindow::createMenus()
         // Scan (stub)
         QMenu* scanMenu = menuBar()->addMenu("&Scan");
         scanMenu->addAction("&Start Smart Scan", [](){});
-        scanMenu->addAction("Band &Plans...", [](){});
+        scanMenu->addAction("Band &Plans...", this, &MainWindow::showBandPlanDialog);
 
         // Audio — important first-class menu (per design)
         QMenu* audioMenu = menuBar()->addMenu("&Audio");
@@ -11185,7 +11325,16 @@ void MainWindow::createMenus()
         audioMenu->addAction("Test Tone (All)", [](){});
 
         // View / Tools / Settings
-        menuBar()->addMenu("&View");
+        auto* viewMenu = menuBar()->addMenu("&View");
+        workspaceLayout->populateMenu(viewMenu);
+        auto* bandOverlay = viewMenu->addAction("Band Plan on Waterfall");
+        bandOverlay->setCheckable(true);
+        bandOverlay->setChecked(QSettings().value("bandplan/overlay", true).toBool());
+        spectrumWidget->setBandPlanOverlayEnabled(bandOverlay->isChecked());
+        connect(bandOverlay, &QAction::toggled, this, [this](bool enabled) {
+            spectrumWidget->setBandPlanOverlayEnabled(enabled);
+            QSettings().setValue("bandplan/overlay", enabled);
+        });
         QMenu* toolsMenu = menuBar()->addMenu("&Tools");
         toolsMenu->addAction("&Decode Log / Transcript...", this, [this]() {
             showTranscriptWindow();

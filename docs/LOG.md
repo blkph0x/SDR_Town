@@ -2,6 +2,154 @@
 
 Newest at the top.
 
+## 2026-09-17 - Native shutdown fault reproduced and corrected
+
+CDB caught libusb/RTL teardown AV; a minimal native-only lifecycle test then
+reproduced the old deployed RTL DLL failure on cycle 2. The manifest's configured
+RTL runtime passes 10 cycles, as does its newly deployed copy. CMake now stages
+that imported target explicitly and includes its licence in release staging.
+Five actual GUI shutdowns under CDB pass; 30-second RDS reception/parity passes;
+279 core/Qt tests pass. T-0026 closed for the reproduced local failure. P25 and
+application shutdown logic untouched. Added reusable native and CDB test tools.
+Next decoder remains SSTV (T-0022). No push, installer, or release publication.
+
+## 2026-09-17 - RDS live gate passes; high gain isolated
+
+Independent RTL gain comparison isolated overload: 40.2 dB clips ~32% of raw
+components and decodes no groups; 19.7 dB clips none and decodes 53 clean groups.
+Actual GUI at requested 20 dB passes twice with 396/261 groups and correct
+station metadata. Adapter/native agreement holds; T-0021 complete. Prior gain
+restored after experiments, no all-mode gain or DSP changes. Added temporary
+gain automation, cu8 analysis/tests and explicit real-hardware acceptance.
+One earlier successful-reception run crashed at shutdown. CDB probes did not
+reproduce unhandled fault; T-0026 remains open for stack-based diagnosis.
+Full core/Qt suite passes. No release/push. SSTV remains next decoder milestone.
+
+## 2026-09-17 - Live RDS adapter ruled out on identical input
+
+Added opt-in, bounded same-input parity probe, tested it with recorded fixtures
+and actual GUI reception. Native/adapted outputs match on all 1,446 live blocks;
+both fail station acquisition. Captured five seconds of gapless IQ and performed
+independent offline FM demod: still no groups. Known-good reference decodes at
+the measured live MPX rate. Exact results in BUILD_NOTES; no guessed RF cause,
+DSP tweaks or station-success claim. Added reusable inspection/validation tools.
+Release build and full core/Qt suite pass. Antenna/cabling question outstanding.
+P25 unchanged, no release or push. RDS live acceptance remains open.
+
+## 2026-09-17 - Shared receive decoder contract, live gate open
+
+DEC-0085 adds a bounded versioned receive interface and immutable registry for
+the existing RDS, CTCSS and DCS backends. RDS GUI and MPX file replay now use
+the same adapter; native versus adapted RDS matches at every recorded block.
+Source/domain/version errors reset state instead of inheriting another stream.
+Added actual CLI registry diagnostics, contract documentation and parity tests.
+Release build, 279 core/Qt cases, CLI checks and four GUI layout checks pass.
+Two live RDS checks failed to identify the expected station, so T-0021 remains
+open. Evidence and the next same-input comparison are in BUILD_NOTES/ISSUES.
+No speculative DSP correction, P25 processing change, release or push.
+
+## 2026-09-17 - Experimental DCS integrated
+
+Implemented native Golay-valid repeated-word DCS recognition, cyclic/polarity
+aliases and bounded nominal-rate discriminator recovery. Uses the existing
+NFM raw tap independently of speaker processing, with above-spectrum status and
+GUI diagnostic snapshots. Added CLI WAV/FLAC and bitstream diagnostics, all-code
+tests and independent Python fixture integration. Eight DCS cases pass, full
+274-case core/Qt suite passes, four GUI layouts pass, live CTCSS/DCS sample
+counts match exactly. No known-code RF claim; user's radio check remains deferred.
+Next coding milestone is T-0021 shared decoder contracts/registry, then SSTV.
+P25 behavior unchanged. No release, push or dependency install performed.
+
+## 2026-09-17 - SSTV and satellite scope recorded
+
+Added user-requested SSTV and public weather/amateur satellite roadmap with
+explicit tasks, delivery order, backend evaluation, Images/Satellites workspaces,
+pass/Doppler/device scheduling and per-link validation gates. Separated archived
+NOAA APT formats from live targets; no all-satellite coverage claim. Reviewed
+upstream SatDump, gr-satellites and QSSTV sources. Planning-only pass: no RX/DSP
+code changed, no dependencies installed, no build or hardware test claimed.
+
+## 2026-09-17 - NFM tone identification and continuity
+
+Implemented experimental informational CTCSS, CLI replay diagnostics and GUI
+status. Real hardware testing caught defects absent from original fixed-parameter
+fixtures: bandwidth data resets, inherited speech AFC resets and bandwidth-only
+GUI cursor resets. Added varying-BW/AFC regressions, isolated the NFM data mixer,
+and preserved analog NFM cursor continuity. Final live test: 35 completed windows,
+three startup resets, no subsequent resets. 265 core/Qt cases pass. Speech output
+parity tested; P25 paths not changed. User deferred independent known-tone test.
+Started DCS with an independent standard-codeword/bit-order/polarity oracle and
+eight ideal WAV fixtures. Live DCS is not implemented; clock/alias/noise validation
+is the next gate. No release or GitHub push requested/performed this pass.
+
+## 2026-09-17 - Automatic RDS and waterfall controls
+
+Implemented user-requested automatic WFM RDS status, visible frequency-aligned
+band sections and release-committed waterfall drag tuning. RX worker uses source
+epoch/cursor evidence for data-only resets; UI never reads mutable codec state.
+Fixed observed stale frequency input on waterfall/automated tuning. Added
+repeatable bounded live hardware GUI test and RDS self-test diagnostics.
+257 native/Qt cases, four actual GUI layouts and CLI fixtures pass; live GUI
+decoded 402 RDS groups with verified expected i98FM PI/PS and song radiotext.
+P25/audio processing left unchanged. Wider RF/Unicode/registry work remains.
+
+## 2026-09-17 - Recorded RDS DSP milestone
+
+Continued T-0018 with pinned Redsea carrier/timing recovery and liquid-dsp behind
+a versioned C ABI DLL; native decoder resets all DSP state on sample provenance
+changes and bounds file/input sizes. Added MPX CLI and recorded upstream fixture.
+Reproduced/fixed optional MPX tap chunk discontinuity using its own causal filter
+and persistent decimation grid; legacy speech/P25 paths left unchanged this pass.
+Release build, 254 core/Qt cases and actual CLI smoke/error tests pass. Vendor
+notices, submodule metadata and deploy/install licenses updated. No push/release.
+Next: live source-loss propagation, receiver capability routing and RDS GUI dock,
+then independent RF identity verification; T-0018 remains in progress.
+
+## 2026-09-17 - User-approved move to RDS
+
+Deferred P25 optimisation as requested, without closing its measured gaps.
+Completed first RDS protocol milestone: pinned redsea sync/CRC/FEC, complete
+group metadata, native offline CLI and optional pre-audio WFM multiplex tap.
+Tests exposed and fixed Windows quoted-path parsing and a text-segment reset
+ordering defect before completion. Release and all tests pass. Deployment
+rules include upstream notices. Live carrier/timing demodulation, extended
+text and GUI display remain explicitly unimplemented, tracked by T-0018.
+
+## 2026-09-17 - Jitter repair verification, remaining parity gap
+
+Verified DEC-0077 resampler partition fix, spectrum dB label mapping and Qt
+settings isolation. Core/workspace suites and four GUI launches pass. Real
+TG30003 replay retains frame count and has no GUI tail loss, but the actual
+PCM comparison uncovered a GUI/CLI mismatch despite equal sample counts.
+Recorded this separately from live producer gaps rather than asserting P25
+completion. No decoder/security threshold changes and no release this pass.
+Next decoder remains RDS under WORKSPACE_AND_DECODERS.md; do not advertise
+it as implemented or close P25 acceptance based on STT/duty alone.
+
+## 2026-09-17 - Location-based receive profiles and waterfall context
+
+Completed infrastructure REQ-BP.1 / DEC-0076 with AU/GB/US partial profiles,
+region/country/location selector, bounded local JSON import/export, persistent
+explicit selection, AUTO priors and waterfall service/decoder hints. Digital
+hints do not pretend to be implemented decoders. Fixed broad airband AM prior
+including navigation and added AU CB data exception. Old unverified generic
+HF priors are not silently asserted to apply nationally; coverage is tracked
+under open T-0015 / REQ-BP.2. No IP geolocation or decoder trust changes.
+Release build, 244 tests, four GUI cases and CLI/GUI P25 byte-equivalence pass.
+No commit, GitHub push or release asset was requested/published in this pass.
+
+## 2026-09-17 - Dockable workspace foundation
+
+Completed REQ-UI.1 / DEC-0075: existing receiver controls remain central;
+saved frequencies, P25, receiver management and capture/display moved into
+named detachable/tabbed docks. Added four layout presets, visibility/lock,
+save/restore/reset and normal-close persistence. Automation does not overwrite
+saved layout. Added workspace/size/screenshot CLI arguments and GUI QA script.
+238 cases pass; real GUI matrix reviewed; CLI/GUI reference P25 WAVs identical.
+No P25 decoder changes or publication. Decoder registry/RDS deliberately remain
+next, rather than advertising an unimplemented module. Roadmap and usage:
+`WORKSPACE_AND_DECODERS.md`.
+
 ## 2026-09-17 - v0.2.55 packaging
 
 User requested source and release assets. Version bumped to 0.2.55; full tests
@@ -907,3 +1055,12 @@ for remote testers with honest remaining-gap notes.
 
 See `docs/p25_phase2_regression_tracker.md` and `src/*NOTES.md` for July–August
 2026 hotfix archaeology. New facts go here.
+# 2026-09-17 - 0.2.56 release preparation (DEC-0090)
+
+Accumulated workspaces, band plans, RDS/tone adapters, diagnostic automation
+and configured RTL runtime are ready for tester packaging. Release helper now
+checks commands and actual branch, signing preserves the trust anchor, and
+portable/manifest verification has negative tests. README and roadmap updated;
+SSTV/satellite are not implemented. 279 C++/Qt cases, four CLI gates, four GUI
+layouts and live GUI RDS under CDB pass. Source commit precedes signed packaging;
+publication and downloaded-asset verification are separate remaining gates.

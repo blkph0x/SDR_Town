@@ -7,6 +7,17 @@
 
 enum class DemodMode { NFM, WFM, AM, USB, LSB, CW, AUTO };
 
+// Pre-audio FM discriminator output. WFM uses 75 kHz deviation normalization;
+// NFM uses the same channel-bandwidth-derived normalization as its audio path.
+// Caller owns the block; no queue, callbacks or audio-path dependency.
+struct FmMultiplexBlock {
+    std::vector<float> samples;
+    double sampleRate = 0, targetHz = 0;
+    uint64_t epoch = 0, firstSample = 0;
+    bool discontinuity = true;
+    uint32_t resetReasons = 0; // continuity, explicit DSP, mode, rate, BW, tune, FIR length.
+};
+
 struct P25ControlCandidate {
     double freqHz = 0.0;
     double bandwidthHz = 0.0;
@@ -72,16 +83,27 @@ public:
                                          size_t target_audio_samples = 0,
                                          double outputRate = 48000.0,
                                          double externalSquelchLevelDb = std::numeric_limits<double>::quiet_NaN(),
-                                         bool audioLpfEnabled = true);
+                                         bool audioLpfEnabled = true,
+                                         FmMultiplexBlock* multiplex = nullptr,
+                                         double dataIdentityHz = std::numeric_limits<double>::quiet_NaN());
 
     // Explicit reset (call on large freq jump or mode switch if you want to be sure).
     void resetState();
+    void resetMultiplexState() { mpxContinuous = false; } // Data-only source gap.
 
     // Public: force immediate squelch gate reset (bypass 0.3s hang) when user explicitly raises the sq threshold.
     // Called from Receiver helper, main GUI squelchSpin valueChanged propagation, and CLI "squelch" command.
     void resetSquelchGate() { squelchGateNeedsReset = true; }
 
 private:
+    bool mpxContinuous = false;
+    double mpxMixerPhase = 0;
+    DemodMode mpxMode = DemodMode::AUTO;
+    uint64_t mpxEpoch = 0, mpxSamples = 0;
+    double mpxRate = 0, mpxInputRate = 0, mpxBandwidth = 0, mpxTarget = 0, mpxCenter = 0;
+    std::vector<std::complex<float>> mpxDelay;
+    size_t mpxWrite = 0, mpxPhase = 0;
+    std::complex<float> mpxPrevious{1, 0};
     // All previous global/static DSP state moved here (one set per Demodulator instance).
     std::complex<float> prev{1,0};
     double ph = 0;

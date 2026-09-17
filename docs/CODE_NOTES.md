@@ -1,5 +1,112 @@
 # Code notes (tree map)
 
+DEC-0090: scripts/release.ps1 checks native exit status, clean source, actual
+branch, CTest and signed packages. sign_update_manifest.ps1 rejects trust-anchor
+mismatch rather than rewriting it during ordinary signing. verify_release.py
+checks hashes, embedded-key signature, portable runtime/paths and configured RTL.
+test_verify_release.py tests happy-path layout and rejection cases with tiny
+fixtures; real release verification separately exercises OpenSSL. Windows CI
+explicitly builds the native core without the MinGW RDS DSP runtime; local full
+release gates include that backend. See RELEASING.md for publication semantics.
+
+DEC-0088/0089: CMake stage_rtl_runtime stages the configured shared RTL target
+instead of trusting stale output-folder DLLs; deploy includes package licence.
+probe_rtlsdr_lifecycle.py isolates native RX lifecycle from Qt/Soapy/DSP.
+test_gui_shutdown.py and test_rds_live_gui.py --debugger collect CDB exception
+stacks and reject first-chance AVs. See NATIVE_RUNTIME_QA.md for acceptance scope.
+
+DEC-0087: diagnose_rds_iq.py accepts explicit cf32_le/cu8 with whole-complex
+sample validation; test_rds_iq_diagnostic.py proves format parity and rejects
+malformed input. test_rds_live_gui.py --rf-gain uses the existing authenticated
+loopback API, restores prior gain, and requires real hardware in final results.
+
+DEC-0086: ReceiveDecoder.cpp optional RdsParity wrapper compares native and
+adapted live results with bounded counters and teardown-only JSONL output.
+test_rds_cli.py verifies it on recorded data; test_rds_live_gui.py --parity
+requires agreement AND reception. diagnose_rds_iq.py provides bounded offline
+FFT-channelized MPX evidence, with a synthetic normalization/invalid-input test.
+Neither changes production DSP settings.
+
+DEC-0085: ReceiveDecoder.h/cpp defines immutable compiled descriptors, borrowed
+versioned raw float blocks, typed snapshot variants and native adapters. Internal
+sdr_town_decoders links existing RDS/tone libraries and owns the high-level MPX
+file reader. Receiver's RDS session and CLI MPX file reader share this adapter;
+tone live paths and P25 are not migrated. CLI `decoders` lists requirements
+without module/hardware probing. See RECEIVE_DECODERS.md and adapter parity tests.
+
+DEC-0084: DcsBitDecoder generates Golay-valid codewords for 105 reference
+payloads, indexes physical inversion/cyclic aliases and requires repeated words.
+DcsDecoder owns eight bounded timing hypotheses and thread-safe snapshots.
+GUI NFM raw-data branch feeds both CTCSS and DCS; speaker/P25 processing does
+not use their results. RdsStatusWidget presents equivalent DCS labels and hides
+stale data. CLI `tones dcs` / `tones dcs-bits` and test_dcs_cli.py provide bounded
+offline diagnostics. No new third-party dependency or copied decoder algorithm.
+
+DEC-0082: NFM data tap has an independent phase-continuous oscillator; speech
+AFC threshold resets do not create data epochs. Same-rate/length bandwidth
+updates retain IQ history. Explicit source/retune reset still resets the data
+path. Analog NFM bandwidth-only GUI changes no longer discard the input cursor.
+First 32 data epochs log reset reason bits; bounded startup diagnostics do not
+log per-sample data. scripts/test_dcs_reference.py is an independent protocol
+oracle and ideal waveform generator, NOT an implemented DCS receiver.
+
+DEC-0081: CtcssDecoder (sdr_town_tones) is a single-owner, bounded streaming
+Goertzel identifier with locked snapshot publication and WAV/FLAC diagnostics.
+Demod's isolated FM tap now accepts NFM plus explicit nominal channel identity
+for AFC continuity. GUI analog worker routes NFM raw data to CTCSS, WFM to RDS;
+P25 branches unchanged. Above-spectrum status and GUI diagnostic JSON expose
+CTCSS. CLI `tones file` is offline and does not enumerate/open radio hardware.
+
+DEC-0080: Receiver owns RdsMpxDecoder on existing DSP worker; WFM obtains IQ
+provenance from getNewIQWindowForReceiver and resets only data-tap state on gaps.
+RdsStatusWidget displays plain-text confirmed metadata, clears on retune/inactive
+mode and hides stale identity. GUI self-test JSON contains RDS diagnostics.
+visibleBandSections resolves/clips priority overlaps, cached by SpectrumWidget.
+Waterfall drags freeze the frequency transform and commit one tune on release.
+
+DEC-0079: RdsDspAbi and src/rds_backend isolate pinned Redsea/liquid-dsp in a
+MinGW C ABI DLL. RdsMpxDecoder owns one decoder, recreates on provenance changes,
+rejects nonfinite/unbounded input and publishes mutex-protected snapshots.
+RdsMpxFile reads bounded mono MPX through existing miniaudio. `rds mpx` is an
+offline CLI diagnostic. Demod's optional MPX branch now has separate causal
+filter and decimation history; legacy speech/P25 processing is unchanged.
+cmake/RdsBackend.cmake builds/copies the DLL beside native app and test binaries.
+
+DEC-0078: RdsDecoder wraps pinned redsea BlockStream/group (sdr_town_rds static
+library). API takes differential-decoded bits, emits only complete validated
+groups, and bounds station text assembly. Tests use upstream reference bits,
+independent polynomial-generated groups and corruption fixtures. CliApp's
+read-only `rds bits` command parses bounded files and returns a JSON snapshot.
+Demod's optional FmMultiplexBlock branches before speech DSP with explicit
+sample-rate/epoch semantics and no queue. No live RDS consumer yet. Vendor
+license/source notices are included by deploy and install rules.
+
+DEC-0077: P25AudioResampler now owns the extracted stateful PCM interpolation
+function. The two-input-sample causal delay removes block-tail future-sample
+clamping; phase, sample count and DC history remain persistent. Regression
+test: test_p25_audio_resampler.cpp. No analog DSP or P25 security changes.
+compare_pcm_wav.py checks actual normalized WAV samples, not container hashes;
+test_compare_pcm_wav.py covers format equivalence and malformed input.
+
+DEC-0076 / REQ-BP.1: `BandPlan` provides immutable country/local profiles,
+atomic shared snapshots, priority/specificity lookup and bounded JSON validation.
+`BandPlanDialog` handles selection, import/export and explicit persistence.
+`SpectrumWidget` overlays profile/service hints and visible service boundaries;
+`MainWindow` supplies actual monitor frequency, menu/button and visibility.
+Existing AUTO selection and classifier priors query the catalog by value.
+CLI `bandplans list/select` and GUI `--gui-bandplan` expose the same catalog.
+`test_bandplan.cpp` covers bounds, ambiguity, hostile imports and concurrency;
+the Qt test target covers preview/Apply/cancel and temporary settings isolation.
+Source/coverage limitations and schema: `BAND_PLANS.md`. No P25 gates changed.
+
+DEC-0075 / REQ-UI.1: `WorkspaceLayout` owns named dock registration, preset
+visibility/tab arrangement, versioned QSettings persistence and View actions.
+`MainWindow` reparents the existing widgets only; receiver signal connections
+and DSP workers are unchanged. `CliApp` parses workspace/size/screenshot flags;
+the GUI saves its own widget image for QA. Tests: `test_workspace.cpp` (separate
+Qt Widgets/Catch executable) and `scripts/test_workspace_gui.py` (actual GUI,
+four presets, startup report + screenshots). No new decoder dependency added.
+
 DEC-0074: `AudioEngine::RingBuffer::ConsumerLease` serializes callback read
 cursor commits with exceptional clear/bridge-discard operations. Callback
 tries once and emits silence on contention; control threads may yield while

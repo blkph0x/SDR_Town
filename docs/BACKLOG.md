@@ -5,6 +5,14 @@ for humans/agents. Update status in the same commit as the work.
 
 Status: `open` | `in_progress` | `blocked` | `done`
 
+## User-authorized receive expansion (2026-09-17)
+
+User explicitly deferred further P25 optimization and requested independent RX
+features. This does not close the historical P25 acceptance gates below. Current
+feature queue: T-0020 DCS, T-0021 shared decoder contracts, T-0022 SSTV, T-0025
+AX.25/APRS, then T-0023/T-0024 satellite planning/weather RX. See
+SATELLITE_AND_SSTV.md. Preserve the tested P25 path; no new TX scope.
+
 ---
 
 ## P0 — Product gate (clear Phase 2 continuous audio)

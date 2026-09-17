@@ -1,0 +1,28 @@
+cmake_minimum_required(VERSION 3.25)
+project(sdrtown_rds_dsp LANGUAGES C CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+get_filename_component(ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(BUILD_AUTOTESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
+set(ENABLE_SIMD OFF CACHE BOOL "" FORCE)
+set(FIND_SIMD OFF CACHE BOOL "" FORCE)
+set(FIND_FFTW OFF CACHE BOOL "" FORCE)
+set(FIND_THREADS OFF CACHE BOOL "" FORCE)
+set(ENABLE_LOGGING OFF CACHE BOOL "" FORCE)
+add_subdirectory("${ROOT}/external/liquid-dsp" liquid)
+# Upstream links POSIX libc explicitly; MinGW uses its normal CRT linkage.
+set_property(TARGET liquid-static PROPERTY INTERFACE_LINK_LIBRARIES "")
+set_property(TARGET liquid-static PROPERTY LINK_LIBRARIES "")
+add_library(sdrtown_rds_dsp SHARED RdsDspAbi.cpp
+    "${ROOT}/external/redsea-block/src/dsp/subcarrier.cc"
+    "${ROOT}/external/redsea-block/src/dsp/liquid_wrappers.cc")
+target_include_directories(sdrtown_rds_dsp PRIVATE "${ROOT}/include" "${ROOT}/external/redsea-block"
+    "${CMAKE_CURRENT_BINARY_DIR}/liquid")
+target_compile_definitions(sdrtown_rds_dsp PRIVATE MODEM_IS_MODEMCF SDRTOWN_RDS_DSP_BUILD)
+target_link_libraries(sdrtown_rds_dsp PRIVATE liquid-static)
+target_link_options(sdrtown_rds_dsp PRIVATE -static -static-libgcc -static-libstdc++)
+set_target_properties(sdrtown_rds_dsp PROPERTIES PREFIX "")
