@@ -49,6 +49,12 @@ Five real-RX GUI cycles under CDB and 30-second live RDS parity/reception pass;
 Generic R820T acceptance, not a universal driver/hardware guarantee.
 
 T-0022 | in_progress | SSTV RX | Robot 36, Martin M1/M2, Scottie S1/S2 and PD120
+DEC-0093 active: nonmodal recorded-image GUI on shared CLI decoder, responsive
+single worker, cancellation/close safety, previews and independent Qt replay tests.
+GUI sub-milestone implemented/tested: Tools window, auto/manual modes, PNG list,
+partial status, preview, output-folder access. Real Robot36/Martin1 GUI/direct
+pixel parity, cancellation/close/teardown and regressions pass (BUILD_NOTES).
+Published 0.2.57 remains offline CLI only; next is bounded live/progressive input.
 reference fixtures, VIS/line sync, slant handling, image preview/gallery/export.
 Depends on T-0021; see SATELLITE_AND_SSTV.md / DEC-0083. DEC-0091 starts bounded
 recorded-audio VIS identification and independent fixture validation; image

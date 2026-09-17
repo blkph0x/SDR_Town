@@ -2,6 +2,17 @@
 
 Newest at the top.
 
+## 2026-09-18 - Recorded SSTV GUI checkpoint
+
+DEC-0093 adds Tools > SSTV Recorded Images on the tested CLI file decoder.
+Off-thread single-job processing, cancellation/close ownership, full-resolution
+PNG results and scaled preview are implemented. Actual independent Robot36/M1
+recordings match direct output through the Qt window; responsive timer and both
+window-size screenshots checked. Core/Qt and CLI regression tests pass.
+Documentation distinguishes unreleased GUI source from published 0.2.57 assets.
+P25/DSP unchanged. Next: bounded live SSTV input and progressive image events,
+then qualify more modes and advance AX.25/public satellite work.
+
 ## 2026-09-17 - Recorded SSTV images and 0.2.57 preparation
 
 Continued T-0022 with native VIS diagnostics and an isolated pinned MIT image

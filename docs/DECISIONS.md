@@ -2,6 +2,24 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0093 - Recorded SSTV GUI on the shared file decoder (2026-09-17)
+
+T-0022 continues with a nonmodal Tools window, one offline job per window and
+one window per main application. Reuse DEC-0092 decoding unchanged; add an
+optional cooperative cancellation callback, checked during PCM loading and
+helper waits. Kill/reap the owned helper on cancellation. Cancellation ends
+before output publication; once saving begins finish the bounded four-image
+transaction rather than presenting a half-written result as cancelled.
+QThread owns file decode and QProcess, never GUI or receiver/DSP callbacks.
+GUI receives completion on its owner thread, keeps original-resolution images
+and scales only previews. Open source, new output directory, mode selection,
+decode/cancel, result list and output-folder action. Partial and no-image states
+remain explicit. Close while running defers until worker stops; destruction
+requests cancellation and joins, never terminates a thread.
+Test real Qt widgets with a deterministic worker for single-job/close/error
+cases, and the actual pinned decoder with independent recordings. No live SSTV
+or P25 modification, no fabricated percentage progress or quality score.
+
 ## DEC-0092 - Isolated recorded SSTV image backend (2026-09-17)
 
 T-0022 next gate: evaluate MIT-licensed unexcellent/sstv commit

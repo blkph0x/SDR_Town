@@ -2,6 +2,27 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-18 - DEC-0093 recorded SSTV GUI
+
+Windows/MSVC 14.44 /Qt 6.11.1. Added nonmodal window and worker cancellation
+to shared file decoder. Initial application build passes; Qt test build fails
+C3861 CHECK_THROWS_WITH because Catch2 matchers header was missing. Explicit
+header added, rebuild passes. Review also fixed cramped list labels and parent
+ownership of finished thread objects. No protocol/backend timing changes.
+
+Final Release build passes. CTest: 275 core cases /189730 assertions, 13 Qt
+cases /109 assertions pass; one independent-recording case is skipped unless
+its fixture environment is supplied. scripts/test_sstv_gui.py supplies it for
+Robot36 and Martin1 separately: both pass 10 assertions, GUI output pixels
+equal direct decoder, UI timer advances, image preview nonempty. Screenshots
+reviewed at 820x600 and 560x420. Worker cancellation/close, parent teardown,
+one-job gating, invalid input, failed/empty result states covered separately.
+Actual CLI SSTV images/negative/resource tests still pass; RDS and registry
+CLI pass. Main GUI four-workspace automation passes with no startup errors.
+Version remains 0.2.57 plus unreleased GUI source; published assets unchanged.
+No live SSTV/progressive acquisition, clean-machine qualification or additional
+P25 acceptance claimed. T-0029 existing P25 verifier failures remain open.
+
 ## 2026-09-17 - DEC-0092 offline SSTV images / release 0.2.57 preparation
 
 Windows/MSVC 14.44, Qt 6.11.1; repo-local Rust 1.88.0 installed from official

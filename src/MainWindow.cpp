@@ -1,4 +1,6 @@
 #include "MainWindow.h"
+#include "SstvWindow.h"
+#include "SstvImageFile.h"
 #include "BandPlanDialog.h"
 #include "RdsStatusWidget.h"
 
@@ -11336,6 +11338,11 @@ void MainWindow::createMenus()
             QSettings().setValue("bandplan/overlay", enabled);
         });
         QMenu* toolsMenu = menuBar()->addMenu("&Tools");
+        toolsMenu->addAction("&SSTV Recorded Images...",this,[this] {
+            auto* window=findChild<SstvWindow*>("sstvWindow");
+            if(!window) {window=new SstvWindow(decodeSstvImageFile,this); window->setObjectName("sstvWindow");}
+            window->show(); window->raise(); window->activateWindow();
+        });
         toolsMenu->addAction("&Decode Log / Transcript...", this, [this]() {
             showTranscriptWindow();
         });

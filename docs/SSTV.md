@@ -5,6 +5,17 @@ classic VIS inspection. No live SSTV, GUI preview, or demodulator changes yet.
 
 ## Image decoding
 
+Development source after 0.2.57: **Tools > SSTV Recorded Images** opens a
+nonmodal window. Select a mono recording, give a new output directory (parent
+must exist), choose Automatic/Robot36/Martin1 and Decode. The image list shows
+complete/partial status and row counts; selecting an item previews the original
+PNG without changing the saved pixels. Open output accesses PNGs and the report.
+One job runs at a time off the GUI thread. Cancel and closing the window request
+cooperative cancellation and reap its helper. Cancellation is checked before
+publishing outputs; if saving already began, the bounded save finishes instead.
+The rest of the receiver is not retuned, muted or reconfigured by this window.
+This GUI is not in the published 0.2.57 assets. No progressive/live image claim.
+
 ```powershell
 build/bin/Release/SDR_Town.exe --cli --no-control-server --cmd 'sstv decode "C:\recordings\sstv.wav" "C:\recordings\new-images" auto'
 ```
@@ -22,6 +33,13 @@ The app-adjacent helper has no network or radio access and runs with a 120-secon
 deadline, 64-KiB diagnostic limit and maximum four pictures per job. Unsupported
 modes fail explicitly. The CLI intentionally waits for this offline job; it is
 not connected to a GUI/live audio callback. Helper is included in release assets.
+
+GUI development regression: `python scripts/test_sstv_gui.py` loads the two
+independent references into real Qt windows and checks saved-image parity with
+direct decoding, event-loop responsiveness and preview screenshots. Core Qt
+tests cover cancellation/close/teardown and errors without reference downloads.
+The recording-dependent test is explicitly skipped unless the harness supplies
+`SDR_TOWN_SSTV_GUI_FIXTURE`; no skipped fixture is counted as reception proof.
 
 Backend: MIT [unexcellent/sstv](https://github.com/unexcellent/sstv/tree/16bf34aac81b0041f5fdce52a1aef64eea0d5f6e),
 pinned with Cargo.lock (libm 0.2.16). Build with Rust 1.88.0 and
@@ -98,6 +116,6 @@ and start/stop framing. This proves this header case, not the image or a live pa
 Synthetic tests alone are not independent reception proof. Live RF acceptance,
 fading and broad offset/noise characterization remain open.
 
-Next: GUI preview/gallery and cancellable replay, then bounded live demodulated-
-audio routing. Qualify Martin2/Scottie/PD modes with independent pictures before
+Next: bounded live demodulated-audio routing and progressive image display.
+Qualify Martin2/Scottie/PD modes with independent pictures before
 advertising them. Satellite scheduling and public/weather payload decoding follow.

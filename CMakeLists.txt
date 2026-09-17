@@ -82,6 +82,8 @@ include(cmake/RdsBackend.cmake)
 
 set(SDR_TOWN_SOURCES
     src/SstvImageFile.cpp
+    src/SstvWindow.cpp
+    include/SstvWindow.h
     src/main.cpp
     src/P25VoiceTiming.cpp
     include/P25VoiceTiming.h
@@ -397,8 +399,10 @@ if(BUILD_TESTS)
   add_test(NAME UnitTests COMMAND sdr_town_tests)
 
   add_executable(sdr_town_workspace_tests tests/test_workspace.cpp src/WorkspaceLayout.cpp
+    tests/test_sstv_gui.cpp tests/sstv_miniaudio.cpp src/SstvWindow.cpp include/SstvWindow.h src/SstvImageFile.cpp
     src/BandPlan.cpp src/BandPlanDialog.cpp src/SpectrumWidget.cpp include/SpectrumWidget.h src/RdsStatusWidget.cpp)
   target_include_directories(sdr_town_workspace_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_include_directories(sdr_town_workspace_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/external/miniaudio)
   target_link_libraries(sdr_town_workspace_tests PRIVATE Catch2::Catch2 Qt6::Widgets nlohmann_json::nlohmann_json)
   add_test(NAME WorkspaceTests COMMAND sdr_town_workspace_tests)
 

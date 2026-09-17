@@ -1,5 +1,13 @@
 # Code notes (tree map)
 
+DEC-0093: SstvWindow is a nonmodal recorded-audio window using one QThread job
+and the same SstvImageFile function as CLI. QProcess stays on that worker;
+only queued completion touches widgets. Optional cancellation is checked during
+input conversion, helper waits and before publication. Close waits asynchronously;
+parent destruction cancels/joins. MainWindow Tools reuses one window instance.
+Tests cover busy/close/cancellation/error states and actual-recording pixel parity
+using the same window class; scripts/test_sstv_gui.py supplies independent fixtures.
+
 DEC-0092: SstvImageFile.h/.cpp normalize bounded mono audio to LE16 temporary
 PCM, launch an app-adjacent helper via argument-array QProcess with deadline/log
 limits, validate schema/mode/row/RGB outputs, then save new-directory PNGs/report.

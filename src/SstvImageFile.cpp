@@ -22,7 +22,12 @@ constexpr auto revision="16bf34aac81b0041f5fdce52a1aef64eea0d5f6e";
 void require(bool ok,const char* message) { if(!ok) throw std::runtime_error(message); }
 }
 
-nlohmann::json decodeSstvImageFile(const QString& input,const QString& output,const QString& mode) {
+nlohmann::json decodeSstvImageFile(const QString& input,const QString& output,const QString& mode,
+                                  const std::function<bool()>& cancelled) {
+    const auto checkCancelled=[&] {
+        if(cancelled && cancelled()) throw std::runtime_error("SSTV decode cancelled");
+    };
+    checkCancelled();
     require(mode=="auto" || mode=="robot36" || mode=="martin1","Supported image modes: auto, robot36, martin1");
     const QFileInfo info(input);
     require(info.isFile() && info.size()<=128*1024*1024,"SSTV image input must be a file <=128 MiB");
@@ -54,6 +59,7 @@ nlohmann::json decodeSstvImageFile(const QString& input,const QString& output,co
     uint64_t total=0;
     QCryptographicHash pcmHash(QCryptographicHash::Sha256);
     for(;;) {
+        checkCancelled();
         ma_uint64 count=0;
         const auto status=ma_decoder_read_pcm_frames(&decoder,samples.data(),samples.size(),&count);
         require(status==MA_SUCCESS || status==MA_AT_END,"SSTV image audio read failed");
@@ -69,6 +75,7 @@ nlohmann::json decodeSstvImageFile(const QString& input,const QString& output,co
         pcmHash.addData(bytes); total+=count;
     }
     pcm.close();
+    checkCancelled();
     QProcess worker;
     worker.setProgram(helper);
     worker.setArguments({pcmPath,QString::number(rate),rgbPath,mode});
@@ -80,6 +87,10 @@ nlohmann::json decodeSstvImageFile(const QString& input,const QString& output,co
         worker.waitForFinished(50);
         stdoutBytes+=worker.readAllStandardOutput();
         stderrBytes+=worker.readAllStandardError();
+        if(cancelled && cancelled()) {
+            worker.kill(); worker.waitForFinished(5000);
+            throw std::runtime_error("SSTV decode cancelled");
+        }
         if(stdoutBytes.size()+stderrBytes.size()>65536 || elapsed.elapsed()>120000) {
             worker.kill(); worker.waitForFinished(5000);
             throw std::runtime_error("SSTV backend exceeded time/log limits");
@@ -117,6 +128,8 @@ nlohmann::json decodeSstvImageFile(const QString& input,const QString& output,co
         {"requestedMode",mode.toStdString()},{"pcmSha256",pcmHash.result().toHex().toStdString()},
         {"images",images},{"outputDirectory",QFileInfo(output).absoluteFilePath().toStdString()}};
     // No caller-visible output before all backend results pass validation.
+    // DEC-0093: cancellation is accepted until publication; finish saving once begun.
+    checkCancelled();
     require(QDir(QFileInfo(output).absolutePath()).mkdir(QFileInfo(output).fileName()),"Cannot create new SSTV output directory");
     for(size_t i=0;i<decoded.size();++i) {
         QSaveFile file(QDir(output).filePath(QString::fromStdString(images[i]["file"].get<std::string>())));
