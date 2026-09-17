@@ -440,5 +440,5 @@ audibly continuous speech. See DEC-0067 and the 20260917 forensic report.
 Observed: release helper ignored native failure status, hard-coded master,
 and signing rewrote the public trust anchor after building. Corrected with
 checked commands, current-branch publication and matching-key enforcement.
-Verification pending package/negative gates. Initial verifier used a Python
+Package/negative gates now PASS (BUILD_NOTES). Initial verifier used a Python
 API absent on this host; replaced with streaming hashing before publication.

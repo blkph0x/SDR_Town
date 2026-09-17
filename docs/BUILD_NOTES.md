@@ -20,6 +20,14 @@ native exit failure, real signing, unchanged embedded key, mismatch rejection.
 Initial diff check caught Markdown trailing spaces and signing EOF blank line;
 removed before commit. Packages/upload verification still pending at this entry.
 
+Packaging PASS: checked helper -SkipPush -SkipAssets rebuilt both test targets,
+reran CTest, Qt deployment, CPack NSIS, ZIP and standalone DLL. OpenSSL verified
+the detached manifest against the embedded key; all asset hashes and configured
+RTL runtime match. Installer 21069901 bytes, ZIP 28943502 bytes, DLL 49664 bytes.
+Extracted ZIP RDS/registry CLI and four workspace GUI tests PASS. PCM comparator
+five tests and independent IQ diagnostic tests PASS. Local asset hashes are in
+SHA256SUMS.txt; upload/download gate remains separate.
+
 ## 2026-09-17 - DEC-0088/0089 reproduced native fault and deployment fix
 
 Baseline CDB runs build/shutdown_probe_01..05.log: first four clean; fifth

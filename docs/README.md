@@ -37,3 +37,4 @@ These stay as capture archaeology. New work is ISSUES + DECISIONS + TASKS.
 
 See [RELEASING.md](RELEASING.md) for current packaging, signature, runtime and
 publication gates, and [SATELLITE_AND_SSTV.md](SATELLITE_AND_SSTV.md) for next work.
+Current tester release: [0.2.56 notes and validation scope](RELEASE_0.2.56.md).
