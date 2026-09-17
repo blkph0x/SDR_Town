@@ -1,8 +1,11 @@
 # Task list (canonical)
 
-T-0027 | in_progress | Release 0.2.56 | DEC-0090 checked packaging/publication,
+T-0027 | done | Release 0.2.56 | DEC-0090 checked packaging/publication,
 document current feature and validation scope, verify signed assets, push source
 and matching release. SSTV implementation remains T-0022, not a release claim.
+Published eight assets from tag v0.2.56 after draft upload and byte-for-byte
+SHA-256 comparison of every downloaded asset. Latest updater endpoint verified.
+Hosted CI is separate and was still running at publication; local gates passed.
 
 T-0021 | done | Shared decoder contracts/registry | Versioned capabilities,
 bounded per-stream input, explicit gaps and common CLI/GUI replay/live session.

@@ -28,6 +28,12 @@ Extracted ZIP RDS/registry CLI and four workspace GUI tests PASS. PCM comparator
 five tests and independent IQ diagnostic tests PASS. Local asset hashes are in
 SHA256SUMS.txt; upload/download gate remains separate.
 
+Publication PASS: source branch and annotated v0.2.56 tag pushed; draft release
+uploaded eight assets. Downloaded all eight and compared each SHA-256 with its
+local original: all match. Published as experimental Latest; public latest
+update.json reports 0.2.56/experimental. Hosted CI was still running, not counted
+as a passing gate. No installer upgrade on a clean remote machine was performed.
+
 ## 2026-09-17 - DEC-0088/0089 reproduced native fault and deployment fix
 
 Baseline CDB runs build/shutdown_probe_01..05.log: first four clean; fifth

@@ -1057,6 +1057,12 @@ See `docs/p25_phase2_regression_tracker.md` and `src/*NOTES.md` for July–Augus
 2026 hotfix archaeology. New facts go here.
 # 2026-09-17 - 0.2.56 release preparation (DEC-0090)
 
+Publication complete: https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.56
+Source tag 0acad74 includes all tested implementation and release evidence;
+follow-up documentation records upload verification. All eight downloaded assets
+match local hashes and the public updater endpoint serves 0.2.56 experimental.
+SSTV reference-fixture work remains the next implementation task.
+
 Accumulated workspaces, band plans, RDS/tone adapters, diagnostic automation
 and configured RTL runtime are ready for tester packaging. Release helper now
 checks commands and actual branch, signing preserves the trust anchor, and
