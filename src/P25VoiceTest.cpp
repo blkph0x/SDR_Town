@@ -2479,9 +2479,24 @@ void runP25ReplayVoiceTest(const P25ReplayCliArgs& argsIn)
             } else if (ordinalFrames < rawSpeakerFrames) {
                 ++speakerOrdinalPartialWindows;
             }
+            const bool speakerOrdinalKnownBefore = voiceTestSpeakerQueue.nextSpeechOrdinalKnown;
+            const int64_t speakerOrdinalBefore = voiceTestSpeakerQueue.nextSpeechOrdinal;
             const std::vector<float> speakerAudioForQueue =
                 p25Phase2SpeakerAudioForQueue(voiceTestSpeakerQueue, audio, audio.audio, phase2FrameSamples);
             const size_t filteredSpeakerFrames = speakerAudioForQueue.size() / phase2FrameSamples;
+            if (args.traceReplay) {
+                std::cout << "P25 speaker-frame audit window=" << voiceWindows
+                          << " expectedKnown=" << speakerOrdinalKnownBefore
+                          << " expectedBefore=" << speakerOrdinalBefore
+                          << " expectedAfter=" << voiceTestSpeakerQueue.nextSpeechOrdinal
+                          << " rawFrames=" << rawSpeakerFrames
+                          << " retainedFrames=" << filteredSpeakerFrames
+                          << " ordinals=";
+                for (const auto ordinal : audio.phase2EmittedSpeechOrdinals) {
+                    std::cout << ordinal << ',';
+                }
+                std::cout << '\n';
+            }
             if (rawSpeakerFrames > filteredSpeakerFrames) {
                 speakerTimelineDroppedFrames +=
                     static_cast<long long>(rawSpeakerFrames - filteredSpeakerFrames);

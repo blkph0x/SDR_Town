@@ -117,6 +117,7 @@ bool upsertP25KnownControlChannel(double freqHz, std::string label);
 
 bool p25ChannelIdentifierUsable(const P25ChannelIdentifier& identifier);
 
+
 P25ChannelIdentifier p25IdentifierFromEvent(const P25ControlEvent& event);
 
 bool upsertP25ChannelIdentifier(double controlFreqHz,

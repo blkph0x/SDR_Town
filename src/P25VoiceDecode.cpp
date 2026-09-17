@@ -1451,7 +1451,7 @@ void p25Phase2ResetVocoderForNewTalkspurt(Receiver& rx, const char* why, qint64 
     rx.p25SessionState.resampler = {};
     rx.p25SessionState.audioTail = {};
     rx.p25Phase2LastGoodPcm.clear();
-    p25Phase2ResetFrameSequencer(rx);
+    rx.p25SessionState.frameSequencer.resetForTalkspurt();
     rx.p25Phase2PreferredAmbeVariant = -1;
     rx.p25Phase2PreferredAmbeVariantHits = 0;
     rx.p25Phase2PreferredAmbeVariantMisses = 0;
@@ -1466,9 +1466,14 @@ void p25Phase2ResetVocoderForNewTalkspurt(Receiver& rx, const char* why, qint64 
 void p25Phase2ObserveTargetTalkspurtMac(Receiver& rx,
                                         const P25Phase2Burst& burst,
                                         bool targetSlot,
-                                        qint64 nowMs)
+                                        qint64 nowMs,
+                                        bool positionKnown,
+                                        uint64_t absoluteDibit)
 {
-    if (!targetSlot) return;
+    const bool boundary = burst.macPttSeen || burst.macEndPttSeen ||
+        burst.macIdleSeen || burst.macHangtimeSeen;
+    if (!targetSlot || !boundary || !positionKnown ||
+        !rx.p25SessionState.talkspurtOrder.acceptBoundary(absoluteDibit)) return;
     const bool spoken =
         rx.p25SessionState.sustain.hadSuccessfulEmit ||
         rx.p25Phase2CallHadSpeakerAudio;
@@ -1480,13 +1485,7 @@ void p25Phase2ObserveTargetTalkspurtMac(Receiver& rx,
     }
     if (!burst.macPttSeen) return;
     if (!spoken) return;
-    // Retransmitted MAC_PTT mid-talkspurt must not click-reset every hop.
-    constexpr qint64 kTalkspurtVocoderResetDebounceMs = 400;
-    if (rx.p25Phase2LastTalkspurtVocoderResetMs > 0 &&
-        nowMs >= rx.p25Phase2LastTalkspurtVocoderResetMs &&
-        (nowMs - rx.p25Phase2LastTalkspurtVocoderResetMs) < kTalkspurtVocoderResetDebounceMs) {
-        return;
-    }
+    // Capture position, rather than wall-clock replay speed, identifies a PTT.
     const char* why = rx.p25Phase2TalkspurtEndedPendingVocoderReset
         ? "mac-ptt-after-end"
         : "mac-ptt-talkspurt";
@@ -2119,7 +2118,7 @@ bool p25Phase2DualSlotUntrustedGarbleWindow(const P25VoiceAudioBlock& out) noexc
 // fold this into DualSlotUntrustedGarbleWindow — that path audio.clear()s the
 // hop and dropped 105622 duty to 0.38.
 bool p25Phase2PostEmitMixedMacDeadWindow(const Receiver& rx,
-                                               const P25VoiceAudioBlock& out) noexcept
+                                                const P25VoiceAudioBlock& out) noexcept
 {
     if (!rx.p25VoicePhase2) return false;
     if (!rx.p25SessionState.sustain.hadSuccessfulEmit &&
@@ -2198,6 +2197,50 @@ bool p25Phase2SameCallSelectedTimeslotContinuationSafe(const Receiver& rx,
     // late-entry AMBE was merged into a dual-slot window.
     return out.phase2CurrentFeedTrustedTargetBurst &&
         out.phase2FedToMbelib <= out.phase2TargetVoiceCodewords + out.phase2ConcealmentFrames;
+}
+
+
+bool p25Phase2PostEmitSelectedSlotContinuationSafe(const Receiver& rx,
+                                                   const P25VoiceAudioBlock& out,
+                                                   const P25P2CallAudioKey& key,
+                                                   qint64 nowMs,
+                                                   bool requireFedAudio) noexcept
+{
+    if (!p25Phase2PostEmitMixedMacDeadWindow(rx, out)) return false;
+    if (!p25Phase2SameCallSelectedTimeslotContinuationSafe(rx, out, key, nowMs, requireFedAudio)) {
+        return false;
+    }
+    if (!out.phase2CurrentFeedTrustedTargetBurst ||
+        out.phase2PendingAmbeFramesReleased > 0 ||
+        out.phase2TargetEssEncrypted ||
+        out.phase2WrongSlot ||
+        out.phase2FeedOrderIssues > 0 ||
+        out.skippedEncrypted) {
+        return false;
+    }
+
+    const bool callAlreadyClear =
+        rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Clear ||
+        rx.p25SessionState.sustain.hadSuccessfulEmit ||
+        rx.p25Phase2CallHadSpeakerAudio ||
+        (rx.p25VoiceClearKnown && !rx.p25VoiceEncrypted);
+    if (!callAlreadyClear) return false;
+
+    const bool selectedStructureStillLocked =
+        out.phase2TargetMaskedBursts > 0 ||
+        out.phase2MaskedBursts > 0 ||
+        out.phase2SuperframeBursts > 0 ||
+        out.phase2ThisWindowTargetEssClear ||
+        out.phase2TargetEssKnown;
+    if (!selectedStructureStillLocked) return false;
+
+    // SDRTrunk keeps a dedicated P25P2AudioModule per selected timeslot.  A
+    // rolling IQ window can legitimately report a louder companion slot; once
+    // the current followed burst is explicitly labelled/trusted, the companion
+    // diagnostics must not starve that selected-slot module.
+    return p25Phase2CompanionSlotAccounted(out) &&
+        p25Phase2StrongSelectedSlotStructure(out) &&
+        p25Phase2WindowHasFreshTargetEvidence(out);
 }
 
 
@@ -2921,11 +2964,17 @@ P25VoiceAudioBlock applyP25Phase2SecurityAudioGate(Receiver& rx,
     const bool dualSlotUntrustedGateEffective =
         dualSlotUntrustedGate && !latchedSelectedDominantClearContinuation;
     // DEC-0012: fail-close trustedClear on post-emit mixed MAC-dead so
-    // explicit-clear / ESS-only cannot emit leftover unproven PCM. Do not
-    // fold this into dualSlotUntrustedGate — that path audio.clear()s the hop
-    // (105622 duty 0.38).
+    // explicit-clear / ESS-only cannot emit leftover unproven PCM.  The only
+    // escape is SDRTrunk-style selected-slot continuation: this window already
+    // fed current, labelled target PCM and the companion slot is accounted for.
+    // Do not fold this into dualSlotUntrustedGate — that path audio.clear()s
+    // the hop (105622 duty 0.38).
+    const bool postEmitSelectedContinuationSafe =
+        p25Phase2PostEmitSelectedSlotContinuationSafe(
+            rx, out, key, nowMs, /*requireFedAudio=*/true);
     const bool postEmitMixedMacDeadGate =
-        p25Phase2PostEmitMixedMacDeadWindow(rx, out);
+        p25Phase2PostEmitMixedMacDeadWindow(rx, out) &&
+        !postEmitSelectedContinuationSafe;
     const bool thisWindowTargetSessionClear =
         out.phase2ThisWindowTargetSessionAudioRelease &&
         !out.phase2TargetEssEncrypted;
@@ -2952,6 +3001,7 @@ P25VoiceAudioBlock applyP25Phase2SecurityAudioGate(Receiver& rx,
         !postEmitMixedMacDeadGate &&
         (latchClearSameCallSafe ||
          sameCallRecentClearSustain ||
+         postEmitSelectedContinuationSafe ||
          windowFreshClear ||
          explicitClearGrantVoiceRelease ||
          (rx.p25SessionState.sustain.hadSuccessfulEmit &&
@@ -4145,15 +4195,16 @@ size_t pushP25LiveStreamingAudio(AudioEngine* engine,
 
     const double outRate = std::max(8000.0, static_cast<double>(engine->getSampleRate()));
     const size_t jitterCap = engine->getJitterQueueCapFrames();
-    // Cold starts need a modest cushion so live Phase-2 does not open with
-    // one-word islands.  A mid-call underrun is allowed to restart faster, but
-    // 40 ms was too small for the observed 250-500 ms worker cadence and leaked
-    // disconnected syllables.  Hold roughly six AMBE frames before a hot
-    // restart; keep the value below conversationally noticeable trunking lag.
-    const size_t coldPrimeSamples = std::max(frameSize * 9,
-        static_cast<size_t>(outRate * 0.180)); // 180 ms startup cushion
-    const size_t hotPrimeSamples = std::max(frameSize * 6,
-        static_cast<size_t>(outRate * 0.120)); // 120 ms mid-call restart cushion
+    // Cold starts need enough selected-slot PCM to survive the measured live
+    // Phase-2 worker cadence.  Capture 20260916_092651 showed the healthy
+    // 240+280 ms traffic jobs producing valid PCM, but p50 DSP was ~553 ms
+    // while the old 120-180 ms prime opened as one-word islands.  A bounded
+    // 240-320 ms cushion is below the engine's 650 ms jitter cap and keeps the
+    // call delayed rather than chopped.
+    const size_t coldPrimeSamples = std::max(frameSize * 16,
+        static_cast<size_t>(outRate * 0.320)); // 320 ms startup cushion
+    const size_t hotPrimeSamples = std::max(frameSize * 12,
+        static_cast<size_t>(outRate * 0.240)); // 240 ms mid-call restart cushion
     // Use sample-accurate ring depth for pacing.  ringFillPercent is UI/log
     // telemetry and can be stale relative to the realtime audio callback; using
     // it as producer flow control under-pushed accepted Phase-2 speech when the
@@ -4169,16 +4220,24 @@ size_t pushP25LiveStreamingAudio(AudioEngine* engine,
     const size_t jitterSoftCap = (jitterCap > frameSize * 4)
         ? std::max(coldPrimeSamples, (jitterCap * 7) / 8)
         : std::max(coldPrimeSamples, static_cast<size_t>(outRate * 0.480));
-    // Hold ~180 ms of real selected-slot PCM so opposite-slot dwell and short
-    // worker holes cannot drain the ring to underrun between hops.
+    // Hold a deeper real selected-slot cushion so opposite-slot dwell and
+    // 500-600 ms worker holes cannot drain the ring to underrun between hops.
     const size_t targetQueuedSamples = std::min(jitterSoftCap, std::max(minPrimeSamples,
-        static_cast<size_t>(outRate * 0.180)));
-    // Validated selected-slot PCM must outrank the clock bridge.  The queue
-    // target stays low-latency, but fresh real PCM can use the audio engine
-    // jitter cap so it is not dribbled behind previously queued silence.
-    const size_t pushCeilingSamples = std::max(jitterSoftCap, jitterCap);
-    const size_t ringLowWaterSamples = std::max(frameSize * 6,
-        static_cast<size_t>(outRate * 0.120));
+        static_cast<size_t>(outRate * 0.420)));
+    // Validated selected-slot PCM must outrank the clock bridge, but live
+    // Phase-2 speech should not fill the entire engine jitter cap.  Capture
+    // 20260916_101342 showed clear decoded frames arriving while the ring was
+    // already 98-100% full; that delayed fresh speech behind older call
+    // context and surfaced as one clear talker with other emits blank/garbled.
+    // Keep about a half-second of live cushion and leave deterministic
+    // headroom for the next selected-slot AMBE frame group.
+    const size_t measuredCadenceCeiling = std::max(targetQueuedSamples,
+        static_cast<size_t>(outRate * 0.480));
+    const size_t pushCeilingSamples = jitterCap > 0
+        ? std::min(jitterCap, measuredCadenceCeiling)
+        : measuredCadenceCeiling;
+    const size_t ringLowWaterSamples = std::max(frameSize * 12,
+        static_cast<size_t>(outRate * 0.240));
     const size_t maxPendingSamples = std::max(pushCeilingSamples,
         static_cast<size_t>(outRate * 0.650)); // bounded producer-side stash
     if (realAudioReady) {
@@ -4201,11 +4260,7 @@ size_t pushP25LiveStreamingAudio(AudioEngine* engine,
     // re-chunked a live stream that already arrived as 20 ms AMBE frames.
     const size_t minFreshPushSamples = frameSize;
 
-    const bool ringAlreadyPrimed = queuedNow >= minPrimeSamples;
-    const bool forcePrimeFromFreshAudio =
-        realAudioReady && queuedNow + pending.size() >= minPrimeSamples;
-    if (!ringAlreadyPrimed && !forcePrimeFromFreshAudio &&
-        queuedNow + pending.size() < minPrimeSamples) {
+    if (p25SpeakerNeedsStartupPrime(queuedNow, pending.size(), minPrimeSamples)) {
         if (pending.size() > maxPendingSamples) {
             pending.erase(pending.begin(),
                 pending.end() - static_cast<std::ptrdiff_t>(maxPendingSamples));
@@ -4481,13 +4536,13 @@ size_t pushP25Phase2PlayoutBridge(AudioEngine* engine,
     (void)ringFillPercent;
     size_t queuedNow = engine->getRingQueuedSamples();
 
-    const size_t bridgeTargetSamples = std::max(effectiveFrameSize * 4,
-        static_cast<size_t>(outRate * 0.080));
+    const size_t bridgeTargetSamples = std::max(effectiveFrameSize * 16,
+        static_cast<size_t>(outRate * 0.320));
     if (queuedNow + pending.size() >= bridgeTargetSamples) return 0;
 
     const size_t deficit = bridgeTargetSamples - queuedNow - pending.size();
-    const size_t maxBridgeSamples = std::max(effectiveFrameSize,
-        static_cast<size_t>(outRate * 0.040));
+    const size_t maxBridgeSamples = std::max(effectiveFrameSize * 4,
+        static_cast<size_t>(outRate * 0.080));
     size_t bridgeSamples = std::min(deficit, maxBridgeSamples);
     bridgeSamples = (bridgeSamples / effectiveFrameSize) * effectiveFrameSize;
     if (bridgeSamples < effectiveFrameSize) return 0;
@@ -4545,22 +4600,10 @@ size_t p25TopUpSpeakerPlaybackRing(AudioEngine* engine,
                 p25Phase2NoteQueuedSpeakerPcmPushed(*rx, pushedRealAudio, nowMs);
             }
         }
-        // Real decoded selected-slot PCM always outranks the clock-only bridge.
-        // Only complete 20 ms frames are playable here. Resampler tails can
-        // leave a tiny sub-frame remainder (for example 1 sample after a
-        // 15361-sample block), and treating that as pending speech starves the
-        // ring between Phase 2 islands. Bridge only when no full real frame is
-        // ready, so synthetic clock audio still never jumps ahead of speech.
-        if (it->second.samples.size() < phase2FrameSamples) {
-            const size_t bridgePushed = pushP25Phase2PlayoutBridge(engine,
-                                                                   *rx,
-                                                                   it->second.samples,
-                                                                   rx->audioOutputIndices,
-                                                                   -1.0,
-                                                                   phase2FrameSamples);
-            totalPushed += bridgePushed;
-            if (bridgeAudioPushed) *bridgeAudioPushed += bridgePushed;
-        }
+        // Do not queue clock-only silence behind decoded speech. It extends
+        // the speech timeline and delays the next real frame even when the
+        // callback has not underrun. The callback already zero-fills a true
+        // underrun; protocol erasures remain part of the decoder's PCM.
     }
     return totalPushed;
 }
@@ -7763,53 +7806,19 @@ P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
         }
     }
 
-    // DEC-0062: MAC_PTT / END_PTT often ride FACCH/SACCH with no VCWs — the
-    // feed loop below skips empty bursts, so observe talkspurt edges here first.
-    if (rx.p25VoiceTdmaSlotKnown) {
-        const uint8_t followedGrantSlot =
-            static_cast<uint8_t>(rx.p25VoiceTdmaSlot & 0x01u);
-        for (const auto& burst : live.phase2Bursts) {
-            bool targetSlot = false;
-            if (burst.grantSlotKnown) {
-                uint8_t slot = static_cast<uint8_t>(burst.grantSlot & 0x01u);
-                if (phase2InvertSlotLabelsForWindow) slot ^= 0x01u;
-                targetSlot = (slot == followedGrantSlot);
-            } else if (burst.macPttSeen || burst.macEndPttSeen ||
-                       burst.macIdleSeen || burst.macHangtimeSeen) {
-                // Unlabelled MAC on a single-slot follow still bounds talkspurts.
-                targetSlot = !bothSlotsHaveVoiceInWindow;
-            }
-            p25Phase2ObserveTargetTalkspurtMac(rx, burst, targetSlot, nowMs);
-        }
-        if (rx.p25Phase2TalkspurtEndedPendingVocoderReset) {
-            bool anyFreshVoice = false;
-            for (const auto& burst : orderedBurstsForFeed) {
-                if (burst.voiceCodewords.empty()) continue;
-                if (burst.kind != P25Phase2BurstKind::Voice4 &&
-                    burst.kind != P25Phase2BurstKind::Voice2) {
-                    continue;
-                }
-                if (!burst.grantSlotKnown) continue;
-                uint8_t slot = static_cast<uint8_t>(burst.grantSlot & 0x01u);
-                if (phase2InvertSlotLabelsForWindow) slot ^= 0x01u;
-                if (slot != followedGrantSlot) continue;
-                anyFreshVoice = true;
-                break;
-            }
-            if (anyFreshVoice) {
-                constexpr qint64 kTalkspurtVocoderResetDebounceMs = 400;
-                if (rx.p25Phase2LastTalkspurtVocoderResetMs <= 0 ||
-                    nowMs < rx.p25Phase2LastTalkspurtVocoderResetMs ||
-                    (nowMs - rx.p25Phase2LastTalkspurtVocoderResetMs) >=
-                        kTalkspurtVocoderResetDebounceMs) {
-                    p25Phase2ResetVocoderForNewTalkspurt(
-                        rx, "post-end-voice", nowMs);
-                }
-            }
-        }
-    }
-
     for (const auto& burst : orderedBurstsForFeed) {
+        // Apply MAC transitions in the same capture order as speech. A prepass
+        // over all MAC messages applies a later END to earlier voice in a window.
+        if (rx.p25VoiceTdmaSlotKnown && burst.grantSlotKnown) {
+            uint8_t slot = static_cast<uint8_t>(burst.grantSlot & 0x01u);
+            if (phase2InvertSlotLabelsForWindow) slot ^= 0x01u;
+            const bool positionKnown = burst.streamBurstStartDibitKnown || haveAbsoluteDibits;
+            const uint64_t position = burst.streamBurstStartDibitKnown
+                ? burst.streamBurstStartDibit : windowStartAbsDibit + burst.dibitOffset;
+            p25Phase2ObserveTargetTalkspurtMac(rx, burst,
+                slot == static_cast<uint8_t>(rx.p25VoiceTdmaSlot & 0x01u),
+                nowMs, positionKnown, position);
+        }
         if (burst.voiceCodewords.empty()) continue;
         // Match sdrtrunk: only hard Voice2/Voice4 timeslots feed AMBE audio.
         // UnknownTimeslot-equivalent bursts remain diagnostics and never become
@@ -8234,14 +8243,20 @@ P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             out.phase2SameCallSelectedTimeslotContinuation = true;
         }
         // Continuation may still escape DualSlotUntrustedGarbleWindow (004206
-        // ESS-clear mixed hops). It must not escape DEC-0012: after the call
-        // has spoken, mixed MAC-dead bursts without this-burst MAC CRC stay
-        // out of mbelib (041716 seq=134).
+        // ESS-clear mixed hops). DEC-0012 still blocks unproven post-emit
+        // companion-louder windows, but the live feed must not starve the
+        // selected SDRTrunk-style timeslot module when the current burst is
+        // labelled, descrambled, same-call, and companion-accounted.
+        const bool selectedPostEmitContinuationForBurst =
+            dualSlotSelectedContinuationForBurst &&
+            p25Phase2PostEmitSelectedSlotContinuationSafe(
+                rx, out, audioKey, nowMs, /*requireFedAudio=*/false);
         const bool dualSlotUntrustedNow =
             !(burst.macCrcValid || burst.macCrcLock) &&
             ((p25Phase2DualSlotUntrustedGarbleWindow(out) &&
               !dualSlotSelectedContinuationForBurst) ||
-             p25Phase2PostEmitMixedMacDeadWindow(rx, out));
+             (p25Phase2PostEmitMixedMacDeadWindow(rx, out) &&
+              !selectedPostEmitContinuationForBurst));
         // DEC-0058: latched clear + selected-dominant + known-clear ESS — do not
         // starve feed on MAC-dead dual-slot hops (142104 waiting-clear islands).
         const bool latchedSelectedDominantClearFeed =
@@ -8259,7 +8274,9 @@ P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             burst.xorMaskApplied &&
             !burstEncryptedForFollowedCall;
         const bool dualSlotUntrustedNowEffective =
-            dualSlotUntrustedNow && !latchedSelectedDominantClearFeed;
+            dualSlotUntrustedNow &&
+            !latchedSelectedDominantClearFeed &&
+            !selectedPostEmitContinuationForBurst;
         const bool clearLatchOpen =
             rx.p25SessionState.callSecurityLatch == P25CallSecurityLatch::Clear &&
             !rx.p25VoiceEncrypted &&
@@ -8295,6 +8312,7 @@ P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
             clearLatchOpen ||
             postEmitClearGrantOpen ||
             clearGrantMacOpen ||
+            selectedPostEmitContinuationForBurst ||
             (p25Phase2SessionSpeakerSustainActive(rx) && selectedSlotEpochForFeed && !dualSlotUntrustedNowEffective);
         // Selected-slot continuous clear: once traffic ESS/PTT (or established
         // same-call clear) is known, keep feeding descrambled Voice2/4 on the
@@ -8315,13 +8333,14 @@ P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
              forceEstablishedFeed ||
              p25Phase2TargetHardClearEvidence(out) ||
              (out.phase2TargetEssKnown && !out.phase2TargetEssEncrypted) ||
-             p25Phase2SessionSpeakerSustainActive(rx) ||
-             clearLatchOpen ||
-             postEmitClearGrantOpen ||
-             clearGrantMacOpen ||
-             (rx.p25VoiceClearKnown && !rx.p25VoiceEncrypted &&
-              (burst.maskPhaseLock || burst.superframeLock ||
-               out.phase2SuperframeBursts > 0)));
+              p25Phase2SessionSpeakerSustainActive(rx) ||
+              clearLatchOpen ||
+              postEmitClearGrantOpen ||
+              clearGrantMacOpen ||
+              selectedPostEmitContinuationForBurst ||
+              (rx.p25VoiceClearKnown && !rx.p25VoiceEncrypted &&
+               (burst.maskPhaseLock || burst.superframeLock ||
+                out.phase2SuperframeBursts > 0)));
         const bool immediateAmbeDecodeAllowed =
             continuousSelectedClearFeed ||
             (!dualSlotUntrustedNowEffective &&
@@ -8496,6 +8515,11 @@ P25VoiceAudioBlock decodeP25Phase2VoiceBlock(Receiver& rx,
                 }
             }
 
+            if (rx.p25Phase2TalkspurtEndedPendingVocoderReset && codewordAbsKnown &&
+                rx.p25SessionState.talkspurtOrder.voiceAfterBoundary(codewordAbsDibit) &&
+                p25Phase2ShouldEmitAmbeFrame(rx, codewordAbsDibit, codewordEndAbsDibit, true, false)) {
+                p25Phase2ResetVocoderForNewTalkspurt(rx, "post-end-fresh-voice", nowMs);
+            }
             P25Phase2SequencerSpeechInput seqInput;
             seqInput.key = frameKey;
             seqInput.ambe96 = ambeFrame;

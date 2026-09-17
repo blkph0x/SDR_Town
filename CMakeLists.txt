@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.53 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.54 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -391,8 +391,10 @@ add_custom_target(deploy
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/tools/diagnostics"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/scripts"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Release/SDR_Town.exe" "${DEPLOY_STAGING}/"
-    # Copy the entire windeployqt tree but then surgically remove anything that is not ours
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Release" "${DEPLOY_STAGING}"
+    COMMAND ${CMAKE_COMMAND}
+            "-DSOURCE=${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Release"
+            "-DDESTINATION=${DEPLOY_STAGING}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/StageRuntime.cmake"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/remote_diag_server.py"
             "${DEPLOY_STAGING}/tools/diagnostics/remote_diag_server.py"
@@ -420,6 +422,9 @@ add_custom_target(deploy
 #   then (in build/bin/Release) windeployqt ... then re-run deploy target, then cpack.
 if(EXISTS "${DEPLOY_STAGING}/SDR_Town.exe")
     set(CPACK_INSTALLED_DIRECTORIES "${DEPLOY_STAGING};.")
+    # Do not also run the fallback Release-tree install and reintroduce stale
+    # executables after constructing an allowlisted staging directory.
+    set(CPACK_INSTALL_CMAKE_PROJECTS "")
     message(STATUS "Using clean deploy staging for packaging: ${DEPLOY_STAGING}")
 else()
     # Fallback with aggressive stale purge (never ship old names or test binaries)

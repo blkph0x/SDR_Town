@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <deque>
 #include <optional>
+#include <utility>
 #include <vector>
 
 // Per-receiver P25 audio/session state.  Replaces the former main.cpp globals
@@ -256,6 +257,19 @@ struct P25Phase2FrameSequencer {
     uint64_t reorderHeld = 0;
     uint64_t reorderReleased = 0;
     uint64_t reorderExpired = 0;
+
+    void resetForTalkspurt() noexcept
+    {
+        // Speaker ordinals belong to the call, not the vocoder predictor.
+        // Restarting them makes the downstream speaker discard new speech.
+        P25Phase2FrameSequencer next;
+        next.callSessionId = callSessionId;
+        next.talkgroupId = talkgroupId;
+        next.slot = slot;
+        next.armed = armed;
+        next.nextSpeechOrdinal = nextSpeechOrdinal;
+        *this = std::move(next);
+    }
 };
 
 // Producer-side speaker PCM bound to one call session.
@@ -319,6 +333,24 @@ struct P25Phase2SessionSustainState {
     int postEmitEyeLostStreak = 0;
 };
 
+struct P25Phase2TalkspurtOrder {
+    bool known = false;
+    uint64_t lastBoundaryDibit = 0;
+
+    bool acceptBoundary(uint64_t dibit) noexcept
+    {
+        if (known && dibit <= lastBoundaryDibit) return false;
+        known = true;
+        lastBoundaryDibit = dibit;
+        return true;
+    }
+
+    bool voiceAfterBoundary(uint64_t dibit) const noexcept
+    {
+        return known && dibit > lastBoundaryDibit;
+    }
+};
+
 struct P25ReceiverSessionState {
     P25P2PendingAudioQueue pendingAudio;
     // Companion-slot pending AMBE (multi-record / priority observe). Never drained
@@ -329,6 +361,7 @@ struct P25ReceiverSessionState {
     P25AudioResamplerState resamplerOpposite;
     P25Phase2AmbeEmitDedupeState ambeDedupe;
     P25Phase2FrameSequencer frameSequencer;
+    P25Phase2TalkspurtOrder talkspurtOrder;
     P25Phase2AudioTailState audioTail;
     P25Phase2SessionSustainState sustain;
     P25CallSecurityLatch callSecurityLatch = P25CallSecurityLatch::Unknown;
@@ -346,6 +379,7 @@ struct P25ReceiverSessionState {
         resamplerOpposite = {};
         ambeDedupe = {};
         frameSequencer = {};
+        talkspurtOrder = {};
         audioTail = {};
         sustain = {};
         callSecurityLatch = P25CallSecurityLatch::Unknown;

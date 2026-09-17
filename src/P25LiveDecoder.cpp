@@ -1,4 +1,5 @@
 #include "P25LiveDecoder.h"
+#include "P25Gf64.h"
 
 #include "P25VoiceTiming.h"
 #include "dsp/P25CqpskStagedScorer.h"
@@ -447,6 +448,15 @@ std::vector<std::complex<float>> resampleWindowedSinc(const std::vector<std::com
     out.reserve(outCount);
     const double step = inputRate / outputRate;
     constexpr int radius = 10;
+    static const auto windowCoefficients = [] {
+        std::array<double, 2 * radius + 1> values{};
+        for (int n = -radius; n <= radius; ++n) {
+            const double winX = static_cast<double>(n + radius) / static_cast<double>(2 * radius);
+            values[static_cast<size_t>(n + radius)] =
+                0.42 - 0.5 * std::cos(2.0 * kPi * winX) + 0.08 * std::cos(4.0 * kPi * winX);
+        }
+        return values;
+    }();
     const double cutoff = std::min(0.46, 0.46 * outputRate / inputRate);
     for (size_t i = 0; i < outCount; ++i) {
         const double pos = static_cast<double>(i) * step;
@@ -466,8 +476,7 @@ std::vector<std::complex<float>> resampleWindowedSinc(const std::vector<std::com
             const double sinc = std::abs(sincArg) < 1e-12
                 ? 1.0
                 : std::sin(kPi * sincArg) / (kPi * sincArg);
-            const double winX = static_cast<double>(n + radius) / static_cast<double>(2 * radius);
-            const double window = 0.42 - 0.5 * std::cos(2.0 * kPi * winX) + 0.08 * std::cos(4.0 * kPi * winX);
+            const double window = windowCoefficients[static_cast<size_t>(n + radius)];
             const double w = 2.0 * cutoff * sinc * window;
             acc += std::complex<double>(x[static_cast<size_t>(idx)].real(), x[static_cast<size_t>(idx)].imag()) * w;
             wsum += w;
@@ -2355,29 +2364,12 @@ std::array<int, P25LiveDecoder::Phase2BurstDibits * 12> makePhase2XorMaskDibits(
 
 uint8_t gf64Mul(uint8_t a, uint8_t b)
 {
-    a &= 0x3fu;
-    b &= 0x3fu;
-    uint16_t product = 0;
-    for (int i = 0; i < 6; ++i) {
-        if ((b >> i) & 1u) product ^= static_cast<uint16_t>(a) << i;
-    }
-    for (int i = 10; i >= 6; --i) {
-        if ((product >> i) & 1u) product ^= static_cast<uint16_t>(0x43u) << (i - 6);
-    }
-    return static_cast<uint8_t>(product & 0x3fu);
-}
-
-uint8_t gf64Pow(uint8_t a, int power)
-{
-    uint8_t out = 1;
-    while (power-- > 0) out = gf64Mul(out, a);
-    return out;
+    return p25fec::gf64Multiply(a, b);
 }
 
 uint8_t gf64Inv(uint8_t a)
 {
-    if ((a & 0x3fu) == 0) return 0;
-    return gf64Pow(a, 62);
+    return p25fec::gf64Inverse(a);
 }
 
 struct Rs63P25Tables {
@@ -2706,10 +2698,19 @@ Phase2RsDecodeResult rs63DecodeErasures(std::array<uint8_t, 63> symbols,
 
     const size_t vars = erasures.size();
     std::vector<std::vector<uint8_t>> matrix(28, std::vector<uint8_t>(vars + 1, 0));
+    // The syndrome of a unit symbol depends only on its position, not on
+    // the received word or erasure hypothesis. Share immutable columns.
+    static const auto unitRemainders = [] {
+        std::array<std::array<uint8_t, 28>, 63> columns{};
+        for (size_t pos = 0; pos < columns.size(); ++pos) {
+            std::array<uint8_t, 63> unit{};
+            unit[pos] = 1;
+            columns[pos] = rs63Remainder(unit);
+        }
+        return columns;
+    }();
     for (size_t c = 0; c < vars; ++c) {
-        std::array<uint8_t, 63> unit{};
-        unit[static_cast<size_t>(erasures[c])] = 1;
-        const auto rem = rs63Remainder(unit);
+        const auto& rem = unitRemainders[static_cast<size_t>(erasures[c])];
         for (size_t r = 0; r < rem.size(); ++r) matrix[r][c] = rem[r] & 0x3fu;
     }
     for (size_t r = 0; r < base.size(); ++r) matrix[r][vars] = base[r] & 0x3fu;
@@ -7781,10 +7782,28 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2FromFramerBurstsInternal(
             m_phase2FramerOriginStreamDibit + fb.absoluteStartDibit;
         const int64_t delta = static_cast<int64_t>(streamBurstStart) -
             static_cast<int64_t>(m_phase2SuperframeAnchorDibit);
-        if (delta < 0 ||
-            (delta % static_cast<int64_t>(p25dsp::kPhase2BurstDibits)) != 0) {
-            // DEC-0033: one misaligned framer burst must not wipe the lattice
-            // (that left later hops with p2bursts=0 after always-queueing).
+        constexpr int64_t kBurstDibits =
+            static_cast<int64_t>(p25dsp::kPhase2BurstDibits);
+        constexpr int64_t kMaxFramerCommitSlipDibits = p25dsp::kSyncOffsetMax;
+        if (delta < -kMaxFramerCommitSlipDibits) {
+            // DEC-0033/0068: one stale/misaligned framer burst must not wipe
+            // the lattice (that left later hops with p2bursts=0 after
+            // always-queueing).
+            continue;
+        }
+
+        // SDRTrunk's P25P2SuperFrameDetector recovers small dibit insert/delete
+        // slips in the [-2,+2] window.  The old framer commit required an exact
+        // 180-dibit modulo match against the retained anchor, which silently
+        // discarded live bursts that the persistent framer had already recovered
+        // after a one- or two-dibit RF timing slip.  Keep the bound identical to
+        // the detector recovery range: accept tiny corrected slips, reject the
+        // larger offsets that would mix TDMA slots.
+        const int64_t burstNum = (delta + (kBurstDibits / 2)) / kBurstDibits;
+        if (burstNum < 0) continue;
+        const int64_t expectedDelta = burstNum * kBurstDibits;
+        const int64_t slipDibits = delta - expectedDelta;
+        if (std::llabs(slipDibits) > kMaxFramerCommitSlipDibits) {
             continue;
         }
 
@@ -7799,7 +7818,7 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2FromFramerBurstsInternal(
             }
         }
         const size_t superframeIndex = static_cast<size_t>(
-            (static_cast<uint64_t>(delta) / p25dsp::kPhase2BurstDibits) % 12ull);
+            static_cast<uint64_t>(burstNum) % 12ull);
         const uint8_t trafficSlot = phase2TrafficSlotForSuperframeBurst(dibits, 0, superframeIndex);
         auto& burstSession = slotSessions[trafficSlot & 0x01u];
         const bool superframeLocked = true;
@@ -7903,9 +7922,11 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2FromFramerBurstsInternal(
             cw.streamBurstStartDibitKnown = true;
             cw.streamBurstStartDibit = streamBurstStart;
         }
-        if (fb.dibitOffsetCorrection != 0) {
+        if (fb.dibitOffsetCorrection != 0 || slipDibits != 0) {
             burst.syncOffsetAdjusted = true;
-            burst.syncOffsetDibits = fb.dibitOffsetCorrection;
+            burst.syncOffsetDibits = slipDibits != 0
+                ? static_cast<int>(slipDibits)
+                : fb.dibitOffsetCorrection;
         }
         out.bursts.push_back(std::move(burst));
         ++decoded;

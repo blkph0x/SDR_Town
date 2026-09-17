@@ -8,6 +8,13 @@ Status: `open` | `closed`
 
 ## ISS-0001 — P25 Phase 2 speaker audio is partial, not continuous
 
+2026-09-17 update: 060515 has gapless recorded IQ but 24 playback-underrun
+increases. Exact RS arithmetic caching removes measured recovery overhead;
+same capture still has six feed gaps and 66 concealment frames. Determine
+same-frame RF/FEC provenance and remaining talkspurt resets before closing.
+Do not equate the improved processing time or a coverage PASS label with
+audibly continuous speech. See DEC-0067 and the 20260917 forensic report.
+
 - **Status:** open
 - **Opened:** 2026-09-07
 - **REQ:** REQ-P2.0 … P2.6

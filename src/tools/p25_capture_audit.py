@@ -98,6 +98,7 @@ AUDIO_UNDERRUN_RE = re.compile(r"\bunderruns=(?P<underruns>\d+)\b", re.IGNORECAS
 AUDIO_RING_FILL_RE = re.compile(r"\bringFill=(?P<fill>[0-9.]+)%", re.IGNORECASE)
 AUDIO_RING_QUEUED_RE = re.compile(r"\bringQueued=(?P<queued>\d+)\b", re.IGNORECASE)
 AUDIO_OUTPUT_RATE_HZ = 48000.0
+CAPTURE_NAME_FREQ_RE = re.compile(r"(?P<freq>\d+(?:[._]\d+)?)MHz", re.IGNORECASE)
 
 
 def parse_mask_params_from_text(text: str) -> dict | None:
@@ -704,6 +705,20 @@ def load_summary(capture_dir: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8", errors="replace"))
 
 
+def capture_name_center_mhz(capture_dir: Path) -> float:
+    matches = CAPTURE_NAME_FREQ_RE.findall(capture_dir.name)
+    if not matches:
+        return 0.0
+    for raw in reversed(matches):
+        try:
+            mhz = float(raw.replace("_", "."))
+        except ValueError:
+            continue
+        if 20.0 <= mhz <= 1000.0:
+            return mhz
+    return 0.0
+
+
 def parse_grants(lines: list[str], started_utc: datetime | None) -> list[dict]:
     grants: list[dict] = []
     for idx, line in enumerate(lines):
@@ -914,8 +929,36 @@ def grant_replay_center_mhz(grant: dict, capture_center_mhz: float) -> float:
     return capture_center_mhz
 
 
+def implausible_p25_voice_grants(grants: list[dict]) -> list[dict]:
+    out: list[dict] = []
+    for grant in grants:
+        try:
+            voice_mhz = float(grant.get("voice_mhz") or 0.0)
+        except (TypeError, ValueError):
+            voice_mhz = 0.0
+        try:
+            source_center_mhz = float(grant.get("source_center_mhz") or 0.0)
+        except (TypeError, ValueError):
+            source_center_mhz = 0.0
+        if voice_mhz > 1000.0 or source_center_mhz > 1000.0:
+            item = {
+                "line": grant.get("line"),
+                "utc": grant.get("utc"),
+                "tg": grant.get("tg"),
+                "channel_hex": grant.get("channel_hex"),
+                "voice_mhz": voice_mhz,
+            }
+            if source_center_mhz > 0.0:
+                item["source_center_mhz"] = source_center_mhz
+            out.append(item)
+    return out
+
+
 def recommended_commands(capture_dir: Path, summary: dict, grants: list[dict]) -> list[str]:
     center_mhz = float(summary.get("center_freq_hz") or summary.get("freq_hz") or 0.0) / 1e6
+    name_center_mhz = capture_name_center_mhz(capture_dir)
+    if center_mhz > 1000.0 and name_center_mhz > 0.0:
+        center_mhz = name_center_mhz
     sample_rate_hz = summary.get("sample_rate_hz")
     if center_mhz <= 0.0 and grants:
         center_mhz = grants[0]["voice_mhz"]
@@ -924,6 +967,9 @@ def recommended_commands(capture_dir: Path, summary: dict, grants: list[dict]) -
     for grant in grants:
         if suggested_voice >= 6:
             break
+        if implausible_p25_voice_grants([grant]):
+            grant["replay_skipped"] = "implausible_p25_voice_frequency"
+            continue
         replay_center_mhz = grant_replay_center_mhz(grant, center_mhz)
         if not grant_in_capture_passband(grant, replay_center_mhz, sample_rate_hz):
             grant["replay_skipped"] = "outside_capture_passband"
@@ -1140,6 +1186,7 @@ def audit_capture(capture_dir: Path) -> dict:
                     grant.setdefault(key, value)
     annotate_grants(grants, lines)
     annotate_inferred_encrypted_holds(grants)
+    implausible_grants = implausible_p25_voice_grants(grants)
     encrypted_guarded_grants = sum(1 for grant in grants if grant_guarded_as_encrypted(grant))
     clear_grants = sum(1 for grant in grants if grant_flag_enabled(grant, "arm_clear"))
     unknown_unguarded_grants = max(0, len(grants) - encrypted_guarded_grants - clear_grants)
@@ -1149,6 +1196,8 @@ def audit_capture(capture_dir: Path) -> dict:
         counts["clear_group_grants"] = clear_grants
     if unknown_unguarded_grants:
         counts["unknown_unguarded_group_grants"] = unknown_unguarded_grants
+    if implausible_grants:
+        counts["implausible_p25_voice_frequency"] = len(implausible_grants)
     health = {
         "health": summary.get("health"),
         "actual_seconds": summary.get("actual_seconds"),
@@ -1201,6 +1250,8 @@ def audit_capture(capture_dir: Path) -> dict:
         findings.append("phase2_scheduler_short_fresh")
     if counts["traffic_retune_stall"]:
         findings.append("traffic_retune_stall")
+    if counts["implausible_p25_voice_frequency"]:
+        findings.append("implausible_p25_voice_frequency")
     if counts["same_call_stale_target_hop"]:
         findings.append("same_call_stale_target_hop")
     if counts["same_call_out_of_source_inplace_hop"]:
@@ -1228,6 +1279,7 @@ def audit_capture(capture_dir: Path) -> dict:
         "same_call_stale_target_hops": stale_target_hops,
         "same_call_out_of_source_inplace_hops": out_of_source_inplace_hops,
         "same_rf_slot_handoff_before_current_clear_grant": same_rf_clear_steals,
+        "implausible_p25_voice_frequency_examples": implausible_grants[:8],
         "grants": grants,
         "findings": findings,
         "recommended_cli_commands": recommended_commands(capture_dir, summary, grants),
@@ -1277,6 +1329,20 @@ def run_self_test() -> None:
     )
     assert any("voicecenter=413.62500" in cmd for cmd in retune_commands)
     assert all("voicecenter=413.37500" not in cmd for cmd in retune_commands)
+    bad_plan_lines = [
+        "[00:00:30.000 | 2026-07-04T00:00:30.000Z UTC] "
+        "Instruction: Group Update | OP=0X02 | MFID=0X00 | Group voice channel grant update | "
+        "id=7 | type=3 | tdma-slots=2 | base=2097.72160MHz | step=76.500kHz | "
+        "tg=10609 | ch=0X7061 | carrier=48 | voice=2101.39360MHz | P25 Phase 2 TDMA | slot=1",
+        "[00:00:30.001 | 2026-07-04T00:00:30.001Z UTC] "
+        "P25 traffic source started: TG=10609 voice=2101.39360MHz slot=1 control=420.35000MHz "
+        "dev=0 kind=single-rtl-retune-traffic-source-low-if sourceCenter=2101.38235MHz sr=2.048MHz.",
+    ]
+    bad_plan_grants = parse_grants(bad_plan_lines, started)
+    annotate_grants(bad_plan_grants, bad_plan_lines)
+    bad_plan = implausible_p25_voice_grants(bad_plan_grants)
+    assert len(bad_plan) == 1
+    assert bad_plan[0]["voice_mhz"] == 2101.39360
     stale = same_call_stale_target_hops([
         "[00:00:02.000 | 2026-07-04T00:00:02.000Z UTC] P25 auto-follow same-call MHz hop pending: TG 30302 voice 419.87500MHz -> 418.87500MHz; retuning traffic source before continuing metadata-only follow.",
         "[00:00:02.100 | 2026-07-04T00:00:02.100Z UTC] P25 DSP VOICE WORKER START: sr=2.048MHz cf=419.12500MHz target=419.87500MHz tg=30302 slot=0 generation=2.",

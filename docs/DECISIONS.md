@@ -1,6 +1,16 @@
 # Decisions
 
 Format: ID, date, status, evidence, decision, consequences.
+
+## DEC-0067 - Exact RS arithmetic caching (2026-09-17)
+
+Accepted after exhaustive arithmetic tests and same-IQ comparison. Replace
+repeated GF64 polynomial multiplication/inversion and unit-symbol syndrome
+construction with immutable lookup tables. Keep polynomial 0x43, decoder
+search order, FEC/CRC criteria, and security gates unchanged. Capture 060515
+commit time falls from 4423 ms to 421 ms over 92 windows; reference 103841 WAV
+SHA256 is unchanged. No timeout/queue-size tuning is authorized by this result.
+Full evidence and remaining gaps: `P25_AUDIO_FORENSICS_20260917.md`.
 A decision is recorded **before** code that depends on it is written.
 
 ---

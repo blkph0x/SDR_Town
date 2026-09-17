@@ -40,8 +40,12 @@ checks = {
         "outRate * 0.650" in main.split("size_t pushP25LiveStreamingAudio", 1)[1][:4000]
         and "outRate * 1.200" not in main.split("size_t pushP25LiveStreamingAudio", 1)[1][:4000]
     ),
-    "real push ceiling follows jitter cap": "std::max(jitterSoftCap, jitterCap)"
-    in main.split("size_t pushP25LiveStreamingAudio", 1)[1][:4000],
+    "real push ceiling leaves live headroom": (
+        "measuredCadenceCeiling" in main.split("size_t pushP25LiveStreamingAudio", 1)[1][:4000]
+        and "outRate * 0.480" in main.split("size_t pushP25LiveStreamingAudio", 1)[1][:4000]
+        and "std::min(jitterCap, measuredCadenceCeiling)"
+        in main.split("size_t pushP25LiveStreamingAudio", 1)[1][:4000]
+    ),
 }
 
 missing = [name for name, ok in checks.items() if not ok]

@@ -2,6 +2,7 @@
 
 #include "P25FollowStateMachine.h"
 #include "P25ReceiverSession.h"
+#include "P25VoiceTiming.h"
 
 namespace {
 
@@ -11,6 +12,77 @@ constexpr int diag(P25FollowDiagCode code)
 }
 
 } // namespace
+
+TEST_CASE("P25 talkspurt reset preserves the speaker call ordinal", "[p25][audio]")
+{
+    P25Phase2FrameSequencer sequence;
+    sequence.armed = true;
+    sequence.callSessionId = 43465069035521ULL;
+    sequence.talkgroupId = 10120;
+    sequence.slot = 1;
+    sequence.nextSpeechOrdinal = 294;
+    sequence.haveActiveBurst = true;
+    sequence.expectedVoiceIndex = 2;
+    sequence.heldFutureFrames[3] = P25Phase2SequencerSpeechInput{};
+
+    sequence.resetForTalkspurt();
+    REQUIRE(sequence.armed);
+    REQUIRE(sequence.callSessionId == 43465069035521ULL);
+    REQUIRE(sequence.talkgroupId == 10120);
+    REQUIRE(sequence.slot == 1);
+    REQUIRE(sequence.nextSpeechOrdinal == 294);
+    REQUIRE_FALSE(sequence.haveActiveBurst);
+    REQUIRE_FALSE(sequence.heldFutureFrames[3].has_value());
+
+    // The next 106 frames must remain new to a speaker expecting frame 294.
+    int64_t speakerExpected = 294;
+    for (int i = 0; i < 106; ++i) {
+        REQUIRE(sequence.nextSpeechOrdinal >= speakerExpected);
+        speakerExpected = ++sequence.nextSpeechOrdinal;
+    }
+    REQUIRE(speakerExpected == 400);
+    sequence = {};
+    REQUIRE(sequence.nextSpeechOrdinal == 0);
+    REQUIRE_FALSE(sequence.armed);
+}
+
+TEST_CASE("P25 talkspurt boundaries follow capture order across overlapping windows", "[p25][audio]")
+{
+    P25Phase2TalkspurtOrder order;
+    REQUIRE_FALSE(order.voiceAfterBoundary(100));
+    REQUIRE(order.acceptBoundary(1080));
+    REQUIRE_FALSE(order.voiceAfterBoundary(900));
+    REQUIRE_FALSE(order.voiceAfterBoundary(1080));
+    REQUIRE(order.voiceAfterBoundary(1260));
+    REQUIRE_FALSE(order.acceptBoundary(1080));
+    REQUIRE_FALSE(order.acceptBoundary(900));
+    REQUIRE(order.acceptBoundary(2160));
+    REQUIRE_FALSE(order.voiceAfterBoundary(1980));
+    REQUIRE(order.voiceAfterBoundary(2340));
+    order = {};
+    REQUIRE(order.acceptBoundary(0));
+}
+
+TEST_CASE("P25 active playback drains ready frames below its startup threshold", "[p25][audio]")
+{
+    constexpr size_t frame = 960;
+    constexpr size_t startup = 12 * frame;
+    REQUIRE(p25SpeakerNeedsStartupPrime(0, frame, startup));
+    REQUIRE_FALSE(p25SpeakerNeedsStartupPrime(0, startup, startup));
+    size_t queued = 2 * frame;
+    size_t consumed = 0;
+    // One second of complete, ordered frames arriving every 20 ms while the
+    // ring is below the old 240 ms re-prime threshold must never underflow.
+    for (size_t i = 0; i < 50; ++i) {
+        REQUIRE_FALSE(p25SpeakerNeedsStartupPrime(queued, frame, startup));
+        queued += frame;
+        REQUIRE(queued >= frame);
+        queued -= frame;
+        consumed += frame;
+    }
+    REQUIRE(consumed == 48000);
+    REQUIRE(queued == 2 * frame);
+}
 
 TEST_CASE("P25 follow returns immediately when a voice channel proves encrypted", "[p25][follow]")
 {

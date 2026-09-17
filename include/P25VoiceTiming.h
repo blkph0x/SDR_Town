@@ -10,6 +10,13 @@
 #include <cstddef>
 #include <cstdint>
 
+inline bool p25SpeakerNeedsStartupPrime(size_t queuedSamples, size_t pendingSamples,
+                                        size_t minimumPrimeSamples) noexcept
+{
+    // Once playing, each ready frame extends the existing stream immediately.
+    return queuedSamples == 0 && pendingSamples < minimumPrimeSamples;
+}
+
 // Speaker mute only — decode arms immediately.  Capture 20260712_021852 still
 // showed post-arm-settle-muted on the first usable DSP pass; keep mute short so
 // clear PCM can emit inside the PTT window once traffic-side proof is available.

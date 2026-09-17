@@ -453,7 +453,9 @@ void p25Phase2ResetVocoderForNewTalkspurt(Receiver& rx, const char* why, qint64 
 void p25Phase2ObserveTargetTalkspurtMac(Receiver& rx,
                                                const P25Phase2Burst& burst,
                                                bool targetSlot,
-                                               qint64 nowMs);
+                                               qint64 nowMs,
+                                               bool positionKnown,
+                                               uint64_t absoluteDibit);
 
 P25Phase2SpeakerPendingQueue& p25SpeakerPendingFor(P25SpeakerPendingMap& map,
                                                             const Receiver& rx);

@@ -1,5 +1,12 @@
 # Code notes (tree map)
 
+2026-09-17: `include/P25Gf64.h` provides immutable GF(64) product/inverse
+tables for the RS recovery path in `P25LiveDecoder.cpp` (DEC-0067). Exhaustive
+byte-domain equivalence tests live in `tests/test_p25live.cpp`. The decoder
+also caches its 63 unit-symbol syndrome columns; neither cache carries call,
+slot, or mutable decoder state. Playback top-up drains decoded PCM only;
+it no longer appends speculative clock silence (055312 forensic report).
+
 If a P25 file's purpose is not in this table, the map is wrong — fix the map
 in the same commit. Analog/GUI modules are listed at coarse grain until they
 become the active REQ.

@@ -5069,6 +5069,23 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                                         QString("session identifier ID %1").arg(static_cast<int>(ev.identifier)));
                                                 }
                                                 if (!eventRegistryEligible &&
+                                                    ev.type == P25ControlEventType::IdentifierUpdate) {
+                                                    const P25ChannelIdentifier identifier = p25IdentifierFromEvent(ev);
+                                                    if (p25ChannelIdentifierUsable(identifier) &&
+                                                        !p25ChannelIdentifierSessionUsable(identifier)) {
+                                                        appendP25LogLineKeyed(QString("session-identifier-reject:%1:%2:%3")
+                                                                .arg(static_cast<int>(ev.identifier))
+                                                                .arg(block.correctedDibitErrors)
+                                                                .arg(rawHex),
+                                                            QString("Rejected high-correction identifier ID %1 for live grant resolution: base=%2MHz step=%3kHz corrected_dibits=%4. The channel plan is implausible for P25 session recovery, so the live resolver was rolled back instead of retuning from a poisoned table.")
+                                                                .arg(static_cast<int>(ev.identifier))
+                                                                .arg(ev.baseFrequencyHz / 1e6, 0, 'f', 5)
+                                                                .arg(ev.channelSpacingHz / 1000.0, 0, 'f', 3)
+                                                                .arg(block.correctedDibitErrors),
+                                                            6000);
+                                                    }
+                                                }
+                                                if (!eventRegistryEligible &&
                                                     p25TsbkPendingVoiceGrantEligible(block.correctedDibitErrors, ev)) {
                                                     rememberPendingP25VoiceGrant(ev, block.correctedDibitErrors, nowMs);
                                                     appendP25LogLineKeyed(QString("tsbk-weak-pending-grant:%1").arg(key),
@@ -8589,7 +8606,7 @@ void MainWindow::showIqReplayWindow()
                                 p25VoiceBlockMayEmitAudio(audio);
                             size_t pushed = 0;
                             size_t speakerPcmSamples = 0;
-                            if (speakerMayEmit) {
+                            if (speakerMayEmit || !state->pendingSpeaker.empty()) {
                                 ++state->emitWindows;
                                 std::vector<float> pushedRealAudio;
                                 std::vector<float> speakerAudioForQueue;
@@ -8600,8 +8617,10 @@ void MainWindow::showIqReplayWindow()
                                     : 48000.0;
                                 const size_t phase2FrameSamples = std::max<size_t>(160,
                                     static_cast<size_t>(outRate * 0.020 + 0.5));
-                                speakerAudioForQueue = p25Phase2SpeakerAudioForQueue(
-                                    state->speakerQueue, audio, audio.audio, phase2FrameSamples);
+                                if (speakerMayEmit) {
+                                    speakerAudioForQueue = p25Phase2SpeakerAudioForQueue(
+                                        state->speakerQueue, audio, audio.audio, phase2FrameSamples);
+                                }
                                 const bool hasPlayableNewPcm = !speakerAudioForQueue.empty();
                                 if (speakerOutputActive) {
                                     pushed = pushP25SpeakerAudio(audioEngine, state->pendingSpeaker,

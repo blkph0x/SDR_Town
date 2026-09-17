@@ -2,6 +2,16 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-17 - RS recovery timing and audio regression checks
+
+Windows x64 / MSBuild 17.14, Release: `cmake --build build --config Release
+--target SDR_Town sdr_town_tests` passed. `sdr_town_tests.exe "[p25]"` passed
+68,957 assertions in 122 cases. Capture 060515 eight-second replay:
+11.265 s before, 7.562 s after, 4.92 -> 4.96 s submitted PCM, six gaps remain.
+GUI replay: 238,080 pushed samples, zero pending/tail drops. Reference 103841:
+19.688 -> 11.625 s for 12 s IQ; output WAV SHA256 unchanged. Source regression
+checks are supplemental and are not an intelligibility verdict.
+
 ---
 
 ## BN-0057 — DEC-0066 dead-grant timeout (131458) (2026-09-15)

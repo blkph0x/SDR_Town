@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <vector>
 
+
 namespace {
 
 void writeBitsMsb(std::vector<uint8_t>& bytes, int startBit, int count, uint64_t value)
@@ -73,6 +74,33 @@ TEST_CASE("P25 control analyzer can be seeded with cached channel identifiers")
     auto freq = analyzer.channelToFrequencyHz(0x70c5);
     REQUIRE(freq.has_value());
     REQUIRE(*freq == Catch::Approx(421225000.0).margin(1.0));
+}
+
+TEST_CASE("P25 high-correction session identifiers reject implausible TDMA plans")
+{
+    P25ControlEvent good;
+    good.type = P25ControlEventType::IdentifierUpdate;
+    good.identifierKnown = true;
+    good.identifier = 7;
+    good.channelType = 3;
+    good.baseFrequencyHz = 420000000.0;
+    good.channelSpacingHz = 12500.0;
+    good.slotsPerCarrier = 2;
+    good.phase2Candidate = true;
+    P25ChannelIdentifier goodIdentifier;
+    goodIdentifier.valid = true;
+    goodIdentifier.id = good.identifier;
+    goodIdentifier.baseHz = good.baseFrequencyHz;
+    goodIdentifier.spacingHz = good.channelSpacingHz;
+    REQUIRE(p25ChannelIdentifierSessionUsable(goodIdentifier));
+
+    P25ControlEvent poisoned = good;
+    poisoned.baseFrequencyHz = 2097721600.0;
+    poisoned.channelSpacingHz = 76500.0;
+    P25ChannelIdentifier poisonedIdentifier = goodIdentifier;
+    poisonedIdentifier.baseHz = poisoned.baseFrequencyHz;
+    poisonedIdentifier.spacingHz = poisoned.channelSpacingHz;
+    REQUIRE_FALSE(p25ChannelIdentifierSessionUsable(poisonedIdentifier));
 }
 
 TEST_CASE("P25 control analyzer preserves unresolved grant updates for pending resolution")

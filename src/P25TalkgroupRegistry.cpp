@@ -1505,9 +1505,10 @@ bool p25TsbkPendingVoiceGrantEligible(int correctedDibitErrors, const P25Control
 
 bool p25TsbkSessionIdentifierEligible(int correctedDibitErrors, const P25ControlEvent& event)
 {
+    const P25ChannelIdentifier identifier = p25IdentifierFromEvent(event);
     return correctedDibitErrors <= kP25SessionIdentifierMaxCorrectedDibits &&
         event.type == P25ControlEventType::IdentifierUpdate &&
-        p25ChannelIdentifierUsable(p25IdentifierFromEvent(event));
+        p25ChannelIdentifierSessionUsable(identifier);
 }
 
 bool mergeP25TalkgroupEvent(std::vector<P25TalkgroupEntry>& talkgroups,

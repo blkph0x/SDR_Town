@@ -2,6 +2,7 @@
 
 #include "P25Control.h"
 #include "P25LiveDecoder.h"
+#include "P25Gf64.h"
 
 #include <algorithm>
 #include <array>
@@ -2127,6 +2128,18 @@ TEST_CASE("P25 live decoder repairs SDRTrunk-layout Phase 2 ACCH RS symbol error
     REQUIRE_FALSE(pdu->directCrcOk);
     REQUIRE(pdu->opcode == 0);
     REQUIRE(pdu->bytes.size() == 19);
+}
+
+TEST_CASE("P25 GF64 tables equal polynomial arithmetic for all byte inputs", "[p25]")
+{
+    for (unsigned a = 0; a < 256; ++a) {
+        REQUIRE(p25fec::gf64Inverse(static_cast<uint8_t>(a)) ==
+                gf64InvForTest(static_cast<uint8_t>(a & 63u)));
+        for (unsigned b = 0; b < 256; ++b) {
+            REQUIRE(p25fec::gf64Multiply(static_cast<uint8_t>(a), static_cast<uint8_t>(b)) ==
+                    gf64MulForTest(static_cast<uint8_t>(a), static_cast<uint8_t>(b)));
+        }
+    }
 }
 
 TEST_CASE("P25 live decoder decodes informational Phase 2 ISCH fields")

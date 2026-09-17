@@ -9,6 +9,12 @@ Status: `open` | `in_progress` | `blocked` | `done`
 
 ## Now
 
+2026-09-17: T-0010 remains in progress. Capture 060515 isolates excessive RS
+recovery work; exact GF64 tables and cached syndrome columns reduce replay
+wall time without changing the 103841 reference WAV. Six feed gaps remain
+on 060515. Version 0.2.54 is an experimental measurement build, not completion
+of REQ-P2.2-6. Evidence: `P25_AUDIO_FORENSICS_20260917.md`.
+
 | ID | Status | REQ | Task |
 |---|---|---|---|
 | T-0013 | in_progress | CI / B-0020 | GitHub Actions Windows Release build + `sdr_town_tests` + Phase 2 string verifiers |

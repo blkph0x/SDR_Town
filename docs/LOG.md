@@ -2,6 +2,15 @@
 
 Newest at the top.
 
+## 2026-09-17 - Capture 060515 processing-cost correction
+
+Exhaustively verified GF64 lookup arithmetic and cached RS syndrome columns.
+The new capture replays faster than its eight-second RF duration; the earlier
+12-second reference retains exactly the same PCM bytes and runs substantially
+faster. No slot, encryption, gain, hop, or timeout policy was changed in this
+optimization. Continuous Phase 2 remains open. Preparing experimental 0.2.54
+for remote testers with honest remaining-gap notes.
+
 ---
 
 ## 2026-09-15 — DEC-0066 dead unknown-grant ~45s hang (131458)
