@@ -1,5 +1,6 @@
 """Exercise the real SSTV window/worker and decoder against independent recordings."""
 import gzip
+import argparse
 import io
 import os
 from pathlib import Path
@@ -11,7 +12,9 @@ import soundfile as sf
 
 def main():
     root = Path(__file__).resolve().parents[1]
-    executable = root / 'build/bin/Release/sdr_town_workspace_tests.exe'
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--exe', type=Path, default=root / 'build/bin/Release/sdr_town_workspace_tests.exe')
+    executable = parser.parse_args().exe.resolve()
     for mode, path in [
         ('robot36', root / 'build/reference-sstv-rust/tests/assets/real_recording.wav.gz'),
         ('martin1', root / 'build/reference-sstv/test/data/m1.ogg'),

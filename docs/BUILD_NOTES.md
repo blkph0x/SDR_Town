@@ -22,6 +22,16 @@ updates, cancellation clearing provisional image, teardown and worker isolation.
 CLI SSTV image/negative tests, RDS/CTCSS/DCS/registry regressions pass. Four
 main GUI workspaces pass without startup errors. Package/remote checks pending.
 
+Packaging passes: release.ps1 -Version 0.2.58 -Channel experimental -SkipPush
+-SkipAssets builds NSIS/ZIP/control DLL, reruns CTest, signs with existing key
+and verifies hashes/required runtime/notices. Eleven verifier tests and signing/
+failure tests pass. Extracted portable SSTV image and RDS CLI tests pass, plus
+four GUI workspace layouts. Test-only workspace executable copied into QA
+extraction (NOT the shipped ZIP) runs all four SSTV GUI full/partial cases using
+packaged helper/DLLs: 13 assertions each pass. test_sstv_gui.py now accepts --exe
+for this repeatable package-runtime gate. No clean-host installer upgrade claim.
+GitHub draft upload/download hash check remains before publication.
+
 ## 2026-09-18 - DEC-0093 recorded SSTV GUI
 
 Windows/MSVC 14.44 /Qt 6.11.1. Added nonmodal window and worker cancellation

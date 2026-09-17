@@ -27,6 +27,9 @@ Qt case passes separately on four independent full/partial recording runs;
 GUI output matches direct decode. Transport/cancellation/teardown and existing
 RDS/CTCSS/DCS/registry/SSTV CLI regressions pass. Four main GUI workspace sizes
 pass. This is recorded-input and local-host evidence, not live RF acceptance.
+Extracted portable CLI/workspace checks pass. SSTV window harness also passes
+four full/partial cases against packaged helper/DLLs. Installer/ZIP hashes and
+Ed25519 update signature verify; test executables are not in the distributed ZIP.
 
 Live RF SSTV, more image modes, AX.25 and public/weather satellite decoders
 remain next work. No P25 DSP, slot/security gate or audio timing changes.
