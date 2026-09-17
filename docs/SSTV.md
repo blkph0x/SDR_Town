@@ -124,5 +124,9 @@ Synthetic tests alone are not independent reception proof. Live RF acceptance,
 fading and broad offset/noise characterization remain open.
 
 Next: bounded live demodulated-audio routing using the verified scanline transport.
+The development tree now has a tested isolated NFM input queue (DEC-0095):
+fixed storage, nonwaiting producer, explicit gap/source-change events and
+sample ordering tests. It is not connected to RX or the GUI. Fractional-rate
+conversion, streaming backend integration and live acceptance remain unfinished.
 Qualify Martin2/Scottie/PD modes with independent pictures before
 advertising them. Satellite scheduling and public/weather payload decoding follow.

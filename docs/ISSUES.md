@@ -2,6 +2,14 @@
 
 Never delete a row. Close with a commit hash and a sentence.
 
+2026-09-18 OPEN T-0031: NFM raw tap can produce fractional sample rates
+(Demod.cpp uses input rate / integer decimation), whereas the pinned SSTV
+backend takes an integer rate. Rounding the metadata is not a verified
+conversion. Qualify a continuous resampler against independent recordings
+before attaching live input. Queue lifecycle requires producer detachment and
+quiescence before restart; validate that in receiver integration. These are
+unfinished live-feature gates, not defects in the existing recorded decoder.
+
 2026-09-17 OPEN T-0029: hosted run 35225600073 at 3a30f1d (0.2.56 checkpoint)
 fails 14 P25 string verifiers; 0.2.57 local sweep reproduces 133 pass/14 fail.
 Failures: capture_fixes, clear_to_encrypted_mac_bar,

@@ -2,6 +2,18 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-18 - DEC-0095 isolated live SSTV input queue
+
+Release SDR_Town, core tests and Qt tests build successfully. Full CTest:
+2/2 targets PASS, 13.84 seconds. Added six ingress cases (8606 assertions),
+repeated 20 times successfully, including 20000-block concurrent producer /
+consumer per run. Checks verify generation boundaries, ordering, exact samples,
+discard accounting, malformed input, source changes and fixed resource limits.
+Stress testing is not a deterministic proof of every thread interleaving or
+an RF throughput qualification. No live path is attached yet.
+test_sstv_gui.py: full/partial Robot36 and Martin1 PASS, 13 assertions each.
+P25 code unchanged; existing static-verifier gap T-0029 remains open.
+
 ## 2026-09-18 - DEC-0094 progressive SSTV / 0.2.58
 
 Windows/MSVC 14.44 /Qt 6.11.1 /Rust 1.88.0. Release app/helper/tests build

@@ -2,6 +2,15 @@
 
 Newest at the top.
 
+## 2026-09-18 - Live SSTV input foundation
+
+Added DEC-0095 bounded preallocated NFM ingress with explicit discontinuities,
+generation and sample-position metadata, nonwaiting producer and fault stats.
+Six native cases and repeated concurrent stress pass alongside full CTest and
+four independent recorded-image GUI cases. No receive/audio/P25 wiring changed.
+T-0031 remains in progress for streaming conversion/helper/UI/live acceptance.
+No version bump or release asset: 0.2.58 remains the completed feature release.
+
 ## 2026-09-18 - Progressive recorded SSTV feature/release preparation
 
 DEC-0094 adds scanline transport and latest-only GUI previews on the same pinned

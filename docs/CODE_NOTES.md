@@ -1,5 +1,15 @@
 # Code notes (tree map)
 
+DEC-0095: SstvLiveInput is an isolated, preallocated NFM ingress queue in
+sdr_town_decoders. It preserves fractional sample rate and absolute position,
+and emits generation-tagged gap events before replacement data after faults.
+Producer try_lock never waits on a consumer; capacity is limited by both slots
+and sample duration. Rejected blocks are included in discardedSamples; gaps
+counts reset operations, which can coalesce into one event. Lifecycle control
+requires a quiescent producer. test_sstv_live_input.cpp checks ordering, bad
+input, retunes/epochs, both overflow limits, restart and concurrent accounting.
+No receiver, P25, speaker, helper or UI path calls this component yet.
+
 DEC-0094: SstvProgress parses bounded progressive helper JSONL, validates row
 geometry/uniqueness and completion, retains assembled frames for final RGB parity.
 Rust helper --progress exports native scanlines without modifying DSP. Optional

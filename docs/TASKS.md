@@ -1,5 +1,12 @@
 # Task list (canonical)
 
+T-0031 | in progress | Live SSTV ingress | DEC-0095 bounded queue and
+discontinuity tests first. No RF/UI wiring until streaming conversion and
+independent full/partial recording equivalence are qualified.
+Queue stage verified: six cases, 20 repeat runs, full CTest and recorded GUI
+regressions pass. Remaining: fractional-rate converter, streaming helper,
+receiver lifecycle integration and actual live end-to-end acceptance.
+
 T-0030 | done | Release 0.2.58 | DEC-0093/0094 recorded SSTV GUI,
 progressive previews, cancellation, independent pixel parity and transport
 validation. Publish source/signed assets only after complete feature gates pass.

@@ -2,6 +2,26 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0095 - Bounded live SSTV ingress before radio wiring (2026-09-18)
+
+MainWindowP25Orchestration's analog branch already exposes FmMultiplexBlock
+for NFM before speaker processing; Demod.cpp stamps rate, tuned identity, epoch
+and sample position. Do not feed post-squelch speaker buffers or WFM MPX into
+SSTV. First implement/test an isolated NFM ingress contract, not a live feature
+claim. One producer, one consumer; fixed preallocated 16 slots x8192 floats,
+also capped at two seconds of input by sample rate. These are memory/resource
+budgets, not latency targets or protocol timers. Producer uses try_lock and
+never waits on the decoder; contention, invalid blocks, missing/overlapping
+samples, source/rate/tune/epoch changes and queue overflow flush queued input
+and emit explicit discontinuity before new data. No sample splicing or padding.
+Consumer/control operations may lock; they never run in RF/audio callbacks.
+The owning session must detach/quiesce its producer before start, stop or
+destruction; the queue alone does not cancel in-flight receiver callbacks.
+This explicit lifecycle requirement must be tested again when wiring RX.
+Next steps are actual streaming helper input, fractional-rate conversion and
+GUI attach/detach/retune integration plus independent replay parity. Keep those
+unavailable until proven. No P25, speaker or receiver wiring in this foundation.
+
 ## DEC-0094 - Progressive recorded SSTV and 0.2.58 release (2026-09-18)
 
 Pinned backend Decoder::events() emits ImageStart/Row/ImageEnd while consuming
