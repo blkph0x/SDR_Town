@@ -2,6 +2,21 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-18 - 0.2.59 release package QA
+
+release.ps1 -Version0.2.59 -Channel experimental -SkipPush -SkipAssets PASS.
+Release CTest3/3 PASS in23.50s: core288 passed/one fixture skip,198438
+assertions; Qt21 passed/three fixture skips,189 assertions; Rust5 passed.
+Fixture harnesses supply those optional recordings separately, not count skips
+as passes. Signed manifest, hashes, portable DLL provenance and required helper
+verification PASS. Source287ff35; generated asset metadata65a00e2.
+Fresh build/portable-qa-0259 extraction: combined worker/live GUI16 cases PASS;
+recorded GUI4 cases PASS; CLI forced/auto/full/partial/Unicode/no-overwrite,
+silence and resource rejection PASS; actual GUI four layouts PASS with no RX
+or startup errors. Test executables copied into QA extraction only, not ZIP.
+Known-image live RF and HF input are still not qualified. Existing T-0029 P25
+static-verifier gap is unchanged and is not represented as green hosted CI.
+
 ## 2026-09-18 - DEC-0099 live SSTV receiver and GUI
 
 Windows x64 / VS2022 MSVC Release. Initial app build failed because Qt's slots

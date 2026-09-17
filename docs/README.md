@@ -18,6 +18,7 @@ Do not edit `C:\Users\Blkph0x\source\repos\SovereignFoundry` from here.
 | [RECEIVE_DECODERS.md](RECEIVE_DECODERS.md) | Shared receive contracts, compiled capabilities and RDS adoption. |
 | [NATIVE_RUNTIME_QA.md](NATIVE_RUNTIME_QA.md) | Native DLL provenance, RX lifecycle and CDB shutdown acceptance. |
 | [SATELLITE_AND_SSTV.md](SATELLITE_AND_SSTV.md) | Planned SSTV/public satellite/weather scope, architecture and acceptance gates. |
+| [SSTV.md](SSTV.md) | Recorded and experimental live NFM SSTV usage, tests and limits. |
 
 Architecture: [`../SOURCE_OF_TRUTH.md`](../SOURCE_OF_TRUTH.md).
 Why/how/effect: [`../CAUSE_EFFECT_MAP.md`](../CAUSE_EFFECT_MAP.md).

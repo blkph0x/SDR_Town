@@ -23,6 +23,8 @@ Do not assume the same numeric TGID denotes the same group on another system.
 T-0033 | pending | Release 0.2.59 | Experimental live NFM SSTV UI/feed.
 Build, combined recording/lifecycle tests, GUI review and package QA before
 publishing. Disclose that off-air SSTV image acceptance remains open.
+Local build, signed manifest and fresh extracted-runtime gates PASS. Awaiting
+upload/hash verification and publication before marking done.
 
 T-0030 | done | Release 0.2.58 | DEC-0093/0094 recorded SSTV GUI,
 progressive previews, cancellation, independent pixel parity and transport
