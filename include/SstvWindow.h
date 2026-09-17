@@ -2,6 +2,8 @@
 #include <QDialog>
 #include <QImage>
 #include <functional>
+#include <atomic>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include "SstvProgress.h"
 
@@ -19,9 +21,13 @@ class SstvWindow final : public QDialog {
 public:
     using Decode = std::function<nlohmann::json(const QString&, const QString&, const QString&,
                                                const std::function<bool()>&, const SstvPreview&)>;
+    using LiveOpen = std::function<Decode(const std::shared_ptr<std::atomic<bool>>&)>;
     explicit SstvWindow(Decode decode, QWidget* parent = nullptr);
     ~SstvWindow() override;
     bool startDecode(const QString& input, const QString& output, const QString& mode);
+    void setLiveSource(LiveOpen open);
+    bool startLive(const QString& output,const QString& mode);
+    void finishLive();
     bool busy() const { return worker_ != nullptr; }
     void cancel();
 signals:
@@ -34,11 +40,14 @@ private:
     void setBusy(bool value);
     void updatePreview();
     Decode decode_;
+    LiveOpen liveOpen_;
+    std::shared_ptr<std::atomic<bool>> finish_;
     QThread* worker_ = nullptr;
     bool closePending_ = false;
     QLineEdit *input_, *output_;
-    QComboBox* mode_;
+    QComboBox *mode_, *source_;
     QPushButton *open_, *destination_, *decodeButton_, *cancelButton_, *folder_;
+    QPushButton* finishButton_;
     QLabel *status_, *preview_;
     QListWidget* images_;
     QImage original_;

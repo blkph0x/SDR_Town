@@ -7,6 +7,9 @@ namespace {constexpr uint32_t reason(SstvInputGap value) {return static_cast<uin
 
 SstvLiveInput::SstvLiveInput():storage_(std::make_unique<Storage>()) {}
 SstvLiveInput::~SstvLiveInput()=default;
+void SstvLiveInput::invalidate(SstvInputGap reason) {
+    if(active_.load()) pending_.fetch_or(static_cast<uint32_t>(reason));
+}
 void SstvLiveInput::resetLocked(uint32_t reasons) {
     discarded_+=queued_; queued_=0; size_=0; head_=0; identity_=false;
     gap_|=reasons; ++generation_; ++gaps_;
@@ -21,6 +24,10 @@ void SstvLiveInput::start() {
 void SstvLiveInput::stop() {
     std::lock_guard lock(mutex_);
     active_.store(false); pendingLocked(); resetLocked(reason(SstvInputGap::Stop));
+}
+void SstvLiveInput::finish() {
+    std::lock_guard lock(mutex_);
+    active_.store(false); pendingLocked();
 }
 SstvPushResult SstvLiveInput::tryPush(const FmMultiplexBlock& block,uint64_t sourceId,DemodMode mode) {
     if(!active_.load()) return SstvPushResult::Inactive;
@@ -44,8 +51,8 @@ SstvPushResult SstvLiveInput::tryPush(const FmMultiplexBlock& block,uint64_t sou
        block.sampleRate!=rate_ || block.targetHz!=target_))) changed|=reason(SstvInputGap::Source);
     if(identity_ && block.firstSample!=next_) changed|=reason(SstvInputGap::Position);
     if(changed) resetLocked(changed);
-    if(size_==slots || queued_+block.samples.size()>size_t(block.sampleRate*2)) resetLocked(reason(SstvInputGap::Overflow));
-    auto& destination=storage_->blocks[(head_+size_)%slots];
+    if(size_==slotCount || queued_+block.samples.size()>size_t(block.sampleRate*2)) resetLocked(reason(SstvInputGap::Overflow));
+    auto& destination=storage_->blocks[(head_+size_)%slotCount];
     std::copy(block.samples.begin(),block.samples.end(),destination.samples.begin());
     destination.count=block.samples.size(); destination.gapReasons=0;
     destination.generation=generation_; destination.sourceId=sourceId; destination.epoch=block.epoch;
@@ -64,7 +71,7 @@ std::optional<SstvInputEvent> SstvLiveInput::pop() {
     }
     if(!size_) return std::nullopt;
     auto result=storage_->blocks[head_];
-    head_=(head_+1)%slots; --size_; queued_-=result.count; consumed_+=result.count;
+    head_=(head_+1)%slotCount; --size_; queued_-=result.count; consumed_+=result.count;
     return result;
 }
 SstvInputStats SstvLiveInput::stats() const {

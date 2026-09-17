@@ -26,6 +26,8 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
     setMinimumSize(560,420);
     auto* layout=new QVBoxLayout(this);
     auto* form=new QFormLayout;
+    source_=new QComboBox(this); source_->setObjectName("sstvSource");
+    source_->addItem("Recording","file"); form->addRow("Source",source_);
     auto row=[&](QLineEdit*& edit,QPushButton*& button,const QString& label,QStyle::StandardPixmap icon) {
         auto* container=new QWidget(this);
         auto* horizontal=new QHBoxLayout(container);
@@ -46,9 +48,11 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
     auto* controls=new QHBoxLayout;
     decodeButton_=new QPushButton(style()->standardIcon(QStyle::SP_MediaPlay),"Decode",this);
     cancelButton_=new QPushButton(style()->standardIcon(QStyle::SP_MediaStop),"Cancel",this);
+    finishButton_=new QPushButton(style()->standardIcon(QStyle::SP_DialogSaveButton),"Finish and save",this);
+    finishButton_->setObjectName("sstvFinish");
     folder_=new QPushButton(style()->standardIcon(QStyle::SP_DirOpenIcon),"Open output",this);
     decodeButton_->setObjectName("sstvDecode"); cancelButton_->setObjectName("sstvCancel");
-    controls->addWidget(decodeButton_); controls->addWidget(cancelButton_); controls->addStretch(); controls->addWidget(folder_);
+    controls->addWidget(decodeButton_); controls->addWidget(finishButton_); controls->addWidget(cancelButton_); controls->addStretch(); controls->addWidget(folder_);
     layout->addLayout(controls);
     auto* split=new QSplitter(this);
     images_=new QListWidget(split); images_->setObjectName("sstvImages");
@@ -69,6 +73,8 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
     });
     connect(decodeButton_,&QPushButton::clicked,this,[this] {startDecode(input_->text(),output_->text(),mode_->currentData().toString());});
     connect(cancelButton_,&QPushButton::clicked,this,&SstvWindow::cancel);
+    connect(finishButton_,&QPushButton::clicked,this,&SstvWindow::finishLive);
+    connect(source_,&QComboBox::currentIndexChanged,this,[this]{setBusy(busy());});
     connect(folder_,&QPushButton::clicked,this,[this] {QDesktopServices::openUrl(QUrl::fromLocalFile(resultDirectory_));});
     connect(images_,&QListWidget::currentRowChanged,this,[this](int index) {
         original_=QImage();
@@ -79,6 +85,21 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
     setBusy(false);
 }
 
+void SstvWindow::setLiveSource(LiveOpen open) {
+    if(busy()) return;
+    liveOpen_=std::move(open);
+    if(liveOpen_ && source_->findData("live")<0) source_->addItem("Live NFM - main receiver","live");
+    setWindowTitle(liveOpen_?"SSTV Images":"SSTV Recorded Images");
+}
+bool SstvWindow::startLive(const QString& output,const QString& mode) {
+    if(busy() || !liveOpen_) return false;
+    source_->setCurrentIndex(source_->findData("live"));
+    return startDecode(QString(),output,mode);
+}
+void SstvWindow::finishLive() {
+    if(worker_ && finish_) {finish_->store(true);finishButton_->setEnabled(false);status_->setText("Finishing and saving...");}
+}
+
 SstvWindow::~SstvWindow() {
     // Parent teardown also joins; queued GUI callbacks use this as their context.
     if(worker_) {worker_->requestInterruption(); worker_->wait(); delete worker_;}
@@ -86,19 +107,26 @@ SstvWindow::~SstvWindow() {
 
 bool SstvWindow::startDecode(const QString& input,const QString& output,const QString& mode) {
     if(busy()) return false;
-    if(input.trimmed().isEmpty() || output.trimmed().isEmpty() || mode_->findData(mode)<0) {
-        status_->setText("Choose a recording, a new output folder and a supported mode."); return false;
+    const bool live=source_->currentData()=="live";
+    if((!live && input.trimmed().isEmpty()) || output.trimmed().isEmpty() || mode_->findData(mode)<0) {
+        status_->setText(live?"Choose a new output folder and a supported mode.":"Choose a recording, a new output folder and a supported mode."); return false;
     }
-    input_->setText(input); output_->setText(output); mode_->setCurrentIndex(mode_->findData(mode));
+    Decode decode=decode_;
+    finish_.reset();
+    if(live) {
+        try {finish_=std::make_shared<std::atomic<bool>>(false); decode=liveOpen_(finish_);}
+        catch(const std::exception& error) {status_->setText(QString::fromUtf8(error.what())); finish_.reset();return false;}
+    }
+    if(!live) input_->setText(input);
+    output_->setText(output); mode_->setCurrentIndex(mode_->findData(mode));
     images_->clear(); original_=QImage(); resultDirectory_.clear(); updatePreview();
-    status_->setText("Decoding..."); setBusy(true);
+    status_->setText(live?"Listening for SSTV...":"Decoding..."); setBusy(true);
     struct Result {
         nlohmann::json report; QString error;
         std::mutex mutex;
         QImage preview; QString mode; int rows=0; bool pending=false;
     };
     auto result=std::make_shared<Result>();
-    const auto decode=decode_;
     worker_=QThread::create([decode,input,output,mode,result] {
         try {result->report=decode(input,output,mode,[] {return QThread::currentThread()->isInterruptionRequested();},
             [result](const QImage& image,const QString& mode,int rows) {
@@ -148,9 +176,13 @@ bool SstvWindow::startDecode(const QString& input,const QString& output,const QS
 
 void SstvWindow::setBusy(bool value) {
     for(auto* widget:std::array<QWidget*,6>{input_,output_,mode_,open_,destination_,decodeButton_}) widget->setEnabled(!value);
+    const bool live=source_->currentData()=="live";
+    source_->setEnabled(!value); input_->setEnabled(!value && !live); open_->setEnabled(!value && !live);
+    decodeButton_->setText(live?"Receive":"Decode");
+    finishButton_->setVisible(live); finishButton_->setEnabled(value && live);
     cancelButton_->setEnabled(value); folder_->setEnabled(!value && !resultDirectory_.isEmpty());
 }
-void SstvWindow::cancel() {if(worker_) {worker_->requestInterruption(); cancelButton_->setEnabled(false); status_->setText("Cancelling...");}}
+void SstvWindow::cancel() {if(worker_) {worker_->requestInterruption(); cancelButton_->setEnabled(false); finishButton_->setEnabled(false); status_->setText("Cancelling...");}}
 void SstvWindow::closeEvent(QCloseEvent* event) {
     if(busy()) {closePending_=true; cancel(); event->ignore();} else QDialog::closeEvent(event);
 }

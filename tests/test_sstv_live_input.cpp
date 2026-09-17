@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "SstvLiveInput.h"
+#include "SstvReceiverFeed.h"
 #include <limits>
 #include <thread>
 
@@ -163,4 +164,42 @@ TEST_CASE("SSTV concurrent ingress never conceals a generation boundary","[sstv]
     REQUIRE(s.queuedBlocks==0); REQUIRE(s.queuedSamples==0);
     REQUIRE(s.consumedSamples+s.discardedSamples==20000*128);
     REQUIRE(s.acceptedSamples+s.contendedBlocks*128==20000*128);
+}
+
+TEST_CASE("SSTV receiver attachment owns lifecycle and rejects overlapping sessions","[sstv][live-input]") {
+    SstvReceiverFeed feed;
+    feed.detach(nullptr); feed.publish(block(),1);
+    auto first=feed.attach();
+    REQUIRE_THROWS(feed.attach());
+    REQUIRE(first->pop()->gapReasons!=0);
+    feed.publish(block(),1);
+    REQUIRE(first->pop()->count==128);
+    feed.discontinuity();
+    REQUIRE(has(*first->pop(),SstvInputGap::Source));
+    feed.detach(first); REQUIRE_FALSE(first->stats().active);
+    auto second=feed.attach(); feed.detach(first);
+    REQUIRE(second->stats().active);
+    REQUIRE(second->pop()->gapReasons!=0);
+    feed.publish(block(),2); REQUIRE(second->pop()->sourceId==2);
+    feed.publish(block(128,128),2); feed.finish(second);
+    REQUIRE_FALSE(second->stats().active);
+    feed.publish(block(128,256),2);
+    const auto tail=second->pop(); REQUIRE(tail); REQUIRE(tail->firstSample==128);
+    REQUIRE_FALSE(second->pop());
+    feed.detach(second);
+}
+
+TEST_CASE("SSTV receiver detach quiesces an active producer","[sstv][live-input]") {
+    SstvReceiverFeed feed; std::atomic<bool> done=false;
+    std::thread producer([&] {
+        auto data=block();
+        while(!done.load()) {feed.publish(data,1); data.firstSample+=data.samples.size();}
+    });
+    bool stopped=true;
+    for(int i=0;i<100;++i) {
+        auto session=feed.attach();
+        std::this_thread::yield(); feed.detach(session);
+        stopped=stopped && !session->stats().active;
+    }
+    done=true; producer.join(); REQUIRE(stopped);
 }

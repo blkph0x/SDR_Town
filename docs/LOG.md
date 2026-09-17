@@ -2,6 +2,16 @@
 
 Newest at the top.
 
+## 2026-09-18 - Live NFM SSTV integration
+
+DEC-0099 adds bounded main-receiver attachment, live GUI session ownership,
+Finish/save and cancellation. Independent recording-driven live GUI images
+match the reference decode; lifecycle, concurrency and regression tests pass.
+P25 DSP/security/speaker paths are unchanged. README/SSTV help document the
+experimental NFM-only scope and open RF acceptance. Existing Alpha Tag support
+answers talkgroup names; system-scoped alias import is planned as T-0032.
+Preparing0.2.59 source and assets; publication not yet verified.
+
 ## 2026-09-18 - Combined SSTV streaming path verified
 
 DEC-0098 links the isolated queue, converter and helper into a bounded

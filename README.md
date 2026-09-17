@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Current version** | **0.2.58** (experimental channel) |
+| **Current version** | **0.2.59** (experimental channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
@@ -47,11 +47,14 @@ see [native debugger tests and hardware limits](docs/NATIVE_RUNTIME_QA.md).
 SSTV now has experimental offline Robot36/Martin1 image decoding to PNG:
 `sstv decode "file.wav" "new-output-directory" auto`. The separate
 `sstv inspect "file.wav"` reports validated classic VIS headers.
-Live RF SSTV and public/weather satellite decoding remain planned.
-Live SSTV development has a tested combined queue/converter/decoder worker;
-live receiver/GUI integration is not yet available.
+Version 0.2.59 adds experimental **Live NFM - main receiver** under
+**Tools > SSTV Images**. Start the main receiver in NFM, select the live source,
+choose a new output folder and Receive. Finish and save drains queued input;
+Cancel discards provisional images. No frequency, filter or audio changes are
+made automatically. Known-transmission RF acceptance remains open; HF SSB input,
+additional image modes and public/weather satellite decoding remain planned.
 See [SSTV commands, resource limits and validation](docs/SSTV.md).
-Version 0.2.58 adds **Tools > SSTV Recorded Images** with background decoding,
+The recorded source retains background decoding,
 cancellation, progressive scanline previews and output-folder access. Preview
 pixels are checked against final RGB output before PNG publication.
 The [staged roadmap](docs/SATELLITE_AND_SSTV.md) starts with independently verified

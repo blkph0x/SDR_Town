@@ -2,7 +2,8 @@
 
 Status: staged roadmap, DEC-0083, 2026-09-17. DEC-0091/0092 deliver offline
 VIS inspection and experimental Robot36/Martin1 PNG decoding in 0.2.57;
-see [SSTV.md](SSTV.md). Live SSTV and satellite support are still planned.
+see [SSTV.md](SSTV.md). Version 0.2.59 adds experimental live NFM input;
+known-transmission RF acceptance, HF SSB input and satellite decoding are open.
 Version 0.2.58 adds the recorded-image GUI, cancellation and progressive previews;
 independent full/partial Robot36/Martin1 Qt replay parity passes (DEC-0093/0094).
 

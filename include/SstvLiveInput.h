@@ -36,12 +36,14 @@ public:
     ~SstvLiveInput();
     void start();
     void stop();
+    void finish(); // Quiesced producer; retain queued data for graceful EOF.
+    void invalidate(SstvInputGap reason);
     SstvPushResult tryPush(const FmMultiplexBlock& block,uint64_t sourceId,DemodMode mode);
     std::optional<SstvInputEvent> pop();
     SstvInputStats stats() const;
 private:
-    static constexpr size_t slots=16;
-    struct Storage {std::array<SstvInputEvent,slots> blocks;};
+    static constexpr size_t slotCount=16;
+    struct Storage {std::array<SstvInputEvent,slotCount> blocks;};
     void resetLocked(uint32_t reasons);
     void pendingLocked();
     std::unique_ptr<Storage> storage_;

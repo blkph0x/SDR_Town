@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "SstvWindow.h"
 #include "SstvImageFile.h"
+#include "SstvLiveSession.h"
 #include "BandPlanDialog.h"
 #include "RdsStatusWidget.h"
 
@@ -11338,9 +11339,25 @@ void MainWindow::createMenus()
             QSettings().setValue("bandplan/overlay", enabled);
         });
         QMenu* toolsMenu = menuBar()->addMenu("&Tools");
-        toolsMenu->addAction("&SSTV Recorded Images...",this,[this] {
+        toolsMenu->addAction("&SSTV Images...",this,[this] {
             auto* window=findChild<SstvWindow*>("sstvWindow");
-            if(!window) {window=new SstvWindow(decodeSstvImageFile,this); window->setObjectName("sstvWindow");}
+            if(!window) {
+                window=new SstvWindow(decodeSstvImageFile,this); window->setObjectName("sstvWindow");
+                window->setLiveSource([this](const std::shared_ptr<std::atomic<bool>>& finish)->SstvWindow::Decode {
+                    std::shared_ptr<Receiver> receiver;
+                    {std::lock_guard lock(receiversMutex);if(!receivers.empty()) receiver=receivers.front();}
+                    if(!receiver) throw std::runtime_error("Start the main receiver in NFM first");
+                    // Capture receiver ownership on GUI start; worker never accesses MainWindow.
+                    return [receiver,finish](const QString&,const QString& output,const QString& mode,const auto& cancel,const auto& preview) {
+                        const auto validate=[receiver] {
+                            std::lock_guard lock(receiver->stateMutex);
+                            if(!receiver->active || receiver->mode!=DemodMode::NFM || receiver->p25VoiceDecodeEnabled || receiver->p25ControlChannelMute)
+                                throw std::runtime_error("Live SSTV requires an active main NFM receiver, not P25");
+                        };
+                        return decodeSstvLive(receiver->sstvFeed,validate,output,mode,[finish]{return finish->load();},cancel,preview);
+                    };
+                });
+            }
             window->show(); window->raise(); window->activateWindow();
         });
         toolsMenu->addAction("&Decode Log / Transcript...", this, [this]() {

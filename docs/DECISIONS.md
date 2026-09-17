@@ -2,6 +2,28 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0099 - Experimental live NFM SSTV session and window (2026-09-18)
+
+Attach one bounded SSTV queue to the main receiver's existing raw NFM tap.
+SstvReceiverFeed serializes attach/detach against producer publication with a
+short mutex; producer only try-locks and records contention as a discontinuity.
+No queue allocation until attach. Detach quiesces publication before stop.
+Receiver ownership is captured on GUI start, not accessed through MainWindow
+from a worker during teardown. Never change frequency, mode, bandwidth, audio
+LPF or squelch to start SSTV; reject inactive/non-NFM/P25 monitor receivers.
+Mode/source loss and retunes fail closed through existing metadata/gap checks.
+No HF SSB SSTV claim: that requires a separate clean linear-demod audio tap.
+Extend recorded window with source selection and Live NFM option. Finish
+quiesces publication, drains the existing queue, closes input normally and saves
+validated complete/partial images; Cancel and
+close invalidate provisional output and join the worker. Live session capped
+at six minutes (existing resource budget), no automatic hidden reattach.
+Latest-only previews and existing new-directory PNG publication are retained.
+Recorded and live controls remain mutually exclusive. Gate: attachment and
+teardown tests, actual streamed GUI recording parity, interruption/finish,
+small/large screenshots and existing regression suite. An off-air SSTV image
+still needs a known transmission; report that acceptance gap explicitly.
+
 ## DEC-0098 - Bounded single-stream SSTV worker (2026-09-18)
 
 Compose DEC-0095 events, DEC-0097 conversion and DEC-0096 helper on a single

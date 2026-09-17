@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.58 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.59 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -74,7 +74,7 @@ add_library(sdr_town_rds STATIC
 target_include_directories(sdr_town_rds PUBLIC include PRIVATE external/redsea-block external/miniaudio)
 add_library(sdr_town_tones STATIC src/CtcssDecoder.cpp src/DcsDecoder.cpp)
 target_include_directories(sdr_town_tones PUBLIC include PRIVATE external/miniaudio)
-add_library(sdr_town_decoders STATIC src/ReceiveDecoder.cpp src/RdsMpxFile.cpp src/SstvVis.cpp src/SstvAudioFile.cpp src/SstvLiveInput.cpp src/SstvRateConverter.cpp)
+add_library(sdr_town_decoders STATIC src/ReceiveDecoder.cpp src/RdsMpxFile.cpp src/SstvVis.cpp src/SstvAudioFile.cpp src/SstvLiveInput.cpp src/SstvRateConverter.cpp src/SstvReceiverFeed.cpp)
 target_include_directories(sdr_town_decoders PUBLIC include PRIVATE external/miniaudio)
 target_link_libraries(sdr_town_decoders PUBLIC sdr_town_rds sdr_town_tones)
 target_link_libraries(sdr_town_decoders PRIVATE nlohmann_json::nlohmann_json)
@@ -83,6 +83,7 @@ include(cmake/RdsBackend.cmake)
 set(SDR_TOWN_SOURCES
     src/SstvImageFile.cpp
     src/SstvStreamWorker.cpp
+    src/SstvLiveSession.cpp
     src/SstvProgress.cpp
     src/SstvWindow.cpp
     include/SstvWindow.h
@@ -406,6 +407,8 @@ if(BUILD_TESTS)
     tests/test_sstv_gui.cpp tests/sstv_miniaudio.cpp src/SstvWindow.cpp include/SstvWindow.h src/SstvImageFile.cpp
     tests/test_sstv_progress.cpp src/SstvProgress.cpp
     tests/test_sstv_stream_worker.cpp src/SstvStreamWorker.cpp src/SstvRateConverter.cpp src/SstvLiveInput.cpp
+    src/SstvReceiverFeed.cpp src/SstvLiveSession.cpp
+    tests/test_sstv_live_gui.cpp
     src/BandPlan.cpp src/BandPlanDialog.cpp src/SpectrumWidget.cpp include/SpectrumWidget.h src/RdsStatusWidget.cpp)
   target_include_directories(sdr_town_workspace_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_include_directories(sdr_town_workspace_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/external/miniaudio)

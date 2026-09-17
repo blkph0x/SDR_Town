@@ -2,6 +2,20 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-18 - DEC-0099 live SSTV receiver and GUI
+
+Windows x64 / VS2022 MSVC Release. Initial app build failed because Qt's slots
+macro collided with SstvLiveInput::slots in the newly included header (lines
+44/45). Renamed the private constant slotCount; subsequent app/core/workspace
+build passed. CTest: 3/3 passed, including five Rust transport tests.
+After graceful-finish queue draining was added, test_sstv_worker.py passed all
+16 worker/live-GUI full/partial forced/auto Robot36/Martin1 cases (11 or14
+assertions each). Recorded GUI regression: four cases,13 assertions each PASS.
+Actual saved GUI previews reviewed at820x600 and560x420, no clipped controls.
+Native application Tools menu opens SSTV Images and exposes Live NFM source.
+This is recording-driven live-session validation, not known-image RF acceptance.
+Package/version0.2.59 build and extracted-runtime QA are recorded separately.
+
 ## 2026-09-18 - DEC-0098 combined SSTV stream worker
 
 Release app/workspace tests build PASS. First integration run failed QImage

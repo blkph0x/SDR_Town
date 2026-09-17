@@ -5,6 +5,7 @@
 #include "CtcssDecoder.h"
 #include "DcsDecoder.h"
 #include "ReceiveDecoder.h"
+#include "SstvReceiverFeed.h"
 #include "P25LiveDecoder.h"
 #include "P25ReceiverSession.h"
 #include "P25TrafficChannelProcessor.h"
@@ -91,6 +92,7 @@ struct Receiver {
     const std::unique_ptr<ReceiveDecoder> rds = createReceiveDecoder("rds"); // DEC-0085; DSP owner, snapshots safe for UI.
     CtcssDecoder ctcss;               // Informational; never opens/closes audio.
     DcsDecoder dcs;                   // Independent subaudible data, no audio gate.
+    const std::shared_ptr<SstvReceiverFeed> sstvFeed=std::make_shared<SstvReceiverFeed>();
     uint64_t rdsIqEpoch = 0, rdsNextIq = 0;
 
     double freqHz = 100e6;

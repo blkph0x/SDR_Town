@@ -1015,6 +1015,8 @@ void MainWindow::startP25LiveDecodePipeline()
                             didWork = true;
                             continue;
                         }
+                        if (monMode != DemodMode::NFM || monP25ControlMute || monP25VoiceDecode || rdsSourceGap)
+                            rx.sstvFeed->discontinuity(); // Metadata only; never touches the P25/audio decoder.
                         if (p25ShouldSuppressAnalogDemod(monP25VoiceDecode,
                                                          monP25ControlMute,
                                                          monP25IndependentTrafficSource,
@@ -1118,6 +1120,7 @@ void MainWindow::startP25LiveDecodePipeline()
                                         mpx.epoch, mpx.firstSample, mpx.discontinuity);
                                     rx.dcs.process(mpx.samples, mpx.sampleRate, monFreq,
                                         mpx.epoch, mpx.firstSample, mpx.discontinuity);
+                                    rx.sstvFeed->publish(mpx, i);
                                 }
                                 rx.rdsIqEpoch = rdsStreamEpoch;
                                 rx.rdsNextIq = rdsIqStart + iq.size();

@@ -2,6 +2,14 @@
 
 Never delete a row. Close with a commit hash and a sentence.
 
+2026-09-18 DEC-0099 updates T-0031: receiver attachment, Finish drain, cancel,
+GUI lifecycle and combined recording parity are implemented and tested.
+Qt slots macro compile collision corrected by renaming the private constant.
+Live known-image RF acceptance remains OPEN. On a gap the session fails closed
+and discards provisional output; automatic restart is deliberately deferred,
+not silently presented as implemented. Live HF/SSB and additional SSTV modes
+remain unsupported. Fractional-rate RF quality is not inferred from fixtures.
+
 2026-09-18 OPEN T-0031: NFM raw tap can produce fractional sample rates
 (Demod.cpp uses input rate / integer decimation), whereas the pinned SSTV
 backend takes an integer rate. Rounding the metadata is not a verified

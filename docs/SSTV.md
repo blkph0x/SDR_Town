@@ -1,11 +1,32 @@
 # SSTV receive development
 
-Version 0.2.58 adds a progressive recorded-image GUI to **experimental
-Robot36/Martin1 decoding** and classic VIS inspection. No live RF SSTV yet.
+Version 0.2.59 adds experimental live NFM input to **Robot36/Martin1 decoding**
+and classic VIS inspection. Known-transmission RF acceptance remains open.
+
+## Live NFM
+
+1. Start and tune the main receiver to an SSTV transmission in NFM. P25 monitor
+   or voice-follow mode must be off. SSTV does not tune or reconfigure the radio.
+2. Open **Tools > SSTV Images**, choose **Live NFM - main receiver**, Automatic
+   (or Robot36/Martin1), and a new output directory whose parent exists.
+3. Press **Receive**. Scanlines appear progressively. **Finish and save** stops
+   accepting new input, drains queued samples, and saves validated PNGs/report.
+   **Cancel** or closing the window discards provisional output.
+
+The source is raw NFM discriminator audio before speaker LPF/EQ/squelch/volume.
+A retune, stream gap, overrun or mode/device loss aborts the session rather than
+joining incompatible samples; restart explicitly. Sessions are bounded to six
+minutes and four images. No automated repeated acquisition yet. Partial images
+are labelled and retain black missing rows. HF USB/LSB audio is not supported
+by this live source. Finishing after an image begins can save a partial image;
+all rows received does not guarantee a noise-free image.
+
+Independent recordings exercise the real live GUI/feed/converter/helper path,
+but are not a substitute for an off-air image from a known transmission.
 
 ## Image decoding
 
-Version 0.2.58: **Tools > SSTV Recorded Images** opens a
+**Tools > SSTV Images**, with Source set to **Recording**, opens a
 nonmodal window. Select a mono recording, give a new output directory (parent
 must exist), choose Automatic/Robot36/Martin1 and Decode. The image list shows
 complete/partial status and row counts; selecting an item previews the original
@@ -19,7 +40,7 @@ completion/quality percentage. A latest-only preview handoff prevents accumulati
 images in the GUI event queue. Failed/cancelled jobs clear the provisional preview.
 The parser validates bounded row events and checks assembled preview pixels
 against the final RGB file before publishing PNGs. Missing rows remain black;
-preview quality is not an RF/protocol correctness guarantee. No live RF input.
+preview quality is not an RF/protocol correctness guarantee.
 
 ```powershell
 build/bin/Release/SDR_Town.exe --cli --no-control-server --cmd 'sstv decode "C:\recordings\sstv.wav" "C:\recordings\new-images" auto'
@@ -124,9 +145,9 @@ Synthetic tests alone are not independent reception proof. Live RF acceptance,
 fading and broad offset/noise characterization remain open.
 
 Next: bounded live demodulated-audio routing using the verified scanline transport.
-The development tree now has a tested isolated NFM input queue (DEC-0095):
+The NFM input queue (DEC-0095) has
 fixed storage, nonwaiting producer, explicit gap/source-change events and
-sample ordering tests. It is not connected to RX or the GUI. The isolated
+sample ordering tests. DEC-0099 connects it to the main NFM receiver. The
 DEC-0097 converter now supplies continuous 48 kHz PCM from fractional input
 rates using the bundled miniaudio resampler. It preserves state across blocks
 and resets on explicit discontinuity; no artificial samples are added at EOF.
@@ -139,8 +160,9 @@ It aborts on an in-stream gap or changed identity and discards provisional
 output on failure. The caller receives owned images after helper/file validation;
 no temporary filenames are published. `python scripts/test_sstv_worker.py`
 checks eight recording cases against the converted file decoder pixel-for-pixel.
-Receiver lifecycle, gap restart policy, GUI live controls and live acceptance
-remain unfinished.
+Live GUI controls use the same worker. Receiver attach/detach is serialized
+against try-lock-only publication; no queue allocations on RX. Gap recovery
+requires explicit restart. Off-air image acceptance remains open.
 
 ### Developer streaming helper
 

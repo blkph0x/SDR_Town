@@ -1,4 +1,5 @@
 """DEC-0098: queue -> C++ converter -> helper -> verified image integration."""
+import argparse
 import gzip
 import io
 import os
@@ -12,8 +13,11 @@ import soundfile as sf
 
 def main():
     root = Path(__file__).resolve().parents[1]
-    core = root / 'build/bin/Release/sdr_town_tests.exe'
-    gui = root / 'build/bin/Release/sdr_town_workspace_tests.exe'
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--core-exe', type=Path, default=root / 'build/bin/Release/sdr_town_tests.exe')
+    parser.add_argument('--gui-exe', type=Path, default=root / 'build/bin/Release/sdr_town_workspace_tests.exe')
+    args = parser.parse_args()
+    core, gui = args.core_exe.resolve(), args.gui_exe.resolve()
     fixtures = (
         ('robot36', root / 'build/reference-sstv-rust/tests/assets/real_recording.wav.gz'),
         ('martin1', root / 'build/reference-sstv/test/data/m1.ogg'),
@@ -37,10 +41,12 @@ def main():
                 for requested in (mode, 'auto'):
                     env = dict(os.environ, SDR_TOWN_SSTV_STREAM_INPUT=str(wav),
                                SDR_TOWN_SSTV_STREAM_REFERENCE=str(reference), SDR_TOWN_SSTV_STREAM_MODE=requested)
-                    run = subprocess.run([str(gui), '[sstv-stream-recording]'], env=env,
-                                         capture_output=True, text=True, timeout=40)
-                    print(label, requested, run.stdout, run.stderr)
-                    assert run.returncode == 0, 'stream worker parity failed'
+                    env['SDR_TOWN_SSTV_LIVE_SCREENSHOT'] = str(root / f'build/sstv-live-{label}-{requested}.png')
+                    for test in ('[sstv-stream-recording]', '[sstv-live-gui-recording]'):
+                        run = subprocess.run([str(gui), test], env=env,
+                                             capture_output=True, text=True, timeout=40)
+                        print(label, requested, test, run.stdout, run.stderr)
+                        assert run.returncode == 0, 'stream worker/GUI parity failed'
 
 
 if __name__ == '__main__':

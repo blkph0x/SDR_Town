@@ -1,5 +1,17 @@
 # Code notes (tree map)
 
+DEC-0099: SstvReceiverFeed owns the optional live queue. Attach/detach/finish
+serialize against publication; RX only try-locks, and contention becomes an
+explicit gap. SstvLiveSession runs receiver validation, bounded stream decode
+and atomic image/report saves on the worker. Finish quiesces RX then drains
+queued data; cancel or a source discontinuity discards provisional output.
+MainWindow captures the main receiver on the GUI thread; its worker never
+dereferences MainWindow. Only active manual NFM outside P25 is accepted.
+SstvWindow provides Recording/Live NFM, Receive, Finish and save, and Cancel.
+tests/test_sstv_live_gui.cpp covers lifecycle and real-recording image parity;
+scripts/test_sstv_worker.py can also target extracted-package test executables.
+Historical notes below describe earlier isolated stages, now integrated.
+
 DEC-0098: SstvStreamWorker consumes explicit data/idle/EOF callbacks on a
 non-GUI thread, validates chronological stream identity, converts, feeds a
 128 KiB-capped QProcess stdin queue and drains bounded progress/stderr.

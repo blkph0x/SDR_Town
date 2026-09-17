@@ -11,8 +11,18 @@ DEC-0097 converter verified: exact partition equality, reset/error isolation,
 six-minute count/drift tests, in-band tones and independent full/partial image
 quality gates. DEC-0098 combined worker passes eight independent recorded pixel
 parity cases, cancellation, empty EOF and nine injected fault paths.
-Remaining: receiver lifecycle, GUI controls
-and live acceptance. No live feature release yet.
+DEC-0099 adds receiver attach/detach and Live NFM GUI controls. Combined GUI
+recording parity and lifecycle tests are the implementation gates; actual
+known-transmission RF image acceptance remains open.
+
+T-0032 | planned | Talkgroup aliases | Existing Add TG Alpha Tag is persisted
+and displayed. Add validated system-scoped alias imports with source/date and
+manual override preservation; never use labels as encryption/audio evidence.
+Do not assume the same numeric TGID denotes the same group on another system.
+
+T-0033 | pending | Release 0.2.59 | Experimental live NFM SSTV UI/feed.
+Build, combined recording/lifecycle tests, GUI review and package QA before
+publishing. Disclose that off-air SSTV image acceptance remains open.
 
 T-0030 | done | Release 0.2.58 | DEC-0093/0094 recorded SSTV GUI,
 progressive previews, cancellation, independent pixel parity and transport
