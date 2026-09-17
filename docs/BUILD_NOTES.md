@@ -12,8 +12,15 @@ errors or hardware RX; Trunking screenshot confirms Aliases button fits.
 Compact560x380 alias dialog screenshot reviewed: labels/actions fit.
 Final plain-text status assertion and packaged QA follow below. No user alias
 database modified; tests use temporary directories and fictional system IDs.
-Final incremental app/workspace build PASS; alias suite71 assertions/4 cases
+Final incremental app/workspace build PASS; alias suite70 assertions/4 cases
 PASS with plain-text status enforced. No new compiler/test failures this pass.
+
+Release0.2.60 source ee92a51; metadata0122d75. release.ps1 PASS, CTest3/3
+PASS in61.14s; signed manifest/runtime provenance/hash verifier PASS. Fresh
+portable-qa-0260 extraction runs Qt25 cases/259 assertions (three optional SSTV
+fixture skips), four main-window layouts and four recorded SSTV GUI cases PASS.
+Test executable is QA-only, not added to published ZIP. Existing T-0029 P25
+static-verifier/acceptance gaps are unchanged; this is not all-hosted-CI proof.
 
 ## 2026-09-18 - 0.2.59 publication verification
 
