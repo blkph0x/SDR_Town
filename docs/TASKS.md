@@ -20,11 +20,13 @@ and displayed. Add validated system-scoped alias imports with source/date and
 manual override preservation; never use labels as encryption/audio evidence.
 Do not assume the same numeric TGID denotes the same group on another system.
 
-T-0033 | pending | Release 0.2.59 | Experimental live NFM SSTV UI/feed.
+T-0033 | done | Release 0.2.59 | Experimental live NFM SSTV UI/feed.
 Build, combined recording/lifecycle tests, GUI review and package QA before
 publishing. Disclose that off-air SSTV image acceptance remains open.
-Local build, signed manifest and fresh extracted-runtime gates PASS. Awaiting
-upload/hash verification and publication before marking done.
+Local build, signed manifest and fresh extracted-runtime gates PASS. Tag
+aa5e766 pushed; eight downloaded asset hashes match local. Published Latest
+experimental; public updater manifest matches signed local bytes. T-0031 RF
+acceptance and T-0029 existing P25 QA gap remain open.
 
 T-0030 | done | Release 0.2.58 | DEC-0093/0094 recorded SSTV GUI,
 progressive previews, cancellation, independent pixel parity and transport

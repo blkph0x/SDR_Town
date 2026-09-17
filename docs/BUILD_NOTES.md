@@ -2,6 +2,15 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-18 - 0.2.59 publication verification
+
+Pushed branch and annotated v0.2.59 tag at aa5e766. All eight assets uploaded
+to a draft, downloaded into build/release-download-0259, SHA256 equality with
+local assets PASS. Published non-prerelease Latest with experimental manifest
+channel (updater uses releases/latest). Public Latest/download/update.json
+matches signed local manifest bytes. Portable Qt lifecycle suite also PASS:
+21 cases/189 assertions, three fixture cases covered by separate harnesses.
+
 ## 2026-09-18 - 0.2.59 release package QA
 
 release.ps1 -Version0.2.59 -Channel experimental -SkipPush -SkipAssets PASS.

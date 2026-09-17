@@ -2,6 +2,14 @@
 
 Newest at the top.
 
+## 2026-09-18 - 0.2.59 published
+
+Source, tag and eight release assets published for experimental live NFM SSTV
+testing. Full CTest, extracted CLI/GUI/worker reference and lifecycle checks
+pass; downloaded asset hashes and public updater manifest verified. T-0033
+complete. Known-transmission RF acceptance, HF live input, additional modes
+and system-scoped talkgroup alias importing remain future work. P25 unchanged.
+
 ## 2026-09-18 - Live NFM SSTV integration
 
 DEC-0099 adds bounded main-receiver attachment, live GUI session ownership,
