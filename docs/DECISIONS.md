@@ -2,6 +2,31 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0097 - SSTV streaming rate conversion (2026-09-18)
+
+Use the bundled miniaudio linear resampler with its default fourth-order
+anti-alias filter; preserve its state across blocks. Source: miniaudio.h
+Resampling section and ma_linear_resampler_set_rate_internal, which reduces
+integer rates by GCF and derives normalized filter coefficients from them.
+Avoid set_rate_ratio's millionth-ratio truncation. Express input Hz rounded
+to 0.0001 Hz and 48000 output Hz in the same scaled units (10000); maximum
+960000000 fits uint32 and fractional accumulator sums remain below uint32.
+At minimum 8000 Hz, 0.00005 Hz rounding error over 360 seconds is at most
+0.108 output sample at 48 kHz. 48 kHz is a backend-supported worker format,
+not a changed RF setting. Exact 48 kHz input bypasses conversion unchanged.
+No AGC, speaker filters, time-based flushing, synthetic tails or padding.
+Only a non-real-time worker owns the converter. Invalid input invalidates it;
+an explicit start(rate) is required after discontinuity. Input blocks retain
+the queue's 8192-sample bound; output allocations are bounded by conversion
+ratio, not session length. Gate: chunk-invariant samples, bounded count drift,
+tone fidelity, restart/error isolation, and independent image decode checks.
+This does not qualify live RF reception or arbitrary weak-signal sensitivity.
+Independent image gate: compare full images against the same upstream pictures
+before/after conversion; allow at most +1 mean absolute 8-bit RGB level versus
+native-rate decoding (engineering regression budget, not a protocol limit).
+Partial recordings must remain partial with the same row count. Record measured
+errors even on failure; do not loosen the gate to accommodate a poor converter.
+
 ## DEC-0096 - Streaming SSTV helper transport (2026-09-18)
 
 Pinned sstv/src/decoder/mod.rs from_samples accepts Iterator<Item=i16> and

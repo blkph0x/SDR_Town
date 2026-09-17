@@ -2,6 +2,23 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-18 - DEC-0097 isolated SSTV rate converter
+
+Release core tests/application build PASS. New rate tests: five cases /89
+assertions PASS, plus independently supplied recording export case. Exact float
+output equality for chunk sizes 1,137,4096,8192 at six rates including
+2048000/43 Hz. Six-minute zero-input count/drift checks pass; in-band tone,
+bypass, reset and invalid-state tests pass. Counts allow the native resampler's
+one-input-interval startup, not fabricated tail samples.
+scripts/test_sstv_rate.py: eight full/partial forced/auto image gates PASS.
+Reference RGB MAE before -> after: Robot36 forced 10.406471 ->10.391415;
+Robot36 auto 14.302396 ->14.318051; Martin1 forced/auto 20.779395 ->20.730420.
+All partial row counts unchanged. The +1 RGB-level regression budget in
+DEC-0097 was set before this run, not fitted afterwards.
+scripts/test_sstv_stream.py eight parity cases/negative lifecycle tests PASS;
+scripts/test_sstv_gui.py four recording cases PASS. Full CTest 3/3 PASS in
+15.49 seconds. No receiver/P25 processing path changed. No live RF gate claimed.
+
 ## 2026-09-18 - DEC-0096 streaming SSTV transport
 
 Release SDR_Town/helper build passes on existing Windows/MSVC/Rust toolchain.

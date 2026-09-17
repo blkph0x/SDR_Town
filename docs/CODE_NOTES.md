@@ -1,5 +1,14 @@
 # Code notes (tree map)
 
+DEC-0097: SstvRateConverter owns a persistent bundled miniaudio resampler on
+one non-real-time worker. Scaled integer rates preserve fractional timing to
+0.0001 Hz; output is 48 kHz mono float. Exact 48 kHz bypass is unchanged.
+Input <=8192 samples, output bounded at sixfold plus one carried interval.
+No gain/speaker filtering, block flushing or artificial EOF tail. Invalid input
+invalidates the session until start(rate); owner must reset on every queue gap.
+Not wired to RX. Tests include independent fixture export consumed by
+scripts/test_sstv_rate.py, plus sample equality across caller chunk sizes.
+
 DEC-0096: src/sstv_backend/src/pcm.rs supplies the pinned decoder's i16 iterator
 from buffered file or stdin input. It retains I/O/odd-length/limit errors until
 finish(); main.rs rejects the whole session on failure. Output is provisional

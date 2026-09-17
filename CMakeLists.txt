@@ -74,7 +74,7 @@ add_library(sdr_town_rds STATIC
 target_include_directories(sdr_town_rds PUBLIC include PRIVATE external/redsea-block external/miniaudio)
 add_library(sdr_town_tones STATIC src/CtcssDecoder.cpp src/DcsDecoder.cpp)
 target_include_directories(sdr_town_tones PUBLIC include PRIVATE external/miniaudio)
-add_library(sdr_town_decoders STATIC src/ReceiveDecoder.cpp src/RdsMpxFile.cpp src/SstvVis.cpp src/SstvAudioFile.cpp src/SstvLiveInput.cpp)
+add_library(sdr_town_decoders STATIC src/ReceiveDecoder.cpp src/RdsMpxFile.cpp src/SstvVis.cpp src/SstvAudioFile.cpp src/SstvLiveInput.cpp src/SstvRateConverter.cpp)
 target_include_directories(sdr_town_decoders PUBLIC include PRIVATE external/miniaudio)
 target_link_libraries(sdr_town_decoders PUBLIC sdr_town_rds sdr_town_tones)
 target_link_libraries(sdr_town_decoders PRIVATE nlohmann_json::nlohmann_json)
@@ -329,6 +329,7 @@ if(BUILD_TESTS)
     tests/test_receive_decoder.cpp
     tests/test_sstv_vis.cpp
     tests/test_sstv_live_input.cpp
+    tests/test_sstv_rate_converter.cpp
     tests/test_devicemanager.cpp
     tests/test_audioengine.cpp
     tests/test_p25_audio_resampler.cpp

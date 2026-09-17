@@ -126,8 +126,15 @@ fading and broad offset/noise characterization remain open.
 Next: bounded live demodulated-audio routing using the verified scanline transport.
 The development tree now has a tested isolated NFM input queue (DEC-0095):
 fixed storage, nonwaiting producer, explicit gap/source-change events and
-sample ordering tests. It is not connected to RX or the GUI. Fractional-rate
-conversion, C++ streaming worker integration and live acceptance remain unfinished.
+sample ordering tests. It is not connected to RX or the GUI. The isolated
+DEC-0097 converter now supplies continuous 48 kHz PCM from fractional input
+rates using the bundled miniaudio resampler. It preserves state across blocks
+and resets on explicit discontinuity; no artificial samples are added at EOF.
+`python scripts/test_sstv_rate.py` checks full/partial independent recordings
+after C++ conversion. Native tests cover fractional-rate tones, six-minute
+sample counts, chunk equality, bypass and reset/error behavior. Real fractional
+RF image reception is not yet qualified. C++ streaming worker integration and
+live acceptance remain unfinished.
 
 ### Developer streaming helper
 

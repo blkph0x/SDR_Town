@@ -2,6 +2,15 @@
 
 Newest at the top.
 
+## 2026-09-18 - SSTV fractional-rate conversion qualified in isolation
+
+DEC-0097 adds worker-owned continuous miniaudio conversion with bounded blocks,
+scaled rate precision, exact 48 kHz bypass and reset/error isolation. Native
+timing/partition tests and independent image quality checks pass; recorded GUI
+and pipe regressions still pass. Documentation updated. No RF or P25 wiring
+changed. T-0031 remains open for bounded worker, receiver lifecycle/UI and live
+acceptance; no version bump or feature-release asset for this internal stage.
+
 ## 2026-09-18 - Streaming SSTV helper transport verified
 
 DEC-0096 adds bounded buffered stdin/file input to the existing pinned decoder,
