@@ -82,6 +82,7 @@ include(cmake/RdsBackend.cmake)
 
 set(SDR_TOWN_SOURCES
     src/SstvImageFile.cpp
+    src/SstvStreamWorker.cpp
     src/SstvProgress.cpp
     src/SstvWindow.cpp
     include/SstvWindow.h
@@ -404,6 +405,7 @@ if(BUILD_TESTS)
   add_executable(sdr_town_workspace_tests tests/test_workspace.cpp src/WorkspaceLayout.cpp
     tests/test_sstv_gui.cpp tests/sstv_miniaudio.cpp src/SstvWindow.cpp include/SstvWindow.h src/SstvImageFile.cpp
     tests/test_sstv_progress.cpp src/SstvProgress.cpp
+    tests/test_sstv_stream_worker.cpp src/SstvStreamWorker.cpp src/SstvRateConverter.cpp src/SstvLiveInput.cpp
     src/BandPlan.cpp src/BandPlanDialog.cpp src/SpectrumWidget.cpp include/SpectrumWidget.h src/RdsStatusWidget.cpp)
   target_include_directories(sdr_town_workspace_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_include_directories(sdr_town_workspace_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/external/miniaudio)

@@ -2,6 +2,28 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0098 - Bounded single-stream SSTV worker (2026-09-18)
+
+Compose DEC-0095 events, DEC-0097 conversion and DEC-0096 helper on a single
+non-GUI worker thread. Source callback returns data, idle or explicit EOF;
+it must not block. Validate source/generation/epoch/rate/frequency/positions
+again at the boundary. Initial gap markers are permitted before any samples;
+a gap during a stream aborts the provisional image, never joins two sources.
+Future live controller may start a new worker after that abort; no hidden retry.
+Use a private QTemporaryDir, --stdin --progress and the existing bounded row
+parser. Accept results only after EOF, normal zero exit, final row validation
+and exact equality with helper RGB files. No output publication in this layer.
+Resource budgets: 360 seconds input and 420 seconds wall per session, four
+images (existing helper), 128 KiB queued stdin, 64 KiB stderr, 4 MiB stdout.
+Poll waits <=5 ms; launch deadline 5 seconds, blocked-pipe deadline 5 seconds,
+EOF completion deadline 10 seconds. These are worker resource/failure limits,
+not demodulation or synchronization constants. Owner drains stderr/stdout on
+each iteration; destructor guard kills/reaps on exceptions/cancellation.
+Gate: independent recordings through actual queue/converter/helper match the
+direct converted recording, progressive callbacks occur on worker, idle cancel,
+explicit gaps/identity faults reject, and startup/EOF errors leave no child.
+No GUI or RF wiring until this combined path passes. P25 untouched.
+
 ## DEC-0097 - SSTV streaming rate conversion (2026-09-18)
 
 Use the bundled miniaudio linear resampler with its default fourth-order

@@ -2,6 +2,23 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-18 - DEC-0098 combined SSTV stream worker
+
+Release app/workspace tests build PASS. First integration run failed QImage
+equality between in-memory RGB888 and loaded PNG; normalized reference format
+to RGB888 in the test, with no decoder change. Exact pixel comparison then
+passes all eight full/partial forced/auto Robot36/Martin1 cases (11 assertions
+each), through actual input queue, converter and pipe helper. Provisional
+callbacks confirmed off the GUI thread; final metadata and pixels validated.
+Native worker tests: three cases/19 assertions PASS, including empty EOF,
+GUI-thread rejection, idle cancellation and nine faults with exact expected
+error categories. No sdrtown_sstv process remained after the fault tests.
+Full CTest 3/3 PASS in 16.77 seconds; stricter error-category assertions rebuilt
+and rerun afterward. Recorded GUI regression four cases PASS (13 assertions
+each). Optional-helper-disabled builds skip helper-dependent tests; enabled
+workspace target stages its helper and requires it to exist.
+Live RF/paced overrun acceptance and controller/UI integration remain open.
+
 ## 2026-09-18 - DEC-0097 isolated SSTV rate converter
 
 Release core tests/application build PASS. New rate tests: five cases /89

@@ -18,6 +18,11 @@ add_custom_command(OUTPUT "${SSTV_EXE}"
     VERBATIM)
 add_custom_target(sstv_backend DEPENDS "${SSTV_EXE}")
 if(BUILD_TESTS)
+    target_compile_definitions(sdr_town_workspace_tests PRIVATE SDR_TOWN_TEST_SSTV_BACKEND=1)
+    add_dependencies(sdr_town_workspace_tests sstv_backend)
+    add_custom_command(TARGET sdr_town_workspace_tests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SSTV_EXE}" "$<TARGET_FILE_DIR:sdr_town_workspace_tests>"
+        VERBATIM)
     add_test(NAME SstvTransportRust
         COMMAND ${CMAKE_COMMAND} -E env ${SSTV_ENV} "${SDR_TOWN_CARGO}" test --offline --locked
             --manifest-path "${CMAKE_SOURCE_DIR}/src/sstv_backend/Cargo.toml"

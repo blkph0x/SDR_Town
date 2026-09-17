@@ -15,6 +15,9 @@ than the float API's quantized ratio. Partition/drift/tone and independent image
 gates pass. Images cover native 32/44.1 kHz recordings; fractional-rate coverage
 is synthetic, not off-air acceptance. Receiver gap/lifecycle wiring, bounded
 pipe worker and live RF still remain open. Preserve true rate in ingress events.
+DEC-0098 now qualifies the combined worker on recorded inputs and fault cases;
+receiver attach/detach, automatic restart after a gap and GUI live controls are
+still open. A live controller must discard provisional previews on exceptions.
 
 2026-09-17 OPEN T-0029: hosted run 35225600073 at 3a30f1d (0.2.56 checkpoint)
 fails 14 P25 string verifiers; 0.2.57 local sweep reproduces 133 pass/14 fail.

@@ -133,8 +133,14 @@ and resets on explicit discontinuity; no artificial samples are added at EOF.
 `python scripts/test_sstv_rate.py` checks full/partial independent recordings
 after C++ conversion. Native tests cover fractional-rate tones, six-minute
 sample counts, chunk equality, bypass and reset/error behavior. Real fractional
-RF image reception is not yet qualified. C++ streaming worker integration and
-live acceptance remain unfinished.
+RF image reception is not yet qualified. The DEC-0098 C++ worker now combines
+the queue, converter and helper, with bounded pipe writes and explicit EOF.
+It aborts on an in-stream gap or changed identity and discards provisional
+output on failure. The caller receives owned images after helper/file validation;
+no temporary filenames are published. `python scripts/test_sstv_worker.py`
+checks eight recording cases against the converted file decoder pixel-for-pixel.
+Receiver lifecycle, gap restart policy, GUI live controls and live acceptance
+remain unfinished.
 
 ### Developer streaming helper
 

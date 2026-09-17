@@ -1,5 +1,15 @@
 # Code notes (tree map)
 
+DEC-0098: SstvStreamWorker consumes explicit data/idle/EOF callbacks on a
+non-GUI thread, validates chronological stream identity, converts, feeds a
+128 KiB-capped QProcess stdin queue and drains bounded progress/stderr.
+In-stream gaps invalidate provisional output instead of splicing epochs.
+Normal EOF returns owned images/metadata only after zero exit and bytewise
+preview/RGB-file parity. Temporary RGB filenames are removed from returned
+metadata; no disk publication in this layer. Guard kills/reaps on failure.
+Independent test uses actual SstvLiveInput plus converter/helper and compares
+against converted-file decoding. It is not attached to a live receiver yet.
+
 DEC-0097: SstvRateConverter owns a persistent bundled miniaudio resampler on
 one non-real-time worker. Scaled integer rates preserve fractional timing to
 0.0001 Hz; output is 48 kHz mono float. Exact 48 kHz bypass is unchanged.

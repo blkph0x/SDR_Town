@@ -2,6 +2,15 @@
 
 Newest at the top.
 
+## 2026-09-18 - Combined SSTV streaming path verified
+
+DEC-0098 links the isolated queue, converter and helper into a bounded
+synchronous worker with explicit EOF, fault propagation and owned cleanup.
+Independent recording pixels match the converted recorded path exactly; error,
+cancel and regression gates pass. No changes to P25 or receiver routing.
+Readme/developer docs updated. T-0031 remains open for receiver lifecycle/UI
+and live acceptance. Source checkpoint only; no new release asset yet.
+
 ## 2026-09-18 - SSTV fractional-rate conversion qualified in isolation
 
 DEC-0097 adds worker-owned continuous miniaudio conversion with bounded blocks,

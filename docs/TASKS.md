@@ -9,7 +9,9 @@ DEC-0096 helper transport verified: five Rust units and eight independent
 full/partial, forced/auto file/pipe parity cases with rows before EOF.
 DEC-0097 converter verified: exact partition equality, reset/error isolation,
 six-minute count/drift tests, in-band tones and independent full/partial image
-quality gates. Remaining: bounded C++ worker, receiver lifecycle, GUI controls
+quality gates. DEC-0098 combined worker passes eight independent recorded pixel
+parity cases, cancellation, empty EOF and nine injected fault paths.
+Remaining: receiver lifecycle, GUI controls
 and live acceptance. No live feature release yet.
 
 T-0030 | done | Release 0.2.58 | DEC-0093/0094 recorded SSTV GUI,

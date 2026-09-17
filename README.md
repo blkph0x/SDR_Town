@@ -48,8 +48,8 @@ SSTV now has experimental offline Robot36/Martin1 image decoding to PNG:
 `sstv decode "file.wav" "new-output-directory" auto`. The separate
 `sstv inspect "file.wav"` reports validated classic VIS headers.
 Live RF SSTV and public/weather satellite decoding remain planned.
-Live SSTV development has tested input buffering, streaming helper transport
-and rate conversion; live receiver/GUI integration is not yet available.
+Live SSTV development has a tested combined queue/converter/decoder worker;
+live receiver/GUI integration is not yet available.
 See [SSTV commands, resource limits and validation](docs/SSTV.md).
 Version 0.2.58 adds **Tools > SSTV Recorded Images** with background decoding,
 cancellation, progressive scanline previews and output-folder access. Preview
