@@ -1,6 +1,8 @@
 # SSTV and Public Satellite Reception
 
-Status: approved roadmap, not implemented capability. DEC-0083, 2026-09-17.
+Status: staged roadmap, DEC-0083, 2026-09-17. DEC-0091/0092 deliver offline
+VIS inspection and experimental Robot36/Martin1 PNG decoding in 0.2.57;
+see [SSTV.md](SSTV.md). Live SSTV and satellite support are still planned.
 
 ## Delivery Order
 

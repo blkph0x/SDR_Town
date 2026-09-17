@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Current version** | **0.2.56** (experimental channel) |
+| **Current version** | **0.2.57** (experimental channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
@@ -44,7 +44,11 @@ Runtime hardening: the release now stages the configured RTL-SDR DLL instead of
 retaining an old copy. The reproduced local shutdown access violation is fixed;
 see [native debugger tests and hardware limits](docs/NATIVE_RUNTIME_QA.md).
 
-SSTV and public/weather satellite decoding are **planned, not implemented**.
+SSTV now has experimental offline Robot36/Martin1 image decoding to PNG:
+`sstv decode "file.wav" "new-output-directory" auto`. The separate
+`sstv inspect "file.wav"` reports validated classic VIS headers.
+Live SSTV, GUI image preview and public/weather satellite decoding remain planned.
+See [SSTV commands, resource limits and validation](docs/SSTV.md).
 The [staged roadmap](docs/SATELLITE_AND_SSTV.md) starts with independently verified
 recorded-audio SSTV before live reception and satellite scheduling.
 

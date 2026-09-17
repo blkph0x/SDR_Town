@@ -2,6 +2,15 @@
 
 Never delete a row. Close with a commit hash and a sentence.
 
+2026-09-17 DEC-0092 validation limits: Martin1 reconstructs the independent BBC
+card but has visible noise/colour differences from colaclanth's output (RGB MAE
+20.7794). Keep experimental, not pixel-identical quality. Robot36 manual and
+auto have different acquisition alignment; both pass upstream reference gate
+(MAE 10.4065/14.3024). Incorrect cross-option equality assertion corrected to
+matching-option app/helper parity plus independent image gate, not a DSP tweak.
+Live SSTV, GUI image workflow and unqualified modes remain T-0022; no global
+decoder sensitivity or damaged-signal robustness guarantee follows from two files.
+
 2026-09-17 DEC-0089 CLOSES reproduced T-0026 native teardown fault: legacy
 rtlsdr.dll in the executable folder failed a standalone lifecycle probe on
 cycle 2, independent of Qt/Soapy/DSP. Configured dependency passes 20 native
@@ -442,3 +451,14 @@ and signing rewrote the public trust anchor after building. Corrected with
 checked commands, current-branch publication and matching-key enforcement.
 Package/negative gates now PASS (BUILD_NOTES). Initial verifier used a Python
 API absent on this host; replaced with streaming hashing before publication.
+# SSTV VIS milestone (DEC-0091 / T-0022)
+
+Initial fractional-rate consecutive-header fixture ended one sample too early
+at 11025 Hz. Corrected fixture tail; all rate/partition cases pass with unchanged
+detector timing. Independent M1 header passes. Image reconstruction, live routes,
+GUI, weak/faded/headerless acquisition and narrow/extended VIS remain unimplemented.
+QSSTV/Python reference licenses were reviewed; no backend code or audio is shipped.
+Unicode SSTV paths initially failed in both narrow file opening and CRT batch
+arguments. Qt argument ingestion plus wide-file opening passes the actual CLI
+test; existing RDS/tone/registry CLI regressions pass. Other legacy file loaders'
+Unicode behavior is not certified by this scoped repair.

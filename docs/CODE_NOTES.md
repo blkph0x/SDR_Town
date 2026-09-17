@@ -1,5 +1,23 @@
 # Code notes (tree map)
 
+DEC-0092: SstvImageFile.h/.cpp normalize bounded mono audio to LE16 temporary
+PCM, launch an app-adjacent helper via argument-array QProcess with deadline/log
+limits, validate schema/mode/row/RGB outputs, then save new-directory PNGs/report.
+src/sstv_backend is a pinned Cargo helper consuming upstream ImageStart/Row/End
+events; duplicate rows, unsupported modes and excess images fail closed.
+cmake/SstvBackend.cmake opts Rust image builds in, stages helper and dependency
+notices; core VIS builds remain Rust-free. release.ps1 enables image backend and
+verify_release.py now requires matching helper/licences. Tests exercise independent
+off-air Robot36 and M1 recordings, exact wrapper pixel parity and failure cases.
+No P25, demodulator, speaker, GUI live tap or radio timing code changed.
+
+DEC-0091: SstvVis.h/.cpp implement bounded native classic VIS inspection with
+sample-clock positions, parity/framing gates and explicit reset. SstvAudioFile.cpp
+uses existing miniaudio file decode, mono/rate/duration/size limits. CLI sstv inspect
+is offline-only and reports imageDecoded=false. test_sstv_vis.cpp covers protocol
+vectors/partitions/rejection; test_sstv_cli.py exercises the executable and optional
+independent upstream audio. No receive registry image capability or live tap added.
+
 DEC-0090: scripts/release.ps1 checks native exit status, clean source, actual
 branch, CTest and signed packages. sign_update_manifest.ps1 rejects trust-anchor
 mismatch rather than rewriting it during ordinary signing. verify_release.py

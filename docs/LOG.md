@@ -2,6 +2,15 @@
 
 Newest at the top.
 
+## 2026-09-17 - Recorded SSTV images and 0.2.57 preparation
+
+Continued T-0022 with native VIS diagnostics and an isolated pinned MIT image
+helper. Robot36 and Martin1 decode independent recordings through the app;
+PNG export, partial status, reproducibility hashes and bounded failures tested.
+Readme/commands/build and scope docs updated. P25/live receive left untouched.
+Local core/CLI gates pass; release publication remains T-0028 until signed
+assets, extracted portable tests and GitHub download comparisons finish.
+
 ## 2026-09-17 - Native shutdown fault reproduced and corrected
 
 CDB caught libusb/RTL teardown AV; a minimal native-only lifecycle test then
@@ -1070,3 +1079,14 @@ portable/manifest verification has negative tests. README and roadmap updated;
 SSTV/satellite are not implemented. 279 C++/Qt cases, four CLI gates, four GUI
 layouts and live GUI RDS under CDB pass. Source commit precedes signed packaging;
 publication and downloaded-asset verification are separate remaining gates.
+# 2026-09-17 - SSTV VIS milestone (DEC-0091)
+
+Implemented native bounded classic VIS inspection and offline `sstv inspect`
+for mono WAV/FLAC; JSON distinguishes headers from image decoding. Checked
+framing/parity/unknown IDs, all seven-bit vectors, five sample rates, four
+partition sizes, resets, bad inputs, silence/noise and repeated headers.
+Pinned independent M1 recording passes (VIS 44 at ~0.832 s). Fixed reproduced
+Unicode batch/path loss with Qt arguments and wide Windows file opening.
+284 core/Qt cases and existing decoder CLI gates pass. Docs/README updated.
+No new release published; 0.2.56 release assets remain unchanged. SSTV image
+reconstruction, GUI/live input and public satellite decoding remain future work.

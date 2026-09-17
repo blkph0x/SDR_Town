@@ -25,7 +25,9 @@ class ReleaseTests(unittest.TestCase):
         self.staging = self.root / 'build/deploy_staging'
         names = ('SDR_Town.exe', 'SdrTownControl.dll', 'sdrtown_rds_dsp.dll', 'rtlsdr.dll',
                  'SoapySDR.dll', 'SoapyRTLSDR.dll', 'Qt6Core.dll', 'Qt6Widgets.dll',
-                 'platforms/qwindows.dll', 'licenses/rtlsdr-COPYRIGHT.txt')
+                 'platforms/qwindows.dll', 'licenses/rtlsdr-COPYRIGHT.txt',
+                 'sdrtown_sstv.exe', 'licenses/sstv/sstv-MIT.txt',
+                 'licenses/sstv/libm-LICENSE.txt', 'licenses/sstv/rust-COPYRIGHT-library.html')
         with zipfile.ZipFile(self.portable, 'w') as archive:
             for name in names:
                 path = self.staging / name

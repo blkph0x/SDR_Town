@@ -2,6 +2,54 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0092 - Isolated recorded SSTV image backend (2026-09-17)
+
+T-0022 next gate: evaluate MIT-licensed unexcellent/sstv commit
+16bf34aac81b0041f5fdce52a1aef64eea0d5f6e as a pinned Rust helper, rather than
+copy GPL reference implementations or invent image demodulation. Its event API
+reports actual rows and completeness; retain those distinctions. Only std and
+libm dependencies are needed with C++ handling audio-file loading and PNG saving.
+Development toolchain Rust 1.88 is installed inside build/toolchains only, without
+altering PATH or unrelated projects. Pin Cargo.lock and retain dependency notices.
+
+Recorded-only CLI first: bounded mono WAV/FLAC, <=360 seconds/128 MiB, temp PCM,
+argument-array QProcess launch of application-adjacent helper, 120-second worker
+deadline, capped metadata and <=4 images with bounded dimensions. No shell,
+network, live radio changes or unbounded output. Save complete and partial
+results explicitly, never infer protocol correctness from a plausible picture.
+Compare a real off-air Robot36 recording and independent Martin recording before
+shipping image modes; unsupported modes stay unavailable. Image GUI/live routing
+remain separate. Release 0.2.57 includes only gates that actually pass.
+
+## DEC-0091 - Bounded SSTV VIS inspection first (2026-09-17)
+
+T-0022 begins with native recorded-audio header inspection, not image reception.
+QSSTV 8c27d6d169d8c6c197eb47c2089870e39bc06a02 sstvtx.cpp/sendPreamble/sendVIS
+defines 300 ms 1900 Hz, 10 ms 1200 Hz, 300 ms 1900 Hz, 30 ms start,
+eight 30 ms LSB-first data/parity symbols (1100=1,1300=0), 30 ms stop at 1200.
+sstvparam.cpp lists the parity-inclusive mode codes. Independent colaclanth/sstv
+3e556eee8ad4c4425799cb652bac26ee58f8e113 supplies m1.ogg and its expected mode.
+Both projects are GPLv3; no source is copied/linked and their audio is kept in
+build-only QA, not redistributed without a separate fixture rights review.
+
+Implement the published tone/framing facts, with a fixed 1 ms search grid and
+10 ms rectangular Goertzel probes. This diagnostic requires >=75% normalized
+tone energy and a 2:1 winning tone ratio: deliberately conservative engineering
+acceptance gates, tested on synthetic tones and the independent recording, not
+claimed as RF sensitivity specifications. Probe the leader throughout, require
+break/start/stop and even parity; unknown seven-bit IDs remain unknown, not a
+guessed mode. No extended/narrow VIS or image success claim. Bounded 910 ms
+history, <=8192 samples/call, explicit reset on source loss, finite samples,
+mono WAV/FLAC 8..96 kHz and 120 seconds/file. Output events/counters in CLI JSON.
+No dependency added, no P25/analog routing changes, no pretend image adapter.
+Follow-up gate reproduced Unicode recording-path failure: the existing narrow
+fopen path uses Windows code-page semantics. Convert CLI UTF-8 to a native
+filesystem path and use miniaudio's wide-file API on Windows for this new loader.
+That alone did not pass: CLI batch echo already contained question marks before
+file loading. Build batch strings from QCoreApplication::arguments() after Qt
+initialization instead of the CRT narrow argv. Keep flag parsing/DSP unchanged;
+rerun existing ASCII CLI regressions alongside the Unicode recording test.
+
 ## DEC-0090 - Checked release publication (2026-09-17)
 
 T-0027: release.ps1 currently ignores native failures and pushes master although

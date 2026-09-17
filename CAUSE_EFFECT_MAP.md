@@ -3,6 +3,9 @@ SDR TOWN — CAUSE / EFFECT EXECUTION MAP
 ================================================================================
 VERSION: 1.0.0  |  COMPANION TO: SOURCE_OF_TRUTH.md
 STATUS RULE: Flip [ ] to [X] only after the verification gate for that REQ is met.
+DEC-0092 checkpoint: offline Robot36/Martin1 image decode verified independently,
+actual CLI/helper pixel parity and input resource gates pass. Full SSTV remains
+open for GUI/live integration and additional independently qualified modes.
 THIS FILE DOES NOT REPLACE THE SoT. It explains why each REQ exists, how to
 finish it, what it causes, and what breaks if it is skipped.
 ================================================================================
@@ -386,3 +389,10 @@ the wrong branch. Checked commands, clean-source preflight, current-branch push
 and independent package/signature validation fail closed. Gate: negative verifier
 tests, full CTest/CLI/GUI gates, signed package check and uploaded checksum match.
 This does not close P25 continuity or future SSTV/satellite reception gates.
+# SSTV first gate (DEC-0091 / T-0022)
+
+Before image or live routing, recognize classic VIS from bounded recorded audio
+without guessing a mode from frequency alone. Gate: protocol/parity/framing and
+arbitrary-partition tests, unknown-code preservation, reset/invalid inputs,
+independent pinned M1 header, CLI negative files and full existing regression.
+Header acceptance does not certify image decoding, pixel order, slant or RF quality.

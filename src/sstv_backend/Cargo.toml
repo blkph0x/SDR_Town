@@ -1,0 +1,15 @@
+[package]
+name = "sdrtown_sstv"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+
+[dependencies]
+sstv = { git = "https://github.com/unexcellent/sstv", rev = "16bf34aac81b0041f5fdce52a1aef64eea0d5f6e", default-features = false, features = ["std"] }
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+strip = true

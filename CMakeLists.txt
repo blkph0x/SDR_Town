@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.56 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.57 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -74,13 +74,14 @@ add_library(sdr_town_rds STATIC
 target_include_directories(sdr_town_rds PUBLIC include PRIVATE external/redsea-block external/miniaudio)
 add_library(sdr_town_tones STATIC src/CtcssDecoder.cpp src/DcsDecoder.cpp)
 target_include_directories(sdr_town_tones PUBLIC include PRIVATE external/miniaudio)
-add_library(sdr_town_decoders STATIC src/ReceiveDecoder.cpp src/RdsMpxFile.cpp)
+add_library(sdr_town_decoders STATIC src/ReceiveDecoder.cpp src/RdsMpxFile.cpp src/SstvVis.cpp src/SstvAudioFile.cpp)
 target_include_directories(sdr_town_decoders PUBLIC include PRIVATE external/miniaudio)
 target_link_libraries(sdr_town_decoders PUBLIC sdr_town_rds sdr_town_tones)
 target_link_libraries(sdr_town_decoders PRIVATE nlohmann_json::nlohmann_json)
 include(cmake/RdsBackend.cmake)
 
 set(SDR_TOWN_SOURCES
+    src/SstvImageFile.cpp
     src/main.cpp
     src/P25VoiceTiming.cpp
     include/P25VoiceTiming.h
@@ -323,6 +324,7 @@ if(BUILD_TESTS)
     tests/test_ctcss.cpp
     tests/test_dcs.cpp
     tests/test_receive_decoder.cpp
+    tests/test_sstv_vis.cpp
     tests/test_devicemanager.cpp
     tests/test_audioengine.cpp
     tests/test_p25_audio_resampler.cpp
@@ -494,6 +496,7 @@ if(TARGET stage_rtl_runtime AND EXISTS "${rtlsdr_DIR}/copyright")
 endif()
 
 # MUST run the deploy target first for a pristine tree (no Maul*, no *test* exes, only SDR_Town + windeployqt).
+include(cmake/SstvBackend.cmake)
 #   cmake --build build --config Release --target deploy
 #   then (in build/bin/Release) windeployqt ... then re-run deploy target, then cpack.
 if(EXISTS "${DEPLOY_STAGING}/SDR_Town.exe")

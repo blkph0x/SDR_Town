@@ -1,5 +1,10 @@
 # Task list (canonical)
 
+T-0028 | pending_release | Release 0.2.57 | Publish DEC-0091/0092 recorded SSTV
+VIS and qualified Robot36/Martin1 image decoding with signed installer, portable
+and control DLL. Local source/CLI/core gates pass; packaging and remote asset
+hash checks must finish before publication is called complete.
+
 T-0027 | done | Release 0.2.56 | DEC-0090 checked packaging/publication,
 document current feature and validation scope, verify signed assets, push source
 and matching release. SSTV implementation remains T-0022, not a release claim.
@@ -37,9 +42,19 @@ Five real-RX GUI cycles under CDB and 30-second live RDS parity/reception pass;
 279 core/Qt cases pass. Release staging hash/license verified. Scope: local
 Generic R820T acceptance, not a universal driver/hardware guarantee.
 
-T-0022 | open | SSTV RX | Robot 36, Martin M1/M2, Scottie S1/S2 and PD120
+T-0022 | in_progress | SSTV RX | Robot 36, Martin M1/M2, Scottie S1/S2 and PD120
 reference fixtures, VIS/line sync, slant handling, image preview/gallery/export.
-Depends on T-0021; see SATELLITE_AND_SSTV.md / DEC-0083. No decoder implemented yet.
+Depends on T-0021; see SATELLITE_AND_SSTV.md / DEC-0083. DEC-0091 starts bounded
+recorded-audio VIS identification and independent fixture validation; image
+decoding, GUI and live routing are not implemented in this milestone.
+VIS sub-milestone done: native bounded detector, offline sstv inspect CLI,
+five cases/643 assertions, independent hash-pinned M1 header, file/Unicode
+negative-to-positive tests and full 284-case regression pass. Continue with
+independent line-sync/image fixtures; do not mark SSTV RX itself complete.
+DEC-0092 image sub-milestone implemented: pinned MIT helper, offline CLI PNG/report
+export, Robot36/Martin1 auto/manual acquisition and partial-image status. Both
+independent recordings pass; actual app/helper pixel parity and input/overwrite
+failures pass. GUI preview/gallery, live integration and other modes remain open.
 
 T-0023 | open | Public satellite catalogue/pass planner | Source-dated per-link
 capability, hardware/coverage checks, orbital data, SGP4/Doppler and device-aware

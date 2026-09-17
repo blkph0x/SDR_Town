@@ -11,6 +11,8 @@
 #include "Demod.h"
 #include "RdsDecoder.h"
 #include "RdsMpxFile.h"
+#include "SstvVis.h"
+#include "SstvImageFile.h"
 #include "CtcssDecoder.h"
 #include "DcsDecoder.h"
 #include "ReceiveDecoder.h"
@@ -155,6 +157,7 @@ static bool cliCommandNeedsStartupDeviceEnumeration(const std::string& command)
         lower == "decoders" || lower.rfind("decoders ", 0) == 0 ||
         lower == "rds" || lower.rfind("rds ", 0) == 0 ||
         lower == "tones" || lower.rfind("tones ", 0) == 0 ||
+        lower == "sstv" || lower.rfind("sstv ", 0) == 0 ||
         lower.rfind("bandplans ", 0) == 0 || lower.rfind("plans ", 0) == 0) {
         return false;
     }
@@ -643,13 +646,6 @@ int runCLI(int argc, char* argv[]) {
     std::cout << "Type 'help' for commands. 'quit' to exit.\n";
     std::cout.flush();
 
-    std::vector<std::string> rawCliArgs;
-    rawCliArgs.reserve(static_cast<size_t>(std::max(argc, 0)));
-    for (int i = 0; i < argc; ++i) {
-        rawCliArgs.emplace_back(argv[i] ? argv[i] : "");
-    }
-    std::deque<std::string> cliBatchCommands = parseCliBatchCommandsFromRawArgs(rawCliArgs);
-
     const GuiRuntimeConfig cliStartupCfg = parseGuiRuntimeConfig(argc, argv);
     if (!cliStartupCfg.debugStage.empty()) {
         gP25DebugStageFilter = p25ParseDebugStage(cliStartupCfg.debugStage);
@@ -668,6 +664,14 @@ int runCLI(int argc, char* argv[]) {
     cliApp.setOrganizationName("SDR_Town");
     cliApp.setApplicationVersion(SDR_TOWN_VERSION);
     remoteDiagnosticsConfigureFromProcess(argc, argv, &cliApp, "cli");
+
+    // DEC-0091: Qt preserves the Windows Unicode command line; CRT narrow argv
+    // has already replaced non-code-page filename characters with question marks.
+    std::vector<std::string> rawCliArgs;
+    const auto arguments=cliApp.arguments();
+    rawCliArgs.reserve(static_cast<size_t>(arguments.size()));
+    for(const auto& argument:arguments) rawCliArgs.push_back(argument.toStdString());
+    std::deque<std::string> cliBatchCommands=parseCliBatchCommandsFromRawArgs(rawCliArgs);
 
     setupLogging();
     spdlog::info("CLI mode started");
@@ -1519,6 +1523,8 @@ int runCLI(int argc, char* argv[]) {
               std::cout << "Commands:\n"
                         << "  decoders               List compiled receive adapters and input requirements\n"
                         << "  tones file <quoted-path> CTCSS in mono discriminator WAV/FLAC, 8..96 kHz, max 120 s\n"
+                        << "  sstv inspect <quoted-path> SSTV VIS headers only; mono WAV/FLAC 8..96 kHz, max 120 s\n"
+                        << "  sstv decode <input> <new-output-dir> [auto|robot36|martin1] Offline PNG images, max 360 s\n"
                         << "  tones dcs <quoted-path> Experimental DCS from mono discriminator WAV/FLAC\n"
                         << "  tones dcs-bits <quoted-path> DCS chronological ASCII bits; max 120 s\n"
                       << "  rds bits <quoted-path>  Decode MSB-first differential-decoded RDS bits\n"
@@ -2307,6 +2313,41 @@ int runCLI(int argc, char* argv[]) {
                     {"purity",tone.purity},{"status",tone.status}};
                 std::cout << result.dump() << '\n';
             } catch (const std::exception& error) { std::cout << "Tone error: " << error.what() << '\n'; }
+            continue;
+        } else if (cmd == "sstv") {
+            std::string action,path;
+            iss >> action;
+            std::getline(iss,path);
+            QString input=QString::fromStdString(path).trimmed();
+            if(action=="decode") {
+                const auto arguments=QProcess::splitCommand(input);
+                if(arguments.size()<2 || arguments.size()>3) {
+                    std::cout << "sstv decode <input> <new-output-dir> [auto|robot36|martin1]\n";
+                    continue;
+                }
+                try {
+                    std::cout << decodeSstvImageFile(arguments[0],arguments[1],
+                        arguments.size()==3?arguments[2]:QString("auto")).dump() << '\n';
+                } catch(const std::exception& e) { std::cout << "SSTV error: " << e.what() << '\n'; }
+                continue;
+            }
+            if(input.startsWith('"') && input.endsWith('"') && input.size()>=2) input=input.mid(1,input.size()-2);
+            if(action!="inspect" || input.isEmpty()) {
+                std::cout << "sstv inspect <quoted-path>: VIS headers only, not image decoding\n";
+                continue;
+            }
+            try {
+                const auto report=inspectSstvAudioFile(input.toStdString());
+                nlohmann::json events=nlohmann::json::array();
+                for(const auto& e:report.headers) events.push_back({{"vis",e.code},{"mode",e.mode},
+                    {"startSample",e.headerStartSample},{"endSample",e.headerEndSample},
+                    {"startSeconds",double(e.headerStartSample)/report.sampleRate}});
+                const nlohmann::json result{{"decoder","sstv-vis"},{"imageDecoded",false},
+                    {"samples",report.samples},{"sampleRate",report.sampleRate},{"headers",events},
+                    {"candidates",report.candidates},{"parityRejected",report.parityRejected},
+                    {"framingRejected",report.framingRejected}};
+                std::cout << result.dump() << '\n';
+            } catch(const std::exception& e) { std::cout << "SSTV error: " << e.what() << '\n'; }
             continue;
         } else if (cmd == "rds") {
             std::string action, path;

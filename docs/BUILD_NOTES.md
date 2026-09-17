@@ -2,6 +2,76 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-17 - DEC-0092 offline SSTV images / release 0.2.57 preparation
+
+Windows/MSVC 14.44, Qt 6.11.1; repo-local Rust 1.88.0 installed from official
+SHA-256-checked rustup bootstrap without changing global PATH. Initial helper
+compile rejected u32->usize dimensions; explicit checked conversions fixed it.
+Cargo --release --locked build then passes; pinned backend plus libm 0.2.16 only.
+First fixture harness rejected stereo M1 source; first-channel extraction now
+matches existing independent VIS test. No app stereo acceptance was relaxed.
+
+Independent Robot36 off-air recording gives complete 320x240 and RGB MAE
+10.406471 against upstream patch.png (<15 gate). M1 independent OGG gives
+complete 320x256 BBC test card, visually inspected against reference; RGB MAE
+20.779395 is recorded, not treated as exact/reference colour equivalence.
+Both helper images viewed. No reference captures are packaged.
+
+cmake -S . -B build -DSDR_TOWN_ENABLE_SSTV_IMAGES=ON and Release app/core/Qt
+build pass. Actual CLI test initially incorrectly required forced/auto Robot36
+pixels identical. Auto acquisition differs; corrected gate compares each path
+to matching helper options, then independently checks reference MAE. Forced
+10.406471 and auto 14.302396 both pass <15. Exact app/helper RGB parity passes
+for both modes/options. Partial truncation, Unicode, no-overwrite, silence,
+bad mode/rate/channel/format/duration/size rejection all pass.
+
+CTest passes 2/2 executables (284 core/Qt cases). SSTV VIS independent header,
+RDS, CTCSS, DCS and registry actual CLI suites all pass. Eleven updated release
+verifier tests pass, plus native-command/signing/trust-anchor tests. GUI and
+packaged-runtime checks are next; no live SSTV or P25 acceptance claimed.
+
+Follow-up: actual GUI Listening 960x720, Trunking 1280x900, HF 800x700 and
+Analysis 1600x900 automation passes with no RX/startup errors. Listening screenshot
+reviewed. CTest totals: 275 core/189730 assertions +9 Qt/87 assertions. P25 DSP
+and GUI receive routing are unchanged. Packaging/extracted runtime still pending.
+
+## 2026-09-17 - DEC-0091 SSTV VIS development
+
+Initial Release compile succeeds with int/float fill and int/bool parity test
+warnings; explicit literal/type corrections made. First SSTV subset: 4/5 cases
+pass, consecutive-header/rate test reports one instead of two events. Added
+rate/chunk context and fractional-rate fixture tail before rerunning; no
+production tolerance changed. Reference check and final gates pending.
+
+Rebuild passes; five SSTV cases / 642 assertions pass before adding the noise
+negative. Fractional fixture concatenation at 11025 Hz rounded both 910 ms
+headers down, ending one sample before the second header's rational deadline;
+one-ms trailing silence corrects the fixture, detector timing unchanged. Actual
+CLI independent m1.ogg first three seconds: VIS 44/Martin M1, start sample 36691
+(~0.832 s), end 76822, one candidate, zero framing/parity rejects. File SHA-256
+recorded in SSTV.md and enforced in CLI test. Silence, stereo, low rate, >120 s,
+malformed/missing files and truncated independent header rejected as expected.
+Reordered identical header predicates to reject flat leader tones before the
+full interior scan (no new thresholds); final build/full regression pending.
+
+Full regression PASS (275 core + 9 Qt cases); RDS/CTCSS/DCS CLI checks PASS.
+Additional non-English filename test then failed to produce a JSON result.
+Confirmed narrow miniaudio fopen_s/ACP and filesystem path usage; switched the
+new SSTV loader to UTF-8 filesystem conversion and Windows wide-file API.
+Final rerun including that negative-to-positive test pending below.
+
+Wide-file change alone still failed: CLI batch echo contained recording-??.wav
+before opening the file. Moved batch string construction after QCoreApplication
+and read Qt's Unicode arguments; existing numeric/startup flags remain untouched.
+This is a CLI argument fix, not any P25 processing change.
+
+Final build PASS. Unicode-path and >64 MiB tests now PASS; independent M1 and
+all SSTV file rejection gates PASS. Existing RDS, CTCSS, DCS and registry CLI
+gates re-run after the argument change: all PASS. CTest final core/library build:
+275 cases / 189730 assertions plus 9 Qt cases / 87 assertions (284 total).
+SSTV subset contributes 5 cases / 643 assertions. No P25 DSP, security, voice
+scheduling or GUI/live receive code changed. No image/live SSTV acceptance claimed.
+
 ## 2026-09-17 - DEC-0090 release hardening
 
 Initial verifier tests: 11 errors because host Python lacks hashlib.file_digest

@@ -54,7 +54,9 @@ def verify(root, version, installer):
                     f'Private/debug/capture artifact in ZIP: {name}')
         required = ('SDR_Town.exe', 'SdrTownControl.dll', 'sdrtown_rds_dsp.dll', 'rtlsdr.dll',
                     'SoapySDR.dll', 'SoapyRTLSDR.dll', 'Qt6Core.dll', 'Qt6Widgets.dll',
-                    'platforms/qwindows.dll', 'licenses/rtlsdr-COPYRIGHT.txt')
+                    'platforms/qwindows.dll', 'licenses/rtlsdr-COPYRIGHT.txt',
+                    'sdrtown_sstv.exe', 'licenses/sstv/sstv-MIT.txt',
+                    'licenses/sstv/libm-LICENSE.txt', 'licenses/sstv/rust-COPYRIGHT-library.html')
         for name in required:
             require(name in names, f'Missing runtime: {name}')
             require(archive.read(name) == (root / 'build/deploy_staging' / name).read_bytes(),
