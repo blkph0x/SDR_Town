@@ -2,6 +2,13 @@
 
 Newest at the top.
 
+## 2026-09-18 - Alias release published
+
+v0.2.60 code and eight assets published after source/package tests and download
+hash verification. Public updater manifest verified. T-0034 done. No real alias
+directory installed or private data uploaded. JSON/manual lists are available;
+external directory integrations and radio-ID aliases remain future scope.
+
 ## 2026-09-18 - P25 alias-list manager
 
 DEC-0100 implements system-isolated labels with create/edit/search/import/export,

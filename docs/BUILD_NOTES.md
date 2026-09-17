@@ -2,6 +2,13 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-18 - 0.2.60 publication
+
+Annotated tagv0.2.60 at3ef2383 and branch pushed. Eight draft release assets
+downloaded to build/release-download-0260; all SHA256s equal local files.
+Published Latest (experimental manifest channel); public Latest update.json
+matches signed local bytes. Installer/portable/control DLL available to testers.
+
 ## 2026-09-18 - DEC-0100 system-scoped alias lists
 
 VS2022 MSVC/x64 Release app and workspace targets build PASS. Initial alias

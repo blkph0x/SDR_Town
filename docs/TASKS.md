@@ -23,8 +23,10 @@ DEC-0100 implements New/Add/Edit/Search/Import/Export/Save with system isolation
 source/date and protected manual overrides. Schema/storage/GUI tests and app
 layouts pass. CSV/XML, RadioReference and radio-ID/transcript labels deferred.
 
-T-0034 | in progress | Release 0.2.60 | Package and verify alias-list feature,
+T-0034 | done | Release 0.2.60 | Package and verify alias-list feature,
 signed manifest and downloaded assets before publishing Latest experimental.
+Tag3ef2383 pushed, eight downloaded asset hashes match local, published Latest
+experimental and public manifest verified. T-0029 remains an existing QA gap.
 
 T-0033 | done | Release 0.2.59 | Experimental live NFM SSTV UI/feed.
 Build, combined recording/lifecycle tests, GUI review and package QA before
