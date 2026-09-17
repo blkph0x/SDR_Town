@@ -11,10 +11,11 @@
 #include <cstdint>
 
 inline bool p25SpeakerNeedsStartupPrime(size_t queuedSamples, size_t pendingSamples,
-                                        size_t minimumPrimeSamples) noexcept
+                                        size_t minimumPrimeSamples, bool endOfStream = false) noexcept
 {
     // Once playing, each ready frame extends the existing stream immediately.
-    return queuedSamples == 0 && pendingSamples < minimumPrimeSamples;
+    // DEC-0070: a completed stream cannot supply more frames to prime its tail.
+    return !endOfStream && queuedSamples == 0 && pendingSamples < minimumPrimeSamples;
 }
 
 // Speaker mute only — decode arms immediately.  Capture 20260712_021852 still

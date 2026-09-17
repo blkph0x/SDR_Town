@@ -2,6 +2,70 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0074 - Serialize exceptional audio cursor mutation (2026-09-17)
+
+AudioEngine callback loads r, copies PCM, then stores advanced r. clearBuffers
+stores w to that same read cursor without excluding the callback; bridge
+discard also writes it. An in-flight callback can overwrite a clear/discard
+with its stale r. Producer reuse can then race with its sample reads.
+Use a per-ring consumer lease for the callback and exceptional clear/discard.
+The callback only tries once and emits silence if control owns the lease:
+it never waits, allocates or logs. Non-RT clear/discard waits for an active
+consumer to finish. Normal SPSC pushes remain concurrent with consumption.
+Do not attribute recorded live gaps to this race without capture evidence.
+
+## DEC-0073 - Walk this-window validated block tails (2026-09-17)
+
+`[block-tail]` fails on physical burst 12: with one permitted lock and two
+complete valid superframes in one block, the second frame's A/B bursts are
+lost. Uncovered-sync recovery only sees C/D S-ISCH. Permit the existing
+bounded complete-burst walk for block input only when a lock in this very
+commit established the current anchor. Never extend a retained previous-eye
+anchor in block mode. Use the existing two-dibit local sync tolerance for
+that current block. Preserve selected-slot/mask/security processing.
+
+## DEC-0072 - Reject nonphysical Phase 2 quadrant permutations (2026-09-17)
+
+Complete 060515 trace at 06:57 shows burst absolute dibit 57777 decoded
+twice: the bad eye swaps every 0/2 (74 symbols) and preserves all 1/3 (86)
+relative to the correct eye. I-ISCH goes from zero errors/location 0 to six
+errors/location 2; codec repeats follow. The search admits all 24 arbitrary
+quadrant permutations. SDRTrunk DQPSKGardnerSymbolEvaluator maps cyclic
+angles -135,-45,+45,+135 to 3,2,0,1. Rotation/conjugation preserve opposite
+dibit pairs (XOR 3); a 0/2-only swap does not. Restrict Phase 2 traffic search
+and remembered candidates to these eight physical rotations/reflections.
+Leave Phase 1 search unchanged. Verify all permutations, reference IQ, and
+latest IQ before judging improvement; do not relax security to get audio.
+
+## DEC-0071 - Complete opt-in replay provenance (2026-09-17)
+
+Explicit validation still throttles pre-gate records to 250 ms and final
+records to 100 ms, hiding frames in 80 ms replay hops. Permit unthrottled
+records only with explicit validation plus SDR_TOWN_P25_VALIDATION_ALL=1.
+Keep default/automatic logging bounded and existing rotation. This is an
+offline forensic tool, not a live performance benchmark or gate relaxation.
+
+## DEC-0070 - Explicit replay end-of-stream drain (2026-09-17)
+
+GUI reference replay 103841 decoded 404 PCM frames but left 5760 samples
+pending until its eight-second drain timeout: the empty speaker ring required
+a 240 ms startup prime, while the entire remaining tail was 120 ms. At an
+explicit end of stream no more samples can satisfy that threshold. Bypass
+startup priming only for this drain, retaining whole-frame output, capacity
+limits and already-applied security/slot gates. Live startup is unchanged.
+
+## DEC-0069 - Resolve slot ownership before selecting session state (2026-09-17)
+
+Reproduced by `[slot-session]`: I-ISCH location 2 rebases local C to absolute
+burst 10 / slot 1, but its caller passes slot 0's state. With explicit starting
+I-ISCH in the fixture, the original helper loses the known slot-1 talkgroup;
+the corrected helper preserves 30302 and its own encryption state.
+Use the same I-ISCH resolution and actual
+burst position for both session selection and burst labelling in all paths.
+Keep missing-I-ISCH fallback, mask phase, and security acceptance unchanged.
+Reference: SDRTrunk `SuperFrameFragment` constructs C/D timeslots with the
+final-fragment ownership swap before their messages reach per-slot modules.
+
 ## DEC-0067 - Exact RS arithmetic caching (2026-09-17)
 
 Accepted after exhaustive arithmetic tests and same-IQ comparison. Replace

@@ -4184,7 +4184,8 @@ size_t pushP25LiveStreamingAudio(AudioEngine* engine,
                                         size_t frameSize,
                                         double ringFillPercent,
                                         bool warmPendingRealAudio,
-                                        std::vector<float>* pushedRealAudio)
+                                        std::vector<float>* pushedRealAudio,
+                                        bool endOfStream)
 {
     if (!engine || frameSize == 0) return 0;
     const bool hasFreshAudio = !audio.empty();
@@ -4260,7 +4261,7 @@ size_t pushP25LiveStreamingAudio(AudioEngine* engine,
     // re-chunked a live stream that already arrived as 20 ms AMBE frames.
     const size_t minFreshPushSamples = frameSize;
 
-    if (p25SpeakerNeedsStartupPrime(queuedNow, pending.size(), minPrimeSamples)) {
+    if (p25SpeakerNeedsStartupPrime(queuedNow, pending.size(), minPrimeSamples, endOfStream)) {
         if (pending.size() > maxPendingSamples) {
             pending.erase(pending.begin(),
                 pending.end() - static_cast<std::ptrdiff_t>(maxPendingSamples));
@@ -5956,7 +5957,10 @@ void writeP25Phase2ValidationRecord(const Receiver& rx,
             : (explicitValidationLog
                 ? 250
                 : (autoDeepTraceLog ? 1000 : (audio.decodedFrames > 0 ? 2000 : 3000)));
-        if (nowMs - lastWriteMs < minSpacingMs) return;
+        // DEC-0071: opt-in offline forensics must retain every replay hop.
+        const bool traceEveryWindow = explicitValidationLog &&
+            qEnvironmentVariableIntValue("SDR_TOWN_P25_VALIDATION_ALL") == 1;
+        if (!traceEveryWindow && nowMs - lastWriteMs < minSpacingMs) return;
         lastWriteMs = nowMs;
     }
 
@@ -6177,6 +6181,8 @@ void writeP25Phase2ValidationRecord(const Receiver& rx,
                 codewords.push_back({
                     {"voiceIndex", cw.voiceIndex},
                     {"dibitOffset", cw.dibitOffset},
+                    {"streamDibitKnown", cw.streamDibitKnown},
+                    {"streamDibit", cw.streamDibitKnown ? json(cw.streamDibit) : json(nullptr)},
                     {"ambeBits", redactRaw ? std::string("<redacted>") : p25CompactBits(ambe)},
                     {"sessionCodewordIdKnown", cw.sessionCodewordIdKnown},
                     {"sessionCodewordId", cw.sessionCodewordIdKnown ? static_cast<long long>(cw.sessionCodewordId) : -1},
@@ -6185,6 +6191,8 @@ void writeP25Phase2ValidationRecord(const Receiver& rx,
             }
             record["bursts"].push_back({
                 {"dibitOffset", burst.dibitOffset},
+                {"streamBurstStartDibitKnown", burst.streamBurstStartDibitKnown},
+                {"streamBurstStartDibit", burst.streamBurstStartDibitKnown ? json(burst.streamBurstStartDibit) : json(nullptr)},
                 {"syncErrors", burst.syncErrors},
                 {"superframeLocked", burst.superframeLocked},
                 {"superframeDibitOffset", burst.superframeDibitOffset},

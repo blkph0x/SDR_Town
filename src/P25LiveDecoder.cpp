@@ -3938,18 +3938,19 @@ uint8_t phase2TrafficSlotFromFragmentLocalIndex(size_t fragmentLocalIndex,
     }
 }
 
+std::optional<size_t> phase2AbsoluteSuperframeBurstIndexFromIisch(
+    const std::vector<int>& dibits, size_t burstPos) noexcept;
+
 uint8_t phase2TrafficSlotForSuperframeBurst(const std::vector<int>& dibits,
-                                            size_t superframeOffset,
+                                            size_t burstPos,
                                             size_t superframeBurstIndex)
 {
-    // SDRTrunk binds A/B/C/D timeslot ownership to the physical fragment position.
-    // I-ISCH fragment location is used for epoch scoring / scrambling-segment
-    // selection — not for re-labeling grant slots here.  DEC-0055.3 rebases the
-    // absolute 0..11 index inside decodePhase2BurstAt when A/B I-ISCH agree;
-    // do not flip an already-aligned grant slot from I-ISCH alone (20260720).
-    (void)dibits;
-    (void)superframeOffset;
-    return phase2TrafficSlotFromSuperframeBurstIndex(superframeBurstIndex);
+    // DEC-0069: choose the state owner using exactly the same resolved index
+    // as decodePhase2BurstAt. Re-labelling only the returned burst mixed the
+    // other slot's TG/security/ESS state into final-fragment C/D messages.
+    const auto absoluteIndex = phase2AbsoluteSuperframeBurstIndexFromIisch(dibits, burstPos);
+    return phase2TrafficSlotFromSuperframeBurstIndex(
+        absoluteIndex.value_or(superframeBurstIndex % 12u));
 }
 
 // DEC-0055.3: when a 720-dibit fragment's A/B I-ISCH locations agree, return the
@@ -4672,7 +4673,7 @@ Phase2MaskPhaseWindow scorePhase2MaskPhaseWindow(const std::vector<int>& dibits,
         const size_t pos = hit ? hit->dibitOffset : expectedPos;
         if (pos + P25LiveDecoder::Phase2BurstDibits > dibits.size()) continue;
         const uint8_t trafficSlot =
-            phase2TrafficSlotForSuperframeBurst(dibits, lock.dibitOffset, slot);
+            phase2TrafficSlotForSuperframeBurst(dibits, pos, slot);
         auto& slotSession = window.sessions[trafficSlot & 0x01u];
         // Mask-phase scoring normally stays shallow.  Realtime late-entry can
         // optionally enable a bounded standards-only ACCH rescue pass when soft
@@ -6529,6 +6530,8 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
                              bool fromLock,
                              P25BlockTimingState& candidateTiming) -> P25LiveDecodeResult {
         P25LiveDecodeResult candidate;
+        if (phase2TrafficDecoder &&
+            !p25dsp::isPhysicalPhase2DibitMapping(params.permutation)) return candidate;
         const double phase = std::clamp(params.symbolPhaseFraction, 0.0, 0.999) * sps;
         auto complexSymbols = recoverComplexSymbols(channel.samples, channel.sampleRate, m_config, phase, &candidateTiming);
         if (complexSymbols.symbols.empty()) return candidate;
@@ -6832,6 +6835,8 @@ P25LiveDecodeResult P25LiveDecoder::processIq(const std::vector<std::complex<flo
                             : permSet.size();
                     for (size_t permIndex = 0; permIndex < permLimit; ++permIndex) {
                         const auto& perm = permSet[permIndex];
+                        if (phase2TrafficDecoder &&
+                            !p25dsp::isPhysicalPhase2DibitMapping(perm)) continue;
                         if (cqpskBudgetReached()) {
                             stopCqpskSearch = true;
                             break;
@@ -8469,7 +8474,7 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
             constexpr size_t kMaxRealtimeStickySyncSlipDibits = 12;
             const auto hit = phase2SyncHitNear(hits, workPos, kMaxRealtimeStickySyncSlipDibits);
             const uint8_t trafficSlot =
-                phase2TrafficSlotForSuperframeBurst(workingDibits, syntheticLockOffset, superframeIndex);
+                phase2TrafficSlotForSuperframeBurst(workingDibits, hit ? hit->dibitOffset : workPos, superframeIndex);
             auto& burstSession = slotSessions[trafficSlot & 0x01u];
             const uint64_t burstStreamDibit =
                 phase2WorkingStreamStart + static_cast<uint64_t>(hit ? hit->dibitOffset : workPos);
@@ -8800,7 +8805,7 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
             const size_t pos = hit ? hit->dibitOffset : expectedPos;
             if (pos + Phase2BurstDibits > workingDibits.size()) continue;
             const uint8_t trafficSlot =
-                phase2TrafficSlotForSuperframeBurst(workingDibits, lock.dibitOffset, slot);
+                phase2TrafficSlotForSuperframeBurst(workingDibits, pos, slot);
             auto& burstSession = slotSessions[trafficSlot & 0x01u];
             const uint64_t burstStreamDibit =
                 phase2WorkingStreamStart + static_cast<uint64_t>(pos);
@@ -8887,10 +8892,12 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
     // (20260712_125240) showed exactly 4 AMBE frames every ~1.5–2.5s: one Voice4
     // from a single lock while multi-superframe RF between worker jobs was never
     // walked.  SDRTrunk emits SuperFrameFragments continuously as dibits arrive.
-    // Same DEC-0008 gate as the hot sticky path: independent block eyes must
-    // not invent extra bursts from a stale stream anchor.
+    // DEC-0073: independent block eyes may walk their own validated lattice,
+    // but must never extrapolate from a previous eye's retained anchor.
+    const bool anchorEstablishedInThisBlock = !lockedWindows.empty() &&
+        m_phase2SuperframeAnchorGeneration == m_phase2DecodeGeneration + 1;
     if (annotateSessionCodewords &&
-        m_config.enableStreamingChannelDdc &&
+        (m_config.enableStreamingChannelDdc || anchorEstablishedInThisBlock) &&
         m_phase2SuperframeAnchorKnown &&
         m_phase2MaskPhaseKnown &&
         mask &&
@@ -8950,10 +8957,11 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
                 const size_t syntheticLockOffset = workPos >= superframeIndex * Phase2BurstDibits
                     ? workPos - superframeIndex * Phase2BurstDibits
                     : 0;
-                constexpr size_t kMaxContinuousSyncSlipDibits = 12;
+                const size_t kMaxContinuousSyncSlipDibits =
+                    m_config.enableStreamingChannelDdc ? 12u : 2u;
                 const auto hit = phase2SyncHitNear(hits, workPos, kMaxContinuousSyncSlipDibits);
                 const uint8_t trafficSlot =
-                    phase2TrafficSlotForSuperframeBurst(workingDibits, syntheticLockOffset, superframeIndex);
+                    phase2TrafficSlotForSuperframeBurst(workingDibits, hit ? hit->dibitOffset : workPos, superframeIndex);
                 auto& contSession = slotSessions[trafficSlot & 0x01u];
                 const uint64_t contBurstStreamDibit =
                     phase2WorkingStreamStart + static_cast<uint64_t>(hit ? hit->dibitOffset : workPos);
@@ -9081,6 +9089,18 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
             return phase2OffsetInWindow(hit.dibitOffset, window.first, window.second);
         });
         if (alreadyCovered) continue;
+        // DEC-0073: the complete-burst walk may already have emitted C/D.
+        // Re-decoding their S-ISCH hits duplicates MAC boundaries and voice.
+        const uint64_t hitStreamStart = phase2WorkingStreamStart + hit.dibitOffset;
+        const bool alreadyWalked = std::any_of(out.bursts.begin(), out.bursts.end(),
+            [&](const P25Phase2Burst& b) {
+                if (!b.valid || !b.streamBurstStartDibitKnown) return false;
+                const uint64_t distance = b.streamBurstStartDibit > hitStreamStart
+                    ? b.streamBurstStartDibit - hitStreamStart
+                    : hitStreamStart - b.streamBurstStartDibit;
+                return distance <= 2u;
+            });
+        if (alreadyWalked) continue;
         if (++uncoveredHitsProcessed > uncoveredHitCap) break;
 
         bool stickyDecoded = false;
@@ -9134,7 +9154,7 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
                         ? hit.dibitOffset - superframeIndex * Phase2BurstDibits
                         : 0;
                     const uint8_t trafficSlot =
-                        phase2TrafficSlotForSuperframeBurst(workingDibits, syntheticLockOffset, superframeIndex);
+                        phase2TrafficSlotForSuperframeBurst(workingDibits, hit.dibitOffset, superframeIndex);
                     auto& stickySession = slotSessions[trafficSlot & 0x01u];
                     // Hot sticky path is shallow ACCH only.  Deep alt-layout /
                     // maxUnknown=2 was ~seconds per hit after 6000 baud lock and
@@ -9203,7 +9223,7 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
                 for (uint8_t phase = 0; phase < 12u && bootstrapTrials < kMaxBootstrapTrials; ++phase) {
                     ++bootstrapTrials;
                     const size_t probeSessionSlot = static_cast<size_t>(
-                        phase2TrafficSlotForSuperframeBurst(workingDibits, lockOffset, slotIndex) & 0x01u);
+                        phase2TrafficSlotForSuperframeBurst(workingDibits, hit.dibitOffset, slotIndex) & 0x01u);
                     auto probeSession = slotSessions[probeSessionSlot];
                     std::vector<P25Phase2MacPdu> probeMacPdus;
                     auto trial = decodePhase2BurstAt(workingDibits, hit.dibitOffset, hit.errors,

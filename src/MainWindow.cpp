@@ -8202,7 +8202,8 @@ void MainWindow::showIqReplayWindow()
                                                    phase2FrameSamples,
                                                    -1.0,
                                                    true,
-                                                   &pushedRealAudio);
+                                                   &pushedRealAudio,
+                                                   true); // DEC-0070: no new PCM can arrive after replay EOF.
                 pendingAfter = state->pendingSpeaker.size();
                 if (!pushedRealAudio.empty()) {
                     state->speakerSamples += static_cast<long long>(pushedRealAudio.size());
@@ -10387,7 +10388,7 @@ LiveIqCaptureResult MainWindow::startLiveIqCapture(const std::string& label,  in
                 session.p25LogStream << "# live_speaker_wav=" << speakerWavPath.toStdString() << "\n";
             }
         }
-        session.ringCsv << "utc,poll,window_start_abs,window_end_abs,cursor_before_abs,append_start_abs,append_end_abs,samples_appended,gap_samples,total_written,bytes_written,zero_append_polls,max_single_gap_samples,file_write_error_polls,signal_level_db,noise_floor_db,snr_db,afc_offset_hz,ring_epoch_resets,ring_epoch_reset_skipped_samples\n";
+        session.ringCsv << "utc,poll,window_start_abs,window_end_abs,cursor_before_abs,append_start_abs,append_end_abs,samples_appended,gap_samples,total_written,bytes_written,zero_append_polls,max_single_gap_samples,file_write_error_polls,signal_level_db,noise_floor_db,snr_db,afc_offset_hz,ring_epoch_resets,ring_epoch_reset_skipped_samples,audio_consumed_frames,audio_zero_fill_frames,audio_empty_callbacks,audio_partial_callbacks,audio_control_silence_frames,audio_producer_dropped_frames\n";
         session.startP25LogSnapshot.clear();
         session.p25LogDuringCapture.clear();
         session.p25CaptureDroppedLines = 0;
@@ -10641,6 +10642,7 @@ void MainWindow::pollLiveIqCapture(bool finalPoll)
         if (periodicFlush && liveIqCapture.p25LogStream.is_open()) liveIqCapture.p25LogStream.flush();
 
         if (liveIqCapture.ringCsv.is_open()) {
+            const auto* audioStats = peekAudioEngineIfReady();
             liveIqCapture.ringCsv
                 << nowUtc.toString(Qt::ISODateWithMs).toStdString() << ','
                 << liveIqCapture.pollCount << ','
@@ -10661,7 +10663,13 @@ void MainWindow::pollLiveIqCapture(bool finalPoll)
                 << liveIqCapture.lastSnrDb << ','
                 << liveIqCapture.lastAfcOffsetHz << ','
                 << liveIqCapture.ringEpochResets << ','
-                << liveIqCapture.ringEpochResetSkippedSamples << "\n";
+                << liveIqCapture.ringEpochResetSkippedSamples << ','
+                << (audioStats ? audioStats->consumedFrames.load(std::memory_order_relaxed) : 0) << ','
+                << (audioStats ? audioStats->zeroFillFrames.load(std::memory_order_relaxed) : 0) << ','
+                << (audioStats ? audioStats->emptyCallbacks.load(std::memory_order_relaxed) : 0) << ','
+                << (audioStats ? audioStats->partialCallbacks.load(std::memory_order_relaxed) : 0) << ','
+                << (audioStats ? audioStats->controlSilenceFrames.load(std::memory_order_relaxed) : 0) << ','
+                << (audioStats ? audioStats->producerDroppedFrames.load(std::memory_order_relaxed) : 0) << "\n";
             if (periodicFlush) liveIqCapture.ringCsv.flush();
         }
 

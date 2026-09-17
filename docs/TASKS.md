@@ -1,5 +1,9 @@
 # Task list (canonical)
 
+2026-09-17 release task: v0.2.55 from DEC-0069 through DEC-0074 rebuilt and
+tested (235 cases); clean packages and signed updater verified. Source/assets
+ready for publication. Experimental channel retained; audio acceptance stays open.
+
 Update this file in the same commit as the work. SoT checkboxes move only
 after the cause/effect verification gate is green.
 
@@ -8,6 +12,20 @@ Status: `open` | `in_progress` | `blocked` | `done`
 ---
 
 ## Now
+
+T-0010 downstream pass: reproduce/exclude exceptional audio read-cursor races
+(DEC-0074), then inspect callback losses separately from decoder feed gaps.
+
+T-0010 current pass: full-frame provenance collected (DEC-0071); physical
+mapping and missing block-tail defects fixed/tested (DEC-0072/73). Live
+underruns and remaining valid-frame loss remain in progress. Evidence and
+non-completion caveats: `P25_MAPPING_AUDIT_20260917.md`.
+
+2026-09-17 follow-up (T-0010 remains in progress): slot-state mismatch reproduced
+and corrected with clear/encrypted companion-slot tests (DEC-0069). Reference
+103841 retains four additional frames; 060515 still has six feed gaps. GUI EOF
+tail priming also reproduced and fixed (DEC-0070). Remaining live continuity
+and concealment are not closed by these scoped repairs.
 
 2026-09-17: T-0010 remains in progress. Capture 060515 isolates excessive RS
 recovery work; exact GF64 tables and cached syndrome columns reduce replay

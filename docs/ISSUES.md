@@ -2,11 +2,33 @@
 
 Never delete a row. Close with a commit hash and a sentence.
 
+2026-09-17, ISS-0001 evidence update (still open): DEC-0074 repairs a
+source-confirmed callback/clear/discard cursor race. The new live capture has
+no producer drops or control-lease collisions, so this race is not established
+as the cause of its remaining speech gaps. Three follows and a 7.117-second
+output span without an underrun rise do not establish all-call intelligibility.
+See `P25_DOWNSTREAM_AUDIT_20260917.md`; no timing/gating thresholds were relaxed.
+
 Status: `open` | `closed`
 
 ---
 
 ## ISS-0001 — P25 Phase 2 speaker audio is partial, not continuous
+
+DEC-0072/73 update: full-frame tracing proved nonphysical 0/2 swaps under an
+apparently good S-ISCH and missing block-tail A/B bursts. Both corrected and
+covered by tests. Latest replay concealment falls 66 -> 3; live mapping-only
+run recognizes an exchange but still has 21 underrun increases. Lower output
+duration includes removal of false signaling-as-voice and is not a blanket
+quality verdict. See `P25_MAPPING_AUDIT_20260917.md`. Issue remains open.
+
+Follow-up: DEC-0069 fixes a reproduced slot-state selection mismatch, retaining
+four previously stale-TG-rejected frames on reference 103841. Latest 060515
+still has six feed gaps and 66 concealment frames, so this issue stays open.
+GUI replay also reproduced a separate short-tail deadlock: 5760 samples waited
+for a 11520-sample prime after EOF. DEC-0070 fixes it: final replay drains all
+5760 samples and completes without pending data or timeout. These results
+do not prove all live speech is intelligible or continuous.
 
 2026-09-17 update: 060515 has gapless recorded IQ but 24 playback-underrun
 increases. Exact RS arithmetic caching removes measured recovery overhead;

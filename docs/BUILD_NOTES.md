@@ -2,6 +2,65 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-17 - v0.2.55 release gate
+
+Versioned Release rebuilt after gracefully closing the running GUI which had
+blocked the linker. Full suite: 81,154 assertions / 235 cases, exit 0
+(`build/tests_release_0.2.55.log`); capture-audit self-test passed. Clean deploy,
+NSIS installer and portable ZIP generated. Staged --version reports 0.2.55.
+Ed25519 manifest signature verified against the unchanged embedded public key;
+installer SHA-256 and size match update.json. Portable executable matches the
+built binary; Qt platform and control DLL present; no WAV/CF32/log/private-key
+or test executable entries. Experimental channel retained for publication.
+
+## 2026-09-17 - Audio cursor race and live callback audit
+
+DEC-0074: Release SDR_Town and sdr_town_tests built successfully. Full suite:
+81,154 assertions / 235 cases (`build/tests_audio_cursor.log`). Capture-audit
+Python self-tests pass. Reference 060515 replay WAV is byte-identical to
+`build/p25_060515_final_geometry.wav` after the downstream change.
+
+Real GUI capture: `build/live_audio_cursor/20260917_072154_033_audio_cursor_420.35000MHz_startstop`.
+90.016 seconds, three follows, zero IQ overruns/epoch resets. Callback counter
+deltas: 1,741,440 consumed frames; 2,580,960 zero-fill frames; 5,377 empty
+callbacks; zero partial callbacks, control-silence frames, or producer drops.
+Empty callbacks include normal control-channel/idle silence, not measured lost
+speech. TG10703 has a 7.117-second output-event span without an underrun rise.
+This is queue continuity evidence, not acoustic intelligibility proof.
+
+Same live IQ replay (TG10703 slot 0, skip 3500 ms, 10 s) yields 378 decoded/fed
+frames, six concealment frames, two feed-gap events, 7.56 s PCM. STT contains
+recognizable phrases and errors. Continuous clear speech across calls remains
+unproven. Details: `docs/P25_DOWNSTREAM_AUDIT_20260917.md`.
+
+## 2026-09-17 - Physical mapping and complete block tails
+
+DEC-0071/72/73: Release rebuilt; full suite 81,149 assertions / 233 cases,
+P25 subset 73,045 / 126. Block-tail regression failed at missing burst 12,
+then duplicate burst 14, now passes all 24 exactly-once plus noise isolation.
+Latest replay concealment 66 -> 3; final 132 decoded frames, 2.64 s submitted
+PCM versus 4.96 s including false voice before. Final GUI reference replay
+completes with no pending tail. Live 90 s mapping-only test: three follows,
+102 outputs, zero IQ overruns, 21 output-underrun increases. STT recognizes
+an exchange but is not acoustic continuity proof. See
+`P25_MAPPING_AUDIT_20260917.md` for commands, limitations and artifacts.
+
+## 2026-09-17 - Slot ownership and replay EOF drain
+
+Release app/tests built. Full suite: 80,299 assertions, 231 cases pass
+(`build/tests_slot_session_final.log`). Original slot helper failed the
+explicit-start-IISCH fixture; fixed helper passes clear/encrypted companions.
+Reference 103841 replay: 394 -> 398 decoded frames, 400 -> 404 fed frames,
+384000 -> 387840 speaker samples; window 2 no longer rejects four stale-TG
+frames. PCM changes after the inserted 80 ms (persistent vocoder state), so
+do not claim byte-identical audio or verified improved intelligibility.
+Latest 060515: still 248 decoded, 250 fed, six gaps, 66 concealment frames.
+GUI reference before EOF fix: 382080 pushed, 5760 pending, drain timeout.
+After fix: 387840 pushed, zero pending, one 5760-sample drain, normal finish.
+CLI/GUI submitted sample counts match; their PCM is not byte-identical.
+Artifacts: `build/p25_103841_slot_session*`,
+`build/p25_060515_slot_session_final*`. No new live RF test in this follow-up.
+
 ## 2026-09-17 - RS recovery timing and audio regression checks
 
 Windows x64 / MSBuild 17.14, Release: `cmake --build build --config Release

@@ -574,7 +574,8 @@ size_t pushP25LiveStreamingAudio(AudioEngine* engine,
                                         size_t frameSize = 240,
                                         double ringFillPercent = -1.0,
                                         bool warmPendingRealAudio = false,
-                                        std::vector<float>* pushedRealAudio = nullptr);
+                                        std::vector<float>* pushedRealAudio = nullptr,
+                                        bool endOfStream = false);
 
 size_t pushP25SpeakerAudio(AudioEngine* engine,
                                   std::vector<float>& pending,

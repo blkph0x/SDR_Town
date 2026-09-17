@@ -1,5 +1,27 @@
 # Code notes (tree map)
 
+DEC-0074: `AudioEngine::RingBuffer::ConsumerLease` serializes callback read
+cursor commits with exceptional clear/bridge-discard operations. Callback
+tries once and emits silence on contention; control threads may yield while
+waiting. Producer writes retain SPSC behavior under the existing audio mutex.
+Six cumulative callback/producer counters are sampled into GUI ring-health CSV
+outside the realtime thread. `p25_capture_audit.py` reports their deltas and
+rejects reset/invalid series; empty callbacks are not inferred speech loss.
+Regression cases: `[audioengine][cursor]`.
+
+DEC-0071/72/73: validation can opt into all-window offline tracing.
+`dsp/P25CqpskStagedScorer.h` validates physical quadrant mappings, used only
+for Phase 2 traffic candidate search/reuse in `P25LiveDecoder.cpp`. The decoder
+also walks block tails from a current-window anchor and excludes those bursts
+from uncovered-sync processing. Tests: `[mapping]`, `[block-tail]`.
+
+2026-09-17 follow-up: `P25LiveDecoder.cpp` resolves I-ISCH ownership before
+selecting a mutable slot session (DEC-0069); callers pass the actual burst
+position. `P25VoiceDecode.cpp` validation adds absolute stream coordinates.
+Its speaker push helper accepts an explicit end-of-stream flag used only by
+GUI replay tail drain (DEC-0070). Live defaults remain unchanged. Regression
+coverage: `[slot-session]` and `[p25][audio]`.
+
 2026-09-17: `include/P25Gf64.h` provides immutable GF(64) product/inverse
 tables for the RS recovery path in `P25LiveDecoder.cpp` (DEC-0067). Exhaustive
 byte-domain equivalence tests live in `tests/test_p25live.cpp`. The decoder

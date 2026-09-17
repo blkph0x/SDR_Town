@@ -90,11 +90,17 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* /*pInpu
             }
         }
     } else {
-        // Real audio path - lock-free ring buffer read (no mutex, no erase, no alloc in RT callback).
+        // Real audio path - nonblocking ring read (no waits, erase, or allocation).
         // This prevents the crackles/stalls caused by locking + vector erase from the realtime thread.
         // Defensive check for races during setActiveOutputs (m_active clear while callback runs).
         if (myAct && myAct->valid.load(std::memory_order_acquire)) {
             auto& rb = myAct->ring;
+            AudioEngine::RingBuffer::ConsumerLease consumer(rb, false);
+            if (!consumer.acquired) {
+                engine->controlSilenceFrames.fetch_add(frameCount, std::memory_order_relaxed);
+                std::memset(out, 0, frameCount * sizeof(float));
+                return;
+            }
             float master = engine->getMasterVolume();
             float v = muted ? 0.0f : (master * myAct->volume.load());
             size_t toRead = frameCount;
@@ -116,12 +122,16 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* /*pInpu
             read += canRead;
             rpos = ringWrap(rpos + canRead, rb.capacity);
             rb.readPos.store(rpos, std::memory_order_release);
+            engine->consumedFrames.fetch_add(read, std::memory_order_relaxed);
 
             if (read < toRead) {
                 // underrun - zero the rest (better than garbage).
                 // P2: do NOT log from the realtime audio callback (can allocate/block and worsen underruns).
                 // Just bump the atomic; UI/CLI stats will report the current count on demand or timer.
                 ++engine->underrunCount;
+                engine->zeroFillFrames.fetch_add(toRead - read, std::memory_order_relaxed);
+                if (read == 0) engine->emptyCallbacks.fetch_add(1, std::memory_order_relaxed);
+                else engine->partialCallbacks.fetch_add(1, std::memory_order_relaxed);
                 std::memset(out + read, 0, (toRead - read) * sizeof(float));
             }
         } else {
@@ -415,8 +425,7 @@ void AudioEngine::clearBuffers()
         if (!actPtr || !actPtr->valid.load(std::memory_order_acquire)) continue;
         auto& rb = actPtr->ring;
         if (rb.capacity == 0) continue;
-        const size_t w = rb.writePos.load(std::memory_order_acquire);
-        rb.readPos.store(w, std::memory_order_release);
+        rb.discardAll();
     }
 }
 
@@ -439,13 +448,17 @@ void AudioEngine::pushAudioToActiveOutputLocked(ActiveOutput& output, const floa
     size_t r = rb.readPos.load(std::memory_order_acquire);
     size_t queued = ringDistance(w, r, rb.capacity);
 
-    if (queued >= maxQueuedFrames) return;
+    if (queued >= maxQueuedFrames) {
+        producerDroppedFrames.fetch_add(count, std::memory_order_relaxed);
+        return;
+    }
 
     const size_t allowedByDepth = (queued < maxQueuedFrames) ? (maxQueuedFrames - queued) : 0;
     if (count > allowedByDepth) {
         // Drop the oldest part of an unusually large producer block, keeping the
         // most recent speech rather than adding a late burst to the queue.
         const size_t drop = count - allowedByDepth;
+        producerDroppedFrames.fetch_add(drop, std::memory_order_relaxed);
         samples += drop;
         count = allowedByDepth;
         if (count == 0) return;
@@ -520,6 +533,7 @@ size_t AudioEngine::dropQueuedBridgeAudio(size_t maxSamples, const std::vector<s
         if (!output.valid.load(std::memory_order_acquire)) return 0;
         auto& rb = output.ring;
         if (rb.capacity == 0 || rb.sampleKind.size() != rb.capacity) return 0;
+        AudioEngine::RingBuffer::ConsumerLease control(rb, true);
 
         size_t droppedTotal = 0;
         while (droppedTotal < maxSamples) {

@@ -1644,6 +1644,47 @@ TEST_CASE("P25 live decoder rebases grantSlot from I-ISCH absolute origin (DEC-0
     REQUIRE(cIt->grantSlot == 1);
 }
 
+TEST_CASE("P25 rebased MAC updates only its advertised timeslot session", "[p25][slot-session]")
+{
+    const bool slotOneEncrypted = GENERATE(false, true);
+    auto dibits = makeSyntheticPhase2Superframe();
+    const auto firstA = makeSyntheticPhase2Isch(0, 0, true, 0);
+    const auto firstB = makeSyntheticPhase2Isch(1, 0, true, 0);
+    std::copy(firstA.begin(), firstA.end(), dibits.begin());
+    std::copy(firstB.begin(), firstB.end(), dibits.begin() + P25LiveDecoder::Phase2BurstDibits);
+    const auto a = makeSyntheticPhase2Isch(0, 2, true, 0);
+    const auto b = makeSyntheticPhase2Isch(1, 2, true, 0);
+    std::copy(a.begin(), a.end(), dibits.begin() + 4 * P25LiveDecoder::Phase2BurstDibits);
+    std::copy(b.begin(), b.end(), dibits.begin() + 5 * P25LiveDecoder::Phase2BurstDibits);
+    for (size_t slot = 0; slot < 2; ++slot) {
+        const auto payload = makeSyntheticPhase2MacActiveGroupUserSacchPayloadForTest(
+            static_cast<uint16_t>(30301 + slot), slot == 1 && slotOneEncrypted);
+        std::copy(payload.begin(), payload.end(), dibits.begin() +
+            (slot + 2) * P25LiveDecoder::Phase2BurstDibits + P25LiveDecoder::Phase2FrameSyncDibits);
+    }
+
+    P25LiveDecoder decoder;
+    const auto result = decoder.processHardDibits(dibits);
+    const auto mac = std::find_if(result.phase2Bursts.begin(), result.phase2Bursts.end(), [](const auto& burst) {
+        return burst.dibitOffset == 6 * P25LiveDecoder::Phase2BurstDibits;
+    });
+    REQUIRE(mac != result.phase2Bursts.end());
+    REQUIRE(mac->grantSlot == 1);
+    REQUIRE(mac->trafficTalkgroupKnown);
+    REQUIRE(mac->trafficTalkgroupId == 30302);
+    REQUIRE(mac->trafficEncrypted == slotOneEncrypted);
+    size_t sameSlotVoice = 0;
+    for (const auto& burst : result.phase2Bursts) {
+        if (burst.dibitOffset < 2 * P25LiveDecoder::Phase2BurstDibits || burst.voiceCodewords.empty()) continue;
+        INFO("offset=" << burst.dibitOffset << " slot=" << unsigned(burst.grantSlot));
+        if (!burst.trafficTalkgroupKnown) continue;
+        REQUIRE(burst.trafficTalkgroupId == 30301 + burst.grantSlot);
+        REQUIRE(burst.trafficEncrypted == (burst.grantSlot == 1 && slotOneEncrypted));
+        ++sameSlotVoice;
+    }
+    REQUIRE(sameSlotVoice > 0);
+}
+
 TEST_CASE("P25 live decoder emits stable Phase 2 session codeword IDs")
 {
     P25LiveDecoder decoder;
@@ -1724,6 +1765,29 @@ TEST_CASE("P25 live decoder applies Phase 2 XOR mask before extracting voice cod
         if (burst.voiceCodewords.empty()) continue;
         REQUIRE(burst.voiceCodewords.front().bits == clearBursts[slot].voiceCodewords.front().bits);
     }
+}
+
+TEST_CASE("P25 block decode walks complete bursts beyond its first validated lock", "[p25][block-tail]")
+{
+    const auto clear = makeSyntheticPhase2SuperframeWithSacchForTest();
+    const auto masked = maskSyntheticPhase2SuperframeForTest(clear, 0x2d2, 0xbee00, 0x2d1, 0);
+    auto input = masked;
+    input.insert(input.end(), masked.begin(), masked.end());
+    P25LiveDecoderConfig cfg;
+    cfg.enableStreamingChannelDdc = false;
+    cfg.maxPhase2SuperframeLocks = 1;
+    P25LiveDecoder decoder(cfg);
+    decoder.setPhase2MaskParameters(0x2d2, 0xbee00, 0x2d1);
+    const auto result = decoder.processHardDibits(input);
+    for (size_t index = 0; index < 24; ++index) {
+        INFO("physical burst " << index);
+        const size_t pos = index * P25LiveDecoder::Phase2BurstDibits;
+        REQUIRE(std::count_if(result.phase2Bursts.begin(), result.phase2Bursts.end(),
+            [=](const auto& b) { return b.dibitOffset == pos; }) == 1);
+    }
+    // The current-block permission must not carry an old lattice into noise.
+    const auto empty = decoder.processHardDibits(std::vector<int>(input.size(), 0));
+    REQUIRE(empty.phase2Bursts.empty());
 }
 
 TEST_CASE("P25 live decoder searches Phase 2 XOR mask phase using MAC CRC evidence")

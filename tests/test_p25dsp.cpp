@@ -9,7 +9,32 @@
 #include "dsp/P25StreamingChannelDdc.h"
 
 #include <cmath>
+#include <algorithm>
 #include <numeric>
+
+TEST_CASE("Phase 2 mappings preserve the physical quadrant cycle", "[p25][dsp][mapping]")
+{
+    std::array<int, 4> p{0, 1, 2, 3};
+    const std::array<int, 4> canonical{3, 2, 0, 1};
+    size_t accepted = 0;
+    do {
+        bool physical = false;
+        for (size_t rotation = 0; rotation < 4; ++rotation) {
+            bool forward = true, reverse = true;
+            for (size_t i = 0; i < 4; ++i) {
+                forward &= p[i] == canonical[(rotation + i) % 4];
+                reverse &= p[i] == canonical[(rotation + 4 - i) % 4];
+            }
+            physical |= forward || reverse;
+        }
+        REQUIRE(p25dsp::isPhysicalPhase2DibitMapping(p) == physical);
+        accepted += physical;
+    } while (std::next_permutation(p.begin(), p.end()));
+    REQUIRE(accepted == 8);
+    REQUIRE_FALSE(p25dsp::isPhysicalPhase2DibitMapping({3, 0, 2, 1}));
+    REQUIRE_FALSE(p25dsp::isPhysicalPhase2DibitMapping({0, 0, 3, 3}));
+    REQUIRE_FALSE(p25dsp::isPhysicalPhase2DibitMapping({-1, 2, 0, 1}));
+}
 
 namespace {
 

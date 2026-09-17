@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import re
@@ -1002,6 +1003,26 @@ def recommended_commands(capture_dir: Path, summary: dict, grants: list[dict]) -
     return out
 
 
+def summarize_audio_callback_rows(rows: list[dict]) -> dict:
+    """Counter deltas, not inferred speech loss; totals aggregate all outputs."""
+    fields = ["audio_consumed_frames", "audio_zero_fill_frames", "audio_empty_callbacks",
+              "audio_partial_callbacks", "audio_control_silence_frames", "audio_producer_dropped_frames"]
+    if len(rows) < 2 or any(field not in rows[0] for field in fields):
+        return {"available": False, "reason": "capture lacks callback counters or two polls"}
+    try:
+        samples = [{field: int(row[field]) for field in fields} for row in rows]
+    except (KeyError, TypeError, ValueError):
+        return {"available": False, "reason": "invalid callback counter row"}
+    if any(value < 0 for sample in samples for value in sample.values()):
+        return {"available": False, "reason": "negative callback counter"}
+    resets = sum(any(b[f] < a[f] for f in fields) for a, b in zip(samples, samples[1:]))
+    if resets:
+        return {"available": False, "reason": "callback counters reset during capture", "resets": resets}
+    return {"available": True, "polls": len(rows),
+            "deltas": {f: samples[-1][f] - samples[0][f] for f in fields},
+            "interpretation": "Per-output totals. Empty callbacks include normal silence; partial callbacks are queue drain boundaries, not proof of missing speech."}
+
+
 def audit_capture(capture_dir: Path) -> dict:
     summary = load_summary(capture_dir)
     if not summary:
@@ -1260,8 +1281,14 @@ def audit_capture(capture_dir: Path) -> dict:
         findings.append("same_rf_slot_handoff_before_current_clear_grant")
     if counts["audio_output_sparse_gap"] and counts["audio_output_underrun_climb"]:
         findings.append("speaker_ring_starvation")
+    callback_rows = []
+    callback_path = next(capture_dir.glob("*_ring_health.csv"), None)
+    if callback_path:
+        with callback_path.open(encoding="utf-8-sig", newline="") as callback_file:
+            callback_rows = list(csv.DictReader(callback_file))
     return {
         "capture_dir": str(capture_dir),
+        "audio_callbacks": summarize_audio_callback_rows(callback_rows),
         "log_path": str(log_path),
         "health": health,
         "counts": dict(counts),
@@ -1287,6 +1314,15 @@ def audit_capture(capture_dir: Path) -> dict:
 
 
 def run_self_test() -> None:
+    fields = ["audio_consumed_frames", "audio_zero_fill_frames", "audio_empty_callbacks",
+              "audio_partial_callbacks", "audio_control_silence_frames", "audio_producer_dropped_frames"]
+    first = {f: "10" for f in fields}
+    last = {f: "20" for f in fields}
+    assert summarize_audio_callback_rows([first, last])["deltas"][fields[0]] == 10
+    assert not summarize_audio_callback_rows([last, first])["available"]
+    assert not summarize_audio_callback_rows([{}, {}])["available"]
+    assert not summarize_audio_callback_rows([first])["available"]
+    assert not summarize_audio_callback_rows([first, {**last, fields[0]: "bad"}])["available"]
     lines = [
         "[00:00:01.000 | 2026-07-04T00:00:01.000Z UTC] Instruction: Group Update | tg=30003 | ch=0X7075 | carrier=58 | voice=420.72500MHz | P25 Phase 2 TDMA | slot=1 | nac=0X2DC | wacn=0XBEE00 | sys=0X2D1",
         "[00:00:01.001 | 2026-07-04T00:00:01.001Z UTC] P25 Phase 2 in-band follow: traffic is inside current RF passband",

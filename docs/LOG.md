@@ -2,6 +2,48 @@
 
 Newest at the top.
 
+## 2026-09-17 - v0.2.55 packaging
+
+User requested source and release assets. Version bumped to 0.2.55; full tests
+and clean package checks passed, including signature/hash verification and
+staged CLI smoke test. Prepared installer, portable ZIP, standalone control
+DLL, checksums and signed updater metadata. Release notes describe measured
+progress without closing the all-call continuous-audio acceptance issue.
+
+## 2026-09-17 - Downstream race repair and real GUI capture
+
+Repaired callback cursor overwrite during clear/discard (DEC-0074), with a
+nonblocking callback lease and regression tests. Added callback counters and
+capture audit deltas. Release/full suite pass: 235 cases / 81,154 assertions.
+90-second GUI auto-follow at 420.350 MHz completed three follows; no producer
+drops, IQ overruns, or control-lease collisions. Reference replay is byte-identical
+after the downstream patch. Live/replay STT still contains errors: no claim of
+fully repaired speech and no release published. Detailed evidence and remaining
+acceptance criteria are in `P25_DOWNSTREAM_AUDIT_20260917.md`.
+
+## 2026-09-17 - Mapping defect proven from identical RF
+
+Full trace found an exact 0/2-only dibit permutation on overlapping identical
+RF. Rejecting nonphysical Phase 2 mappings sharply reduces codec concealment
+and false voice. Block-tail unit test then reproduced lost A/B bursts beyond
+one lock; fixed current-window walking and duplicate uncovered-sync processing.
+233 tests pass; final GUI replay completes; live mapping-only capture provides
+recognizable exchanges via local STT but still underruns. No claim of complete
+continuous audio; no publish this pass. Full audit:
+`P25_MAPPING_AUDIT_20260917.md`.
+
+## 2026-09-17 - Verified slot-state and GUI tail defects
+
+DEC-0069 makes mutable session selection agree with I-ISCH-rebased ownership,
+including final-fragment C/D inversion used by SDRTrunk. Regression tests cover
+clear/encrypted companion calls. Same-IQ reference retains four additional
+frames previously rejected for stale talkgroup state. DEC-0070 fixes GUI EOF
+tail starvation without altering live startup thresholds. Added absolute burst
+and codeword stream positions to detailed validation logs. Release rebuilt;
+231 tests pass. New capture still has six gaps and 66 concealment frames:
+continuous clear speech remains unproven. No release or asset published in
+this follow-up; do not replace the existing 0.2.54 assets with these changes.
+
 ## 2026-09-17 - Capture 060515 processing-cost correction
 
 Exhaustively verified GF64 lookup arithmetic and cached RS syndrome columns.

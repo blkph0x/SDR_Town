@@ -84,6 +84,16 @@ TEST_CASE("P25 active playback drains ready frames below its startup threshold",
     REQUIRE(queued == 2 * frame);
 }
 
+TEST_CASE("P25 end of stream drains short tails without changing live priming", "[p25][audio]")
+{
+    constexpr size_t frame = 960;
+    constexpr size_t startup = 12 * frame;
+    for (size_t frames = 1; frames < 12; ++frames) {
+        REQUIRE(p25SpeakerNeedsStartupPrime(0, frames * frame, startup));
+        REQUIRE_FALSE(p25SpeakerNeedsStartupPrime(0, frames * frame, startup, true));
+    }
+}
+
 TEST_CASE("P25 follow returns immediately when a voice channel proves encrypted", "[p25][follow]")
 {
     P25FollowSnapshot snapshot;
