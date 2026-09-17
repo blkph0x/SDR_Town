@@ -2,6 +2,24 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0094 - Progressive recorded SSTV and 0.2.58 release (2026-09-18)
+
+Pinned backend Decoder::events() emits ImageStart/Row/ImageEnd while consuming
+a pull iterator. Complete the recorded GUI feature before live push integration.
+Optional helper --progress emits bounded JSONL RGB scanlines; no DSP or pixel
+math changes. C++ validates schema, dimensions, image index, unique row indices,
+hex length/content and final metadata/row agreement. Compare assembled preview
+pixels with final RGB output before publishing PNGs. Limits: <=4096 bytes/line,
+4 MiB stdout total, 64 KiB stderr, four images and prior time/input bounds.
+These are transport/resource budgets, not protocol sensitivity constants.
+Preview snapshots at eight-row intervals go into one mutex-protected latest
+image, sampled by a GUI timer; never queue a full image per scanline. Clear
+preview on failed/cancelled work. Saving remains final validated output only.
+Test fragmented/malformed/duplicate/out-of-order row transport and independent
+recordings, retaining exact GUI/direct output parity. Publish GUI+progressive
+recorded reception as 0.2.58 with tested signed assets. Live RF is explicitly
+not in this release and remains T-0022's next stage; P25 remains untouched.
+
 ## DEC-0093 - Recorded SSTV GUI on the shared file decoder (2026-09-17)
 
 T-0022 continues with a nonmodal Tools window, one offline job per window and

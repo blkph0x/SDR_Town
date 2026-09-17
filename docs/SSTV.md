@@ -1,11 +1,11 @@
 # SSTV receive development
 
-Version 0.2.57 adds **experimental recorded-audio Robot36/Martin1 images** and
-classic VIS inspection. No live SSTV, GUI preview, or demodulator changes yet.
+Version 0.2.58 adds a progressive recorded-image GUI to **experimental
+Robot36/Martin1 decoding** and classic VIS inspection. No live RF SSTV yet.
 
 ## Image decoding
 
-Development source after 0.2.57: **Tools > SSTV Recorded Images** opens a
+Version 0.2.58: **Tools > SSTV Recorded Images** opens a
 nonmodal window. Select a mono recording, give a new output directory (parent
 must exist), choose Automatic/Robot36/Martin1 and Decode. The image list shows
 complete/partial status and row counts; selecting an item previews the original
@@ -14,7 +14,12 @@ One job runs at a time off the GUI thread. Cancel and closing the window request
 cooperative cancellation and reap its helper. Cancellation is checked before
 publishing outputs; if saving already began, the bounded save finishes instead.
 The rest of the receiver is not retuned, muted or reconfigured by this window.
-This GUI is not in the published 0.2.57 assets. No progressive/live image claim.
+Decoded rows appear progressively with actual row counts, not an invented
+completion/quality percentage. A latest-only preview handoff prevents accumulating
+images in the GUI event queue. Failed/cancelled jobs clear the provisional preview.
+The parser validates bounded row events and checks assembled preview pixels
+against the final RGB file before publishing PNGs. Missing rows remain black;
+preview quality is not an RF/protocol correctness guarantee. No live RF input.
 
 ```powershell
 build/bin/Release/SDR_Town.exe --cli --no-control-server --cmd 'sstv decode "C:\recordings\sstv.wav" "C:\recordings\new-images" auto'
@@ -31,8 +36,10 @@ already-written images; a retry must use a new directory.
 
 The app-adjacent helper has no network or radio access and runs with a 120-second
 deadline, 64-KiB diagnostic limit and maximum four pictures per job. Unsupported
-modes fail explicitly. The CLI intentionally waits for this offline job; it is
-not connected to a GUI/live audio callback. Helper is included in release assets.
+modes fail explicitly. Progressive local stdout has a separate 4-MiB total and
+4096-byte line limit; stderr remains capped at 64 KiB. The CLI intentionally
+waits for this offline job; GUI decoding runs on its worker, never a live audio
+callback. Helper is included in release assets.
 
 GUI development regression: `python scripts/test_sstv_gui.py` loads the two
 independent references into real Qt windows and checks saved-image parity with
@@ -116,6 +123,6 @@ and start/stop framing. This proves this header case, not the image or a live pa
 Synthetic tests alone are not independent reception proof. Live RF acceptance,
 fading and broad offset/noise characterization remain open.
 
-Next: bounded live demodulated-audio routing and progressive image display.
+Next: bounded live demodulated-audio routing using the verified scanline transport.
 Qualify Martin2/Scottie/PD modes with independent pictures before
 advertising them. Satellite scheduling and public/weather payload decoding follow.

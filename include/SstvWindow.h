@@ -3,6 +3,7 @@
 #include <QImage>
 #include <functional>
 #include <nlohmann/json.hpp>
+#include "SstvProgress.h"
 
 class QLineEdit;
 class QComboBox;
@@ -17,7 +18,7 @@ class SstvWindow final : public QDialog {
     Q_OBJECT
 public:
     using Decode = std::function<nlohmann::json(const QString&, const QString&, const QString&,
-                                               const std::function<bool()>&)>;
+                                               const std::function<bool()>&, const SstvPreview&)>;
     explicit SstvWindow(Decode decode, QWidget* parent = nullptr);
     ~SstvWindow() override;
     bool startDecode(const QString& input, const QString& output, const QString& mode);

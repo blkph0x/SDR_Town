@@ -1,5 +1,10 @@
 # Task list (canonical)
 
+T-0030 | pending_release | Release 0.2.58 | DEC-0093/0094 recorded SSTV GUI,
+progressive previews, cancellation, independent pixel parity and transport
+validation. Publish source/signed assets only after complete feature gates pass.
+Local source/CLI/Qt/full+partial reference gates pass; packaging next.
+
 T-0029 | pending | P25 static-verifier reconciliation | 14 existing hosted/local
 string failures (133 passing) at 0.2.56 and 0.2.57. Audit current definitions and
 DEC intent, add behavioural gates as appropriate; do not retune P25 or weaken

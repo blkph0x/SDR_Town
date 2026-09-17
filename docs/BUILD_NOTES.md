@@ -2,6 +2,26 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-18 - DEC-0094 progressive SSTV / 0.2.58
+
+Windows/MSVC 14.44 /Qt 6.11.1 /Rust 1.88.0. Release app/helper/tests build
+passes. No backend DSP/pixel math changed: optional row JSONL is generated
+from the same RGB canvas. New C++ parser validates row transport and checks
+assembled image equals final file before publishing. UI holds latest snapshot.
+
+CTest PASS: 275 core cases/189730 assertions +17 Qt cases/155 assertions;
+one reference-dependent case is explicitly skipped in default CTest. Separate
+test_sstv_gui.py runs it four times (Robot36/Martin1 full/15s partial), all 13
+assertions pass each, multiple preview callbacks and exact direct/GUI image
+parity. Preview screenshots at 820x600 and 560x420 generated; Martin1 partial
+small view inspected (30/256 rows, missing rows black, no overlap).
+Native tests cover fragmented records, out-of-order row positions, duplicate/
+bad row/RGB/index, incomplete lines/images, zero-row partials, missing completion
+rows, 4096-byte line/4-MiB transport/four-image limits, 1000 latest-only preview
+updates, cancellation clearing provisional image, teardown and worker isolation.
+CLI SSTV image/negative tests, RDS/CTCSS/DCS/registry regressions pass. Four
+main GUI workspaces pass without startup errors. Package/remote checks pending.
+
 ## 2026-09-18 - DEC-0093 recorded SSTV GUI
 
 Windows/MSVC 14.44 /Qt 6.11.1. Added nonmodal window and worker cancellation

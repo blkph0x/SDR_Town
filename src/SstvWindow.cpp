@@ -17,6 +17,8 @@
 #include <QVBoxLayout>
 #include <memory>
 #include <array>
+#include <mutex>
+#include <QTimer>
 
 SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(std::move(decode)) {
     setWindowTitle("SSTV Recorded Images");
@@ -90,16 +92,35 @@ bool SstvWindow::startDecode(const QString& input,const QString& output,const QS
     input_->setText(input); output_->setText(output); mode_->setCurrentIndex(mode_->findData(mode));
     images_->clear(); original_=QImage(); resultDirectory_.clear(); updatePreview();
     status_->setText("Decoding..."); setBusy(true);
-    struct Result { nlohmann::json report; QString error; };
+    struct Result {
+        nlohmann::json report; QString error;
+        std::mutex mutex;
+        QImage preview; QString mode; int rows=0; bool pending=false;
+    };
     auto result=std::make_shared<Result>();
     const auto decode=decode_;
     worker_=QThread::create([decode,input,output,mode,result] {
-        try {result->report=decode(input,output,mode,[] {return QThread::currentThread()->isInterruptionRequested();});}
+        try {result->report=decode(input,output,mode,[] {return QThread::currentThread()->isInterruptionRequested();},
+            [result](const QImage& image,const QString& mode,int rows) {
+                std::lock_guard lock(result->mutex);
+                result->preview=image; result->mode=mode; result->rows=rows; result->pending=true;
+            });}
         catch(const std::exception& e) {result->error=QString::fromUtf8(e.what());}
         catch(...) {result->error="Unexpected SSTV decoder failure";}
     });
     worker_->setParent(this);
-    connect(worker_,&QThread::finished,this,[this,result] {
+    auto* timer=new QTimer(this);
+    connect(timer,&QTimer::timeout,this,[this,result] {
+        if(!worker_ || worker_->isInterruptionRequested()) return;
+        std::lock_guard lock(result->mutex);
+        if(!result->pending) return;
+        result->pending=false; original_=result->preview;
+        status_->setText(QString("Decoding %1: %2/%3 rows").arg(result->mode).arg(result->rows).arg(original_.height()));
+        updatePreview();
+    });
+    timer->start(50); // DEC-0094 latest-only GUI observation, not a decoder clock.
+    connect(worker_,&QThread::finished,this,[this,result,timer] {
+        timer->stop(); timer->deleteLater();
         auto* finished=worker_; worker_=nullptr; finished->wait(); finished->deleteLater();
         bool success=result->error.isEmpty();
         if(success) {
@@ -117,7 +138,7 @@ bool SstvWindow::startDecode(const QString& input,const QString& output,const QS
                 if(images_->count()) images_->setCurrentRow(0);
             } catch(const std::exception& e) {success=false; result->error=QString::fromUtf8(e.what()); images_->clear(); resultDirectory_.clear();}
         }
-        if(!success) status_->setText(result->error);
+        if(!success) {status_->setText(result->error); original_=QImage(); updatePreview();}
         setBusy(false);
         if(closePending_) {closePending_=false; close();}
         emit decodeFinished(success);

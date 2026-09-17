@@ -9,7 +9,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         println!("sdrtown-sstv/1 {REVISION}");
         return Ok(());
     }
-    if args.len() != 5 { return Err("expected input.pcm sample-rate output-directory auto|robot36|martin1".into()); }
+    let progress = args.len() == 6 && args[5] == "--progress";
+    if args.len() != 5 && !progress { return Err("expected input.pcm sample-rate output-directory auto|robot36|martin1 [--progress]".into()); }
     let input = PathBuf::from(&args[1]);
     let rate: u32 = args[2].to_str().ok_or("invalid rate")?.parse()?;
     if !(8000..=96000).contains(&rate) { return Err("sample rate outside 8..96 kHz".into()); }
@@ -55,6 +56,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     canvas[(y*width+x)*3..(y*width+x)*3+3].copy_from_slice(&[pixel.red(),pixel.green(),pixel.blue()]);
                 }
                 seen[y] = true; rows += 1;
+                if progress {
+                    use std::fmt::Write as _;
+                    let mut hex = String::with_capacity(width * 6);
+                    for byte in &canvas[y*width*3..(y+1)*width*3] { write!(&mut hex,"{byte:02x}")?; }
+                    println!("{{\"kind\":\"row\",\"schema\":1,\"image\":{count},\"mode\":\"{mode_name}\",\"width\":{width},\"height\":{height},\"row\":{y},\"rgb\":\"{hex}\"}}");
+                    io::stdout().flush()?;
+                }
             }
             Event::ImageEnd { complete } => {
                 if !active || (complete && rows != height) { return Err("inconsistent image completion".into()); }

@@ -1,5 +1,14 @@
 # Code notes (tree map)
 
+DEC-0094: SstvProgress parses bounded progressive helper JSONL, validates row
+geometry/uniqueness and completion, retains assembled frames for final RGB parity.
+Rust helper --progress exports native scanlines without modifying DSP. Optional
+SstvPreview callback is consumed on the file worker. SstvWindow exchanges one
+mutex-protected latest image, observed by a 50ms UI timer, no per-row GUI queue.
+Failure/cancellation clears provisional pixels. CLI without callback retains its
+prior metadata-only helper path. test_sstv_progress.cpp exercises transport edges;
+real Qt tests cover full/partial independent recordings and preview/final equality.
+
 DEC-0093: SstvWindow is a nonmodal recorded-audio window using one QThread job
 and the same SstvImageFile function as CLI. QProcess stays on that worker;
 only queued completion touches widgets. Optional cancellation is checked during

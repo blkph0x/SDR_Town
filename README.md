@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Current version** | **0.2.57** (experimental channel) |
+| **Current version** | **0.2.58** (experimental channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
@@ -47,11 +47,11 @@ see [native debugger tests and hardware limits](docs/NATIVE_RUNTIME_QA.md).
 SSTV now has experimental offline Robot36/Martin1 image decoding to PNG:
 `sstv decode "file.wav" "new-output-directory" auto`. The separate
 `sstv inspect "file.wav"` reports validated classic VIS headers.
-Live SSTV, GUI image preview and public/weather satellite decoding remain planned.
+Live RF SSTV and public/weather satellite decoding remain planned.
 See [SSTV commands, resource limits and validation](docs/SSTV.md).
-Development source after 0.2.57 adds **Tools > SSTV Recorded Images** with
-background decoding, cancellation, image previews and output-folder access.
-This GUI addition is not in the published 0.2.57 assets; live SSTV remains planned.
+Version 0.2.58 adds **Tools > SSTV Recorded Images** with background decoding,
+cancellation, progressive scanline previews and output-folder access. Preview
+pixels are checked against final RGB output before PNG publication.
 The [staged roadmap](docs/SATELLITE_AND_SSTV.md) starts with independently verified
 recorded-audio SSTV before live reception and satellite scheduling.
 
@@ -432,8 +432,8 @@ Useful docs (may be denser than this README):
 ## Direction - current implementation order
 
 1. **SSTV recorded reception, then live images**
-   Offline Robot36/Martin1 PNGs and VIS inspection now ship. Next: GUI preview,
-   cancellable replay and live routing, then independently qualified additional
+   Offline Robot36/Martin1 PNGs, progressive GUI replay and VIS inspection ship.
+   Next: bounded live input, then independently qualified additional
    Martin/Scottie/PD modes.
 
 2. **Public satellite and weather reception**
@@ -491,5 +491,5 @@ See `LICENSE.txt`.
 
 **Bottom line:** WFM/AM/NFM, RDS, workspaces and region band plans are available.
 Tone identification, P25 and offline SSTV images remain experimental.
-Live SSTV/GUI image tools and satellite work are next;
+Live SSTV input and satellite work are next;
 no universal reception or clear-audio percentage is claimed.

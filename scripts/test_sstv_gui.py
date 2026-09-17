@@ -22,14 +22,16 @@ def main():
             samples = samples[:, 0]
         with tempfile.TemporaryDirectory(prefix='sstv gui ') as temporary:
             audio = Path(temporary) / 'recording.wav'
-            sf.write(audio, samples, rate, subtype='PCM_16')
-            environment = dict(os.environ, SDR_TOWN_SSTV_GUI_FIXTURE=str(audio),
-                               SDR_TOWN_SSTV_GUI_SCREENSHOT=str(root / f'build/sstv-gui-{mode}.png'))
-            result = subprocess.run([str(executable), '[sstv-gui-recording]'], env=environment,
-                                    capture_output=True, text=True, timeout=150)
-            print(mode, result.stdout, result.stderr)
-            assert result.returncode == 0
-            assert 'All tests passed' in result.stdout
+            for label, data in [('full', samples), ('partial', samples[:rate*15])]:
+                sf.write(audio, data, rate, subtype='PCM_16')
+                environment = dict(os.environ, SDR_TOWN_SSTV_GUI_FIXTURE=str(audio),
+                                   SDR_TOWN_SSTV_GUI_PARTIAL='1' if label == 'partial' else '0',
+                                   SDR_TOWN_SSTV_GUI_SCREENSHOT=str(root / f'build/sstv-gui-{mode}-{label}.png'))
+                result = subprocess.run([str(executable), '[sstv-gui-recording]'], env=environment,
+                                        capture_output=True, text=True, timeout=150)
+                print(mode, label, result.stdout, result.stderr)
+                assert result.returncode == 0
+                assert 'All tests passed' in result.stdout
 
 
 if __name__ == '__main__':

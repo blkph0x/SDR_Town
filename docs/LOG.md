@@ -2,6 +2,14 @@
 
 Newest at the top.
 
+## 2026-09-18 - Progressive recorded SSTV feature/release preparation
+
+DEC-0094 adds scanline transport and latest-only GUI previews on the same pinned
+backend. Full/partial Robot36 and Martin1 match direct decoding exactly; malformed
+transport and cancellation/teardown gates pass. Readme/help/build scope updated
+for 0.2.58. T-0030 packages the completed recorded-GUI feature; live RF remains
+next T-0022 stage, not a release claim. P25 implementation unchanged.
+
 ## 2026-09-18 - Recorded SSTV GUI checkpoint
 
 DEC-0093 adds Tools > SSTV Recorded Images on the tested CLI file decoder.

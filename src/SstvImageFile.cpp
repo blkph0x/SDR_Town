@@ -23,7 +23,7 @@ void require(bool ok,const char* message) { if(!ok) throw std::runtime_error(mes
 }
 
 nlohmann::json decodeSstvImageFile(const QString& input,const QString& output,const QString& mode,
-                                  const std::function<bool()>& cancelled) {
+                                  const std::function<bool()>& cancelled, const SstvPreview& preview) {
     const auto checkCancelled=[&] {
         if(cancelled && cancelled()) throw std::runtime_error("SSTV decode cancelled");
     };
@@ -78,14 +78,19 @@ nlohmann::json decodeSstvImageFile(const QString& input,const QString& output,co
     checkCancelled();
     QProcess worker;
     worker.setProgram(helper);
-    worker.setArguments({pcmPath,QString::number(rate),rgbPath,mode});
+    QStringList arguments{pcmPath,QString::number(rate),rgbPath,mode};
+    if(preview) arguments.push_back("--progress");
+    worker.setArguments(arguments);
     worker.start();
+    struct ProcessGuard {QProcess& p; ~ProcessGuard(){if(p.state()!=QProcess::NotRunning) {p.kill(); p.waitForFinished(5000);}}} processGuard{worker};
     require(worker.waitForStarted(5000),"SSTV backend did not start");
     QElapsedTimer elapsed; elapsed.start();
     QByteArray stdoutBytes,stderrBytes;
+    SstvProgress progress(preview);
     for(;;) {
         worker.waitForFinished(50);
-        stdoutBytes+=worker.readAllStandardOutput();
+        const auto chunk=worker.readAllStandardOutput();
+        if(preview) progress.append(chunk); else stdoutBytes+=chunk;
         stderrBytes+=worker.readAllStandardError();
         if(cancelled && cancelled()) {
             worker.kill(); worker.waitForFinished(5000);
@@ -99,6 +104,7 @@ nlohmann::json decodeSstvImageFile(const QString& input,const QString& output,co
     }
     if(worker.exitStatus()!=QProcess::NormalExit || worker.exitCode()!=0)
         throw std::runtime_error("SSTV backend failed: "+stderrBytes.left(2048).toStdString());
+    if(preview) {progress.finish(); stdoutBytes=progress.metadata();}
     auto images=nlohmann::json::array();
     std::vector<QImage> decoded;
     for(const auto& line:stdoutBytes.split('\n')) {
@@ -119,6 +125,7 @@ nlohmann::json decodeSstvImageFile(const QString& input,const QString& output,co
         require(bytes.size()==w*h*3,"SSTV RGB read failed");
         decoded.push_back(QImage(reinterpret_cast<const uchar*>(bytes.constData()),w,h,w*3,QImage::Format_RGB888).copy());
         require(!decoded.back().isNull(),"SSTV image allocation failed");
+        if(preview) require(images.size()<progress.images().size() && decoded.back()==progress.images()[images.size()],"SSTV preview/final pixels differ");
         const auto png="image-"+std::to_string(images.size())+(complete?".png":".partial.png");
         item["file"]=png;
         item["rgbSha256"]=QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex().toStdString();

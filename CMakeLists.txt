@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.57 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.58 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -82,6 +82,7 @@ include(cmake/RdsBackend.cmake)
 
 set(SDR_TOWN_SOURCES
     src/SstvImageFile.cpp
+    src/SstvProgress.cpp
     src/SstvWindow.cpp
     include/SstvWindow.h
     src/main.cpp
@@ -400,6 +401,7 @@ if(BUILD_TESTS)
 
   add_executable(sdr_town_workspace_tests tests/test_workspace.cpp src/WorkspaceLayout.cpp
     tests/test_sstv_gui.cpp tests/sstv_miniaudio.cpp src/SstvWindow.cpp include/SstvWindow.h src/SstvImageFile.cpp
+    tests/test_sstv_progress.cpp src/SstvProgress.cpp
     src/BandPlan.cpp src/BandPlanDialog.cpp src/SpectrumWidget.cpp include/SpectrumWidget.h src/RdsStatusWidget.cpp)
   target_include_directories(sdr_town_workspace_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_include_directories(sdr_town_workspace_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/external/miniaudio)

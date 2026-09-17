@@ -3,6 +3,9 @@ SDR TOWN — CAUSE / EFFECT EXECUTION MAP
 ================================================================================
 VERSION: 1.0.0  |  COMPANION TO: SOURCE_OF_TRUTH.md
 STATUS RULE: Flip [ ] to [X] only after the verification gate for that REQ is met.
+DEC-0094 checkpoint: progressive recorded previews validated against final RGB;
+full/partial independent recordings match direct decode. Row protocol/resource
+and latest-only UI handoff tests pass. Live RF remains open.
 DEC-0093 checkpoint: recorded SSTV GUI/direct pixels match on independent
 Robot36/Martin1 inputs. Single-job ownership, responsiveness, cancellation and
 teardown tested; preview reviewed at two sizes. Live/progressive SSTV still open.
