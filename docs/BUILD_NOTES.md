@@ -46,6 +46,12 @@ git diff --check passes for authored files; original upstream Rust copyright
 HTML retains its whitespace unchanged. No installer upgrade on a clean host
 or live SSTV reception claimed. Ready for draft upload/download hash validation.
 
+Draft asset verification PASS: eight GitHub downloads byte-identical to local
+assets. Hosted previous checkpoint run 35225600073 failed P25 source verifiers;
+local full sweep confirms PASS=133 FAIL=14. P25 source/header/DSP/verifier diff
+between v0.2.56 and v0.2.57 is empty. Record existing QA gap as T-0029; do not
+claim hosted CI green. New SSTV and native/CLI/GUI runtime gates remain passing.
+
 ## 2026-09-17 - DEC-0091 SSTV VIS development
 
 Initial Release compile succeeds with int/float fill and int/bool parity test

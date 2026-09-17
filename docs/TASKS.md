@@ -1,9 +1,15 @@
 # Task list (canonical)
 
-T-0028 | pending_release | Release 0.2.57 | Publish DEC-0091/0092 recorded SSTV
+T-0029 | pending | P25 static-verifier reconciliation | 14 existing hosted/local
+string failures (133 passing) at 0.2.56 and 0.2.57. Audit current definitions and
+DEC intent, add behavioural gates as appropriate; do not retune P25 or weaken
+security/slot checks merely to obtain green strings. See ISSUES/BUILD_NOTES.
+
+T-0028 | done | Release 0.2.57 | Publish DEC-0091/0092 recorded SSTV
 VIS and qualified Robot36/Martin1 image decoding with signed installer, portable
-and control DLL. Local source/CLI/core gates pass; packaging and remote asset
-hash checks must finish before publication is called complete.
+and control DLL. Local source/CLI/core/GUI and extracted portable gates pass.
+Eight draft-download hashes match, now published Latest; public updater manifest
+matches signed local asset. Tag 9347f82; existing P25 static failures remain T-0029.
 
 T-0027 | done | Release 0.2.56 | DEC-0090 checked packaging/publication,
 document current feature and validation scope, verify signed assets, push source

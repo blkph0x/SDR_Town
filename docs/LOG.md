@@ -10,6 +10,11 @@ PNG export, partial status, reproducibility hashes and bounded failures tested.
 Readme/commands/build and scope docs updated. P25/live receive left untouched.
 Local core/CLI gates pass; release publication remains T-0028 until signed
 assets, extracted portable tests and GitHub download comparisons finish.
+Completion: tag v0.2.57 at 9347f82 pushed, eight assets published as Latest
+experimental after identical download hashes and extracted CLI/GUI passes.
+Public latest/update.json matches signed local manifest. T-0028 closed.
+Existing hosted/local P25 string failures are recorded as T-0029, not hidden
+by this new decoder release; P25 source/DSP/security paths remain unchanged.
 
 ## 2026-09-17 - Native shutdown fault reproduced and corrected
 

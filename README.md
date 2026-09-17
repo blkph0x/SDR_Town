@@ -429,8 +429,9 @@ Useful docs (may be denser than this README):
 ## Direction - current implementation order
 
 1. **SSTV recorded reception, then live images**
-   Independent reference fixtures, VIS/line synchronization, initially Robot 36,
-   then validated Martin/Scottie/PD modes, progressive preview and PNG export.
+   Offline Robot36/Martin1 PNGs and VIS inspection now ship. Next: GUI preview,
+   cancellable replay and live routing, then independently qualified additional
+   Martin/Scottie/PD modes.
 
 2. **Public satellite and weather reception**
    Source-dated catalogue, SGP4 pass/Doppler planning, AX.25/public telemetry,
@@ -486,5 +487,6 @@ See `LICENSE.txt`.
 - Issues and PRs: https://github.com/Blkph0x/SDR_Town  
 
 **Bottom line:** WFM/AM/NFM, RDS, workspaces and region band plans are available.
-Tone identification and P25 remain experimental. SSTV and satellite work are next;
+Tone identification, P25 and offline SSTV images remain experimental.
+Live SSTV/GUI image tools and satellite work are next;
 no universal reception or clear-audio percentage is claimed.

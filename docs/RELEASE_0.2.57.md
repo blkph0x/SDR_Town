@@ -39,6 +39,10 @@ verified. Eleven package-verifier tests and command/signing failure tests pass.
 Existing P25 paths are unchanged. GUI SSTV preview/live reception and public
 satellite decoders remain next work. Known-tone RF checks still await hardware.
 No broad P25 clear-audio certification or new protocol support is implied.
+Known QA caveat: 14 P25 source-string verifier failures also occurred in the
+previous 0.2.56 documentation checkpoint's hosted run. They reproduce locally
+(133 pass/14 fail). P25 sources/verifiers are unchanged; these failures remain
+open for separate review, not waived as proof of correct P25 behaviour.
 
 Installer, portable ZIP, standalone control DLL, SHA-256 checksums and signed
 update manifest are provided. Experimental channel is published as GitHub Latest

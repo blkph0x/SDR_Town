@@ -2,6 +2,19 @@
 
 Never delete a row. Close with a commit hash and a sentence.
 
+2026-09-17 OPEN T-0029: hosted run 35225600073 at 3a30f1d (0.2.56 checkpoint)
+fails 14 P25 string verifiers; 0.2.57 local sweep reproduces 133 pass/14 fail.
+Failures: capture_fixes, clear_to_encrypted_mac_bar,
+clear_trusted_hold_and_structure_cold_exit, dec0055_epoch_dual_slot_origin,
+dec0062_talkspurt_vocoder_reset, dual_ambe_module, opposite_slot_no_probe_thrash,
+playback_ring_target_fill, playout_bridge_real_pcm_priority, retune_and_streaming,
+scheduler_optimizations, session_sustain, streaming_framer_commit,
+sustain_robustness (all verify_p25_phase2_*.py). Native core/Qt cases pass.
+git diff v0.2.56 v0.2.57 of main.cpp, P25 sources/headers, DSP and P25 verifiers
+is empty. Do not change DSP to satisfy text markers or silently weaken tests;
+review each against current definitions/DEC history and behavioural tests.
+This is an existing QA gap, not SSTV proof or a claim of stale/harmless tests.
+
 2026-09-17 DEC-0092 validation limits: Martin1 reconstructs the independent BBC
 card but has visible noise/colour differences from colaclanth's output (RGB MAE
 20.7794). Keep experimental, not pixel-identical quality. Robot36 manual and
