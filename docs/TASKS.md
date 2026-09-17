@@ -1,9 +1,11 @@
 # Task list (canonical)
 
-T-0030 | pending_release | Release 0.2.58 | DEC-0093/0094 recorded SSTV GUI,
+T-0030 | done | Release 0.2.58 | DEC-0093/0094 recorded SSTV GUI,
 progressive previews, cancellation, independent pixel parity and transport
 validation. Publish source/signed assets only after complete feature gates pass.
-Local source/CLI/Qt/full+partial reference gates pass; packaging next.
+Local source/CLI/Qt/full+partial reference and extracted-runtime gates pass.
+Tag 4006b94 pushed; eight downloaded asset hashes match local. Published Latest
+experimental, public updater manifest verified. T-0029 existing P25 QA gap open.
 
 T-0029 | pending | P25 static-verifier reconciliation | 14 existing hosted/local
 string failures (133 passing) at 0.2.56 and 0.2.57. Audit current definitions and
@@ -59,7 +61,8 @@ single worker, cancellation/close safety, previews and independent Qt replay tes
 GUI sub-milestone implemented/tested: Tools window, auto/manual modes, PNG list,
 partial status, preview, output-folder access. Real Robot36/Martin1 GUI/direct
 pixel parity, cancellation/close/teardown and regressions pass (BUILD_NOTES).
-Published 0.2.57 remains offline CLI only; next is bounded live/progressive input.
+Published 0.2.57 was CLI only; 0.2.58 ships the recorded GUI and progressive
+previews. Next is bounded live input with discontinuity/retune handling.
 reference fixtures, VIS/line sync, slant handling, image preview/gallery/export.
 Depends on T-0021; see SATELLITE_AND_SSTV.md / DEC-0083. DEC-0091 starts bounded
 recorded-audio VIS identification and independent fixture validation; image

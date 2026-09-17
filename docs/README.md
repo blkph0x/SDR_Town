@@ -37,5 +37,5 @@ These stay as capture archaeology. New work is ISSUES + DECISIONS + TASKS.
 
 See [RELEASING.md](RELEASING.md) for current packaging, signature, runtime and
 publication gates, and [SATELLITE_AND_SSTV.md](SATELLITE_AND_SSTV.md) for next work.
-Current release preparation: [0.2.58 notes and validation scope](RELEASE_0.2.58.md).
+Current tester release: [0.2.58 notes and validation scope](RELEASE_0.2.58.md).
 SSTV: [offline Robot36/Martin1 images, VIS inspection and next gates](SSTV.md).

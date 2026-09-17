@@ -32,6 +32,12 @@ packaged helper/DLLs: 13 assertions each pass. test_sstv_gui.py now accepts --ex
 for this repeatable package-runtime gate. No clean-host installer upgrade claim.
 GitHub draft upload/download hash check remains before publication.
 
+Publication PASS: source and v0.2.58 tag (4006b94) pushed. All eight draft
+downloads SHA-256 identical to local assets; released as GitHub Latest in the
+experimental updater channel. Public latest/download/update.json byte-identical
+to signed local manifest. No P25 source/DSP changes versus 0.2.57. Hosted CI is
+separate from these local/package gates; T-0029 string-check failures remain open.
+
 ## 2026-09-18 - DEC-0093 recorded SSTV GUI
 
 Windows/MSVC 14.44 /Qt 6.11.1. Added nonmodal window and worker cancellation

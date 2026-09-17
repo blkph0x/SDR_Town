@@ -12,6 +12,9 @@ next T-0022 stage, not a release claim. P25 implementation unchanged.
 Release cadence requested by user: completed feature updates include current
 README/docs, pushed source and fresh versioned release assets after acceptance;
 do not silently leave full features source-only or overwrite a published version.
+Completed: v0.2.58 /4006b94 published with eight verified assets and working
+latest manifest URL. T-0030 closed; next T-0022 gate is bounded live RF input,
+not another recorded-GUI placeholder. P25 remains isolated from this work.
 
 ## 2026-09-18 - Recorded SSTV GUI checkpoint
 
