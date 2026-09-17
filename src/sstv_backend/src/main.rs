@@ -1,5 +1,7 @@
-use std::{env, fs, io::{self, Write}, path::PathBuf};
+use std::{env, fs, io::{self, BufReader, Read, Write}, path::PathBuf};
 use sstv::{Decoder, Event, Mode};
+mod pcm;
+use pcm::PcmSamples;
 
 const REVISION: &str = "16bf34aac81b0041f5fdce52a1aef64eea0d5f6e";
 
@@ -10,8 +12,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let progress = args.len() == 6 && args[5] == "--progress";
-    if args.len() != 5 && !progress { return Err("expected input.pcm sample-rate output-directory auto|robot36|martin1 [--progress]".into()); }
-    let input = PathBuf::from(&args[1]);
+    if args.len() != 5 && !progress { return Err("expected input.pcm|--stdin sample-rate output-directory auto|robot36|martin1 [--progress]".into()); }
     let rate: u32 = args[2].to_str().ok_or("invalid rate")?.parse()?;
     if !(8000..=96000).contains(&rate) { return Err("sample rate outside 8..96 kHz".into()); }
     let mode = match args[4].to_str() {
@@ -20,19 +21,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some("martin1") => Mode::Martin1,
         _ => return Err("unsupported mode".into()),
     };
-    let length = fs::metadata(&input)?.len();
-    if length % 2 != 0 || length > u64::from(rate) * 360 * 2 { return Err("invalid PCM length".into()); }
-    let bytes = fs::read(&input)?;
-    if bytes.len() as u64 != length { return Err("PCM changed while reading".into()); }
+    let limit = u64::from(rate) * 360;
+    let (reader, length): (Box<dyn Read>, Option<u64>) = if args[1] == "--stdin" {
+        (Box::new(io::stdin()), None)
+    } else {
+        let file = fs::File::open(PathBuf::from(&args[1]))?;
+        let metadata = file.metadata()?;
+        let length = metadata.len();
+        if !metadata.is_file() || length % 2 != 0 || length > limit * 2 { return Err("invalid PCM length".into()); }
+        (Box::new(file), Some(length))
+    };
     let output = PathBuf::from(&args[3]);
     fs::create_dir(&output)?; // Exclusive directory: never overwrite an earlier run.
-    let samples = bytes.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]]));
+    let mut samples = PcmSamples::new(BufReader::with_capacity(8192, reader), limit);
     let mut canvas = Vec::<u8>::new();
     let mut seen = Vec::<bool>::new();
     let (mut width, mut height, mut rows, mut count) = (0usize, 0usize, 0usize, 0usize);
     let mut active = false;
     let mut mode_name = "";
-    for event in Decoder::from_samples(mode, samples, rate).events() {
+    for event in Decoder::from_samples(mode, samples.by_ref(), rate).events() {
         match event {
             Event::ImageStart(found) => {
                 if active || count >= 4 { return Err("image/session limit exceeded".into()); }
@@ -70,10 +77,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let mut stream = fs::OpenOptions::new().write(true).create_new(true).open(output.join(&file))?;
                 stream.write_all(&canvas)?;
                 println!("{{\"schema\":1,\"backend\":\"{REVISION}\",\"file\":\"{file}\",\"mode\":\"{mode_name}\",\"width\":{width},\"height\":{height},\"rows\":{rows},\"complete\":{complete}}}");
+                io::stdout().flush()?;
                 count += 1; active = false;
             }
         }
     }
+    let consumed = samples.finish()?;
+    if length.is_some_and(|length| length != consumed * 2) { return Err("PCM changed while reading".into()); }
     if active { return Err("unterminated image event stream".into()); }
     Ok(())
 }

@@ -1,5 +1,15 @@
 # Code notes (tree map)
 
+DEC-0096: src/sstv_backend/src/pcm.rs supplies the pinned decoder's i16 iterator
+from buffered file or stdin input. It retains I/O/odd-length/limit errors until
+finish(); main.rs rejects the whole session on failure. Output is provisional
+until exit zero. Reader storage is fixed, not proportional to capture duration.
+Helper --stdin preserves sample order across byte-fragmented writes and flushes
+both progressive rows and image metadata. Owner drains both pipes and controls
+deadline/cancellation. Rust reader units join CTest when SSTV images are enabled;
+scripts/test_sstv_stream.py covers independent recordings and pipe lifecycle.
+No C++ RX/GUI caller uses stdin yet; existing file interface remains compatible.
+
 DEC-0095: SstvLiveInput is an isolated, preallocated NFM ingress queue in
 sdr_town_decoders. It preserves fractional sample rate and absolute position,
 and emits generation-tagged gap events before replacement data after faults.

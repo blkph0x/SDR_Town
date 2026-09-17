@@ -1,4 +1,4 @@
-# Offline-only helper; core/native-only builds can omit the Rust toolchain.
+# Recorded-image helper with developer streaming transport; live RX is not wired.
 option(SDR_TOWN_ENABLE_SSTV_IMAGES "Build pinned offline Robot36/Martin1 image backend" OFF)
 if(NOT SDR_TOWN_ENABLE_SSTV_IMAGES)
     return()
@@ -14,9 +14,16 @@ add_custom_command(OUTPUT "${SSTV_EXE}"
     COMMAND ${CMAKE_COMMAND} -E env ${SSTV_ENV} "${SDR_TOWN_CARGO}" build --release --locked
         --manifest-path "${CMAKE_SOURCE_DIR}/src/sstv_backend/Cargo.toml"
         --target-dir "${CMAKE_BINARY_DIR}/sstv-backend"
-    DEPENDS src/sstv_backend/Cargo.toml src/sstv_backend/Cargo.lock src/sstv_backend/src/main.rs
+    DEPENDS src/sstv_backend/Cargo.toml src/sstv_backend/Cargo.lock src/sstv_backend/src/main.rs src/sstv_backend/src/pcm.rs
     VERBATIM)
 add_custom_target(sstv_backend DEPENDS "${SSTV_EXE}")
+if(BUILD_TESTS)
+    add_test(NAME SstvTransportRust
+        COMMAND ${CMAKE_COMMAND} -E env ${SSTV_ENV} "${SDR_TOWN_CARGO}" test --offline --locked
+            --manifest-path "${CMAKE_SOURCE_DIR}/src/sstv_backend/Cargo.toml"
+            --target-dir "${CMAKE_BINARY_DIR}/sstv-backend")
+    set_tests_properties(SstvTransportRust PROPERTIES TIMEOUT 120)
+endif()
 add_dependencies(SDR_Town sstv_backend)
 add_custom_command(TARGET SDR_Town POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SSTV_EXE}" "$<TARGET_FILE_DIR:SDR_Town>"

@@ -2,6 +2,21 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-18 - DEC-0096 streaming SSTV transport
+
+Release SDR_Town/helper build passes on existing Windows/MSVC/Rust toolchain.
+Five Rust PCM-reader units PASS; now included in SSTV-enabled CTest with offline,
+locked dependencies. Final CTest 3/3 PASS in 14.13 seconds.
+scripts/test_sstv_stream.py PASS: eight independent Robot36/Martin1 cases,
+forced/auto and full/15-second partial. Fragmented pipe writes (including odd
+byte boundaries) produce identical JSON rows, metadata and RGB to file input.
+Every case observes progressive rows before stdin EOF. Odd byte count and
+over-budget input rejected; existing output rejected; idle child killed/reaped.
+scripts/test_sstv_images_cli.py PASS including Unicode, partial, silence,
+resource validation and reference parity. Robot36 forced MAE 10.406471 and auto
+14.302396 unchanged. scripts/test_sstv_gui.py four cases PASS (13 assertions
+each). No live receiver or rate-converter qualification is claimed.
+
 ## 2026-09-18 - DEC-0095 isolated live SSTV input queue
 
 Release SDR_Town, core tests and Qt tests build successfully. Full CTest:

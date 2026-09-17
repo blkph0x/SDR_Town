@@ -127,6 +127,25 @@ Next: bounded live demodulated-audio routing using the verified scanline transpo
 The development tree now has a tested isolated NFM input queue (DEC-0095):
 fixed storage, nonwaiting producer, explicit gap/source-change events and
 sample ordering tests. It is not connected to RX or the GUI. Fractional-rate
-conversion, streaming backend integration and live acceptance remain unfinished.
+conversion, C++ streaming worker integration and live acceptance remain unfinished.
+
+### Developer streaming helper
+
+The helper accepts `sdrtown_sstv.exe --stdin <integer-rate> <new-output-dir>
+auto|robot36|martin1 [--progress]`. Supply raw mono signed 16-bit little-endian
+PCM and close stdin at EOF. All prior mode/rate/image/session limits apply.
+Rows arrive before EOF, but every output remains provisional until exit zero:
+an odd final byte, read failure or excess samples invalidates the session.
+The owning worker must continuously drain both output pipes, bound logs, enforce
+a wall-time deadline, close the input and kill/reap on cancellation. This helper
+does not provide RX controls or a continuously running unlimited receiver.
+
+`python scripts/test_sstv_stream.py` verifies full/partial independent Robot36
+and Martin1, forced/auto, with fragmented writes, identical metadata/pixels and
+rows observed before closing stdin. It also checks malformed/oversized streams,
+existing-output rejection and idle-pipe termination. The references stay in
+build; none are redistributed. Reader unit tests are included in CTest for
+SSTV-enabled builds.
+
 Qualify Martin2/Scottie/PD modes with independent pictures before
 advertising them. Satellite scheduling and public/weather payload decoding follow.

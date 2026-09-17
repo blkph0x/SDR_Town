@@ -2,6 +2,17 @@
 
 Newest at the top.
 
+## 2026-09-18 - Streaming SSTV helper transport verified
+
+DEC-0096 adds bounded buffered stdin/file input to the existing pinned decoder,
+without DSP changes. Handles split samples, Interrupted reads, EOF/error and
+sample-budget enforcement; emits rows and completion metadata incrementally.
+Five reader units, eight file/pipe recording parity cases, existing CLI/GUI
+regressions and full CTest pass. Documentation and development command updated.
+T-0031 remains open for fractional-rate conversion, C++ pipe worker, RX/UI
+integration and live acceptance. Source checkpoint only; no new release asset
+or live SSTV claim. P25 and speaker processing are untouched.
+
 ## 2026-09-18 - Live SSTV input foundation
 
 Added DEC-0095 bounded preallocated NFM ingress with explicit discontinuities,

@@ -2,6 +2,25 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0096 - Streaming SSTV helper transport (2026-09-18)
+
+Pinned sstv/src/decoder/mod.rs from_samples accepts Iterator<Item=i16> and
+events consumes it incrementally. Add --stdin as the input argument using a
+bounded buffered little-endian PCM reader, shared with file input. Keep the
+same mode, sample rate, four-image and 360-second limits, row protocol and
+pixel algorithm. Short reads, split samples and Interrupted reads are handled;
+odd EOF, I/O errors and over-budget input cause a nonzero exit. Output remains
+provisional until successful exit, as in the existing C++ file wrapper.
+Flush metadata as well as rows so a pipe consumer sees completed images promptly.
+The session owner must drain stdout/stderr concurrently, close stdin at its
+sample budget and kill/reap on cancellation or a wall-time deadline. Blocking
+stdin reads run only in this child, never on RX/GUI threads. No detached workers.
+Gate: malformed-reader units plus independent Robot36/Martin1 full/partial
+file versus pipe RGB/metadata parity and scanlines observed before stdin closes.
+This is a transport milestone, not live RF acceptance. Fractional-rate input
+conversion and GUI/receiver integration remain T-0031; never round a rate as
+a substitute for resampling. No new dependency or P25/audio path change.
+
 ## DEC-0095 - Bounded live SSTV ingress before radio wiring (2026-09-18)
 
 MainWindowP25Orchestration's analog branch already exposes FmMultiplexBlock

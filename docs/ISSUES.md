@@ -9,6 +9,12 @@ conversion. Qualify a continuous resampler against independent recordings
 before attaching live input. Queue lifecycle requires producer detachment and
 quiescence before restart; validate that in receiver integration. These are
 unfinished live-feature gates, not defects in the existing recorded decoder.
+DEC-0096 closes helper stdin transport qualification on eight recording cases.
+The bundled miniaudio API accepts a float rate ratio (miniaudio.h:5491), but
+no SSTV converter is implemented or qualified yet. Preserve true tap rate in
+the ingress events; validate conversion drift/partition invariance and decoded
+image quality before wiring it. Do not reinterpret fractional samples as an
+integer-rate stream.
 
 2026-09-17 OPEN T-0029: hosted run 35225600073 at 3a30f1d (0.2.56 checkpoint)
 fails 14 P25 string verifiers; 0.2.57 local sweep reproduces 133 pass/14 fail.

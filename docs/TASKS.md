@@ -6,6 +6,10 @@ independent full/partial recording equivalence are qualified.
 Queue stage verified: six cases, 20 repeat runs, full CTest and recorded GUI
 regressions pass. Remaining: fractional-rate converter, streaming helper,
 receiver lifecycle integration and actual live end-to-end acceptance.
+DEC-0096 helper transport verified: five Rust units and eight independent
+full/partial, forced/auto file/pipe parity cases with rows before EOF.
+Remaining: rate conversion, bounded C++ worker, receiver lifecycle, GUI controls
+and live acceptance. No live feature release yet.
 
 T-0030 | done | Release 0.2.58 | DEC-0093/0094 recorded SSTV GUI,
 progressive previews, cancellation, independent pixel parity and transport
