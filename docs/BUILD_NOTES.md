@@ -33,7 +33,18 @@ packaged-runtime checks are next; no live SSTV or P25 acceptance claimed.
 Follow-up: actual GUI Listening 960x720, Trunking 1280x900, HF 800x700 and
 Analysis 1600x900 automation passes with no RX/startup errors. Listening screenshot
 reviewed. CTest totals: 275 core/189730 assertions +9 Qt/87 assertions. P25 DSP
-and GUI receive routing are unchanged. Packaging/extracted runtime still pending.
+and GUI receive routing are unchanged.
+
+Packaging PASS: release.ps1 -Version 0.2.57 -Channel experimental -SkipPush
+-SkipAssets reconfigures SSTV ON, rebuilds/stages runtime, reruns CTest, builds
+NSIS/ZIP, signs and verifies manifest with existing trust anchor. App/helper,
+RTL runtime and all license files match staging. Extracted portable image/VIS
+and RDS suites pass; four GUI workspace sizes pass with no startup errors.
+Five concatenated off-air Robot36 recordings explicitly fail at fifth image
+(exit 1, image/session limit exceeded, exactly four prior records), as designed.
+git diff --check passes for authored files; original upstream Rust copyright
+HTML retains its whitespace unchanged. No installer upgrade on a clean host
+or live SSTV reception claimed. Ready for draft upload/download hash validation.
 
 ## 2026-09-17 - DEC-0091 SSTV VIS development
 

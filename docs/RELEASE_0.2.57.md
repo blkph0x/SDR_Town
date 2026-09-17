@@ -32,6 +32,9 @@ Martin1 reconstructs the independent BBC test card with visible noise/colour
 differences. Actual app and helper output match pixel-for-pixel with matching
 options. Auto/manual, partials, Unicode, silence, input bounds and overwrite
 protection tested. These are offline experimental results, not live SSTV proof.
+Extracted portable SSTV image/VIS and RDS CLI tests pass, along with all four
+GUI workspace sizes. Package contents/hashes and Ed25519 manifest signature
+verified. Eleven package-verifier tests and command/signing failure tests pass.
 
 Existing P25 paths are unchanged. GUI SSTV preview/live reception and public
 satellite decoders remain next work. Known-tone RF checks still await hardware.
