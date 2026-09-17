@@ -12,6 +12,13 @@ GUI replay: 238,080 pushed samples, zero pending/tail drops. Reference 103841:
 19.688 -> 11.625 s for 12 s IQ; output WAV SHA256 unchanged. Source regression
 checks are supplemental and are not an intelligibility verdict.
 
+Final release: full suite passed 77,061 assertions in 229 cases. Staged CLI
+launch exits 0. Installer/portable contents checked for excluded diagnostics
+and old binaries; packaged executable matches the tested build. Installer
+hash/size match update.json and its Ed25519 signature verifies against the
+embedded public key. The build has a non-fatal Qt deploy warning about absent
+Direct3D 12 dxcompiler/dxil; no related smoke-test failure was observed.
+
 ---
 
 ## BN-0057 — DEC-0066 dead-grant timeout (131458) (2026-09-15)

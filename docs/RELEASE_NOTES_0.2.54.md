@@ -20,6 +20,7 @@ investigation; this release does not claim complete clear-voice reception.
 ## Verification and limits
 
 - P25 tests: 68,957 assertions in 122 cases passed.
+- Full suite: 77,061 assertions in 229 cases passed.
 - An eight-second IQ replay improved from 11.27 to 7.56 seconds processing time.
 - An earlier reference replay improved from 19.69 to 11.63 seconds, with a
   byte-identical output WAV.
