@@ -3425,7 +3425,8 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             .arg(followTg.talkgroupId)
                             .arg(followTg.tdmaSlotKnown ? QString::number(followTg.tdmaSlot & 0x01u) : QString("unknown"))
                             .arg(followTg.lastVoiceFreqHz / 1e6, 0, 'f', 5));
-                        if (p25Status) p25Status->setText(QString("Auto follow TG %1").arg(followTg.talkgroupId));
+                        if (p25Status) p25Status->setText(QString("Auto follow %1").arg(
+                            p25TalkgroupStatusLabel(followTg.talkgroupId, followTg.wacn, followTg.systemId, followTg.p25MaskParamsKnown)));
                         return true;
                     }
                     appendP25LogLineKeyed("auto-follow-same-rf-metadata-switch-busy",
@@ -3679,7 +3680,8 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             .arg(followTg.talkgroupId)
                             .arg(oldVoiceFreqHz / 1e6, 0, 'f', 5)
                             .arg(sameCallFollowVoiceHz / 1e6, 0, 'f', 5));
-                        if (p25Status) p25Status->setText(QString("Auto follow TG %1").arg(followTg.talkgroupId));
+                        if (p25Status) p25Status->setText(QString("Auto follow %1").arg(
+                            p25TalkgroupStatusLabel(followTg.talkgroupId, followTg.wacn, followTg.systemId, followTg.p25MaskParamsKnown)));
                         return true;
                     }
                 }
@@ -3884,7 +3886,8 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     .arg(kP25Phase2PostArmSettleMs)
                     .arg(guiRuntimeConfig.p25LateEntryAudioProbe ? "on" : "off"));
             }
-            if (p25Status) p25Status->setText(QString("Auto follow TG %1").arg(followTg.talkgroupId));
+            if (p25Status) p25Status->setText(QString("Auto follow %1").arg(
+                p25TalkgroupStatusLabel(followTg.talkgroupId, followTg.wacn, followTg.systemId, followTg.p25MaskParamsKnown)));
             return true;
         };
 
@@ -4339,7 +4342,8 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 .arg(tg.controlFreqHz / 1e6, 0, 'f', 5)
                 .arg(p25TalkgroupIsPhase2(tg) ? "Phase 2 TDMA" : "Phase 1 FDMA")
                 .arg(tg.encryptionKnown ? (tg.encrypted ? "encrypted" : "clear") : "unknown"));
-            p25Status->setText(QString("Following TG %1").arg(tg.talkgroupId));
+            p25Status->setText(QString("Following %1").arg(
+                p25TalkgroupStatusLabel(tg.talkgroupId, tg.wacn, tg.systemId, tg.p25MaskParamsKnown)));
             statusBar()->showMessage(QString("Following P25 TG %1 at %2 MHz with %3 voice decode%4.")
                 .arg(tg.talkgroupId)
                 .arg(tg.lastVoiceFreqHz / 1e6, 0, 'f', 5)
@@ -6067,8 +6071,15 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                         return;
                                     }
                                 }
-                                const QString followStatusText = QString("TG %1 %2 sync=%3 nid=%4 imbe=%5 dec=%6 p2=%7/%8 sf=%9 mask=%10 mac=%11/%12 ess=%13")
-                                    .arg(tg > 0 ? tg : static_cast<long long>(p25FollowTalkgroupId))
+                                const long long statusTgId =
+                                    tg > 0 ? tg : static_cast<long long>(p25FollowTalkgroupId);
+                                const QString tgStatusLabel = p25TalkgroupStatusLabel(
+                                    static_cast<uint32_t>(std::max<long long>(0, statusTgId)),
+                                    voiceStateWacn,
+                                    voiceStateSystemId,
+                                    voiceStateMaskKnown && voiceStateWacn != 0);
+                                const QString followStatusText = QString("%1 %2 sync=%3 nid=%4 imbe=%5 dec=%6 p2=%7/%8 sf=%9 mask=%10 mac=%11/%12 ess=%13")
+                                    .arg(tgStatusLabel)
                                     .arg(p25VoiceDiagLabel(code))
                                     .arg(syncs)
                                     .arg(nids)
@@ -6287,8 +6298,12 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                         }
                                         if (p25Status && p25FollowAutoActive && voiceStateDecodeEnabled &&
                                             decoded == 0 && !recentSpeakerDiag) {
-                                            p25Status->setText(QString("TG %1 acquiring (%2)")
-                                                .arg(statusTg)
+                                            p25Status->setText(QString("%1 acquiring (%2)")
+                                                .arg(p25TalkgroupStatusLabel(
+                                                    static_cast<uint32_t>(std::max<long long>(0, statusTg)),
+                                                    voiceStateWacn,
+                                                    voiceStateSystemId,
+                                                    voiceStateMaskKnown && voiceStateWacn != 0))
                                                 .arg(blockReason));
                                         }
                                         // If the voice channel is definitely in passband and we repeatedly
@@ -6556,8 +6571,12 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                     lastVoiceSlot = static_cast<int>(voiceStateSlot);
                                 }
                                 if (p25StatusLabel && p25FollowAutoActive && statusTg > 0) {
-                                    p25StatusLabel->setText(QString("TG %1 %2 b=%3 vcw=%4 sf=%5 mask=%6 mac=%7/%8")
-                                        .arg(statusTg)
+                                    p25StatusLabel->setText(QString("%1 %2 b=%3 vcw=%4 sf=%5 mask=%6 mac=%7/%8")
+                                        .arg(p25TalkgroupStatusLabel(
+                                            static_cast<uint32_t>(statusTg),
+                                            voiceStateWacn,
+                                            voiceStateSystemId,
+                                            voiceStateMaskKnown && voiceStateWacn != 0))
                                         .arg(p25VoiceDiagLabel(code))
                                         .arg(p2bursts)
                                         .arg(p2vcw)

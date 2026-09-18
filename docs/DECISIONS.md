@@ -2,6 +2,39 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0102 - RadioReference site CSV aliases (2026-09-18)
+
+Evidence: fubarzi/TG-SITES `trs_sites_*.csv` uses RFSS, Site Dec/Hex, Description,
+County Name, then ragged frequency columns. SDRTrunk treats site labels as
+presentation identifiers attached to a system, separate from decode policy.
+Extend the existing system-scoped alias list with optional `sites` entries keyed
+by RFSS+site ID (site 0..65535 for RadioReference directories; over-the-air
+matching still uses the decoder's reported site). Import via the same CSV action
+with header detection; require an explicit destination system. Preserve
+talkgroups on site reimport and sites on talkgroup reimport; manual overrides
+survive. Ignore NAC/lat/lon/frequencies for RF decisions. Resolve names only in
+control-log `site=` text and talkgroup Alpha Tag tooltips when system metadata
+is known. Same 1MiB/10000 combined budget and atomic save rules as DEC-0100/0101.
+
+## DEC-0101 - RadioReference-compatible CSV imports (2026-09-18)
+
+Reference: https://trunkrecorder.com/docs/CONFIGURE#talkgroupsFile documents
+direct RadioReference CSV headers Decimal, Hex, Alpha Tag, Mode, Description,
+Tag, Category. Use Decimal plus Alpha Tag (Description fallback), Category
+(Tag fallback) by header, not column position. These files lack WACN/System ID;
+require an explicitly selected or newly created destination system. Never infer
+it from TGID, filename or receiving frequency. Imported Mode/Priority/NAC must
+not change any receive/security policy. Preserve existing manual overrides.
+Qt has no CSV parser in the present dependency set: implement a small bounded
+RFC4180 state machine with quoted commas, escaped quotes, embedded newlines,
+CRLF/LF, UTF-8 BOM and explicit UTF-16 BOM. Reject malformed rows/quotes,
+invalid encodings, duplicate IDs/headers and conflicting optional Hex IDs.
+No silent skipping. Same 1MiB/10000-entry budget as JSON. Blank rows ignored;
+blank headers, empty datasets and conventional frequency exports rejected.
+Expose a distinct Import CSV action alongside JSON; destination dialog shows
+system hex IDs and final list preview remains staged until Save. Tests use the
+published column schema, adversarial CSV and real Qt destination workflow.
+
 ## DEC-0100 - System-scoped P25 alias lists (2026-09-18)
 
 Evidence: SDRTrunk Playlist-Editor wiki (accessed2026-09-18), Aliases and

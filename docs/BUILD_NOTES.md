@@ -2,6 +2,20 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-18 - 0.2.61 alias CSV + status labels
+
+AppData Roaming path confirmed for aliases; Local→Roaming migrate on read.
+`[aliases]` workspace tests PASS after CSV/sites/status label work. Release
+packaging follows via scripts/release.ps1. Windows CI still red on T-0029
+Phase 2 string verifiers (133 pass / 14 fail), unrelated to aliases.
+
+## 2026-09-18 - DEC-0101/0102 RadioReference CSV aliases
+
+VS2022 MSVC/x64 Release `SDR_Town` + `sdr_town_workspace_tests` PASS.
+`[aliases]` **6/6** cases, **111** assertions (TG+sites CSV, destination GUI).
+No P25 follow/decode changes. Import CSV accepts TG-SITES-style `trs_tg_*` and
+`trs_sites_*` with explicit destination WACN/System ID.
+
 ## 2026-09-18 - 0.2.60 publication
 
 Annotated tagv0.2.60 at3ef2383 and branch pushed. Eight draft release assets

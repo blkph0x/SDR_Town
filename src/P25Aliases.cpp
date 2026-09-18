@@ -1,5 +1,6 @@
 #include "P25Aliases.h"
 #include <QDate>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -17,7 +18,10 @@ namespace {
 constexpr qsizetype maxBytes=1024*1024; // DEC-0100 bounded configuration, not telemetry.
 void require(bool ok,const char* error) {if(!ok) throw std::runtime_error(error);}
 unsigned number(const QJsonValue& value,unsigned maximum) {
-    require(value.isDouble(),"Alias ID must be an integer JSON number");
+    require(value.isDouble(),
+            value.isNull() || value.isUndefined()
+                ? "Missing alias ID number (wrong JSON shape? use AppData load or a single-list export)"
+                : "Alias ID must be an integer JSON number");
     const double n=value.toDouble();
     require(std::isfinite(n) && n>=0 && n<=maximum && std::floor(n)==n,"Alias ID is out of range");
     return unsigned(n);
@@ -37,6 +41,24 @@ QJsonObject document(const QByteArray& bytes) {
     require(error.error==QJsonParseError::NoError && doc.isObject(),"Invalid alias JSON document");
     return doc.object();
 }
+bool isAliasDatabaseDocument(const QJsonObject& o) {
+    return o.value("lists").isArray() && !o.value("talkgroups").isArray();
+}
+void parseSites(P25AliasList& list,const QJsonObject& o,bool stored) {
+    if(!o.contains("sites")) return;
+    require(o.value("sites").isArray(),"Missing sites array");
+    const auto entries=o.value("sites").toArray();
+    require(entries.size()<=10000,"Too many site aliases (maximum 10000)");
+    for(const auto entry:entries) {
+        require(entry.isObject(),"Invalid site entry");
+        const auto item=entry.toObject();
+        const auto rfss=number(item.value("rfss"),255);
+        const auto siteId=number(item.value("id"),65535);
+        P25SiteAlias alias{text(item.value("name"),128),text(item.value("group"),128,true),false};
+        if(stored) {require(item.value("manual").isBool(),"Invalid stored manual flag");alias.manual=item.value("manual").toBool();}
+        require(list.sites.emplace(P25SiteKey{rfss,siteId},std::move(alias)).second,"Duplicate site in alias list");
+    }
+}
 P25AliasList parse(const QJsonObject& o,bool stored) {
     require(number(o.value("version"),1)==1,"Unsupported alias version");
     P25AliasList list;
@@ -55,22 +77,35 @@ P25AliasList parse(const QJsonObject& o,bool stored) {
         if(stored) {require(item.value("manual").isBool(),"Invalid stored manual flag");alias.manual=item.value("manual").toBool();}
         require(list.talkgroups.emplace(id,std::move(alias)).second,"Duplicate talkgroup in alias list");
     }
+    parseSites(list,o,stored);
+    require(list.talkgroups.size()+list.sites.size()<=10000,"Too many aliases (maximum 10000 combined)");
     return list;
 }
 QJsonObject object(const P25AliasList& list) {
     QJsonArray entries;
     for(const auto& [id,a]:list.talkgroups) entries.append(QJsonObject{{"id",int(id)},{"name",a.name},{"group",a.group},{"manual",a.manual}});
+    QJsonArray siteEntries;
+    for(const auto& [key,a]:list.sites)
+        siteEntries.append(QJsonObject{{"rfss",int(key.first)},{"id",int(key.second)},{"name",a.name},{"group",a.group},{"manual",a.manual}});
     return {{"version",1},{"wacn",int(list.wacn)},{"systemId",int(list.systemId)},
-            {"name",list.name},{"source",list.source},{"updated",list.updated},{"talkgroups",entries}};
+            {"name",list.name},{"source",list.source},{"updated",list.updated},
+            {"talkgroups",entries},{"sites",siteEntries}};
 }
 }
-P25AliasList parseP25AliasImport(const QByteArray& bytes) {return parse(document(bytes),false);}
+P25AliasList parseP25AliasImport(const QByteArray& bytes) {
+    const auto o=document(bytes);
+    require(!isAliasDatabaseDocument(o),
+            "This file is the full alias database (lists[]). Open Aliases... to load it from AppData, "
+            "or Export a single system list / use Import CSV...");
+    return parse(o,false);
+}
 QByteArray exportP25AliasList(const P25AliasList& list) {
     const auto bytes=QJsonDocument(object(list)).toJson();parseP25AliasImport(bytes);return bytes;
 }
 void mergeP25AliasList(P25AliasLists& lists,P25AliasList incoming) {
     for(auto& current:lists) if(current.wacn==incoming.wacn && current.systemId==incoming.systemId) {
         for(const auto& [id,a]:current.talkgroups) if(a.manual) incoming.talkgroups[id]=a;
+        for(const auto& [key,a]:current.sites) if(a.manual) incoming.sites[key]=a;
         // Validate merged size/text before mutation, including protected entries.
         exportP25AliasList(incoming);current=std::move(incoming);return;
     }
@@ -84,9 +119,62 @@ QString resolveP25Alias(const P25AliasLists& lists,bool known,unsigned wacn,unsi
     }
     return {};
 }
+QString resolveP25SiteAlias(const P25AliasLists& lists,bool known,unsigned wacn,unsigned systemId,
+                            unsigned rfss,unsigned siteId,const QString& manual) {
+    if(!manual.trimmed().isEmpty()) return manual;
+    if(!known || rfss>255 || siteId>65535) return {};
+    for(const auto& list:lists) if(list.wacn==wacn && list.systemId==systemId) {
+        const auto it=list.sites.find(P25SiteKey{rfss,siteId});
+        if(it!=list.sites.end()) return it->second.name;
+    }
+    return {};
+}
+namespace {
+P25AliasLists g_aliasCache;
+QByteArray g_aliasCacheBytes;
+QString g_aliasCachePath;
+qint64 g_aliasCacheCheckedMs=0;
+const P25AliasLists& cachedAliasLists() {
+    const qint64 now=QDateTime::currentMSecsSinceEpoch();
+    if(now-g_aliasCacheCheckedMs<2000 && !g_aliasCachePath.isEmpty()) return g_aliasCache;
+    g_aliasCacheCheckedMs=now;
+    const auto path=p25AliasesPath();
+    try {
+        const auto bytes=readP25AliasFile(path);
+        if(path==g_aliasCachePath && bytes==g_aliasCacheBytes) return g_aliasCache;
+        g_aliasCachePath=path;
+        g_aliasCacheBytes=bytes;
+        g_aliasCache=loadP25AliasDatabase(bytes);
+    } catch(...) {
+        // Keep last good cache on transient read/parse errors.
+    }
+    return g_aliasCache;
+}
+}
+QString formatP25TalkgroupStatusLabel(unsigned talkgroupId,bool systemKnown,unsigned wacn,
+                                      unsigned systemId,const QString& manual) {
+    if(talkgroupId==0) return QStringLiteral("TG ?");
+    const auto alias=resolveP25Alias(cachedAliasLists(),systemKnown,wacn,systemId,talkgroupId,manual);
+    if(alias.isEmpty()) return QString("TG %1").arg(talkgroupId);
+    return QString("TG %1 %2").arg(talkgroupId).arg(alias);
+}
+void invalidateP25AliasCache() {
+    g_aliasCache={};g_aliasCacheBytes={};g_aliasCachePath={};g_aliasCacheCheckedMs=0;
+}
 QString p25AliasesPath() {return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)+"/p25_aliases.json";}
 QByteArray readP25AliasFile(const QString& path) {
-    if(!QFileInfo::exists(path)) return {};
+    if(!QFileInfo::exists(path)) {
+        // Windows Qt AppDataLocation is Roaming; an earlier import helper wrote Local.
+        const auto localFallback =
+            QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)+"/p25_aliases.json";
+        if(QFileInfo::exists(localFallback) &&
+           QFileInfo(localFallback).absoluteFilePath()!=QFileInfo(path).absoluteFilePath()) {
+            require(QDir().mkpath(QFileInfo(path).absolutePath()),"Cannot create alias directory");
+            require(QFile::copy(localFallback,path),"Cannot migrate alias database from Local AppData");
+        } else {
+            return {};
+        }
+    }
     QFile file(path);require(file.open(QIODevice::ReadOnly),"Cannot read alias file");
     require(file.size()<=maxBytes,"Alias file exceeds 1 MiB");
     const auto bytes=file.read(maxBytes+1);require(file.error()==QFile::NoError && bytes.size()<=maxBytes,"Cannot read bounded alias file");
@@ -114,4 +202,5 @@ void saveP25AliasDatabase(const QString& path,const P25AliasLists& lists,const Q
     QLockFile lock(path+".lock");require(lock.tryLock(0),"Alias database is being edited by another process");
     require(readP25AliasFile(path)==expected,"Alias database changed externally; reopen the editor");
     QSaveFile file(path);require(file.open(QIODevice::WriteOnly) && file.write(bytes)==bytes.size() && file.commit(),"Cannot save alias database");
+    invalidateP25AliasCache();
 }

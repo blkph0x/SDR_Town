@@ -2,6 +2,12 @@
 
 Newest at the top.
 
+## 2026-09-18 - RadioReference CSV talkgroup and site aliases
+
+DEC-0101/0102: Import CSV for RR talkgroup and site exports, destination system
+picker, Sites tab, control-log/tooltip site labels. Manual overrides preserved.
+P25 RF path untouched. Workspace `[aliases]` 111 assertions PASS. T-0035 done.
+
 ## 2026-09-18 - Alias release published
 
 v0.2.60 code and eight assets published after source/package tests and download

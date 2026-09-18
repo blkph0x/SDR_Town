@@ -2,11 +2,12 @@
 
 Never delete a row. Close with a commit hash and a sentence.
 
-2026-09-18 DEC-0100 scope: alias-list names resolve in the P25 talkgroup table,
-only with known system metadata. Real directory sourcing, CSV/SDRTrunk XML,
-RadioReference API integration, radio-ID/log/transcript aliases are deferred.
-No claim of full SDRTrunk playlist compatibility or bundled regional names.
-Untrusted source labels forced to plain text before release.
+2026-09-18 DEC-0100/0101/0102 scope: alias-list names resolve in the P25
+talkgroup table and site labels in control-log/tooltips, only with known system
+metadata. CSV talkgroup/site import is supported; SDRTrunk XML, RadioReference
+API integration, radio-ID/log/transcript aliases remain deferred. No claim of
+full SDRTrunk playlist compatibility or bundled regional names. Untrusted
+source labels forced to plain text before release.
 
 2026-09-18 DEC-0099 updates T-0031: receiver attachment, Finish drain, cancel,
 GUI lifecycle and combined recording parity are implemented and tested.

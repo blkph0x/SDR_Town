@@ -1,11 +1,13 @@
 # Code notes (tree map)
 
-DEC-0100: P25Aliases is a bounded Qt JSON model/merge/resolve and atomic storage
-module. P25AliasDialog stages imports/manual edits and only commits on Save.
+DEC-0100/0101/0102: P25Aliases is a bounded Qt JSON model/merge/resolve and
+atomic storage module with RadioReference CSV talkgroup and site imports.
+P25AliasDialog stages imports/manual edits and only commits on Save.
 P25TalkgroupRegistry's table renderer loads names independently; alphaTag wins,
-otherwise known WACN/System ID+TGID must match. It never modifies registry rows
-or audio decisions. MainWindow adds the manager beside Add TG. Alias tests live
-in the Qt workspace target and use temporary databases, not the user's files.
+otherwise known WACN/System ID+TGID must match. Site aliases annotate control
+log `site=` lines and Alpha Tag tooltips. Never modifies registry rows or audio
+decisions. MainWindow adds the manager beside Add TG. Alias tests live in the
+Qt workspace target and use temporary databases, not the user's files.
 
 DEC-0099: SstvReceiverFeed owns the optional live queue. Attach/detach/finish
 serialize against publication; RX only try-locks, and contention becomes an

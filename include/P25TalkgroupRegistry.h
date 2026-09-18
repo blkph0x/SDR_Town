@@ -212,6 +212,11 @@ QString p25EventLogText(const P25ControlEvent& ev);
 QString p25GrantDetailLogText(const P25ControlEvent& ev);
 
 QString p25FollowDetailLogText(const P25TalkgroupEntry& tg);
+// Presentation-only: "TG 10120" or "TG 10120 AlphaTag" using registry + alias lists.
+QString p25TalkgroupStatusLabel(uint32_t talkgroupId,
+                                uint32_t wacn,
+                                uint16_t systemId,
+                                bool systemKnown);
 
 void populateP25TalkgroupTable(QTableWidget* table, const std::vector<P25TalkgroupEntry>& talkgroups);
 

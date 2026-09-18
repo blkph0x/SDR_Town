@@ -1,5 +1,17 @@
 # Task list (canonical)
 
+T-0037 | in progress | Release 0.2.61 | Package CSV alias import + status Alpha
+Tag labels; verify assets and updater. Known Windows CI Phase 2 string-verifier
+failures remain T-0029 (not introduced by this release).
+
+T-0035 | done | RadioReference CSV alias import | Header-based bounded CSV for
+talkgroups and sites (DEC-0101/0102), explicit destination system and staged
+review; preserve manual names. TG-SITES-compatible `trs_tg_*` / `trs_sites_*`.
+Then resume AX.25/APRS recorded-input backend qualification (T-0036).
+
+T-0036 | planned | AX.25/APRS recorded receive | Evaluate established backend,
+pin source/license and independent recording before claiming audio decode.
+
 T-0031 | pending RF acceptance | Live SSTV ingress | DEC-0095 bounded queue and
 discontinuity tests first. No RF/UI wiring until streaming conversion and
 independent full/partial recording equivalence are qualified.
