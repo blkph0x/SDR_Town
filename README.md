@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Current version** | **0.2.62** (experimental channel) |
+| **Current version** | **0.2.63** (experimental channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
@@ -82,12 +82,12 @@ This is **active experimental software**. It is useful for real RF testing and d
 | Area | Reality |
 |------|---------|
 | **Analog demod** | **WFM, AM, NFM** are solid everyday paths. **AUTO** picks mode/BW/LPF suggestions from band priors + live signal estimates. **USB / LSB / CW** exist and produce audio; they are basic receive chains, not polished DX receivers. |
-| **GUI** | Spectrum + waterfall, device manager, multi-output audio, saved frequencies, P25 control/talkgroup panes, live SIG/NF/SNR/AFC readouts, IQ capture, training capture, Help → Check for Updates / Report Issue. |
+| **GUI** | Spectrum + waterfall, device manager, multi-output audio, saved frequencies, P25 control/talkgroup panes, live SIG/NF/SNR/AFC readouts, IQ capture, training capture, Help â†’ Check for Updates / Report Issue. |
 | **Devices** | RTL-SDR (primary path) and SoapySDR discovery/open. Safe stub path when hardware is absent. RF gain, sample rate, antenna, PPM (manual + cal/apply). |
 | **Audio** | miniaudio multi-output (speakers + virtual cable), per-output enable/volume, ring-fill and underrun counters. Master volume in GUI. |
 | **P25 Phase 1** | Control-channel C4FM path: frame sync, NID, TSDU/TSBK trust, grants, talkgroup list. Clear IMBE backend via mbelib when frames validate. |
-| **P25 Phase 2** | Full experimental TDMA pipeline: superframe/ISCH, XOR mask (NAC/WACN/SysID), ACCH/MAC/ESS hypotheses, Voice2/Voice4 → AMBE 3600×2450 (mbelib), one-RTL traffic retune + return-to-control, security gate (encrypted mute, clear only with proof). |
-| **Updater** | Fetches `update.json` + `update.json.sig` from GitHub **latest** release, verifies Ed25519 signature (when a release public key is configured) and SHA-256 of the installer, user consent only—no silent install. |
+| **P25 Phase 2** | Full experimental TDMA pipeline: superframe/ISCH, XOR mask (NAC/WACN/SysID), ACCH/MAC/ESS hypotheses, Voice2/Voice4 â†’ AMBE 3600Ã—2450 (mbelib), one-RTL traffic retune + return-to-control, security gate (encrypted mute, clear only with proof). |
+| **Updater** | Fetches `update.json` + `update.json.sig` from GitHub **latest** release, verifies Ed25519 signature (when a release public key is configured) and SHA-256 of the installer, user consent onlyâ€”no silent install. |
 | **CLI** | Full interactive shell + one-shot `--cli --cmd "..."`. Replay/voicetest/followtest/waitgrant for lab and field diagnostics. |
 
 ### P25 Phase 2 clear audio - experimental
@@ -96,15 +96,15 @@ As of **v0.2.51**, file voicetest of the 2026-09-08 `041716` call (TG 10330 slot
 
 What that means in practice:
 
-- **When it works:** grant → follow → mask + slot → clear proof (MAC/ESS/PTT or established clear carry) → AMBE frames feed mbelib → speaker audio. Continuous/joined enough to be useful.
-- **When it fails or degrades:** low/zero MAC CRC despite high superframe/mask counts; opposite-slot thrash; late-entry wait; frame order/dedupe gaps (logs show `expVcw` / `fed` / `emitPcm` / `gaps`); irregular 20 ms cadence → blocky or “almost” speech; return-to-control before the call ends.
+- **When it works:** grant â†’ follow â†’ mask + slot â†’ clear proof (MAC/ESS/PTT or established clear carry) â†’ AMBE frames feed mbelib â†’ speaker audio. Continuous/joined enough to be useful.
+- **When it fails or degrades:** low/zero MAC CRC despite high superframe/mask counts; opposite-slot thrash; late-entry wait; frame order/dedupe gaps (logs show `expVcw` / `fed` / `emitPcm` / `gaps`); irregular 20â€¯ms cadence â†’ blocky or â€œalmostâ€ speech; return-to-control before the call ends.
 - **Security is intentional and strict:** unknown grants do **not** open the speaker by default. Encrypted grants/ESS stay muted. Lab-only late-entry/unknown probe is **default off** (`kP25Phase2AllowUnknownGrantFieldAudioProbe = false`); enable only via explicit CLI/GUI flags for diagnostics.
 
 Do **not** treat Phase 2 as production-ready. Treat it as a working experimental decoder under active hardening toward SDRTrunk-class continuity.
 
 ### AI clear-audio automation
 
-End-to-end live → IQ save → CLI voicetest → STT → GUI replay:
+End-to-end live â†’ IQ save â†’ CLI voicetest â†’ STT â†’ GUI replay:
 
 ```powershell
 python src/tools/run_p25_ai_clear_audio_pipeline.py --cc 420.350 --build
@@ -115,10 +115,10 @@ Shared STT defaults (also used by deep audit / live diag / GUI IQ replay): backe
 ### Incomplete or experimental (do not oversell)
 
 - **ONNX classifier backend** is a placeholder; the **deterministic** classifier is what runs.
-- **Smart Scan** button is present (PR6-era foundation)—not a full production scanner (no priority lists, lockout, hold, multi-TG routing product yet).
-- **DMR / NXDN / DRM / pager / satellite** modules are roadmap only—not implemented as working decoders.
+- **Smart Scan** button is present (PR6-era foundation)â€”not a full production scanner (no priority lists, lockout, hold, multi-TG routing product yet).
+- **DMR / NXDN / DRM / pager / satellite** modules are roadmap onlyâ€”not implemented as working decoders.
 - **Updater** verifies Ed25519 manifest signatures (when configured) plus installer SHA-256; Authenticode not done yet.
-- **SDR open/stream** is in-process (no separate helper process yet)—wedged USB/Soapy can still affect the app process.
+- **SDR open/stream** is in-process (no separate helper process yet)â€”wedged USB/Soapy can still affect the app process.
 - **SSB/CW** are functional basics, not contest-grade AGC/filtering chains.
 
 ---
@@ -137,7 +137,7 @@ Tester builds: https://github.com/Blkph0x/SDR_Town/releases
 
 **How shipping works (code path):**
 
-1. Bump `project(SDR_Town VERSION …)` in `CMakeLists.txt`.
+1. Bump `project(SDR_Town VERSION â€¦)` in `CMakeLists.txt`.
 2. Commit reviewed source first. `scripts/release.ps1 -Version X.Y.Z -Channel experimental` checks the clean attached branch, builds/tests, deploys Qt, packages NSIS/ZIP/control DLL, signs and verifies the manifest/assets, commits release metadata, tags and pushes the current branch, then uploads assets. Native command failures stop the process. See [release gates and manual publication](docs/RELEASING.md).
 3. App `UpdateManager` fetches  
    `https://github.com/Blkph0x/SDR_Town/releases/latest/download/update.json`  
@@ -145,12 +145,12 @@ Tester builds: https://github.com/Blkph0x/SDR_Town/releases
 
 ---
 
-## Quick start — GUI
+## Quick start â€” GUI
 
-1. Install drivers (RTL-SDR: Zadig → WinUSB as Administrator; other Soapy devices per vendor).
+1. Install drivers (RTL-SDR: Zadig â†’ WinUSB as Administrator; other Soapy devices per vendor).
 2. Run `SDR_Town.exe` (installer or portable).
-3. **Devices → Rescan / Discover Devices**, enable device, set sample rate / gain / antenna / PPM, apply.
-4. **Audio → Configure Output Devices** (speakers ± virtual cable), test tone if needed.
+3. **Devices â†’ Rescan / Discover Devices**, enable device, set sample rate / gain / antenna / PPM, apply.
+4. **Audio â†’ Configure Output Devices** (speakers Â± virtual cable), test tone if needed.
 5. Tune frequency; choose **AUTO** or **WFM / NFM / AM / USB / LSB / CW**.
 6. Adjust BW, LPF, squelch, RF gain, master volume while watching **SIG / NF / SNR / AFC**.
 
@@ -158,10 +158,10 @@ Tester builds: https://github.com/Blkph0x/SDR_Town/releases
 
 | Panel / control | Function |
 |-----------------|----------|
-| Spectrum + waterfall | Live spectrum; FFT sizes include 4096–65536; zoom/color controls |
+| Spectrum + waterfall | Live spectrum; FFT sizes include 4096â€“65536; zoom/color controls |
 | Active receivers | Multi-receiver foundation: add/remove, mode, BW (incl. Auto BW), LPF on/off + cutoff, squelch + Auto, gain, set & tune device |
 | SIG / NF / SNR / AFC | Live RF metrics from DSP worker |
-| Master volume + Outputs… | Global volume; multi-output routing |
+| Master volume + Outputsâ€¦ | Global volume; multi-output routing |
 | Saved frequencies | Add current / tune / delete / refresh |
 | Capture Training Sample | SigMF + classifier training tile |
 | Start/Stop IQ Capture | Rolling IQ capture for lab/debug (AppData under SDR Town) |
@@ -172,7 +172,7 @@ Tester builds: https://github.com/Blkph0x/SDR_Town/releases
 | IQ Replay | Tools -> IQ Replay opens a seekable SigMF replay window with P25 speaker-gate decode, WAV save, and STT tap |
 | Help | Check for Updates; Report Issue; My Submitted Issues (with remote diagnostics config) |
 
-**Grant Test:** tunes selected/known CC, mutes raw control audio, arms auto-follow, opens P25 log—standard field grant/voice-gate workflow.
+**Grant Test:** tunes selected/known CC, mutes raw control audio, arms auto-follow, opens P25 logâ€”standard field grant/voice-gate workflow.
 
 **P25 audio policy (GUI + CLI):** control-channel audio is muted by design. Voice audio opens only after security/session proof (or established clear carry). Encrypted calls are skipped/muted.
 
@@ -207,7 +207,7 @@ The replay path uses metadata-only SigMF inspection for the slider, then loads b
 
 ---
 
-## Quick start — CLI
+## Quick start â€” CLI
 
 ```powershell
 # Interactive shell
@@ -243,7 +243,7 @@ The replay path uses metadata-only SigMF inspection for the slider, then loads b
 | `capture <label> [rx]` | SigMF + training tile |
 | `model status` / `model load <onnx>` / `model unload` | ONNX placeholder API (deterministic remains active) |
 | `audio list` | Playback devices |
-| `audio enable <out0> [out1 …]` | Enable outputs |
+| `audio enable <out0> [out1 â€¦]` | Enable outputs |
 | `audio disable` | Stop outputs |
 | `rx add` | Add another receiver entry |
 | `help` | Command list |
@@ -265,7 +265,7 @@ The replay path uses metadata-only SigMF inspection for the slider, then loads b
 | `p25 clearaudio <cc_mhz> [dev] [seconds] [record=s] [tg=id]` | Field clear-audio diagnostic (wait/follow/save) |
 | `p25 replay <sigmf-meta\|data\|dir> [target_mhz] [ms] [phase2] [skip=ms] [center=mhz] [nac= wacn= system=]` | Offline IQ through P25 decoder |
 | `p25 followtest <capture> <cc_mhz> [ms] [skip=] [center=] [voicecenter=] [followms=] [tg=]` | Replay CC grants + voice follow/gate test |
-| `p25 voicetest <capture> <voice_mhz> [ms] [skip=] [center=] [offsethz=] [tg=] [slot=0\|1] [nac=…] [clear\|enc] [stream] [probe\|noprobe] [wav=]` | Phase 2 voice IQ through speaker gate |
+| `p25 voicetest <capture> <voice_mhz> [ms] [skip=] [center=] [offsethz=] [tg=] [slot=0\|1] [nac=â€¦] [clear\|enc] [stream] [probe\|noprobe] [wav=]` | Phase 2 voice IQ through speaker gate |
 | `p25 voice` | Voice backend status + Phase 2 validation log path |
 
 ### CLI examples
@@ -327,7 +327,7 @@ $env:SDR_TOWN_P25_VALIDATION_REDACT = "1"
 
 Logs under AppData `logs` (rotated). With redact, sensitive symbols/AMBE/ESS identifiers are scrubbed.
 
-**Cadence compare fields** (DSP / DEEP DIAG logs): `expVcw`, `fed`, `emitPcm`/`emit`, `gaps`, `lastAbs` — expected voice codewords vs frames fed to mbelib vs PCM emitted vs order gaps. Use these when diagnosing blocky/repeated/out-of-order audio.
+**Cadence compare fields** (DSP / DEEP DIAG logs): `expVcw`, `fed`, `emitPcm`/`emit`, `gaps`, `lastAbs` â€” expected voice codewords vs frames fed to mbelib vs PCM emitted vs order gaps. Use these when diagnosing blocky/repeated/out-of-order audio.
 
 ---
 
@@ -336,15 +336,15 @@ Logs under AppData `logs` (rotated). With redact, sensitive symbols/AMBE/ESS ide
 1. Tune or add a known **control channel**.
 2. **Monitor CC** (audio muted) or `p25 monitor`.
 3. Watch **P25 Log** / CLI for sync, NID, TSBK, grants, slot, mask, MAC, ESS.
-4. Enable **Auto Follow Grants** or use `p25 waitgrant … follow`.
+4. Enable **Auto Follow Grants** or use `p25 waitgrant â€¦ follow`.
 5. On grant: one-RTL path retunes (or independent traffic source), arms Phase 2 decode, gates speaker until clear proof.
 6. On end/idle/timeout: return to control, clear voice state.
 
 **Phase 2 gate summary (do not relax casually):**
 
 - Emit clear audio only with defined proof: session release / ESS clear / MAC PTT-ACTIVE path / established clear carry after prior proof.
-- Encrypted grant or encrypted ESS → mute.
-- Unknown security → queue/wait, not free-play (except explicit lab probe flags).
+- Encrypted grant or encrypted ESS â†’ mute.
+- Unknown security â†’ queue/wait, not free-play (except explicit lab probe flags).
 - Opposite TDMA slot VCWs are ignored for release on the followed slot.
 
 Field captures and logs typically live under:
@@ -359,7 +359,7 @@ Field captures and logs typically live under:
 
 ## Remote diagnostics (alpha)
 
-When `remote_diagnostics.json` is present (or `--diag-url` / env), the app can send **compact JSON events** (startup, stalls, P25 gate counters, audio metrics)—not full IQ/PCM dumps.
+When `remote_diagnostics.json` is present (or `--diag-url` / env), the app can send **compact JSON events** (startup, stalls, P25 gate counters, audio metrics)â€”not full IQ/PCM dumps.
 
 ```powershell
 # Collector
@@ -371,13 +371,13 @@ powershell -ExecutionPolicy Bypass -File scripts\start_remote_diag_server.ps1 -P
 # disable: --diag-off
 ```
 
-Help → Report Issue / My Submitted Issues integrate with the collector when configured. See `scripts/install_remote_diag_task.ps1` for a logon task.
+Help â†’ Report Issue / My Submitted Issues integrate with the collector when configured. See `scripts/install_remote_diag_task.ps1` for a logon task.
 
 ---
 
 ## Build from source
 
-**Prerequisites:** Windows 10/11 x64, VS 2022 C++, CMake ≥ 3.25, Git, vcpkg, Qt 6 MSVC 64-bit Widgets, liquid-dsp / Soapy as per `vcpkg.json` and CMake, optional mbelib submodule for P25 voice.
+**Prerequisites:** Windows 10/11 x64, VS 2022 C++, CMake â‰¥ 3.25, Git, vcpkg, Qt 6 MSVC 64-bit Widgets, liquid-dsp / Soapy as per `vcpkg.json` and CMake, optional mbelib submodule for P25 voice.
 
 ```powershell
 git clone https://github.com/Blkph0x/SDR_Town.git
@@ -410,7 +410,7 @@ C:\Qt\6.11.1\msvc2022_64\bin\windeployqt.exe SDR_Town.exe --no-compiler-runtime 
 .\scripts\release.ps1 -Version X.Y.Z -Channel experimental
 ```
 
-Produces and uploads: NSIS setup, portable ZIP, `update.json`, `update.json.sig`, SHA files. Generate signing keys once with `scripts/sign_update_manifest.ps1 -GenerateKeyPair` (private key stays local). Optional: `-RemoteDiagnosticsUrl https://…` injects packaged diag config without committing tokens.
+Produces and uploads: NSIS setup, portable ZIP, `update.json`, `update.json.sig`, SHA files. Generate signing keys once with `scripts/sign_update_manifest.ps1 -GenerateKeyPair` (private key stays local). Optional: `-RemoteDiagnosticsUrl https://â€¦` injects packaged diag config without committing tokens.
 
 ---
 
@@ -418,8 +418,8 @@ Produces and uploads: NSIS setup, portable ZIP, `update.json`, `update.json.sig`
 
 ```text
 CMakeLists.txt          Version + deploy/CPack
-include/                Headers (Demod, DeviceManager, P25*, AudioEngine, UpdateManager, …)
-src/                    Implementation (main GUI/CLI, P25LiveDecoder, Demod, …)
+include/                Headers (Demod, DeviceManager, P25*, AudioEngine, UpdateManager, â€¦)
+src/                    Implementation (main GUI/CLI, P25LiveDecoder, Demod, â€¦)
 src/tools/              Python audits, verify scripts, remote_diag_server, clear-audio diag
 tests/                  C++ unit tests + PowerShell CLI/GUI harnesses
 scripts/                release.ps1, remote diag helpers, classifier training helpers
@@ -432,10 +432,10 @@ DESIGN.md               Architecture / history (verbose; may lag code)
 
 Useful docs (may be denser than this README):
 
-- `docs/p25_phase2_release_gate.md` — Phase 2 security/release gates  
-- `docs/P25_SDRTRUNK_FULL_COMPARISON.md` — parity notes vs SDRTrunk  
-- `docs/signal_classifier.md` — deterministic classifier  
-- `DESIGN.md` — long-form design log (not always current on every edge)
+- `docs/p25_phase2_release_gate.md` â€” Phase 2 security/release gates  
+- `docs/P25_SDRTRUNK_FULL_COMPARISON.md` â€” parity notes vs SDRTrunk  
+- `docs/signal_classifier.md` â€” deterministic classifier  
+- `DESIGN.md` â€” long-form design log (not always current on every edge)
 
 ---
 
@@ -473,12 +473,12 @@ Useful docs (may be denser than this README):
 
 ```text
 DeviceManager (RTL/Soapy IQ)
-    → DSP worker + optional P25 voice worker
-        → Demod (analog)  → AudioEngine (miniaudio)
-        → P25LiveDecoder  → grant/follow state machine
-            → Phase 2 mask / MAC / ESS / AMBE (mbelib)
-            → Security gate → speaker / mute / queue
-UpdateManager ← GitHub releases/latest/update.json
+    â†’ DSP worker + optional P25 voice worker
+        â†’ Demod (analog)  â†’ AudioEngine (miniaudio)
+        â†’ P25LiveDecoder  â†’ grant/follow state machine
+            â†’ Phase 2 mask / MAC / ESS / AMBE (mbelib)
+            â†’ Security gate â†’ speaker / mute / queue
+UpdateManager â† GitHub releases/latest/update.json
 ```
 
 Single-instance lock by default (device contention). CLI and GUI share the same demod/P25 cores.
