@@ -9122,6 +9122,29 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
         p25.insert("voiceFrequencyHz", p25AutoFollowVoiceFreqHz);
         p25.insert("trafficActive", p25IndependentTrafficActive);
         p25.insert("trafficRetunedPrimary", p25IndependentTrafficRetunedPrimary);
+        // Public/FUBAR "now playing" label: TG + alpha only (no voice diag suffix).
+        QString talkgroupStatusLabel;
+        if (p25FollowTalkgroupId > 0 &&
+            (p25FollowEnabled || p25FollowAutoActive || p25IndependentTrafficActive)) {
+            uint32_t labelWacn = 0;
+            uint16_t labelSystemId = 0;
+            bool labelSystemKnown = false;
+            try {
+                for (const auto& tg : loadP25Talkgroups()) {
+                    if (tg.talkgroupId != p25FollowTalkgroupId) continue;
+                    if (tg.p25MaskParamsKnown) {
+                        labelWacn = tg.wacn;
+                        labelSystemId = tg.systemId;
+                        labelSystemKnown = true;
+                    }
+                    break;
+                }
+            } catch (...) {
+            }
+            talkgroupStatusLabel = p25TalkgroupStatusLabel(
+                p25FollowTalkgroupId, labelWacn, labelSystemId, labelSystemKnown);
+        }
+        p25.insert("talkgroupStatusLabel", talkgroupStatusLabel);
         const qint64 statusNowMs = QDateTime::currentMSecsSinceEpoch();
         const bool warmStandbyActive = p25AutoFollowWarmStandbyUntilMs > statusNowMs;
         p25.insert("warmStandbyActive", warmStandbyActive);
