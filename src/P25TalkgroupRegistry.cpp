@@ -1077,18 +1077,15 @@ QString p25EventLogText(const P25ControlEvent& ev)
         parts << QString("rfss=%1").arg(static_cast<int>(ev.rfssId));
         QString siteText = QString::number(static_cast<int>(ev.siteId));
         // Presentation only: site aliases never affect grants or RF policy.
-        try {
-            const auto aliases = loadP25AliasDatabase(readP25AliasFile(p25AliasesPath()));
-            const auto siteName = resolveP25SiteAlias(
-                aliases,
-                ev.networkStatusKnown || ev.rfssStatusKnown,
-                ev.wacn,
-                ev.systemId,
-                ev.rfssId,
-                ev.siteId);
-            if (!siteName.isEmpty()) siteText += QString(" (%1)").arg(siteName);
-        } catch (const std::exception&) {
-        }
+        // Must use the process cache — control logs fire per TSBK and a full
+        // 0.5MiB alias reparse here starves DSP/UI and kills P25 audio.
+        const auto siteName = resolveCachedP25SiteAlias(
+            ev.networkStatusKnown || ev.rfssStatusKnown,
+            ev.wacn,
+            ev.systemId,
+            ev.rfssId,
+            ev.siteId);
+        if (!siteName.isEmpty()) siteText += QString(" (%1)").arg(siteName);
         parts << QString("site=%1").arg(siteText);
     }
     if (ev.networkStatusKnown || ev.rfssStatusKnown) parts << QString("lra=%1").arg(p25HexId(ev.lra, 2));

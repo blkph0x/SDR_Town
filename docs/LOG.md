@@ -2,6 +2,12 @@
 
 Newest at the top.
 
+## 2026-09-19 - Alias cache hotfix for P25 audio
+
+Control-log site labels stopped doing a full `p25_aliases.json` reparse per
+event (~515 KiB after NSW CSV import). Cached resolve + mtime/size gate.
+`[aliases]` 119 assertions PASS. Preparing 0.2.62 release.
+
 ## 2026-09-18 - RadioReference CSV talkgroup and site aliases
 
 DEC-0101/0102: Import CSV for RR talkgroup and site exports, destination system

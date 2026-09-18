@@ -2,6 +2,15 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-19 - P25 audio stall from uncached alias reparse
+
+`p25EventLogText` (0.2.61 site Alpha Tag) called `loadP25AliasDatabase(readP25AliasFile)`
+on every RFSS-stamped control event. With ~515 KiB AppData `p25_aliases.json`
+that full read/parse on the GUI control path starved DSP/UI after CSV import.
+Fix: `resolveCachedP25SiteAlias` + mtime/size short-circuit in alias cache. No
+decode/follow changes. Workspace `[aliases]` **6/6** / **119** assertions PASS.
+Release target **0.2.62**.
+
 ## 2026-09-18 - 0.2.61 alias CSV + status labels
 
 AppData Roaming path confirmed for aliases; Local→Roaming migrate on read.

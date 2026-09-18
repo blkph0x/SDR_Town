@@ -134,17 +134,33 @@ P25AliasLists g_aliasCache;
 QByteArray g_aliasCacheBytes;
 QString g_aliasCachePath;
 qint64 g_aliasCacheCheckedMs=0;
+qint64 g_aliasCacheMtimeMs=0;
+qint64 g_aliasCacheSize=-1;
 const P25AliasLists& cachedAliasLists() {
     const qint64 now=QDateTime::currentMSecsSinceEpoch();
+    // In-memory TTL: avoid even a stat() storm from status/log spam.
     if(now-g_aliasCacheCheckedMs<2000 && !g_aliasCachePath.isEmpty()) return g_aliasCache;
     g_aliasCacheCheckedMs=now;
     const auto path=p25AliasesPath();
     try {
+        const QFileInfo info(path);
+        if(info.exists() && path==g_aliasCachePath &&
+           info.lastModified().toMSecsSinceEpoch()==g_aliasCacheMtimeMs &&
+           info.size()==g_aliasCacheSize) {
+            return g_aliasCache;
+        }
         const auto bytes=readP25AliasFile(path);
-        if(path==g_aliasCachePath && bytes==g_aliasCacheBytes) return g_aliasCache;
+        if(path==g_aliasCachePath && bytes==g_aliasCacheBytes) {
+            g_aliasCacheMtimeMs=info.exists()?info.lastModified().toMSecsSinceEpoch():0;
+            g_aliasCacheSize=info.exists()?info.size():0;
+            return g_aliasCache;
+        }
         g_aliasCachePath=path;
         g_aliasCacheBytes=bytes;
         g_aliasCache=loadP25AliasDatabase(bytes);
+        const QFileInfo after(path);
+        g_aliasCacheMtimeMs=after.exists()?after.lastModified().toMSecsSinceEpoch():0;
+        g_aliasCacheSize=after.exists()?after.size():static_cast<qint64>(bytes.size());
     } catch(...) {
         // Keep last good cache on transient read/parse errors.
     }
@@ -158,8 +174,13 @@ QString formatP25TalkgroupStatusLabel(unsigned talkgroupId,bool systemKnown,unsi
     if(alias.isEmpty()) return QString("TG %1").arg(talkgroupId);
     return QString("TG %1 %2").arg(talkgroupId).arg(alias);
 }
+QString resolveCachedP25SiteAlias(bool systemKnown,unsigned wacn,unsigned systemId,
+                                  unsigned rfss,unsigned siteId,const QString& manual) {
+    return resolveP25SiteAlias(cachedAliasLists(),systemKnown,wacn,systemId,rfss,siteId,manual);
+}
 void invalidateP25AliasCache() {
-    g_aliasCache={};g_aliasCacheBytes={};g_aliasCachePath={};g_aliasCacheCheckedMs=0;
+    g_aliasCache={};g_aliasCacheBytes={};g_aliasCachePath={};
+    g_aliasCacheCheckedMs=0;g_aliasCacheMtimeMs=0;g_aliasCacheSize=-1;
 }
 QString p25AliasesPath() {return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)+"/p25_aliases.json";}
 QByteArray readP25AliasFile(const QString& path) {

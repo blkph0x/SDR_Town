@@ -24,6 +24,9 @@ TEST_CASE("P25 alias lists strictly validate imported identifiers and preserve m
     CHECK(formatP25TalkgroupStatusLabel(123,true,781824,1,"Dispatch")=="TG 123 Dispatch");
     CHECK(formatP25TalkgroupStatusLabel(123,false,781824,1,"Local")=="TG 123 Local");
     CHECK(formatP25TalkgroupStatusLabel(0,true,781824,1)=="TG ?");
+    // Cached site helper must stay exception-safe on the control-log hot path.
+    CHECK(resolveCachedP25SiteAlias(true,781824,1,1,1).isEmpty());
+    CHECK(resolveCachedP25SiteAlias(false,781824,1,1,1,"Tower")=="Tower");
     CHECK(resolveP25Alias(lists,false,781824,1,123).isEmpty());
     CHECK(resolveP25Alias(lists,true,781824,2,123).isEmpty());
     CHECK(resolveP25Alias(lists,true,781825,1,123).isEmpty());

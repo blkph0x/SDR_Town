@@ -30,6 +30,9 @@ QString resolveP25SiteAlias(const P25AliasLists& lists,bool systemKnown,unsigned
 // Presentation-only status text: "TG 10120" or "TG 10120 Dispatch".
 QString formatP25TalkgroupStatusLabel(unsigned talkgroupId,bool systemKnown,unsigned wacn,
                                       unsigned systemId,const QString& manual={});
+// Hot-path safe: uses the process alias cache (no per-call disk reparse).
+QString resolveCachedP25SiteAlias(bool systemKnown,unsigned wacn,unsigned systemId,
+                                  unsigned rfss,unsigned siteId,const QString& manual={});
 void invalidateP25AliasCache();
 QString p25AliasesPath();
 QByteArray readP25AliasFile(const QString& path);

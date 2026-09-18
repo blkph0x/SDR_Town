@@ -1,8 +1,12 @@
 # Task list (canonical)
 
-T-0037 | in progress | Release 0.2.61 | Package CSV alias import + status Alpha
-Tag labels; verify assets and updater. Known Windows CI Phase 2 string-verifier
-failures remain T-0029 (not introduced by this release).
+T-0038 | in progress | Release 0.2.62 | Hotfix cached alias resolve on control
+log path so large AppData alias DBs cannot starve P25 audio. Package, verify
+assets and updater. T-0029 Phase 2 string-verifier CI debt unchanged.
+
+T-0037 | done | Release 0.2.61 | Package CSV alias import + status Alpha Tag
+labels; assets and updater verified. Known Windows CI Phase 2 string-verifier
+failures remain T-0029 (not introduced by that release).
 
 T-0035 | done | RadioReference CSV alias import | Header-based bounded CSV for
 talkgroups and sites (DEC-0101/0102), explicit destination system and staged
