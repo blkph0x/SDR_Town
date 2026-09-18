@@ -90,13 +90,29 @@ checks = {
         and "rx, out, key, nowMs," in security_gate_region
         and "p25Phase2DualSlotUntrustedGarbleWindow(out)" in security_gate_region
         and "!sameCallSelectedContinuation" in security_gate_region
-        and "p25Phase2PostEmitMixedMacDeadWindow(rx, out)" in security_gate_region
+        and "p25Phase2PostEmitMixedMacDeadWindow(rx, out)" in main
+        # DEC-0055.1 keep path uses Effective gate (0058 latched escape can
+        # suppress DualSlot entirely); still require keep vs drop branches.
+        and "if (dualSlotUntrustedGateEffective)" in main
         and "dual-slot-untrusted-garble-drop" in main.split(
-            "if (dualSlotUntrustedGate)", 1
-        )[1][:900]
+            "if (dualSlotUntrustedGateEffective)", 1
+        )[1][:2200]
+        and "dual-slot-untrusted-keep-selected-pcm" in main.split(
+            "if (dualSlotUntrustedGateEffective)", 1
+        )[1][:2200]
+        and "keepLabelledSelectedClearPcm" in main.split(
+            "if (dualSlotUntrustedGateEffective)", 1
+        )[1][:2200]
         and "postEmitMixedMacDeadGate" not in main.split(
-            "if (dualSlotUntrustedGate)", 1
+            "if (dualSlotUntrustedGateEffective)", 1
         )[1][:900]
+    ),
+    "trusted clear allows DEC-0058 latched selected-dominant escape": (
+        "latchedSelectedDominantClearContinuation" in trusted_clear_region
+        and "!dualSlotUntrustedGateEffective" in trusted_clear_region
+        and "out.phase2OppositeVoiceCodewords == 0 ||" in trusted_clear_region
+        and "out.phase2ThisWindowTargetMacCrcValid" in trusted_clear_region
+        and "out.phase2ThisWindowTargetEssClear" in trusted_clear_region
     ),
     "feed dual-slot gate has continuation escape": (
         "dualSlotSelectedContinuationProof" not in feed_region
@@ -136,12 +152,6 @@ checks = {
         and "out.phase2ThisWindowTargetMacCrcValid" in recent_continuation_region
         and "out.phase2ThisWindowTargetEssClear" in recent_continuation_region
         and "out.phase2SameCallSelectedTimeslotContinuation" in recent_continuation_region
-    ),
-    "trusted clear sustain cannot bypass dual-slot proof": (
-        "out.phase2OppositeVoiceCodewords == 0 ||" in trusted_clear_region
-        and "out.phase2ThisWindowTargetMacCrcValid" in trusted_clear_region
-        and "out.phase2ThisWindowTargetEssClear" in trusted_clear_region
-        and "sameCallSelectedContinuation" not in trusted_clear_region.split("unknownGrantProbeVoiceRelease", 1)[0]
     ),
     "speaker gate names garble": "phase2-dual-slot-untrusted-garble" in main,
     "explicit-clear evidence fails closed on dual-slot": (

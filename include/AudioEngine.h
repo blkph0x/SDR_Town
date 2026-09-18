@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <new>
 #include <cstdint>
+#include <thread>
 
 #include "miniaudio.h"
 
@@ -81,6 +82,13 @@ public:
 
     // Diagnostics counters (incremented from RT callback; read lock-free from stats)
     std::atomic<int> underrunCount{0};
+    // Cumulative per-output callback observations, not inferred speech loss.
+    std::atomic<uint64_t> consumedFrames{0};
+    std::atomic<uint64_t> zeroFillFrames{0};
+    std::atomic<uint64_t> emptyCallbacks{0};
+    std::atomic<uint64_t> partialCallbacks{0};
+    std::atomic<uint64_t> controlSilenceFrames{0};
+    std::atomic<uint64_t> producerDroppedFrames{0};
 
     struct ActiveOutput;
 
@@ -97,9 +105,29 @@ private:
     std::vector<AudioDeviceInfo> m_devices;
 
 public:
-    // Simple power-of-2 lock-free ring buffer for realtime audio (no mutex, no erase/alloc in callback).
+    // Power-of-2 SPSC ring with nonblocking callback and guarded control discards.
     // Capacity must be power of 2.
     struct RingBuffer {
+        // DEC-0074: only exceptional cursor mutations exclude the consumer.
+        // Normal producer writes retain the SPSC path. Callback acquisition
+        // is a single nonblocking attempt; only control threads may wait.
+        std::atomic_flag consumerBusy = ATOMIC_FLAG_INIT;
+        struct ConsumerLease {
+            RingBuffer& ring;
+            bool acquired;
+            ConsumerLease(RingBuffer& rb, bool wait) noexcept : ring(rb), acquired(false) {
+                do {
+                    acquired = !ring.consumerBusy.test_and_set(std::memory_order_acquire);
+                    if (acquired || !wait) break;
+                    std::this_thread::yield();
+                } while (true);
+            }
+            ~ConsumerLease() {
+                if (acquired) ring.consumerBusy.clear(std::memory_order_release);
+            }
+            ConsumerLease(const ConsumerLease&) = delete;
+            ConsumerLease& operator=(const ConsumerLease&) = delete;
+        };
         std::vector<float> data;
         std::vector<uint8_t> sampleKind;
         alignas(std::hardware_destructive_interference_size) std::atomic<size_t> writePos{0};
@@ -126,6 +154,11 @@ public:
                 capacity = other.capacity;
             }
             return *this;
+        }
+
+        void discardAll() noexcept {
+            ConsumerLease control(*this, true);
+            readPos.store(writePos.load(std::memory_order_acquire), std::memory_order_release);
         }
 
         void init(size_t cap) {

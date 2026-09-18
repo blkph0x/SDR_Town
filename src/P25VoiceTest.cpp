@@ -30,6 +30,7 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cctype>
 #include <cstdint>
@@ -919,8 +920,59 @@ CliP25WavCaptureSummary stopCliP25OppositeWavCapture()
     return out;
 }
 
-bool writeJsonDocumentFile(const QString& path, const json& doc, QString* error)
+static std::mutex gLiveIqSpeakerWavMutex;
+static std::unique_ptr<Pcm16WavCapture> gLiveIqSpeakerWavCapture;
+static std::atomic<bool> gLiveIqSpeakerWavActive{false};
+
+bool startLiveIqSpeakerWavCapture(const QString& path, double sampleRate, QString* error)
 {
+    std::lock_guard<std::mutex> lk(gLiveIqSpeakerWavMutex);
+    if (!gLiveIqSpeakerWavCapture) gLiveIqSpeakerWavCapture = std::make_unique<Pcm16WavCapture>();
+    const uint32_t sr = static_cast<uint32_t>(std::clamp(
+        std::isfinite(sampleRate) ? std::lround(sampleRate) : 48000ll,
+        8000ll,
+        192000ll));
+    const bool ok = gLiveIqSpeakerWavCapture->open(path, sr, error);
+    gLiveIqSpeakerWavActive.store(ok, std::memory_order_release);
+    return ok;
+}
+
+void appendLiveIqSpeakerWavCapture(const float* samples, size_t count)
+{
+    if (!samples || count == 0) return;
+    if (!gLiveIqSpeakerWavActive.load(std::memory_order_acquire)) return;
+    std::lock_guard<std::mutex> lk(gLiveIqSpeakerWavMutex);
+    if (gLiveIqSpeakerWavCapture && gLiveIqSpeakerWavCapture->active()) {
+        gLiveIqSpeakerWavCapture->append(samples, count);
+    }
+}
+
+void appendLiveIqSpeakerWavCapture(const std::vector<float>& samples)
+{
+    if (samples.empty()) return;
+    appendLiveIqSpeakerWavCapture(samples.data(), samples.size());
+}
+
+CliP25WavCaptureSummary stopLiveIqSpeakerWavCapture()
+{
+    std::lock_guard<std::mutex> lk(gLiveIqSpeakerWavMutex);
+    gLiveIqSpeakerWavActive.store(false, std::memory_order_release);
+    CliP25WavCaptureSummary out;
+    if (!gLiveIqSpeakerWavCapture) return out;
+    out.active = gLiveIqSpeakerWavCapture->active();
+    out.path = gLiveIqSpeakerWavCapture->path();
+    out.samples = gLiveIqSpeakerWavCapture->sampleCount();
+    out.sampleRate = gLiveIqSpeakerWavCapture->sampleRate();
+    gLiveIqSpeakerWavCapture->close();
+    return out;
+}
+
+bool liveIqSpeakerWavCaptureActive() noexcept
+{
+    return gLiveIqSpeakerWavActive.load(std::memory_order_acquire);
+}
+
+bool writeJsonDocumentFile(const QString& path, const json& doc, QString* error){
     try {
         std::ofstream out(path.toStdString());
         if (!out.is_open()) {
@@ -2427,9 +2479,24 @@ void runP25ReplayVoiceTest(const P25ReplayCliArgs& argsIn)
             } else if (ordinalFrames < rawSpeakerFrames) {
                 ++speakerOrdinalPartialWindows;
             }
+            const bool speakerOrdinalKnownBefore = voiceTestSpeakerQueue.nextSpeechOrdinalKnown;
+            const int64_t speakerOrdinalBefore = voiceTestSpeakerQueue.nextSpeechOrdinal;
             const std::vector<float> speakerAudioForQueue =
                 p25Phase2SpeakerAudioForQueue(voiceTestSpeakerQueue, audio, audio.audio, phase2FrameSamples);
             const size_t filteredSpeakerFrames = speakerAudioForQueue.size() / phase2FrameSamples;
+            if (args.traceReplay) {
+                std::cout << "P25 speaker-frame audit window=" << voiceWindows
+                          << " expectedKnown=" << speakerOrdinalKnownBefore
+                          << " expectedBefore=" << speakerOrdinalBefore
+                          << " expectedAfter=" << voiceTestSpeakerQueue.nextSpeechOrdinal
+                          << " rawFrames=" << rawSpeakerFrames
+                          << " retainedFrames=" << filteredSpeakerFrames
+                          << " ordinals=";
+                for (const auto ordinal : audio.phase2EmittedSpeechOrdinals) {
+                    std::cout << ordinal << ',';
+                }
+                std::cout << '\n';
+            }
             if (rawSpeakerFrames > filteredSpeakerFrames) {
                 speakerTimelineDroppedFrames +=
                     static_cast<long long>(rawSpeakerFrames - filteredSpeakerFrames);

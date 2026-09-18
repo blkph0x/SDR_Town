@@ -1,7 +1,1196 @@
 # Decisions
 
 Format: ID, date, status, evidence, decision, consequences.
+
+## DEC-0102 - RadioReference site CSV aliases (2026-09-18)
+
+Evidence: fubarzi/TG-SITES `trs_sites_*.csv` uses RFSS, Site Dec/Hex, Description,
+County Name, then ragged frequency columns. SDRTrunk treats site labels as
+presentation identifiers attached to a system, separate from decode policy.
+Extend the existing system-scoped alias list with optional `sites` entries keyed
+by RFSS+site ID (site 0..65535 for RadioReference directories; over-the-air
+matching still uses the decoder's reported site). Import via the same CSV action
+with header detection; require an explicit destination system. Preserve
+talkgroups on site reimport and sites on talkgroup reimport; manual overrides
+survive. Ignore NAC/lat/lon/frequencies for RF decisions. Resolve names only in
+control-log `site=` text and talkgroup Alpha Tag tooltips when system metadata
+is known. Same 1MiB/10000 combined budget and atomic save rules as DEC-0100/0101.
+
+## DEC-0101 - RadioReference-compatible CSV imports (2026-09-18)
+
+Reference: https://trunkrecorder.com/docs/CONFIGURE#talkgroupsFile documents
+direct RadioReference CSV headers Decimal, Hex, Alpha Tag, Mode, Description,
+Tag, Category. Use Decimal plus Alpha Tag (Description fallback), Category
+(Tag fallback) by header, not column position. These files lack WACN/System ID;
+require an explicitly selected or newly created destination system. Never infer
+it from TGID, filename or receiving frequency. Imported Mode/Priority/NAC must
+not change any receive/security policy. Preserve existing manual overrides.
+Qt has no CSV parser in the present dependency set: implement a small bounded
+RFC4180 state machine with quoted commas, escaped quotes, embedded newlines,
+CRLF/LF, UTF-8 BOM and explicit UTF-16 BOM. Reject malformed rows/quotes,
+invalid encodings, duplicate IDs/headers and conflicting optional Hex IDs.
+No silent skipping. Same 1MiB/10000-entry budget as JSON. Blank rows ignored;
+blank headers, empty datasets and conventional frequency exports rejected.
+Expose a distinct Import CSV action alongside JSON; destination dialog shows
+system hex IDs and final list preview remains staged until Save. Tests use the
+published column schema, adversarial CSV and real Qt destination workflow.
+
+## DEC-0100 - System-scoped P25 alias lists (2026-09-18)
+
+Evidence: SDRTrunk Playlist-Editor wiki (accessed2026-09-18), Aliases and
+Channel General sections: named alias lists label identifiers independently
+of decoding, attached to channels. Local P25TalkgroupEntry already stores
+WACN/System ID and manual alphaTag. Implement independent presentation-only
+lists keyed by WACN+System ID; never infer a system from TGID or frequency.
+Unknown system identity gets no imported label. Existing alphaTag takes priority.
+JSON version1 import/export uses Qt's structured parser; no new dependency or
+claim of SDRTrunk XML/RadioReference API compatibility. One list per system,
+bounded to1MiB/10000 aliases per document, with strict integer ranges, duplicate
+rejection, bounded UTF-8 text and explicit source/date. Review before saving.
+Editable names/groups become protected manual overrides on subsequent imports.
+All imported metadata stays outside scanner/encryption/priority/voice decisions.
+Persist atomically via QSaveFile; reject external changes while editing rather
+than overwrite. Never erase an unreadable database. Tests cover malformed input,
+system isolation, manual precedence, merge, roundtrip, storage and GUI workflow.
+
+## DEC-0099 - Experimental live NFM SSTV session and window (2026-09-18)
+
+Attach one bounded SSTV queue to the main receiver's existing raw NFM tap.
+SstvReceiverFeed serializes attach/detach against producer publication with a
+short mutex; producer only try-locks and records contention as a discontinuity.
+No queue allocation until attach. Detach quiesces publication before stop.
+Receiver ownership is captured on GUI start, not accessed through MainWindow
+from a worker during teardown. Never change frequency, mode, bandwidth, audio
+LPF or squelch to start SSTV; reject inactive/non-NFM/P25 monitor receivers.
+Mode/source loss and retunes fail closed through existing metadata/gap checks.
+No HF SSB SSTV claim: that requires a separate clean linear-demod audio tap.
+Extend recorded window with source selection and Live NFM option. Finish
+quiesces publication, drains the existing queue, closes input normally and saves
+validated complete/partial images; Cancel and
+close invalidate provisional output and join the worker. Live session capped
+at six minutes (existing resource budget), no automatic hidden reattach.
+Latest-only previews and existing new-directory PNG publication are retained.
+Recorded and live controls remain mutually exclusive. Gate: attachment and
+teardown tests, actual streamed GUI recording parity, interruption/finish,
+small/large screenshots and existing regression suite. An off-air SSTV image
+still needs a known transmission; report that acceptance gap explicitly.
+
+## DEC-0098 - Bounded single-stream SSTV worker (2026-09-18)
+
+Compose DEC-0095 events, DEC-0097 conversion and DEC-0096 helper on a single
+non-GUI worker thread. Source callback returns data, idle or explicit EOF;
+it must not block. Validate source/generation/epoch/rate/frequency/positions
+again at the boundary. Initial gap markers are permitted before any samples;
+a gap during a stream aborts the provisional image, never joins two sources.
+Future live controller may start a new worker after that abort; no hidden retry.
+Use a private QTemporaryDir, --stdin --progress and the existing bounded row
+parser. Accept results only after EOF, normal zero exit, final row validation
+and exact equality with helper RGB files. No output publication in this layer.
+Resource budgets: 360 seconds input and 420 seconds wall per session, four
+images (existing helper), 128 KiB queued stdin, 64 KiB stderr, 4 MiB stdout.
+Poll waits <=5 ms; launch deadline 5 seconds, blocked-pipe deadline 5 seconds,
+EOF completion deadline 10 seconds. These are worker resource/failure limits,
+not demodulation or synchronization constants. Owner drains stderr/stdout on
+each iteration; destructor guard kills/reaps on exceptions/cancellation.
+Gate: independent recordings through actual queue/converter/helper match the
+direct converted recording, progressive callbacks occur on worker, idle cancel,
+explicit gaps/identity faults reject, and startup/EOF errors leave no child.
+No GUI or RF wiring until this combined path passes. P25 untouched.
+
+## DEC-0097 - SSTV streaming rate conversion (2026-09-18)
+
+Use the bundled miniaudio linear resampler with its default fourth-order
+anti-alias filter; preserve its state across blocks. Source: miniaudio.h
+Resampling section and ma_linear_resampler_set_rate_internal, which reduces
+integer rates by GCF and derives normalized filter coefficients from them.
+Avoid set_rate_ratio's millionth-ratio truncation. Express input Hz rounded
+to 0.0001 Hz and 48000 output Hz in the same scaled units (10000); maximum
+960000000 fits uint32 and fractional accumulator sums remain below uint32.
+At minimum 8000 Hz, 0.00005 Hz rounding error over 360 seconds is at most
+0.108 output sample at 48 kHz. 48 kHz is a backend-supported worker format,
+not a changed RF setting. Exact 48 kHz input bypasses conversion unchanged.
+No AGC, speaker filters, time-based flushing, synthetic tails or padding.
+Only a non-real-time worker owns the converter. Invalid input invalidates it;
+an explicit start(rate) is required after discontinuity. Input blocks retain
+the queue's 8192-sample bound; output allocations are bounded by conversion
+ratio, not session length. Gate: chunk-invariant samples, bounded count drift,
+tone fidelity, restart/error isolation, and independent image decode checks.
+This does not qualify live RF reception or arbitrary weak-signal sensitivity.
+Independent image gate: compare full images against the same upstream pictures
+before/after conversion; allow at most +1 mean absolute 8-bit RGB level versus
+native-rate decoding (engineering regression budget, not a protocol limit).
+Partial recordings must remain partial with the same row count. Record measured
+errors even on failure; do not loosen the gate to accommodate a poor converter.
+
+## DEC-0096 - Streaming SSTV helper transport (2026-09-18)
+
+Pinned sstv/src/decoder/mod.rs from_samples accepts Iterator<Item=i16> and
+events consumes it incrementally. Add --stdin as the input argument using a
+bounded buffered little-endian PCM reader, shared with file input. Keep the
+same mode, sample rate, four-image and 360-second limits, row protocol and
+pixel algorithm. Short reads, split samples and Interrupted reads are handled;
+odd EOF, I/O errors and over-budget input cause a nonzero exit. Output remains
+provisional until successful exit, as in the existing C++ file wrapper.
+Flush metadata as well as rows so a pipe consumer sees completed images promptly.
+The session owner must drain stdout/stderr concurrently, close stdin at its
+sample budget and kill/reap on cancellation or a wall-time deadline. Blocking
+stdin reads run only in this child, never on RX/GUI threads. No detached workers.
+Gate: malformed-reader units plus independent Robot36/Martin1 full/partial
+file versus pipe RGB/metadata parity and scanlines observed before stdin closes.
+This is a transport milestone, not live RF acceptance. Fractional-rate input
+conversion and GUI/receiver integration remain T-0031; never round a rate as
+a substitute for resampling. No new dependency or P25/audio path change.
+
+## DEC-0095 - Bounded live SSTV ingress before radio wiring (2026-09-18)
+
+MainWindowP25Orchestration's analog branch already exposes FmMultiplexBlock
+for NFM before speaker processing; Demod.cpp stamps rate, tuned identity, epoch
+and sample position. Do not feed post-squelch speaker buffers or WFM MPX into
+SSTV. First implement/test an isolated NFM ingress contract, not a live feature
+claim. One producer, one consumer; fixed preallocated 16 slots x8192 floats,
+also capped at two seconds of input by sample rate. These are memory/resource
+budgets, not latency targets or protocol timers. Producer uses try_lock and
+never waits on the decoder; contention, invalid blocks, missing/overlapping
+samples, source/rate/tune/epoch changes and queue overflow flush queued input
+and emit explicit discontinuity before new data. No sample splicing or padding.
+Consumer/control operations may lock; they never run in RF/audio callbacks.
+The owning session must detach/quiesce its producer before start, stop or
+destruction; the queue alone does not cancel in-flight receiver callbacks.
+This explicit lifecycle requirement must be tested again when wiring RX.
+Next steps are actual streaming helper input, fractional-rate conversion and
+GUI attach/detach/retune integration plus independent replay parity. Keep those
+unavailable until proven. No P25, speaker or receiver wiring in this foundation.
+
+## DEC-0094 - Progressive recorded SSTV and 0.2.58 release (2026-09-18)
+
+Pinned backend Decoder::events() emits ImageStart/Row/ImageEnd while consuming
+a pull iterator. Complete the recorded GUI feature before live push integration.
+Optional helper --progress emits bounded JSONL RGB scanlines; no DSP or pixel
+math changes. C++ validates schema, dimensions, image index, unique row indices,
+hex length/content and final metadata/row agreement. Compare assembled preview
+pixels with final RGB output before publishing PNGs. Limits: <=4096 bytes/line,
+4 MiB stdout total, 64 KiB stderr, four images and prior time/input bounds.
+These are transport/resource budgets, not protocol sensitivity constants.
+Preview snapshots at eight-row intervals go into one mutex-protected latest
+image, sampled by a GUI timer; never queue a full image per scanline. Clear
+preview on failed/cancelled work. Saving remains final validated output only.
+Test fragmented/malformed/duplicate/out-of-order row transport and independent
+recordings, retaining exact GUI/direct output parity. Publish GUI+progressive
+recorded reception as 0.2.58 with tested signed assets. Live RF is explicitly
+not in this release and remains T-0022's next stage; P25 remains untouched.
+
+## DEC-0093 - Recorded SSTV GUI on the shared file decoder (2026-09-17)
+
+T-0022 continues with a nonmodal Tools window, one offline job per window and
+one window per main application. Reuse DEC-0092 decoding unchanged; add an
+optional cooperative cancellation callback, checked during PCM loading and
+helper waits. Kill/reap the owned helper on cancellation. Cancellation ends
+before output publication; once saving begins finish the bounded four-image
+transaction rather than presenting a half-written result as cancelled.
+QThread owns file decode and QProcess, never GUI or receiver/DSP callbacks.
+GUI receives completion on its owner thread, keeps original-resolution images
+and scales only previews. Open source, new output directory, mode selection,
+decode/cancel, result list and output-folder action. Partial and no-image states
+remain explicit. Close while running defers until worker stops; destruction
+requests cancellation and joins, never terminates a thread.
+Test real Qt widgets with a deterministic worker for single-job/close/error
+cases, and the actual pinned decoder with independent recordings. No live SSTV
+or P25 modification, no fabricated percentage progress or quality score.
+
+## DEC-0092 - Isolated recorded SSTV image backend (2026-09-17)
+
+T-0022 next gate: evaluate MIT-licensed unexcellent/sstv commit
+16bf34aac81b0041f5fdce52a1aef64eea0d5f6e as a pinned Rust helper, rather than
+copy GPL reference implementations or invent image demodulation. Its event API
+reports actual rows and completeness; retain those distinctions. Only std and
+libm dependencies are needed with C++ handling audio-file loading and PNG saving.
+Development toolchain Rust 1.88 is installed inside build/toolchains only, without
+altering PATH or unrelated projects. Pin Cargo.lock and retain dependency notices.
+
+Recorded-only CLI first: bounded mono WAV/FLAC, <=360 seconds/128 MiB, temp PCM,
+argument-array QProcess launch of application-adjacent helper, 120-second worker
+deadline, capped metadata and <=4 images with bounded dimensions. No shell,
+network, live radio changes or unbounded output. Save complete and partial
+results explicitly, never infer protocol correctness from a plausible picture.
+Compare a real off-air Robot36 recording and independent Martin recording before
+shipping image modes; unsupported modes stay unavailable. Image GUI/live routing
+remain separate. Release 0.2.57 includes only gates that actually pass.
+
+## DEC-0091 - Bounded SSTV VIS inspection first (2026-09-17)
+
+T-0022 begins with native recorded-audio header inspection, not image reception.
+QSSTV 8c27d6d169d8c6c197eb47c2089870e39bc06a02 sstvtx.cpp/sendPreamble/sendVIS
+defines 300 ms 1900 Hz, 10 ms 1200 Hz, 300 ms 1900 Hz, 30 ms start,
+eight 30 ms LSB-first data/parity symbols (1100=1,1300=0), 30 ms stop at 1200.
+sstvparam.cpp lists the parity-inclusive mode codes. Independent colaclanth/sstv
+3e556eee8ad4c4425799cb652bac26ee58f8e113 supplies m1.ogg and its expected mode.
+Both projects are GPLv3; no source is copied/linked and their audio is kept in
+build-only QA, not redistributed without a separate fixture rights review.
+
+Implement the published tone/framing facts, with a fixed 1 ms search grid and
+10 ms rectangular Goertzel probes. This diagnostic requires >=75% normalized
+tone energy and a 2:1 winning tone ratio: deliberately conservative engineering
+acceptance gates, tested on synthetic tones and the independent recording, not
+claimed as RF sensitivity specifications. Probe the leader throughout, require
+break/start/stop and even parity; unknown seven-bit IDs remain unknown, not a
+guessed mode. No extended/narrow VIS or image success claim. Bounded 910 ms
+history, <=8192 samples/call, explicit reset on source loss, finite samples,
+mono WAV/FLAC 8..96 kHz and 120 seconds/file. Output events/counters in CLI JSON.
+No dependency added, no P25/analog routing changes, no pretend image adapter.
+Follow-up gate reproduced Unicode recording-path failure: the existing narrow
+fopen path uses Windows code-page semantics. Convert CLI UTF-8 to a native
+filesystem path and use miniaudio's wide-file API on Windows for this new loader.
+That alone did not pass: CLI batch echo already contained question marks before
+file loading. Build batch strings from QCoreApplication::arguments() after Qt
+initialization instead of the CRT narrow argv. Keep flag parsing/DSP unchanged;
+rerun existing ASCII CLI regressions alongside the Unicode recording test.
+
+## DEC-0090 - Checked release publication (2026-09-17)
+
+T-0027: release.ps1 currently ignores native failures and pushes master although
+the working branch is fix/acch-rescue-clear-grant-mac. Require an explicit version,
+default to experimental, check each native command, run CTest before packaging,
+and push the actual attached branch. Require committed source before packaging;
+release metadata is committed only after successful packaging/signing. Validate
+portable contents, installer/manifest hashes and detached signature before upload.
+Publish 0.2.56 with the accumulated tested decoder/workspace/runtime work; do not
+claim SSTV or satellite reception implemented. Those reference gates remain open.
+No P25 tuning/security changes in this release-hardening pass.
+
+## DEC-0089 - Deploy the configured RTL runtime (2026-09-17)
+
+T-0026 evidence: CDB shutdown_probe_05 captures AV in libusb control transfer
+under RTL/Soapy unmake. Standalone probe_rtlsdr_lifecycle.py (no Qt/Soapy/DSP)
+reproduces close AV with shipped rtlsdr.dll on cycle 2; the configured vcpkg
+rtlsdr 2.0.2 package passes 10 cycles. Both libusb DLL hashes are identical.
+The executable folder contained a legacy v0.7.0-190-gdfd8 DLL not the manifest's
+configured dependency. Make executable builds stage the imported rtlsdr target
+deterministically, retain the old binary under build for forensic comparison,
+and include its dependency licence in staging. No driver API, gain, DSP, slot,
+queue or teardown timeout changes. Validate deployed native probe and actual
+GUI under CDB, then reception. Physical Blog V4/RSP testing remains unperformed;
+do not equate the Generic R820T acceptance with all hardware certification.
+
+## DEC-0088 - Debugger-backed GUI acceptance (2026-09-17)
+
+T-0026 intermittent shutdown AV has no root-cause stack yet. Extend existing
+RDS GUI acceptance with an explicit CDB executable option, first-chance AV
+stack logging and a strict failure if any AV occurs, even if application code
+catches it. No system-wide debugger settings, registry edits, driver replacement
+or speculative teardown patch. Retain normal real-hardware/station gates and
+bounded process waits. Debugger exit alone is not application acceptance.
+
+## DEC-0087 - Independent RTL capture comparison (2026-09-17)
+
+DEC-0086 established native/adapter parity but not RF acquisition. Existing
+rtl_sdr CLI can capture the same device without SDR Town/Soapy. Compare short
+98.1 MHz captures at requested 40 and 20 dB, with identical offline analysis.
+These are controlled diagnostic gain settings, not new app defaults or a
+presumed fix. Extend the diagnostic to explicit unsigned 8-bit IQ, centered
+at 127.5 and scaled by 128, with size validation and independent tests. Preserve
+the sample rate/gain/tool output and decoded groups. No P25 changes.
+
+## DEC-0086 - Same-input live RDS parity diagnostic (2026-09-17)
+
+Two DEC-0085 live runs failed PI/PS identification while recorded adapter/native
+parity passed. Add an opt-in SDR_TOWN_RDS_PARITY_LOG diagnostic wrapper: feed
+identical borrowed MPX to the native backend and adapter, compare all published
+decode fields except wall-clock timestamp values, count disagreements and
+write one JSONL summary per exercised receiver at destruction. Reset/source
+semantics match the adapter's documented contract. No sample logging, queues,
+threads, DSP threshold changes or default extra decoding. Diagnostic overhead
+is explicitly double RDS decoding and is not a performance benchmark. Never
+treat agreement alone as successful reception. CLI fixture tests must validate
+the report before the actual GUI live test uses it.
+
+## DEC-0085 - Shared receive decoder contract, RDS-first adoption (2026-09-17)
+
+T-0021: existing RdsMpxDecoder, CtcssDecoder and DcsDecoder already have bounded
+synchronous input and thread-safe native snapshots. Wrap them behind a small
+versioned receive interface; immutable registry lists only these implemented
+decoders. Explicit float-domain (raw MPX vs discriminator), source ID, sample
+clock, frequency identity, epoch, absolute cursor and gap flag accompany every
+borrowed block. No retained spans, added queue, hidden resampling or new thread.
+Reject wrong domain/version/invalid metadata, clear backend state, and force
+reacquisition. Source changes force discontinuity even if epochs/cursors match.
+Concrete snapshot variants preserve existing typed fields; factory selection
+is allowlisted. Registration means compiled adapter, not guaranteed DLL/RF
+availability. Backends still perform their own content validation and loading.
+Adopt RDS in both GUI and CLI MPX file replay only after direct/adapter parity
+on the independent recorded MPX fixture and synthetic tone adapters. Existing
+tone file paths remain intact; P25 is not registered or migrated. No nominal
+SSTV/satellite support entry until a real decoder exists. New libraries are
+internal CMake organization, not new third-party dependencies.
+
+## DEC-0084 - Experimental receive-only DCS (2026-09-17)
+
+ETSI 103236 section 4.2 specifies 23 bits, 134.4 baud, LSB-first and physical
+deviation polarity. test_dcs_reference.py independently checks codewords and
+Golay polynomial 0xC75. Use SDRTrunk's enumerated payload values as protocol
+data, not its reversed-bit I labels. Generate words algebraically and index
+cyclic alignments and actual complements, retaining ALL equivalent labels.
+Engineering profile, not certified squelch: three identical words spaced 23
+bits confirm; expire after 46 bits without repeated-word evidence. Exact parity
+only, no error correction. Test every code/polarity/rotation and malformed input.
+Experimental recovery: eight staggered integrate/dump phases at nominal 134.4
+baud, 2 Hz DC removal, two 300 Hz low-pass poles. Require two agreeing timing
+hypotheses and a unique vote winner. These design choices require shaped/noisy/
+clock-offset fixtures; no RF performance claim. Preserve all speech and P25 DSP.
+Known-radio acceptance remains deferred by user; informational output only.
+Catalogue test found 105 values in both our list and the reference, despite the
+reference comment claiming 104; exact list comparison showed no differences.
+
+## DEC-0083 - SSTV and public satellite receive roadmap (2026-09-17)
+
+User requests SSTV, public satellites and weather satellites in the expansion
+plan. Track per-downlink capabilities and hardware/coverage requirements, not
+an unsupported promise of every spacecraft. Preserve the working P25 path and
+finish DCS continuity/validation before adding another live decoder.
+Sources reviewed: SatDump pipeline documentation and GPL-3.0 license;
+gr-satellites supported-satellite documentation; ON4QZ/QSSTV; NOAA POES status
+page search result (direct page fetch returned 403). Links and gates are in
+SATELLITE_AND_SSTV.md. These references identify candidates, not dependencies
+approved for bundling or proof of current transmitter operation.
+Prefer a proven backend where appropriate, with pinned versions, explicit
+input/output contracts, license review, bounded worker queues and cancellation.
+An external process can isolate faults; it does not waive license obligations.
+No network catalogue import may execute arbitrary commands. No automatic
+transmit, decrypt, or private-traffic collection is part of this milestone.
+
+## DEC-0082 - Preserve NFM data history during same-rate bandwidth updates (2026-09-17)
+
+Live CTCSS GUI QA failed: 22 resets, zero complete windows at exit, with
+automatic bandwidth 7605.46875 Hz. Inspection found exact bandwidth inequality
+restarting the data stream even when its sample clock and FIR length agree.
+FIR delay stores input IQ, not coefficient-dependent output: retain that history
+on NFM coefficient updates when rate and length are unchanged. Continue resetting
+on source gaps, rate/length/mode/center/identity changes and explicit DSP resets.
+Do not change WFM behavior or speech DSP. Require varying-bandwidth regression,
+bit-identical tapped/untapped speech, and repeated live GUI measurement.
+User deferred independent known-tone RF acceptance until their radio is available.
+
+Follow-up measurement: build/ctcss_reset_qa/run.log shows mid-stream reset
+reason 2 only (explicit/automatic speech DSP reset), unchanged 12500 Hz bandwidth,
+unchanged IQ epoch and exactly adjacent cursor. Demod's cumulative >5 kHz AFC
+target test resets its speech oscillator. Isolate the NFM data mixer phase;
+its nominal identity, source cursor and explicit resetState() define continuity,
+not the speech-only automatic target threshold. Retain WFM behavior. Regression
+must cross that threshold while proving unchanged speech output.
+
+Final live isolation run passes with eight current-stream windows, but logs
+three bandwidth-only GUI resets jumping source cursors (21:01:09/11/18).
+syncMonitorVarsToReceiver conflates analog NFM bandwidth adjustments with a
+retune, resetting the input cursor and audio ring. Preserve analog NFM stream
+when only bandwidth changes; Demod already rebuilds coefficients and resets
+data history when its clock/FIR length changes. Keep old reset behavior for
+actual frequency/mode changes, P25 voice/control and all other modes.
+
+## DEC-0081 - Receive-only CTCSS identification (2026-09-17)
+
+Next user-approved decoder milestone. Start with informational CTCSS; do not
+gate or reshape working audio before independent RF validation. GNU Radio's
+gr-analog/lib/ctcss_squelch_ff_impl.cc documents the classic 38-tone set and
+adjacent/edge guard-frequency approach. TI SPRA096 documents Goertzel energy
+evaluation. Implement our own bounded streaming bank using that mathematics,
+not copied GNU Radio code. Link references in docs/NFM_TONES.md.
+Engineering acceptance profile (not a certification claim): one-second Hann
+windows resolve the closest supported tones, two matching windows confirm,
+DC removal and four cascaded 300 Hz low-pass poles suppress voice; >=65% tonal
+purity, 4:1 strongest/runner-up energy and +/-1% guard comparisons reject
+ambiguous/noisy/off-frequency windows. Test all supported frequencies, gain,
+speech interference, noise, missing samples, switches and arbitrary partitions.
+Tune/rate/mode/source-gap reset all data-only state. No invented DCS decoder
+or tone squelch UI: defer these until reference codewords and RF captures exist.
+Nominal channel identity is explicit for the NFM tap so phase-continuous AFC
+updates do not erase a tone window. Preserve source-epoch and true retune resets.
+GUI tone freshness is two seconds without input (presentation only).
+
+## DEC-0080 - Live RDS and waterfall interaction (2026-09-17)
+
+User requests automatic WFM RDS display, frequency-aligned band sections and
+drag tuning while preserving improved audio. Use existing chronological IQ
+window provenance (DeviceManager's vector wrapper previously discarded it),
+reset only MPX/RDS state on gaps, and run the bounded decoder on the receiver
+DSP owner. No RDS processing in P25 branches. UI reads short snapshot locks;
+hide identity on inactive/non-WFM/retuned receivers and mark no recent RDS
+after five seconds (presentation policy only, never a decoding/audio gate).
+Draw disjoint visible band sections using existing priority/ambiguity lookup.
+Drag previews on a frozen frequency axis, commits once on release: existing
+frequencySelected handler retunes hardware, so emitting on each mouse movement
+would queue repeated retunes. Click still commits on release; squelch stays
+independent and only owns its spectrum region. Test actual mouse events,
+section clipping and metadata lifecycle, plus recorded DSP and full regressions.
+
+## DEC-0079 - RDS DSP integration and measured live gate (2026-09-17)
+
+Partition gate reproduced: [mpx-partition] fails at the second 137-sample
+block. Inspection also finds the shared audio FIR reads future input and
+zero-pads block tails. Rather than alter audible analog output in this task,
+the optional RDS tap will use a separate causal FIR/decimation state over the
+same downmixed IQ and existing channel coefficients. Preserve phase across
+all chunks; no future samples, no guessed gap filling. Disabled path remains
+unchanged and enabled/disabled audio must still compare bit-for-bit.
+
+Use pinned redsea subcarrier/liquid wrappers, not a newly invented carrier or
+clock recovery. Existing liquid-dsp submodule is 9e00870e25ce9ecf473b7474875a19a3dfc52ce9;
+main CMake explicitly disables MSVC integration. Probe installed GCC 11.3
+MinGW to build an isolated DLL with a versioned C ABI: opaque handle, floats
+in and byte bits out, caller-owned buffers, exceptions caught at the boundary.
+Never pass std::complex, STL objects or ownership of allocations across CRTs.
+If successful, reproducible CMake helper build and local absolute-path loading
+are required; static MinGW runtime linking avoids hidden runtime DLLs.
+
+Vendor pinned redsea DSP with documented minimal adaptations only: extract
+MPXBuffer from file-reader dependencies and widen stream counters to avoid
+the documented seven-hour timing jump. Full recreation on discontinuity resets
+all DSP state, not just the upstream partial reset. Test real upstream MPX
+fixture PI 0x6201, chunk invariance, reset/rate errors, noise and bounded input.
+
+Live GUI integration is gated on those tests. Keep decoded metadata separate
+from speech PCM and P25; bounded work, receiver identity and stale-state rules
+must be explicit. Repair WFM decimation timing only after a failing partition
+test, preserving original aligned-block audio. Do not claim RF validation from
+synthetic or MPX replay alone. No P25 timeout, gate or vocoder changes.
+
+## DEC-0078 - RDS foundation without changing P25 (2026-09-17)
+
+User explicitly defers further P25 optimisation and approves the decoder
+roadmap. Reuse redsea BlockStream/group at commit
+7555c9f6259d50718697ee8c9f218ea012c6892c (windytan/redsea), retaining upstream
+license and file notices. These modules provide bit sync, CRC and burst FEC
+without the full executable's liquid-dsp/libsndfile/iconv dependencies.
+No new RF decoder is claimed: this milestone consumes already-demodulated
+MSB-first RDS bits, with a CLI fixture path and strict complete-group metadata.
+Incomplete groups cannot publish station text; retune/reset clears all state.
+Use bounded assembly and explicit PI / radiotext A-B lifecycle.
+
+Add an opt-in WFM multiplex output before audio LPF/de-emphasis/squelch with
+actual rate, frequency and reset/overwrite provenance. Disabled by default;
+one retained block, no background thread and no audio mutation. First prove
+audio equivalence enabled/disabled. Live 57 kHz extraction, carrier/timing
+recovery and GUI metadata are next and require reference RF tests. A decoder
+registry should follow a working MPX consumer, not list unavailable decoders.
+
+## DEC-0077 - Partition-invariant P25 PCM interpolation and feature QA (2026-09-17)
+
+Live GUI capture 20260917_084229 has five follows, zero IQ overruns and zero
+producer drops, but underrun rises and rejected/missing VCWs. These are not
+proof that interpolation causes all gaps. Source inspection separately finds
+resampleDecodedP25PcmWithState reads idx+1/idx+2 and clamps them to the current
+block tail. Therefore identical PCM split into frames differs from one batch.
+Extract this function unchanged for a failing partition-invariance test. If
+reproduced, use a two-input-sample causal delay so its cubic stencil uses only
+available samples, retaining phase/DC state and exact frame counts. No new
+vocoder, smoothing, gates or buffering thresholds. Test 8 kHz to 48/44.1 kHz,
+20 ms and irregular partitions. Delay is stencil support, not guessed jitter.
+
+Visual QA also found dB tick labels mapped upside-down over the entire widget
+instead of using the spectrum curve transform. Correct that mapping. Band-plan
+Qt tests must use explicitly selected settings format: the org/app constructor
+does not follow setDefaultFormat, so it persisted the test's US selection.
+Repair test isolation and restore AU. Report coverage/remaining RF gaps honestly.
+
+## DEC-0076 - Explicit receive-band profiles, not inferred protocols (2026-09-17)
+
+Replace the mixed-country first-match table with immutable selected profiles
+and value-returning lookup. Region/country/location are explicit metadata;
+local profiles can be imported from bounded validated JSON. Use half-open
+intervals, priority then narrowest span; equal-rank incompatible overlaps must
+not force a mode. Most-specific mixed/data entries block broader analog hints.
+Band-derived defaults apply through existing AUTO paths, not forced changes to
+manual modes or P25 follow. No plan grants encryption/decoder trust. Label
+decoder hints separately from decoder availability. No IP/geolocation lookup.
+
+Primary references checked 2026-09-17: ACMA Australian spectrum plan and CB
+class licence, Ofcom UKFAT/PMR446 guidance, CAA aeronautical stations, USCG
+marine channel table, NOAA NWR frequency list. Sources and partial coverage
+travel with each profile. Receive bandwidths are application defaults, not
+channel spacing or regulatory limits. New dependencies: none.
+
+## DEC-0075 - Presentation-only workspace foundation (2026-09-17)
+
+User approved the next-feature roadmap. MainWindow currently stacks receiver,
+saved-frequency, P25, TX and capture controls in one QVBoxLayout. Reparent the
+existing widgets into named Qt docks; retain all signal handlers and DSP paths.
+Use a small WorkspaceLayout owner for presets, versioned QSettings state,
+visibility/lock actions and reset. No custom docking dependency, decoder rewrite,
+or pretend RDS implementation. Keep runtime-automated sessions from overwriting
+the normal saved layout. Expose preset and screenshot arguments for GUI QA.
+Gate: Qt interaction/persistence tests, real GUI screenshots at different sizes,
+full existing tests, unchanged P25 reference replay. This presentation work is
+independent of unresolved all-call P25 audio acceptance.
+
+## DEC-0074 - Serialize exceptional audio cursor mutation (2026-09-17)
+
+AudioEngine callback loads r, copies PCM, then stores advanced r. clearBuffers
+stores w to that same read cursor without excluding the callback; bridge
+discard also writes it. An in-flight callback can overwrite a clear/discard
+with its stale r. Producer reuse can then race with its sample reads.
+Use a per-ring consumer lease for the callback and exceptional clear/discard.
+The callback only tries once and emits silence if control owns the lease:
+it never waits, allocates or logs. Non-RT clear/discard waits for an active
+consumer to finish. Normal SPSC pushes remain concurrent with consumption.
+Do not attribute recorded live gaps to this race without capture evidence.
+
+## DEC-0073 - Walk this-window validated block tails (2026-09-17)
+
+`[block-tail]` fails on physical burst 12: with one permitted lock and two
+complete valid superframes in one block, the second frame's A/B bursts are
+lost. Uncovered-sync recovery only sees C/D S-ISCH. Permit the existing
+bounded complete-burst walk for block input only when a lock in this very
+commit established the current anchor. Never extend a retained previous-eye
+anchor in block mode. Use the existing two-dibit local sync tolerance for
+that current block. Preserve selected-slot/mask/security processing.
+
+## DEC-0072 - Reject nonphysical Phase 2 quadrant permutations (2026-09-17)
+
+Complete 060515 trace at 06:57 shows burst absolute dibit 57777 decoded
+twice: the bad eye swaps every 0/2 (74 symbols) and preserves all 1/3 (86)
+relative to the correct eye. I-ISCH goes from zero errors/location 0 to six
+errors/location 2; codec repeats follow. The search admits all 24 arbitrary
+quadrant permutations. SDRTrunk DQPSKGardnerSymbolEvaluator maps cyclic
+angles -135,-45,+45,+135 to 3,2,0,1. Rotation/conjugation preserve opposite
+dibit pairs (XOR 3); a 0/2-only swap does not. Restrict Phase 2 traffic search
+and remembered candidates to these eight physical rotations/reflections.
+Leave Phase 1 search unchanged. Verify all permutations, reference IQ, and
+latest IQ before judging improvement; do not relax security to get audio.
+
+## DEC-0071 - Complete opt-in replay provenance (2026-09-17)
+
+Explicit validation still throttles pre-gate records to 250 ms and final
+records to 100 ms, hiding frames in 80 ms replay hops. Permit unthrottled
+records only with explicit validation plus SDR_TOWN_P25_VALIDATION_ALL=1.
+Keep default/automatic logging bounded and existing rotation. This is an
+offline forensic tool, not a live performance benchmark or gate relaxation.
+
+## DEC-0070 - Explicit replay end-of-stream drain (2026-09-17)
+
+GUI reference replay 103841 decoded 404 PCM frames but left 5760 samples
+pending until its eight-second drain timeout: the empty speaker ring required
+a 240 ms startup prime, while the entire remaining tail was 120 ms. At an
+explicit end of stream no more samples can satisfy that threshold. Bypass
+startup priming only for this drain, retaining whole-frame output, capacity
+limits and already-applied security/slot gates. Live startup is unchanged.
+
+## DEC-0069 - Resolve slot ownership before selecting session state (2026-09-17)
+
+Reproduced by `[slot-session]`: I-ISCH location 2 rebases local C to absolute
+burst 10 / slot 1, but its caller passes slot 0's state. With explicit starting
+I-ISCH in the fixture, the original helper loses the known slot-1 talkgroup;
+the corrected helper preserves 30302 and its own encryption state.
+Use the same I-ISCH resolution and actual
+burst position for both session selection and burst labelling in all paths.
+Keep missing-I-ISCH fallback, mask phase, and security acceptance unchanged.
+Reference: SDRTrunk `SuperFrameFragment` constructs C/D timeslots with the
+final-fragment ownership swap before their messages reach per-slot modules.
+
+## DEC-0067 - Exact RS arithmetic caching (2026-09-17)
+
+Accepted after exhaustive arithmetic tests and same-IQ comparison. Replace
+repeated GF64 polynomial multiplication/inversion and unit-symbol syndrome
+construction with immutable lookup tables. Keep polynomial 0x43, decoder
+search order, FEC/CRC criteria, and security gates unchanged. Capture 060515
+commit time falls from 4423 ms to 421 ms over 92 windows; reference 103841 WAV
+SHA256 is unchanged. No timeout/queue-size tuning is authorized by this result.
+Full evidence and remaining gaps: `P25_AUDIO_FORENSICS_20260917.md`.
 A decision is recorded **before** code that depends on it is written.
+
+---
+
+## DEC-0066 — Dead unknown-grant parks must return in ~8s (not ~45s)
+
+- **Date:** 2026-09-15
+- **Status:** accepted
+- **Evidence (capture 20260915_131458):**
+  - Return-to-CC stick fixed (0065); monitoring continued.
+  - **Zero** `P25 audio output` lines; live_speaker.wav ~30 KB empty.
+  - Unknown-enc follows TG12068/10326/… sat **~45s** each with `drop=A`
+    `no-vcw-from-live-window` until ACQ watchdog.
+  - FSM used `waitingUnknownClearGrant` no-VCW **45000/40000** ms.
+- **Decision:**
+  1. Unknown-grant + cold dead (no bursts/VCW/speech): **8s tuned / 6s silence**.
+  2. Unknown-grant with some structure but still no VCW: **12s / 8s**.
+  3. Clear-grant cold dead: **10s / 7s** (was 45s/30s).
+  4. Keep long holds only when call was already live (continuation / speech).
+  5. Hard-timeout also covers unknown/cold dead (~12s), was excluded before.
+- **Out of scope:** why those grants had zero VCWs (RF/slot/enc) — next after
+  hangs stop starving CC of follow opportunities.
+- **Consequences:** Dead parks free the tuner quickly so the next clear grant
+  can be followed. Expect ACQ watchdog ~8–12s on empty voice, not ~45s.
+
+## DEC-0065 — Return-to-CC must follow physical RF, not retunesPrimary flag
+
+- **Date:** 2026-09-15
+- **Status:** accepted
+- **Evidence (capture 20260915_125341 TG10120 @421.350):**
+  - Live clear emits for ~few seconds (CADENCE duty≈0.7–1.0) then drop=A /
+    no-vcw; ACQ watchdog returned.
+  - Return logged: `continuing muted control-channel monitor on 420.350 …
+    without RF retune` while cf was still **421.33875** (voice low-IF).
+  - `retunesPrimary=false` because select thought CC "fits" on voice-park LO,
+    but start still moved primary LO off CC → P25 log went quiet (no CC in
+    passband).
+- **Decision:**
+  1. On independent-traffic release: if primary RF center is >75 kHz from CC,
+     take one-RTL return/warm-standby path even when `retunesPrimary` was false.
+  2. When start moves primary LO away from CC (DEC-0015 align path), latch
+     `p25IndependentTrafficRetunedPrimary=true`.
+- **Out of scope:** sparse mid-call feedRatio/absDup (separate audio duty track).
+- **Consequences:** Return after one-RTL voice must retune home and keep watching
+  CC. Prove: no `without RF retune` while cf≠cc; expect retune/warm-standby +
+  continued stage-lock lines.
+
+## DEC-0064 — Warm-standby must not kill CC monitor on return
+
+- **Date:** 2026-09-15
+- **Status:** accepted (amends DEC-0063 idle early-out)
+- **Evidence (bridge Monitor-CC → follow → return):**
+  - Voice ends; one-RTL warm-standby holds RF on voice while follow flags clear.
+  - CC decode/validation resumed off-frequency (`p25CcInPassband` true at 2.048 Msps).
+  - After follows >30s, ~28 bad windows → `disableP25ControlMonitorDueToValidation`
+    zeros `p25MonitoredControlFreqHz` → P25 log stops; not watching CC.
+  - DEC-0063 idle same-CC early-out could skip recovery re-arm while RF still on voice.
+- **Decision:**
+  1. Pause CC decode + validation while `warmStandbyUntilMs` is active (and while
+     one-RTL traffic retuned primary).
+  2. On real RF return to CC (immediate / follow / warm-standby expire): reset
+     validation + reseed analyzer (same spirit as Monitor CC button).
+  3. Failed retune must **not** claim `p25MonitoredControlFreqHz`.
+  4. Idle arm early-out only if RF is physically on CC and not in warm-standby.
+  5. Status exposes `warmStandbyActive`; analog tune / FUBAR refuse during it.
+  6. Bridge P25 control **persists** `autoFollow` (no restore of stale GUI config).
+- **Out of scope:** RID/TG decode quality; streaming DDC; DEC-0012.
+- **Consequences:** Return-to-CC after bridge follow must resume muted CC watch
+  like the normal GUI path. Prove via warm-standby log then
+  `P25 control validation armed` / continued CC NAC lines (no disable).
+
+## DEC-0063 — Idempotent P25 control arm + refuse analog tune while follow live
+
+- **Date:** 2026-09-15
+- **Status:** accepted
+- **Evidence (FUBAR ↔ SdrTownControl.dll):**
+  - Follow snaps back to Monitor CC **420.350** mid-call; P25 receive stops.
+  - `armGuiRuntimeP25Control` always retuned to CC, cleared
+    `p25AutoFollowVoiceFreqHz` / follow flags, and reset the live decoder —
+    so a repeated `/v1/p25/control` (or Monitor-CC re-arm) killed the grant.
+  - FUBAR analog `Tune` posts `/v1/tune` with `p25AutoFollow=0`, which took
+    the non-P25 path and could retune RF off the voice channel.
+- **Decision:**
+  1. Same-CC re-arm while follow/traffic/voice-freq live → **idempotent**
+     (refresh autoFollow + return-CC only; keep RF/voice/decoder).
+  2. Same-CC idle re-arm with matching autoFollow → no decoder wipe.
+  3. Analog `/v1/tune` while follow live → **409** unless `force=true`.
+  4. Status exposes `voiceFrequencyHz`; log control tune requests.
+  5. FUBAR bridge refuses Tune when status shows follow/traffic active.
+- **Out of scope:** RID/TG decode quality (DEC-0062+); streaming DDC; DEC-0012.
+- **Consequences:** FUBAR Monitor-CC / poll must not snap RF to CC mid-grant.
+  Prove with `p25-control-arm-idempotent` / `tune-refused-follow` log lines.
+
+## DEC-0062 — Mid-grant talkspurt must reset mbelib (225923 RID garble)
+
+- **Date:** 2026-09-13
+- **Status:** accepted
+- **Evidence (capture 20260912_225923 TG30304 clear @421.225 slot=1):**
+  - Live WAV CLEAR ~24 s; CADENCE ok=18/71 (TG30304 mean duty 0.55).
+  - `src=unknown` on all emits — grant SRC never painted; cannot split RIDs in log.
+  - GOOD emits (41): feedR≈1.0, absDup=0, push p50=**360 ms**.
+  - BAD emits (37): raw feedR≈0.30 but **uniqueFreshR p50=1.0** (absDup==ctxDrop
+    always) with fresh_tgt p50=**6** (~120 ms) — overlap tax, not fresh kill.
+  - Operator: one RID perfect, other talk on same grant unintelligible.
+  - Vocoder / preferred-AMBE / sequencer reset only on call/slot/freq change
+    (`p25Phase2SyncAmbeEmitDedupeCallContext`); MAC_PTT only cleared pending
+    AMBE queue. Predictor state survived mid-grant talker changes.
+  - DEC-0061 240+280 held (workers ctx=280); not a thin-overlap regression.
+- **Decision:**
+  1. On target-slot **MAC_PTT** after this call has spoken: reset selected
+     mbelib + resampler + audioTail + frame sequencer + preferred AMBE
+     variants (**keep** abs-dibit de-dupe + security latch + opposite module).
+  2. On target **END_PTT / IDLE / HANGTIME** after spoken: set pending flag;
+     reset on next target voice or on following MAC_PTT.
+  3. Debounce 400 ms against retransmitted MAC_PTT.
+- **Out of scope:** inventing MAC_PTT source-address offsets; thinning overlap;
+  streaming DDC; DEC-0012.
+- **Consequences:** New talkspurts on the same TG grant should not inherit the
+  prior RID's AMBE predictor. Re-prove live; expect `VOCODER_RESET
+  why=mac-ptt-*` between talkers when MAC is visible.
+
+## DEC-0061 — Restore catch-up overlap 280 ms (153932 jitter)
+
+- **Date:** 2026-09-13
+- **Status:** accepted (amends DEC-0060 sizes; restores DEC-0024 overlap)
+- **Evidence (capture 20260912_153932 after DEC-0060 280+80):**
+  - Live WAV CLEAR but **97** active islands, len p50=**40 ms**, mean≈94 ms;
+    short≤80 ms=**75**; chop pairs (island≤120 & gap≤120)=**76**.
+  - Worker shapes dominated by **160+80 / 280+80** (ctx=163840); empty-audio
+    majority on those eyes; sustain 80+280 almost absent while speaking.
+  - Audio top-up **68/69 bridge** (960/1920) at ringFill≈10–12%; underrun
+    path inventing continuity between short emits.
+  - pcm_vs_wall p50≈0.70 — pace improved vs 152348 half-audio, but thin
+    overlap recreated the DEC-0024 eye-death / stutter class.
+- **Decision:** Speaker `backlogCatchUp` → **240 ms fresh + 280 ms overlap**
+  (minFresh 160). Idle sustain stays 80+280. Dual-slot latch (0058.2) unchanged.
+- **Out of scope:** streaming DDC default-on; DEC-0012; absDup budget waste
+  (still B-0001).
+- **Consequences:** Catch-up keeps DEC-0009 lock surface while advancing ≈
+  emit wall (~200–230 ms). Re-prove live duty; expect ctx=573440 on catch-up.
+
+## DEC-0060 — Speaker backlog catch-up must pace RF (152348 half-audio)
+
+- **Date:** 2026-09-13
+- **Status:** superseded by DEC-0061 (thin overlap caused 153932 jitter)
+- **Evidence (capture 20260912_152348 TG11108 RID 0x243754 clear):**
+  - Live WAV CLEAR but longest active run **0.84 s**; active_ratio≈0.52.
+  - Emit islands **pcm_vs_wall ≈ 0.45–0.65** (literally ~half wall speech).
+  - SRC 0x243754 feed_ratio **0.624** with absDup=184 ≈ missing feed; median
+    targetVcw=18 fed=10–12.
+  - Worker shapes **99× fresh=160 ms + ctx=280 ms**; emit dsp p50≈**220 ms** >
+    fresh 160 ms on **20/28** emit jobs; budget trips while ctxDrop/absDup
+    dominate (fed/tgt collapses to ~0.22 on high-absDup hops).
+  - pcm_per_fed median **960** — vocoder fine when fed; failure is pre-vocoder
+    under-advance + budget spent on context that absDup discards.
+  - DEC-0059 ReturnEncrypted only on enc TGs 12068/12069 — not this bug.
+- **Decision:** Speaker `backlogCatchUp` geometry → **280 ms fresh + 80 ms
+  overlap** (360 ms total, same surface as sustain 80+280). Idle sustain stays
+  80+280. Dual-slot latched continuation (DEC-0058.2) unchanged.
+- **Out of scope:** streaming DDC default-on; DEC-0012; inventing PLC.
+- **Consequences:** Catch-up advances ≥ emit dsp p50 so RF backlog drains and
+  CQPSK budget lands on new voice. **Superseded:** 153932 proved 80 ms overlap
+  → 40 ms WAV islands / bridge top-ups; DEC-0061 restored 280 ms overlap.
+
+## DEC-0059 — Companion ESS must not abort clear follows (145139)
+
+- **Date:** 2026-09-13
+- **Status:** accepted
+- **Evidence (capture 20260912_145139):**
+  - Live WAV ~14.3 s CLEAR / fragmented (longest run 1.32 s); CADENCE ok=7/60;
+    primary FEED_GATE; TG30302 mean duty ~0.25.
+  - Clear TG **30302** RID **0x2391D7** emitted ess=clear / targetEss=clear, then
+    `ReturnEncrypted trustedEss=yes … ess=enc macCrc=2` while grantLatch=no —
+    abandoned mid-call. Encrypted hold then blocked re-follow; RID **0x2353DA**
+    later recovered better (absDup=0).
+  - Same RF dual-slot: encrypted TG **12068** companion on opposite slot.
+  - Root: sticky session-painted ESS / `trafficStatus.diag.encrypted` ORed into
+    follow ESS, plus monotonic `RecentTargetEssEncrypted` OR that never cleared
+    on later clear observations. Pending drain also released opposite-only
+    (targetVcw=0 pendingRel=8).
+- **Decision:**
+  1. Traffic processor security flags only from **this-burst** ESS/traffic-SO.
+  2. Voice target ESS encrypted only from observed this-burst paint; sticky
+     clear may keep known, never promote encrypted.
+  3. Recent target ESS: this-window clear **clears** sticky encrypted.
+  4. MainWindow follow ESS uses target-slot fields; do **not** OR traffic
+     `diag.encrypted`. Do not Clear→Encrypted promote while latch is Clear.
+  5. Refuse pending AMBE drain on opposite-only windows (targetVcw=0, opp>0).
+- **Out of scope:** DEC-0012 softening; streaming DDC default-on; budget/worker.
+- **Consequences:** Clear RIDs should survive companion encrypted ESS on the
+  opposite timeslot. Still open: absDup/ctxDrop underpush, budget trips (B-0001).
+
+## DEC-0058 — Speaker backlog catch-up + latched dual-slot continuity (142104)
+
+- **Date:** 2026-09-13
+- **Status:** accepted
+- **Evidence (capture 20260912_142104 TG10301 clear @417.675 ~57s):**
+  - Live WAV listen=CLEAR but only **~15 s** / 436 s; longest active run **2.24 s**.
+  - Worker windows **63×** iq=737280 fresh=163840 context=573440 (80+280).
+  - dsp p50≈**198 ms** / p90≈**585 ms**; worker-busy **56**; budget trips **154**.
+  - Emit gaps mean≈**0.9 s** max≈**3 s** — weak/strange choppy islands.
+  - Mid-call waiting clear grant with p2ess=clear / callClearTrusted=yes on
+    dual-slot MAC-dead hops (target≈opp, mac≈0) after Clear latch.
+  - DEC-0032 absolute ban on backlog overriding speaker 80+280 under-advanced RF.
+- **Decision:**
+  1. When speaker-sustain/active-clear **and** acklogCatchUp: keep **280 ms**
+     overlap; advance **160 ms** fresh (minFresh 80). Idle sustain stays 80+280.
+  2. Latched/spoken clear + selected-dominant + companion accounted + target ESS
+     known clear → do not dual-slot-garble-drop / feed-starve (DEC-0012 companion-
+     louder PostEmitMixedMacDead unchanged).
+- **Consequences:** Catch-up while lagging without shrinking overlap; fewer
+  waiting-clear holes after Clear latch. Budget/worker cost still open under B-0001.
+  **Amended by DEC-0060 then DEC-0061:** catch-up sizes are now **240+280**.
+
+## DEC-0057 — Wrong-TDMA status on clear immutable grant
+
+- **Date:** 2026-09-13
+- **Status:** accepted (amended after Catch/forensic)
+- **Evidence (capture 20260912_135857 TG30003):**
+  - Listen WAV **29.2 s CLEAR**; CADENCE ok=16/83; **wrong_tdma=47**; 75 follow
+    lines Phase 2 wrong TDMA slot with p2vcw&gt;0 decoded=0 (no concurrent emit).
+  - CC grant **SLOT=1** immutable; emit avg targetVcw≈13.7 opp≈6.9 — dual-slot
+    RF with companion talker. Slot probe correctly refuses flip when mask known.
+  - Logic: phase2WrongSlot set whenever opposite has VCWs and selected has none
+    — brands normal companion dwell as wrong slot.
+  - Catch with planted final-fragment I-ISCH: lock slips (sfOff=180) and absolute
+    index for phys C is **10 → grantSlot 1** (standards C/D swap). Lock-relative
+    parity for index 6 would have labelled TS1 and fought the CC grant.
+- **Decision:**
+  1. Do not set phase2WrongSlot when p25Phase2GrantedSlotImmutable (companion
+     dwell / opposite-only silence on our timeslot). Pending drain same rule.
+  2. Keep DEC-0055.3: **grantSlot** from I-ISCH absolute index when A/B agree;
+     else lock-relative %12. Do **not** force lock-rel-only (that mislabels
+     final-fragment C/D and does not stop companion-dwell status spam).
+- **Consequences:** Status should stop spamming wrong-TDMA on clear grants while
+  slot labels stay standards-aligned when I-ISCH is present. Remaining continuity
+  holes still FEED_GATE/budget/worker.
+
+
+## DEC-0056 — Clear follow hang + WFM default BW
+
+- **Date:** 2026-09-12
+- **Status:** accepted
+- **Evidence (capture `20260912_134135`):**
+  - Enc TGs return in &lt;1 s (`ReturnEncrypted`). Clear TG30302 hung ~57 s after
+    speech; live WAV only **5.64 s** CLEAR; CADENCE ok=2/64, budget_trip=47,
+    worker_busy=63, primary FEED_GATE.
+  - Meta: NFM **12.5 kHz**, `audio_lpf_enabled=false` — P25 speaker is AMBE PCM;
+    Demod LPF/WFM BW are **not** on this path.
+  - Root hang: `clearTrustedHold` extended 40 s speaker grace with no traffic;
+    structure-only `lastActive` refresh; clear no-VCW timers 45–60 s; carrier
+    acquire hold after speech.
+- **Decision:**
+  1. Extended speaker grace requires **current** traffic evidence (not grant-clear alone).
+  2. After clear speech, no-VCW return in **12 s tuned / 6 s silence**.
+  3. Carrier-acquire hold only in early acquire (`lastActive` ≤ tune+2.5 s).
+  4. After speaker/clear latch, do not refresh `lastActive` on structure-only.
+  5. WFM/AUTO default BW **220 kHz** (snap 180–250); separate from P25.
+- **Not fixed here:** clear mid-call blocky islands (dual-slot/epoch/budget/worker)
+  — still open under B-0001; BW/LPF not the cause on Phase-2 follow.
+
+## DEC-0055 — Epoch identity + dual-slot keep-selected PCM
+
+- **Date:** 2026-09-12
+- **Status:** accepted
+- **Evidence:** Code audit of IQ→mbelib→speaker: (1) DualSlot MAC-dead
+  `audio.clear()` punched holes after Clear latch with labelled selected VCWs;
+  (2) `epochTrusted` soft arm `establishedClear && xorApplied && grantSlotKnown`
+  fed wrong sticky phase as continuous garble; (3) grantSlot used lock-relative
+  `%12` only — I-ISCH flip rejected (20260720) but absolute **origin** unused.
+- **Decision:**
+  1. **Dual-slot:** Clear latch + labelled selected (`targetVcw>0`, fed,
+     strong/trusted) → keep PCM (`dual-slot-untrusted-keep-selected-pcm`); else
+     still `audio.clear()`. Feed mute / DEC-0012 companion-louder unchanged.
+  2. **epochTrusted:** remove bare establishedClear+xor+grantSlot. Continuity via
+     this-burst SF/mask/MAC or `forceEstablishedFeed` only. Prefer hole over garble.
+  3. **I-ISCH origin:** when A/B I-ISCH agree, rebase absolute index
+     `location*4+local` for grantSlot/mask; missing/disagree → lock-relative.
+     Do not flip via I-ISCH alone without origin rebase.
+- **Out of scope:** streaming DDC default-on (DEC-0038); DEC-0012 softening;
+  invent PLC; budget DEC-0052–0054.
+- **Consequences:** Fewer post-clear dual-slot silence holes; wrong-phase feed
+  rejects instead of garble; mid-lock slot labels track standards when I-ISCH
+  present. Live 100% still needs B-0001 start/stop + listen harvester.
+
+## DEC-0054 — Restore cold full-commit; sticky cheap only (`081416`)
+
+- **Date:** 2026-09-12
+- **Status:** accepted
+- **Evidence:**
+  - `061217` (pre-0052): ~**92 s** CLEAR WAV, many emits — almost fully clear.
+  - `064509` (0052 skip): ~0.6 s golden then silence.
+  - `081416` (0053): **0.36 s SILENT** WAV, **1** audio emit, cheap-commit
+    log hits **0**, budget trips generic only, worker-busy 147.
+  - Root: CQPSK half-budget headroom stopped search before
+    `realtimeBudgetExceeded()`, so forceCheap never re-armed; when cold
+    forceCheap did run it poisoned first eye (phase0 / no deep rescue).
+- **Decision:**
+  1. **Remove** DEC-0052 CQPSK commit-headroom reserve.
+  2. **Cold / non-sticky:** never forceCheap; re-arm
+     `kP25LiveColdCommitAllowanceMs` (**200**) and full annotate.
+  3. **Sticky only:** cheap-commit + re-arm
+     `kP25LiveStickyCheapCommitAllowanceMs` (**120**).
+  4. Never skip-commit (064509). Keep DEC-0051 mid-loop aborts.
+- **Consequences:** Aim to restore 061217-class continuous CLEAR follows.
+  Worker may again run >80 ms on cold acquires — acceptable vs silence.
+
+## DEC-0053 — Sticky budget path cheap-commits (not skip) (`064509`)
+
+- **Date:** 2026-09-12
+- **Status:** accepted
+- **Evidence (capture `20260912_064509`, ~257 s, post–DEC-0052):**
+  - First follow emit ~0.6 s **CLEAR**, then permanent silence; only **2** emits
+    total (WAV **1.24 s**) vs `061217` **91.96 s** CLEAR / **478** emits.
+  - CADENCE ok≥0.65=**0**; no_vcw **470**; budget_trip **4**; emit p50 **170**
+    (improved) but continuity collapsed.
+  - eye-lost **0** — not DEC-0048. Skip-commit after sticky ready zeroed VCWs.
+  - Cheap-commit with already-expired CQPSK deadline also emits 0 VCW (annotate
+    loops break on entry) — need a short re-arm allowance.
+- **Decision:**
+  1. **Reject** sticky skip-commit. Sticky+budgetGone → **cheap-commit** on
+     sticky lattice (same forceCheap path as cold).
+  2. Re-arm `kP25LiveCheapCommitAllowanceMs` (**50**) before cheap annotate.
+  3. Prefer `cheap-commit` tags in p25_log budget-trip lines.
+  4. Keep CQPSK headroom (DEC-0052); do not soften DEC-0012; streaming DDC off.
+- **Consequences:** Expect multi-second CLEAR follows again with bounded dsp;
+  logscan should show `cheap-commit sticky-sustain` not silence after first emit.
+
+## DEC-0052 — Close mustAnnotateCommit budget hole (`061217`)
+
+- **Date:** 2026-09-12
+- **Status:** accepted
+- **Evidence (capture `20260912_061217`, ~713 s, gapless, SNR≈17.9):**
+  - Live listen overall **CLEAR** (3 brief GARBLED 2 s islands) — almost fully
+    clear subjectively.
+  - CADENCE n=676: A=446 D=197 ok=**20**; duty mean 0.135 max 1.038.
+  - Emit dsp p50≈**223** / p90≈**562** (worse than 044651’s 212); worker-busy
+    **690** (~0.97/s); rolling busy max still **~15.9 s**; wall-timeout **0**.
+  - DEC-0051 budget-trip log hits: **0** — early-out never ran.
+  - Root cause: `mustAnnotateCommit = phase2CqpskTrafficDemod || …` is always
+    true on live Phase-2 follow, so processIq still ran full annotate/commit
+    after the deadline; CQPSK also consumed the whole 80 ms budget before
+    commit.
+  - File bars on clear islands: duty 0.67–0.78 listen=CLEAR; LIVE_WORSE is
+    continuity (busy cliffs), not RF/mbelib.
+- **Decision:**
+  1. Sticky sustain + budget gone → **skip full commit** (free worker; next hop
+     continues lattice). Log `[p25][budget][dec0052] skip-commit…`.
+  2. Cold first-eye + budget gone → **cheap commit** only (no 12-phase /
+     deep rescue); flag `m_phase2ForceCheapRealtimeCommit`.
+  3. Reserve ~half of realtime budget as CQPSK→commit headroom (25–60 ms).
+  4. Surface budget trips into p25_log (`P25 budget trip:`) + logscan
+     `budget_trip` signature.
+- **Consequences:** Expect emit p50≪120, busy/sec down, ok→D cliffs fewer;
+  listen should stay CLEAR. Do not soften DEC-0012; streaming DDC stays off.
+
+## DEC-0051 — Cooperative mid-decode realtime budget abort (`044651`)
+
+- **Date:** 2026-09-12
+- **Status:** accepted
+- **Evidence (capture `20260912_044651`, automated full forensic):**
+  - Live CADENCE A=86 D=35 ok=5; TG10120 max duty **0.909**; TG20202 max
+    **0.639**; worker-busy **135**; rolling grew to **~15.9 s** while busy.
+  - Worker dsp: emit p50≈**212 ms** / p90≈**491 ms**; empty p90≈**228 ms** /
+    max **642 ms** under healthy budget **80** / eye-lost **120**.
+  - Wall-timeout **0** — DEC-0046 post-hoc wall never fired; jobs still held
+    single-flight for hundreds of ms (CQPSK stop ≠ commit/mask abort).
+  - File path still recovers RF/mbelib; PRIMARY class FEED_GATE + slow worker.
+- **Decision:**
+  1. Arm a processIq-scoped deadline (`armRealtimeDecodeBudget`) shared by
+     CQPSK search, Phase-2 sync scan, lock walk, 12-phase mask hunt, and
+     sticky burst walk.
+  2. Abort those loops cooperatively when exceeded; keep best-so-far; still
+     run annotate/commit when Phase-2 traffic requires it, but commit itself
+     is budget-gated (fixes “mustAnnotateCommit always unbounded”).
+  3. Do **not** clamp decode wall (DEC-0046 stands). Do **not** soften
+     DEC-0012. Streaming DDC stays default-off.
+  4. Catch `[p25][cqpsk][budget]` ceiling **350 ms** (was 2500); verifier
+     `verify_p25_phase2_cooperative_budget_abort.py`.
+- **Consequences:** Live worker should release near budget so the next 80+280
+  eye can run; expect fewer worker-busy cliffs and less rolling explosion.
+  Operator still resets PPM≈−2 after DEC-0049; re-prove with start/stop +
+  DEC-0050 listen classifier.
+
+## DEC-0050 — PCM listen classifier (CLEAR / GARBLED / SILENT) for live vs file
+
+- **Date:** 2026-09-12
+- **Status:** accepted
+- **Evidence:** File IQ replay is repeatedly “pretty good” (duty≥0.65 / PASS) while
+  live same-day captures are islands then nothing / subjective garble. CADENCE
+  duty, drop A–E, and STT chars/words do **not** score perceptual clear speech;
+  duty can pass on blocky/garbled PCM.
+- **Decision:**
+  1. Add `p25_pcm_listen_classify.py` — frame RMS / ZCR / spectral flatness /
+     envelope CV → **CLEAR | GARBLED | SILENT** (orthogonal to duty).
+  2. Dump `*_live_speaker.wav` during start/stop IQ capture (speaker-push PCM).
+  3. Wire classify into `run_p25_capture_full_forensic.py` +
+     `run_p25_listen_bar_harvester.py`; CLI `p25 listenclassify <wav>`.
+  4. Fixtures: file-replay WAV goldens + live/file mismatch flag
+     `LIVE_WORSE_THAN_FILE`.
+- **Consequences:** Automation can fail a “PASS duty” bar when listen=GARBLED,
+  and prove live-path regressions without relying on operator ears alone.
+
+## DEC-0049 — Harden Auto PPM after 1250 Hz overshoot (`044651`)
+
+- **Date:** 2026-09-12
+- **Status:** accepted
+- **Evidence (capture `20260912_044651`, ~268 s):**
+  - Live: TG10120 ok duty up to **0.909** (5 windows); TG20202 max **0.639**
+    drop D; CADENCE A=86 D=35 ok=5; worker-busy **135**.
+  - Auto PPM applied **twice** from AFC=**1250.0**Hz conf=**0.45**:
+    ppm −1.93 → −4.91 → **−7.88**. Summary residual AFC ~874 Hz. CC TSBK
+    showed high dibit corrections / CRC notes after overshoot.
+  - File voicetest TG10120 duty **0.64**; TG20202 **0.615** — RF+mbelib OK;
+    live “nothing” after good islands is eye/worker, not codec.
+- **Decision:**
+  1. Reject AFC samples on soft-probe rail ±1250 (±5 Hz).
+  2. Min conf **0.55**, max |AFC| **2000**, max step **1.5** ppm, cooldown
+     **120 s**.
+  3. Apply only from **trusted CC offset** — never fall back to
+     `gLastAfcOffsetHz` after Phase 2.
+  4. `p25AutoPpmAfcSampleAcceptable` + Catch `[p25][ppm][dec0049]`.
+- **Consequences:** Stops LO walk-off. Operator should reset device PPM
+  near **−2.0** before next listen. Worker-busy / feedRatio still open.
+
+---
+
+## DEC-0048 — Escalate eye-lost cand=16 on first post-emit miss (`041612`)
+
+- **Date:** 2026-09-12
+- **Status:** accepted (implemented; live re-prove pending)
+- **Evidence (capture `20260912_041612`, ~215 s, DEC-0046 exe):**
+  - Live CADENCE n=100: drop A=82 D=13 B=5; duty max **0.399**; ok≥0.65 **0**;
+    worker-busy **103**; Auto PPM **0**; wall-timeout **0**.
+  - **Same IQ file** `p25 voicetest` TG20202 slot1 8s:
+    `PASS_PARTIAL` **duty=0.805** drop=ok ambe=322/322 — RF+mbelib fine.
+  - Live emits briefly then permanent `no-vcw` under healthy cand=4; eye-lost
+    waited streak≥2 before cand=16.
+- **Decision:** `kP25LiveEyeLostReplayCandStreak = 1` (first post-emit eye-lost
+  hop uses cand=16 / 120 ms). Keep healthy cand=4/80. No mbelib-neo, hop/TTL,
+  DEC-0012 soften, or streaming default-on.
+- **Consequences:** Faster live re-lock toward file duty. Worker emit dsp
+  p50≈227 ms still open (cooperative abort).
+
+---
+
+## DEC-0047 — Automated `p25 logscan` deep forensic CLI
+
+- **Date:** 2026-09-12
+- **Status:** accepted
+- **Evidence:** Live “no audio” invisible to voicetest; need CADENCE /
+  worker-busy / wall / Auto PPM / reject-before-feed rollup from startstop logs.
+- **Decision:** `python src/tools/p25_logscan.py` + CLI `p25 logscan <dir>`
+  prints primary failure class and mbelib-neo advice (only when CADENCE ok).
+- **Consequences:** Every listen with startstop is automatable.
+
+---
+
+## DEC-0046 — Do not clamp live decode wall / wipe pending on wall stamps
+
+- **Date:** 2026-09-12
+- **Status:** accepted (reverts DEC-0045 clamp; hardens publish path)
+- **Evidence:**
+  - Operator: after DEC-0044/0045 Release, audio “really bad” again
+    (almost-worked → next gap-fix kills it).
+  - Wall is checked **after** `decodeP25VoiceAudioBlock` returns — it does
+    not cooperatively abort. Jobs can still run ≫ budget.
+  - Publish path: `decode-wall-timeout` without keepEvidence called
+    `p25Phase2ClearStaleResultSpeakerPending` → wiped playout mid-call.
+  - Clamping healthy wall to **105** made empty eyes (>105 ms) hit that
+    path constantly → continuous audio death.
+- **Decision:**
+  1. **Reject** DEC-0045 wall clamp; healthy/eye-lost keep global wall **320**.
+  2. Wall stamps (`decode-wall-timeout` / `overbudget-kept`) must **never**
+     clear speaker pending; empty overruns publish diags only.
+  3. Keep DEC-0044 auto PPM (return-to-control only).
+  4. No hop/TTL / DEC-0012 soften / streaming default-on.
+- **Consequences:** Restores pre-0045 pending continuity. Worker-busy when
+  dsp ≫80 remains open — needs cooperative budget abort, not wall stamps.
+  Catch `[p25][dec0046]` + verifiers lock the invariant.
+
+---
+
+## DEC-0045 — Cap live healthy/eye-lost decode walls (`032907`)
+
+- **Date:** 2026-09-12
+- **Status:** **rejected** (superseded by DEC-0046)
+- **Evidence (capture `20260912_032907`):** emit-gate dsp p50≈451 vs budget 80;
+  wall 320. Intent was to yield single-flight sooner.
+- **Decision (original):** clamp healthy wall 105 / eye-lost 145.
+- **Why rejected:** wall is post-hoc; clamp increased empty-timeout pending
+  wipes without shortening jobs. See DEC-0046.
+
+---
+
+## DEC-0044 — Auto PPM from sustained CC AFC (return-to-control only)
+
+- **Date:** 2026-09-12
+- **Status:** accepted (implemented; live re-prove pending)
+- **Evidence:** `032907` / prior captures: ppm device **0.0** while CC AFC
+  sits near **~884 Hz**. Soft-AFC cold seed exists; live still acquires then
+  cliffs on worker throughput. Manual PPM only today (`setFrequencyCorrection`
+  / CLI `ppm`). Baking CC AFC into LO mid-voice fights DEC-0016 park.
+- **Decision:**
+  1. On **return-to-control** (not warm-standby / not mid-voice), optionally
+     apply `estimatePpmCorrectionDelta(CC AFC, CC Hz)` via
+     `DeviceManager::setFrequencyCorrection`.
+  2. Gates: |AFC| 200–3500 Hz, conf ≥0.45 (or trusted CC offset ≤5 min),
+     |Δppm| ≥0.40, step clamp ±5, cooldown 30 s.
+  3. Prefer `gP25LastTrustedControlOffsetHz` over live AFC globals after
+     Phase 2 park.
+- **Consequences:** First follows start closer to LO; does not by itself fix
+  worker-busy drop D (that is DEC-0045).
+
+---
+
+## DEC-0043 — Post-speak opp-dominant sticky wipe debounced (twin rescue reverted)
+
+- **Date:** 2026-09-12
+- **Status:** accepted (debounce kept; ±1 twin rescue reverted after `024000`)
+- **Evidence:**
+  - `20260912_020758` TG20201 clear: post-speak opp-dominant sticky invalidate
+    wiped proven XOR/epoch → permanent `no-vcw` (file duty ~0.80).
+  - `20260912_024000` live: clear TG30003 @421.975 file
+    `PASS_CONTINUOUS duty=0.705` but live max **0.649**, wrong-TDMA /
+    `no-sf-mask` / worker-busy. Soft DUID ±1 twin rescue + debounce stuck
+    bad epochs — twin path reverted.
+- **Decision:**
+  1. After speak, opp-dominant sticky invalidate requires streak **≥3**.
+     Pre-speak keeps immediate invalidate.
+  2. **Do not** prefer ±1-burst lock twins via soft DUID scores on block path.
+  3. No hop/TTL / DEC-0012 soften / streaming default-on.
+- **Consequences:** Live clear continuity still open (worker drop D). Re-prove
+  on ENC=clear follows after rebuild.
+
+---
+
+## DEC-0042 — Healthy live sustain uses cand=4 / 80 ms (002128 forensic)
+
+- **Date:** 2026-09-12
+- **Status:** accepted (implemented; live re-prove pending)
+- **Evidence (capture `20260912_002128`, ~54 min, SNR ~15 dB, DEC-0041 exe):**
+  - CADENCE n=2731: mean duty **0.115**, ok≥0.65 only **99**; drops
+    A=1891 / D=650 / B=91 / ok=99. worker-busy **2782**.
+  - **Same failure on every TG** (30017/30302/30003/10301/10330/20201/…):
+    not a one-site grant quirk.
+  - Drop D feedRatio **0.445** ≈ ok feedRatio **0.427** — playout duty is
+    low because fewer VCWs/windows complete per second (tv 50 vs 117,
+    windows 6.4 vs 10.2), not because the feed gate newly blocks.
+  - Hard cliffs (duty≥0.50→&lt;0.15, n=27): **every** example co-timed with
+    worker-busy in the prior 2.5 s; then targetVcw collapses → drop A.
+  - Emit-gate WORKER dsp p50 **199** / p90 **535** ms on 80+280 eyes while
+    sustain needs ~80 ms hops under pending=1.
+  - **File voicetest** same capture TG **30017** slot1 skip=0 8s:
+    `PASS_CONTINUOUS duty=0.83` — RF/MAC are continuous; live extract starves.
+  - DEC-0041 eye-lost budget cap alone did not move the mean-duty class vs
+    `234224` (0.134 → 0.115 on a longer sample).
+- **Decision:**
+  1. When post-emit eye is **healthy** (`!eyeLost`): live hot caps
+     **cand=4 / budget=80** (`kP25LiveHealthySustain*`).
+  2. Keep DEC-0041: first eye-lost miss cand=8/120; streak≥2 → cand=16/120.
+  3. No hop/TTL change. No DEC-0012 soften. No streaming default-on.
+- **Consequences:** Re-prove file bars 060036/095846. New live CADENCE must
+  raise ok seconds / cut worker-busy without collapsing any TG’s peak duty.
+
+---
+
+## DEC-0041 — Live eye-lost re-lock keeps cand=16 inside hot 120 ms wall
+
+- **Date:** 2026-09-12
+- **Status:** accepted (implemented; file bars + live re-prove pending)
+- **Evidence:**
+  - Capture `20260911_234224` (~372 s gapless CC IQ, SNR ~12.5 dB) on ACCH
+    branch Release: CADENCE drop **D=101**/338 with `worker-busy` while
+    `pendingJobs=0` / `busy=yes`; operator heard short &lt;1 s islands after
+    brief emit.
+  - WORKER (rate-limited): dsp p50 **69.5** / p90 **461** / max **1515** ms;
+    emit-gate dsp p50 **202** / p90 **590**; submit interval p50 **159** ms
+    vs DEC-0009 sustain fresh **80** ms.
+  - DEC-0035/0039 live eye-lost used full replay caps **cand=16 / budget=240**.
+    That matches CLI/voicetest width but on the single-flight GUI worker the
+    240 ms wall + block-channelize produced multi-hundred-ms jobs → scheduler
+    skips → drop D death spiral. Healthy eye correctly stayed cand=8/120
+    (DEC-0019 / 060221).
+  - Do **not** soften DEC-0012. Do not invent hop/TTL. Do not default-on
+    streaming DDC (DEC-0038).
+- **Decision:**
+  1. Keep DEC-0039 definition of eye-lost (post-emit no-target counts).
+  2. First consecutive post-emit eye-lost hop stays **cand=8 / 120** (cheap
+     challenge). Streak ≥2 escalates to **cand=16** (replay width).
+  3. Live escalate budget is **`kP25LiveEyeLostReplayBudgetMs` = hot 120**,
+     not `kP25ReplayHotBudgetMs` (240). CLI/voicetest may still use 240.
+  4. Realtime unknown-mask deep ACCH rescue stays alt-kind capable but is
+     bounded to top **2** phases × deep budget **1** (was 4×2 on the ACCH
+     branch) so acquisition cost cannot re-feed drop D.
+- **Consequences:** Re-prove file bars 060036 / 095846. Live CADENCE on a
+  new GUI follow should cut worker-busy drop D without losing DEC-0035-class
+  re-lock width after a short miss streak.
 
 ---
 

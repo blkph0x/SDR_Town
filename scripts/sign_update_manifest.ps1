@@ -24,6 +24,12 @@ function Find-OpenSsl {
     return $null
 }
 
+function Invoke-OpenSsl {
+    param([string[]]$Arguments)
+    & $openssl @Arguments
+    if ($LASTEXITCODE -ne 0) { throw "OpenSSL failed ($LASTEXITCODE)." }
+}
+
 function Write-PublicKeyInc {
     param([string]$PubDerPath, [string]$IncPath)
     $der = [System.IO.File]::ReadAllBytes($PubDerPath)
@@ -54,9 +60,9 @@ if ($GenerateKeyPair) {
     if (-not (Test-Path $keyDir)) {
         New-Item -ItemType Directory -Path $keyDir | Out-Null
     }
-    & $openssl genpkey -algorithm ED25519 -out $PrivateKeyPath | Out-Null
+    Invoke-OpenSsl @('genpkey', '-algorithm', 'ED25519', '-out', $PrivateKeyPath)
     $pubDer = [System.IO.Path]::GetTempFileName()
-    & $openssl pkey -in $PrivateKeyPath -pubout -outform DER -out $pubDer | Out-Null
+    Invoke-OpenSsl @('pkey', '-in', $PrivateKeyPath, '-pubout', '-outform', 'DER', '-out', $pubDer)
     Write-PublicKeyInc -PubDerPath $pubDer -IncPath $PublicKeyIncPath
     Remove-Item $pubDer -Force
     Write-Host "Generated signing keypair."
@@ -75,9 +81,22 @@ if (-not (Test-Path $PrivateKeyPath)) {
     throw "Private signing key not found: $PrivateKeyPath`nRun: scripts/sign_update_manifest.ps1 -GenerateKeyPair"
 }
 
+# DEC-0090: ordinary signing must not rotate the application's trust anchor.
+$pubDer = [System.IO.Path]::GetTempFileName()
+try {
+    Invoke-OpenSsl @('pkey', '-in', $PrivateKeyPath, '-pubout', '-outform', 'DER', '-out', $pubDer)
+    $der = [System.IO.File]::ReadAllBytes($pubDer)
+    if ($der.Length -ne 44) { throw "Unexpected Ed25519 public key length." }
+    $hex = -join ($der[-32..-1] | ForEach-Object { $_.ToString('x2') })
+    $embedded = Get-Content $PublicKeyIncPath -Raw
+    if ($embedded -notmatch ('"' + [regex]::Escape($hex) + '"')) {
+        throw "Signing key does not match embedded public key. Rebuild after an explicit key rotation."
+    }
+} finally { Remove-Item -LiteralPath $pubDer -Force }
+
 $sigBin = [System.IO.Path]::GetTempFileName()
 try {
-    & $openssl pkeyutl -sign -inkey $PrivateKeyPath -rawin -in $ManifestPath -out $sigBin | Out-Null
+    Invoke-OpenSsl @('pkeyutl', '-sign', '-inkey', $PrivateKeyPath, '-rawin', '-in', $ManifestPath, '-out', $sigBin)
     $sigBytes = [System.IO.File]::ReadAllBytes($sigBin)
     if ($sigBytes.Length -ne 64) {
         throw "Expected 64-byte Ed25519 signature, got $($sigBytes.Length)"
@@ -87,12 +106,4 @@ try {
     Write-Host "Wrote manifest signature: $sigPath"
 } finally {
     if (Test-Path $sigBin) { Remove-Item $sigBin -Force }
-}
-
-$pubDer = [System.IO.Path]::GetTempFileName()
-try {
-    & $openssl pkey -in $PrivateKeyPath -pubout -outform DER -out $pubDer | Out-Null
-    Write-PublicKeyInc -PubDerPath $pubDer -IncPath $PublicKeyIncPath
-} finally {
-    if (Test-Path $pubDer) { Remove-Item $pubDer -Force }
 }

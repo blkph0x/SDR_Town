@@ -233,7 +233,14 @@ public:
     void append(const std::vector<float>& samples)
     {
         if (!m_out.is_open() || samples.empty()) return;
-        for (float sample : samples) {
+        append(samples.data(), samples.size());
+    }
+
+    void append(const float* samples, size_t count)
+    {
+        if (!m_out.is_open() || !samples || count == 0) return;
+        for (size_t i = 0; i < count; ++i) {
+            const float sample = samples[i];
             const double v = std::isfinite(sample) ? std::clamp<double>(sample, -1.0, 1.0) : 0.0;
             const int16_t s = static_cast<int16_t>(std::lround(v * 32767.0));
             writeU16(static_cast<uint16_t>(s));
@@ -346,6 +353,12 @@ void appendCliP25OppositeWavCapture(const std::vector<float>& samples);
 CliP25WavCaptureSummary stopCliP25WavCapture();
 CliP25WavCaptureSummary stopCliP25OppositeWavCapture();
 
+// DEC-0050: live start/stop sidecar — what the speaker actually heard (not file IQ replay).
+bool startLiveIqSpeakerWavCapture(const QString& path, double sampleRate, QString* error = nullptr);
+void appendLiveIqSpeakerWavCapture(const float* samples, size_t count);
+void appendLiveIqSpeakerWavCapture(const std::vector<float>& samples);
+CliP25WavCaptureSummary stopLiveIqSpeakerWavCapture();
+bool liveIqSpeakerWavCaptureActive() noexcept;
 bool writeJsonDocumentFile(const QString& path, const json& doc, QString* error = nullptr);
 const char* captureHealthVerdict(uint64_t samplesWritten,
                                  uint64_t ringOverrunSamples,

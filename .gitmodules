@@ -4,3 +4,6 @@
 [submodule "external/mbelib"]
 	path = external/mbelib
 	url = https://github.com/szechyjs/mbelib.git
+[submodule "external/liquid-dsp"]
+	path = external/liquid-dsp
+	url = https://github.com/jgaeddert/liquid-dsp.git

@@ -1,5 +1,236 @@
 # Code notes (tree map)
 
+DEC-0100/0101/0102: P25Aliases is a bounded Qt JSON model/merge/resolve and
+atomic storage module with RadioReference CSV talkgroup and site imports.
+P25AliasDialog stages imports/manual edits and only commits on Save.
+P25TalkgroupRegistry's table renderer loads names independently; alphaTag wins,
+otherwise known WACN/System ID+TGID must match. Site aliases annotate control
+log `site=` lines and Alpha Tag tooltips. Never modifies registry rows or audio
+decisions. MainWindow adds the manager beside Add TG. Alias tests live in the
+Qt workspace target and use temporary databases, not the user's files.
+
+DEC-0099: SstvReceiverFeed owns the optional live queue. Attach/detach/finish
+serialize against publication; RX only try-locks, and contention becomes an
+explicit gap. SstvLiveSession runs receiver validation, bounded stream decode
+and atomic image/report saves on the worker. Finish quiesces RX then drains
+queued data; cancel or a source discontinuity discards provisional output.
+MainWindow captures the main receiver on the GUI thread; its worker never
+dereferences MainWindow. Only active manual NFM outside P25 is accepted.
+SstvWindow provides Recording/Live NFM, Receive, Finish and save, and Cancel.
+tests/test_sstv_live_gui.cpp covers lifecycle and real-recording image parity;
+scripts/test_sstv_worker.py can also target extracted-package test executables.
+Historical notes below describe earlier isolated stages, now integrated.
+
+DEC-0098: SstvStreamWorker consumes explicit data/idle/EOF callbacks on a
+non-GUI thread, validates chronological stream identity, converts, feeds a
+128 KiB-capped QProcess stdin queue and drains bounded progress/stderr.
+In-stream gaps invalidate provisional output instead of splicing epochs.
+Normal EOF returns owned images/metadata only after zero exit and bytewise
+preview/RGB-file parity. Temporary RGB filenames are removed from returned
+metadata; no disk publication in this layer. Guard kills/reaps on failure.
+Independent test uses actual SstvLiveInput plus converter/helper and compares
+against converted-file decoding. It is not attached to a live receiver yet.
+
+DEC-0097: SstvRateConverter owns a persistent bundled miniaudio resampler on
+one non-real-time worker. Scaled integer rates preserve fractional timing to
+0.0001 Hz; output is 48 kHz mono float. Exact 48 kHz bypass is unchanged.
+Input <=8192 samples, output bounded at sixfold plus one carried interval.
+No gain/speaker filtering, block flushing or artificial EOF tail. Invalid input
+invalidates the session until start(rate); owner must reset on every queue gap.
+Not wired to RX. Tests include independent fixture export consumed by
+scripts/test_sstv_rate.py, plus sample equality across caller chunk sizes.
+
+DEC-0096: src/sstv_backend/src/pcm.rs supplies the pinned decoder's i16 iterator
+from buffered file or stdin input. It retains I/O/odd-length/limit errors until
+finish(); main.rs rejects the whole session on failure. Output is provisional
+until exit zero. Reader storage is fixed, not proportional to capture duration.
+Helper --stdin preserves sample order across byte-fragmented writes and flushes
+both progressive rows and image metadata. Owner drains both pipes and controls
+deadline/cancellation. Rust reader units join CTest when SSTV images are enabled;
+scripts/test_sstv_stream.py covers independent recordings and pipe lifecycle.
+No C++ RX/GUI caller uses stdin yet; existing file interface remains compatible.
+
+DEC-0095: SstvLiveInput is an isolated, preallocated NFM ingress queue in
+sdr_town_decoders. It preserves fractional sample rate and absolute position,
+and emits generation-tagged gap events before replacement data after faults.
+Producer try_lock never waits on a consumer; capacity is limited by both slots
+and sample duration. Rejected blocks are included in discardedSamples; gaps
+counts reset operations, which can coalesce into one event. Lifecycle control
+requires a quiescent producer. test_sstv_live_input.cpp checks ordering, bad
+input, retunes/epochs, both overflow limits, restart and concurrent accounting.
+No receiver, P25, speaker, helper or UI path calls this component yet.
+
+DEC-0094: SstvProgress parses bounded progressive helper JSONL, validates row
+geometry/uniqueness and completion, retains assembled frames for final RGB parity.
+Rust helper --progress exports native scanlines without modifying DSP. Optional
+SstvPreview callback is consumed on the file worker. SstvWindow exchanges one
+mutex-protected latest image, observed by a 50ms UI timer, no per-row GUI queue.
+Failure/cancellation clears provisional pixels. CLI without callback retains its
+prior metadata-only helper path. test_sstv_progress.cpp exercises transport edges;
+real Qt tests cover full/partial independent recordings and preview/final equality.
+
+DEC-0093: SstvWindow is a nonmodal recorded-audio window using one QThread job
+and the same SstvImageFile function as CLI. QProcess stays on that worker;
+only queued completion touches widgets. Optional cancellation is checked during
+input conversion, helper waits and before publication. Close waits asynchronously;
+parent destruction cancels/joins. MainWindow Tools reuses one window instance.
+Tests cover busy/close/cancellation/error states and actual-recording pixel parity
+using the same window class; scripts/test_sstv_gui.py supplies independent fixtures.
+
+DEC-0092: SstvImageFile.h/.cpp normalize bounded mono audio to LE16 temporary
+PCM, launch an app-adjacent helper via argument-array QProcess with deadline/log
+limits, validate schema/mode/row/RGB outputs, then save new-directory PNGs/report.
+src/sstv_backend is a pinned Cargo helper consuming upstream ImageStart/Row/End
+events; duplicate rows, unsupported modes and excess images fail closed.
+cmake/SstvBackend.cmake opts Rust image builds in, stages helper and dependency
+notices; core VIS builds remain Rust-free. release.ps1 enables image backend and
+verify_release.py now requires matching helper/licences. Tests exercise independent
+off-air Robot36 and M1 recordings, exact wrapper pixel parity and failure cases.
+No P25, demodulator, speaker, GUI live tap or radio timing code changed.
+
+DEC-0091: SstvVis.h/.cpp implement bounded native classic VIS inspection with
+sample-clock positions, parity/framing gates and explicit reset. SstvAudioFile.cpp
+uses existing miniaudio file decode, mono/rate/duration/size limits. CLI sstv inspect
+is offline-only and reports imageDecoded=false. test_sstv_vis.cpp covers protocol
+vectors/partitions/rejection; test_sstv_cli.py exercises the executable and optional
+independent upstream audio. No receive registry image capability or live tap added.
+
+DEC-0090: scripts/release.ps1 checks native exit status, clean source, actual
+branch, CTest and signed packages. sign_update_manifest.ps1 rejects trust-anchor
+mismatch rather than rewriting it during ordinary signing. verify_release.py
+checks hashes, embedded-key signature, portable runtime/paths and configured RTL.
+test_verify_release.py tests happy-path layout and rejection cases with tiny
+fixtures; real release verification separately exercises OpenSSL. Windows CI
+explicitly builds the native core without the MinGW RDS DSP runtime; local full
+release gates include that backend. See RELEASING.md for publication semantics.
+
+DEC-0088/0089: CMake stage_rtl_runtime stages the configured shared RTL target
+instead of trusting stale output-folder DLLs; deploy includes package licence.
+probe_rtlsdr_lifecycle.py isolates native RX lifecycle from Qt/Soapy/DSP.
+test_gui_shutdown.py and test_rds_live_gui.py --debugger collect CDB exception
+stacks and reject first-chance AVs. See NATIVE_RUNTIME_QA.md for acceptance scope.
+
+DEC-0087: diagnose_rds_iq.py accepts explicit cf32_le/cu8 with whole-complex
+sample validation; test_rds_iq_diagnostic.py proves format parity and rejects
+malformed input. test_rds_live_gui.py --rf-gain uses the existing authenticated
+loopback API, restores prior gain, and requires real hardware in final results.
+
+DEC-0086: ReceiveDecoder.cpp optional RdsParity wrapper compares native and
+adapted live results with bounded counters and teardown-only JSONL output.
+test_rds_cli.py verifies it on recorded data; test_rds_live_gui.py --parity
+requires agreement AND reception. diagnose_rds_iq.py provides bounded offline
+FFT-channelized MPX evidence, with a synthetic normalization/invalid-input test.
+Neither changes production DSP settings.
+
+DEC-0085: ReceiveDecoder.h/cpp defines immutable compiled descriptors, borrowed
+versioned raw float blocks, typed snapshot variants and native adapters. Internal
+sdr_town_decoders links existing RDS/tone libraries and owns the high-level MPX
+file reader. Receiver's RDS session and CLI MPX file reader share this adapter;
+tone live paths and P25 are not migrated. CLI `decoders` lists requirements
+without module/hardware probing. See RECEIVE_DECODERS.md and adapter parity tests.
+
+DEC-0084: DcsBitDecoder generates Golay-valid codewords for 105 reference
+payloads, indexes physical inversion/cyclic aliases and requires repeated words.
+DcsDecoder owns eight bounded timing hypotheses and thread-safe snapshots.
+GUI NFM raw-data branch feeds both CTCSS and DCS; speaker/P25 processing does
+not use their results. RdsStatusWidget presents equivalent DCS labels and hides
+stale data. CLI `tones dcs` / `tones dcs-bits` and test_dcs_cli.py provide bounded
+offline diagnostics. No new third-party dependency or copied decoder algorithm.
+
+DEC-0082: NFM data tap has an independent phase-continuous oscillator; speech
+AFC threshold resets do not create data epochs. Same-rate/length bandwidth
+updates retain IQ history. Explicit source/retune reset still resets the data
+path. Analog NFM bandwidth-only GUI changes no longer discard the input cursor.
+First 32 data epochs log reset reason bits; bounded startup diagnostics do not
+log per-sample data. scripts/test_dcs_reference.py is an independent protocol
+oracle and ideal waveform generator, NOT an implemented DCS receiver.
+
+DEC-0081: CtcssDecoder (sdr_town_tones) is a single-owner, bounded streaming
+Goertzel identifier with locked snapshot publication and WAV/FLAC diagnostics.
+Demod's isolated FM tap now accepts NFM plus explicit nominal channel identity
+for AFC continuity. GUI analog worker routes NFM raw data to CTCSS, WFM to RDS;
+P25 branches unchanged. Above-spectrum status and GUI diagnostic JSON expose
+CTCSS. CLI `tones file` is offline and does not enumerate/open radio hardware.
+
+DEC-0080: Receiver owns RdsMpxDecoder on existing DSP worker; WFM obtains IQ
+provenance from getNewIQWindowForReceiver and resets only data-tap state on gaps.
+RdsStatusWidget displays plain-text confirmed metadata, clears on retune/inactive
+mode and hides stale identity. GUI self-test JSON contains RDS diagnostics.
+visibleBandSections resolves/clips priority overlaps, cached by SpectrumWidget.
+Waterfall drags freeze the frequency transform and commit one tune on release.
+
+DEC-0079: RdsDspAbi and src/rds_backend isolate pinned Redsea/liquid-dsp in a
+MinGW C ABI DLL. RdsMpxDecoder owns one decoder, recreates on provenance changes,
+rejects nonfinite/unbounded input and publishes mutex-protected snapshots.
+RdsMpxFile reads bounded mono MPX through existing miniaudio. `rds mpx` is an
+offline CLI diagnostic. Demod's optional MPX branch now has separate causal
+filter and decimation history; legacy speech/P25 processing is unchanged.
+cmake/RdsBackend.cmake builds/copies the DLL beside native app and test binaries.
+
+DEC-0078: RdsDecoder wraps pinned redsea BlockStream/group (sdr_town_rds static
+library). API takes differential-decoded bits, emits only complete validated
+groups, and bounds station text assembly. Tests use upstream reference bits,
+independent polynomial-generated groups and corruption fixtures. CliApp's
+read-only `rds bits` command parses bounded files and returns a JSON snapshot.
+Demod's optional FmMultiplexBlock branches before speech DSP with explicit
+sample-rate/epoch semantics and no queue. No live RDS consumer yet. Vendor
+license/source notices are included by deploy and install rules.
+
+DEC-0077: P25AudioResampler now owns the extracted stateful PCM interpolation
+function. The two-input-sample causal delay removes block-tail future-sample
+clamping; phase, sample count and DC history remain persistent. Regression
+test: test_p25_audio_resampler.cpp. No analog DSP or P25 security changes.
+compare_pcm_wav.py checks actual normalized WAV samples, not container hashes;
+test_compare_pcm_wav.py covers format equivalence and malformed input.
+
+DEC-0076 / REQ-BP.1: `BandPlan` provides immutable country/local profiles,
+atomic shared snapshots, priority/specificity lookup and bounded JSON validation.
+`BandPlanDialog` handles selection, import/export and explicit persistence.
+`SpectrumWidget` overlays profile/service hints and visible service boundaries;
+`MainWindow` supplies actual monitor frequency, menu/button and visibility.
+Existing AUTO selection and classifier priors query the catalog by value.
+CLI `bandplans list/select` and GUI `--gui-bandplan` expose the same catalog.
+`test_bandplan.cpp` covers bounds, ambiguity, hostile imports and concurrency;
+the Qt test target covers preview/Apply/cancel and temporary settings isolation.
+Source/coverage limitations and schema: `BAND_PLANS.md`. No P25 gates changed.
+
+DEC-0075 / REQ-UI.1: `WorkspaceLayout` owns named dock registration, preset
+visibility/tab arrangement, versioned QSettings persistence and View actions.
+`MainWindow` reparents the existing widgets only; receiver signal connections
+and DSP workers are unchanged. `CliApp` parses workspace/size/screenshot flags;
+the GUI saves its own widget image for QA. Tests: `test_workspace.cpp` (separate
+Qt Widgets/Catch executable) and `scripts/test_workspace_gui.py` (actual GUI,
+four presets, startup report + screenshots). No new decoder dependency added.
+
+DEC-0074: `AudioEngine::RingBuffer::ConsumerLease` serializes callback read
+cursor commits with exceptional clear/bridge-discard operations. Callback
+tries once and emits silence on contention; control threads may yield while
+waiting. Producer writes retain SPSC behavior under the existing audio mutex.
+Six cumulative callback/producer counters are sampled into GUI ring-health CSV
+outside the realtime thread. `p25_capture_audit.py` reports their deltas and
+rejects reset/invalid series; empty callbacks are not inferred speech loss.
+Regression cases: `[audioengine][cursor]`.
+
+DEC-0071/72/73: validation can opt into all-window offline tracing.
+`dsp/P25CqpskStagedScorer.h` validates physical quadrant mappings, used only
+for Phase 2 traffic candidate search/reuse in `P25LiveDecoder.cpp`. The decoder
+also walks block tails from a current-window anchor and excludes those bursts
+from uncovered-sync processing. Tests: `[mapping]`, `[block-tail]`.
+
+2026-09-17 follow-up: `P25LiveDecoder.cpp` resolves I-ISCH ownership before
+selecting a mutable slot session (DEC-0069); callers pass the actual burst
+position. `P25VoiceDecode.cpp` validation adds absolute stream coordinates.
+Its speaker push helper accepts an explicit end-of-stream flag used only by
+GUI replay tail drain (DEC-0070). Live defaults remain unchanged. Regression
+coverage: `[slot-session]` and `[p25][audio]`.
+
+2026-09-17: `include/P25Gf64.h` provides immutable GF(64) product/inverse
+tables for the RS recovery path in `P25LiveDecoder.cpp` (DEC-0067). Exhaustive
+byte-domain equivalence tests live in `tests/test_p25live.cpp`. The decoder
+also caches its 63 unit-symbol syndrome columns; neither cache carries call,
+slot, or mutable decoder state. Playback top-up drains decoded PCM only;
+it no longer appends speculative clock silence (055312 forensic report).
+
 If a P25 file's purpose is not in this table, the map is wrong — fix the map
 in the same commit. Analog/GUI modules are listed at coarse grain until they
 become the active REQ.

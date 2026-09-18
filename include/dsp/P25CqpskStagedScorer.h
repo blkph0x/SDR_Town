@@ -10,6 +10,18 @@
 
 namespace p25dsp {
 
+// DEC-0072 / SDRTrunk DQPSKGardnerSymbolEvaluator: cyclic dibits 3,2,0,1.
+// Rotation/conjugation may change orientation, but never opposite pairs.
+inline bool isPhysicalPhase2DibitMapping(const std::array<int, 4>& p) noexcept
+{
+    unsigned seen = 0;
+    for (int d : p) {
+        if (d < 0 || d > 3 || (seen & (1u << d))) return false;
+        seen |= 1u << d;
+    }
+    return (p[0] ^ p[2]) == 3 && (p[1] ^ p[3]) == 3;
+}
+
 struct P25Phase2SyncPreview {
     int bestSyncErrors = 999;
     int bestInvertedErrors = 999;

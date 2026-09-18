@@ -78,12 +78,24 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
         }
         sessionAudioRelease = sessionAudioRelease ||
             (burst.sessionAudioRelease && trafficTalkgroupBelongsToCall);
+        // DEC-0059 / capture 145139: sticky session-painted essKnown/encrypted on
+        // every Voice2/4 (including companion-updated ESS) made the traffic
+        // processor report encrypted=true while the followed clear slot still
+        // emitted ess=clear — MainWindow ORed that into ReturnEncrypted.
+        // Only this-burst ESS / traffic-SO observations may set security here.
         burstEssKnown = burstEssKnown ||
-            burst.essKnown ||
-            (trafficTalkgroupBelongsToCall && burst.trafficSecurityKnown);
+            (burst.essObservedThisBurst && burst.essKnown) ||
+            (burst.trafficSecurityObservedThisBurst &&
+             trafficTalkgroupBelongsToCall &&
+             burst.trafficSecurityKnown);
         burstEncrypted = burstEncrypted ||
-            (burst.essKnown && burst.encrypted) ||
-            (trafficTalkgroupBelongsToCall && burst.trafficSecurityKnown && burst.trafficEncrypted);
+            (burst.essObservedThisBurst &&
+             burst.essKnown &&
+             (burst.essEncrypted || burst.encrypted)) ||
+            (burst.trafficSecurityObservedThisBurst &&
+             trafficTalkgroupBelongsToCall &&
+             burst.trafficSecurityKnown &&
+             burst.trafficEncrypted);
         macPttSeen = macPttSeen || burst.macPttSeen;
         macActiveSeen = macActiveSeen || burst.macActiveSeen;
         macEndPttSeen = macEndPttSeen || burst.macEndPttSeen;

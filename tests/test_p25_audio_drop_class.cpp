@@ -91,3 +91,20 @@ TEST_CASE("P25 audio drop classifier: voicetest span scales the unique floor", "
     sample.windowSeconds = 8.0; // unique/s = 2.5 < 8 → A, not B
     REQUIRE(classifyP25AudioDrop(sample) == P25AudioDropBucket::Extract);
 }
+
+TEST_CASE("DEC-0046 wall timeout must not clear speaker pending", "[p25][drop][dec0046]")
+{
+    REQUIRE_FALSE(p25Phase2WallTimeoutMayClearSpeakerPending("decode-wall-timeout", false));
+    REQUIRE_FALSE(p25Phase2WallTimeoutMayClearSpeakerPending("decode-wall-overbudget-kept", false));
+    REQUIRE_FALSE(p25Phase2WallTimeoutMayClearSpeakerPending("decode-wall-timeout", true));
+    REQUIRE(p25Phase2WallTimeoutMayClearSpeakerPending("traffic-generation-stale", false));
+    REQUIRE(p25Phase2WallTimeoutMayClearSpeakerPending("call-session-changed", false));
+}
+
+TEST_CASE("DEC-0046 healthy sustain wall equals global wall until cooperative abort", "[p25][drop][dec0046]")
+{
+    REQUIRE(p25Phase2LiveSustainBudgetWallSane(80, 320, 320));
+    REQUIRE_FALSE(p25Phase2LiveSustainBudgetWallSane(80, 105, 320)); // DEC-0045 rejected
+    REQUIRE_FALSE(p25Phase2LiveSustainBudgetWallSane(80, 60, 320));  // wall < budget
+    REQUIRE_FALSE(p25Phase2LiveSustainBudgetWallSane(0, 320, 320));
+}

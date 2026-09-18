@@ -3,9 +3,9 @@
 # Run from project root after a successful build/fix session.
 
 param(
-    [string]$Version = "0.2.19",
+    [Parameter(Mandatory = $true)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version,
     [ValidateSet("stable", "experimental")]
-    [string]$Channel = "stable",
+    [string]$Channel = "experimental",
     [string]$RemoteDiagnosticsUrl = "",
     [string]$RemoteDiagnosticsTokenFile = "$env:APPDATA\SDR_Town\remote_diagnostics_token.txt",
     [switch]$SkipPush,
@@ -14,10 +14,31 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Invoke-Checked {
+    param([string]$Program, [string[]]$Arguments)
+    & $Program @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Program failed with exit code $LASTEXITCODE; release stopped."
+    }
+}
+
 Write-Host "=== SDR Town $Channel Release v$Version ===" -ForegroundColor Cyan
 
 $root = $PSScriptRoot | Split-Path -Parent
 Set-Location $root
+
+$branch = git symbolic-ref --quiet --short HEAD
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($branch)) {
+    throw "Release requires an attached source branch."
+}
+$dirty = git status --porcelain --untracked-files=normal
+if ($LASTEXITCODE -ne 0 -or $dirty) {
+    throw "Commit reviewed source changes and exclude local artifacts before releasing."
+}
+$existingTag = git tag --list "v$Version"
+if ($LASTEXITCODE -ne 0 -or $existingTag) {
+    throw "Tag v$Version already exists or could not be checked."
+}
 
 $cmakeText = Get-Content CMakeLists.txt -Raw
 $escapedVersion = [regex]::Escape($Version)
@@ -27,18 +48,21 @@ if ($cmakeText -notmatch "project\(SDR_Town VERSION\s+$escapedVersion\s+LANGUAGE
 
 # 1. Ensure clean branded build
 Write-Host "`n[1/6] Running clean deploy + windeployqt + cpack..." -ForegroundColor Yellow
-cmake --build build --config Release --target deploy | Out-Null
+Invoke-Checked cmake @('-S', '.', '-B', 'build', '-DSDR_TOWN_ENABLE_SSTV_IMAGES=ON')
+Invoke-Checked cmake @('--build', 'build', '--config', 'Release', '--target', 'deploy', 'sdr_town_tests', 'sdr_town_workspace_tests', '-j', '4')
+Invoke-Checked ctest @('--test-dir', 'build', '-C', 'Release', '--output-on-failure')
 
 $qtWindeploy = "C:\Qt\6.11.1\msvc2022_64\bin\windeployqt.exe"
 if (Test-Path $qtWindeploy) {
     Push-Location build\bin\Release
-    & $qtWindeploy SDR_Town.exe --no-compiler-runtime --no-system-d3d-compiler | Out-Null
-    Pop-Location
+    try {
+        Invoke-Checked $qtWindeploy @('SDR_Town.exe', '--no-compiler-runtime', '--no-system-d3d-compiler')
+    } finally { Pop-Location }
 } else {
-    Write-Warning "windeployqt not found at expected path. Using existing deployed tree."
+    throw "windeployqt is required for a verified release package."
 }
 
-cmake --build build --config Release --target deploy | Out-Null
+Invoke-Checked cmake @('--build', 'build', '--config', 'Release', '--target', 'deploy', '-j', '4')
 
 if (-not [string]::IsNullOrWhiteSpace($RemoteDiagnosticsUrl)) {
     $portableStaging = "build\deploy_staging"
@@ -66,7 +90,7 @@ if (-not [string]::IsNullOrWhiteSpace($RemoteDiagnosticsUrl)) {
     Write-Host "  Injected packaged remote diagnostics config: $RemoteDiagnosticsUrl"
 }
 
-cpack -G NSIS -C Release --config build/CPackConfig.cmake | Out-Null
+Invoke-Checked cpack @('-G', 'NSIS', '-C', 'Release', '--config', 'build/CPackConfig.cmake')
 
 $setupName = "SDR_Town-$Version-win64-setup.exe"
 $setup = @(
@@ -98,6 +122,10 @@ $setupShaFile = "SDR_Town-$Version-win64-setup.exe.sha256"
 
 $portableZip = "SDR_Town-$Version-win64-portable.zip"
 $portableHash = if (Test-Path $portableZip) { (Get-FileHash $portableZip -Algorithm SHA256).Hash.ToLower() } else { "" }
+$controlDll = "SdrTownControl-$Version-win64.dll"
+Copy-Item -LiteralPath "$portable\SdrTownControl.dll" -Destination $controlDll -Force
+$controlHash = (Get-FileHash $controlDll -Algorithm SHA256).Hash.ToLower()
+"$controlHash  $controlDll" | Set-Content "$controlDll.sha256" -Encoding ascii
 
 # Update update.json
 $manifest = Get-Content update.json | ConvertFrom-Json
@@ -117,22 +145,25 @@ $manifest | ConvertTo-Json -Depth 10 | Set-Content update.json -Encoding utf8
 @"
 $setupHash  SDR_Town-$Version-win64-setup.exe
 $portableHash  SDR_Town-$Version-win64-portable.zip
+$controlHash  $controlDll
 "@ | Set-Content SHA256SUMS.txt -Encoding ascii
+
+Invoke-Checked python @('scripts/verify_release.py', '--version', $Version, '--installer', $setup)
 
 Write-Host "  update.json and SHA256SUMS.txt updated with fresh hashes."
 
 # 3. Commit metadata
-git add update.json SHA256SUMS.txt
-git commit -m "release: v$Version dev build - updated manifests + SHA256SUMS" --allow-empty | Out-Null
+Invoke-Checked git @('add', 'update.json', 'update.json.sig', 'SHA256SUMS.txt')
+Invoke-Checked git @('commit', '-m', "release: v$Version experimental assets and signed manifest")
 
 if (-not $SkipPush) {
     Write-Host "`n[3/6] Pushing code + tag..." -ForegroundColor Yellow
     if (git tag --list "v$Version") {
         throw "Tag v$Version already exists. Pick a new version instead of overwriting a published release."
     }
-    git tag -a "v$Version" -m "SDR Town $Version"
-    git push origin master
-    git push origin "v$Version"
+    Invoke-Checked git @('tag', '-a', "v$Version", '-m', "SDR Town $Version")
+    Invoke-Checked git @('push', 'origin', $branch)
+    Invoke-Checked git @('push', 'origin', "v$Version")
 }
 
 if (-not $SkipAssets) {
@@ -142,14 +173,13 @@ if (-not $SkipAssets) {
         $gh = (Get-Command gh -ErrorAction SilentlyContinue).Source
     }
     if ($gh -and (Test-Path $gh)) {
-        $assets = @($setup, $setupShaFile, $portableZip, "update.json", "update.json.sig", "SHA256SUMS.txt") | Where-Object { Test-Path $_ }
+        $assets = @($setup, $setupShaFile, $portableZip, $controlDll, "$controlDll.sha256", "update.json", "update.json.sig", "SHA256SUMS.txt")
         $notes = if ($Channel -eq "experimental") { "Experimental tester build. Fresh installer, portable ZIP, manifest, and hashes for the in-app updater." } else { "Stable build. Fresh installer, portable ZIP, manifest, and hashes for the in-app updater." }
         $ghArgs = @("release", "create", "v$Version") + $assets + @("--title", "SDR Town $Version ($Channel)", "--notes", $notes, "--repo", "Blkph0x/SDR_Town", "--verify-tag", "--latest")
-        & $gh @ghArgs | Out-Null
+        Invoke-Checked $gh $ghArgs
         Write-Host "  Assets uploaded via gh."
     } else {
-        Write-Host "  gh CLI not found in expected locations. Please run the manual upload or install gh."
-        Write-Host "  Direct link: https://github.com/Blkph0x/SDR_Town/releases/edit/v$Version"
+        throw "gh CLI not found; release assets have not been uploaded."
     }
 }
 

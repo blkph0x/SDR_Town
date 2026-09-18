@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 #include <optional>
 #include <string>
 #include <vector>
@@ -43,6 +44,14 @@ struct P25ChannelIdentifier {
     int slotsPerCarrier = 1;
     bool phase2Capable = false;
 };
+
+inline bool p25ChannelIdentifierSessionUsable(const P25ChannelIdentifier& identifier)
+{
+    return identifier.valid && identifier.id < 16 &&
+        std::isfinite(identifier.baseHz) && std::isfinite(identifier.spacingHz) &&
+        identifier.spacingHz >= 5000.0 && identifier.spacingHz <= 25000.0 &&
+        identifier.baseHz >= 30e6 && identifier.baseHz <= 1.0e9;
+}
 
 struct P25ExplicitChannelDescriptor {
     bool valid = false;

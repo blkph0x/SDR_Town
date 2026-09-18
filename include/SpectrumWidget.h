@@ -8,6 +8,7 @@
 #include <complex>
 #include <vector>
 #include <deque>
+#include "BandPlan.h"
 
 class SpectrumWidget : public QWidget
 {
@@ -40,9 +41,11 @@ public:
     // Called from the main level timer so the plot can show the current squelch metric and floor.
     void setLiveRms(double rmsDb);
     void setLiveLevels(double signalDb, double noiseFloorDb);
+    void setBandPlanMonitorFrequency(double hz); // GUI-thread overlay target, not hardware LO
+    void setBandPlanOverlayEnabled(bool enabled);
 
 signals:
-    void frequencySelected(double freqHz);  // user clicked
+    void frequencySelected(double freqHz);  // click/drag committed on release
     void bandwidthSelected(double bwHz);    // future drag select
     void squelchThresholdChanged(double db); // user dragged the interactive squelch line/bar on the right side
 
@@ -99,11 +102,18 @@ private:
     // interaction
     bool m_dragging = false;
     int m_lastMouseX = 0;
+    double m_dragLowHz = 0, m_dragBwHz = 0, m_dragPreviewHz = 0;
+    int m_dragPlotWidth = 1;
     int m_tuneX = -1;  // last clicked x for visual tune line across full display (incl waterfall)
 
     // Squelch visualization + interactive control (linked to main GUI Squelch spin + receivers)
     double m_squelchThresholdDb = -80.0;
     bool m_squelchDragging = false;
+    double m_bandPlanMonitorHz = 0;
+    bool m_bandPlanOverlayEnabled = true;
+    std::shared_ptr<const BandPlanProfile> m_overlayProfile;
+    double m_overlayLow = 0, m_overlayHigh = 0;
+    std::vector<BandPlanEntry> m_overlaySections;
 
     // Live RF markers for drawing "signal" and "noise floor" reference lines.
     double m_liveSignalDb = -100.0;

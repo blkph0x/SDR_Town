@@ -125,21 +125,20 @@ P25Phase2VoiceChunkPlan p25Phase2PlanVoiceDecodeChunk(
         return plan;
     }
 
-    // DEC-0032 / capture 20260909_081701: do NOT let backlogCatchUp override
-    // speaker-sustain. DEC-0031 put 120+280 ahead of DEC-0009 80+280 after
-    // speak; the first cold emit (dsp~428 ms) left enough backlog that the
-    // next hop became fresh=120 ms and immediately went `no voice sync`
-    // (drop A hang). Keep lastDecode-anchored catch-up only when we are not
-    // already on the speaker-sustain / active-clear path.
+    // Speaker-sustain / active-clear path (DEC-0009 geometry).
+    // DEC-0032 forbade backlogCatchUp from *replacing* 80+280 after 081701.
+    // DEC-0058 used 160+280; DEC-0060 thinned overlap to 80 ms → 153932 jitter
+    // (40 ms WAV islands / bridge top-ups). DEC-0061: 240+280 (see header).
     if (speakerSustainDecode ||
         (activeSpeakerClearPath && !wideReacquireWindow &&
          !maskEpochRepairWindow && !unacquiredAcquireWindow && !coldEye)) {
-        // SDRTrunk's traffic source is continuous.  Our one-RTL worker cannot
-        // skip to live-edge with 180 ms catch-up just because lag exceeded one
-        // 50 ms hop — that is the jitter/garble-between-speech pattern.
-        // DEC-0020 tried 80 ms fresh + 0 overlap after emit (live wall proxy):
-        // voicetest wall 16.6→2.8 s but 105622 duty 0.645→0.055 drop=A
-        // (eye loss). Keep DEC-0009 80+280 until streaming DDC keeps the eye.
+        if (backlogCatchUp) {
+            plan.maxChunkSeconds = kP25Phase2VoiceDecodeSpeakerBacklogCatchUpChunkSeconds;
+            plan.overlapSeconds = kP25Phase2VoiceDecodeSpeakerBacklogCatchUpOverlapSeconds;
+            plan.minFreshSeconds = kP25Phase2VoiceDecodeSpeakerBacklogCatchUpMinFreshSeconds;
+            plan.minFreshFloorSamples = 8192.0;
+            return plan;
+        }
         plan.maxChunkSeconds = kP25Phase2VoiceDecodeSpeakerSustainChunkSeconds;
         plan.overlapSeconds = kP25Phase2VoiceDecodeSpeakerSustainOverlapSeconds;
         plan.minFreshSeconds = kP25Phase2VoiceDecodeSpeakerSustainMinFreshSeconds;

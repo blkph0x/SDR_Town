@@ -2,7 +2,7 @@ name: Windows CI
 
 on:
   push:
-    branches: [master, main, 'ci/**', 'refactor/**']
+    branches: [master, main, 'ci/**', 'refactor/**', 'fix/**']
   pull_request:
     branches: [master, main]
 
@@ -59,7 +59,10 @@ jobs:
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" `
             -DBUILD_TESTS=ON `
-            -DSDR_TOWN_ENABLE_MBELIB=ON
+            -DSDR_TOWN_ENABLE_MBELIB=ON `
+            -DSDR_TOWN_BUILD_RDS_DSP=OFF
+          # CI covers native core; the MinGW MPX backend has separate full-release gates.
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build SDR_Town + tests
         shell: pwsh
@@ -100,3 +103,7 @@ jobs:
           }
           Write-Host "PASS=$ok FAIL=$fail"
           if ($fail -gt 0) { exit 1 }
+
+      - name: Release verifier negative tests
+        shell: pwsh
+        run: python scripts/test_verify_release.py

@@ -2,6 +2,7 @@
 
 #include "P25FollowStateMachine.h"
 #include "P25ReceiverSession.h"
+#include "P25VoiceTiming.h"
 
 namespace {
 
@@ -11,6 +12,87 @@ constexpr int diag(P25FollowDiagCode code)
 }
 
 } // namespace
+
+TEST_CASE("P25 talkspurt reset preserves the speaker call ordinal", "[p25][audio]")
+{
+    P25Phase2FrameSequencer sequence;
+    sequence.armed = true;
+    sequence.callSessionId = 43465069035521ULL;
+    sequence.talkgroupId = 10120;
+    sequence.slot = 1;
+    sequence.nextSpeechOrdinal = 294;
+    sequence.haveActiveBurst = true;
+    sequence.expectedVoiceIndex = 2;
+    sequence.heldFutureFrames[3] = P25Phase2SequencerSpeechInput{};
+
+    sequence.resetForTalkspurt();
+    REQUIRE(sequence.armed);
+    REQUIRE(sequence.callSessionId == 43465069035521ULL);
+    REQUIRE(sequence.talkgroupId == 10120);
+    REQUIRE(sequence.slot == 1);
+    REQUIRE(sequence.nextSpeechOrdinal == 294);
+    REQUIRE_FALSE(sequence.haveActiveBurst);
+    REQUIRE_FALSE(sequence.heldFutureFrames[3].has_value());
+
+    // The next 106 frames must remain new to a speaker expecting frame 294.
+    int64_t speakerExpected = 294;
+    for (int i = 0; i < 106; ++i) {
+        REQUIRE(sequence.nextSpeechOrdinal >= speakerExpected);
+        speakerExpected = ++sequence.nextSpeechOrdinal;
+    }
+    REQUIRE(speakerExpected == 400);
+    sequence = {};
+    REQUIRE(sequence.nextSpeechOrdinal == 0);
+    REQUIRE_FALSE(sequence.armed);
+}
+
+TEST_CASE("P25 talkspurt boundaries follow capture order across overlapping windows", "[p25][audio]")
+{
+    P25Phase2TalkspurtOrder order;
+    REQUIRE_FALSE(order.voiceAfterBoundary(100));
+    REQUIRE(order.acceptBoundary(1080));
+    REQUIRE_FALSE(order.voiceAfterBoundary(900));
+    REQUIRE_FALSE(order.voiceAfterBoundary(1080));
+    REQUIRE(order.voiceAfterBoundary(1260));
+    REQUIRE_FALSE(order.acceptBoundary(1080));
+    REQUIRE_FALSE(order.acceptBoundary(900));
+    REQUIRE(order.acceptBoundary(2160));
+    REQUIRE_FALSE(order.voiceAfterBoundary(1980));
+    REQUIRE(order.voiceAfterBoundary(2340));
+    order = {};
+    REQUIRE(order.acceptBoundary(0));
+}
+
+TEST_CASE("P25 active playback drains ready frames below its startup threshold", "[p25][audio]")
+{
+    constexpr size_t frame = 960;
+    constexpr size_t startup = 12 * frame;
+    REQUIRE(p25SpeakerNeedsStartupPrime(0, frame, startup));
+    REQUIRE_FALSE(p25SpeakerNeedsStartupPrime(0, startup, startup));
+    size_t queued = 2 * frame;
+    size_t consumed = 0;
+    // One second of complete, ordered frames arriving every 20 ms while the
+    // ring is below the old 240 ms re-prime threshold must never underflow.
+    for (size_t i = 0; i < 50; ++i) {
+        REQUIRE_FALSE(p25SpeakerNeedsStartupPrime(queued, frame, startup));
+        queued += frame;
+        REQUIRE(queued >= frame);
+        queued -= frame;
+        consumed += frame;
+    }
+    REQUIRE(consumed == 48000);
+    REQUIRE(queued == 2 * frame);
+}
+
+TEST_CASE("P25 end of stream drains short tails without changing live priming", "[p25][audio]")
+{
+    constexpr size_t frame = 960;
+    constexpr size_t startup = 12 * frame;
+    for (size_t frames = 1; frames < 12; ++frames) {
+        REQUIRE(p25SpeakerNeedsStartupPrime(0, frames * frame, startup));
+        REQUIRE_FALSE(p25SpeakerNeedsStartupPrime(0, frames * frame, startup, true));
+    }
+}
 
 TEST_CASE("P25 follow returns immediately when a voice channel proves encrypted", "[p25][follow]")
 {
@@ -390,6 +472,40 @@ TEST_CASE("P25 follow treats pre-audio Phase 2 acquisition as call activity", "[
     REQUIRE(decision.action == P25FollowAction::None);
 }
 
+TEST_CASE("P25 follow does not abandon spoken clear grant on traffic-encrypted alone", "[p25][follow]")
+{
+    // DEC-0059 / 145139: companion sticky traffic.encrypted must not force
+    // ReturnEncrypted while target ESS stays clear on an explicit clear grant.
+    P25FollowSnapshot snapshot;
+    snapshot.autoActive = true;
+    snapshot.phase2Voice = true;
+    snapshot.nowMs = 10'000;
+    snapshot.tunedAtMs = 1'000;
+    snapshot.lastActiveMs = 9'800;
+    snapshot.recentSpeakerOutputMs = 9'700;
+    snapshot.talkgroupId = 30302;
+    snapshot.diag = diag(P25FollowDiagCode::Decoding);
+    snapshot.grantEncryptionKnown = true;
+    snapshot.grantEncrypted = false;
+    snapshot.phase2TrafficProcessorActive = true;
+    snapshot.phase2TrafficEncrypted = true; // companion sticky
+    snapshot.phase2TrafficCallActive = true;
+    snapshot.phase2TrafficAudioOpen = true;
+    snapshot.phase2EssKnown = true;
+    snapshot.phase2EssEncrypted = false; // target clear
+    snapshot.phase2MacCrcValid = 2;
+    snapshot.phase2VoiceCodewords = 12;
+    snapshot.decodedFrames = 6;
+    snapshot.rfMetricsPopulated = true;
+    snapshot.recentSnrDb = 12.0;
+    snapshot.recentSignalLevelDb = -50.0;
+    snapshot.recentNoiseFloorDb = -70.0;
+
+    const auto decision = evaluateP25Follow(snapshot);
+    REQUIRE_FALSE(decision.encryptedOnVoice);
+    REQUIRE(decision.action == P25FollowAction::None);
+}
+
 TEST_CASE("P25 follow returns when the traffic processor proves encryption", "[p25][follow]")
 {
     P25FollowSnapshot snapshot;
@@ -629,15 +745,16 @@ TEST_CASE("P25 follow does not let stale clear ESS hold a no-VCW traffic channel
     REQUIRE(decision.action == P25FollowAction::ReturnNoVoiceCodewords);
 }
 
-TEST_CASE("P25 follow holds unknown clear-grant acquisition longer before no-VCW return", "[p25][follow]")
+TEST_CASE("P25 follow returns quickly from unknown clear-grant with no VCWs", "[p25][follow]")
 {
+    // DEC-0066 / capture 20260915_131458: unknown grants parked ~45s dead.
     P25FollowSnapshot snapshot;
     snapshot.autoActive = true;
     snapshot.phase2Voice = true;
-    snapshot.nowMs = 20'000;
+    snapshot.nowMs = 5'000;
     snapshot.tunedAtMs = 1'000;
     snapshot.lastActiveMs = 1'000;
-    snapshot.diagUpdatedMs = 19'500;
+    snapshot.diagUpdatedMs = 4'500;
     snapshot.diag = diag(P25FollowDiagCode::WaitingForClearGrant);
     snapshot.grantEncryptionKnown = false;
     snapshot.grantEncrypted = false;
@@ -649,7 +766,7 @@ TEST_CASE("P25 follow holds unknown clear-grant acquisition longer before no-VCW
     REQUIRE_FALSE(midDecision.tdmaNoVcwTimeout);
     REQUIRE(midDecision.action == P25FollowAction::None);
 
-    snapshot.nowMs = 46'500;
+    snapshot.nowMs = 10'000;
     snapshot.lastActiveMs = 1'000;
     const auto lateDecision = evaluateP25Follow(snapshot);
     REQUIRE(lateDecision.tdmaNoVcwTimeout);
@@ -774,13 +891,43 @@ TEST_CASE("P25 follow holds clear-trusted call across empty-eye gaps after emit"
     REQUIRE_FALSE(holdDecision.activityGone);
     REQUIRE_FALSE(holdDecision.tdmaNoVcwTimeout);
 
-    // After clear-trusted 40s speaker grace expires with no refresh, return.
-    snapshot.nowMs = 70'000;
+    // DEC-0056: after post-speech quiet timers (not 40s grant-only grace), return.
+    snapshot.nowMs = 42'000;
     snapshot.lastActiveMs = 28'500;
     snapshot.recentSpeakerOutputMs = 28'470;
-    snapshot.diagUpdatedMs = 69'900;
+    snapshot.diagUpdatedMs = 41'900;
     const auto expiredDecision = evaluateP25Follow(snapshot);
     REQUIRE(expiredDecision.action != P25FollowAction::None);
+}
+
+TEST_CASE("P25 follow returns on dead clear channel without grant-only 40s hang", "[p25][follow]")
+{
+    // Capture 20260912_134135: clear grant + stale speaker must not block return
+    // for ~minute when there is no current traffic evidence.
+    P25FollowSnapshot snapshot;
+    snapshot.autoActive = true;
+    snapshot.phase2Voice = true;
+    snapshot.nowMs = 40'000;
+    snapshot.tunedAtMs = 10'000;
+    snapshot.lastActiveMs = 12'000;
+    snapshot.recentSpeakerOutputMs = 12'000;
+    snapshot.diagUpdatedMs = 39'500;
+    snapshot.diag = diag(P25FollowDiagCode::NoSync);
+    snapshot.decodedFrames = 0;
+    snapshot.phase2VoiceCodewords = 0;
+    snapshot.phase2Bursts = 0;
+    snapshot.phase2SuperframeBursts = 0;
+    snapshot.phase2MaskedBursts = 0;
+    snapshot.phase2MacPdus = 0;
+    snapshot.phase2TrafficProcessorActive = true;
+    snapshot.phase2TrafficCallActive = false;
+    snapshot.phase2TrafficAudioOpen = false;
+    snapshot.grantEncryptionKnown = true;
+    snapshot.grantEncrypted = false;
+
+    const auto decision = evaluateP25Follow(snapshot);
+    REQUIRE(decision.action != P25FollowAction::None);
+    REQUIRE_FALSE(decision.encryptedOnVoice);
 }
 
 TEST_CASE("P25 follow keeps speaker grace when current TDMA structure remains alive", "[p25][follow]")

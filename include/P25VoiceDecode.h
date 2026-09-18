@@ -5,6 +5,7 @@
 // Invariants: no hop/TTL/CADENCE/feed-gate behavior changes — move-only.
 
 #include "AudioEngine.h"
+#include "BandPlan.h"
 #include "Demod.h"
 #include "P25AppGlobals.h"
 #include "P25Control.h"
@@ -75,18 +76,6 @@ struct RfSquelchMetrics {
     double snrDb = 0.0;
     bool valid = false;
 };
-
-struct BandPlanEntry {
-    std::string name;
-    double startHz = 0.0;
-    double endHz = 0.0;
-    DemodMode mode = DemodMode::NFM;
-    double bandwidthHz = 12500.0;
-    double lpfHz = 3000.0;
-    double stepHz = 12500.0;
-};
-
-const BandPlanEntry* findBandPlanForFrequency(double freqHz);
 
 struct SmartModeSelection {
     DemodMode mode = DemodMode::NFM;
@@ -429,6 +418,16 @@ double applyNfmAfcFromSpectrum(Receiver& rx,
                                       double channelBwHz,
                                       DemodMode mode);
 
+// DEC-0044: apply device PPM from sustained CC AFC while idle on control.
+// Never call during Phase 2 voice follow (mid-park retune fights DEC-0016).
+// Returns true when setFrequencyCorrection was invoked.
+bool p25MaybeAutoApplyPpmFromControlAfc(size_t deviceIndex,
+                                               double controlFreqHz,
+                                               double afcOffsetHz,
+                                               double afcConfidence,
+                                               qint64 nowMs,
+                                               QString* logLine);
+
 double p25VoiceAfcTargetHz(const Receiver& rx, double nominalFreqHz, double channelBwHz);
 
 ReceiverSessionKey p25ReceiverSessionKey(const Receiver& rx);
@@ -437,6 +436,15 @@ P25P2CallAudioKey p25CurrentPhase2AudioKey(const Receiver& rx, double targetFreq
 
 void p25Phase2AdoptGrantSourceIdForCurrentCall(Receiver& rx,
                                                       uint32_t sourceId) noexcept;
+
+// DEC-0062 talkspurt vocoder reset (abs-dedupe preserved).
+void p25Phase2ResetVocoderForNewTalkspurt(Receiver& rx, const char* why, qint64 nowMs);
+void p25Phase2ObserveTargetTalkspurtMac(Receiver& rx,
+                                               const P25Phase2Burst& burst,
+                                               bool targetSlot,
+                                               qint64 nowMs,
+                                               bool positionKnown,
+                                               uint64_t absoluteDibit);
 
 P25Phase2SpeakerPendingQueue& p25SpeakerPendingFor(P25SpeakerPendingMap& map,
                                                             const Receiver& rx);
@@ -555,7 +563,8 @@ size_t pushP25LiveStreamingAudio(AudioEngine* engine,
                                         size_t frameSize = 240,
                                         double ringFillPercent = -1.0,
                                         bool warmPendingRealAudio = false,
-                                        std::vector<float>* pushedRealAudio = nullptr);
+                                        std::vector<float>* pushedRealAudio = nullptr,
+                                        bool endOfStream = false);
 
 size_t pushP25SpeakerAudio(AudioEngine* engine,
                                   std::vector<float>& pending,

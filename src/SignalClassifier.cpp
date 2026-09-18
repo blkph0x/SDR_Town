@@ -1,4 +1,5 @@
 #include "SignalClassifier.h"
+#include "BandPlan.h"
 
 #include <algorithm>
 #include <cmath>
@@ -361,7 +362,8 @@ SignalRecommendation AdvancedSignalClassifier::recommendFromFeatures(const Signa
         return makeStandard(SignalClass::Unknown, f, 0.15, "weak/no-signal fallback");
     }
 
-    if (targetFreqHz >= 87.5e6 && targetFreqHz <= 108.0e6 && f.estimatedBandwidthHz >= 90000.0) {
+    const auto plan = findBandPlanForFrequency(targetFreqHz);
+    if (plan && plan->mode == DemodMode::WFM && f.estimatedBandwidthHz >= 90000.0) {
         return makeStandard(SignalClass::WFM, f, 0.92, "FM broadcast band plus wide occupied bandwidth");
     }
 
@@ -376,8 +378,8 @@ SignalRecommendation AdvancedSignalClassifier::recommendFromFeatures(const Signa
         f.sidebandBalanceDb <= 8.0 &&
         f.symmetry >= 0.45 &&
         f.spectralFlatness < 0.55;
-    if (amShape || (targetFreqHz >= 108.0e6 && targetFreqHz <= 137.0e6 && f.estimatedBandwidthHz <= 32000.0)) {
-        return makeStandard(SignalClass::AM, f, amShape ? 0.86 : 0.72, amShape ? "carrier with balanced AM sidebands" : "airband AM frequency plan");
+    if (amShape || (plan && plan->mode == DemodMode::AM && f.estimatedBandwidthHz <= 32000.0)) {
+        return makeStandard(SignalClass::AM, f, amShape ? 0.86 : 0.72, amShape ? "carrier with balanced AM sidebands" : "selected receive-plan AM prior");
     }
 
     const bool p25Like =

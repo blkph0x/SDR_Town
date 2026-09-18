@@ -386,14 +386,19 @@ Demodulator::Demodulator() = default;
 Demodulator::~Demodulator() = default;
 
 void Demodulator::resetState() {
+    resetMultiplexState(); // Explicit retune/reset, unlike speech-only AFC resets.
     dspStateNeedsReset = true;
 }
 
 std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex<float>>& iq,
     double sr, double cf, double target, DemodMode mode, double& rmsOut,
     double lpfHz, double squelchDb, double gain, double wfmDeTauUs, double wfmPilotNotchR,
-    double channelBwHz, size_t target_audio_samples, double outputRate, double externalSquelchLevelDb, bool audioLpfEnabled)
+    double channelBwHz, size_t target_audio_samples, double outputRate, double externalSquelchLevelDb, bool audioLpfEnabled,
+    FmMultiplexBlock* multiplex, double dataIdentityHz)
 {
+    if (multiplex) *multiplex = {};
+    if (!multiplex || iq.empty() || sr <= 0 || !std::isfinite(sr) || (mode != DemodMode::WFM && mode != DemodMode::NFM))
+        mpxContinuous = false;
     // AUTO must be resolved by the caller/classifier before reaching the DSP core.
     // Treat any leaked AUTO as conservative NFM rather than WFM; otherwise AUTO
     // uses broadcast-FM deviation/bandwidth and breaks narrowband reception.
@@ -452,7 +457,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
 
     // Channel FIR (same design as before)
     if (channelBwHz <= 0) {
-        channelBwHz = (mode == DemodMode::WFM || mode == DemodMode::AUTO) ? 180000.0
+        channelBwHz = (mode == DemodMode::WFM || mode == DemodMode::AUTO) ? 220000.0
             : (mode == DemodMode::AM ? 20000.0 : (mode == DemodMode::CW ? 1000.0 : 12500.0));
     }
     if (std::abs(channelBwHz - lastBw) > 50 || std::abs(sr - lastS) > 100) {
@@ -481,6 +486,65 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         if (sum != 0) for (auto &t : chanTaps) t /= (float)sum;
         lastBw = channelBwHz; lastS = sr;
         firDelay.assign( std::min(firDelay.size(), (size_t)nTaps-1), std::complex<float>(0,0) );
+    }
+    if (multiplex && (mode == DemodMode::WFM || mode == DemodMode::NFM) && !chanTaps.empty()) {
+        // DEC-0079: independent causal data branch. The speech FIR below is
+        // deliberately unchanged; its block-tail lookahead cannot clock RDS.
+        const size_t factor = internalRate > 1000 && internalRate < sr * .95
+            ? std::max<size_t>(1, static_cast<size_t>(std::llround(sr/internalRate))) : 1;
+        const double rate = sr / factor;
+        // DEC-0081: nominal channel identity lets NFM AFC vary its phase-continuous
+        // oscillator without inventing a new stream on every correction. Real
+        // retunes still reset through source epoch/identity/resetState().
+        const double identity = std::isfinite(dataIdentityHz) ? dataIdentityHz : target;
+        const bool dataDspReset = mode != DemodMode::NFM && dspStateNeedsReset;
+        const bool discontinuity = !mpxContinuous || dataDspReset ||
+            mpxMode != mode ||
+            mpxRate != rate || mpxInputRate != sr ||
+            // DEC-0082: NFM coefficient changes reuse input-IQ history when
+            // the clock and FIR length agree; they are not missing samples.
+            (mode != DemodMode::NFM && mpxBandwidth != channelBwHz) ||
+            mpxTarget != identity || mpxCenter != cf || mpxDelay.size() != chanTaps.size();
+        if (discontinuity) {
+            multiplex->resetReasons = (!mpxContinuous ? 1u : 0u) | (dataDspReset ? 2u : 0u) |
+                (mpxMode != mode ? 4u : 0u) | (mpxRate != rate || mpxInputRate != sr ? 8u : 0u) |
+                (mode != DemodMode::NFM && mpxBandwidth != channelBwHz ? 16u : 0u) |
+                (mpxTarget != identity || mpxCenter != cf ? 32u : 0u) |
+                (mpxDelay.size() != chanTaps.size() ? 64u : 0u);
+            ++mpxEpoch; mpxSamples = 0; mpxWrite = mpxPhase = 0;
+            mpxMixerPhase = 0;
+            mpxPrevious = {1,0}; mpxDelay.assign(chanTaps.size(), {});
+        }
+        multiplex->sampleRate = rate; multiplex->targetHz = identity;
+        multiplex->epoch = mpxEpoch; multiplex->firstSample = mpxSamples;
+        multiplex->discontinuity = discontinuity;
+        multiplex->samples.reserve(baseband.size()/factor+1);
+        const double deviation = mode == DemodMode::NFM ? std::clamp(channelBwHz*.20,1800.0,5000.0) : 75000.0;
+        const float scale = static_cast<float>(rate/(2*M_PI*deviation));
+        for (size_t index = 0; index < baseband.size(); ++index) {
+            // DEC-0082: speech's cumulative AFC reset must not reset data phase.
+            auto sample = baseband[index];
+            if (mode == DemodMode::NFM) {
+                sample = iq[index] * std::polar(1.0f, static_cast<float>(-mpxMixerPhase));
+                mpxMixerPhase = std::remainder(mpxMixerPhase + phaseInc, twoPi);
+            }
+            mpxDelay[mpxWrite] = sample;
+            if (mpxPhase == 0) {
+                std::complex<float> filtered{};
+                size_t at = mpxWrite;
+                for (float tap : chanTaps) {
+                    filtered += tap * mpxDelay[at];
+                    at = at == 0 ? mpxDelay.size()-1 : at-1;
+                }
+                multiplex->samples.push_back(std::arg(filtered*std::conj(mpxPrevious))*scale);
+                mpxPrevious = filtered;
+            }
+            if (++mpxPhase == factor) mpxPhase = 0;
+            if (++mpxWrite == mpxDelay.size()) mpxWrite = 0;
+        }
+        mpxSamples += multiplex->samples.size();
+        mpxRate=rate; mpxInputRate=sr; mpxBandwidth=channelBwHz;
+        mpxTarget=identity; mpxCenter=cf; mpxMode=mode; mpxContinuous=true;
     }
     if (!chanTaps.empty() && channelBwHz > 0) {
         size_t M = chanTaps.size();

@@ -382,6 +382,8 @@ void MainWindow::startP25LiveDecodePipeline()
                     bool phase2VoiceQueueSustainHint = false;
                     uint64_t iqStartAbsolute = 0;
                     bool iqStartAbsoluteKnown = false;
+                    uint64_t rdsStreamEpoch = 0, rdsIqStart = 0;
+                    bool rdsSourceGap = false;
                     uint64_t iqDecodeEndAbsolute = 0;
                     bool iqDecodeEndAbsoluteKnown = false;
                     size_t phase2FreshIqSamples = 0;
@@ -897,7 +899,15 @@ void MainWindow::startP25LiveDecodePipeline()
                             }
                             last = now;
                         } else {
-                            iq = mgr.getNewSamplesForReceiver(i, rx, tgt);  // updates the live rx's lastConsumedAbsolute
+                            if (!monP25VoiceDecode && (monMode == DemodMode::WFM || monMode == DemodMode::NFM)) {
+                                auto window = mgr.getNewIQWindowForReceiver(i, rx, tgt);
+                                rdsStreamEpoch = window.streamEpoch;
+                                rdsIqStart = window.startAbsolute;
+                                rdsSourceGap = window.cursorDiscontinuity;
+                                iq = std::move(window.samples);
+                            } else {
+                                iq = mgr.getNewSamplesForReceiver(i, rx, tgt);
+                            }
                         }
                     }
 
@@ -1005,6 +1015,8 @@ void MainWindow::startP25LiveDecodePipeline()
                             didWork = true;
                             continue;
                         }
+                        if (monMode != DemodMode::NFM || monP25ControlMute || monP25VoiceDecode || rdsSourceGap)
+                            rx.sstvFeed->discontinuity(); // Metadata only; never touches the P25/audio decoder.
                         if (p25ShouldSuppressAnalogDemod(monP25VoiceDecode,
                                                          monP25ControlMute,
                                                          monP25IndependentTrafficSource,
@@ -1079,9 +1091,45 @@ void MainWindow::startP25LiveDecodePipeline()
                             }
                             (void)need;
                         } else {
+                            FmMultiplexBlock mpx;
+                            const bool decodeRds = monMode == DemodMode::WFM && !monP25ControlMute;
+                            const bool decodeTones = monMode == DemodMode::NFM && !monP25ControlMute;
+                            const bool decodeData = decodeRds || decodeTones;
+                            if (decodeData && (rdsSourceGap || rx.rdsIqEpoch != rdsStreamEpoch || rx.rdsNextIq != rdsIqStart)) {
+                                rx.demod.resetMultiplexState();
+                                rx.rds->reset();
+                                rx.ctcss.reset();
+                                rx.dcs.reset();
+                            }
                             ch = rx.demod.demodulateToAudio(iq, sr, cf, demodFreq, monMode,
                                 rms, monLpf, monSquelch, monGain, monWfmDe,
-                                monWfmNotch, monBw, need, orate, rfSquelchLevel, monAudioLpfEnabled);
+                                monWfmNotch, monBw, need, orate, rfSquelchLevel, monAudioLpfEnabled,
+                                decodeData && !rdsSourceGap ? &mpx : nullptr,
+                                decodeTones ? monFreq : std::numeric_limits<double>::quiet_NaN());
+                            if (decodeData && !rdsSourceGap) {
+                                if (decodeRds) {
+                                    rx.ctcss.reset();
+                                    rx.dcs.reset();
+                                    rx.rds->process({mpx.samples, DecoderInputDomain::FmMultiplex,
+                                        mpx.sampleRate, mpx.targetHz, i, mpx.epoch, mpx.firstSample, mpx.discontinuity});
+                                } else {
+                                    rx.rds->reset();
+                                    if (mpx.discontinuity && mpx.epoch <= 32) spdlog::info("NFM data reset reasons={} rate={} bw={} epoch={} iqEpoch={} iqStart={} previousEnd={}",
+                                        mpx.resetReasons, mpx.sampleRate, monBw, mpx.epoch, rdsStreamEpoch, rdsIqStart, rx.rdsNextIq);
+                                    rx.ctcss.process(mpx.samples, mpx.sampleRate, monFreq,
+                                        mpx.epoch, mpx.firstSample, mpx.discontinuity);
+                                    rx.dcs.process(mpx.samples, mpx.sampleRate, monFreq,
+                                        mpx.epoch, mpx.firstSample, mpx.discontinuity);
+                                    rx.sstvFeed->publish(mpx, i);
+                                }
+                                rx.rdsIqEpoch = rdsStreamEpoch;
+                                rx.rdsNextIq = rdsIqStart + iq.size();
+                            } else {
+                                rx.rds->reset();
+                                rx.ctcss.reset();
+                                rx.dcs.reset();
+                                rx.rdsIqEpoch = rx.rdsNextIq = 0;
+                            }
                         }
                     }
                     if (haveP25Audio) {

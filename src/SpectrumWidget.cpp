@@ -1,4 +1,5 @@
 #include "SpectrumWidget.h"
+#include "BandPlan.h"
 
 #include <QPainter>
 #include <QMouseEvent>
@@ -380,6 +381,20 @@ double SpectrumWidget::squelchVizDbFromY(int y, int specH) const
     return dbFromY(y, specH);
 }
 
+void SpectrumWidget::setBandPlanMonitorFrequency(double hz)
+{
+    if (std::isfinite(hz) && hz > 0 && hz != m_bandPlanMonitorHz) {
+        m_bandPlanMonitorHz = hz;
+        update();
+    }
+}
+
+void SpectrumWidget::setBandPlanOverlayEnabled(bool enabled)
+{
+    m_bandPlanOverlayEnabled = enabled;
+    update();
+}
+
 void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
 {
     QPainter p(this);
@@ -464,14 +479,10 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
         QFont smallFont = p.font(); smallFont.setPointSize(8); p.setFont(smallFont);
 
         for (double db = std::floor(cmin / step) * step; db <= cmax + 0.1; db += step) {
-            int y = (db >= cmin && db <= cmax)
-                ? yFromDb(db, specH)   // use the spectrum-area mapping for the top part
-                : -1;
-
-            // Also draw ticks extending into the waterfall area at the equivalent relative position
-            // (simple linear extension of the same norm for the whole height is acceptable for a threshold viz)
-            double norm = std::clamp( (db - cmin) / range , 0.0, 1.0);
-            int yFull = static_cast<int>( norm * (h - 8) );
+            if (db < cmin || db > cmax) continue;
+            // DEC-0077: the waterfall vertical axis is time, not signal level.
+            // Use exactly the same dB mapping as spectrum, SQ, SIG and NF.
+            const int yFull = yFromDb(db, specH);
 
             // tick on axis
             p.drawLine(axisW - 8, yFull, axisW - 2, yFull);
@@ -672,14 +683,62 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
     p.drawLine(cx, 0, cx, specH);
 
     // last clicked tune position - full height line (works for clicks in spectrum OR waterfall area)
-    if (m_tuneX >= 0 && m_tuneX < w) {
+    const double markerHz = m_dragging ? m_dragPreviewHz : m_bandPlanMonitorHz;
+    const int markerX = markerHz > 0 && viewBwSnap > 0
+        ? specRect.left()+static_cast<int>((markerHz-(centerSnap-viewBwSnap/2))/viewBwSnap*specRect.width()) : -1;
+    if (markerX >= specRect.left() && markerX <= specRect.right()) {
         p.setPen(QPen(QColor(255, 120, 120), 1, Qt::DashLine));
-        p.drawLine(m_tuneX, 0, m_tuneX, h);
+        p.drawLine(markerX, 0, markerX, h);
     }
 
     // title / info (use snapshot for consistency with the curve/waterfall of this frame)
+    if (m_bandPlanOverlayEnabled && wfRect.height() >= 38) {
+        const auto profile = BandPlanCatalog::instance().active();
+        const double target = m_bandPlanMonitorHz > 0 ? m_bandPlanMonitorHz : centerSnap;
+        const auto band = lookupBand(*profile, target);
+        p.save();
+        p.setClipRect(wfRect);
+        const QRect banner(wfRect.left(), wfRect.top(), wfRect.width(), 38);
+        p.fillRect(banner, QColor(16, 26, 28, 230));
+        p.setPen(QColor(153, 223, 199));
+        QFont font = p.font(); font.setPointSize(8); p.setFont(font);
+        const QString context = QString::fromStdString(profile->region + " / " + profile->country + " / " + profile->location);
+        p.drawText(banner.adjusted(5, 0, -5, -19), Qt::AlignVCenter,
+            p.fontMetrics().elidedText(context + QString(" | %1 MHz").arg(target / 1e6, 0, 'f', 5), Qt::ElideRight, banner.width() - 10));
+        const double low = centerSnap - viewBwSnap / 2;
+        if (profile != m_overlayProfile || low != m_overlayLow || low+viewBwSnap != m_overlayHigh) {
+            m_overlayProfile=profile; m_overlayLow=low; m_overlayHigh=low+viewBwSnap;
+            m_overlaySections=visibleBandSections(*profile,m_overlayLow,m_overlayHigh);
+        }
+        for (const auto& section : m_overlaySections) {
+            const int left = wfRect.left() + static_cast<int>((section.startHz-low)/viewBwSnap*wfRect.width());
+            const int right = wfRect.left() + static_cast<int>((section.endHz-low)/viewBwSnap*wfRect.width());
+            const QRect area(left, banner.top()+19, std::max(1,right-left), 19);
+            const QColor color = QColor::fromHsv((static_cast<int>(section.mode)*53+140)%360,90,110);
+            p.fillRect(area, color);
+            p.setPen(QColor(220,230,230,130));
+            p.drawLine(left, area.top(), left, wfRect.bottom());
+            p.drawLine(right, area.top(), right, wfRect.bottom());
+            p.setPen(Qt::white);
+            if (area.width()>24) p.drawText(area.adjusted(3,0,-3,0), Qt::AlignVCenter,
+                p.fontMetrics().elidedText(QString::fromStdString(section.name + " | " + bandPlanModeName(section.mode)), Qt::ElideRight, area.width()-6));
+        }
+        if (m_overlaySections.empty()) {
+            p.setPen(Qt::white);
+            p.drawText(banner.adjusted(5,19,-5,0), Qt::AlignVCenter, "No mapped service in this view");
+        }
+        if (band && viewBwSnap > 0) {
+            const double low = centerSnap - viewBwSnap / 2;
+            p.setPen(QPen(QColor(153, 223, 199, 160), 1, Qt::DashLine));
+            for (double edge : {band->startHz, band->endHz}) if (edge >= low && edge < low + viewBwSnap) {
+                const int x = wfRect.left() + static_cast<int>((edge - low) / viewBwSnap * wfRect.width());
+                p.drawLine(x, banner.bottom() + 1, x, wfRect.bottom());
+            }
+        }
+        p.restore();
+    }
     p.setPen(Qt::white);
-    p.drawText(8, 16, QString("Center: %1 MHz   SR: %2 MS/s   (click anywhere incl. waterfall to tune monitor)")
+    p.drawText(8, 16, QString("Center: %1 MHz   SR: %2 MS/s")
                           .arg(centerSnap / 1e6, 0, 'f', 3)
                           .arg(srSnap / 1e6, 0, 'f', 2));
 }
@@ -694,9 +753,9 @@ void SpectrumWidget::mousePressEvent(QMouseEvent* event)
         int specHlocal = hh * 2 / 3;
 
         // Priority: right-side squelch grab bar or close to the horizontal squelch line → interactive squelch drag
-        bool nearRightBar = (mx >= ww - 35);
+        bool nearRightBar = (mx >= ww - 35 && my < specHlocal);
         int currentSqY = yFromSquelchViz(m_squelchThresholdDb, specHlocal);
-        bool nearLine = std::abs(my - currentSqY) <= 10;
+        bool nearLine = my < specHlocal && std::abs(my - currentSqY) <= 10;
 
         if (nearRightBar || nearLine) {
             m_squelchDragging = true;
@@ -709,8 +768,15 @@ void SpectrumWidget::mousePressEvent(QMouseEvent* event)
         }
 
         // Normal behavior: click anywhere else (spectrum or waterfall) = tune to that freq
-        double f = freqFromX(mx);
-        emit frequencySelected(f);
+        if (mx < kSpectrumAxisWidth || mx >= ww-kSpectrumRightMargin) return;
+        m_dragging = true;
+        {
+            QMutexLocker lock(&m_dataMutex);
+            m_dragBwHz = m_viewBandwidthHz > 0 ? m_viewBandwidthHz : m_sampleRate;
+            m_dragLowHz = m_centerFreq-m_dragBwHz/2;
+        }
+        m_dragPlotWidth = std::max(1,ww-kSpectrumAxisWidth-kSpectrumRightMargin);
+        m_dragPreviewHz = m_dragLowHz+(mx-kSpectrumAxisWidth)*m_dragBwHz/m_dragPlotWidth;
         m_lastMouseX = mx;
         m_tuneX = mx;
         update();
@@ -727,7 +793,7 @@ void SpectrumWidget::mouseMoveEvent(QMouseEvent* event)
 
     // Hover feedback: change cursor when over the right squelch bar or the line (affordance)
     int currentSqY = yFromSquelchViz(m_squelchThresholdDb, specHlocal);
-    bool overSquelchZone = (mx >= ww - 35) || (std::abs(my - currentSqY) <= 10);
+    bool overSquelchZone = my < specHlocal && ((mx >= ww - 35) || (std::abs(my - currentSqY) <= 10));
     if (overSquelchZone) {
         setCursor(Qt::SplitVCursor);
     } else if (cursor().shape() != Qt::ArrowCursor) {
@@ -746,10 +812,10 @@ void SpectrumWidget::mouseMoveEvent(QMouseEvent* event)
     }
 
     if (m_dragging) {
-        // Continuous drag tuning kept for backward compat but not entered on simple click now.
-        double f = freqFromX(mx);
-        emit frequencySelected(f);
-        m_tuneX = mx;
+        m_dragPreviewHz = m_dragLowHz + std::clamp(mx-kSpectrumAxisWidth,0,m_dragPlotWidth)*m_dragBwHz/m_dragPlotWidth;
+        m_tuneX = std::clamp(mx,kSpectrumAxisWidth,width()-kSpectrumRightMargin);
+        setCursor(Qt::CrossCursor);
+        setToolTip(QString("%1 MHz").arg(m_dragPreviewHz/1e6,0,'f',5));
         update();
     }
 }
@@ -757,11 +823,14 @@ void SpectrumWidget::mouseMoveEvent(QMouseEvent* event)
 void SpectrumWidget::mouseReleaseEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
+        const bool commit = m_dragging;
+        const double selected = m_dragLowHz + std::clamp(event->pos().x()-kSpectrumAxisWidth,0,m_dragPlotWidth)*m_dragBwHz/m_dragPlotWidth;
         m_dragging = false;
         m_squelchDragging = false;
         unsetCursor();
         // m_tuneX is kept so the dashed tune line remains visible after the click
         update();
+        if (commit) emit frequencySelected(selected);
     }
 }
 

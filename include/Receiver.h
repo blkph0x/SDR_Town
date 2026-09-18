@@ -1,6 +1,11 @@
 #pragma once
 
 #include "Demod.h"
+#include "RdsMpxDecoder.h"
+#include "CtcssDecoder.h"
+#include "DcsDecoder.h"
+#include "ReceiveDecoder.h"
+#include "SstvReceiverFeed.h"
 #include "P25LiveDecoder.h"
 #include "P25ReceiverSession.h"
 #include "P25TrafficChannelProcessor.h"
@@ -84,6 +89,11 @@ struct Receiver {
 
     size_t deviceIndex = 0;           // which DeviceManager device this receiver uses
     Demodulator demod;                // own demod instance (already per-state)
+    const std::unique_ptr<ReceiveDecoder> rds = createReceiveDecoder("rds"); // DEC-0085; DSP owner, snapshots safe for UI.
+    CtcssDecoder ctcss;               // Informational; never opens/closes audio.
+    DcsDecoder dcs;                   // Independent subaudible data, no audio gate.
+    const std::shared_ptr<SstvReceiverFeed> sstvFeed=std::make_shared<SstvReceiverFeed>();
+    uint64_t rdsIqEpoch = 0, rdsNextIq = 0;
 
     double freqHz = 100e6;
     DemodMode mode = DemodMode::NFM;
@@ -189,6 +199,10 @@ struct Receiver {
     // Consecutive decode windows with Phase-2 bursts but zero selected-slot VCW
     // after a successful emit — triggers soft sticky mask/SF rehunt.
     int p25Phase2StructureNoTargetVoiceWindows = 0;
+    // DEC-0043 / capture 20260912_020758: consecutive opp-dominant (wrong-TDMA)
+    // windows after the call has spoken. Immediate sticky invalidate on a single
+    // companion-slot island wiped a proven XOR/epoch and starved clear audio.
+    int p25Phase2OppDominantEpochWindows = 0;
     // Consecutive post-emit empty eyes (no bursts/VCW). Soft-rehunt + clear
     // block CQPSK hint; do not steal speaker-sustain geometry (DEC-0032).
     int p25Phase2PostEmitEmptyEyeWindows = 0;
@@ -231,6 +245,10 @@ struct Receiver {
     // Capture 20260811_021036 L35906: hop reset hadSuccessfulEmit → context VCWs
     // replayed (ctxVcw>ctxDrop) as short dual-voice / syllable repeats.
     bool p25Phase2CallHadSpeakerAudio = false;
+    // DEC-0062: mid-grant talkspurt boundaries (MAC_PTT / post-END voice) must
+    // reset mbelib without wiping abs-dedupe. Debounce + END-pending flags.
+    int64_t p25Phase2LastTalkspurtVocoderResetMs = 0;
+    bool p25Phase2TalkspurtEndedPendingVocoderReset = false;
     P25VoiceDiagSnapshot p25VoiceDiagnostics;
     P25LiveDecoder p25VoiceLiveDecoder{p25RealtimeVoiceDecoderConfig()};
     std::unique_ptr<P25TrafficChannelProcessor> p25TrafficProcessor;
@@ -298,6 +316,7 @@ struct Receiver {
         p25Phase2ForceMaskEpochRehunt = false;
         p25Phase2MaskEpochRepairHoldWindows = 0;
         p25Phase2StructureNoTargetVoiceWindows = 0;
+        p25Phase2OppDominantEpochWindows = 0;
         p25Phase2PostEmitEmptyEyeWindows = 0;
     }
     void resetP25TrafficSessionFieldsLocked(bool fullClear = true)
@@ -327,6 +346,7 @@ struct Receiver {
         p25Phase2ForceMaskEpochRehunt = false;
         p25Phase2MaskEpochRepairHoldWindows = 0;
         p25Phase2StructureNoTargetVoiceWindows = 0;
+        p25Phase2OppDominantEpochWindows = 0;
         p25Phase2PostEmitEmptyEyeWindows = 0;
         p25Phase2LastEmittedAbsDibit = 0;
         p25Phase2StickySlotLabelInvert = false;
@@ -344,6 +364,8 @@ struct Receiver {
         p25DiagSlotProbeBlocked = 0;
         p25DiagSecurityChanged = 0;
         p25DiagVocoderReset = 0;
+        p25Phase2LastTalkspurtVocoderResetMs = 0;
+        p25Phase2TalkspurtEndedPendingVocoderReset = false;
         p25DiagPendingAudioCleared = 0;
         p25DiagVariantChanged = 0;
         p25DiagRingUnderrun = 0;

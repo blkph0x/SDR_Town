@@ -38,10 +38,12 @@
 #include "RemoteDiagnostics.h"
 #include "SignalClassifier.h"
 #include "SpectrumWidget.h"
+#include "SdrTownControlServer.h"
 #include "SttEngine.h"
 #include "TranscriptHub.h"
 #include "TranscriptWindow.h"
 #include "UpdateManager.h"
+#include "WorkspaceLayout.h"
 
 #include <QAction>
 #include <QApplication>
@@ -169,6 +171,23 @@ private slots:
     void showDevicesDialog();
 
 private:
+    void installSdrTownControlServer();
+
+    QJsonObject handleSdrTownControlRequest(const QString& method,
+                                            const QString& path,
+                                            const QJsonObject& body);
+
+    QJsonObject sdrTownControlStatusSnapshot();
+
+    QJsonObject applySdrTownControlTune(const QJsonObject& body);
+
+    QJsonObject applySdrTownControlVolume(const QJsonObject& body);
+
+    void resetP25ControlMonitorValidation(double ccHz, const QString& reason);
+    void noteP25ControlMonitorDecodeWindow(const P25LiveDecodeResult& result,
+                                           bool hasTrustedControl);
+    void disableP25ControlMonitorDueToValidation(const QString& reason);
+
     struct P25VoiceDecodeJob {
         std::shared_ptr<Receiver> rx;
         std::vector<std::complex<float>> iq;
@@ -258,6 +277,7 @@ private:
     std::thread p25ControlWorkerThread;
     std::thread p25VoiceWorkerThread;
     GuiRuntimeConfig guiRuntimeConfig;
+    WorkspaceLayout* workspaceLayout = nullptr;
     QStringList guiRuntimeStartupErrors;
     qint64 guiRuntimeStartupAppliedMs = 0;
     std::atomic<long long> guiP25AudioOutputEvents{0};
@@ -275,6 +295,7 @@ private:
     QStringList guiIqReplayRecentStatus;
 
     UpdateManager* m_updateManager = nullptr;   // professional GitHub release + in-app updater (state-of-the-art, safe)
+    std::unique_ptr<SdrTownControlServer> m_controlServer;
     TranscriptHub* m_transcriptHub = nullptr;
     SttEngine* m_sttEngine = nullptr;
     P25TranscriptSource* m_p25TranscriptSource = nullptr;
@@ -392,6 +413,10 @@ private:
     double p25AutoFollowLastReturnVoiceHz = 0.0;
     qint64 p25AutoFollowWarmStandbyUntilMs = 0;
     double p25AutoFollowWarmStandbyVoiceHz = 0.0;
+    qint64 p25ControlMonitorArmedMs = 0;
+    qint64 p25ControlMonitorLastTrustedMs = 0;
+    int p25ControlMonitorBadWindows = 0;
+    QString p25ControlMonitorDisabledReason;
     qint64 p25LastSameRfMetadataSwitchMs = 0;
     qint64 p25SameRfClearGrantHoldUntilMs = 0;
     P25LiveDecoder p25LiveDecoder;
@@ -448,11 +473,16 @@ private:
     QString p25LastDiagSignature;
     qint64 p25LastDiagLogMs = 0;
     std::map<std::string, qint64> p25LogThrottleByKey;
+    QDoubleSpinBox* monitorFreqSpin = nullptr;
+    QComboBox* monitorModeCombo = nullptr;
+    QDoubleSpinBox* rfGainSpin = nullptr;
+    QDoubleSpinBox* squelchSpinBox = nullptr;
     QDoubleSpinBox* bwSpin = nullptr;
     QDoubleSpinBox* lpfSpin = nullptr;
     QCheckBox* lpfEnableCheck = nullptr;
+    SpectrumWidget* spectrumWidget = nullptr;
+    QLabel* controlStatusLabel = nullptr;
     WaterfallRoiBuilder classifierRoiBuilder{128};
-    // spectrumWidget kept for future if needed
 
     void appendP25LogLine(const QString& text);
 
@@ -521,5 +551,6 @@ private:
     void closeEvent(QCloseEvent* event) override;
 
     void createMenus();
+    void showBandPlanDialog();
 };
 

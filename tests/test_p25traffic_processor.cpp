@@ -200,6 +200,29 @@ TEST_CASE("P25 traffic processor closes audio immediately on Phase 2 call-end MA
     REQUIRE_FALSE(processor.mayEmitSustainedAudio());
 }
 
+TEST_CASE("P25 traffic processor ignores sticky non-observed encrypted ESS paint", "[p25][traffic]")
+{
+    P25TrafficChannelProcessor processor(48, 30302, 421225000, 1);
+
+    P25LiveDecodeResult result;
+    result.stats.phase2VoiceCodewords = 4;
+    P25Phase2Burst burst;
+    burst.valid = true;
+    burst.grantSlotKnown = true;
+    burst.grantSlot = 1;
+    burst.essKnown = true;
+    burst.essEncrypted = true;
+    burst.encrypted = true;
+    burst.essObservedThisBurst = false; // sticky session paint only
+    burst.voiceCodewords.push_back(P25Phase2VoiceCodeword{});
+    result.phase2Bursts.push_back(burst);
+
+    processor.observeDecodeResult(result, 9500);
+    const auto diag = processor.getDiag();
+    REQUIRE_FALSE(diag.encrypted);
+    REQUIRE_FALSE(diag.essTrusted);
+}
+
 TEST_CASE("P25 traffic processor keeps encrypted calls muted and supports teardown", "[p25][traffic]")
 {
     P25TrafficChannelProcessor processor(44, 12068, 421350000, 1);
@@ -211,7 +234,9 @@ TEST_CASE("P25 traffic processor keeps encrypted calls muted and supports teardo
     burst.grantSlotKnown = true;
     burst.grantSlot = 1;
     burst.essKnown = true;
+    burst.essEncrypted = true;
     burst.encrypted = true;
+    burst.essObservedThisBurst = true;
     burst.voiceCodewords.push_back(P25Phase2VoiceCodeword{});
     result.phase2Bursts.push_back(burst);
 
