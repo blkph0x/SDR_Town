@@ -194,3 +194,29 @@ void SstvWindow::updatePreview() {
     if(original_.isNull()) preview_->clear();
     else preview_->setPixmap(QPixmap::fromImage(original_).scaled(preview_->size(),Qt::KeepAspectRatio,Qt::SmoothTransformation));
 }
+
+QString SstvWindow::statusMessage() const {
+    return status_ ? status_->text() : QString();
+}
+
+bool SstvWindow::liveSelected() const {
+    return source_ && source_->currentData().toString() == QStringLiteral("live");
+}
+
+QStringList SstvWindow::imagePaths() const {
+    QStringList out;
+    if (!images_) return out;
+    for (int i = 0; i < images_->count(); ++i) {
+        if (auto* item = images_->item(i)) out.append(item->data(Qt::UserRole).toString());
+    }
+    return out;
+}
+
+QStringList SstvWindow::imageLabels() const {
+    QStringList out;
+    if (!images_) return out;
+    for (int i = 0; i < images_->count(); ++i) {
+        if (auto* item = images_->item(i)) out.append(item->text());
+    }
+    return out;
+}

@@ -5,8 +5,11 @@
 #include "P25AliasDialog.h"
 #include "BandPlanDialog.h"
 #include "RdsStatusWidget.h"
+#include "RdsMpxDecoder.h"
+#include "DcsDecoder.h"
 
 #include <QCloseEvent>
+#include <QFileInfo>
 #include <QSizePolicy>
 
 // AUTOMOC: Q_OBJECT lives in MainWindow.h (SpectrumWidget / TranscriptWindow pattern).
@@ -297,10 +300,13 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         QHBoxLayout* monLay = new QHBoxLayout();
         monLay->addWidget(new QLabel("Monitor Freq (MHz):"));
         QDoubleSpinBox* monFreq = new QDoubleSpinBox();
-        monFreq->setRange(24, 1766); // RTL range example
+        // Allow HF through microwave. Device drivers still enforce their own RF limits.
+        // Old floor of 24 MHz made entries like 7 MHz snap back to the previous value (often 100).
+        monFreq->setRange(0.1, 6000.0);
         monFreq->setDecimals(5);
         monFreq->setValue(100.0);
         monFreq->setSingleStep(0.0125);
+        monFreq->setCorrectionMode(QAbstractSpinBox::CorrectToNearestValue);
         monitorFreqSpin = monFreq;
         QPushButton* setMonBtn = new QPushButton("Set & Tune Device");
         QComboBox* modeBox = new QComboBox();
@@ -346,6 +352,16 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         gainSpin->setToolTip("Manual SDR RF gain / sensitivity. 0 = minimum gain; higher values increase sensitivity and overload risk. This writes directly to the SDR hardware when a real device is active.");
         rfGainSpin = gainSpin;
         gainLay->addWidget(gainSpin);
+        gainLay->addSpacing(12);
+        gainLay->addWidget(new QLabel("Direct samp:"));
+        QComboBox* directSamp = new QComboBox();
+        directSamp->addItem("Off (tuner)", 0);
+        directSamp->addItem("I-ADC (HF)", 1);
+        directSamp->addItem("Q-ADC (HF)", 2);
+        directSamp->setToolTip("RTL-SDR only. Enable Q-ADC or I-ADC to receive ~500 kHz–28 MHz (HF). Leave Off for normal VHF/UHF tuner mode.");
+        directSamp->setMaximumWidth(140);
+        directSamplingCombo = directSamp;
+        gainLay->addWidget(directSamp);
         gainLay->addSpacing(12);
         gainLay->addWidget(new QLabel("Squelch (dB):"));
         QDoubleSpinBox* squelchSpin = new QDoubleSpinBox();
@@ -4363,6 +4379,22 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             }
         });
 
+        connect(directSamp, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, directSamp](int) {
+            const int mode = directSamp->currentData().toInt();
+            auto& mgr = DeviceManager::instance();
+            if (mgr.getDevices().empty()) {
+                statusBar()->showMessage("No SDR device for direct sampling yet.", 2500);
+                return;
+            }
+            mgr.setDirectSampling(0, mode);
+            if (mode > 0) {
+                statusBar()->showMessage(QString("RTL direct sampling %1 — HF ~500 kHz–28 MHz enabled. Tune below 24 MHz now.")
+                    .arg(mode == 1 ? "I-ADC" : "Q-ADC"), 5000);
+            } else {
+                statusBar()->showMessage("RTL direct sampling off — normal tuner (~24 MHz+).", 3500);
+            }
+        });
+
         connect(squelchSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this, spectrum](double v) {
             std::lock_guard<std::mutex> lk(monitorParamsMutex);
             monitorSquelchDb = v;
@@ -4790,6 +4822,16 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 .arg(gMax, 0, 'f', 1));
             gainSpin->blockSignals(false);
             monitorRfGainDb = gainSpin->value();
+            if (directSamp) {
+                directSamp->blockSignals(true);
+                const int mode = std::clamp(d0.directSampling, 0, 2);
+                const int idx = directSamp->findData(mode);
+                if (idx >= 0) directSamp->setCurrentIndex(idx);
+                directSamp->setEnabled(d0.driver == "rtlsdr");
+                directSamp->blockSignals(false);
+            }
+        } else if (directSamp) {
+            directSamp->setEnabled(false);
         }
         int enabled = 0;
         for (const auto& d : initialDevs) if (d.enabled) ++enabled;
@@ -7325,8 +7367,8 @@ void MainWindow::showDevicesDialog()
         drvLabel->setStyleSheet("color: #ffcc00; font-size: 10px;");
         mainLay->addWidget(drvLabel);
 
-        QTableWidget* table = new QTableWidget(devs.size(), 9, &dlg);
-        QStringList headers = {"Enabled", "Runtime", "Label / Driver", "Serial", "Antenna", "Sample Rate (MS/s)", "Gain (dB)", "PPM", "Freq Range (MHz)"};
+        QTableWidget* table = new QTableWidget(devs.size(), 10, &dlg);
+        QStringList headers = {"Enabled", "Runtime", "Label / Driver", "Serial", "Antenna", "Sample Rate (MS/s)", "Gain (dB)", "PPM", "Direct samp", "Freq Range (MHz)"};
         table->setHorizontalHeaderLabels(headers);
         table->horizontalHeader()->setStretchLastSection(true);
         table->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -7337,6 +7379,7 @@ void MainWindow::showDevicesDialog()
         std::vector<QDoubleSpinBox*> rateSpins;
         std::vector<QDoubleSpinBox*> gainSpins;
         std::vector<QDoubleSpinBox*> ppmSpins;
+        std::vector<QComboBox*> directCombos;
 
         for (size_t i = 0; i < devs.size(); ++i) {
             const auto& d = devs[i];
@@ -7406,9 +7449,22 @@ void MainWindow::showDevicesDialog()
                 mgr.setLiveGain(i, gval);
             });
 
+            QComboBox* direct = new QComboBox();
+            direct->addItem("Off", 0);
+            direct->addItem("I-ADC", 1);
+            direct->addItem("Q-ADC", 2);
+            direct->setCurrentIndex(std::clamp(d.directSampling, 0, 2));
+            direct->setEnabled(d.driver == "rtlsdr");
+            direct->setToolTip("RTL-SDR HF: Q-ADC or I-ADC enables ~500 kHz–28 MHz. Off uses the normal VHF/UHF tuner.");
+            table->setCellWidget(row, 8, direct);
+            directCombos.push_back(direct);
+            connect(direct, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [i, direct](int) {
+                DeviceManager::instance().setDirectSampling(i, direct->currentData().toInt());
+            });
+
             // Freq range
-            QString fr = QString("%1 – %2").arg(d.minFreq/1e6, 0, 'f', 0).arg(d.maxFreq/1e6, 0, 'f', 0);
-            table->setItem(row, 8, new QTableWidgetItem(fr));
+            QString fr = QString("%1 – %2").arg(d.minFreq/1e6, 0, 'f', 3).arg(d.maxFreq/1e6, 0, 'f', 0);
+            table->setItem(row, 9, new QTableWidgetItem(fr));
         }
 
         mainLay->addWidget(table);
@@ -7443,6 +7499,7 @@ void MainWindow::showDevicesDialog()
                     std::string ant = antCombos[i]->currentText().toStdString();
 
                     mgr.updateDeviceParams(i, rateHz, g, ant, ppm);
+                    mgr.setDirectSampling(i, directCombos[i]->currentData().toInt());
 
                     // Start/stop real streaming on enable. startStreaming itself is hardened (try/catch + stub fallback + thread guards)
                     // so this should not propagate, but outer try is defense-in-depth for any future native/USB fault on Apply.
@@ -7450,6 +7507,7 @@ void MainWindow::showDevicesDialog()
                         mgr.startStreaming(i, true /* real SDR, not stub */);
                         mgr.setLiveGain(i, g);
                         mgr.setFrequencyCorrection(i, ppm);
+                        mgr.setDirectSampling(i, directCombos[i]->currentData().toInt());
                     } else {
                         mgr.stopStreaming(i);
                     }
@@ -9087,6 +9145,15 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
             state.insert("volume", monitorMasterVolume);
         }
 
+        {
+            auto& mgr = DeviceManager::instance();
+            const int ds = mgr.getDirectSampling(0);
+            state.insert("directSampling", ds);
+            state.insert("directSamplingLabel",
+                         ds == 1 ? QStringLiteral("I-ADC")
+                                 : (ds == 2 ? QStringLiteral("Q-ADC") : QStringLiteral("Off")));
+        }
+
         QJsonArray knownControlChannels;
         for (const auto& cc : loadP25KnownControlChannels()) {
             if (!std::isfinite(cc.freqHz) || cc.freqHz <= 0.0) continue;
@@ -9157,6 +9224,127 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
         p25.insert("monitorDisabledReason", p25ControlMonitorDisabledReason);
         state.insert("p25", p25);
 
+        // Read-only decoder/UI snapshots only (same contract as the overlay timer).
+        // Never call process()/reset() here — DSP ownership stays on the receiver thread.
+        QJsonObject rds;
+        QJsonObject tones;
+        {
+            std::shared_ptr<Receiver> rx;
+            {
+                std::lock_guard<std::mutex> lock(receiversMutex);
+                if (!receivers.empty()) rx = receivers.front();
+            }
+            DemodMode mode = DemodMode::AUTO;
+            double monitorHz = 0.0;
+            {
+                std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                mode = currentMonitorMode;
+                monitorHz = currentMonitorFreq;
+            }
+            const bool rxActive = [&]() {
+                if (!rx) return false;
+                std::lock_guard<std::mutex> lock(rx->stateMutex);
+                return rx->active && !rx->p25VoiceDecodeEnabled && !rx->p25ControlChannelMute;
+            }();
+            const bool wfmEligible = rxActive && (mode == DemodMode::WFM || mode == DemodMode::AUTO);
+            const bool nfmEligible = rxActive && (mode == DemodMode::NFM || mode == DemodMode::AUTO);
+            const auto nowMs = RdsMpxDecoder::monotonicMs();
+
+            const auto rdsSnap = rx ? std::get<RdsMpxSnapshot>(rx->rds->snapshot()) : RdsMpxSnapshot{};
+            rds.insert("eligible", wfmEligible);
+            rds.insert("modeHint", QStringLiteral("Tune an FM broadcast in WFM (or AUTO on the FM band)."));
+            rds.insert("status", QString::fromStdString(rdsSnap.status));
+            rds.insert("targetHz", rdsSnap.targetHz);
+            rds.insert("fresh", rdsSnap.lastGroupMs != 0 && (nowMs - rdsSnap.lastGroupMs) <= 5000);
+            rds.insert("identified", rdsSnap.station.identified);
+            rds.insert("pi", QString("%1").arg(rdsSnap.station.pi, 4, 16, QChar('0')).toUpper());
+            rds.insert("pty", static_cast<int>(rdsSnap.station.pty));
+            rds.insert("programmeService", QString::fromStdString(rdsSnap.station.programmeService));
+            rds.insert("radioText", QString::fromStdString(rdsSnap.station.radioText));
+            rds.insert("trafficAnnouncement", rdsSnap.station.trafficAnnouncement);
+            QString summary = QStringLiteral("Waiting for FM station data");
+            if (!wfmEligible) summary = QStringLiteral("Switch SDR Town to WFM on an FM broadcast station");
+            else if (!rdsSnap.station.identified) summary = QStringLiteral("Listening for RDS…");
+            else if (!rds.value("fresh").toBool()) summary = QStringLiteral("RDS stale — retune or wait for the next group");
+            else if (!rdsSnap.station.programmeService.empty())
+                summary = QString::fromStdString(rdsSnap.station.programmeService);
+            else summary = QStringLiteral("Station identified");
+            rds.insert("summary", summary);
+
+            const auto ctcss = rx ? rx->ctcss.snapshot() : CtcssSnapshot{};
+            const auto dcs = rx ? rx->dcs.snapshot() : DcsSnapshot{};
+            tones.insert("eligible", nfmEligible);
+            tones.insert("modeHint", QStringLiteral("Tune a UHF/VHF NFM channel (or AUTO). Tones are display-only and never mute audio."));
+            tones.insert("ctcssHz", ctcss.frequencyHz);
+            tones.insert("ctcssStatus", QString::fromStdString(ctcss.status));
+            tones.insert("ctcssFresh", ctcss.updatedMs != 0 && (nowMs - ctcss.updatedMs) <= 2000
+                && std::abs(ctcss.targetHz - monitorHz) <= 1.0);
+            tones.insert("ctcssPurity", ctcss.purity);
+            QJsonArray dcsAliases;
+            QStringList dcsLabels;
+            if (std::abs(dcs.targetHz - monitorHz) <= 1.0 && dcs.updatedMs
+                && (nowMs - dcs.updatedMs) <= 2000) {
+                for (const auto& id : dcs.identities) {
+                    const auto label = QString::fromStdString(dcsLabel(id));
+                    dcsAliases.append(label);
+                    dcsLabels.append(label);
+                }
+            }
+            tones.insert("dcsAliases", dcsAliases);
+            tones.insert("dcsStatus", QString::fromStdString(dcs.status));
+            QString toneSummary = QStringLiteral("Waiting for CTCSS / DCS");
+            if (!nfmEligible) toneSummary = QStringLiteral("Switch SDR Town to NFM on a narrow FM channel");
+            else if (tones.value("ctcssFresh").toBool() && ctcss.frequencyHz > 0.0)
+                toneSummary = QString("CTCSS %1 Hz").arg(ctcss.frequencyHz, 0, 'f', 1);
+            if (!dcsLabels.isEmpty()) {
+                const QString dcsPart = QString("DCS %1").arg(dcsLabels.join(" / "));
+                toneSummary = (toneSummary.startsWith("CTCSS") ? (toneSummary + " · " + dcsPart) : dcsPart);
+            } else if (nfmEligible && !(tones.value("ctcssFresh").toBool() && ctcss.frequencyHz > 0.0)) {
+                toneSummary = QStringLiteral("Searching for CTCSS / DCS…");
+            }
+            tones.insert("summary", toneSummary);
+        }
+        state.insert("rds", rds);
+        state.insert("tones", tones);
+
+        QJsonObject sstv;
+        sstv.insert("modeHint",
+                    QStringLiteral("In SDR Town open Tools → SSTV Images. Choose Live NFM - main receiver, pick a new empty output folder, then Receive. Finish and save when the picture is done."));
+        if (auto* window = findChild<SstvWindow*>(QStringLiteral("sstvWindow"))) {
+            sstv.insert("windowOpen", true);
+            sstv.insert("busy", window->busy());
+            sstv.insert("live", window->liveSelected());
+            sstv.insert("status", window->statusMessage());
+            sstv.insert("outputDirectory", window->resultDirectory());
+            QJsonArray images;
+            const auto paths = window->imagePaths();
+            const auto labels = window->imageLabels();
+            for (int i = 0; i < paths.size(); ++i) {
+                QJsonObject img;
+                img.insert("path", paths.at(i));
+                img.insert("label", i < labels.size() ? labels.at(i) : QFileInfo(paths.at(i)).fileName());
+                img.insert("name", QFileInfo(paths.at(i)).fileName());
+                images.append(img);
+            }
+            sstv.insert("images", images);
+            sstv.insert("summary", window->busy()
+                                       ? (window->statusMessage().isEmpty()
+                                              ? QStringLiteral("Receiving SSTV…")
+                                              : window->statusMessage())
+                                       : (paths.isEmpty()
+                                              ? QStringLiteral("SSTV window open — start Receive when ready")
+                                              : QString("%1 picture(s) ready").arg(paths.size())));
+        } else {
+            sstv.insert("windowOpen", false);
+            sstv.insert("busy", false);
+            sstv.insert("live", false);
+            sstv.insert("status", QStringLiteral("SSTV window not open yet"));
+            sstv.insert("outputDirectory", QString());
+            sstv.insert("images", QJsonArray{});
+            sstv.insert("summary", QStringLiteral("Open Tools → SSTV Images in SDR Town to decode pictures"));
+        }
+        state.insert("sstv", sstv);
+
         QJsonObject caps;
         caps.insert("readStatus", true);
         caps.insert("setFrequency", true);
@@ -9166,8 +9354,12 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
         caps.insert("setRfGain", true);
         caps.insert("setSquelch", true);
         caps.insert("setVolume", true);
+        caps.insert("setDirectSampling", true);
         caps.insert("listP25ControlChannels", true);
         caps.insert("startP25Control", true);
+        caps.insert("readRds", true);
+        caps.insert("readTones", true);
+        caps.insert("readSstv", true);
         state.insert("capabilities", caps);
 
         return state;
@@ -9186,6 +9378,41 @@ QJsonObject MainWindow::applySdrTownControlVolume(const QJsonObject& body)
         monitorMasterVolume = std::clamp(volume, 0.0, 1.0);
         if (AudioEngine* eng = peekAudioEngineIfReady()) {
             eng->setMasterVolume(static_cast<float>(monitorMasterVolume));
+        }
+        return {{"ok", true}, {"state", sdrTownControlStatusSnapshot()}};
+    }
+
+QJsonObject MainWindow::applySdrTownControlDirectSampling(const QJsonObject& body)
+{
+        int mode = body.value("directSampling").toInt(-1);
+        if (mode < 0) {
+            const QString label = body.value("mode").toString().trimmed().toUpper();
+            if (label == "OFF" || label == "TUNER" || label == "0") mode = 0;
+            else if (label == "I" || label == "I-ADC" || label == "1") mode = 1;
+            else if (label == "Q" || label == "Q-ADC" || label == "2") mode = 2;
+            else if (body.contains("enabled")) mode = body.value("enabled").toBool(false) ? 2 : 0;
+        }
+        if (mode < 0 || mode > 2) {
+            return {{"ok", false}, {"status", 400},
+                    {"error", "directSampling must be 0 (off), 1 (I-ADC), or 2 (Q-ADC)"}};
+        }
+        auto& mgr = DeviceManager::instance();
+        if (mgr.getDevices().empty()) {
+            return {{"ok", false}, {"status", 503}, {"error", "no SDR device available"}};
+        }
+        mgr.setDirectSampling(0, mode);
+        if (directSamplingCombo) {
+            directSamplingCombo->blockSignals(true);
+            const int idx = directSamplingCombo->findData(mode);
+            if (idx >= 0) directSamplingCombo->setCurrentIndex(idx);
+            directSamplingCombo->blockSignals(false);
+        }
+        if (statusBar()) {
+            statusBar()->showMessage(mode == 0
+                ? QStringLiteral("RTL direct sampling off (tuner)")
+                : QString("RTL direct sampling %1 — HF ~500 kHz–28 MHz")
+                      .arg(mode == 1 ? "I-ADC" : "Q-ADC"),
+                4000);
         }
         return {{"ok", true}, {"state", sdrTownControlStatusSnapshot()}};
     }
@@ -9389,6 +9616,10 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
 
         if (monitorFreqSpin) {
             monitorFreqSpin->blockSignals(true);
+            // Keep the spinbox range wide enough for API tunes (HF included).
+            if (monitorFreqSpin->minimum() > 0.1 || monitorFreqSpin->maximum() < 6000.0) {
+                monitorFreqSpin->setRange(0.1, 6000.0);
+            }
             monitorFreqSpin->setValue(freqHz / 1e6);
             monitorFreqSpin->blockSignals(false);
         }
@@ -9530,6 +9761,9 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
         if (path == "/v1/volume" && method == "POST") {
             return applySdrTownControlVolume(body);
         }
+        if (path == "/v1/direct-sampling" && method == "POST") {
+            return applySdrTownControlDirectSampling(body);
+        }
         if (path == "/v1/p25/control" && method == "POST") {
             QJsonObject tune = body;
             tune.insert("mode", "P25");
@@ -9591,6 +9825,9 @@ bool MainWindow::startGuiRuntimeDeviceAt(double freqHz,  bool p25Defaults)
         const size_t devIndex = guiRuntimeDeviceIndex();
         if (monitorFreqSpin) {
             const QSignalBlocker blocker(monitorFreqSpin);
+            if (monitorFreqSpin->minimum() > 0.1 || monitorFreqSpin->maximum() < 6000.0) {
+                monitorFreqSpin->setRange(0.1, 6000.0);
+            }
             monitorFreqSpin->setValue(freqHz/1e6);
         }
         {

@@ -91,6 +91,51 @@ static double clampFrequencyCorrectionPpm(double ppm) {
     return std::clamp(ppm, -200.0, 200.0);
 }
 
+static int clampDirectSamplingMode(int mode) {
+    if (mode < 0 || mode > 2) return 0;
+    return mode;
+}
+
+static void updateRtlFreqLimitsForDirectSampling(DeviceInfo& d) {
+    if (d.driver != "rtlsdr") return;
+    if (d.directSampling > 0) {
+        // R820T bypassed — ADC samples HF directly (~500 kHz usable floor).
+        d.minFreq = 500e3;
+        d.maxFreq = 28.8e6;
+    } else {
+        d.minFreq = 24e6;
+        d.maxFreq = 1766e6;
+    }
+}
+
+#ifdef HAVE_SOAPYSDR
+static bool applySoapyDirectSampling(SoapySDR::Device* dev, int mode, size_t indexForLog) {
+    if (!dev) return false;
+    const int useMode = clampDirectSamplingMode(mode);
+    const std::string value = std::to_string(useMode);
+    // SoapyRTLSDR primary key is direct_samp; try aliases for forks.
+    static const char* kKeys[] = {"direct_samp", "directSamp", "direct_sampling"};
+    for (const char* key : kKeys) {
+        try {
+            dev->writeSetting(key, value);
+            spdlog::info("Applied RTL direct sampling on device {}: {}={} ({})",
+                         indexForLog, key, value,
+                         useMode == 0 ? "tuner/off" : (useMode == 1 ? "I-ADC" : "Q-ADC"));
+            return true;
+        } catch (const std::exception& ex) {
+            spdlog::debug("direct sampling key '{}' failed on device {}: {}", key, indexForLog, ex.what());
+        } catch (...) {
+            spdlog::debug("direct sampling key '{}' failed on device {}: unknown error", key, indexForLog);
+        }
+    }
+    if (useMode != 0) {
+        spdlog::warn("Could not apply direct sampling mode {} on device {} (setting unsupported?)",
+                     useMode, indexForLog);
+    }
+    return false;
+}
+#endif
+
 static double correctedTuneFrequencyHz(double logicalHz, double ppm) {
     if (!std::isfinite(logicalHz) || logicalHz <= 0.0) return logicalHz;
     ppm = clampFrequencyCorrectionPpm(ppm);
@@ -450,6 +495,7 @@ nlohmann::json DeviceManager::toJson() const {
         j["gain"] = d.gain;
         j["frequencyCorrectionPpm"] = d.frequencyCorrectionPpm;
         j["antenna"] = d.antenna;
+        j["directSampling"] = d.directSampling;
         arr.push_back(j);
     }
     return arr;
@@ -471,6 +517,10 @@ void DeviceManager::fromJson(const nlohmann::json& j) {
                 if (saved.contains("frequencyCorrectionPpm")) d.frequencyCorrectionPpm = clampFrequencyCorrectionPpm(saved["frequencyCorrectionPpm"].get<double>());
                 else if (saved.contains("ppm")) d.frequencyCorrectionPpm = clampFrequencyCorrectionPpm(saved["ppm"].get<double>());
                 if (saved.contains("antenna")) d.antenna = saved["antenna"];
+                if (saved.contains("directSampling")) {
+                    d.directSampling = clampDirectSamplingMode(saved["directSampling"].get<int>());
+                    updateRtlFreqLimitsForDirectSampling(d);
+                }
                 break;
             }
         }
@@ -706,6 +756,10 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                 try { localDev->setGain(SOAPY_SDR_RX, 0, useGainName, useGain); } catch (...) { localDev->setGain(SOAPY_SDR_RX, 0, useGain); }
             } else {
                 try { localDev->setGain(SOAPY_SDR_RX, 0, useGain); } catch (...) {}
+            }
+            // Direct sampling must be set before setFrequency so HF LO requests are accepted.
+            if (d.driver == "rtlsdr") {
+                applySoapyDirectSampling(localDev, d.directSampling, index);
             }
             double center = 100e6;
             uint64_t centerTuneSeq = st.centerTuneRequestSeq.load(std::memory_order_acquire);
@@ -1177,6 +1231,59 @@ void DeviceManager::setFrequencyCorrection(size_t index, double ppm) {
         st.nativeFrequencyCorrectionActive = false;
     }
 #endif
+}
+
+void DeviceManager::setDirectSampling(size_t index, int mode) {
+    const int useMode = clampDirectSamplingMode(mode);
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (index >= devices.size()) return;
+        devices[index].directSampling = useMode;
+        updateRtlFreqLimitsForDirectSampling(devices[index]);
+        saveSettings();
+    }
+
+#ifdef HAVE_SOAPYSDR
+    auto* stPtr = streamState(index);
+    if (!stPtr) return;
+    auto& st = *stPtr;
+
+    double logicalCenter = 0.0;
+    {
+        std::lock_guard<std::mutex> qlk(st.queueMutex);
+        logicalCenter = st.currentCenter;
+    }
+
+    bool appliedLive = false;
+    {
+        std::lock_guard<std::mutex> stateLock(st.stateMutex);
+        if (st.soapyDev && !st.stopFlag) {
+            std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+            appliedLive = applySoapyDirectSampling(st.soapyDev, useMode, index);
+            if (std::isfinite(logicalCenter) && logicalCenter > 0.0) {
+                const double tuneHz = st.nativeFrequencyCorrectionActive
+                    ? logicalCenter
+                    : correctedTuneFrequencyHz(logicalCenter, st.frequencyCorrectionPpm);
+                try {
+                    st.soapyDev->setFrequency(SOAPY_SDR_RX, 0, tuneHz);
+                } catch (const std::exception& ex) {
+                    spdlog::warn("Retune after direct sampling change failed for device {}: {}",
+                                 index, ex.what());
+                } catch (...) {}
+            }
+        }
+    }
+    if (!appliedLive) {
+        spdlog::debug("Direct sampling for device {} recorded as {} (model updated; applied on next real start).",
+                      index, useMode);
+    }
+#endif
+}
+
+int DeviceManager::getDirectSampling(size_t index) const {
+    std::lock_guard<std::mutex> lk(devicesMutex);
+    if (index >= devices.size()) return 0;
+    return devices[index].directSampling;
 }
 
 size_t DeviceManager::getIQQueueDepth(size_t index) const {

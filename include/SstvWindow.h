@@ -30,6 +30,11 @@ public:
     void finishLive();
     bool busy() const { return worker_ != nullptr; }
     void cancel();
+    QString statusMessage() const;
+    QString resultDirectory() const { return resultDirectory_; }
+    QStringList imagePaths() const;
+    QStringList imageLabels() const;
+    bool liveSelected() const;
 signals:
     void decodeFinished(bool success);
 protected:

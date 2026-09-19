@@ -280,6 +280,22 @@ SDRTOWN_CONTROL_API int SdrTownControl_SetVolume(const SdrTownControlConfig* con
     return requestJson(config, "POST", "/v1/volume", body.str(), responseJson, responseJsonBytes);
 }
 
+SDRTOWN_CONTROL_API int SdrTownControl_SetDirectSampling(const SdrTownControlConfig* config,
+                                                         int mode,
+                                                         char* responseJson,
+                                                         size_t responseJsonBytes)
+{
+    if (mode < 0 || mode > 2) {
+        copyResponse("{\"ok\":false,\"error\":\"directSampling must be 0, 1, or 2\"}",
+                     responseJson, responseJsonBytes);
+        return SDRTOWN_CONTROL_BAD_ARGUMENT;
+    }
+    std::ostringstream body;
+    body << "{\"directSampling\":" << mode << "}";
+    return requestJson(config, "POST", "/v1/direct-sampling", body.str(), responseJson,
+                       responseJsonBytes);
+}
+
 SDRTOWN_CONTROL_API int SdrTownControl_StartP25Control(const SdrTownControlConfig* config,
                                                        double controlFrequencyHz,
                                                        int autoFollow,

@@ -180,7 +180,7 @@ private:
     QJsonObject sdrTownControlStatusSnapshot();
 
     QJsonObject applySdrTownControlTune(const QJsonObject& body);
-
+    QJsonObject applySdrTownControlDirectSampling(const QJsonObject& body);
     QJsonObject applySdrTownControlVolume(const QJsonObject& body);
 
     void resetP25ControlMonitorValidation(double ccHz, const QString& reason);
@@ -475,6 +475,7 @@ private:
     std::map<std::string, qint64> p25LogThrottleByKey;
     QDoubleSpinBox* monitorFreqSpin = nullptr;
     QComboBox* monitorModeCombo = nullptr;
+    QComboBox* directSamplingCombo = nullptr;
     QDoubleSpinBox* rfGainSpin = nullptr;
     QDoubleSpinBox* squelchSpinBox = nullptr;
     QDoubleSpinBox* bwSpin = nullptr;

@@ -37,6 +37,9 @@ struct DeviceInfo {
     double frequencyCorrectionPpm = 0.0; // oscillator correction; persisted and applied live when supported
     std::string antenna;
     std::string gainName;         // for setGain with specific element (e.g. "TUNER" for RTL)
+    // RTL-SDR HF: SoapyRTLSDR direct_samp — 0=off (tuner), 1=I-ADC, 2=Q-ADC (usual HF pick).
+    // Enables ~500 kHz–~28 MHz when the R820T tuner is bypassed.
+    int directSampling = 0;
     // TX capability (Sprint 0 probe). RTL-class RX-only sticks stay false.
     bool canTx = false;
     std::vector<std::string> txAntennas;
@@ -140,6 +143,11 @@ public:
     // Live oscillator correction. Uses native SoapySDR frequency correction when available,
     // otherwise tunes the hardware LO to a corrected frequency while keeping UI/logical center intact.
     void setFrequencyCorrection(size_t index, double ppm);
+
+    // RTL-SDR direct sampling (HF). mode: 0=off, 1=I-ADC, 2=Q-ADC.
+    // Persisted and applied live via Soapy writeSetting("direct_samp", ...).
+    void setDirectSampling(size_t index, int mode);
+    int getDirectSampling(size_t index) const;
 
     // Diagnostics
     std::vector<std::string> getAvailableDrivers() const;
