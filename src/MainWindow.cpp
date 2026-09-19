@@ -9850,7 +9850,7 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
         }
 
         // DEC-0063/0064: analog /v1/tune must not tear down a live grant follow or
-        // warm-standby hold unless the caller explicitly forces it.
+        // warm-standby hold unless the caller explicitly forces it (website Take control).
         const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
         const bool followLive =
             p25FollowEnabled ||
@@ -9858,7 +9858,8 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
             p25IndependentTrafficActive ||
             (p25AutoFollowVoiceFreqHz > 0.0) ||
             (p25AutoFollowWarmStandbyUntilMs > nowMs);
-        if (followLive && !body.value("force").toBool(false)) {
+        const bool forceLeaveP25 = body.value("force").toBool(false);
+        if (followLive && !forceLeaveP25) {
             appendP25LogLineKeyed(
                 QStringLiteral("sdr-town-control-tune-refused-follow"),
                 QString("SDR Town control tune refused: P25 follow/warm-standby active TG=%1 voice=%2MHz (pass force=true to override).")
@@ -9944,6 +9945,11 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
 
         classifierRoiBuilder.clear();
         if (spectrumWidget) spectrumWidget->setCenterFreq(freqHz);
+        // Always leave P25 Monitor CC / auto-follow when switching to analog — otherwise
+        // the next grant (or status poll) snaps RF and the website mode button back to P25.
+        p25ControlMonitorDisabledReason.clear();
+        p25MonitoredControlFreqHz = 0.0;
+        p25AutoFollowEnabled = false;
         p25FollowEnabled = false;
         p25FollowAutoActive = false;
         p25FollowTalkgroupId = 0;
@@ -9953,8 +9959,23 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
         p25AutoFollowLastActiveMs = 0;
         p25AutoFollowLastMHzHopMs = 0;
         p25AutoFollowReturnControlFreqHz = 0.0;
+        p25AutoFollowWarmStandbyUntilMs = 0;
+        p25AutoFollowWarmStandbyVoiceHz = 0.0;
         p25IndependentTrafficActive = false;
         p25IndependentTrafficRetunedPrimary = false;
+        p25LiveControlAnalyzer.reset();
+        p25PendingVoiceGrants.clear();
+        p25RepeatedVoiceGrants.clear();
+        p25ControlWorkerResetPending.store(true, std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> pendingLock(p25ControlPendingMutex);
+            p25ControlPendingResult.reset();
+        }
+        if (p25AutoFollowCheckBox) {
+            p25AutoFollowCheckBox->blockSignals(true);
+            p25AutoFollowCheckBox->setChecked(false);
+            p25AutoFollowCheckBox->blockSignals(false);
+        }
         {
             std::lock_guard<std::mutex> lk(receiversMutex);
             receivers.erase(std::remove_if(receivers.begin(), receivers.end(),

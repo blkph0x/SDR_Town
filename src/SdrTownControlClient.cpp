@@ -233,7 +233,8 @@ SDRTOWN_CONTROL_API int SdrTownControl_Tune(const SdrTownControlConfig* config,
     if (std::isfinite(request->squelchDb)) {
         body << ",\"squelchDb\":" << request->squelchDb;
     }
-    body << ",\"p25AutoFollow\":" << (request->p25AutoFollow ? "true" : "false") << "}";
+    body << ",\"p25AutoFollow\":" << (request->p25AutoFollow ? "true" : "false")
+         << ",\"force\":" << (request->force ? "true" : "false") << "}";
     return requestJson(config, "POST", "/v1/tune", body.str(), responseJson, responseJsonBytes);
 }
 
@@ -246,7 +247,8 @@ SDRTOWN_CONTROL_API int SdrTownControl_SetMode(const SdrTownControlConfig* confi
         copyResponse("{\"ok\":false,\"error\":\"mode is required\"}", responseJson, responseJsonBytes);
         return SDRTOWN_CONTROL_BAD_ARGUMENT;
     }
-    std::string body = std::string("{\"mode\":\"") + jsonEscape(mode) + "\"}";
+    // Website / FUBAR mode taps are intentional — force leaves a live P25 follow.
+    std::string body = std::string("{\"mode\":\"") + jsonEscape(mode) + "\",\"force\":true}";
     return requestJson(config, "POST", "/v1/mode", body, responseJson, responseJsonBytes);
 }
 

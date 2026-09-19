@@ -38,6 +38,7 @@ struct SdrTownTuneRequest {
     double squelchDb;         // NaN = leave
     int startDevice;          // 0/1
     int p25AutoFollow;        // 0/1, only meaningful for P25
+    int force;                // 0/1 — leave live P25 follow for an intentional analog retune
 };
 
 SDRTOWN_CONTROL_API const char* SdrTownControl_Version(void);
