@@ -191,14 +191,15 @@ TEST_CASE("Workspace roundtrips geometry visibility and lock state", "[workspace
     REQUIRE_FALSE(layout.isLocked());
 }
 
-TEST_CASE("DCS status displays equivalent labels and hides stale data", "[workspace]") {
+TEST_CASE("DCS status displays preferred label and hides stale data", "[workspace]") {
     RdsStatusWidget widget;
     CtcssSnapshot tone; tone.targetHz=100e6; tone.updatedMs=1000;
     DcsSnapshot dcs; dcs.targetHz=100e6; dcs.updatedMs=1000;
     dcs.identities={{0023,false},{0047,true}};
     widget.presentTone(tone,true,100e6,1100,dcs);
-    REQUIRE(widget.text().contains("023N / 047I"));
-    REQUIRE(widget.text().contains("equivalent"));
+    REQUIRE(widget.text().contains("DCS: 023N"));
+    REQUIRE_FALSE(widget.text().contains("equivalent"));
+    REQUIRE_FALSE(widget.text().contains("047I"));
     dcs.updatedMs=1; tone.updatedMs=3000;
     widget.presentTone(tone,true,100e6,3000,dcs);
     REQUIRE_FALSE(widget.text().contains("023N"));
