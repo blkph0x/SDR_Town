@@ -429,6 +429,39 @@ void AudioEngine::clearBuffers()
     }
 }
 
+size_t AudioEngine::trimQueuedAudio(size_t maxQueuedSamples,
+                                    const std::vector<size_t>& activeOutputIndices)
+{
+    if (maxQueuedSamples == 0) return 0;
+    std::lock_guard<std::mutex> lk(audioMutex);
+    size_t droppedTotal = 0;
+    auto trimOne = [&](ActiveOutput& output) {
+        if (!output.valid.load(std::memory_order_acquire)) return;
+        auto& rb = output.ring;
+        if (rb.capacity == 0) return;
+        size_t w = rb.writePos.load(std::memory_order_relaxed);
+        size_t r = rb.readPos.load(std::memory_order_acquire);
+        size_t queued = ringDistance(w, r, rb.capacity);
+        if (queued <= maxQueuedSamples) return;
+        const size_t drop = queued - maxQueuedSamples;
+        r = ringWrap(r + drop, rb.capacity);
+        rb.readPos.store(r, std::memory_order_release);
+        droppedTotal += drop;
+        producerDroppedFrames.fetch_add(drop, std::memory_order_relaxed);
+    };
+    if (activeOutputIndices.empty()) {
+        for (auto& actPtr : m_active) {
+            if (actPtr) trimOne(*actPtr);
+        }
+    } else {
+        for (size_t activeIndex : activeOutputIndices) {
+            if (activeIndex >= m_active.size() || !m_active[activeIndex]) continue;
+            trimOne(*m_active[activeIndex]);
+        }
+    }
+    return droppedTotal;
+}
+
 void AudioEngine::pushAudioToActiveOutputLocked(ActiveOutput& output, const float* samples, size_t count, uint8_t sampleKind)
 {
     if (!output.valid.load(std::memory_order_acquire)) return;

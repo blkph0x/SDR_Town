@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.64 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.65 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -72,7 +72,7 @@ add_library(sdr_town_rds STATIC
     external/redsea-block/src/group.cc
 )
 target_include_directories(sdr_town_rds PUBLIC include PRIVATE external/redsea-block external/miniaudio)
-add_library(sdr_town_tones STATIC src/CtcssDecoder.cpp src/DcsDecoder.cpp)
+add_library(sdr_town_tones STATIC src/CtcssDecoder.cpp src/DcsDecoder.cpp src/DtmfDecoder.cpp src/ControlEventLog.cpp)
 target_include_directories(sdr_town_tones PUBLIC include PRIVATE external/miniaudio)
 add_library(sdr_town_decoders STATIC src/ReceiveDecoder.cpp src/RdsMpxFile.cpp src/SstvVis.cpp src/SstvAudioFile.cpp src/SstvLiveInput.cpp src/SstvRateConverter.cpp src/SstvReceiverFeed.cpp)
 target_include_directories(sdr_town_decoders PUBLIC include PRIVATE external/miniaudio)
@@ -330,6 +330,7 @@ if(BUILD_TESTS)
   add_executable(sdr_town_tests
     tests/test_rds.cpp
     tests/test_ctcss.cpp
+    tests/test_dtmf.cpp
     tests/test_dcs.cpp
     tests/test_receive_decoder.cpp
     tests/test_sstv_vis.cpp

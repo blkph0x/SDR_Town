@@ -113,6 +113,9 @@ private:
 
     float agcGain = 1.0f;
     float lpA = 0, lpB = 0, dcv = 0;
+    // Discriminator DC tracker for speech HPF — must not share state with audio-path dcv,
+    // otherwise the NFM tone/DCS tap is corrupted across chunks when audio LPF is on.
+    float discDc = 0;
     float des = 0;
     float nx1=0, nx2=0, ny1=0, ny2=0;
     float flp1=0, flp2=0;
@@ -124,6 +127,16 @@ private:
     double resampPhase = 0.0;
     double lastResampInputRate = -1.0;
     double lastResampOutputRate = -1.0;
+
+    // NFM stage-1 CIC (full-rate → ~192 kHz) so the channel FIR can be sharp enough.
+    std::complex<float> nfmCicSum{0.f, 0.f};
+    int nfmCicCount = 0;
+    int nfmCicFactor = 0;
+    std::vector<float> nfmSpeechTaps;
+    std::vector<std::complex<float>> nfmSpeechFirDelay;
+    double nfmSpeechLastBw = -1.0;
+    double nfmSpeechLastRate = -1.0;
+    float clickFadeGain = 1.0f;
 
     bool dspStateNeedsReset = false;
     double lastResetTarget = -1e12;

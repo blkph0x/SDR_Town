@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Current version** | **0.2.64** (experimental channel) |
+| **Current version** | **0.2.65** (experimental channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
@@ -46,6 +46,7 @@ Formerly *MaulAudio Pro*. Branding, binaries, installer, AppData paths, and rele
 - HTTP JSON on **localhost only** (default port **8765**). Not exposed to the LAN.
 - `GET /v1/status` includes monitor state and a `p25` object. From **0.2.63**, `p25.talkgroupStatusLabel` is the clean `TG <id> <alpha>` string (no voice diagnostic suffix). FUBAR uses that for the website subtitle, with an alias-file fallback on older SDR Town builds.
 - From **0.2.64**, status also exposes read-only `rds`, `tones` (CTCSS/DCS), and `sstv` blocks for the FUBAR website panels. `POST /v1/direct-sampling` sets RTL-SDR `direct_samp` (0=off, 1=I-ADC, 2=Q-ADC) for HF down to ~500 kHz. `POST /v1/mode` changes demod at the current frequency.
+- From **0.2.65**, opt-in **Repeater Control Monitor** (receive-only): DTMF decode, CTCSS/DCS/carrier **heard list**, and dual-watch of output+input when the IQ passband covers the pair. Status adds `tones.dtmf` and `repeater`. See `docs/REPEATER_MONITOR.md`. NFM audio path improved; DCS uses the speech discriminator tap; DTMF no longer double-fires single keypresses.
 - Analog `/v1/tune` is refused while a P25 voice follow or warm-standby hold is active so a website poll cannot yank RF back to the control channel mid-call.
 
 FUBAR’s own README has the station/website side in full: https://github.com/blkph0x/FUBAR#fubar--sdr-town

@@ -1360,7 +1360,8 @@ std::vector<std::complex<float>> DeviceManager::getRecentIQWindow(size_t index, 
 
 // S0 / audit-followup-2: cursor based new-samples only, chronological, per-rx.
 // Replaces the "always take newest overlapping window" anti-pattern that caused repeated demod of the same data / chop.
-DeviceManager::RecentIQWindow DeviceManager::getNewIQWindowForReceiver(size_t devIndex, Receiver& rx, size_t maxSamples) {
+DeviceManager::RecentIQWindow DeviceManager::getNewIQWindowForReceiver(size_t devIndex, Receiver& rx, size_t maxSamples,
+                                                                       size_t maxLagSamples) {
     RecentIQWindow outWindow;
     if (maxSamples == 0) return outWindow;
     auto* stPtr = streamState(devIndex);
@@ -1414,6 +1415,27 @@ DeviceManager::RecentIQWindow DeviceManager::getNewIQWindowForReceiver(size_t de
         myLast = total - (uint64_t)maxSamples;
         rx.lastConsumedAbsolute.store(myLast, std::memory_order_release);
         available = total - myLast;
+    }
+
+    // Analog realtime path: the IQ ring can hold ~10+ seconds. If DSP falls behind,
+    // skip old samples instead of playing speech many seconds late.
+    // Keep a healthy live tail (~100 ms worth of maxSamples blocks) so FIR/squelch
+    // are not reset every couple of blocks (that sounds like a helicopter).
+    if (maxLagSamples > 0 && available > static_cast<uint64_t>(maxLagSamples)) {
+        const uint64_t keep = std::min<uint64_t>(
+            static_cast<uint64_t>(maxSamples) * 4ull,
+            std::max<uint64_t>(static_cast<uint64_t>(maxLagSamples) / 4ull, static_cast<uint64_t>(maxSamples)));
+        myLast = (total > keep) ? total - keep : 0;
+        rx.lastConsumedAbsolute.store(myLast, std::memory_order_release);
+        available = (total > myLast) ? (total - myLast) : 0;
+        outWindow.cursorDiscontinuity = true;
+        static thread_local auto lastLagLog = std::chrono::steady_clock::time_point{};
+        const auto nowLag = std::chrono::steady_clock::now();
+        if (nowLag - lastLagLog > std::chrono::seconds(2)) {
+            spdlog::warn("Receiver on dev {} analog catch-up: dropped backlog to stay within {} samples of live edge.",
+                devIndex, (unsigned long long)maxLagSamples);
+            lastLagLog = nowLag;
+        }
     }
 
     if (available == 0) return outWindow;

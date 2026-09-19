@@ -15,6 +15,7 @@
 #include "SstvImageFile.h"
 #include "CtcssDecoder.h"
 #include "DcsDecoder.h"
+#include "DtmfDecoder.h"
 #include "ReceiveDecoder.h"
 #include "IP25AmbeEncoder.h"
 #include "P25AppGlobals.h"
@@ -1523,10 +1524,11 @@ int runCLI(int argc, char* argv[]) {
               std::cout << "Commands:\n"
                         << "  decoders               List compiled receive adapters and input requirements\n"
                         << "  tones file <quoted-path> CTCSS in mono discriminator WAV/FLAC, 8..96 kHz, max 120 s\n"
-                        << "  sstv inspect <quoted-path> SSTV VIS headers only; mono WAV/FLAC 8..96 kHz, max 120 s\n"
-                        << "  sstv decode <input> <new-output-dir> [auto|robot36|martin1] Offline PNG images, max 360 s\n"
                         << "  tones dcs <quoted-path> Experimental DCS from mono discriminator WAV/FLAC\n"
                         << "  tones dcs-bits <quoted-path> DCS chronological ASCII bits; max 120 s\n"
+                        << "  tones dtmf <quoted-path> DTMF digits from mono discriminator WAV/FLAC\n"
+                        << "  sstv inspect <quoted-path> SSTV VIS headers only; mono WAV/FLAC 8..96 kHz, max 120 s\n"
+                        << "  sstv decode <input> <new-output-dir> [auto|robot36|martin1] Offline PNG images, max 360 s\n"
                       << "  rds bits <quoted-path>  Decode MSB-first differential-decoded RDS bits\n"
                       << "  rds mpx <quoted-path>   Decode mono MPX WAV/FLAC (128..384 kHz, max 120 s)\n"
                       << "  list | devices          - show enumerated devices\n"
@@ -2293,16 +2295,24 @@ int runCLI(int argc, char* argv[]) {
             std::string action, path; iss >> action; std::getline(iss,path);
             QString input=QString::fromStdString(path).trimmed();
             if (input.startsWith('"') && input.endsWith('"') && input.size()>=2) input=input.mid(1,input.size()-2);
-            if ((action!="file" && action!="dcs" && action!="dcs-bits") || input.isEmpty()) {
-                std::cout << "tones file|dcs|dcs-bits <quoted-path>\n"; continue;
+            if ((action!="file" && action!="dcs" && action!="dcs-bits" && action!="dtmf") || input.isEmpty()) {
+                std::cout << "tones file|dcs|dcs-bits|dtmf <quoted-path>\n"; continue;
             }
             try {
+                if (action == "dtmf") {
+                    const auto dtmf = decodeDtmfFile(input.toStdString());
+                    std::cout << nlohmann::json{{"decoder","dtmf"},{"digit",dtmf.digit ? std::string(1,dtmf.digit) : ""},
+                        {"sequence",dtmf.sequence},{"lastSequence",dtmf.lastSequence},
+                        {"samples",dtmf.samples},{"frames",dtmf.frames},{"confirmedDigits",dtmf.confirmedDigits},
+                        {"purity",dtmf.purity},{"twistDb",dtmf.twistDb},{"status",dtmf.status}}.dump() << '\n';
+                    continue;
+                }
                 if (action!="file") {
                     DcsSnapshot dcs;
                     if (action=="dcs") dcs=decodeDcsFile(input.toStdString());
                     else { dcs.identities=decodeDcsBitsFile(input.toStdString()); dcs.status="Bitstream decoded"; }
                     std::vector<std::string> aliases;
-                    for (const auto& id:dcs.identities) aliases.push_back(dcsLabel(id));
+                    if (!dcs.identities.empty()) aliases.push_back(dcsLabel(preferredDcsIdentity(dcs.identities)));
                     std::cout << nlohmann::json{{"decoder","dcs"},{"input",action},{"aliases",aliases},
                         {"samples",dcs.samples},{"agreeingPhases",dcs.agreeingPhases},{"status",dcs.status}}.dump() << '\n';
                     continue;

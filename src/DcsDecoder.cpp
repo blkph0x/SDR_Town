@@ -83,6 +83,18 @@ std::string dcsLabel(const DcsIdentity& id) {
     std::ostringstream text; text<<std::oct<<std::setw(3)<<std::setfill('0')<<id.code<<(id.inverted?'I':'N');
     return text.str();
 }
+DcsIdentity preferredDcsIdentity(const std::vector<DcsIdentity>& identities) {
+    if (identities.empty()) return {};
+    DcsIdentity best = identities.front();
+    for (const auto& id : identities) {
+        if (id.inverted != best.inverted) {
+            if (!id.inverted) best = id;
+            continue;
+        }
+        if (id.code < best.code) best = id;
+    }
+    return best;
+}
 void DcsDecoder::publish() { std::lock_guard lock(mutex_); published_=state_; }
 DcsSnapshot DcsDecoder::snapshot() const { std::lock_guard lock(mutex_); return published_; }
 void DcsDecoder::reset() {

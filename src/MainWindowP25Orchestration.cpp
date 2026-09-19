@@ -1,4 +1,6 @@
 #include "MainWindow.h"
+#include "RepeaterControlHooks.h"
+#include "RepeaterMonitor.h"
 
 // AUTOMOC: Q_OBJECT lives in MainWindow.h.
 // ISS-0010: live GUI P25 decode pipeline (voice worker + guiDspWorker rolling IQ).
@@ -535,10 +537,22 @@ void MainWindow::startP25LiveDecodePipeline()
                             monBw = smart.bandwidthHz;
                             monLpf = smart.lpfHz;
                         }
+                        // Guard: NFM with a leftover WFM bandwidth sounds robotic.
+                        if (monMode == DemodMode::NFM && monBw > 25000.0) {
+                            monBw = 12500.0;
+                            monLpf = std::min(monLpf, 3000.0);
+                        }
 
+                        // Probe RF level at the nominal tune first so strong local HT
+                        // can disable spectrum-AFC (AFC hunt → warble/robotic audio).
+                        rfMetrics = computeRfSquelchMetrics(pwr, sr, cf, monFreq, monBw, monMode);
+                        const bool skipAnalogAfc = !monP25VoiceDecode && rfMetrics.valid
+                            && rfMetrics.signalLevelDb > -45.0;
                         demodFreq = monP25VoiceDecode
                             ? p25VoiceAfcTargetHz(rx, p25Phase2VoiceSchedulerNominalHz(rx), monBw)
-                            : applyNfmAfcFromSpectrum(rx, pwr, sr, cf, monFreq, monBw, monMode);
+                            : (skipAnalogAfc
+                                ? monFreq
+                                : applyNfmAfcFromSpectrum(rx, pwr, sr, cf, monFreq, monBw, monMode));
                         // P25 TDMA acquisition must stay centered on the granted channel.
                         const double voiceNominalHz = monP25VoiceDecode
                             ? p25Phase2VoiceSchedulerNominalHz(rx)
@@ -900,7 +914,13 @@ void MainWindow::startP25LiveDecodePipeline()
                             last = now;
                         } else {
                             if (!monP25VoiceDecode && (monMode == DemodMode::WFM || monMode == DemodMode::NFM)) {
-                                auto window = mgr.getNewIQWindowForReceiver(i, rx, tgt);
+                                // Emergency-only catch-up. A tight 120 ms threshold was thrashing
+                                // discontinuities every few blocks → helicopter chop. Allow ~400 ms
+                                // of IQ slack so the demod FIR/squelch stay continuous.
+                                const size_t analogMaxLag = (sr > 0.0)
+                                    ? static_cast<size_t>(std::clamp(sr * 0.400, 32768.0, sr * 0.600))
+                                    : 32768;
+                                auto window = mgr.getNewIQWindowForReceiver(i, rx, tgt, analogMaxLag);
                                 rdsStreamEpoch = window.streamEpoch;
                                 rdsIqStart = window.startAbsolute;
                                 rdsSourceGap = window.cursorDiscontinuity;
@@ -1095,31 +1115,112 @@ void MainWindow::startP25LiveDecodePipeline()
                             const bool decodeRds = monMode == DemodMode::WFM && !monP25ControlMute;
                             const bool decodeTones = monMode == DemodMode::NFM && !monP25ControlMute;
                             const bool decodeData = decodeRds || decodeTones;
+
+                            bool repEnabled = false, repDualWanted = false, repLogDtmf = false,
+                                repLogTones = false, repLogCarrier = false;
+                            double repOutHz = 0.0, repInHz = 0.0;
+                            {
+                                std::lock_guard<std::mutex> lock(repeaterMonitorMutex);
+                                repEnabled = repeaterMonitorEnabled;
+                                repDualWanted = repeaterDualWatchWanted;
+                                repLogDtmf = repeaterLogDtmf;
+                                repLogTones = repeaterLogTones;
+                                repLogCarrier = repeaterLogCarrier;
+                                repOutHz = repeaterOutputHz;
+                                repInHz = repeaterInputHz;
+                            }
+
+                            double audioTargetHz = demodFreq;
+                            double primaryIdentityHz = monFreq;
+                            bool dualActive = false;
+                            QString dualReason = QStringLiteral("disabled");
+                            if (repEnabled && repDualWanted && decodeTones) {
+                                const auto plan = planRepeaterDualWatch(repOutHz, repInHz, sr, monBw);
+                                if (!plan.feasible) {
+                                    dualReason = QString::fromUtf8(plan.reason);
+                                    rx.repeaterDualWatchCentered = false;
+                                } else {
+                                    const bool inBandNow =
+                                        frequencyInPassband(repOutHz, cf, sr, monBw) &&
+                                        frequencyInPassband(repInHz, cf, sr, monBw);
+                                    if (!inBandNow && !rx.repeaterDualWatchCentered &&
+                                        std::abs(cf - plan.centerHz) > std::max(25e3, monBw * 2.0)) {
+                                        // One-shot soft center only — never spam setCenterFreq.
+                                        mgr.setCenterFreq(i, plan.centerHz);
+                                        cf = plan.centerHz;
+                                        rx.repeaterDualWatchCentered = true;
+                                        dualReason = QStringLiteral("centering for pair");
+                                    }
+                                    if (frequencyInPassband(repOutHz, cf, sr, monBw) &&
+                                        frequencyInPassband(repInHz, cf, sr, monBw)) {
+                                        dualActive = true;
+                                        dualReason = QStringLiteral("active in passband");
+                                        audioTargetHz = repOutHz;
+                                        primaryIdentityHz = repOutHz;
+                                        rx.repeaterDualWatchCentered = true;
+                                    } else if (rx.repeaterDualWatchCentered) {
+                                        dualReason = QStringLiteral("waiting for retune settle");
+                                    } else {
+                                        dualReason = QStringLiteral("pair outside current passband");
+                                    }
+                                }
+                            } else if (repEnabled && !repDualWanted) {
+                                dualReason = QStringLiteral("dual-watch unchecked");
+                                rx.repeaterDualWatchCentered = false;
+                            } else if (repEnabled) {
+                                dualReason = QStringLiteral("NFM required");
+                                rx.repeaterDualWatchCentered = false;
+                            } else {
+                                rx.repeaterDualWatchCentered = false;
+                            }
+                            {
+                                std::lock_guard<std::mutex> lock(repeaterMonitorMutex);
+                                repeaterDualWatchActive = dualActive;
+                                repeaterDualWatchReason = dualReason;
+                            }
+
                             if (decodeData && (rdsSourceGap || rx.rdsIqEpoch != rdsStreamEpoch || rx.rdsNextIq != rdsIqStart)) {
                                 rx.demod.resetMultiplexState();
                                 rx.rds->reset();
                                 rx.ctcss.reset();
                                 rx.dcs.reset();
+                                if (repEnabled) rx.dtmf.reset();
                             }
-                            ch = rx.demod.demodulateToAudio(iq, sr, cf, demodFreq, monMode,
+                            ch = rx.demod.demodulateToAudio(iq, sr, cf, audioTargetHz, monMode,
                                 rms, monLpf, monSquelch, monGain, monWfmDe,
                                 monWfmNotch, monBw, need, orate, rfSquelchLevel, monAudioLpfEnabled,
                                 decodeData && !rdsSourceGap ? &mpx : nullptr,
-                                decodeTones ? monFreq : std::numeric_limits<double>::quiet_NaN());
+                                decodeTones ? primaryIdentityHz : std::numeric_limits<double>::quiet_NaN());
                             if (decodeData && !rdsSourceGap) {
                                 if (decodeRds) {
                                     rx.ctcss.reset();
                                     rx.dcs.reset();
+                                    if (repEnabled) rx.dtmf.reset();
                                     rx.rds->process({mpx.samples, DecoderInputDomain::FmMultiplex,
                                         mpx.sampleRate, mpx.targetHz, i, mpx.epoch, mpx.firstSample, mpx.discontinuity});
                                 } else {
                                     rx.rds->reset();
                                     if (mpx.discontinuity && mpx.epoch <= 32) spdlog::info("NFM data reset reasons={} rate={} bw={} epoch={} iqEpoch={} iqStart={} previousEnd={}",
                                         mpx.resetReasons, mpx.sampleRate, monBw, mpx.epoch, rdsStreamEpoch, rdsIqStart, rx.rdsNextIq);
-                                    rx.ctcss.process(mpx.samples, mpx.sampleRate, monFreq,
+                                    rx.ctcss.process(mpx.samples, mpx.sampleRate, primaryIdentityHz,
                                         mpx.epoch, mpx.firstSample, mpx.discontinuity);
-                                    rx.dcs.process(mpx.samples, mpx.sampleRate, monFreq,
+                                    rx.dcs.process(mpx.samples, mpx.sampleRate, primaryIdentityHz,
                                         mpx.epoch, mpx.firstSample, mpx.discontinuity);
+                                    if (repEnabled) {
+                                        rx.dtmf.process(mpx.samples, mpx.sampleRate, primaryIdentityHz,
+                                            mpx.epoch, mpx.firstSample, mpx.discontinuity);
+                                        const auto channel = dualActive ? ControlEvent::Channel::Output
+                                                                        : ControlEvent::Channel::Tuned;
+                                        if (repLogDtmf)
+                                            drainDtmfEvents(rx.dtmf, rx.controlEvents, channel, primaryIdentityHz);
+                                        noteToneChanges(rx.controlEvents, channel, primaryIdentityHz,
+                                            rx.ctcss.snapshot(), rx.lastLoggedCtcssHz,
+                                            rx.dcs.snapshot(), rx.lastLoggedDcsKey, repLogTones);
+                                        const bool carrierOpen = std::isfinite(rms) && rms > (monSquelch + 1.0);
+                                        noteCarrier(rx.controlEvents, channel, primaryIdentityHz,
+                                            carrierOpen, rx.controlCarrierOpen, repLogCarrier,
+                                            RdsMpxDecoder::monotonicMs());
+                                    }
                                     rx.sstvFeed->publish(mpx, i);
                                 }
                                 rx.rdsIqEpoch = rdsStreamEpoch;
@@ -1128,7 +1229,70 @@ void MainWindow::startP25LiveDecodePipeline()
                                 rx.rds->reset();
                                 rx.ctcss.reset();
                                 rx.dcs.reset();
+                                if (repEnabled) rx.dtmf.reset();
                                 rx.rdsIqEpoch = rx.rdsNextIq = 0;
+                            }
+
+                            // Silent input-leg DDC when dual-watch is active (no speaker audio).
+                            // Rate-limit to every 4th block so NFM audio stays realtime; DTMF still
+                            // catches keypad bursts which last tens of ms.
+                            if (repEnabled && dualActive && decodeTones && !rdsSourceGap) {
+                                ++rx.inputWatchSkipCounter;
+                                const bool runInputWatch = (rx.inputWatchSkipCounter % 4u) == 1u;
+                                if (runInputWatch) {
+                                    FmMultiplexBlock inMpx;
+                                    const bool inGap = rx.inputWatchIqEpoch != rdsStreamEpoch ||
+                                        rx.inputWatchNextIq != rdsIqStart;
+                                    if (inGap) {
+                                        rx.inputWatchDemod.resetMultiplexState();
+                                        rx.inputWatchCtcss.reset();
+                                        rx.inputWatchDcs.reset();
+                                        rx.inputWatchDtmf.reset();
+                                    }
+                                    double inRms = -200.0;
+                                    (void)rx.inputWatchDemod.demodulateToAudio(iq, sr, cf, repInHz, DemodMode::NFM,
+                                        inRms, monLpf, monSquelch, 1.0, monWfmDe, monWfmNotch, monBw,
+                                        0, orate, rfSquelchLevel, false, &inMpx, repInHz);
+                                    rx.inputWatchCtcss.process(inMpx.samples, inMpx.sampleRate, repInHz,
+                                        inMpx.epoch, inMpx.firstSample, inMpx.discontinuity || inGap);
+                                    rx.inputWatchDcs.process(inMpx.samples, inMpx.sampleRate, repInHz,
+                                        inMpx.epoch, inMpx.firstSample, inMpx.discontinuity || inGap);
+                                    rx.inputWatchDtmf.process(inMpx.samples, inMpx.sampleRate, repInHz,
+                                        inMpx.epoch, inMpx.firstSample, inMpx.discontinuity || inGap);
+                                    if (repLogDtmf)
+                                        drainDtmfEvents(rx.inputWatchDtmf, rx.controlEvents,
+                                            ControlEvent::Channel::Input, repInHz);
+                                    noteToneChanges(rx.controlEvents, ControlEvent::Channel::Input, repInHz,
+                                        rx.inputWatchCtcss.snapshot(), rx.inputLastLoggedCtcssHz,
+                                        rx.inputWatchDcs.snapshot(), rx.inputLastLoggedDcsKey, repLogTones);
+                                    const bool inCarrier = std::isfinite(inRms) && inRms > (monSquelch + 1.0);
+                                    noteCarrier(rx.controlEvents, ControlEvent::Channel::Input, repInHz,
+                                        inCarrier, rx.inputWatchCarrierOpen, repLogCarrier,
+                                        RdsMpxDecoder::monotonicMs());
+                                    rx.inputWatchIqEpoch = rdsStreamEpoch;
+                                    rx.inputWatchNextIq = rdsIqStart + iq.size();
+                                }
+                            } else if (!dualActive) {
+                                rx.inputWatchIqEpoch = rx.inputWatchNextIq = 0;
+                                rx.inputWatchSkipCounter = 0;
+                            }
+
+                            if (!repEnabled) {
+                                if (rx.repeaterMonitorWasEnabled) {
+                                    rx.dtmf.reset();
+                                    rx.inputWatchDtmf.reset();
+                                    rx.inputWatchCtcss.reset();
+                                    rx.inputWatchDcs.reset();
+                                    rx.inputWatchDemod.resetMultiplexState();
+                                    rx.inputWatchIqEpoch = rx.inputWatchNextIq = 0;
+                                    rx.controlCarrierOpen = false;
+                                    rx.inputWatchCarrierOpen = false;
+                                    rx.repeaterMonitorWasEnabled = false;
+                                    rx.repeaterDualWatchCentered = false;
+                                    rx.inputWatchSkipCounter = 0;
+                                }
+                            } else {
+                                rx.repeaterMonitorWasEnabled = true;
                             }
                         }
                     }
@@ -1421,13 +1585,31 @@ void MainWindow::startP25LiveDecodePipeline()
                                 }
                                 }
                             } else if (!monP25VoiceDecode) {
-                                // Analog demod (WFM/NFM/AM/etc): use the simple frame pusher, not the
-                                // P25 jitter-buffer path.  GUI regression: demod ran but audio never
-                                // reached the speakers because only the P25 branch pushed PCM.
-                                pushAudioFrames(audioOutputEngine,
-                                    p25SpeakerPendingFor(pendingAudioByRx, rx).samples,
-                                    ch,
-                                    rxAudioOutputs);
+                                // Analog demod: push PCM directly. Only trim when the ring is badly
+                                // behind (emergency). Trimming every block caused helicopter chop.
+                                if (audioOutputEngine) {
+                                    const size_t queued = audioOutputEngine->getRingQueuedSamples();
+                                    const size_t emergencyCap = static_cast<size_t>(
+                                        std::clamp(orate * 0.350, 8000.0, orate * 0.500));
+                                    const size_t softTarget = static_cast<size_t>(
+                                        std::clamp(orate * 0.080, 2400.0, orate * 0.120));
+                                    if (queued > emergencyCap)
+                                        audioOutputEngine->trimQueuedAudio(softTarget, rxAudioOutputs);
+                                }
+                                if (audioOutputEngine && !ch.empty()) {
+                                    // Bypass 5 ms frame chunking for live NFM — fewer edge clicks.
+                                    auto& pending = p25SpeakerPendingFor(pendingAudioByRx, rx).samples;
+                                    if (!pending.empty()) {
+                                        // Flush any leftover alignment crumbs, then go direct.
+                                        pending.insert(pending.end(), ch.begin(), ch.end());
+                                        audioOutputEngine->pushAudioToActiveOutputs(
+                                            pending.data(), pending.size(), rxAudioOutputs);
+                                        pending.clear();
+                                    } else {
+                                        audioOutputEngine->pushAudioToActiveOutputs(
+                                            ch.data(), ch.size(), rxAudioOutputs);
+                                    }
+                                }
                             }
                         } else if (haveP25Audio && monP25VoiceDecode) {
                             const quint32 tgLog = p25Audio.talkgroupId;

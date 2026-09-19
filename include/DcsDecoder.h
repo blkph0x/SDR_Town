@@ -60,3 +60,5 @@ private:
 DcsSnapshot decodeDcsFile(const std::string& path, size_t chunkSize = 4096);
 std::vector<DcsIdentity> decodeDcsBitsFile(const std::string& path);
 std::string dcsLabel(const DcsIdentity& identity);
+// Prefer normal polarity, then lowest octal code — what radios usually print.
+DcsIdentity preferredDcsIdentity(const std::vector<DcsIdentity>& identities);

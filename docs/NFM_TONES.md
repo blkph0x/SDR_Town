@@ -92,6 +92,16 @@ Independent known-code RF acceptance is still deferred until the user's radio
 is available. Longer fading/drift/performance qualification and optional
 tone-controlled squelch remain open. P25/speaker processing is unchanged.
 
+## DTMF (opt-in repeater monitor)
+
+See `docs/REPEATER_MONITOR.md`. DTMF uses the same NFM discriminator tap with a
+Goertzel keypad bank. It runs only when Repeater Control Monitor is enabled.
+
+```powershell
+build/bin/Release/sdr_town_tests.exe '[dtmf]'
+build/bin/Release/SDR_Town.exe --cli --no-control-server --cmd 'tones dtmf "discriminator.wav"'
+```
+
 An independent protocol oracle and bounded ideal discriminator fixtures are now
 available (not live decode or RF evidence):
 

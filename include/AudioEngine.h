@@ -53,6 +53,11 @@ public:
     void pushBridgeAudioToActiveOutputs(const float* samples, size_t count, const std::vector<size_t>& activeOutputIndices);
     size_t dropQueuedBridgeAudio(size_t maxSamples, const std::vector<size_t>& activeOutputIndices = {});
     void clearBuffers();
+    // Drop oldest queued PCM so live analog monitoring stays near realtime.
+    // Returns samples discarded. Never touches the realtime callback read path
+    // beyond advancing readPos under audioMutex (same ownership as push).
+    size_t trimQueuedAudio(size_t maxQueuedSamples,
+                           const std::vector<size_t>& activeOutputIndices = {});
 
     // Test tone on a specific active output (or all)
     void playTestTone(size_t activeIndex = size_t(-1), float freq = 1000.0f, float durationSec = 0.6f);

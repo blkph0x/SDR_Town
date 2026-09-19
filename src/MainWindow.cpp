@@ -401,6 +401,154 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         audioLay->addStretch();
         rxLay->addLayout(audioLay);
 
+        // Opt-in repeater control monitor (receive-only). Off by default — no CPU when disabled.
+        QGroupBox* repeaterBox = new QGroupBox("Repeater Control Monitor (receive-only)");
+        repeaterBox->setStyleSheet("QGroupBox { font-size: 11px; }");
+        auto* repeaterLay = new QVBoxLayout(repeaterBox);
+        auto* repeaterTop = new QHBoxLayout();
+        repeaterMonitorEnableCheck = new QCheckBox("Enable");
+        repeaterMonitorEnableCheck->setChecked(false);
+        repeaterMonitorEnableCheck->setToolTip("When off, DTMF/event logging and dual-watch are fully idle. Enable only while investigating a repeater.");
+        repeaterDualWatchCheck = new QCheckBox("Dual-watch input");
+        repeaterDualWatchCheck->setChecked(false);
+        repeaterDualWatchCheck->setToolTip("Listen on output while silently monitoring the input for DTMF/tones when sample rate covers both. Leave off for lowest NFM latency.");
+        repeaterLogDtmfCheck = new QCheckBox("Log DTMF");
+        repeaterLogDtmfCheck->setChecked(true);
+        repeaterLogTonesCheck = new QCheckBox("Log CTCSS/DCS");
+        repeaterLogTonesCheck->setChecked(true);
+        repeaterLogCarrierCheck = new QCheckBox("Log carrier");
+        repeaterLogCarrierCheck->setChecked(true);
+        repeaterTop->addWidget(repeaterMonitorEnableCheck);
+        repeaterTop->addWidget(repeaterDualWatchCheck);
+        repeaterTop->addWidget(repeaterLogDtmfCheck);
+        repeaterTop->addWidget(repeaterLogTonesCheck);
+        repeaterTop->addWidget(repeaterLogCarrierCheck);
+        repeaterTop->addStretch();
+        repeaterLay->addLayout(repeaterTop);
+        auto* repeaterFreqLay = new QHBoxLayout();
+        repeaterFreqLay->addWidget(new QLabel("Output MHz:"));
+        repeaterOutputSpin = new QDoubleSpinBox();
+        repeaterOutputSpin->setRange(0.1, 6000.0);
+        repeaterOutputSpin->setDecimals(5);
+        repeaterOutputSpin->setSingleStep(0.0125);
+        repeaterOutputSpin->setValue(476.4625);
+        repeaterFreqLay->addWidget(repeaterOutputSpin);
+        repeaterFreqLay->addWidget(new QLabel("Input MHz:"));
+        repeaterInputSpin = new QDoubleSpinBox();
+        repeaterInputSpin->setRange(0.1, 6000.0);
+        repeaterInputSpin->setDecimals(5);
+        repeaterInputSpin->setSingleStep(0.0125);
+        repeaterInputSpin->setValue(477.2125);
+        repeaterFreqLay->addWidget(repeaterInputSpin);
+        QPushButton* repeaterAuOffsetBtn = new QPushButton("+750 kHz");
+        repeaterAuOffsetBtn->setToolTip("Set input = output + 750 kHz (typical AU UHF CB repeater offset).");
+        repeaterFreqLay->addWidget(repeaterAuOffsetBtn);
+        repeaterTuneOutputBtn = new QPushButton("Tune out");
+        repeaterTuneInputBtn = new QPushButton("Tune in");
+        repeaterFreqLay->addWidget(repeaterTuneOutputBtn);
+        repeaterFreqLay->addWidget(repeaterTuneInputBtn);
+        repeaterFreqLay->addStretch();
+        repeaterLay->addLayout(repeaterFreqLay);
+        repeaterStatusLabel = new QLabel("Repeater monitor: off");
+        repeaterStatusLabel->setWordWrap(true);
+        repeaterLay->addWidget(repeaterStatusLabel);
+        repeaterEventLogView = new QPlainTextEdit();
+        repeaterEventLogView->setReadOnly(true);
+        repeaterEventLogView->setMaximumBlockCount(400);
+        repeaterEventLogView->setPlaceholderText("Heard list: CTCSS, DCS, and DTMF codes appear here when Enable is on.");
+        repeaterEventLogView->setFixedHeight(110);
+        repeaterLay->addWidget(repeaterEventLogView);
+        auto* repeaterBtnLay = new QHBoxLayout();
+        repeaterClearLogBtn = new QPushButton("Clear list");
+        repeaterBtnLay->addWidget(repeaterClearLogBtn);
+        repeaterBtnLay->addStretch();
+        repeaterLay->addLayout(repeaterBtnLay);
+        rxLay->addWidget(repeaterBox);
+
+        {
+            QSettings s;
+            repeaterMonitorEnableCheck->setChecked(s.value("repeaterMonitor/enabled", false).toBool());
+            repeaterDualWatchCheck->setChecked(s.value("repeaterMonitor/dualWatch", false).toBool());
+            repeaterLogDtmfCheck->setChecked(s.value("repeaterMonitor/logDtmf", true).toBool());
+            repeaterLogTonesCheck->setChecked(s.value("repeaterMonitor/logTones", true).toBool());
+            repeaterLogCarrierCheck->setChecked(s.value("repeaterMonitor/logCarrier", true).toBool());
+            repeaterOutputSpin->setValue(s.value("repeaterMonitor/outputMHz", 476.4625).toDouble());
+            repeaterInputSpin->setValue(s.value("repeaterMonitor/inputMHz", 477.2125).toDouble());
+        }
+        auto syncRepeaterMonitorConfig = [this]() {
+            std::lock_guard<std::mutex> lock(repeaterMonitorMutex);
+            repeaterMonitorEnabled = repeaterMonitorEnableCheck && repeaterMonitorEnableCheck->isChecked();
+            repeaterDualWatchWanted = repeaterDualWatchCheck && repeaterDualWatchCheck->isChecked();
+            repeaterLogDtmf = repeaterLogDtmfCheck && repeaterLogDtmfCheck->isChecked();
+            repeaterLogTones = repeaterLogTonesCheck && repeaterLogTonesCheck->isChecked();
+            repeaterLogCarrier = repeaterLogCarrierCheck && repeaterLogCarrierCheck->isChecked();
+            repeaterOutputHz = repeaterOutputSpin ? repeaterOutputSpin->value() * 1e6 : 0.0;
+            repeaterInputHz = repeaterInputSpin ? repeaterInputSpin->value() * 1e6 : 0.0;
+            QSettings s;
+            s.setValue("repeaterMonitor/enabled", repeaterMonitorEnabled);
+            s.setValue("repeaterMonitor/dualWatch", repeaterDualWatchWanted);
+            s.setValue("repeaterMonitor/logDtmf", repeaterLogDtmf);
+            s.setValue("repeaterMonitor/logTones", repeaterLogTones);
+            s.setValue("repeaterMonitor/logCarrier", repeaterLogCarrier);
+            s.setValue("repeaterMonitor/outputMHz", repeaterOutputHz / 1e6);
+            s.setValue("repeaterMonitor/inputMHz", repeaterInputHz / 1e6);
+            if (!repeaterMonitorEnabled) {
+                repeaterDualWatchActive = false;
+                repeaterDualWatchReason = QStringLiteral("disabled");
+            }
+        };
+        syncRepeaterMonitorConfig();
+        connect(repeaterMonitorEnableCheck, &QCheckBox::toggled, this, [syncRepeaterMonitorConfig](bool) { syncRepeaterMonitorConfig(); });
+        connect(repeaterDualWatchCheck, &QCheckBox::toggled, this, [syncRepeaterMonitorConfig](bool) { syncRepeaterMonitorConfig(); });
+        connect(repeaterLogDtmfCheck, &QCheckBox::toggled, this, [syncRepeaterMonitorConfig](bool) { syncRepeaterMonitorConfig(); });
+        connect(repeaterLogTonesCheck, &QCheckBox::toggled, this, [syncRepeaterMonitorConfig](bool) { syncRepeaterMonitorConfig(); });
+        connect(repeaterLogCarrierCheck, &QCheckBox::toggled, this, [syncRepeaterMonitorConfig](bool) { syncRepeaterMonitorConfig(); });
+        connect(repeaterOutputSpin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [syncRepeaterMonitorConfig](double) { syncRepeaterMonitorConfig(); });
+        connect(repeaterInputSpin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [syncRepeaterMonitorConfig](double) { syncRepeaterMonitorConfig(); });
+        connect(repeaterAuOffsetBtn, &QPushButton::clicked, this, [this, syncRepeaterMonitorConfig]() {
+            if (!repeaterOutputSpin || !repeaterInputSpin) return;
+            repeaterInputSpin->setValue(repeaterOutputSpin->value() + 0.750);
+            syncRepeaterMonitorConfig();
+        });
+        auto tuneRepeaterFreq = [this](double hz) {
+            if (!monitorFreqSpin) return;
+            const QSignalBlocker blocker(monitorFreqSpin);
+            monitorFreqSpin->setValue(hz / 1e6);
+            {
+                std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                currentMonitorFreq = hz;
+                currentMonitorMode = DemodMode::NFM;
+            }
+            if (monitorModeCombo) {
+                const QSignalBlocker modeBlock(monitorModeCombo);
+                monitorModeCombo->setCurrentText("NFM");
+            }
+            syncMonitorVarsToReceiver(0);
+            setReceiverActive(0, true);
+            auto& mgr = DeviceManager::instance();
+            for (size_t i = 0; i < mgr.getDevices().size(); ++i) {
+                if (mgr.isStreaming(i)) {
+                    mgr.setCenterFreq(i, hz);
+                    break;
+                }
+            }
+            if (spectrumWidget) spectrumWidget->setCenterFreq(hz);
+            statusBar()->showMessage(QString("Tuned to %1 MHz").arg(hz / 1e6, 0, 'f', 5), 2500);
+        };
+        connect(repeaterTuneOutputBtn, &QPushButton::clicked, this, [this, tuneRepeaterFreq]() {
+            tuneRepeaterFreq(repeaterOutputSpin ? repeaterOutputSpin->value() * 1e6 : 0.0);
+        });
+        connect(repeaterTuneInputBtn, &QPushButton::clicked, this, [this, tuneRepeaterFreq]() {
+            tuneRepeaterFreq(repeaterInputSpin ? repeaterInputSpin->value() * 1e6 : 0.0);
+        });
+        connect(repeaterClearLogBtn, &QPushButton::clicked, this, [this]() {
+            std::shared_ptr<Receiver> rx;
+            { std::lock_guard<std::mutex> lock(receiversMutex); if (!receivers.empty()) rx = receivers.front(); }
+            if (rx) rx->controlEvents.clear();
+            repeaterEventUiIndex = 0;
+            if (repeaterEventLogView) repeaterEventLogView->clear();
+        });
+
         connect(masterVolSlider, &QSlider::valueChanged, this, [this, masterVolValue](int v) {
             monitorMasterVolume = std::clamp(v / 100.0, 0.0, 1.0);
             masterVolValue->setText(QString("%1%").arg(v));
@@ -4799,6 +4947,88 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             if (explicitNfm || (toneEligible && tone.status != "Inactive"))
                 rdsStatus->presentTone(tone,toneEligible,target,RdsMpxDecoder::monotonicMs(),rx ? rx->dcs.snapshot() : DcsSnapshot{});
             else rdsStatus->present(rx ? std::get<RdsMpxSnapshot>(rx->rds->snapshot()) : RdsMpxSnapshot{}, eligible, target, RdsMpxDecoder::monotonicMs());
+
+            if (repeaterStatusLabel) {
+                bool enabled = false;
+                bool dualWanted = false;
+                bool dualActive = false;
+                QString dualReason;
+                double outHz = 0, inHz = 0;
+                {
+                    std::lock_guard<std::mutex> lock(repeaterMonitorMutex);
+                    enabled = repeaterMonitorEnabled;
+                    dualWanted = repeaterDualWatchWanted;
+                    dualActive = repeaterDualWatchActive;
+                    dualReason = repeaterDualWatchReason;
+                    outHz = repeaterOutputHz;
+                    inHz = repeaterInputHz;
+                }
+                if (!enabled) {
+                    repeaterStatusLabel->setText("Repeater monitor: off");
+                } else {
+                    QString dtmfBit;
+                    if (rx) {
+                        const auto d = dualActive ? rx->inputWatchDtmf.snapshot() : rx->dtmf.snapshot();
+                        if (d.toneActive && d.digit)
+                            dtmfBit = QString(" · DTMF %1").arg(QChar(d.digit));
+                        else if (!d.lastSequence.empty())
+                            dtmfBit = QString(" · last %1").arg(QString::fromStdString(d.lastSequence));
+                    }
+                    repeaterStatusLabel->setText(
+                        QString("Monitor on · out %1 / in %2 · dual-watch %3 (%4)%5")
+                            .arg(outHz / 1e6, 0, 'f', 5)
+                            .arg(inHz / 1e6, 0, 'f', 5)
+                            .arg(dualActive ? "active" : (dualWanted ? "idle" : "off"))
+                            .arg(dualReason)
+                            .arg(dtmfBit));
+                }
+            }
+            if (repeaterEventLogView && rx) {
+                std::vector<ControlEvent> fresh;
+                const uint64_t hi = rx->controlEvents.drainSince(repeaterEventUiIndex, fresh);
+                repeaterEventUiIndex = hi;
+                auto channelLabel = [](ControlEvent::Channel ch) -> QString {
+                    switch (ch) {
+                    case ControlEvent::Channel::Output: return QStringLiteral("output");
+                    case ControlEvent::Channel::Input: return QStringLiteral("input");
+                    default: return QStringLiteral("tuned");
+                    }
+                };
+                for (const auto& ev : fresh) {
+                    QString line;
+                    const QString where = channelLabel(ev.channel);
+                    switch (ev.kind) {
+                    case ControlEvent::Kind::DtmfSequence:
+                        line = QString("DTMF  %1  (%2)").arg(QString::fromStdString(ev.detail), where);
+                        break;
+                    case ControlEvent::Kind::DtmfDigit:
+                        // Prefer completed sequences in the heard list.
+                        continue;
+                    case ControlEvent::Kind::CtcssChange:
+                        if (ev.detail == "clear")
+                            line = QString("CTCSS  clear  (%1)").arg(where);
+                        else
+                            line = QString("CTCSS  %1  (%2)").arg(QString::fromStdString(ev.detail), where);
+                        break;
+                    case ControlEvent::Kind::DcsChange:
+                        if (ev.detail == "clear")
+                            line = QString("DCS  clear  (%1)").arg(where);
+                        else
+                            line = QString("DCS  %1  (%2)").arg(QString::fromStdString(ev.detail), where);
+                        break;
+                    case ControlEvent::Kind::CarrierOpen:
+                        line = QString("Carrier open  (%1)").arg(where);
+                        break;
+                    case ControlEvent::Kind::CarrierClose:
+                        line = QString("Carrier closed  (%1)").arg(where);
+                        break;
+                    default:
+                        continue;
+                    }
+                    if (!line.isEmpty())
+                        repeaterEventLogView->appendPlainText(line);
+                }
+            }
         });
         bandPlanTimer->start(250); // UI overlay refresh only; no DSP/tuning work
         installSdrTownControlServer();
@@ -9284,8 +9514,8 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
             QStringList dcsLabels;
             if (std::abs(dcs.targetHz - monitorHz) <= 1.0 && dcs.updatedMs
                 && (nowMs - dcs.updatedMs) <= 2000) {
-                for (const auto& id : dcs.identities) {
-                    const auto label = QString::fromStdString(dcsLabel(id));
+                if (!dcs.identities.empty()) {
+                    const auto label = QString::fromStdString(dcsLabel(preferredDcsIdentity(dcs.identities)));
                     dcsAliases.append(label);
                     dcsLabels.append(label);
                 }
@@ -9303,9 +9533,66 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
                 toneSummary = QStringLiteral("Searching for CTCSS / DCS…");
             }
             tones.insert("summary", toneSummary);
+
+            QJsonObject dtmf;
+            const bool repOn = [&]() {
+                std::lock_guard<std::mutex> lock(repeaterMonitorMutex);
+                return repeaterMonitorEnabled;
+            }();
+            const auto dtmfSnap = rx
+                ? (([&]() {
+                       std::lock_guard<std::mutex> lock(repeaterMonitorMutex);
+                       return repeaterDualWatchActive;
+                   }())
+                       ? rx->inputWatchDtmf.snapshot()
+                       : rx->dtmf.snapshot())
+                : DtmfSnapshot{};
+            dtmf.insert("enabled", repOn);
+            dtmf.insert("digit", dtmfSnap.digit ? QString(QChar(dtmfSnap.digit)) : QString());
+            dtmf.insert("sequence", QString::fromStdString(dtmfSnap.sequence));
+            dtmf.insert("lastSequence", QString::fromStdString(dtmfSnap.lastSequence));
+            dtmf.insert("toneActive", dtmfSnap.toneActive);
+            dtmf.insert("status", QString::fromStdString(dtmfSnap.status));
+            dtmf.insert("purity", dtmfSnap.purity);
+            dtmf.insert("confirmedDigits", static_cast<double>(dtmfSnap.confirmedDigits));
+            tones.insert("dtmf", dtmf);
         }
         state.insert("rds", rds);
         state.insert("tones", tones);
+
+        QJsonObject repeater;
+        {
+            std::lock_guard<std::mutex> lock(repeaterMonitorMutex);
+            repeater.insert("enabled", repeaterMonitorEnabled);
+            repeater.insert("dualWatchWanted", repeaterDualWatchWanted);
+            repeater.insert("dualWatchActive", repeaterDualWatchActive);
+            repeater.insert("dualWatchReason", repeaterDualWatchReason);
+            repeater.insert("outputHz", repeaterOutputHz);
+            repeater.insert("inputHz", repeaterInputHz);
+            repeater.insert("logDtmf", repeaterLogDtmf);
+            repeater.insert("logTones", repeaterLogTones);
+            repeater.insert("logCarrier", repeaterLogCarrier);
+        }
+        {
+            std::shared_ptr<Receiver> rx;
+            { std::lock_guard<std::mutex> lock(receiversMutex); if (!receivers.empty()) rx = receivers.front(); }
+            QJsonArray events;
+            if (rx) {
+                for (const auto& ev : rx->controlEvents.snapshot()) {
+                    QJsonObject row;
+                    row.insert("ms", static_cast<double>(ev.ms));
+                    row.insert("kind", QString::fromUtf8(ControlEventLog::kindName(ev.kind)));
+                    row.insert("channel", QString::fromUtf8(ControlEventLog::channelName(ev.channel)));
+                    row.insert("freqHz", ev.freqHz);
+                    row.insert("detail", QString::fromStdString(ev.detail));
+                    events.append(row);
+                }
+            }
+            repeater.insert("events", events);
+            repeater.insert("modeHint",
+                QStringLiteral("Opt-in receive-only. Enable in SDR Town Receiver Controls → Repeater Control Monitor. Dual-watch needs sample rate covering output+input (e.g. 750 kHz AU CB at ≥2.048 Msps)."));
+        }
+        state.insert("repeater", repeater);
 
         QJsonObject sstv;
         sstv.insert("modeHint",
@@ -10147,7 +10434,8 @@ void MainWindow::writeGuiRuntimeSelfTestResult(const char* phase)
                     {"resets",tone.resets},{"status",tone.status},{"purity",tone.purity}};
                 const auto dcs = rx ? rx->dcs.snapshot() : DcsSnapshot{};
                 std::vector<std::string> dcsAliases;
-                for (const auto& id:dcs.identities) dcsAliases.push_back(dcsLabel(id));
+                if (!dcs.identities.empty())
+                    dcsAliases.push_back(dcsLabel(preferredDcsIdentity(dcs.identities)));
                 record["dcs"] = {{"aliases",dcsAliases},{"samples",dcs.samples},{"resets",dcs.resets},
                     {"targetHz",dcs.targetHz},{"agreeingPhases",dcs.agreeingPhases},{"status",dcs.status}};
                 record["rds"] = {{"status",rds.status},{"frequencyHz",rds.targetHz},

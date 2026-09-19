@@ -388,6 +388,11 @@ Demodulator::~Demodulator() = default;
 void Demodulator::resetState() {
     resetMultiplexState(); // Explicit retune/reset, unlike speech-only AFC resets.
     dspStateNeedsReset = true;
+    nfmCicSum = {0.f, 0.f};
+    nfmCicCount = 0;
+    nfmCicFactor = 0;
+    nfmSpeechFirDelay.clear();
+    clickFadeGain = 0.0f;
 }
 
 std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex<float>>& iq,
@@ -438,6 +443,9 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
             cwBfoPhase = 0.0;
             firDelay.assign(firDelay.size(), std::complex<float>(0,0));
             dspStateNeedsReset = true;
+            clickFadeGain = 0.0f;
+            nfmCicSum = {0.f, 0.f};
+            nfmCicCount = 0;
             lastResetTarget = target;
             lastResetMode = mode;
         }
@@ -460,6 +468,10 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         channelBwHz = (mode == DemodMode::WFM || mode == DemodMode::AUTO) ? 220000.0
             : (mode == DemodMode::AM ? 20000.0 : (mode == DemodMode::CW ? 1000.0 : 12500.0));
     }
+    // NFM must stay narrow. A leftover WFM 180 kHz BW makes the discriminator
+    // sound harsh/robotic on handhelds and CB/PMR.
+    if (mode == DemodMode::NFM && channelBwHz > 25000.0)
+        channelBwHz = 12500.0;
     if (std::abs(channelBwHz - lastBw) > 50 || std::abs(sr - lastS) > 100) {
         double fc = channelBwHz / 2.0 / sr;
         double atten = 60.0;
@@ -487,9 +499,9 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         lastBw = channelBwHz; lastS = sr;
         firDelay.assign( std::min(firDelay.size(), (size_t)nTaps-1), std::complex<float>(0,0) );
     }
-    if (multiplex && (mode == DemodMode::WFM || mode == DemodMode::NFM) && !chanTaps.empty()) {
-        // DEC-0079: independent causal data branch. The speech FIR below is
-        // deliberately unchanged; its block-tail lookahead cannot clock RDS.
+    if (multiplex && mode == DemodMode::WFM && !chanTaps.empty()) {
+        // DEC-0079: independent causal data branch for WFM/RDS. NFM tones/DCS now
+        // use the improved speech discriminator tap published after demod (below).
         const size_t factor = internalRate > 1000 && internalRate < sr * .95
             ? std::max<size_t>(1, static_cast<size_t>(std::llround(sr/internalRate))) : 1;
         const double rate = sr / factor;
@@ -546,7 +558,133 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         mpxRate=rate; mpxInputRate=sr; mpxBandwidth=channelBwHz;
         mpxTarget=identity; mpxCenter=cf; mpxMode=mode; mpxContinuous=true;
     }
-    if (!chanTaps.empty() && channelBwHz > 0) {
+    if (mode == DemodMode::NFM) {
+        // Two-stage NFM front-end:
+        // 1) CIC/boxcar to ~192 kHz (cheap anti-alias)
+        // 2) Sharp channel FIR at that rate (the old full-rate FIR was capped at
+        //    321 taps — far too weak at 2.4 Msps → aliasing = static/robotic)
+        // 3) Decimate to ~48 kHz for the discriminator
+        if (dspStateNeedsReset) {
+            nfmCicSum = {0.f, 0.f};
+            nfmCicCount = 0;
+            nfmSpeechFirDelay.clear();
+            clickFadeGain = 0.0f;
+        }
+
+        double workRate = sr;
+        if (sr > 300e3) {
+            const int M1 = std::max(1, static_cast<int>(std::llround(sr / 192000.0)));
+            if (M1 != nfmCicFactor) {
+                nfmCicFactor = M1;
+                nfmCicSum = {0.f, 0.f};
+                nfmCicCount = 0;
+            }
+            std::vector<std::complex<float>> stage1;
+            stage1.reserve(baseband.size() / static_cast<size_t>(M1) + 2);
+            for (const auto& s : baseband) {
+                nfmCicSum += s;
+                if (++nfmCicCount >= M1) {
+                    stage1.push_back(nfmCicSum * (1.0f / static_cast<float>(M1)));
+                    nfmCicSum = {0.f, 0.f};
+                    nfmCicCount = 0;
+                }
+            }
+            baseband = std::move(stage1);
+            workRate = sr / static_cast<double>(M1);
+
+            if (std::abs(channelBwHz - nfmSpeechLastBw) > 50.0 || std::abs(workRate - nfmSpeechLastRate) > 100.0) {
+                const double fc = std::min(0.45, (channelBwHz * 0.5) / workRate);
+                const double atten = 70.0;
+                double beta = 0.1102 * (atten - 8.7);
+                int half = static_cast<int>(std::ceil(3.5 / std::max(1e-6, fc * 0.55) + 1.0));
+                half = std::clamp(half, 24, 384);
+                const int nTaps = 2 * half + 1;
+                nfmSpeechTaps.resize(static_cast<size_t>(nTaps));
+                double sum = 0.0;
+                for (int i = 0; i < nTaps; ++i) {
+                    const int m = i - half;
+                    double w = 0.0;
+                    const double arg = static_cast<double>(m) / half;
+                    if (std::abs(arg) < 1.0) {
+                        const double x = beta * std::sqrt(1.0 - arg * arg);
+                        w = std::cyl_bessel_i(0, x) / std::cyl_bessel_i(0, beta);
+                    }
+                    const double sinc = (m == 0) ? (2.0 * fc) : std::sin(2 * M_PI * fc * m) / (M_PI * m);
+                    nfmSpeechTaps[static_cast<size_t>(i)] = static_cast<float>(w * sinc);
+                    sum += nfmSpeechTaps[static_cast<size_t>(i)];
+                }
+                if (sum != 0.0) for (auto& t : nfmSpeechTaps) t = static_cast<float>(t / sum);
+                nfmSpeechLastBw = channelBwHz;
+                nfmSpeechLastRate = workRate;
+                nfmSpeechFirDelay.assign(static_cast<size_t>(nTaps - 1), std::complex<float>(0, 0));
+            }
+
+            if (!nfmSpeechTaps.empty() && !baseband.empty()) {
+                const size_t M = nfmSpeechTaps.size();
+                const size_t D = M - 1;
+                if (nfmSpeechFirDelay.size() != D) nfmSpeechFirDelay.assign(D, std::complex<float>(0, 0));
+                std::vector<std::complex<float>> ext;
+                ext.reserve(D + baseband.size());
+                ext.insert(ext.end(), nfmSpeechFirDelay.begin(), nfmSpeechFirDelay.end());
+                ext.insert(ext.end(), baseband.begin(), baseband.end());
+                std::vector<std::complex<float>> inputTail;
+                if (baseband.size() >= D) inputTail.assign(ext.end() - static_cast<std::ptrdiff_t>(D), ext.end());
+                std::vector<std::complex<float>> filt(ext.size());
+                const int h = static_cast<int>(M / 2);
+                for (size_t n = 0; n < ext.size(); ++n) {
+                    std::complex<float> acc(0, 0);
+                    for (int k = -h; k <= h; ++k) {
+                        const long idx = static_cast<long>(n) + k;
+                        if (idx >= 0 && idx < static_cast<long>(ext.size()))
+                            acc += ext[static_cast<size_t>(idx)] * nfmSpeechTaps[static_cast<size_t>(k + h)];
+                    }
+                    filt[n] = acc;
+                }
+                baseband.assign(filt.begin() + static_cast<std::ptrdiff_t>(D), filt.end());
+                if (!inputTail.empty()) nfmSpeechFirDelay = std::move(inputTail);
+            }
+
+            // Bring discriminator rate near 48 kHz.
+            const double discTarget = 48000.0;
+            if (workRate > discTarget * 1.5) {
+                const int M2 = std::max(1, static_cast<int>(std::llround(workRate / discTarget)));
+                if (M2 > 1) {
+                    std::vector<std::complex<float>> dec;
+                    dec.reserve(baseband.size() / static_cast<size_t>(M2) + 1);
+                    for (size_t i = 0; i < baseband.size(); i += static_cast<size_t>(M2))
+                        dec.push_back(baseband[i]);
+                    baseband = std::move(dec);
+                    workRate /= static_cast<double>(M2);
+                }
+            }
+        } else if (!chanTaps.empty()) {
+            // Already near audio rate (tests / low SR): reuse the shared channel FIR.
+            size_t M = chanTaps.size();
+            size_t D = (M > 0 ? M - 1 : 0);
+            if (firDelay.size() != D) firDelay.resize(D, std::complex<float>(0, 0));
+            std::vector<std::complex<float>> ext;
+            ext.reserve(D + baseband.size());
+            ext.insert(ext.end(), firDelay.begin(), firDelay.end());
+            ext.insert(ext.end(), baseband.begin(), baseband.end());
+            std::vector<std::complex<float>> inputTail;
+            if (baseband.size() >= D)
+                inputTail.assign(ext.end() - static_cast<std::ptrdiff_t>(D), ext.end());
+            std::vector<std::complex<float>> filt(ext.size());
+            int h = static_cast<int>(M / 2);
+            for (size_t n = 0; n < ext.size(); ++n) {
+                std::complex<float> acc(0, 0);
+                for (int k = -h; k <= h; ++k) {
+                    long idx = static_cast<long>(n) + k;
+                    if (idx >= 0 && idx < static_cast<long>(ext.size()))
+                        acc += ext[static_cast<size_t>(idx)] * chanTaps[static_cast<size_t>(k + h)];
+                }
+                filt[n] = acc;
+            }
+            baseband.assign(filt.begin() + static_cast<std::ptrdiff_t>(D), filt.end());
+            if (!inputTail.empty()) firDelay = std::move(inputTail);
+        }
+        internalRate = workRate;
+    } else if (!chanTaps.empty() && channelBwHz > 0) {
         size_t M = chanTaps.size();
         size_t D = (M > 0 ? M-1 : 0);
         if (firDelay.size() != D) firDelay.resize(D, std::complex<float>(0,0));
@@ -592,19 +730,23 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
     for (const auto& s : baseband) channelPower += std::norm(s);
     double channelLevelDb = 10.0 * std::log10(channelPower / std::max<size_t>(1, baseband.size()) + 1e-20);
 
-    // WFM channelizer decimation (still scalar for now; polyphase upgrade planned)
-    double demodRate = sr;
+    // Channelizer decimation before demod (non-NFM; NFM already staged above).
+    double demodRate = (mode == DemodMode::NFM) ? internalRate : sr;
     bool isWFM = (mode == DemodMode::WFM || mode == DemodMode::AUTO);
-    if (isWFM && internalRate > 1000.0 && internalRate < sr * 0.95) {
-        int M = std::max(1, (int)std::llround(sr / internalRate));
-        if (M > 1) {
-            std::vector<std::complex<float>> dec;
-            dec.reserve(baseband.size() / M + 1);
-            for (size_t i = 0; i < baseband.size(); i += M) {
-                dec.push_back(baseband[i]);
+    if (mode != DemodMode::NFM) {
+        const bool decimateBeforeDisc = isWFM || mode == DemodMode::AM
+            || mode == DemodMode::USB || mode == DemodMode::LSB || mode == DemodMode::CW;
+        if (decimateBeforeDisc && internalRate > 1000.0 && internalRate < sr * 0.95) {
+            int M = std::max(1, (int)std::llround(sr / internalRate));
+            if (M > 1) {
+                std::vector<std::complex<float>> dec;
+                dec.reserve(baseband.size() / M + 1);
+                for (size_t i = 0; i < baseband.size(); i += M) {
+                    dec.push_back(baseband[i]);
+                }
+                baseband = std::move(dec);
+                demodRate = sr / M;
             }
-            baseband = std::move(dec);
-            demodRate = sr / M;
         }
     }
 
@@ -653,12 +795,53 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
             ? std::clamp(channelBwHz * 0.20, 1800.0, 5000.0)
             : 75000.0;
         const float fmScale = static_cast<float>(demodRate / (2.0 * M_PI * deviationNormHz));
+        if (dspStateNeedsReset) discDc = 0;
+        const float dcAlpha = 1.0f - std::exp(-2.0f * 3.14159265f * 20.0f / (float)std::max(1000.0, demodRate));
+        // NFM tone/DCS tap wants the raw scaled discriminator (pre speech-HPF). CTCSS/DCS
+        // run their own DC tracking; sharing audio-path dcv previously smashed DCS across chunks.
+        const bool captureToneTap = multiplex && mode == DemodMode::NFM
+            && demodRate >= 8000.0 && demodRate <= 96000.0;
+        if (captureToneTap) multiplex->samples.resize(baseband.size());
         for (size_t k=0; k<baseband.size(); ++k) {
             auto s = baseband[k];
             float d = std::arg(s * std::conj(prev));
             prev = s;
-            base[k] = d * fmScale;
+            const float scaled = d * fmScale;
+            if (captureToneTap) multiplex->samples[k] = scaled;
+            // High-pass the speech discriminator to kill DC clicks from phase unwrap / retune.
+            discDc += dcAlpha * (scaled - discDc);
+            base[k] = scaled - discDc;
         }
+    }
+
+    // NFM tone/DCS tap: publish raw disc samples collected above (pre-audio-LPF).
+    // DEC-0081: do not bump epoch on speech-only DSP resets / AFC (dataIdentity stays).
+    if (multiplex && mode == DemodMode::NFM && !multiplex->samples.empty()
+        && demodRate >= 8000.0 && demodRate <= 96000.0) {
+        const double identity = std::isfinite(dataIdentityHz) ? dataIdentityHz : target;
+        const bool discontinuity = !mpxContinuous ||
+            mpxMode != mode || std::abs(mpxRate - demodRate) > 1.0 ||
+            mpxTarget != identity || mpxCenter != cf;
+        if (discontinuity) {
+            multiplex->resetReasons = (!mpxContinuous ? 1u : 0u) |
+                (mpxMode != mode ? 4u : 0u) | (std::abs(mpxRate - demodRate) > 1.0 ? 8u : 0u) |
+                ((mpxTarget != identity || mpxCenter != cf) ? 32u : 0u);
+            ++mpxEpoch;
+            mpxSamples = 0;
+        }
+        multiplex->sampleRate = demodRate;
+        multiplex->targetHz = identity;
+        multiplex->epoch = mpxEpoch;
+        multiplex->firstSample = mpxSamples;
+        multiplex->discontinuity = discontinuity;
+        mpxSamples += multiplex->samples.size();
+        mpxRate = demodRate;
+        mpxInputRate = sr;
+        mpxBandwidth = channelBwHz;
+        mpxTarget = identity;
+        mpxCenter = cf;
+        mpxMode = mode;
+        mpxContinuous = true;
     }
 
     // Voice AGC only for SSB. FM levels are set by deviation; AM is carrier-normalized above.
@@ -833,8 +1016,12 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
                 squelchHangLeft = std::max(0, squelchHangLeft - (int)aud.size());
             }
 
-            const float attack = 1.0f - std::exp(-1.0f / (0.006f * (float)outputRate));
-            const float release = 1.0f - std::exp(-1.0f / (0.025f * (float)outputRate));
+        const float attack = (mode == DemodMode::NFM)
+            ? (1.0f - std::exp(-1.0f / (0.015f * (float)outputRate)))
+            : (1.0f - std::exp(-1.0f / (0.006f * (float)outputRate)));
+        const float release = (mode == DemodMode::NFM)
+            ? (1.0f - std::exp(-1.0f / (0.045f * (float)outputRate)))
+            : (1.0f - std::exp(-1.0f / (0.025f * (float)outputRate)));
             for (auto &s : aud) {
                 if (target > squelchGateGain)
                     squelchGateGain = squelchGateGain * (1-attack) + target * attack;
@@ -842,6 +1029,21 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
                     squelchGateGain = squelchGateGain * (1-release) + target * release;
                 squelchGateGain = std::clamp(squelchGateGain, 0.0f, 1.0f);
                 s *= gain * squelchGateGain;
+            }
+        }
+        // Gentle peak control only — the old tanh compressor made speech sound grit/robotic.
+        if (mode == DemodMode::NFM) {
+            for (auto &s : aud) {
+                if (s > 0.98f) s = 0.98f;
+                else if (s < -0.98f) s = -0.98f;
+            }
+        }
+        // Fade in after retune / DSP reset so block edges don't click.
+        if (clickFadeGain < 0.999f) {
+            const float fadeAttack = 1.0f - std::exp(-1.0f / (0.006f * (float)outputRate));
+            for (auto &s : aud) {
+                clickFadeGain += (1.0f - clickFadeGain) * fadeAttack;
+                s *= clickFadeGain;
             }
         }
         dspStateNeedsReset = false;

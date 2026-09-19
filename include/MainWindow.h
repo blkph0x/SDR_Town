@@ -36,6 +36,7 @@
 #include "SavedFrequencies.h"
 #include "Receiver.h"
 #include "RemoteDiagnostics.h"
+#include "RepeaterMonitor.h"
 #include "SignalClassifier.h"
 #include "SpectrumWidget.h"
 #include "SdrTownControlServer.h"
@@ -71,6 +72,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMetaObject>
+#include <QPlainTextEdit>
 #include <QPointer>
 #include <QProgressBar>
 #include <QPushButton>
@@ -483,6 +485,30 @@ private:
     QCheckBox* lpfEnableCheck = nullptr;
     SpectrumWidget* spectrumWidget = nullptr;
     QLabel* controlStatusLabel = nullptr;
+    // Opt-in repeater control monitor (receive-only). Off by default.
+    QCheckBox* repeaterMonitorEnableCheck = nullptr;
+    QCheckBox* repeaterDualWatchCheck = nullptr;
+    QCheckBox* repeaterLogDtmfCheck = nullptr;
+    QCheckBox* repeaterLogTonesCheck = nullptr;
+    QCheckBox* repeaterLogCarrierCheck = nullptr;
+    QDoubleSpinBox* repeaterOutputSpin = nullptr;
+    QDoubleSpinBox* repeaterInputSpin = nullptr;
+    QLabel* repeaterStatusLabel = nullptr;
+    QPlainTextEdit* repeaterEventLogView = nullptr;
+    QPushButton* repeaterTuneOutputBtn = nullptr;
+    QPushButton* repeaterTuneInputBtn = nullptr;
+    QPushButton* repeaterClearLogBtn = nullptr;
+    std::mutex repeaterMonitorMutex;
+    bool repeaterMonitorEnabled = false;
+    bool repeaterDualWatchWanted = false;
+    bool repeaterLogDtmf = true;
+    bool repeaterLogTones = true;
+    bool repeaterLogCarrier = true;
+    double repeaterOutputHz = 476.4625e6;
+    double repeaterInputHz = 477.2125e6;
+    bool repeaterDualWatchActive = false;
+    QString repeaterDualWatchReason = QStringLiteral("disabled");
+    uint64_t repeaterEventUiIndex = 0;
     WaterfallRoiBuilder classifierRoiBuilder{128};
 
     void appendP25LogLine(const QString& text);

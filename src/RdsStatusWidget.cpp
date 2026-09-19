@@ -18,10 +18,8 @@ void RdsStatusWidget::presentTone(const CtcssSnapshot& s, bool eligible, double 
     QStringList labels;
     if (s.frequencyHz>0) labels.append(QString("CTCSS: %1 Hz").arg(s.frequencyHz,0,'f',1));
     if (std::abs(dcs.targetHz-targetHz)<=1 && dcs.updatedMs && nowMs-dcs.updatedMs<=2000 && !dcs.identities.empty()) {
-        QStringList aliases;
-        for (const auto& id:dcs.identities)
-            aliases.append(QString("%1%2").arg(id.code,3,8,QChar('0')).arg(id.inverted?'I':'N'));
-        labels.append("DCS: " + aliases.join(" / ") + " (equivalent)");
+        const auto id = preferredDcsIdentity(dcs.identities);
+        labels.append(QString("DCS: %1").arg(QString::fromStdString(dcsLabel(id))));
     }
     setText(labels.isEmpty() ? QStringLiteral("NFM tones: searching CTCSS / DCS") : labels.join("  |  "));
 }

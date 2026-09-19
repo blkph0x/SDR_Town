@@ -3,7 +3,9 @@
 #include "Demod.h"
 #include "RdsMpxDecoder.h"
 #include "CtcssDecoder.h"
+#include "ControlEventLog.h"
 #include "DcsDecoder.h"
+#include "DtmfDecoder.h"
 #include "ReceiveDecoder.h"
 #include "SstvReceiverFeed.h"
 #include "P25LiveDecoder.h"
@@ -89,9 +91,25 @@ struct Receiver {
 
     size_t deviceIndex = 0;           // which DeviceManager device this receiver uses
     Demodulator demod;                // own demod instance (already per-state)
+    Demodulator inputWatchDemod;      // Opt-in repeater input DDC (muted); unused when monitor off.
     const std::unique_ptr<ReceiveDecoder> rds = createReceiveDecoder("rds"); // DEC-0085; DSP owner, snapshots safe for UI.
     CtcssDecoder ctcss;               // Informational; never opens/closes audio.
     DcsDecoder dcs;                   // Independent subaudible data, no audio gate.
+    DtmfDecoder dtmf;                 // Opt-in DTMF on primary NFM tap; never gates audio.
+    CtcssDecoder inputWatchCtcss;
+    DcsDecoder inputWatchDcs;
+    DtmfDecoder inputWatchDtmf;
+    ControlEventLog controlEvents{256};
+    bool controlCarrierOpen = false;
+    bool inputWatchCarrierOpen = false;
+    double lastLoggedCtcssHz = -1.0;
+    std::string lastLoggedDcsKey;
+    double inputLastLoggedCtcssHz = -1.0;
+    std::string inputLastLoggedDcsKey;
+    uint64_t inputWatchIqEpoch = 0, inputWatchNextIq = 0;
+    bool repeaterMonitorWasEnabled = false;
+    bool repeaterDualWatchCentered = false;
+    unsigned inputWatchSkipCounter = 0;
     const std::shared_ptr<SstvReceiverFeed> sstvFeed=std::make_shared<SstvReceiverFeed>();
     uint64_t rdsIqEpoch = 0, rdsNextIq = 0;
 

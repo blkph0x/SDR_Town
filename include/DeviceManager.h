@@ -106,7 +106,10 @@ public:
     // The receiver's lastConsumedAbsolute is updated. Returns only *new* samples in chronological order.
     // If the rx is too far behind the write cursor, log a drop, advance the cursor, and return a short zeroed/faded block.
     std::vector<std::complex<float>> getNewSamplesForReceiver(size_t devIndex, Receiver& rx, size_t maxSamples);
-    RecentIQWindow getNewIQWindowForReceiver(size_t devIndex, Receiver& rx, size_t maxSamples);
+    // maxLagSamples: for analog realtime audio, skip old IQ once backlog exceeds this
+    // (0 = legacy behaviour — allow backlog up to the full IQ ring, ~tens of seconds).
+    RecentIQWindow getNewIQWindowForReceiver(size_t devIndex, Receiver& rx, size_t maxSamples,
+                                             size_t maxLagSamples = 0);
     void setReceiverCursorToLiveEdge(size_t devIndex, Receiver& rx);
     // Place a receiver cursor slightly before the current live edge so a newly
     // created logical traffic-channel source can immediately decode with enough
