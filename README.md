@@ -10,8 +10,44 @@
 | **License** | See `LICENSE.txt` |
 | **Releases** | https://github.com/Blkph0x/SDR_Town/releases |
 | **Repo** | https://github.com/Blkph0x/SDR_Town |
+| **Pairs with** | [FUBAR](https://github.com/blkph0x/FUBAR) (VOX capture, public live website, optional remote tune) |
 
 Formerly *MaulAudio Pro*. Branding, binaries, installer, AppData paths, and release assets all use **SDR Town** / `SDR_Town`.
+
+## SDR Town + FUBAR
+
+[FUBAR](https://github.com/blkph0x/FUBAR) is the companion station app. Use SDR Town to receive and decode; use FUBAR to capture the audio and put a public website on the LAN (and optionally the [FUBAR Net](https://gearsqueens.online/fubar-net) directory).
+
+| App | Role |
+|-----|------|
+| **SDR Town** | RF in, demod / P25 follow, speaker or virtual-cable out, local control API on `127.0.0.1:8765` |
+| **FUBAR** | WASAPI capture, VOX WAVs, live website, typed **Now playing**, live P25 subtitle, optional website tune leases via `SdrTownControl.dll` |
+
+### Why pair them
+
+| Use case | SDR Town | FUBAR |
+|----------|----------|-------|
+| **Share what you hear** | Demod to VB-CABLE or a hardware line | Capture that feed; **Public website** → phones listen live |
+| **Show live P25 activity** | Monitor CC + auto-follow; keep aliases filled in | Website keeps your typed title; smaller line shows `TG …` + alpha, or `Listening to NSWGRN Control` on the CC |
+| **Let a trusted visitor retune** | Leave local control server running (default) | Enable SDR Town control in FUBAR settings; visitor **Take control** on the site (queued lease) |
+| **Log interesting traffic** | Stay on channel / trunk follow | VOX clips land in `%AppData%\Roaming\FUBAR\Vox_captures` |
+
+### Setup checklist
+
+1. Install or unpack [SDR Town](https://github.com/Blkph0x/SDR_Town/releases) and [FUBAR](https://github.com/blkph0x/FUBAR/releases).
+2. In SDR Town, start the receiver (and P25 Monitor CC / auto-follow if that is your station). Confirm the status bar shows local control on `127.0.0.1:8765` (loopback only).
+3. Route SDR Town audio to **VB-CABLE** (or another capture endpoint FUBAR can open).
+4. In FUBAR, select that cable as the input, enable **Public website**, and set **Now playing**.
+5. Place `SdrTownControl.dll` next to `FUBAR.exe` (FUBAR release ZIPs usually include it; matching DLL also ships on SDR Town releases as `SdrTownControl-X.Y.Z-win64.dll`).
+6. **Tools → Settings** in FUBAR: enable SDR Town control and pick allowed actions (tune, mode, RF gain, P25 CC, …).
+
+### Control API notes (for FUBAR and other local clients)
+
+- HTTP JSON on **localhost only** (default port **8765**). Not exposed to the LAN.
+- `GET /v1/status` includes monitor state and a `p25` object. From **0.2.63**, `p25.talkgroupStatusLabel` is the clean `TG <id> <alpha>` string (no voice diagnostic suffix). FUBAR uses that for the website subtitle, with an alias-file fallback on older SDR Town builds.
+- Analog `/v1/tune` is refused while a P25 voice follow or warm-standby hold is active so a website poll cannot yank RF back to the control channel mid-call.
+
+FUBAR’s own README has the station/website side in full: https://github.com/blkph0x/FUBAR#fubar--sdr-town
 
 P25 friendly names: **P25 Calls > Aliases...** manages named system-specific
 talkgroup lists, JSON import/export, search, groups and protected manual edits.
