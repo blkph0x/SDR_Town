@@ -57,7 +57,7 @@ bool httpGetUrl(const std::string& url, std::string* body, std::string* error, i
     fullPath.append(extra, uc.dwExtraInfoLength);
 
     const DWORD t = static_cast<DWORD>(std::max(3000, timeoutMs));
-    HINTERNET session = WinHttpOpen(L"SDR-Town/0.2.75 (CelesTrak TLE)",
+    HINTERNET session = WinHttpOpen(L"SDR-Town/0.2.76 (CelesTrak TLE)",
                                     WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                                     WINHTTP_NO_PROXY_NAME,
                                     WINHTTP_NO_PROXY_BYPASS,

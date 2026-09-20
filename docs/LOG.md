@@ -2,6 +2,12 @@
 
 Newest at the top.
 
+## 2026-09-20 - Release 0.2.76 Inmarsat honesty + FUBAR 1.1.39 pair
+
+DEC-0105: Inmarsat voice follow/record disabled; locked always false; no slicer
+bytes into AMBE. Remaining gaps listed in docs/INMARSAT.md. FUBAR website matches
+Town radio controls without home lat/lon.
+
 ## 2026-09-20 - Release 0.2.75
 
 Experimental patch: TLE WinHTTP + UI busy, DEC-0104 home coords omitted from

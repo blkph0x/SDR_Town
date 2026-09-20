@@ -55,8 +55,8 @@ InmarsatEngineConfig InmarsatEngineConfig::fromJson(const nlohmann::json& j) {
     c.channelHz = j.value("channelHz", c.channelHz);
     c.mode = j.value("mode", c.mode);
     c.baud = j.value("baud", c.baud);
-    c.voiceFollow = j.value("voiceFollow", c.voiceFollow);
-    c.recordVoice = j.value("recordVoice", c.recordVoice);
+    c.voiceFollow = false;
+    c.recordVoice = false;
     c.recordDir = j.value("recordDir", c.recordDir);
     return c;
 }
@@ -301,9 +301,7 @@ void InmarsatEngine::onDecodedBytes(const uint8_t* data, size_t len) {
         freq = tunedHz_;
         mode = config_.mode;
     }
-    if (mode == "aero_voice" || followingVoice_) {
-        if (voice_) voice_->feedBytes(data, len);
-    }
+    (void)mode;
     if (acars_) acars_->feedBytes(data, len, freq);
 }
 
@@ -329,34 +327,14 @@ void InmarsatEngine::onMessage(const InmarsatMessage& msg) {
                                                       msg.text.substr(0, 40));
     }
 
-    if (msg.kind == InmarsatMsgKind::CAssign) applyVoiceFollow(msg);
     notify();
 }
 
-void InmarsatEngine::applyVoiceFollow(const InmarsatMessage& msg) {
-    bool follow = false;
-    size_t dev = 0;
-    {
-        std::lock_guard<std::mutex> lk(mutex_);
-        follow = config_.voiceFollow;
-        dev = config_.deviceIndex;
-        if (!follow || msg.voiceRxHz <= 0) return;
-        if (!followingVoice_) controlHz_ = tunedHz_ > 0 ? tunedHz_ : config_.channelHz;
-        followingVoice_ = true;
-        state_ = InmarsatEngineState::VoiceFollow;
-        voiceHz_ = msg.voiceRxHz;
-        tunedHz_ = msg.voiceRxHz;
-        config_.mode = "aero_voice";
-        config_.baud = 8400;
-        voiceFollowUntilUnix_ = unixNow() + 90.0;
-        lastStatus_ = "Voice follow";
-        if (voice_) voice_->setRecording(config_.recordVoice, config_.recordDir, msg.aesId);
-        demod_.reset(InmarsatDemodMode::AeroVoice8400, 2.048e6, 0.0);
-    }
-    try {
-        DeviceManager::instance().retuneWithLease(dev, msg.voiceRxHz, DeviceManager::DeviceLeaseOwner::Inmarsat, true, nullptr);
-    } catch (...) {
-    }
+void InmarsatEngine::applyVoiceFollow(const InmarsatMessage&) {
+    std::lock_guard<std::mutex> lk(mutex_);
+    followingVoice_ = false;
+    if (config_.voiceFollow)
+        lastStatus_ = "Voice follow requested but not implemented (no unique-word/C-assign)";
 }
 
 void InmarsatEngine::returnToControl() {
@@ -454,7 +432,7 @@ void InmarsatEngine::processIq() {
     const auto st = demod_.stats();
     {
         std::lock_guard<std::mutex> lk(mutex_);
-        locked_ = st.locked;
+        locked_ = false;
         ebnoDb_ = st.ebnoDb;
         if (voice_) voiceFrames_ = voice_->framesDecoded();
         if (followingVoice_ && unixNow() > voiceFollowUntilUnix_) {

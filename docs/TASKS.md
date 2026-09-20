@@ -1,5 +1,8 @@
 # Task list (canonical)
 
+T-0043 | done | Release 0.2.76 | Honest Inmarsat: no fake voice follow/lock
+(DEC-0105). Pair FUBAR 1.1.39. docs/INMARSAT.md remaining gaps.
+
 T-0042 | done | Release 0.2.75 | TLE WinHTTP + UI busy flag; DEC-0104 public JSON
 omits home lat/lon; T-0041 staging copies `data/inmarsat` and skips leftover
 versioned control DLLs. Do not retag 0.2.74.

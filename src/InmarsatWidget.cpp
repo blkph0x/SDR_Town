@@ -78,9 +78,12 @@ void InmarsatWidget::buildUi() {
     top->addWidget(new QLabel("BAND PLAN"));
     planCombo_ = new QComboBox();
     top->addWidget(planCombo_, 1);
-    voiceFollowCheck_ = new QCheckBox("Voice follow");
-    voiceFollowCheck_->setChecked(true);
-    recordCheck_ = new QCheckBox("Record voice");
+    voiceFollowCheck_ = new QCheckBox("Voice follow (not implemented)");
+    voiceFollowCheck_->setChecked(false);
+    voiceFollowCheck_->setEnabled(false);
+    voiceFollowCheck_->setToolTip("Needs unique-word sync and verified C-assign. Not in this release.");
+    recordCheck_ = new QCheckBox("Record voice (not implemented)");
+    recordCheck_->setEnabled(false);
     top->addWidget(voiceFollowCheck_);
     top->addWidget(recordCheck_);
     startBtn_ = new QPushButton("Start");

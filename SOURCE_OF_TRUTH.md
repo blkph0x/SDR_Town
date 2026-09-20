@@ -3,7 +3,7 @@ SDR TOWN — SOURCE OF TRUTH (SoT)
 ================================================================================
 VERSION: 1.0.0
 PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
-CURRENT VERSION IN TREE: 0.2.75
+CURRENT VERSION IN TREE: 0.2.76
 ACTIVE PHASE: Receive decoder expansion; P25 acceptance remains open, work deferred by user
 METHOD: Athanor / SovereignFoundry process (never guess, evidence, trackers).
          This tree is NOT Athanor. Qt, SoapySDR, mbelib, miniaudio stay.
@@ -78,7 +78,7 @@ Working well (keep; do not destabilize for P25 experiments):
   [X] Phase 2 superframe / ISCH / XOR mask generation (NAC/WACN/SysID)
   [X] Encrypted mute (security fail-closed when proof says encrypted)
   [X] Updater: GitHub latest + Ed25519 manifest when key configured
-      (published tester: v0.2.75 experimental)
+      (published tester: v0.2.76 experimental)
 
 Shipped experimental in v0.2.74 (user deferred further P25 work and authorized
 receive expansion). These are not P25 SoT gates and are not live-RF accepted:
@@ -87,7 +87,8 @@ receive expansion). These are not P25 SoT gates and are not live-RF accepted:
   [X] Satcom scanner, observer map, TLE/SGP4 Doppler, ISS SSTV arm (unit tests;
       live pass/Doppler RF acceptance open)
   [X] Aircraft map (OpenSky + optional local 1090)
-  [X] Inmarsat prototype UI/API/CLI (ACARS/ADS-C parse; no unique-word/FEC)
+  [X] Inmarsat prototype UI/API/CLI (band plans + ACARS/ADS-C parse).
+      Voice follow disabled (DEC-0105). Gaps: docs/INMARSAT.md.
   [X] Tuner lease: satcom/Inmarsat/aircraft cannot steal listen without force
   [X] CLI: observer, tle, satcom, inmarsat, aircraft, sdrplay, devices rescan
 

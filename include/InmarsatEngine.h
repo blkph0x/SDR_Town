@@ -30,7 +30,7 @@ struct InmarsatEngineConfig {
     double channelHz = 1542935000.0;
     std::string mode = "aero_oqpsk"; // aero_msk | aero_oqpsk | aero_voice | egc
     int baud = 10500;
-    bool voiceFollow = true;
+    bool voiceFollow = false; // not implemented: no unique-word / C-assign proof
     bool recordVoice = false;
     std::string recordDir;
 

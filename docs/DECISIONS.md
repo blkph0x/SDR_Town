@@ -2,6 +2,15 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0105 - Inmarsat voice follow stays disabled (2026-09-20)
+
+Evidence: slicer has no unique-word; C-assign is fixture regex; AMBE pack is not
+Aero 8400. Retuning on `voiceFollow` would hop L-band without a proven grant.
+
+Decision: `voiceFollow`/`recordVoice` default false, ignored on load/API.
+`applyVoiceFollow` does not retune. Status `locked` is always false.
+Remaining gaps stay in `docs/INMARSAT.md`. Do not invent FEC/UW to close them.
+
 ## DEC-0104 - FUBAR must not receive or set home lat/lon (2026-09-20)
 
 Evidence: FUBAR is a public website. Visitors with Take control could read/write

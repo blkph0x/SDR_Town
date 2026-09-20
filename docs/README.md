@@ -22,6 +22,7 @@ Do not edit `C:\Users\Blkph0x\source\repos\SovereignFoundry` from here.
 | [SDRPLAY.md](SDRPLAY.md) | SDRplay RSP multi-model support via SoapySDRPlay3 (gains, AGC, duo, HDR). |
 | [P25_ALIASES.md](P25_ALIASES.md) | System-specific names, import format and manual precedence. |
 | [FUBAR_PAIRING.md](FUBAR_PAIRING.md) | Companion FUBAR versions, `SdrTownControl.dll`, and honest gaps. |
+| [INMARSAT.md](INMARSAT.md) | Inmarsat prototype: what ships vs remaining gaps. |
 
 Architecture: [`../SOURCE_OF_TRUTH.md`](../SOURCE_OF_TRUTH.md).
 Why/how/effect: [`../CAUSE_EFFECT_MAP.md`](../CAUSE_EFFECT_MAP.md).
@@ -41,5 +42,5 @@ These stay as capture archaeology. New work is ISSUES + DECISIONS + TASKS.
 
 See [RELEASING.md](RELEASING.md) for current packaging, signature, runtime and
 publication gates, and [SATELLITE_AND_SSTV.md](SATELLITE_AND_SSTV.md) for next work.
-Current tester release: [0.2.75 notes](RELEASE_0.2.75.md).
+Current tester release: [0.2.76 notes](RELEASE_0.2.76.md). Inmarsat: [INMARSAT.md](INMARSAT.md).
 SSTV: [offline Robot36/Martin1 images, VIS inspection and next gates](SSTV.md).

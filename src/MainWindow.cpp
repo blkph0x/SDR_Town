@@ -10877,8 +10877,8 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             }
             if (body.contains("voiceFollow") || body.contains("recordVoice") || body.contains("deviceIndex")) {
                 cfg = InmarsatEngine::instance().config();
-                if (body.contains("voiceFollow")) cfg.voiceFollow = body.value("voiceFollow").toBool(cfg.voiceFollow);
-                if (body.contains("recordVoice")) cfg.recordVoice = body.value("recordVoice").toBool(cfg.recordVoice);
+                cfg.voiceFollow = false;
+                cfg.recordVoice = false;
                 if (body.contains("deviceIndex")) cfg.deviceIndex = static_cast<size_t>(body.value("deviceIndex").toInt(0));
                 InmarsatEngine::instance().setConfig(cfg);
             }
