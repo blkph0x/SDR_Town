@@ -1,8 +1,10 @@
 #include <catch2/catch_all.hpp>
 
 #include <string>
+#include <vector>
 
 #include "P25AudioDropClass.h"
+#include "P25TalkgroupRegistry.h"
 
 TEST_CASE("P25 audio drop classifier: follow return is bucket E", "[p25][drop]")
 {
@@ -107,4 +109,26 @@ TEST_CASE("DEC-0046 healthy sustain wall equals global wall until cooperative ab
     REQUIRE_FALSE(p25Phase2LiveSustainBudgetWallSane(80, 105, 320)); // DEC-0045 rejected
     REQUIRE_FALSE(p25Phase2LiveSustainBudgetWallSane(80, 60, 320));  // wall < budget
     REQUIRE_FALSE(p25Phase2LiveSustainBudgetWallSane(0, 320, 320));
+}
+
+TEST_CASE("P25 unresolved talkgroup grants use the resolved-grant correction budget", "[p25][control][talkgroup]")
+{
+    P25ControlEvent grant;
+    grant.type = P25ControlEventType::GroupVoiceGrant;
+    grant.talkgroupId = 12345;
+    grant.channel = 0x7001;
+
+    REQUIRE_FALSE(p25ControlEventIsResolvedVoiceGrant(grant));
+    REQUIRE(kP25PendingVoiceGrantMaxCorrectedDibits == kP25VoiceGrantMaxCorrectedDibits);
+    REQUIRE(p25TsbkPendingVoiceGrantEligible(kP25PendingVoiceGrantMaxCorrectedDibits, grant));
+
+    std::vector<P25PendingVoiceGrant> pending;
+    REQUIRE(p25RememberPendingVoiceGrant(
+        pending, grant, kP25PendingVoiceGrantMaxCorrectedDibits, 1000));
+    REQUIRE(pending.size() == 1);
+    REQUIRE(pending.front().event.talkgroupId == 12345);
+    REQUIRE(pending.front().correctedDibitErrors == kP25VoiceGrantMaxCorrectedDibits);
+
+    REQUIRE_FALSE(p25TsbkPendingVoiceGrantEligible(
+        kP25PendingVoiceGrantMaxCorrectedDibits + 1, grant));
 }
