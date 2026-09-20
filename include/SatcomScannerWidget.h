@@ -91,5 +91,6 @@ private:
     QString autoCapturePassKey_;
     qint64 autoCaptureRetryAfter_ = 0;
     bool autoCaptureOwned_ = false;
+    bool autoEngineWasRunning_ = false;
     bool autoSstvRequested_ = false;
 };
