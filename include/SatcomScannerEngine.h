@@ -141,6 +141,7 @@ private:
     std::string recordPath_;
     std::string recordSatId_;
     std::string recordDownlinkId_;
+    std::string armedRole_;
     std::string sstvOutputDir_;
     std::string lastStatus_;
     bool skipRequested_ = false;
