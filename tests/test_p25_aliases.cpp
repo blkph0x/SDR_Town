@@ -27,7 +27,7 @@ TEST_CASE("P25 alias lists strictly validate imported identifiers and preserve m
     // Cached site helper must stay exception-safe on the control-log hot path.
     CHECK(resolveCachedP25SiteAlias(true,781824,1,1,1).isEmpty());
     CHECK(resolveCachedP25SiteAlias(false,781824,1,1,1,"Tower")=="Tower");
-    CHECK(resolveP25Alias(lists,false,781824,1,123).isEmpty());
+    CHECK(resolveP25Alias(lists,false,781824,1,123)=="Dispatch");
     CHECK(resolveP25Alias(lists,true,781824,2,123).isEmpty());
     CHECK(resolveP25Alias(lists,true,781825,1,123).isEmpty());
     CHECK(resolveP25Alias(lists,true,781824,1,124).isEmpty());
@@ -37,6 +37,9 @@ TEST_CASE("P25 alias lists strictly validate imported identifiers and preserve m
     CHECK(lists[0].talkgroups.at(123).name=="Local override");
     CHECK(lists[0].talkgroups.at(456).name=="New import");
     list.systemId=2;mergeP25AliasList(lists,list);CHECK(lists.size()==2);
+    // Unknown-system fallback is allowed only when all imported systems agree.
+    CHECK(resolveP25Alias(lists,false,0,0,123).isEmpty());
+    CHECK(resolveP25Alias(lists,false,0,0,456)=="New import");
     const auto bytes=serializeP25AliasDatabase(lists);
     CHECK(serializeP25AliasDatabase(loadP25AliasDatabase(bytes))==bytes);
     CHECK_FALSE(parseP25AliasImport(exportP25AliasList(lists[0])).talkgroups.at(123).manual);
@@ -151,7 +154,7 @@ TEST_CASE("P25 alias CSV imports RadioReference talkgroups and sites","[aliases]
     CHECK(list.talkgroups.at(10000).name=="1121 GL 01");
     CHECK(list.talkgroups.at(10000).group=="Shared Liaisons (GLOs/ESOs)");
     CHECK(resolveP25Alias({list},true,0xbee00,1,10000)=="1121 GL 01");
-    CHECK(resolveP25Alias({list},false,0xbee00,1,10000).isEmpty());
+    CHECK(resolveP25Alias({list},false,0xbee00,1,10000)=="1121 GL 01");
 
     const QByteArray sitesCsv=
         "RFSS,Site Dec,Site Hex,Site NAC,Description,County Name,Lat,Lon,Range,Frequencies\n"
