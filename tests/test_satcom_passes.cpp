@@ -9,42 +9,11 @@
 #include "HttpGet.h"
 
 #include <cmath>
-#include <ctime>
 #include <fstream>
-#include <iomanip>
 #include <memory>
-#include <sstream>
 #include <string>
 #include <QCoreApplication>
 #include <QDir>
-
-namespace {
-
-std::string currentIssLine1()
-{
-    const std::time_t now = std::time(nullptr);
-    std::tm utc{};
-#ifdef _WIN32
-    gmtime_s(&utc, &now);
-#else
-    gmtime_r(&now, &utc);
-#endif
-
-    const int year2 = (utc.tm_year + 1900) % 100;
-    const double day = static_cast<double>(utc.tm_yday + 1) +
-        static_cast<double>(utc.tm_hour * 3600 + utc.tm_min * 60 + utc.tm_sec) / 86400.0;
-
-    std::ostringstream epoch;
-    epoch << std::setfill('0') << std::setw(2) << year2
-          << std::fixed << std::setprecision(8) << std::setw(12) << day;
-
-    const std::string line =
-        "1 25544U 98067A   " + epoch.str() +
-        "  .00007470  00000+0  14267-3 0  9991";
-    return line;
-}
-
-} // namespace
 
 TEST_CASE("Observer parses both hemispheres", "[satcom][pass]")
 {
@@ -134,9 +103,8 @@ TEST_CASE("Selected satellite snapshot exposes finite map coordinates", "[satcom
     TleSet t;
     t.noradId = 25544;
     t.name = "ISS (ZARYA)";
-    t.line1 = currentIssLine1();
-    t.line2 = "2 25544  51.6307 190.1401 0004820 160.6694 199.4478 15.49188396586472";
-    REQUIRE(t.line1.size() == 69);
+    t.line1 = "1 25544U 98067A   21001.00000000  .00002182  00000-0  40864-4 0  9990";
+    t.line2 = "2 25544  51.6456 247.4627 0003000  45.0000 315.0000 15.48900000200000";
     TleStore::instance().upsert(t);
 
     SatObserverConfig observer;
@@ -147,9 +115,11 @@ TEST_CASE("Selected satellite snapshot exposes finite map coordinates", "[satcom
     SatPassPlanner::instance().setObserver(observer);
     SatPassPlanner::instance().setCatalogueSelection({"iss"});
 
-    const auto snap = SatPassPlanner::instance().snapshot();
-    REQUIRE(snap.positions.size() == 1);
-    const auto& pos = snap.positions.front();
+    // Evaluate at the exact TLE epoch (2021-01-01T00:00:00Z). This verifies
+    // the map projection without coupling the test to the runner's wall clock.
+    const auto positions = SatPassPlanner::instance().currentPositionsAt(1609459200.0);
+    REQUIRE(positions.size() == 1);
+    const auto& pos = positions.front();
     REQUIRE(pos.satId == "iss");
     REQUIRE(pos.noradId == 25544);
     REQUIRE(pos.tleValid);
@@ -163,6 +133,7 @@ TEST_CASE("Selected satellite snapshot exposes finite map coordinates", "[satcom
     REQUIRE(pos.longitudeDeg <= 180.0);
     REQUIRE(pos.altitudeKm > 100.0);
     REQUIRE(pos.rangeKm > 0.0);
+    REQUIRE(pos.armable);
     REQUIRE(pos.downlinkId == "iss-sstv");
     REQUIRE(pos.role == "sstv");
 
