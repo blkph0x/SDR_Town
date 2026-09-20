@@ -1,0 +1,16 @@
+{
+  "id": "3f5",
+  "name": "I-3 F5",
+  "aliases": ["3F5", "I3F5", "AORE"],
+  "orbitalSlotDegE": -54.0,
+  "region": "AORE: Atlantic Ocean East",
+  "source": "Public AORE L-band Aero/STD-C survey references. Partial; verify on-air.",
+  "channels": [
+    {"label": "STD-C / EGC", "freqHz": 1541450000, "mode": "egc", "baud": 1200},
+    {"label": "Aero P1", "freqHz": 1543100000, "mode": "aero_oqpsk", "baud": 10500},
+    {"label": "Aero P2", "freqHz": 1543250000, "mode": "aero_oqpsk", "baud": 10500},
+    {"label": "Aero P3", "freqHz": 1543400000, "mode": "aero_oqpsk", "baud": 10500},
+    {"label": "Aero MSK 1200", "freqHz": 1542950000, "mode": "aero_msk", "baud": 1200},
+    {"label": "Aero Voice 8400", "freqHz": 1544100000, "mode": "aero_voice", "baud": 8400}
+  ]
+}

@@ -85,6 +85,7 @@ docs/generated/
 !vcpkg.json
 !CMakePresets.json
 !resources/*.json
+!data/inmarsat/*.json
 appdata/
 recordings/
 logs/

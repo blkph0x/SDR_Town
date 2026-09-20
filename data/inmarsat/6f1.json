@@ -1,0 +1,18 @@
+{
+  "id": "6f1",
+  "name": "I-6 F1",
+  "aliases": ["6F1", "I6F1", "IOE"],
+  "orbitalSlotDegE": 83.5,
+  "region": "IOE: Indian Ocean East",
+  "source": "Public IOE L-band Aero/STD-C survey references (post 4F2→6F1 migration notes). Partial; verify on-air.",
+  "channels": [
+    {"label": "STD-C / EGC", "freqHz": 1541450000, "mode": "egc", "baud": 1200},
+    {"label": "Aero P1", "freqHz": 1543000000, "mode": "aero_oqpsk", "baud": 10500},
+    {"label": "Aero P2", "freqHz": 1543150000, "mode": "aero_oqpsk", "baud": 10500},
+    {"label": "Aero P3", "freqHz": 1543300000, "mode": "aero_oqpsk", "baud": 10500},
+    {"label": "Aero P4", "freqHz": 1543450000, "mode": "aero_oqpsk", "baud": 10500},
+    {"label": "Aero P5", "freqHz": 1543600000, "mode": "aero_oqpsk", "baud": 10500},
+    {"label": "Aero MSK 1200", "freqHz": 1542900000, "mode": "aero_msk", "baud": 1200},
+    {"label": "Aero Voice 8400", "freqHz": 1544200000, "mode": "aero_voice", "baud": 8400}
+  ]
+}
