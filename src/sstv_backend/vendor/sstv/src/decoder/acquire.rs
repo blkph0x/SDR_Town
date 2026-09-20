@@ -34,21 +34,35 @@ const fn is_leader(frequency: Frequency) -> bool {
 pub(super) fn detect_by_sync_period<I: Iterator<Item = i16>>(
     stream: &mut FrequencyStream<I>,
 ) -> Option<(Mode, f64)> {
+    let mut best: Option<(Mode, f64, f64)> = None;
     for mode in Mode::ALL {
         if mode.layout().sync_pulse().1.ns() == 0 {
             continue;
         }
-        if let Some(start) = lock_onto_first_line(stream, &mode.layout()) {
-            return Some((mode, start));
+        if let Some((start, error)) = lock_onto_first_line_scored(stream, &mode.layout()) {
+            let better = match best {
+                None => true,
+                Some((_, _, previous)) => error + 1e-12 < previous,
+            };
+            if better {
+                best = Some((mode, start, error));
+            }
         }
     }
-    None
+    best.map(|(mode, start, _)| (mode, start))
 }
 
 pub(super) fn lock_onto_first_line<I: Iterator<Item = i16>>(
     stream: &mut FrequencyStream<I>,
     layout: &Layout,
 ) -> Option<f64> {
+    lock_onto_first_line_scored(stream, layout).map(|(start, _)| start)
+}
+
+fn lock_onto_first_line_scored<I: Iterator<Item = i16>>(
+    stream: &mut FrequencyStream<I>,
+    layout: &Layout,
+) -> Option<(f64, f64)> {
     let (sync_offset, sync_duration) = layout.sync_pulse();
     if sync_duration.ns() == 0 {
         return None;
@@ -92,7 +106,11 @@ pub(super) fn lock_onto_first_line<I: Iterator<Item = i16>>(
                 }
                 for &(a, _) in candidates.iter().rev() {
                     if a < b && spaced(a, b) {
-                        return Some(a as f64 - stream.samples_in(sync_offset));
+                        let first = (b - a) as f64;
+                        let second = (position - b) as f64;
+                        let error = ((first - period).abs() + (second - period).abs())
+                            / (2.0 * period);
+                        return Some((a as f64 - stream.samples_in(sync_offset), error));
                     }
                 }
             }
@@ -216,29 +234,70 @@ fn read_vis_bits<I: Iterator<Item = i16>>(
     }
 
     let is_sync_bit = |hz: u32| hz.abs_diff(SYNC_FREQUENCY.hz()) <= TONE_TOLERANCE_HZ;
-    if !is_sync_bit(bits[0]) || !is_sync_bit(bits[9]) {
+    if is_sync_bit(bits[0]) && is_sync_bit(bits[9]) {
+        let mut code = 0u8;
+        let mut ones = 0u32;
+        let mut tones_ok = true;
+        for (bit, hz) in bits[1..=8].iter().enumerate() {
+            if !(950..=1450).contains(hz) {
+                tones_ok = false;
+                break;
+            }
+            if *hz < 1200 {
+                ones += 1;
+                if bit < 7 {
+                    code |= 1 << bit;
+                }
+            }
+        }
+        if tones_ok && ones.is_multiple_of(2)
+            && let Some(mode) = Mode::from_vis_code(code)
+        {
+            // The ten bits span 300ms; image data follows the stop bit.
+            let mut sequence_start = start_bit as f64 + samples(300.0);
+            if mode.has_starting_sync_pulse() {
+                sequence_start += stream.samples_in(mode.layout().sync_pulse().1);
+            }
+            return Some((mode, sequence_start));
+        }
+    }
+    read_vis_word(stream, start_bit)
+}
+
+/// QSSTV 16-bit VIS: start + 16 data bits + stop (low byte 0x23).
+fn read_vis_word<I: Iterator<Item = i16>>(
+    stream: &mut FrequencyStream<I>,
+    start_bit: usize,
+) -> Option<(Mode, f64)> {
+    let sample_rate = f64::from(stream.sample_rate());
+    let samples = move |milliseconds: f64| milliseconds / 1000.0 * sample_rate;
+
+    let mut bits = [0u32; 18];
+    for (slot, bit) in bits.iter_mut().enumerate() {
+        let mut medians = [0u32; 3];
+        for (sample, offset) in medians.iter_mut().zip([8.0, 15.0, 22.0]) {
+            let position = start_bit + samples(slot as f64 * 30.0 + offset) as usize;
+            *sample = stream.peek(position)?.hz();
+        }
+        medians.sort_unstable();
+        *bit = medians[1];
+    }
+
+    let is_sync_bit = |hz: u32| hz.abs_diff(SYNC_FREQUENCY.hz()) <= TONE_TOLERANCE_HZ;
+    if !is_sync_bit(bits[0]) || !is_sync_bit(bits[17]) {
         return None;
     }
-    let mut code = 0u8;
-    let mut ones = 0u32;
-    for (bit, hz) in bits[1..=8].iter().enumerate() {
+    let mut word = 0u16;
+    for (bit, hz) in bits[1..=16].iter().enumerate() {
         if !(950..=1450).contains(hz) {
             return None;
         }
         if *hz < 1200 {
-            ones += 1;
-            if bit < 7 {
-                code |= 1 << bit;
-            }
+            word |= 1 << bit;
         }
     }
-    if !ones.is_multiple_of(2) {
-        return None;
-    }
-
-    let mode = Mode::from_vis_code(code)?;
-    // The ten bits span 300ms; image data follows the stop bit.
-    let mut sequence_start = start_bit as f64 + samples(300.0);
+    let mode = Mode::from_vis_word(word)?;
+    let mut sequence_start = start_bit as f64 + samples(540.0);
     if mode.has_starting_sync_pulse() {
         sequence_start += stream.samples_in(mode.layout().sync_pulse().1);
     }

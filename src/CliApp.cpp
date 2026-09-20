@@ -1552,7 +1552,7 @@ int runCLI(int argc, char* argv[]) {
                         << "  tones dcs-bits <quoted-path> DCS chronological ASCII bits; max 120 s\n"
                         << "  tones dtmf <quoted-path> DTMF digits from mono discriminator WAV/FLAC\n"
                         << "  sstv inspect <quoted-path> SSTV VIS headers only; mono WAV/FLAC 8..96 kHz, max 120 s\n"
-                        << "  sstv decode <input> <new-output-dir> [auto|robot36|martin1|scottie1|pd120|...]\n"
+                        << "  sstv decode <input> <new-output-dir> [auto|robot36|martin1|scottie3|fax480|mp73|...]\n"
                       << "  rds bits <quoted-path>  Decode MSB-first differential-decoded RDS bits\n"
                       << "  rds mpx <quoted-path>   Decode mono MPX WAV/FLAC (128..384 kHz, max 120 s)\n"
                       << "  list | devices          - show enumerated devices\n"
@@ -2667,7 +2667,7 @@ int runCLI(int argc, char* argv[]) {
             if(action=="decode") {
                 const auto arguments=QProcess::splitCommand(input);
                 if(arguments.size()<2 || arguments.size()>3) {
-                    std::cout << "sstv decode <input> <new-output-dir> [auto|robot36|martin1|scottie1|pd120|...]\n";
+                    std::cout << "sstv decode <input> <new-output-dir> [auto|robot36|martin1|scottie3|fax480|mp73|...]\n";
                     continue;
                 }
                 try {

@@ -51,7 +51,7 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
     for (const auto& spec : kSstvModes)
         mode_->addItem(QString::fromUtf8(spec.label), QString::fromUtf8(spec.id));
     form->addRow("Mode",mode_);
-    hint_=new QLabel("Tune 1200–2300 Hz. Automatic reads VIS then, if needed, line-sync period. Forced mode uses 1200 Hz sync (AVT has no line sync — VIS or start of image). Robot B&W, SC2-30/60/120 and AVT 24/90/94/188 use QSSTV/handbook timings.",this);
+    hint_=new QLabel("Tune 1200–2300 Hz. Automatic reads 7-bit VIS, then QSSTV 16-bit VIS (MP/MR/ML), then 1200 Hz line-sync period. Forced mode uses line sync (AVT has none — VIS or start of image). FAX480 has no VIS. Narrow 2172 Hz modes are not supported.",this);
     hint_->setWordWrap(true);
     form->addRow(hint_);
     layout->addLayout(form);
@@ -241,6 +241,9 @@ QString SstvWindow::statusMessage() const {
     return status_ ? status_->text() : QString();
 }
 
+QString SstvWindow::selectedMode() const {
+    return mode_ ? mode_->currentData().toString() : QStringLiteral("auto");
+}
 bool SstvWindow::liveSelected() const {
     return source_ && source_->currentData().toString() == QStringLiteral("live");
 }

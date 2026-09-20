@@ -2,6 +2,18 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0108 - Leftover SSTV families from handbook/QSSTV (2026-09-20)
+
+Evidence: SSTV Handbook ch.4 Martin M3/M4, Scottie S3/S4, Wraase SC-1 24/48/48Q/96
+scan tables; QSSTV `sstvparam.cpp` FAX480 (VIS 0, 512x500, 133.633 s) and MP/MR/ML
+16-bit VIS (`0xNN23`) plus `modePD`/`modeRobot2` scan split. Auto line-sync first-match
+would confuse FAX480 (267 ms) with Scottie 2 (278 ms).
+
+Decision: add those layouts to the vendored crate. Auto: 7-bit VIS, then 16-bit VIS,
+then closest 1200 Hz line-sync period (not first 15% match). FAX480 has no VIS.
+MR175 omitted (QSSTV VIS 0x4A23 collides with MR140). Narrow 2172 Hz modes omitted
+(demod is 1500–2300 Hz). FUBAR uses the same mode list and `/v1/sstv/live|finish|cancel`.
+
 ## DEC-0107 - Extra SSTV modes from QSSTV/handbook (2026-09-20)
 
 Evidence: ON4QZ QSSTV `sstvparam.cpp` VIS/geometry; SSTV Handbook ch.4 SC-2 and AVT

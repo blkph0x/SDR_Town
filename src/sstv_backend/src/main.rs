@@ -36,6 +36,27 @@ fn parse_mode(name: &str) -> Result<Mode, Box<dyn std::error::Error>> {
         "avt90" => Mode::Avt90,
         "avt94" => Mode::Avt94,
         "avt188" => Mode::Avt188,
+        "martin3" => Mode::Martin3,
+        "martin4" => Mode::Martin4,
+        "scottie3" => Mode::Scottie3,
+        "scottie4" => Mode::Scottie4,
+        "fax480" => Mode::Fax480,
+        "sc124" => Mode::WrasseSc124,
+        "sc148" => Mode::WrasseSc148,
+        "sc148q" => Mode::WrasseSc148q,
+        "sc196" => Mode::WrasseSc196,
+        "mp73" => Mode::Mp73,
+        "mp115" => Mode::Mp115,
+        "mp140" => Mode::Mp140,
+        "mp175" => Mode::Mp175,
+        "mr73" => Mode::Mr73,
+        "mr90" => Mode::Mr90,
+        "mr115" => Mode::Mr115,
+        "mr140" => Mode::Mr140,
+        "ml180" => Mode::Ml180,
+        "ml240" => Mode::Ml240,
+        "ml280" => Mode::Ml280,
+        "ml320" => Mode::Ml320,
         _ => return Err("unsupported mode".into()),
     })
 }
@@ -71,6 +92,27 @@ fn mode_name(mode: Mode) -> Result<&'static str, Box<dyn std::error::Error>> {
         Mode::Avt90 => "avt90",
         Mode::Avt94 => "avt94",
         Mode::Avt188 => "avt188",
+        Mode::Martin3 => "martin3",
+        Mode::Martin4 => "martin4",
+        Mode::Scottie3 => "scottie3",
+        Mode::Scottie4 => "scottie4",
+        Mode::Fax480 => "fax480",
+        Mode::WrasseSc124 => "sc124",
+        Mode::WrasseSc148 => "sc148",
+        Mode::WrasseSc148q => "sc148q",
+        Mode::WrasseSc196 => "sc196",
+        Mode::Mp73 => "mp73",
+        Mode::Mp115 => "mp115",
+        Mode::Mp140 => "mp140",
+        Mode::Mp175 => "mp175",
+        Mode::Mr73 => "mr73",
+        Mode::Mr90 => "mr90",
+        Mode::Mr115 => "mr115",
+        Mode::Mr140 => "mr140",
+        Mode::Ml180 => "ml180",
+        Mode::Ml240 => "ml240",
+        Mode::Ml280 => "ml280",
+        Mode::Ml320 => "ml320",
         _ => return Err("detected mode is not mapped in this helper".into()),
     })
 }
@@ -96,6 +138,65 @@ fn run_selftest() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn mean_abs_error(a: &[RgbPixel], b: &[RgbPixel]) -> f64 {
+    let total: u64 = a.iter().zip(b).map(|(p, q)| {
+        let d = |x: u8, y: u8| u64::from((i32::from(x) - i32::from(y)).unsigned_abs());
+        d(p.red(), q.red()) + d(p.green(), q.green()) + d(p.blue(), q.blue())
+    }).sum();
+    total as f64 / (a.len() as f64 * 3.0)
+}
+
+fn run_selftest_all() -> Result<(), Box<dyn std::error::Error>> {
+    const RATE: u32 = 16_000;
+    const MAX_ERR: f64 = 12.0;
+    let mut failed = 0usize;
+    let mut passed = 0usize;
+    for mode in Mode::ALL {
+        let w = mode.image_width() as usize;
+        let h = mode.image_height() as usize;
+        let mut pixels = Vec::with_capacity(w * h);
+        for y in 0..h {
+            for x in 0..w {
+                pixels.push(RgbPixel::new(
+                    (x * 255 / w.saturating_sub(1).max(1)) as u8,
+                    (y * 255 / h.saturating_sub(1).max(1)) as u8,
+                    128,
+                ));
+            }
+        }
+        let encoder = Encoder::new(mode, pixels.clone().into_iter())?;
+        let mut samples: Vec<i16> = Synthesizer::new(encoder, RATE).collect();
+        samples.extend(std::iter::repeat_n(0i16, RATE as usize / 2));
+        let mut ok = true;
+        for decoder_mode in [mode, Mode::Auto] {
+            let decoded: Vec<_> = Decoder::from_samples(decoder_mode, samples.iter().copied(), RATE)
+                .images()
+                .collect();
+            if decoded.len() != 1 || decoded[0].mode() != mode || !decoded[0].complete() {
+                ok = false;
+                eprintln!("SSTV selftest-all fail: {mode:?} via {decoder_mode:?} count/mode/complete");
+                continue;
+            }
+            let expected: Vec<RgbPixel> = match mode {
+                Mode::RobotBw8 | Mode::RobotBw12 | Mode::Robot24 | Mode::Fax480 => pixels.iter().copied().map(|p| {
+                    let y = sstv::YuvPixel::from(p).luma();
+                    RgbPixel::new(y, y, y)
+                }).collect(),
+                _ => pixels.clone(),
+            };
+            let err = mean_abs_error(&expected, decoded[0].pixels());
+            if err >= MAX_ERR {
+                ok = false;
+                eprintln!("SSTV selftest-all fail: {mode:?} via {decoder_mode:?} mae={err}");
+            }
+        }
+        if ok { passed += 1; } else { failed += 1; }
+    }
+    println!("{{\"schema\":1,\"backend\":\"{REVISION}\",\"selftestAll\":true,\"passed\":{passed},\"failed\":{failed},\"modes\":{}}}", Mode::ALL.len());
+    if failed > 0 { return Err("selftest-all: one or more modes failed".into()); }
+    Ok(())
+}
+
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = env::args_os().collect();
     if args.len() == 2 && args[1] == "--version" {
@@ -104,6 +205,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if args.len() == 2 && args[1] == "--selftest" {
         return run_selftest();
+    }
+    if args.len() == 2 && args[1] == "--selftest-all" {
+        return run_selftest_all();
     }
     let progress = args.len() == 6 && args[5] == "--progress";
     if args.len() != 5 && !progress {

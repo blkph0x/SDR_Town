@@ -15,6 +15,9 @@ add_custom_command(OUTPUT "${SSTV_EXE}"
         --manifest-path "${CMAKE_SOURCE_DIR}/src/sstv_backend/Cargo.toml"
         --target-dir "${CMAKE_BINARY_DIR}/sstv-backend"
     DEPENDS src/sstv_backend/Cargo.toml src/sstv_backend/Cargo.lock src/sstv_backend/src/main.rs src/sstv_backend/src/pcm.rs
+        src/sstv_backend/vendor/sstv/src/modes/mod.rs src/sstv_backend/vendor/sstv/src/modes/extra.rs
+        src/sstv_backend/vendor/sstv/src/modes/martin.rs src/sstv_backend/vendor/sstv/src/modes/scottie.rs
+        src/sstv_backend/vendor/sstv/src/decoder/acquire.rs src/sstv_backend/vendor/sstv/tests/all_modes.rs
     VERBATIM)
 add_custom_target(sstv_backend DEPENDS "${SSTV_EXE}")
 if(BUILD_TESTS)
@@ -27,7 +30,7 @@ if(BUILD_TESTS)
         COMMAND ${CMAKE_COMMAND} -E env ${SSTV_ENV} "${SDR_TOWN_CARGO}" test --offline --locked
             --manifest-path "${CMAKE_SOURCE_DIR}/src/sstv_backend/Cargo.toml"
             --target-dir "${CMAKE_BINARY_DIR}/sstv-backend")
-    set_tests_properties(SstvTransportRust PROPERTIES TIMEOUT 120)
+    set_tests_properties(SstvTransportRust PROPERTIES TIMEOUT 900)
 endif()
 add_dependencies(SDR_Town sstv_backend)
 add_custom_command(TARGET SDR_Town POST_BUILD

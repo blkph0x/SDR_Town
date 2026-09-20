@@ -27,17 +27,21 @@ const fn sequence(scan: Duration) -> [Step; 8] {
 const MARTIN_1_SEQUENCE: [Step; 8] = sequence(us!(146_432));
 const MARTIN_2_SEQUENCE: [Step; 8] = sequence(us!(73_216));
 
-const fn layout(sequences: &'static [&'static [Step]]) -> Layout {
+const fn layout(width: usize, height: usize, sequences: &'static [&'static [Step]]) -> Layout {
     Layout {
-        width: 320,
-        height: 256,
+        width,
+        height,
         sequences,
         lines_per_sequence: 1,
         color: ColorMode::Rgb,
     }
 }
 
-/// 256 lines of 446.446ms each: a 114 second transmission.
-pub const MARTIN_1: Layout = layout(&[&MARTIN_1_SEQUENCE]);
-/// 256 lines of 226.798ms each: a 58 second transmission.
-pub const MARTIN_2: Layout = layout(&[&MARTIN_2_SEQUENCE]);
+/// 256 lines of 446.446ms each: a 114 second transmission. Dayton + handbook.
+pub const MARTIN_1: Layout = layout(320, 256, &[&MARTIN_1_SEQUENCE]);
+/// Dayton paper: 320x256 at half scan time (58 s). VIS 40.
+pub const MARTIN_2: Layout = layout(320, 256, &[&MARTIN_2_SEQUENCE]);
+/// Handbook M3: same line as M1, 128 lines, ~57 s. VIS 36.
+pub const MARTIN_3: Layout = layout(320, 128, &[&MARTIN_1_SEQUENCE]);
+/// Handbook M4: 160x128, M2 scan 73.216 ms, ~29 s. VIS 32.
+pub const MARTIN_4: Layout = layout(160, 128, &[&MARTIN_2_SEQUENCE]);

@@ -3,7 +3,7 @@ SDR TOWN — SOURCE OF TRUTH (SoT)
 ================================================================================
 VERSION: 1.0.0
 PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
-CURRENT VERSION IN TREE: 0.2.78
+CURRENT VERSION IN TREE: 0.2.79
 ACTIVE PHASE: Receive decoder expansion; P25 acceptance remains open, work deferred by user
 METHOD: Athanor / SovereignFoundry process (never guess, evidence, trackers).
          This tree is NOT Athanor. Qt, SoapySDR, mbelib, miniaudio stay.
@@ -78,7 +78,7 @@ Working well (keep; do not destabilize for P25 experiments):
   [X] Phase 2 superframe / ISCH / XOR mask generation (NAC/WACN/SysID)
   [X] Encrypted mute (security fail-closed when proof says encrypted)
   [X] Updater: GitHub latest + Ed25519 manifest when key configured
-      (published tester: v0.2.78 experimental)
+      (published tester: v0.2.79 experimental)
 
 Shipped experimental in v0.2.74 (user deferred further P25 work and authorized
 receive expansion). These are not P25 SoT gates and are not live-RF accepted:

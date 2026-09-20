@@ -260,6 +260,8 @@ pub struct Events<I: Iterator<Item = i16>> {
     state: State,
     /// Decoded events waiting to be handed out, oldest first.
     queue: VecDeque<Event>,
+    /// AVT/headerless: allow a single start-at-zero if VIS is missing.
+    headerless_fallback: bool,
 }
 
 /// Where the decoder is in the acquire → decode → acquire cycle.
@@ -406,6 +408,7 @@ impl<I: Iterator<Item = i16>> Events<I> {
             requested_mode: mode,
             state: State::Searching,
             queue: VecDeque::new(),
+            headerless_fallback: true,
         }
     }
 
@@ -434,7 +437,14 @@ impl<I: Iterator<Item = i16>> Events<I> {
         let acquired = if self.requested_mode == Mode::Auto {
             detect_mode(&mut self.stream).or_else(|| detect_by_sync_period(&mut self.stream))
         } else if self.requested_mode.layout().sync_pulse().1.ns() == 0 {
-            Some((self.requested_mode, 0.0))
+            // AVT: no line sync. Prefer VIS so the header is not decoded as image.
+            if let Some((_, start)) = detect_mode(&mut self.stream) {
+                Some((self.requested_mode, start))
+            } else if self.headerless_fallback && self.stream.peek(0).is_some() {
+                Some((self.requested_mode, 0.0))
+            } else {
+                None
+            }
         } else {
             lock_onto_first_line(&mut self.stream, &self.requested_mode.layout())
                 .map(|sequence_start| (self.requested_mode, sequence_start))
@@ -442,6 +452,7 @@ impl<I: Iterator<Item = i16>> Events<I> {
 
         match acquired {
             Some((mode, sequence_start)) => {
+                self.headerless_fallback = false;
                 // Replay only from the first line onward.
                 let origin = self.stream.start_at(sequence_start.max(0.0) as usize);
                 let image = ImageState::new(mode, sequence_start - origin as f64);

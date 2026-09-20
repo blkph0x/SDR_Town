@@ -29,10 +29,10 @@ const SCOTTIE_1_SEQUENCE: [Step; 7] = sequence(us!(138_240));
 const SCOTTIE_2_SEQUENCE: [Step; 7] = sequence(us!(88_064));
 const SCOTTIE_DX_SEQUENCE: [Step; 7] = sequence(us!(345_600));
 
-const fn layout(sequences: &'static [&'static [Step]]) -> Layout {
+const fn layout(width: usize, height: usize, sequences: &'static [&'static [Step]]) -> Layout {
     Layout {
-        width: 320,
-        height: 256,
+        width,
+        height,
         sequences,
         lines_per_sequence: 1,
         color: ColorMode::Rgb,
@@ -40,8 +40,12 @@ const fn layout(sequences: &'static [&'static [Step]]) -> Layout {
 }
 
 /// 256 lines of 428.22ms each: a 110 second transmission.
-pub const SCOTTIE_1: Layout = layout(&[&SCOTTIE_1_SEQUENCE]);
-/// 256 lines of 277.692ms each: a 71 second transmission.
-pub const SCOTTIE_2: Layout = layout(&[&SCOTTIE_2_SEQUENCE]);
+pub const SCOTTIE_1: Layout = layout(320, 256, &[&SCOTTIE_1_SEQUENCE]);
+/// Dayton: 320x256 at S2 scan time (71 s).
+pub const SCOTTIE_2: Layout = layout(320, 256, &[&SCOTTIE_2_SEQUENCE]);
 /// 256 lines of 1050.3ms each: a 269 second transmission.
-pub const SCOTTIE_DX: Layout = layout(&[&SCOTTIE_DX_SEQUENCE]);
+pub const SCOTTIE_DX: Layout = layout(320, 256, &[&SCOTTIE_DX_SEQUENCE]);
+/// Handbook S3: S1 scans, 128 lines, ~55 s. VIS 52.
+pub const SCOTTIE_3: Layout = layout(320, 128, &[&SCOTTIE_1_SEQUENCE]);
+/// Handbook S4: S2 scans, 160x128, ~36 s. VIS 48.
+pub const SCOTTIE_4: Layout = layout(160, 128, &[&SCOTTIE_2_SEQUENCE]);

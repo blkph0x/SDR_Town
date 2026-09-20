@@ -2,6 +2,7 @@
 #include "SstvWindow.h"
 #include "SstvImageFile.h"
 #include "SstvLiveSession.h"
+#include "SstvModes.h"
 #include "P25AliasDialog.h"
 #include "BandPlanDialog.h"
 #include "RdsStatusWidget.h"
@@ -23,9 +24,12 @@
 #include "AdsBTrackStore.h"
 
 #include <QCloseEvent>
+#include <QDateTime>
+#include <QDir>
 #include <QDockWidget>
 #include <QFileInfo>
 #include <QSizePolicy>
+#include <QStandardPaths>
 #include <algorithm>
 #include <cmath>
 
@@ -10047,11 +10051,30 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
 
         QJsonObject sstv;
         sstv.insert("modeHint",
-                    QStringLiteral("In SDR Town open Tools → SSTV Images. Choose Live NFM - main receiver, pick a new empty output folder, then Receive. Finish and save when the picture is done."));
+                    QStringLiteral("Auto = 7-bit VIS, then QSSTV 16-bit VIS (MP/MR/ML), then 1200 Hz line-sync. FAX480 has no VIS. AVT has no line sync. Narrow 2172 Hz modes are not supported."));
+        sstv.insert("autoPath", QStringLiteral("vis-7bit,vis-16bit,line-sync"));
+        QJsonArray modeList;
+        QJsonObject autoMode;
+        autoMode.insert("id", "auto");
+        autoMode.insert("label", "Automatic (VIS then line-sync)");
+        autoMode.insert("vis", 0);
+        modeList.append(autoMode);
+        for (const auto& spec : kSstvModes) {
+            QJsonObject m;
+            m.insert("id", QString::fromUtf8(spec.id));
+            m.insert("label", QString::fromUtf8(spec.label));
+            m.insert("vis", static_cast<int>(spec.vis));
+            m.insert("width", spec.width);
+            m.insert("height", spec.height);
+            m.insert("durationSec", spec.durationSec);
+            modeList.append(m);
+        }
+        sstv.insert("modes", modeList);
         if (auto* window = findChild<SstvWindow*>(QStringLiteral("sstvWindow"))) {
             sstv.insert("windowOpen", true);
             sstv.insert("busy", window->busy());
             sstv.insert("live", window->liveSelected());
+            sstv.insert("mode", window->selectedMode());
             sstv.insert("status", window->statusMessage());
             sstv.insert("outputDirectory", window->resultDirectory());
             QJsonArray images;
@@ -10076,6 +10099,7 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
             sstv.insert("windowOpen", false);
             sstv.insert("busy", false);
             sstv.insert("live", false);
+            sstv.insert("mode", QStringLiteral("auto"));
             sstv.insert("status", QStringLiteral("SSTV window not open yet"));
             sstv.insert("outputDirectory", QString());
             sstv.insert("images", QJsonArray{});
@@ -10098,6 +10122,7 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
         caps.insert("readRds", true);
         caps.insert("readTones", true);
         caps.insert("readSstv", true);
+        caps.insert("sstvLive", true);
         caps.insert("sdrplayControls", active && active->isSdrplay);
         caps.insert("satcomScanner", true);
         caps.insert("satcomPasses", true);
@@ -10570,6 +10595,28 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
         return {{"ok", true}, {"state", sdrTownControlStatusSnapshot()}};
     }
 
+SstvWindow* MainWindow::ensureSstvWindow()
+{
+    auto* window = findChild<SstvWindow*>(QStringLiteral("sstvWindow"));
+    if (window) return window;
+    window = new SstvWindow(decodeSstvImageFile, this);
+    window->setObjectName(QStringLiteral("sstvWindow"));
+    window->setLiveSource([this](const std::shared_ptr<std::atomic<bool>>& finish) -> SstvWindow::Decode {
+        std::shared_ptr<Receiver> receiver;
+        { std::lock_guard lock(receiversMutex); if (!receivers.empty()) receiver = receivers.front(); }
+        if (!receiver) throw std::runtime_error("Start the main receiver in NFM first");
+        return [receiver, finish](const QString&, const QString& output, const QString& mode, const auto& cancel, const auto& preview) {
+            const auto validate = [receiver] {
+                std::lock_guard lock(receiver->stateMutex);
+                if (!receiver->active || receiver->mode != DemodMode::NFM || receiver->p25VoiceDecodeEnabled || receiver->p25ControlChannelMute)
+                    throw std::runtime_error("Live SSTV requires an active main NFM receiver, not P25");
+            };
+            return decodeSstvLive(receiver->sstvFeed, validate, output, mode, [finish] { return finish->load(); }, cancel, preview);
+        };
+    });
+    return window;
+}
+
 QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
                                                     const QString& path,
                                                     const QJsonObject& body)
@@ -10898,6 +10945,51 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             tune.insert("mode", "P25");
             tune.insert("p25Control", true);
             return applySdrTownControlTune(tune);
+        }
+        if (path == "/v1/sstv/live" && method == "POST") {
+            QString mode = body.value("mode").toString("auto").trimmed().toLower();
+            if (!sstvModeIdOk(mode.toStdString())) {
+                return {{"ok", false}, {"status", 400}, {"error", "unsupported SSTV mode"}};
+            }
+            auto* window = ensureSstvWindow();
+            if (!window) {
+                return {{"ok", false}, {"status", 500}, {"error", "cannot open SSTV window"}};
+            }
+            if (window->busy()) {
+                return {{"ok", false}, {"status", 409}, {"error", "SSTV job already running"}};
+            }
+            QString output = body.value("outputDirectory").toString().trimmed();
+            if (output.isEmpty()) {
+                const QString root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+                const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss");
+                output = QDir(root).filePath(QStringLiteral("sstv/sstv-%1").arg(stamp));
+            }
+            QDir().mkpath(QFileInfo(output).absolutePath());
+            window->show();
+            window->raise();
+            if (!window->startLive(output, mode)) {
+                return {{"ok", false}, {"status", 400},
+                        {"error", window->statusMessage().isEmpty()
+                                      ? QStringLiteral("Live SSTV did not start (need NFM, new output folder)")
+                                      : window->statusMessage()}};
+            }
+            return {{"ok", true}, {"state", sdrTownControlStatusSnapshot()}};
+        }
+        if (path == "/v1/sstv/finish" && method == "POST") {
+            auto* window = findChild<SstvWindow*>(QStringLiteral("sstvWindow"));
+            if (!window || !window->busy()) {
+                return {{"ok", false}, {"status", 409}, {"error", "no live SSTV job to finish"}};
+            }
+            window->finishLive();
+            return {{"ok", true}, {"state", sdrTownControlStatusSnapshot()}};
+        }
+        if (path == "/v1/sstv/cancel" && method == "POST") {
+            auto* window = findChild<SstvWindow*>(QStringLiteral("sstvWindow"));
+            if (!window || !window->busy()) {
+                return {{"ok", false}, {"status", 409}, {"error", "no SSTV job to cancel"}};
+            }
+            window->cancel();
+            return {{"ok", true}, {"state", sdrTownControlStatusSnapshot()}};
         }
         return {{"ok", false}, {"status", 404}, {"error", "unknown SDR Town control endpoint"}};
     }
@@ -12771,25 +12863,9 @@ void MainWindow::createMenus()
         });
         QMenu* toolsMenu = menuBar()->addMenu("&Tools");
         toolsMenu->addAction("&SSTV Images...",this,[this] {
-            auto* window=findChild<SstvWindow*>("sstvWindow");
-            if(!window) {
-                window=new SstvWindow(decodeSstvImageFile,this); window->setObjectName("sstvWindow");
-                window->setLiveSource([this](const std::shared_ptr<std::atomic<bool>>& finish)->SstvWindow::Decode {
-                    std::shared_ptr<Receiver> receiver;
-                    {std::lock_guard lock(receiversMutex);if(!receivers.empty()) receiver=receivers.front();}
-                    if(!receiver) throw std::runtime_error("Start the main receiver in NFM first");
-                    // Capture receiver ownership on GUI start; worker never accesses MainWindow.
-                    return [receiver,finish](const QString&,const QString& output,const QString& mode,const auto& cancel,const auto& preview) {
-                        const auto validate=[receiver] {
-                            std::lock_guard lock(receiver->stateMutex);
-                            if(!receiver->active || receiver->mode!=DemodMode::NFM || receiver->p25VoiceDecodeEnabled || receiver->p25ControlChannelMute)
-                                throw std::runtime_error("Live SSTV requires an active main NFM receiver, not P25");
-                        };
-                        return decodeSstvLive(receiver->sstvFeed,validate,output,mode,[finish]{return finish->load();},cancel,preview);
-                    };
-                });
+            if (auto* window = ensureSstvWindow()) {
+                window->show(); window->raise(); window->activateWindow();
             }
-            window->show(); window->raise(); window->activateWindow();
         });
         auto raiseSatcomHub = [this](auto showTab) {
             auto* hub = findChild<SatcomHubWidget*>("satcomHub");

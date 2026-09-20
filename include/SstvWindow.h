@@ -36,6 +36,7 @@ public:
     QStringList imagePaths() const;
     QStringList imageLabels() const;
     bool liveSelected() const;
+    QString selectedMode() const;
 signals:
     void decodeFinished(bool success);
 protected:
