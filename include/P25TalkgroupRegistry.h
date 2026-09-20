@@ -101,6 +101,8 @@ inline constexpr int kP25VoiceGrantMaxCorrectedDibits = 18;
 // table has not arrived yet. Once IDEN resolves it, the grant is subject to the
 // same action threshold as a grant that happened to arrive after the table.
 inline constexpr int kP25PendingVoiceGrantMaxCorrectedDibits = kP25VoiceGrantMaxCorrectedDibits;
+static_assert(kP25PendingVoiceGrantMaxCorrectedDibits == kP25VoiceGrantMaxCorrectedDibits,
+              "pending and resolved P25 voice grants must use the same trust budget");
 inline constexpr int kP25RepeatedVoiceGrantMaxCorrectedDibits = 24;
 inline constexpr int kP25RepeatedVoiceGrantMinHits = 2;
 inline constexpr qint64 kP25RepeatedVoiceGrantTtlMs = 5000;
