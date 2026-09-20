@@ -2,6 +2,11 @@
 
 Newest at the top.
 
+## 2026-09-20 - Release 0.2.75
+
+Experimental patch: TLE WinHTTP + UI busy, DEC-0104 home coords omitted from
+FUBAR HTTP, T-0041 inmarsat JSON in staging / no leftover 0.2.71 control DLL.
+
 ## 2026-09-20 - TLE download hang
 
 Refresh TLE looked idle because refreshUi() (500 ms) overwrote "downloading…".

@@ -25,10 +25,10 @@ v0.2.74 ZIP additionally contains leftover `SdrTownControl-0.2.71-win64.dll` fro
 
 | App | Latest tag | Ships / expects |
 |-----|------------|-----------------|
-| SDR Town | **v0.2.74** | Town APIs through 0.2.74; GitHub asset `SdrTownControl-0.2.74-win64.dll` |
+| SDR Town | **v0.2.75** | Town APIs through 0.2.75; GitHub asset `SdrTownControl-0.2.75-win64.dll` |
 | FUBAR | **v1.1.33** (`037d290`) | Ships `SdrTownControl.dll` **from Town 0.2.66**. Website: P25 subtitle, RDS/tones/SSTV tabs, tune/mode/LPF/gain/P25 CC, leave-P25 on analog. **No** Satcom / Inmarsat / Aircraft / SDRplay website panels in this tag. |
 
-A tester who installs **both GitHub Latest** gets Town 0.2.74 radio + FUBAR 1.1.33 website. Core listen/P25/tune still pairs if they **replace** FUBAR’s DLL with the 0.2.74 asset. Website satcom/Inmarsat/aircraft/SDRplay panels need FUBAR source **1.1.38** (in the FUBAR working tree, **not** GitHub Latest).
+A tester who installs **both GitHub Latest** gets Town 0.2.75 radio + FUBAR 1.1.33 website. Core listen/P25/tune still pairs if they **replace** FUBAR’s DLL with the 0.2.75 asset. Website satcom/Inmarsat/aircraft/SDRplay panels need FUBAR source **1.1.38** (not GitHub Latest).
 
 ## FUBAR working tree vs Town 0.2.74
 

@@ -1,6 +1,10 @@
 # Task list (canonical)
 
-T-0041 | open | 0.2.74 package follow-up | (1) `data/inmarsat/*.json` missing from
+T-0042 | done | Release 0.2.75 | TLE WinHTTP + UI busy flag; DEC-0104 public JSON
+omits home lat/lon; T-0041 staging copies `data/inmarsat` and skips leftover
+versioned control DLLs. Do not retag 0.2.74.
+
+T-0041 | done | 0.2.74 package follow-up | Shipped in **0.2.75** (T-0042). Original: (1) `data/inmarsat/*.json` missing from
 deploy_staging — Inmarsat uses built-in 4f2 fallback. (2) StageRuntime glob-copied
 an extra `SdrTownControl-0.2.71-win64.dll` into the Town portable ZIP. The
 **pairing** DLL is first-class: FUBAR loads `SdrTownControl.dll` beside
