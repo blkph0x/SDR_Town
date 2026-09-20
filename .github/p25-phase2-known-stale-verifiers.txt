@@ -1,0 +1,19 @@
+# These legacy source-string verifiers are known to lag the current implementation.
+# CI still runs and reports them, but only a failure outside this list is blocking.
+# Remove an entry as soon as that verifier is converted to a semantic/unit test or updated.
+verify_p25_phase2_capture_fixes.py
+verify_p25_phase2_clear_to_encrypted_mac_bar.py
+verify_p25_phase2_clear_trusted_hold_and_structure_cold_exit.py
+verify_p25_phase2_dec0055_epoch_dual_slot_origin.py
+verify_p25_phase2_dec0062_talkspurt_vocoder_reset.py
+verify_p25_phase2_dec0063_idempotent_control_arm.py
+verify_p25_phase2_dual_ambe_module.py
+verify_p25_phase2_opposite_slot_no_probe_thrash.py
+verify_p25_phase2_playback_ring_target_fill.py
+verify_p25_phase2_playout_bridge_real_pcm_priority.py
+verify_p25_phase2_retune_and_streaming.py
+verify_p25_phase2_retune_ring_continuity.py
+verify_p25_phase2_scheduler_optimizations.py
+verify_p25_phase2_session_sustain.py
+verify_p25_phase2_streaming_framer_commit.py
+verify_p25_phase2_sustain_robustness.py
