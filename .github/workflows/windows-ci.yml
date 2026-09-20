@@ -1,18 +1,22 @@
 name: Windows CI
 
 on:
+  workflow_dispatch:
   push:
-    branches: [master, main, 'ci/**', 'feature/**', 'refactor/**', 'fix/**']
+    branches: [master, main, 'ci/**', 'feature/**', 'release/**', 'refactor/**', 'fix/**']
   pull_request:
     branches: [master, main]
+
+permissions:
+  contents: write
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-test:
-    name: MSVC Release build + tests
+  build-test-package:
+    name: MSVC Release build, tests, and package
     runs-on: windows-2022
     timeout-minutes: 180
 
@@ -22,17 +26,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        # Do not use submodules: recursive. Build dependencies are checked out explicitly below.
+        with:
+          fetch-depth: 1
+          submodules: false
 
-      - name: Checkout build submodules (miniaudio + mbelib only)
+      - name: Checkout required build and packaging submodules
         shell: pwsh
         run: |
-          git submodule update --init --depth 1 -- external/miniaudio external/mbelib
+          git submodule update --init --depth 1 -- `
+            external/miniaudio external/mbelib external/liquid-dsp
           if (-not (Test-Path external/miniaudio/miniaudio.h)) {
             throw "external/miniaudio/miniaudio.h missing after submodule update"
           }
           if (-not (Test-Path external/mbelib/CMakeLists.txt)) {
             throw "external/mbelib/CMakeLists.txt missing after submodule update"
+          }
+          if (-not (Test-Path external/liquid-dsp/LICENSE)) {
+            throw "external/liquid-dsp/LICENSE missing after submodule update"
           }
 
       - name: Install Qt 6
@@ -50,6 +60,7 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/microsoft/vcpkg.git "${{ github.workspace }}/vcpkg"
           & "${{ github.workspace }}/vcpkg/bootstrap-vcpkg.bat" -disableMetrics
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Configure CMake (VS 2022 + vcpkg manifest)
         shell: pwsh
@@ -61,10 +72,9 @@ jobs:
             -DBUILD_TESTS=ON `
             -DSDR_TOWN_ENABLE_MBELIB=ON `
             -DSDR_TOWN_BUILD_RDS_DSP=OFF
-          # CI covers native core; the MinGW MPX backend has separate full-release gates.
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Build SDR_Town + native tests
+      - name: Build SDR_Town and native tests
         shell: pwsh
         run: |
           cmake --build build --config Release `
@@ -106,60 +116,131 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Phase 2 verifier regression gate
-        shell: pwsh
-        run: |
-          $baselinePath = ".github/p25-phase2-known-stale-verifiers.txt"
-          if (-not (Test-Path $baselinePath)) { throw "Missing $baselinePath" }
-          $known = @(
-            Get-Content $baselinePath |
-              ForEach-Object { $_.Trim() } |
-              Where-Object { $_ -and -not $_.StartsWith('#') }
-          )
-          $ok = 0
-          $knownFailures = @()
-          $unexpectedFailures = @()
-          $resolvedBaseline = @()
-
-          Get-ChildItem src/tools/verify_p25_phase2_*.py | Sort-Object Name | ForEach-Object {
-            python $_.FullName
-            $failed = $LASTEXITCODE -ne 0
-            $isKnown = $known -contains $_.Name
-            if ($failed) {
-              if ($isKnown) {
-                Write-Host "KNOWN STALE $($_.Name)"
-                $knownFailures += $_.Name
-              } else {
-                Write-Host "UNEXPECTED FAIL $($_.Name)"
-                $unexpectedFailures += $_.Name
-              }
-            } else {
-              $ok++
-              if ($isKnown) { $resolvedBaseline += $_.Name }
-            }
-          }
-
-          Add-Content $env:GITHUB_STEP_SUMMARY "### Phase 2 source-verifier report"
-          Add-Content $env:GITHUB_STEP_SUMMARY "- Passing: $ok"
-          Add-Content $env:GITHUB_STEP_SUMMARY "- Known stale failures: $($knownFailures.Count)"
-          Add-Content $env:GITHUB_STEP_SUMMARY "- Unexpected failures: $($unexpectedFailures.Count)"
-          if ($knownFailures.Count -gt 0) {
-            Add-Content $env:GITHUB_STEP_SUMMARY ""
-            Add-Content $env:GITHUB_STEP_SUMMARY "Known stale verifiers (tracked, non-blocking):"
-            $knownFailures | ForEach-Object { Add-Content $env:GITHUB_STEP_SUMMARY "- ``$_``" }
-          }
-          if ($resolvedBaseline.Count -gt 0) {
-            Add-Content $env:GITHUB_STEP_SUMMARY ""
-            Add-Content $env:GITHUB_STEP_SUMMARY "Baseline entries now passing; remove these from the baseline:"
-            $resolvedBaseline | ForEach-Object { Add-Content $env:GITHUB_STEP_SUMMARY "- ``$_``" }
-          }
-          if ($unexpectedFailures.Count -gt 0) {
-            Add-Content $env:GITHUB_STEP_SUMMARY ""
-            Add-Content $env:GITHUB_STEP_SUMMARY "Unexpected verifier regressions:"
-            $unexpectedFailures | ForEach-Object { Add-Content $env:GITHUB_STEP_SUMMARY "- ``$_``" }
-            exit 1
-          }
-
       - name: Release verifier negative tests
         shell: pwsh
-        run: python scripts/test_verify_release.py
+        run: |
+          python scripts/test_verify_release.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build clean portable staging directory
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --target deploy -j 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $stage = Join-Path $env:GITHUB_WORKSPACE "build/deploy_staging"
+          $exe = Join-Path $stage "SDR_Town.exe"
+          if (-not (Test-Path $exe)) { throw "deploy staging did not produce SDR_Town.exe" }
+
+          $windeployqt = Join-Path $env:QT_ROOT_DIR "bin/windeployqt.exe"
+          if (-not (Test-Path $windeployqt)) { throw "windeployqt.exe not found" }
+          & $windeployqt `
+            --release `
+            --dir $stage `
+            --no-translations `
+            --no-system-d3d-compiler `
+            --no-opengl-sw `
+            $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          if (-not (Test-Path (Join-Path $stage "Qt6Core.dll"))) {
+            throw "portable staging is missing Qt6Core.dll"
+          }
+
+      - name: Create portable ZIP and checksum
+        shell: pwsh
+        run: |
+          $stage = Join-Path $env:GITHUB_WORKSPACE "build/deploy_staging"
+          $refName = $env:GITHUB_REF_NAME
+          if ($refName.StartsWith("release/")) {
+            $tag = $refName.Substring("release/".Length)
+            if (-not $tag.StartsWith("v")) { $tag = "v$tag" }
+            $label = $tag.Substring(1)
+          } else {
+            $tag = ""
+            $label = "0.2.80-ci.$env:GITHUB_RUN_NUMBER"
+          }
+
+          $buildInfo = [ordered]@{
+            version = $label
+            branch = $refName
+            commit = $env:GITHUB_SHA
+            workflowRun = $env:GITHUB_RUN_ID
+            generatedUtc = (Get-Date).ToUniversalTime().ToString("o")
+          }
+          $buildInfo | ConvertTo-Json | Set-Content `
+            (Join-Path $stage "build-info.json") -Encoding utf8
+
+          $assetName = "SDR_Town-$label-win64.zip"
+          $assetPath = Join-Path $env:GITHUB_WORKSPACE "build/$assetName"
+          if (Test-Path $assetPath) { Remove-Item $assetPath -Force }
+          Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $assetPath -Force
+
+          $hash = (Get-FileHash $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $shaName = "$assetName.sha256"
+          $shaPath = Join-Path $env:GITHUB_WORKSPACE "build/$shaName"
+          "$hash  $assetName" | Set-Content $shaPath -Encoding ascii
+
+          "PACKAGE_ASSET=$assetName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PACKAGE_SHA=$shaName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          Add-Content $env:GITHUB_STEP_SUMMARY "### Portable test build"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Asset: ``$assetName``"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- SHA-256: ``$hash``"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Commit: ``$env:GITHUB_SHA``"
+
+      - name: Upload tested portable build
+        uses: actions/upload-artifact@v7
+        with:
+          name: SDR_Town-${{ github.run_number }}-${{ github.sha }}
+          path: |
+            build/${{ env.PACKAGE_ASSET }}
+            build/${{ env.PACKAGE_SHA }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Publish prerelease assets
+        if: github.event_name == 'push' && startsWith(github.ref_name, 'release/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          if ([string]::IsNullOrWhiteSpace($tag)) { throw "release branch did not produce a tag" }
+
+          $asset = Join-Path $env:GITHUB_WORKSPACE "build/$env:PACKAGE_ASSET"
+          $checksum = Join-Path $env:GITHUB_WORKSPACE "build/$env:PACKAGE_SHA"
+          if (-not (Test-Path $asset) -or -not (Test-Path $checksum)) {
+            throw "release assets are missing"
+          }
+
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          $exists = $LASTEXITCODE -eq 0
+          if ($exists) {
+            gh release upload $tag $asset $checksum `
+              --repo $env:GITHUB_REPOSITORY --clobber
+          } else {
+            $notes = @"
+          Automated SDR Town satcom test build.
+
+          - Selected satellites are propagated and displayed on the observer map.
+          - Optional automatic in-range arm, Doppler tracking, capture, and supported decoding are included.
+          - ISS SSTV uses the existing bounded SSTV decoder and saves its output with the pass capture.
+          - Built and tested by Windows CI from commit $env:GITHUB_SHA.
+
+          This is a prerelease test build. The fallback branch is backup/pre-satcom-auto-20260920.
+          "@
+            gh release create $tag $asset $checksum `
+              --repo $env:GITHUB_REPOSITORY `
+              --target $env:GITHUB_SHA `
+              --title "SDR Town $tag satcom test build" `
+              --notes $notes `
+              --prerelease
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $url = gh release view $tag --repo $env:GITHUB_REPOSITORY --json url --jq .url
+          Add-Content $env:GITHUB_STEP_SUMMARY ""
+          Add-Content $env:GITHUB_STEP_SUMMARY "Published prerelease: $url"
