@@ -129,6 +129,30 @@ TEST_CASE("P25 unresolved talkgroup grants use the resolved-grant correction bud
     REQUIRE(pending.front().event.talkgroupId == 12345);
     REQUIRE(pending.front().correctedDibitErrors == kP25VoiceGrantMaxCorrectedDibits);
 
+    P25ControlChannelAnalyzer analyzer;
+    P25ChannelIdentifier identifier;
+    identifier.valid = true;
+    identifier.id = 7;
+    identifier.channelType = 3;
+    identifier.baseHz = 420000000.0;
+    identifier.spacingHz = 12500.0;
+    identifier.bandwidthHz = 12500.0;
+    identifier.slotsPerCarrier = 2;
+    identifier.phase2Capable = true;
+    analyzer.setChannelIdentifier(identifier);
+
+    const auto resolved = p25ResolvePendingVoiceGrants(pending, analyzer, 1100);
+    REQUIRE(pending.empty());
+    REQUIRE(resolved.size() == 1);
+    REQUIRE(p25ControlEventIsResolvedVoiceGrant(resolved.front()));
+    REQUIRE(resolved.front().talkgroupId == 12345);
+
+    std::vector<P25TalkgroupEntry> registry;
+    REQUIRE(mergeP25TalkgroupEvent(registry, 420475000.0, resolved.front(), 1200));
+    REQUIRE(registry.size() == 1);
+    REQUIRE(registry.front().talkgroupId == 12345);
+    REQUIRE(registry.front().lastVoiceFreqHz > 0.0);
+
     REQUIRE_FALSE(p25TsbkPendingVoiceGrantEligible(
         kP25PendingVoiceGrantMaxCorrectedDibits + 1, grant));
 }
