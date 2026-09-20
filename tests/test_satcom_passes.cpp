@@ -98,6 +98,49 @@ TEST_CASE("TLE loadFromFile parses 3-line sets", "[satcom][pass][tle]")
     REQUIRE(t.line1.find("25544") != std::string::npos);
 }
 
+TEST_CASE("Selected satellite snapshot exposes finite map coordinates", "[satcom][pass][map]")
+{
+    TleSet t;
+    t.noradId = 25544;
+    t.name = "ISS (ZARYA)";
+    t.line1 = "1 25544U 98067A   26263.14255447  .00007470  00000+0  14267-3 0  9991";
+    t.line2 = "2 25544  51.6307 190.1401 0004820 160.6694 199.4478 15.49188396586472";
+    TleStore::instance().upsert(t);
+
+    SatObserverConfig observer;
+    observer.latDeg = -33.87;
+    observer.lonDeg = 151.21;
+    observer.altM = 50.0;
+    observer.minElevationDeg = 10.0;
+    SatPassPlanner::instance().setObserver(observer);
+    SatPassPlanner::instance().setCatalogueSelection({"iss"});
+
+    const auto snap = SatPassPlanner::instance().snapshot();
+    REQUIRE(snap.positions.size() == 1);
+    const auto& pos = snap.positions.front();
+    REQUIRE(pos.satId == "iss");
+    REQUIRE(pos.noradId == 25544);
+    REQUIRE(pos.tleValid);
+    REQUIRE(std::isfinite(pos.latitudeDeg));
+    REQUIRE(std::isfinite(pos.longitudeDeg));
+    REQUIRE(std::isfinite(pos.altitudeKm));
+    REQUIRE(std::isfinite(pos.elevationDeg));
+    REQUIRE(pos.latitudeDeg >= -90.0);
+    REQUIRE(pos.latitudeDeg <= 90.0);
+    REQUIRE(pos.longitudeDeg >= -180.0);
+    REQUIRE(pos.longitudeDeg <= 180.0);
+    REQUIRE(pos.altitudeKm > 100.0);
+    REQUIRE(pos.rangeKm > 0.0);
+    REQUIRE(pos.downlinkId == "iss-sstv");
+    REQUIRE(pos.role == "sstv");
+
+    const auto local = SatPassPlanner::instance().statusJson();
+    REQUIRE(local.contains("positions"));
+    REQUIRE(local["positions"].size() == 1);
+    const auto pub = SatPassPlanner::instance().publicStatusJson();
+    REQUIRE_FALSE(pub.contains("positions"));
+}
+
 TEST_CASE("Live CelesTrak TLE download parses ISS 25544", "[satcom][tle][network]")
 {
     int argc = 0;
@@ -148,6 +191,7 @@ TEST_CASE("Public satcom JSON omits home lat/lon", "[satcom][pass]")
     REQUIRE_FALSE(pub["observer"].contains("latDeg"));
     REQUIRE_FALSE(pub["observer"].contains("lonDeg"));
     REQUIRE_FALSE(pub["observer"].contains("altM"));
+    REQUIRE_FALSE(pub.contains("positions"));
     const auto full = SatPassPlanner::instance().statusJson();
     REQUIRE(full["observer"].value("latDeg", 0.0) == Catch::Approx(-33.87).margin(1e-6));
 }
