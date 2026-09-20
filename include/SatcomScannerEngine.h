@@ -67,6 +67,8 @@ struct SatcomScannerSnapshot {
     double spectrumRateHz = 0.0;
     std::vector<std::string> recentDecodes;
     std::string aptPreviewPath;
+    std::string recordPath;
+    std::string sstvOutputDir;
     uint64_t logWritten = 0;
     uint64_t logDropped = 0;
     std::string lastStatus;
@@ -77,9 +79,10 @@ struct SatcomScannerSnapshot {
     std::string armedRole;
 };
 
-// Lightweight AX.25 / APT hooks filled by engine after demod.
 class Ax25AprsDecoder;
 class AptImageDecoder;
+class Demodulator;
+class SstvReceiverFeed;
 
 class SatcomScannerEngine {
 public:
@@ -100,7 +103,7 @@ public:
                  bool force = false, std::string* error = nullptr);
     void disarmPass();
     void setAutoTrack(bool on);
-    void tickPassTrack(); // ~1 Hz from UI timer
+    void tickPassTrack(); // ~1 Hz from worker while armed
 
     SatcomScannerSnapshot snapshot() const;
     std::string stateName() const;
@@ -116,6 +119,10 @@ private:
     bool detectActivity(double& peakHz, double& peakDb);
     void processLockedAudio();
     void pushLog(SatcomLog::EventType t, double hz, const char* text);
+    std::string makeCaptureStem(const std::string& satId, const std::string& downlinkId) const;
+    void writeRecordingMetadata(const std::string& path) const;
+    void startSstvCapture(const std::string& satId, const std::string& downlinkId);
+    void finishSstvCapture(bool cancel);
 
     mutable std::mutex mutex_;
     SatcomScannerConfig config_;
@@ -131,6 +138,10 @@ private:
     double spectrumRateHz_ = 0.0;
     std::vector<std::string> recentDecodes_;
     std::string aptPreviewPath_;
+    std::string recordPath_;
+    std::string recordSatId_;
+    std::string recordDownlinkId_;
+    std::string sstvOutputDir_;
     std::string lastStatus_;
     bool skipRequested_ = false;
     bool recordRequested_ = false;
@@ -145,4 +156,12 @@ private:
     SatcomLog::AsyncLog log_;
     std::unique_ptr<Ax25AprsDecoder> ax25_;
     std::unique_ptr<AptImageDecoder> apt_;
+    std::unique_ptr<Demodulator> demod_;
+    std::atomic<bool> demodResetRequested_{true};
+
+    std::shared_ptr<SstvReceiverFeed> sstvFeed_;
+    mutable std::mutex sstvMutex_;
+    std::thread sstvThread_;
+    std::atomic<bool> sstvFinish_{false};
+    std::atomic<bool> sstvCancel_{false};
 };
