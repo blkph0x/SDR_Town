@@ -2,6 +2,12 @@
 
 Newest at the top.
 
+## 2026-09-20 - SSTV Dayton modes unlocked (DEC-0106)
+
+Helper/CLI/GUI now accept the 18 modes in the pinned crate. VIS names expanded.
+Per-line 1200 Hz sync is the slant correction. Helper timeout 540 s. Preview
+line limit 16 KiB for 800 px PD290. Unsupported: AVT, Robot 8/12/24, SC2-30/60/120.
+
 ## 2026-09-20 - Release 0.2.76 Inmarsat honesty + FUBAR 1.1.39 pair
 
 DEC-0105: Inmarsat voice follow/record disabled; locked always false; no slicer

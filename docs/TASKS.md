@@ -1,5 +1,9 @@
 # Task list (canonical)
 
+T-0044 | done | SSTV Dayton modes + 0.2.77 | DEC-0106. Helper selftest Robot36
+round-trip. VIS/GUI/CLI expose 18 crate modes. AVT/Robot B&W/SC2-30/60/120 not
+in crate. [sstv] 9367 assertions PASS.
+
 T-0043 | done | Release 0.2.76 | Honest Inmarsat: no fake voice follow/lock
 (DEC-0105). Pair FUBAR 1.1.39. docs/INMARSAT.md remaining gaps.
 

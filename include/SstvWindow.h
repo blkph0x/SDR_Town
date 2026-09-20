@@ -12,6 +12,7 @@ class QComboBox;
 class QPushButton;
 class QLabel;
 class QListWidget;
+class QSlider;
 class QThread;
 class QCloseEvent;
 class QResizeEvent;
@@ -44,6 +45,7 @@ protected:
 private:
     void setBusy(bool value);
     void updatePreview();
+    QImage adjustedPreview() const;
     Decode decode_;
     LiveOpen liveOpen_;
     std::shared_ptr<std::atomic<bool>> finish_;
@@ -53,8 +55,12 @@ private:
     QComboBox *mode_, *source_;
     QPushButton *open_, *destination_, *decodeButton_, *cancelButton_, *folder_;
     QPushButton* finishButton_;
-    QLabel *status_, *preview_;
+    QLabel *status_ = nullptr;
+    QLabel *preview_ = nullptr;
+    QLabel *hint_ = nullptr;
     QListWidget* images_;
+    QSlider *brightness_, *contrast_;
     QImage original_;
+    int scanline_ = -1;
     QString resultDirectory_;
 };

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.76 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.77 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -389,6 +389,7 @@ if(BUILD_TESTS)
     tests/test_dcs.cpp
     tests/test_receive_decoder.cpp
     tests/test_sstv_vis.cpp
+    tests/test_sstv_modes.cpp
     tests/test_sstv_live_input.cpp
     tests/test_sstv_rate_converter.cpp
     tests/test_devicemanager.cpp

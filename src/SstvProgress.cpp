@@ -1,4 +1,5 @@
 #include "SstvProgress.h"
+#include "SstvModes.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <cstring>
@@ -14,11 +15,11 @@ void SstvProgress::append(const QByteArray& bytes) {
     for(;;) {
         const auto end=pending_.indexOf('\n');
         if(end<0) break;
-        require(end<=4096,"SSTV preview line limit exceeded");
+        require(end<=16384,"SSTV preview line limit exceeded");
         const auto record=pending_.left(end).trimmed(); pending_.remove(0,end+1);
         if(!record.isEmpty()) line(record);
     }
-    require(pending_.size()<=4096,"SSTV preview line limit exceeded");
+    require(pending_.size()<=16384,"SSTV preview line limit exceeded");
 }
 void SstvProgress::line(const QByteArray& bytes) {
     const auto record=nlohmann::json::parse(bytes.constData(),bytes.constData()+bytes.size());
@@ -28,9 +29,9 @@ void SstvProgress::line(const QByteArray& bytes) {
         require(record.at("file")=="image-"+std::to_string(images_.size())+".rgb","Invalid SSTV preview image sequence");
         if(image_.isNull() && record.at("rows")==0) {
             mode_=QString::fromStdString(record.at("mode").get<std::string>());
-            const int height=mode_=="robot36"?240:mode_=="martin1"?256:0;
-            require(height!=0 && record.at("width")==320 && record.at("height")==height,"Invalid empty SSTV preview");
-            image_=QImage(320,height,QImage::Format_RGB888);
+            const auto* spec=sstvModeById(record.at("mode").get<std::string>());
+            require(spec && record.at("width")==spec->width && record.at("height")==spec->height,"Invalid empty SSTV preview");
+            image_=QImage(spec->width,spec->height,QImage::Format_RGB888);
             require(!image_.isNull(),"SSTV preview allocation failed"); image_.fill(Qt::black);
         }
         require(!image_.isNull() && record.at("rows")==rows_ && record.at("height")==image_.height()
@@ -45,7 +46,7 @@ void SstvProgress::line(const QByteArray& bytes) {
     for(const auto* key:{"width","height","row","image"}) require(record.at(key).is_number_integer(),"Noninteger SSTV preview field");
     const auto mode=QString::fromStdString(record.at("mode").get<std::string>());
     const int width=record.at("width").get<int>(),height=record.at("height").get<int>(),row=record.at("row").get<int>();
-    require(record.at("width")==320 && record.at("height")==height && ((mode=="robot36" && height==240)||(mode=="martin1" && height==256)),"Invalid SSTV preview dimensions");
+    require(sstvModeDimensionsOk(mode.toStdString(),width,height),"Invalid SSTV preview dimensions");
     if(image_.isNull()) {
         image_=QImage(width,height,QImage::Format_RGB888);
         require(!image_.isNull(),"SSTV preview allocation failed");

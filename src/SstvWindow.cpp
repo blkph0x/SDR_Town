@@ -1,4 +1,5 @@
 #include "SstvWindow.h"
+#include "SstvModes.h"
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDesktopServices>
@@ -9,12 +10,15 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QPainter>
 #include <QPushButton>
+#include <QSlider>
 #include <QSplitter>
 #include <QStyle>
 #include <QThread>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <algorithm>
 #include <memory>
 #include <array>
 #include <mutex>
@@ -43,8 +47,14 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
     row(output_,destination_,"New output folder",QStyle::SP_DirIcon);
     input_->setObjectName("sstvInput"); output_->setObjectName("sstvOutput");
     mode_=new QComboBox(this);
-    mode_->addItem("Automatic","auto"); mode_->addItem("Robot 36","robot36"); mode_->addItem("Martin M1","martin1");
-    form->addRow("Mode",mode_); layout->addLayout(form);
+    mode_->addItem("Automatic (VIS header)","auto");
+    for (const auto& spec : kSstvModes)
+        mode_->addItem(QString::fromUtf8(spec.label), QString::fromUtf8(spec.id));
+    form->addRow("Mode",mode_);
+    hint_=new QLabel("Tune so the SSTV tones sit in 1200–2300 Hz. Automatic uses VIS; pick a mode if the header is noisy (locks on 1200 Hz line sync). AVT / Robot 8–24 / SC2-30/60/120 are not in this decoder.",this);
+    hint_->setWordWrap(true);
+    form->addRow(hint_);
+    layout->addLayout(form);
     auto* controls=new QHBoxLayout;
     decodeButton_=new QPushButton(style()->standardIcon(QStyle::SP_MediaPlay),"Decode",this);
     cancelButton_=new QPushButton(style()->standardIcon(QStyle::SP_MediaStop),"Cancel",this);
@@ -62,6 +72,16 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
     preview_->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Ignored);
     split->setStretchFactor(0,0); split->setStretchFactor(1,1); split->setSizes({220,580});
     layout->addWidget(split,1);
+    auto* adj=new QHBoxLayout;
+    adj->addWidget(new QLabel("Brightness",this));
+    brightness_=new QSlider(Qt::Horizontal,this); brightness_->setRange(0,200); brightness_->setValue(100);
+    adj->addWidget(brightness_);
+    adj->addWidget(new QLabel("Contrast",this));
+    contrast_=new QSlider(Qt::Horizontal,this); contrast_->setRange(25,250); contrast_->setValue(100);
+    adj->addWidget(contrast_);
+    layout->addLayout(adj);
+    connect(brightness_,&QSlider::valueChanged,this,[this]{updatePreview();});
+    connect(contrast_,&QSlider::valueChanged,this,[this]{updatePreview();});
     status_=new QLabel("Idle",this); status_->setObjectName("sstvStatus"); status_->setWordWrap(true); layout->addWidget(status_);
     connect(open_,&QPushButton::clicked,this,[this] {
         const auto path=QFileDialog::getOpenFileName(this,"Open SSTV recording",input_->text(),"Audio (*.wav *.flac)");
@@ -142,7 +162,7 @@ bool SstvWindow::startDecode(const QString& input,const QString& output,const QS
         if(!worker_ || worker_->isInterruptionRequested()) return;
         std::lock_guard lock(result->mutex);
         if(!result->pending) return;
-        result->pending=false; original_=result->preview;
+        result->pending=false; original_=result->preview; scanline_=result->rows>0?result->rows-1:-1;
         status_->setText(QString("Decoding %1: %2/%3 rows").arg(result->mode).arg(result->rows).arg(original_.height()));
         updatePreview();
     });
@@ -190,9 +210,31 @@ void SstvWindow::reject() {
     if(busy()) {closePending_=true; cancel();} else QDialog::reject();
 }
 void SstvWindow::resizeEvent(QResizeEvent* event) {QDialog::resizeEvent(event); updatePreview();}
+QImage SstvWindow::adjustedPreview() const {
+    if(original_.isNull()) return {};
+    QImage img=original_.convertToFormat(QImage::Format_RGB888);
+    const double b=(brightness_?brightness_->value():100)/100.0-1.0;
+    const double c=(contrast_?contrast_->value():100)/100.0;
+    for(int y=0;y<img.height();++y) {
+        auto* line=img.scanLine(y);
+        for(int x=0;x<img.width();++x) {
+            for(int k=0;k<3;++k) {
+                double v=line[x*3+k]/255.0;
+                v=(v-0.5)*c+0.5+b;
+                line[x*3+k]=uchar(std::clamp(v,0.0,1.0)*255.0);
+            }
+        }
+    }
+    if(scanline_>=0 && scanline_<img.height()) {
+        QPainter p(&img);
+        p.setPen(QPen(QColor(255,48,48),2));
+        p.drawLine(0,scanline_,img.width(),scanline_);
+    }
+    return img;
+}
 void SstvWindow::updatePreview() {
     if(original_.isNull()) preview_->clear();
-    else preview_->setPixmap(QPixmap::fromImage(original_).scaled(preview_->size(),Qt::KeepAspectRatio,Qt::SmoothTransformation));
+    else preview_->setPixmap(QPixmap::fromImage(adjustedPreview()).scaled(preview_->size(),Qt::KeepAspectRatio,Qt::SmoothTransformation));
 }
 
 QString SstvWindow::statusMessage() const {

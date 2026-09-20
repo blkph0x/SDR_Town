@@ -1,12 +1,15 @@
 #include "SstvImageFile.h"
+#include "SstvModes.h"
 #include "miniaudio.h"
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <QImageWriter>
 #include <QProcess>
 #include <QSaveFile>
 #include <QTemporaryDir>
@@ -28,7 +31,7 @@ nlohmann::json decodeSstvImageFile(const QString& input,const QString& output,co
         if(cancelled && cancelled()) throw std::runtime_error("SSTV decode cancelled");
     };
     checkCancelled();
-    require(mode=="auto" || mode=="robot36" || mode=="martin1","Supported image modes: auto, robot36, martin1");
+    require(sstvModeIdOk(mode.toStdString()),"Unsupported SSTV mode (see Tools > SSTV Images)");
     const QFileInfo info(input);
     require(info.isFile() && info.size()<=128*1024*1024,"SSTV image input must be a file <=128 MiB");
     require(!QFileInfo::exists(output),"SSTV output directory already exists; choose a new directory");
@@ -49,14 +52,17 @@ nlohmann::json decodeSstvImageFile(const QString& input,const QString& output,co
     struct Guard { ma_decoder* p; ~Guard(){ma_decoder_uninit(p);} } guard{&decoder};
     const auto rate=decoder.outputSampleRate;
     require(decoder.outputChannels==1 && rate>=8000 && rate<=96000,"SSTV image audio must be mono at 8..96 kHz");
-    const uint64_t limit=uint64_t{rate}*360; // DEC-0092 recorded job resource budget.
+    const uint64_t limit=uint64_t{rate}*kSstvMaxDurationSec;
     ma_uint64 length=0;
-    require(ma_decoder_get_length_in_pcm_frames(&decoder,&length)!=MA_SUCCESS || length<=limit,"SSTV image audio exceeds 360 seconds");
+    require(ma_decoder_get_length_in_pcm_frames(&decoder,&length)!=MA_SUCCESS || length<=limit,"SSTV image audio exceeds duration budget");
     QFile pcm(pcmPath);
     require(pcm.open(QIODevice::WriteOnly|QIODevice::NewOnly),"Cannot create temporary PCM");
     std::array<float,4096> samples{};
     std::array<qint16,4096> integers{};
     uint64_t total=0;
+    double hpY=0, lpY=0, prevX=0;
+    const double hpA=1.0/(1.0+2*3.14159265358979323846*1000.0/double(rate));
+    const double lpA=1.0/(1.0+2*3.14159265358979323846*2500.0/double(rate));
     QCryptographicHash pcmHash(QCryptographicHash::Sha256);
     for(;;) {
         checkCancelled();
@@ -64,10 +70,13 @@ nlohmann::json decodeSstvImageFile(const QString& input,const QString& output,co
         const auto status=ma_decoder_read_pcm_frames(&decoder,samples.data(),samples.size(),&count);
         require(status==MA_SUCCESS || status==MA_AT_END,"SSTV image audio read failed");
         if(!count) break;
-        require(count<=limit-total,"SSTV image audio exceeds 360 seconds");
+        require(count<=limit-total,"SSTV image audio exceeds duration budget");
         for(size_t i=0;i<count;++i) {
             require(std::isfinite(samples[i]),"Non-finite SSTV audio");
-            const auto value=static_cast<qint16>(std::lround(std::clamp(double(samples[i]),-1.0,32767.0/32768.0)*32768.0));
+            const double x=double(samples[i]);
+            hpY=hpA*(hpY+x-prevX); prevX=x;
+            lpY+=lpA*(hpY-lpY);
+            const auto value=static_cast<qint16>(std::lround(std::clamp(lpY,-1.0,32767.0/32768.0)*32768.0));
             integers[i]=qToLittleEndian(value);
         }
         const QByteArrayView bytes(reinterpret_cast<const char*>(integers.data()),qsizetype(count*2));
@@ -96,7 +105,7 @@ nlohmann::json decodeSstvImageFile(const QString& input,const QString& output,co
             worker.kill(); worker.waitForFinished(5000);
             throw std::runtime_error("SSTV decode cancelled");
         }
-        if(stdoutBytes.size()+stderrBytes.size()>65536 || elapsed.elapsed()>120000) {
+        if(stdoutBytes.size()+stderrBytes.size()>65536 || elapsed.elapsed()>540000) {
             worker.kill(); worker.waitForFinished(5000);
             throw std::runtime_error("SSTV backend exceeded time/log limits");
         }
@@ -117,7 +126,7 @@ nlohmann::json decodeSstvImageFile(const QString& input,const QString& output,co
         const int w=item.at("width").get<int>(),h=item.at("height").get<int>();
         const int rows=item.at("rows").get<int>();
         const bool complete=item.at("complete").get<bool>();
-        require(w==320 && ((found=="robot36" && h==240)||(found=="martin1" && h==256)),"Invalid SSTV image mode/dimensions");
+        require(sstvModeDimensionsOk(found,w,h),"Invalid SSTV image mode/dimensions");
         require(rows>=0 && rows<=h && (!complete || rows==h),"Invalid SSTV image row count");
         QFile rgb(QDir(rgbPath).filePath(QString::fromStdString(name)));
         require(rgb.open(QIODevice::ReadOnly) && rgb.size()==w*h*3,"Invalid SSTV RGB output");
@@ -140,7 +149,13 @@ nlohmann::json decodeSstvImageFile(const QString& input,const QString& output,co
     require(QDir(QFileInfo(output).absolutePath()).mkdir(QFileInfo(output).fileName()),"Cannot create new SSTV output directory");
     for(size_t i=0;i<decoded.size();++i) {
         QSaveFile file(QDir(output).filePath(QString::fromStdString(images[i]["file"].get<std::string>())));
-        require(file.open(QIODevice::WriteOnly) && decoded[i].save(&file,"PNG") && file.commit(),"SSTV PNG save failed");
+        require(file.open(QIODevice::WriteOnly),"SSTV PNG save failed");
+        QImageWriter writer(&file,"png");
+        writer.setText("SSTV Mode", QString::fromStdString(images[i].value("mode",std::string())));
+        writer.setText("UTC", QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+        writer.setText("Rows", QString::number(images[i].value("rows",0)));
+        writer.setText("Complete", images[i].value("complete",false)?"true":"false");
+        require(writer.write(decoded[i]) && file.commit(),"SSTV PNG save failed");
     }
     QSaveFile report(QDir(output).filePath("sstv-report.json"));
     const auto json=result.dump(2);

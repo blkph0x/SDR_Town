@@ -2,6 +2,17 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0106 - Unlock pinned SSTV Dayton modes (2026-09-20)
+
+Evidence: unexcellent/sstv 16bf34aa implements 18 modes with VIS auto-detect
+and per-line 1200 Hz sync re-align (slant lock). The helper previously rejected
+everything except Robot36/Martin1 and killed jobs at 120 s (too short for PD).
+
+Decision: expose those 18 modes in helper/CLI/GUI. Auto = VIS. Forced mode uses
+the crate's first-line sync lock. 1–2.5 kHz pre-filter on recorded PCM.
+Timeout/budget 480 s. AVT / Robot B&W / SC2-30/60/120 stay unsupported (not in
+the crate). Do not invent a second decoder.
+
 ## DEC-0105 - Inmarsat voice follow stays disabled (2026-09-20)
 
 Evidence: slicer has no unique-word; C-assign is fixture regex; AMBE pack is not

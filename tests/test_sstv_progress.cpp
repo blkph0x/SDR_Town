@@ -36,7 +36,7 @@ TEST_CASE("SSTV preview rejects malformed or inconsistent rows", "[sstv-progress
     SECTION("incomplete image") {SstvProgress s(sink); s.append(row(0)); CHECK_THROWS(s.finish());}
     SECTION("missing rows") {SstvProgress s(sink); s.append(row(0)); CHECK_THROWS(s.append(end(1,true)));}
     SECTION("bad row count") {SstvProgress s(sink); s.append(row(0)); CHECK_THROWS(s.append(end(2)));}
-    SECTION("line bound") {SstvProgress s(sink); CHECK_THROWS(s.append(QByteArray(4097,'x')));}
+    SECTION("line bound") {SstvProgress s(sink); CHECK_THROWS(s.append(QByteArray(16385,'x')));}
     SECTION("transport bound") {SstvProgress s(sink); CHECK_THROWS(s.append(QByteArray(4*1024*1024+1,'\n')));}
     SECTION("image bound") {
         SstvProgress s(sink);

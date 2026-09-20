@@ -1,4 +1,5 @@
 #include "SstvVis.h"
+#include "SstvModes.h"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -20,18 +21,8 @@ void SstvVisDetector::reset() {
 uint64_t SstvVisDetector::atMs(uint64_t ms) const { return ms * rate_ / 1000; }
 
 std::string_view SstvVisDetector::modeName(unsigned code) {
-    // QSSTV sstvparam.cpp, seven data bits without the parity bit (DEC-0091).
-    switch (code) {
-    case 8: return "Robot 36";
-    case 12: return "Robot 72";
-    case 44: return "Martin M1";
-    case 40: return "Martin M2";
-    case 60: return "Scottie S1";
-    case 56: return "Scottie S2";
-    case 76: return "Scottie DX";
-    case 95: return "PD120";
-    default: return "Unknown";
-    }
+    if (const auto* m = sstvModeByVis(code)) return m->label;
+    return "Unknown";
 }
 
 int SstvVisDetector::tone(uint64_t start, uint64_t end) const {

@@ -1,5 +1,6 @@
 #include "SstvStreamWorker.h"
 #include "SstvRateConverter.h"
+#include "SstvModes.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
@@ -59,7 +60,7 @@ SstvStreamResult decodeSstvStream(const SstvStreamRead& next,const QString& mode
         require(errors.size()<=65536,"SSTV helper stderr limit exceeded");
     };
     for(;;) {
-        cancel(); require(wall.elapsed()<420000,"SSTV stream wall limit exceeded");
+        cancel(); require(wall.elapsed()<540000,"SSTV stream wall limit exceeded");
         drain();
         const auto pending=process.bytesToWrite();
         if(pending==0 || pending<previousPending) stall.restart();
@@ -92,9 +93,9 @@ SstvStreamResult decodeSstvStream(const SstvStreamRead& next,const QString& mode
                     require(block->sourceId==result.sourceId && block->epoch==result.epoch && block->generation==result.generation &&
                             block->sampleRate==result.inputRate && block->targetHz==result.targetHz && block->firstSample==expected,
                             "SSTV stream identity/position changed without a gap");
-                    require(double(result.inputSamples+block->count)<=result.inputRate*360,"SSTV input sample budget exceeded");
+                    require(double(result.inputSamples+block->count)<=result.inputRate*kSstvMaxDurationSec,"SSTV input sample budget exceeded");
                     const auto converted=converter.process(std::span(block->samples.data(),block->count));
-                    require(result.outputSamples+converted.size()<=uint64_t{48000}*360,"SSTV output sample budget exceeded");
+                    require(result.outputSamples+converted.size()<=uint64_t{48000}*kSstvMaxDurationSec,"SSTV output sample budget exceeded");
                     QByteArray pcm(qsizetype(converted.size()*2),Qt::Uninitialized);
                     for(size_t i=0;i<converted.size();++i) {
                         const auto value=qToLittleEndian(qint16(std::lround(std::clamp(double(converted[i]),-1.,32767./32768.)*32768)));

@@ -42,5 +42,5 @@ These stay as capture archaeology. New work is ISSUES + DECISIONS + TASKS.
 
 See [RELEASING.md](RELEASING.md) for current packaging, signature, runtime and
 publication gates, and [SATELLITE_AND_SSTV.md](SATELLITE_AND_SSTV.md) for next work.
-Current tester release: [0.2.76 notes](RELEASE_0.2.76.md). Inmarsat: [INMARSAT.md](INMARSAT.md).
+Current tester release: [0.2.77 notes](RELEASE_0.2.77.md). SSTV: [SSTV.md](SSTV.md). Inmarsat: [INMARSAT.md](INMARSAT.md).
 SSTV: [offline Robot36/Martin1 images, VIS inspection and next gates](SSTV.md).

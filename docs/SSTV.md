@@ -46,7 +46,11 @@ preview quality is not an RF/protocol correctness guarantee.
 build/bin/Release/SDR_Town.exe --cli --no-control-server --cmd 'sstv decode "C:\recordings\sstv.wav" "C:\recordings\new-images" auto'
 ```
 
-Use `auto`, `robot36` or `martin1`. Input is demodulated mono WAV/FLAC at
+Use `auto` (VIS) or a Dayton-paper mode id: `robot36`, `robot72`, `martin1`,
+`martin2`, `scottie1`, `scottie2`, `scottiedx`, `pd50`…`pd290`, `wrasse180`,
+`pasokonp3/p5/p7`. Manual mode locks on 1200 Hz line sync if VIS is missing.
+AVT, Robot 8/12/24 and Wraase SC2-30/60/120 are **not** in the pinned decoder.
+Input is demodulated mono WAV/FLAC at
 8..96 kHz, up to 360 seconds / 128 MiB, not IQ. Parent output directory must
 exist; the image directory must be new. PNGs and `sstv-report.json` record mode,
 rows, completeness, PCM/RGB hashes and exact backend revision. Partial pictures
@@ -105,9 +109,9 @@ legacy file command.
 
 The classic header has two 300 ms 1900 Hz leaders, a 10 ms 1200 Hz break,
 30 ms start, seven LSB-first data bits plus even parity, and 30 ms stop.
-Data tone 1100 Hz is one, 1300 Hz is zero; start/stop are 1200 Hz. Eight known
-IDs are named: Robot 36/72, Martin M1/M2, Scottie S1/S2/DX and PD120. A name
-only identifies a validated header, not implemented image-mode support.
+Data tone 1100 Hz is one, 1300 Hz is zero; start/stop are 1200 Hz. Eighteen Dayton-paper VIS codes are named (Robot 36/72, Martin M1/M2, Scottie
+S1/S2/DX, PD50–290, Wraase SC2-180, Pasokon P3/P5/P7). Image decode uses the
+same table. Other parity-valid codes remain `Unknown`.
 Other parity-valid seven-bit codes are reported as Unknown; narrow and extended
 VIS are not supported by the inspector. Image acquisition is delegated to the
 pinned backend; this is not a promise of arbitrary headerless/late-entry recovery.

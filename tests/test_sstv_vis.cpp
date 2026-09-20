@@ -49,7 +49,7 @@ TEST_CASE("SSTV VIS validates all seven-bit IDs without claiming image support",
         CHECK(events[0].headerEndSample==7280);
     }
     CHECK(SstvVisDetector::modeName(44)=="Martin M1");
-    CHECK(SstvVisDetector::modeName(95)=="PD120");
+    CHECK(SstvVisDetector::modeName(95)=="PD 120");
     CHECK(SstvVisDetector::modeName(127)=="Unknown");
 }
 

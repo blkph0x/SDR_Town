@@ -1,4 +1,5 @@
 #include "SstvLiveSession.h"
+#include "SstvModes.h"
 #include "SstvStreamWorker.h"
 #include <QDir>
 #include <QElapsedTimer>
@@ -22,10 +23,10 @@ nlohmann::json decodeSstvLive(const std::shared_ptr<SstvReceiverFeed>& feed,
     const auto result=decodeSstvStream([&]()->SstvStreamItem {
         validateReceiver();
         if(!finishing && finish && finish()) {feed->finish(queue);finishing=true;}
-        if(duration.elapsed()>=360000 || seconds>=360) return SstvStreamEnd{};
+        if(duration.elapsed()>=540000 || seconds>=kSstvMaxDurationSec) return SstvStreamEnd{};
         if(auto item=queue->pop()) {
             if(item->count && item->sampleRate>0) {
-                const size_t remaining=size_t(std::max(0.,std::floor((360-seconds)*item->sampleRate)));
+                const size_t remaining=size_t(std::max(0.,std::floor((kSstvMaxDurationSec-seconds)*item->sampleRate)));
                 item->count=std::min(item->count,remaining);
                 if(!item->count) return SstvStreamEnd{};
                 seconds+=double(item->count)/item->sampleRate;
