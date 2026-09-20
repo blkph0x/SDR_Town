@@ -108,10 +108,10 @@ Roadmap (not in 0.2.74 as production features):
   [ ] ONNX classifier backend (placeholder today)
   [ ] Authenticode
   [ ] P25 Phase 2 clear TX on air (sprints 0–4 are lab shells)
-  [ ] Package follow-up T-0041: copy data/inmarsat into deploy staging; stop
-      glob-copying leftover SdrTownControl-*-win64.dll into the portable ZIP
-      (0.2.74 zip contains unused SdrTownControl-0.2.71-win64.dll; testers use
-      SdrTownControl.dll / the versioned 0.2.74 asset on GitHub)
+  [ ] Package follow-up T-0041: copy data/inmarsat into deploy staging; do not
+      glob extra old `SdrTownControl-0.2.N-win64.dll` into the Town ZIP.
+      The **0.2.74** versioned DLL is the FUBAR pairing asset (rename to
+      `SdrTownControl.dll` beside FUBAR.exe). See docs/FUBAR_PAIRING.md.
 
 Historical marker, not a green SoT checkbox:
   p25-clear-continuous-20260810 — isolation PASS, continuity PARTIAL.

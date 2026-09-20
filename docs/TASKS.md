@@ -1,14 +1,13 @@
 # Task list (canonical)
 
-T-0041 | open | 0.2.74 package follow-up | Evidence from the published portable
-ZIP: (1) `data/inmarsat/*.json` is not in deploy_staging (CMake install rule
-goes to bin/data; packaging copies Release via StageRuntime.cmake). Inmarsat
-UI then uses the built-in 4f2 fallback. (2) StageRuntime glob-copied
-`SdrTownControl-0.2.71-win64.dll` from the Release folder; testers should use
-`SdrTownControl.dll` / GitHub `SdrTownControl-0.2.74-win64.dll`. Do not
-overwrite tag v0.2.74. Next patch copies `data/inmarsat` into staging and
-skips versioned leftover control DLLs. SDRplay API/module remain host-installed
-by design (`docs/SDRPLAY.md`).
+T-0041 | open | 0.2.74 package follow-up | (1) `data/inmarsat/*.json` missing from
+deploy_staging — Inmarsat uses built-in 4f2 fallback. (2) StageRuntime glob-copied
+an extra `SdrTownControl-0.2.71-win64.dll` into the Town portable ZIP. The
+**pairing** DLL is first-class: FUBAR loads `SdrTownControl.dll` beside
+`FUBAR.exe`; testers copy GitHub `SdrTownControl-0.2.74-win64.dll` (or the ZIP’s
+`SdrTownControl.dll`) and rename it. Do **not** use the leftover 0.2.71 file
+with Town 0.2.74. Do not overwrite tag v0.2.74. See FUBAR_PAIRING.md.
+SDRplay API/module remain host-installed (`docs/SDRPLAY.md`).
 
 T-0040 | done | Release 0.2.74 | Tag v0.2.74 at 4f26f2e, branch pushed, GitHub
 Latest experimental with installer, portable ZIP, SdrTownControl-0.2.74-win64.dll,

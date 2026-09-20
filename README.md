@@ -38,8 +38,8 @@ Formerly *MaulAudio Pro*. Branding, binaries, installer, AppData paths, and rele
 2. In SDR Town, start the receiver (and P25 Monitor CC / auto-follow if that is your station). Confirm the status bar shows local control on `127.0.0.1:8765` (loopback only).
 3. Route SDR Town audio to **VB-CABLE** (or another capture endpoint FUBAR can open).
 4. In FUBAR, select that cable as the input, enable **Public website**, and set **Now playing**.
-5. Place `SdrTownControl.dll` next to `FUBAR.exe` (FUBAR release ZIPs usually include it; matching DLL also ships on SDR Town releases as `SdrTownControl-X.Y.Z-win64.dll`).
-6. **Tools → Settings** in FUBAR: enable SDR Town control and pick allowed actions (tune, mode, RF gain, P25 CC, …).
+5. Place a **matching** `SdrTownControl.dll` next to `FUBAR.exe`. Copy this Town release’s `SdrTownControl-0.2.74-win64.dll` and rename it `SdrTownControl.dll`. FUBAR GitHub Latest (**1.1.33**) still ships the **0.2.66** DLL — replace it when pairing with 0.2.74. See [pairing versions and gaps](docs/FUBAR_PAIRING.md).
+6. **Tools → Settings** in FUBAR: enable SDR Town control and pick allowed actions (tune, mode, RF gain, P25 CC, …). FUBAR **1.1.33** website has P25/RDS/tones/SSTV + Take control. Satcom / Inmarsat / Aircraft / SDRplay **website** tabs are in FUBAR source **1.1.38** (not GitHub Latest).
 
 ### Control API notes (for FUBAR and other local clients)
 

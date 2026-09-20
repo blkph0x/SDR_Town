@@ -2,6 +2,14 @@
 
 Newest at the top.
 
+## 2026-09-20 - FUBAR pairing recorded from both READMEs
+
+`SdrTownControl.dll` is the companion bridge (FUBAR LoadLibrary beside FUBAR.exe).
+Published pair on GitHub is FUBAR **1.1.33** + Town **0.2.66** DLL; Town Latest is
+**0.2.74**. FUBAR working tree is **1.1.38** unreleased (satcom/aircraft/Inmarsat/
+SDRplay website tabs). Documented in docs/FUBAR_PAIRING.md. T-0041 leftover is
+the extra 0.2.71 named DLL in the Town ZIP, not the pairing asset itself.
+
 ## 2026-09-20 - SoT/tracker reconciliation after v0.2.74
 
 Reconciled SOURCE_OF_TRUTH, TASKS, BACKLOG, ISSUES, CODE_NOTES, CAUSE_EFFECT_MAP

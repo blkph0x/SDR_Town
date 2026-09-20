@@ -1,6 +1,10 @@
 # SDR Town 0.2.74 (experimental)
 
-Paired with FUBAR for website control. Ship matching `SdrTownControl-0.2.74-win64.dll`.
+Companion: [FUBAR](https://github.com/blkph0x/FUBAR). Copy this release’s
+`SdrTownControl-0.2.74-win64.dll` next to `FUBAR.exe` as `SdrTownControl.dll`.
+FUBAR **GitHub Latest is 1.1.33** (ships the 0.2.66 DLL; P25/RDS/tones/SSTV +
+Take control). Satcom / Inmarsat / Aircraft / SDRplay **website** tabs need
+unreleased FUBAR 1.1.38 source. Pairing matrix: `docs/FUBAR_PAIRING.md`.
 
 ## Ready for tester hardware
 
@@ -17,7 +21,7 @@ Paired with FUBAR for website control. Ship matching `SdrTownControl-0.2.74-win6
 - Satcom/Inmarsat **cannot retune** while listen/P25 owns the device unless `force=true`.
 - AX.25/APT/ADS-B are experimental. Meteor LRPT / commercial sat / dual-SDR Inmarsat voice are not in this build.
 - P25 DSP is unchanged from 0.2.66. REQ-P2.2…P2.6 remain open.
-- Portable ZIP also contains leftover `SdrTownControl-0.2.71-win64.dll` from a Release-folder glob. Use `SdrTownControl.dll` or the GitHub `SdrTownControl-0.2.74-win64.dll` asset (T-0041).
+- Portable ZIP also contains leftover `SdrTownControl-0.2.71-win64.dll` (T-0041 glob). **Do not** give that 0.2.71 file to FUBAR. Use `SdrTownControl.dll` in the ZIP or the GitHub **0.2.74** DLL asset.
 
 ## Assets
 

@@ -12,6 +12,10 @@ User deferred further P25 DSP and authorized independent RX features. That does
 (tag 4f26f2e): SDRplay Soapy profile, satcom/observer/TLE/Doppler, aircraft map,
 Inmarsat prototype, tuner lease, CLI. P25 path unchanged from 0.2.66.
 
+Pairing: FUBAR GitHub Latest is **1.1.33** (0.2.66 DLL). Town Latest is **0.2.74**.
+Website satcom/Inmarsat/aircraft/SDRplay tabs live in unreleased FUBAR **1.1.38**.
+See `docs/FUBAR_PAIRING.md`.
+
 Still open after 0.2.74 (not invented as done): T-0041 package follow-up,
 T-0031 live SSTV RF image, T-0029 string-verifier debt, T-0036 AX.25 backend
 qualification, T-0020/T-0019 tone RF acceptance, T-0024 Meteor LRPT. Live RSP

@@ -21,6 +21,7 @@ Do not edit `C:\Users\Blkph0x\source\repos\SovereignFoundry` from here.
 | [SSTV.md](SSTV.md) | Recorded and experimental live NFM SSTV usage, tests and limits. |
 | [SDRPLAY.md](SDRPLAY.md) | SDRplay RSP multi-model support via SoapySDRPlay3 (gains, AGC, duo, HDR). |
 | [P25_ALIASES.md](P25_ALIASES.md) | System-specific names, import format and manual precedence. |
+| [FUBAR_PAIRING.md](FUBAR_PAIRING.md) | Companion FUBAR versions, `SdrTownControl.dll`, and honest gaps. |
 
 Architecture: [`../SOURCE_OF_TRUTH.md`](../SOURCE_OF_TRUTH.md).
 Why/how/effect: [`../CAUSE_EFFECT_MAP.md`](../CAUSE_EFFECT_MAP.md).

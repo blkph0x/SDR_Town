@@ -5,13 +5,12 @@ Never delete a row. Close with a commit hash and a sentence.
 2026-09-20 v0.2.74 published at 4f26f2e (GitHub Latest experimental). P25 DSP
 unchanged. SDRplay vendor API/SoapySDRPlay3 are **not** in the installer by
 design (`docs/SDRPLAY.md`); host install + exclusive RSP access required.
-OPEN T-0041 (packaging, not DSP): inspected `SDR_Town-0.2.74-win64-portable.zip`
-contains `SdrTownControl.dll` plus leftover `SdrTownControl-0.2.71-win64.dll`
-(StageRuntime.cmake copies every `Release/*.dll`); it does **not** contain
-`data/inmarsat/*.json` (deploy target never copies that tree; CMake
-`install(DIRECTORY … DESTINATION bin/data)` is unused by cpack staging).
-Inmarsat then uses the built-in 4f2 fallback (`InmarsatBandPlan.cpp`). Do not
-overwrite tag v0.2.74.
+`SdrTownControl.dll` is the FUBAR companion bridge (FUBAR GitHub Latest is
+**1.1.33**, still shipping the **0.2.66** DLL). Pair 0.2.74 by copying
+`SdrTownControl-0.2.74-win64.dll` beside `FUBAR.exe` as `SdrTownControl.dll`.
+OPEN T-0041: ZIP also has leftover `SdrTownControl-0.2.71-win64.dll` (glob);
+missing `data/inmarsat/*.json`. See `docs/FUBAR_PAIRING.md`. Do not overwrite
+tag v0.2.74.
 
 2026-09-18 DEC-0100/0101/0102 scope: alias-list names resolve in the P25
 talkgroup table and site labels in control-log/tooltips, only with known system
