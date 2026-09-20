@@ -105,6 +105,14 @@ public:
     bool tickAutoTrack(double* outTunedHz);
 
     SatPassPlannerSnapshot snapshot(double hoursAhead = 24.0) const;
+
+    // Deterministic position sample used by tests, diagnostics and time-scrub UIs.
+    // Production snapshots still sample the current wall-clock time.
+    std::vector<SatCurrentPosition> currentPositionsAt(double unixSec) const {
+        std::lock_guard<std::mutex> lk(mutex_);
+        return currentPositionsLocked(unixSec);
+    }
+
     nlohmann::json statusJson() const;
     // Same as statusJson but no lat/lon/alt — for FUBAR/website (home stays in SDR Town).
     nlohmann::json publicStatusJson() const;
