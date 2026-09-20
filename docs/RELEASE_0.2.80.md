@@ -33,5 +33,4 @@ Dropdown **HamDRM digital**. File Auto with no analogue image retries HamDRM.
 - EasyPal interleaved file RS is not implemented (protocol not published; EasyDRF
   states it is incompatible).
 - Live RF analogue and live HamDRM on-air still for the other tester.
-- FUBAR 1.1.40 already shows Town's mode list; HamDRM appears after this Town
-  drop. Pairing DLL is 0.2.80.
+- Pair FUBAR **1.1.41** with this Town DLL. The website SSTV list includes HamDRM.

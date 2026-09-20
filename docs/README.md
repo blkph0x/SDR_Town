@@ -42,5 +42,5 @@ These stay as capture archaeology. New work is ISSUES + DECISIONS + TASKS.
 
 See [RELEASING.md](RELEASING.md) for current packaging, signature, runtime and
 publication gates, and [SATELLITE_AND_SSTV.md](SATELLITE_AND_SSTV.md) for next work.
-Current tester release: [0.2.78 notes](RELEASE_0.2.78.md). SSTV: [SSTV.md](SSTV.md). Inmarsat: [INMARSAT.md](INMARSAT.md).
-SSTV: [offline Robot36/Martin1 images, VIS inspection and next gates](SSTV.md).
+Current tester release: [0.2.80 notes](RELEASE_0.2.80.md). Pairing: [FUBAR_PAIRING.md](FUBAR_PAIRING.md) (Town **0.2.80** / FUBAR **1.1.41**).
+SSTV: [analogue families, HamDRM, live NFM, tests and limits](SSTV.md). Inmarsat: [INMARSAT.md](INMARSAT.md).

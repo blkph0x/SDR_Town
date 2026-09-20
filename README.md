@@ -38,8 +38,8 @@ Formerly *MaulAudio Pro*. Branding, binaries, installer, AppData paths, and rele
 2. In SDR Town, start the receiver (and P25 Monitor CC / auto-follow if that is your station). Confirm the status bar shows local control on `127.0.0.1:8765` (loopback only).
 3. Route SDR Town audio to **VB-CABLE** (or another capture endpoint FUBAR can open).
 4. In FUBAR, select that cable as the input, enable **Public website**, and set **Now playing**.
-5. Place a **matching** `SdrTownControl.dll` next to `FUBAR.exe`. Copy this Town release’s `SdrTownControl-0.2.78-win64.dll` and rename it `SdrTownControl.dll`. See [pairing versions and gaps](docs/FUBAR_PAIRING.md).
-6. **Tools → Settings** in FUBAR: enable SDR Town control and pick allowed actions (tune, mode, RF gain, P25 CC, …). FUBAR **1.1.33** website has P25/RDS/tones/SSTV + Take control. Satcom / Inmarsat / Aircraft / SDRplay **website** tabs are in FUBAR source **1.1.38** (not GitHub Latest).
+5. Place a **matching** `SdrTownControl.dll` next to `FUBAR.exe`. This Town **0.2.80** release ships `SdrTownControl-0.2.80-win64.dll` (rename to `SdrTownControl.dll`). Pair with FUBAR **1.1.41**. See [pairing versions and gaps](docs/FUBAR_PAIRING.md).
+6. **Tools → Settings** in FUBAR: enable SDR Town control and pick allowed actions. FUBAR **1.1.41** website has P25/RDS/tones/SSTV (Auto + HamDRM list, Receive/Finish/Cancel), Satcom, Inmarsat, Aircraft, and SDRplay. **Home lat/lon is Town-only** (not on the public site).
 
 ### Control API notes (for FUBAR and other local clients)
 
@@ -52,6 +52,7 @@ Formerly *MaulAudio Pro*. Branding, binaries, installer, AppData paths, and rele
 - From **0.2.69**, Satcom pass planner: home lat/lon (N/S E/W), CelesTrak TLE cache, SGP4 AOS/LOS, Auto-track Doppler retune, ISS SSTV arm/handoff. API: `/v1/satcom/observer|passes|catalogue|arm|tle/refresh`, capability `satcomPasses`.
 - From **0.2.70**, sat catalogue honesty badges + Aircraft Map (local 1090 ADS-B + OpenSky enrichment, OSM tiles, click popout). API `/v1/aircraft/status|track|refresh`, capability `aircraftMap`.
 - From **0.2.74**, SDRplay discovery checks the installed API and SoapySDRPlay3 runtime in standard SDRplay, PothosSDR, radioconda, and application-local locations, and reports “module loaded” separately from “RSP detected”. From **0.2.73**, WFM listen path no longer resets demod on soft IQ catch-up (fixes 98.1 buzz + waterfall freeze); spectrum UI downsamples. From **0.2.72**, Satcom/Inmarsat/Aircraft dock is lazy and silent on the listening preset (no UI timer / pass-track retune fighting WFM). From **0.2.71**, experimental Inmarsat L-band prototype (public band plans, ACARS/ADS-C parse). **Not RF-qualified:** no unique-word/FEC/Aero AMBE proof. Tools **Inmarsat Aero**; API `/v1/inmarsat/status|control|messages|bandplans`, capability `inmarsatAero`. ADS-C positions feed Aircraft Map (`fromAdsc`). Dual-SDR voice radio not yet. Click the satcom home map (or Shift-click the aircraft map) to set observer lat/lon for ISS SSTV, pass prediction, and Doppler. CLI: `observer`, `tle`, `satcom`, `inmarsat`, `aircraft`.
+- From **0.2.79**, analogue SSTV Auto covers Dayton + handbook leftovers (Martin M3/M4, Scottie S3/S4, SC-1, FAX480, MP/MR/ML). From **0.2.80**, **HamDRM digital** (HB9TLK Mode B 2.5 kHz) is a second engine; file Auto retries it if analogue finds nothing. Status `sstv.modes` is the same list FUBAR shows. `POST /v1/sstv/live|finish|cancel` starts/stops live NFM receive (Take control). See [docs/SSTV.md](docs/SSTV.md).
 - From **0.2.65**, opt-in **Repeater Control Monitor** (receive-only): DTMF decode, CTCSS/DCS/carrier **heard list**, and dual-watch of output+input when the IQ passband covers the pair. Status adds `tones.dtmf` and `repeater`. See `docs/REPEATER_MONITOR.md`. NFM audio path improved; DCS uses the speech discriminator tap; DTMF no longer double-fires single keypresses.
 - Analog `/v1/tune` is refused while a P25 voice follow or warm-standby hold is active so a website poll cannot yank RF back to the control channel mid-call.
 
@@ -93,21 +94,20 @@ Runtime hardening: the release now stages the configured RTL-SDR DLL instead of
 retaining an old copy. The reproduced local shutdown access violation is fixed;
 see [native debugger tests and hardware limits](docs/NATIVE_RUNTIME_QA.md).
 
-SSTV now has experimental offline Robot36/Martin1 image decoding to PNG:
-`sstv decode "file.wav" "new-output-directory" auto`. The separate
-`sstv inspect "file.wav"` reports validated classic VIS headers.
-Version 0.2.59 adds experimental **Live NFM - main receiver** under
-**Tools > SSTV Images**. Start the main receiver in NFM, select the live source,
-choose a new output folder and Receive. Finish and save drains queued input;
-Cancel discards provisional images. No frequency, filter or audio changes are
-made automatically. Known-transmission RF acceptance remains open; HF SSB input,
-additional image modes and public/weather satellite decoding remain planned.
-See [SSTV commands, resource limits and validation](docs/SSTV.md).
-The recorded source retains background decoding,
-cancellation, progressive scanline previews and output-folder access. Preview
-pixels are checked against final RGB output before PNG publication.
-The [staged roadmap](docs/SATELLITE_AND_SSTV.md) starts with independently verified
-recorded-audio SSTV before live reception and satellite scheduling.
+SSTV (**Tools > SSTV Images**, CLI `sstv decode` / `sstv inspect`):
+
+- **Analogue:** Dayton Martin/Scottie/Robot/PD/Pasokon/SC2-180 plus handbook/QSSTV
+  leftovers (Robot B&W, SC2-30/60/120, AVT, M3/M4, S3/S4, SC-1, FAX480, MP/MR/ML).
+  Auto = 7-bit VIS (Hamming-1), then 16-bit VIS, then closest 1200 Hz line-sync.
+- **Digital:** **HamDRM** (HB9TLK Mode B 2.5 kHz). File Auto retries HamDRM if
+  analogue finds no picture. Not EasyPal file-level RS.
+- **Live NFM:** main receiver discriminator audio, Receive / Finish and save /
+  Cancel. Does not retune the radio. Known-transmission RF acceptance is still open.
+  HF SSB live input is not supported.
+
+`sstv decode "file.wav" "new-output-directory" auto`  
+`sstv decode "file.wav" "new-output-directory" hamdrm`  
+See [SSTV.md](docs/SSTV.md). Satellite pass/Doppler/ISS arm is in Satcom (not the SSTV window).
 
 ---
 
@@ -159,10 +159,11 @@ Shared STT defaults (also used by deep audit / live diag / GUI IQ replay): backe
 ### Incomplete or experimental (do not oversell)
 
 - **ONNX classifier backend** is a placeholder; the **deterministic** classifier is what runs.
-- **Smart Scan** button is present (PR6-era foundation)â€”not a full production scanner (no priority lists, lockout, hold, multi-TG routing product yet).
-- **DMR / NXDN / DRM / pager / satellite** modules are roadmap onlyâ€”not implemented as working decoders.
+- **Smart Scan** button is present (PR6-era foundation)—not a full production scanner (no priority lists, lockout, hold, multi-TG routing product yet).
+- **Satcom / aircraft / Inmarsat / SSTV / HamDRM** ship as **experimental** tools (recorded SSTV and HamDRM selftest are verified; live RF pictures, live HamDRM on-air, Inmarsat unique-word/FEC/AMBE, and Meteor LRPT are not).
+- **DMR / NXDN / POCSAG / broadcast DRM** are still not implemented as receive decoders.
 - **Updater** verifies Ed25519 manifest signatures (when configured) plus installer SHA-256; Authenticode not done yet.
-- **SDR open/stream** is in-process (no separate helper process yet)â€”wedged USB/Soapy can still affect the app process.
+- **SDR open/stream** is in-process (no separate helper process yet)—wedged USB/Soapy can still affect the app process.
 - **SSB/CW** are functional basics, not contest-grade AGC/filtering chains.
 
 ---
@@ -290,6 +291,13 @@ The replay path uses metadata-only SigMF inspection for the slider, then loads b
 | `audio enable <out0> [out1 â€¦]` | Enable outputs |
 | `audio disable` | Stop outputs |
 | `rx add` | Add another receiver entry |
+| `sstv inspect <wav>` | Classic VIS headers only |
+| `sstv decode <wav> <new-dir> [auto\|hamdrm\|martin1\|…]` | Offline analogue or HamDRM image decode |
+| `observer show` / `observer set <lat> <lon>` | Home position for ISS/passes/Doppler (Town only; not FUBAR) |
+| `tle refresh` / `tle load` | CelesTrak or fixture TLE |
+| `satcom status\|start [force]\|stop\|arm\|…` | Satcom scanner / ISS SSTV arm |
+| `inmarsat status\|start [force]\|stop\|plan` | Inmarsat prototype (no voice follow) |
+| `aircraft` | Aircraft map status |
 | `help` | Command list |
 | `quit` / `exit` | Leave CLI |
 
@@ -485,28 +493,30 @@ Useful docs (may be denser than this README):
 
 ## Direction - current implementation order
 
-1. **SSTV recorded reception, then live images**
-   Offline Robot36/Martin1 PNGs, progressive GUI replay and VIS inspection ship.
-   Next: bounded live input, then independently qualified additional
-   Martin/Scottie/PD modes.
+1. **SSTV live RF and HamDRM on-air**
+   Recorded analogue modes and HamDRM selftest ship. Next: known-transmission
+   live NFM pictures, HF SSB live input, EasyPal file-RS only if a published table appears.
 
-2. **Public satellite and weather reception**
-   Source-dated catalogue, SGP4 pass/Doppler planning, AX.25/public telemetry,
-   Meteor LRPT and archived NOAA APT. Hardware and mission coverage stay explicit.
+2. **Satellite / weather honesty**
+   Satcom scanner, TLE/SGP4 Doppler, ISS SSTV arm, NOAA APT grayscale, and
+   aircraft map ship experimentally. Meteor LRPT / SatDump-class decode do not.
 
-3. **Analog and data polish**
-   Broader RDS character/region support, known-tone CTCSS/DCS RF acceptance,
-   SSB/CW filtering/AGC, then separately validated DMR/NXDN/DRM receive chains.
+3. **Inmarsat prototype gaps**
+   Band plan, start/stop, ACARS/ADS-C log. No unique-word, FEC, or Aero AMBE.
 
-4. **Operational hardening and trust**
+4. **Analog and data polish**
+   Known-tone CTCSS/DCS RF acceptance, SSB/CW filtering/AGC, then separately
+   validated DMR/NXDN/pager chains.
+
+5. **Operational hardening and trust**
    More hardware/debugger cycles, SDR process isolation, Authenticode and
-   reproducible release gates. GUI/CLI/P25 modules have already been split.
+   reproducible release gates.
 
-5. **P25 follow-up (deferred by user)**
+6. **P25 follow-up (deferred by user)**
    Preserve security/slot isolation and capture-based regression tests. Remaining
-   live continuity qualification is open; decoder expansion is not proof it is solved.
+   live continuity qualification is open.
 
-6. **Scanner and classifier extensions**
+7. **Scanner and classifier extensions**
    Recording history, multi-output per TG and a measured ONNX classifier backend;
    the current classifier remains deterministic.
 
@@ -543,7 +553,7 @@ See `LICENSE.txt`.
 - Include DEEP DIAG / DSP VOICE lines with `expVcw`, `fed`, `emit`, `gaps`, `p2sf`, `p2mask`, `p2mac`, gate reason.
 - Issues and PRs: https://github.com/Blkph0x/SDR_Town  
 
-**Bottom line:** WFM/AM/NFM, RDS, workspaces and region band plans are available.
-Tone identification, P25 and offline SSTV images remain experimental.
-Live SSTV input and satellite work are next;
-no universal reception or clear-audio percentage is claimed.
+**Bottom line:** WFM/AM/NFM, RDS, workspaces, band plans, SDRplay Soapy, satcom/TLE/Doppler,
+aircraft map, and analogue SSTV (plus HamDRM selftest) ship in **0.2.80**. P25, live SSTV RF,
+Inmarsat, and HamDRM on-air remain experimental. No universal reception or clear-audio
+percentage is claimed. Pair FUBAR **1.1.41** with this Town DLL.

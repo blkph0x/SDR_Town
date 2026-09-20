@@ -1,6 +1,7 @@
 # SSTV receive development
 
-Version 0.2.59 adds experimental live NFM input to **Robot36/Martin1 decoding**
+Version **0.2.80** ships analogue SSTV (Dayton + handbook/QSSTV leftovers) and
+**HamDRM** digital (HB9TLK Mode B 2.5 kHz), plus experimental live NFM input
 and classic VIS inspection. Known-transmission RF acceptance remains open.
 
 ## Live NFM
@@ -8,7 +9,7 @@ and classic VIS inspection. Known-transmission RF acceptance remains open.
 1. Start and tune the main receiver to an SSTV transmission in NFM. P25 monitor
    or voice-follow mode must be off. SSTV does not tune or reconfigure the radio.
 2. Open **Tools > SSTV Images**, choose **Live NFM - main receiver**, Automatic
-   (or Robot36/Martin1), and a new output directory whose parent exists.
+   (or a forced analogue / HamDRM mode), and a new output directory whose parent exists.
 3. Press **Receive**. Scanlines appear progressively. **Finish and save** stops
    accepting new input, drains queued samples, and saves validated PNGs/report.
    **Cancel** or closing the window discards provisional output.
@@ -28,7 +29,7 @@ but are not a substitute for an off-air image from a known transmission.
 
 **Tools > SSTV Images**, with Source set to **Recording**, opens a
 nonmodal window. Select a mono recording, give a new output directory (parent
-must exist), choose Automatic/Robot36/Martin1 and Decode. The image list shows
+must exist), choose Automatic or a listed mode and Decode. The image list shows
 complete/partial status and row counts; selecting an item previews the original
 PNG without changing the saved pixels. Open output accesses PNGs and the report.
 One job runs at a time off the GUI thread. Cancel and closing the window request
