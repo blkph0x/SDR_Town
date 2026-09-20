@@ -113,11 +113,28 @@ void mergeP25AliasList(P25AliasLists& lists,P25AliasList incoming) {
 }
 QString resolveP25Alias(const P25AliasLists& lists,bool known,unsigned wacn,unsigned systemId,unsigned tg,const QString& manual) {
     if(!manual.trimmed().isEmpty()) return manual;
-    if(!known) return {};
-    for(const auto& list:lists) if(list.wacn==wacn && list.systemId==systemId) {
-        const auto it=list.talkgroups.find(tg);if(it!=list.talkgroups.end()) return it->second.name;
+    if(known) {
+        for(const auto& list:lists) if(list.wacn==wacn && list.systemId==systemId) {
+            const auto it=list.talkgroups.find(tg);if(it!=list.talkgroups.end()) return it->second.name;
+        }
+        return {};
     }
-    return {};
+
+    // A grant can arrive before Network Status supplies WACN/System.  Do not
+    // hide an imported RadioReference alpha tag in that interval when the TGID
+    // has one unambiguous name across all imported systems. Conflicting names
+    // remain blank until system metadata is known, avoiding a wrong-system tag.
+    QString unique;
+    bool found=false;
+    for(const auto& list:lists) {
+        const auto it=list.talkgroups.find(tg);
+        if(it==list.talkgroups.end()) continue;
+        const QString candidate=it->second.name.trimmed();
+        if(candidate.isEmpty()) continue;
+        if(!found) {unique=candidate;found=true;continue;}
+        if(QString::compare(unique,candidate,Qt::CaseInsensitive)!=0) return {};
+    }
+    return found?unique:QString{};
 }
 QString resolveP25SiteAlias(const P25AliasLists& lists,bool known,unsigned wacn,unsigned systemId,
                             unsigned rfss,unsigned siteId,const QString& manual) {
