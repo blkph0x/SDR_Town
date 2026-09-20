@@ -7,3 +7,9 @@
 [submodule "external/liquid-dsp"]
 	path = external/liquid-dsp
 	url = https://github.com/jgaeddert/liquid-dsp.git
+[submodule "_codex_refs/op25"]
+	path = _codex_refs/op25
+	url = https://github.com/boatbod/op25.git
+[submodule "_codex_refs/sdrtrunk"]
+	path = _codex_refs/sdrtrunk
+	url = https://github.com/DSheirer/sdrtrunk.git
