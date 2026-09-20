@@ -9,11 +9,42 @@
 #include "HttpGet.h"
 
 #include <cmath>
+#include <ctime>
 #include <fstream>
+#include <iomanip>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <QCoreApplication>
 #include <QDir>
+
+namespace {
+
+std::string currentIssLine1()
+{
+    const std::time_t now = std::time(nullptr);
+    std::tm utc{};
+#ifdef _WIN32
+    gmtime_s(&utc, &now);
+#else
+    gmtime_r(&now, &utc);
+#endif
+
+    const int year2 = (utc.tm_year + 1900) % 100;
+    const double day = static_cast<double>(utc.tm_yday + 1) +
+        static_cast<double>(utc.tm_hour * 3600 + utc.tm_min * 60 + utc.tm_sec) / 86400.0;
+
+    std::ostringstream epoch;
+    epoch << std::setfill('0') << std::setw(2) << year2
+          << std::fixed << std::setprecision(8) << std::setw(12) << day;
+
+    const std::string line =
+        "1 25544U 98067A   " + epoch.str() +
+        "  .00007470  00000+0  14267-3 0  9991";
+    return line;
+}
+
+} // namespace
 
 TEST_CASE("Observer parses both hemispheres", "[satcom][pass]")
 {
@@ -103,8 +134,9 @@ TEST_CASE("Selected satellite snapshot exposes finite map coordinates", "[satcom
     TleSet t;
     t.noradId = 25544;
     t.name = "ISS (ZARYA)";
-    t.line1 = "1 25544U 98067A   26263.14255447  .00007470  00000+0  14267-3 0  9991";
+    t.line1 = currentIssLine1();
     t.line2 = "2 25544  51.6307 190.1401 0004820 160.6694 199.4478 15.49188396586472";
+    REQUIRE(t.line1.size() == 69);
     TleStore::instance().upsert(t);
 
     SatObserverConfig observer;
