@@ -158,10 +158,10 @@ void SatcomScannerWidget::buildUi() {
     obsLay->addWidget(minElSpin_, 1, 3);
     auto* applyObs = new QPushButton("Apply location");
     auto* selSats = new QPushButton("Select satellites…");
-    auto* refreshTle = new QPushButton("Refresh TLE");
+    refreshTleBtn_ = new QPushButton("Refresh TLE");
     obsLay->addWidget(applyObs, 2, 0);
     obsLay->addWidget(selSats, 2, 1);
-    obsLay->addWidget(refreshTle, 2, 2);
+    obsLay->addWidget(refreshTleBtn_, 2, 2);
     tleAgeLabel_ = new QLabel("TLE: —");
     obsLay->addWidget(tleAgeLabel_, 2, 3);
     observerMap_ = new ObserverMapWidget(this);
@@ -170,7 +170,7 @@ void SatcomScannerWidget::buildUi() {
     root->addWidget(obs);
     connect(applyObs, &QPushButton::clicked, this, &SatcomScannerWidget::onApplyObserver);
     connect(selSats, &QPushButton::clicked, this, &SatcomScannerWidget::onSelectSats);
-    connect(refreshTle, &QPushButton::clicked, this, &SatcomScannerWidget::onRefreshTle);
+    connect(refreshTleBtn_, &QPushButton::clicked, this, &SatcomScannerWidget::onRefreshTle);
 
     auto* passRow = new QHBoxLayout();
     passTable_ = new QTableWidget(0, 6);
@@ -348,10 +348,16 @@ void SatcomScannerWidget::onSelectSats() {
 }
 
 void SatcomScannerWidget::onRefreshTle() {
+    if (tleBusy_) return;
+    tleBusy_ = true;
+    if (refreshTleBtn_) refreshTleBtn_->setEnabled(false);
     tleAgeLabel_->setText("TLE: downloading…");
     SatPassPlanner::instance().refreshTleAsync([this](bool ok, std::string err) {
         QMetaObject::invokeMethod(this, [this, ok, err]() {
+            tleBusy_ = false;
+            if (refreshTleBtn_) refreshTleBtn_->setEnabled(true);
             if (!ok) {
+                tleAgeLabel_->setText("TLE: failed");
                 QMessageBox::warning(this, "TLE",
                                      QString::fromStdString(err.empty() ? "Refresh failed" : err));
             }
@@ -425,9 +431,13 @@ void SatcomScannerWidget::refreshPassesTable() {
         passTable_->setItem(i, 5, new QTableWidgetItem(QString::number(p.freqHz / 1e6, 'f', 4)));
     }
 
-    if (plan.tleAgeSec < 0) tleAgeLabel_->setText("TLE: none — Refresh");
-    else if (plan.tleAgeSec < 3600) tleAgeLabel_->setText(QString("TLE age: %1m").arg(plan.tleAgeSec / 60));
-    else tleAgeLabel_->setText(QString("TLE age: %1h").arg(plan.tleAgeSec / 3600.0, 0, 'f', 1));
+    if (!tleBusy_) {
+        if (plan.tleAgeSec < 0) tleAgeLabel_->setText("TLE: none — Refresh");
+        else if (plan.tleAgeSec < 3600)
+            tleAgeLabel_->setText(QString("TLE age: %1m").arg(plan.tleAgeSec / 60));
+        else
+            tleAgeLabel_->setText(QString("TLE age: %1h").arg(plan.tleAgeSec / 3600.0, 0, 'f', 1));
+    }
 
     if (plan.armed.armed) {
         passStatusLabel_->setText(

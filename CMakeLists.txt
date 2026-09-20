@@ -264,7 +264,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Gui
     Qt6::Widgets
     Qt6::Network
-    wininet
+    winhttp
     spdlog::spdlog
     nlohmann_json::nlohmann_json
     unofficial-sodium::sodium
@@ -455,7 +455,7 @@ if(BUILD_TESTS)
     Catch2::Catch2WithMain
     Qt6::Core
     Qt6::Network
-    wininet
+    winhttp
     spdlog::spdlog
     nlohmann_json::nlohmann_json
     sdr_town_dsp

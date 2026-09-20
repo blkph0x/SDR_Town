@@ -2,6 +2,11 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-20 - Live CelesTrak TLE
+
+PowerShell and WinHTTP GET of gp.php GROUP=stations/weather/amateur return 200
+and parse ISS (ZARYA) 25544. UI busy flag so Refresh TLE cannot be clobbered.
+
 ## 2026-09-20 - v0.2.74 published; package inspection
 
 `scripts/release.ps1 -Version 0.2.74` CTest 3/3 PASS. Tag v0.2.74 = 4f26f2e.

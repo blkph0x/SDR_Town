@@ -143,8 +143,8 @@ bool TleStore::refreshFromNetwork(std::string* error) {
     std::string lastErr;
     for (const char* url : kUrls) {
         std::string body, err;
-        if (!httpGetUrl(url, &body, &err, 20000)) {
-            lastErr = err;
+        if (!httpGetUrl(url, &body, &err, 15000)) {
+            lastErr = err.empty() ? std::string(url) : err;
             continue;
         }
         combined += body;
@@ -167,7 +167,7 @@ bool TleStore::refreshFromNetwork(std::string* error) {
     refreshedUnix_ = std::chrono::duration_cast<std::chrono::seconds>(
                          std::chrono::system_clock::now().time_since_epoch())
                          .count();
-    lastError_.clear();
+    lastError_ = std::to_string(n) + " TLE sets from CelesTrak";
     // unlock before save to avoid deadlock — saveCache locks again
     // so save inline:
     try {

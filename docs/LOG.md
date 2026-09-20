@@ -2,6 +2,13 @@
 
 Newest at the top.
 
+## 2026-09-20 - TLE download hang
+
+Refresh TLE looked idle because refreshUi() (500 ms) overwrote "downloading…".
+WinINet InternetOpenUrl also ignored timeouts. Switched httpGetUrl to WinHTTP
+with 15 s timeouts; UI keeps busy state until the worker finishes. Live
+CelesTrak stations/weather/amateur groups parse ISS 25544.
+
 ## 2026-09-20 - DEC-0104 FUBAR must not see/set home lat/lon
 
 Public website no longer proxies observer GET/POST or shows lat/lon. Town

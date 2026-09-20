@@ -80,4 +80,6 @@ private:
     QCheckBox* autoTrackCheck_ = nullptr;
     QComboBox* downlinkCombo_ = nullptr;
     ObserverMapWidget* observerMap_ = nullptr;
+    QPushButton* refreshTleBtn_ = nullptr;
+    bool tleBusy_ = false;
 };

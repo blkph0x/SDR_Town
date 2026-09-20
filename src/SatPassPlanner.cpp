@@ -100,7 +100,9 @@ void SatPassPlanner::refreshTleAsync(std::function<void(bool, std::string)> done
     TleStore::instance().refreshFromNetworkAsync([this, done = std::move(done)](bool ok, std::string err) {
         {
             std::lock_guard<std::mutex> lk(mutex_);
-            lastStatus_ = ok ? "TLE refreshed from CelesTrak" : ("TLE refresh failed: " + err);
+            lastStatus_ = ok
+                ? ("TLE refreshed: " + std::to_string(TleStore::instance().all().size()) + " sets")
+                : ("TLE refresh failed: " + err);
         }
         if (ok) refreshPasses(24.0);
         notify();

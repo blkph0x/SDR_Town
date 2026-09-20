@@ -6,9 +6,13 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include "HttpGet.h"
+
 #include <cmath>
 #include <fstream>
+#include <memory>
 #include <string>
+#include <QCoreApplication>
 #include <QDir>
 
 TEST_CASE("Observer parses both hemispheres", "[satcom][pass]")
@@ -92,6 +96,43 @@ TEST_CASE("TLE loadFromFile parses 3-line sets", "[satcom][pass][tle]")
     auto t = TleStore::instance().get(25544);
     REQUIRE(t.noradId == 25544);
     REQUIRE(t.line1.find("25544") != std::string::npos);
+}
+
+TEST_CASE("Live CelesTrak TLE download parses ISS 25544", "[satcom][tle][network]")
+{
+    int argc = 0;
+    char* argv[] = {nullptr};
+    std::unique_ptr<QCoreApplication> ownedApp;
+    if (!QCoreApplication::instance()) {
+        ownedApp = std::make_unique<QCoreApplication>(argc, argv);
+        ownedApp->setApplicationName("SDR Town Test");
+    }
+    std::string err;
+    std::string body;
+    const bool got = httpGetUrl(
+        "https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=tle", &body, &err, 15000);
+    if (!got) {
+        WARN("CelesTrak stations fetch failed: " + err);
+        return;
+    }
+    REQUIRE(body.find("ISS") != std::string::npos);
+    REQUIRE(body.find("25544") != std::string::npos);
+
+    REQUIRE(TleStore::instance().refreshFromNetwork(&err));
+    auto iss = TleStore::instance().get(25544);
+    REQUIRE(iss.noradId == 25544);
+    REQUIRE(iss.line1.size() >= 68);
+    REQUIRE(iss.line2.size() >= 68);
+    REQUIRE(iss.line1[0] == '1');
+    REQUIRE(iss.line2[0] == '2');
+    Sgp4::Elements el{};
+    REQUIRE(Sgp4::parseTle(iss.line1, iss.line2, &el));
+    REQUIRE(el.satnum == 25544);
+    auto st = Sgp4::propagate(el, 0.0);
+    REQUIRE(st.ok);
+    const double rmag = std::sqrt(st.r[0] * st.r[0] + st.r[1] * st.r[1] + st.r[2] * st.r[2]);
+    REQUIRE(rmag > 6500.0);
+    REQUIRE(rmag < 7500.0);
 }
 
 TEST_CASE("Public satcom JSON omits home lat/lon", "[satcom][pass]")
