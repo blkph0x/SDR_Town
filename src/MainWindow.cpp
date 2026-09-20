@@ -7,10 +7,27 @@
 #include "RdsStatusWidget.h"
 #include "RdsMpxDecoder.h"
 #include "DcsDecoder.h"
+#include "SdrplayProfile.h"
+#include "SdrplayDiversity.h"
+#include "SatcomScannerWidget.h"
+#include "AircraftMapWidget.h"
+#include "InmarsatWidget.h"
+#include "SatcomHubWidget.h"
+#include "InmarsatEngine.h"
+#include "InmarsatBandPlan.h"
+#include "InmarsatMessageStore.h"
+#include "SatcomScannerEngine.h"
+#include "SatPassPlanner.h"
+#include "SatObserverConfig.h"
+#include "TleStore.h"
+#include "AdsBTrackStore.h"
 
 #include <QCloseEvent>
+#include <QDockWidget>
 #include <QFileInfo>
 #include <QSizePolicy>
+#include <algorithm>
+#include <cmath>
 
 // AUTOMOC: Q_OBJECT lives in MainWindow.h (SpectrumWidget / TranscriptWindow pattern).
 // Method bodies out-of-line (ISS-0004 Phase B). Live P25 voice worker/publish:
@@ -4886,6 +4903,22 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         captureLayout->addLayout(trainingLay);
         captureLayout->addStretch();
         workspaceLayout->addPanel("capture", "Capture / Display", capturePanel);
+        {
+            auto* hub = new SatcomHubWidget(this);
+            hub->setObjectName("satcomHub");
+            connect(hub, &SatcomHubWidget::requestOpenSstvLive, this, [this]() {
+                for (QAction* a : menuBar()->actions()) {
+                    if (!a->menu()) continue;
+                    for (QAction* sub : a->menu()->actions()) {
+                        if (sub->text().contains("SSTV", Qt::CaseInsensitive)) {
+                            sub->trigger();
+                            return;
+                        }
+                    }
+                }
+            });
+            workspaceLayout->addPanel("satcom", "Satcom / Inmarsat", hub);
+        }
         rxBox->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
         mainLayout->setStretch(mainLayout->indexOf(rxBox), 0);
         rmsLabel->setWordWrap(true);
@@ -7576,23 +7609,33 @@ void MainWindow::showDevicesDialog()
         dlg.resize(900, 520);
 
         auto& mgr = DeviceManager::instance();
-        // Full probe=true here: user explicitly opened the manager, so we can safely query real
-        // hardware capabilities to populate nice combos/spins/ranges. If this still blows up for
-        // a particular dongle, at least the main window opened.
-        auto devs = mgr.enumerateDevices(true);
+        std::vector<DeviceInfo> devs = mgr.getDevices();
+        bool anyLive = false;
+        for (size_t i = 0; i < devs.size(); ++i) {
+            if (mgr.isStreaming(i)) { anyLive = true; break; }
+        }
+        if (!anyLive || devs.empty()) {
+            // Probe only when nothing is listening so opening Device Manager cannot kill WFM.
+            devs = mgr.enumerateDevices(true, true);
+        }
 
         QVBoxLayout* mainLay = new QVBoxLayout(&dlg);
 
-        QLabel* hint = new QLabel("Rescan to refresh. Enable devices, adjust gain/sample rate/antenna/PPM correction. Settings persist across runs. Real SoapySDR + HackRF recommended (stubs shown if no Soapy).");
+        QLabel* hint = new QLabel(anyLive
+            ? "Live RX is running — this dialog will not stop it. Rescan Devices will stop streams. Enable devices, adjust gain/sample rate/antenna/PPM."
+            : "Rescan to refresh. Enable devices, adjust gain/sample rate/antenna/PPM correction. Settings persist across runs.");
         hint->setWordWrap(true);
         mainLay->addWidget(hint);
 
-        // Diagnostics for RTL-SDR etc.
+        // Diagnostics for RTL-SDR / SDRplay etc.
         auto drivers = mgr.getAvailableDrivers();
         QString drvStr = "Available Soapy drivers: ";
         for (size_t i=0; i<drivers.size(); ++i) { if (i>0) drvStr += ", "; drvStr += QString::fromStdString(drivers[i]); }
         if (drivers.empty()) drvStr += "none (check Soapy installation)";
-        QLabel* drvLabel = new QLabel(drvStr + "\nFor RTL-SDR: Use Zadig (zadig.akeo.ie) to install WinUSB driver for your RTL device (Interface 0). If 'rtlsdr' not listed above, the SoapyRTLSDR module is missing — install PothosSDR or place SoapyRTLSDR.dll in Soapy modules dir and restart app.");
+        QLabel* drvLabel = new QLabel(drvStr
+            + "\nFor RTL-SDR: Use Zadig (zadig.akeo.ie) to install WinUSB driver for your RTL device (Interface 0). If 'rtlsdr' not listed above, the SoapyRTLSDR module is missing — install PothosSDR or place SoapyRTLSDR.dll in Soapy modules dir and restart app."
+            + "\n" + QString::fromStdString(mgr.getSdrplaySetupStatus())
+            + " — Install order: SDRplay API 3.x from sdrplay.com, then SoapySDRPlay3 (PothosSDR/radioconda), then restart.");
         drvLabel->setWordWrap(true);
         drvLabel->setStyleSheet("color: #ffcc00; font-size: 10px;");
         mainLay->addWidget(drvLabel);
@@ -7631,18 +7674,44 @@ void MainWindow::showDevicesDialog()
 
             // Antenna combo
             QComboBox* ant = new QComboBox();
-            for (const auto& a : d.antennas) ant->addItem(QString::fromStdString(a));
-            if (!d.antenna.empty()) ant->setCurrentText(QString::fromStdString(d.antenna));
+            for (const auto& a : d.antennas) {
+                const QString name = QString::fromStdString(a);
+                if (d.isSdrplay) {
+                    ant->addItem(name + " — " + QString::fromStdString(
+                        SdrplayProfile::antennaPortDescription(d.sdrplayModel, a)), name);
+                } else {
+                    ant->addItem(name, name);
+                }
+            }
+            if (!d.antenna.empty()) {
+                const int ai = ant->findData(QString::fromStdString(d.antenna));
+                if (ai >= 0) ant->setCurrentIndex(ai);
+                else ant->setCurrentText(QString::fromStdString(d.antenna));
+            }
+            if (d.isSdrplay) {
+                ant->setToolTip("RSPdx: A/B SMA (Bias-T), C BNC HF. RSPduo: Tuner1 50Ω/Hi-Z, Tuner2 50Ω. Live-applied.");
+            }
             table->setCellWidget(row, 4, ant);
             antCombos.push_back(ant);
+            connect(ant, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [i, ant](int) {
+                const QString data = ant->currentData().toString();
+                const std::string name = data.isEmpty() ? ant->currentText().toStdString() : data.toStdString();
+                DeviceManager::instance().setLiveAntenna(i, name);
+            });
 
             // Sample rate
             QDoubleSpinBox* rate = new QDoubleSpinBox();
-            rate->setRange(0.1, 60.0);
+            const double maxMsps = d.isSdrplay
+                ? (SdrplayProfile::maxSampleRateHz(d.sdrplayDuoMode) / 1e6)
+                : 60.0;
+            rate->setRange(0.1, maxMsps);
             rate->setDecimals(3);
             rate->setSingleStep(0.1);
             rate->setSuffix(" MS/s");
-            rate->setValue(d.sampleRate / 1e6);
+            rate->setValue(std::min(d.sampleRate / 1e6, maxMsps));
+            if (d.isSdrplay && d.sdrplayDuoMode == "DT") {
+                rate->setToolTip("RSPduo Dual Tuner: max 2 MS/s per tuner (10 MS/s only in Single Tuner mode).");
+            }
             // add common rates from list if present
             table->setCellWidget(row, 5, rate);
             rateSpins.push_back(rate);
@@ -7699,6 +7768,255 @@ void MainWindow::showDevicesDialog()
 
         mainLay->addWidget(table);
 
+        // SDRplay model-specific panel (shown for selected SDRplay row).
+        QGroupBox* sdrplayBox = new QGroupBox("SDRplay controls", &dlg);
+        auto* sdrplayLay = new QFormLayout(sdrplayBox);
+        QLabel* sdrplayInfo = new QLabel("Select an SDRplay row above.");
+        sdrplayInfo->setWordWrap(true);
+        sdrplayLay->addRow(sdrplayInfo);
+        QCheckBox* sdrAgc = new QCheckBox("AGC");
+        QDoubleSpinBox* sdrIfgr = new QDoubleSpinBox();
+        sdrIfgr->setRange(20.0, 59.0); sdrIfgr->setDecimals(0); sdrIfgr->setSuffix(" dB"); sdrIfgr->setToolTip("IFGR — IF gain reduction (higher = less IF gain)");
+        QDoubleSpinBox* sdrRfgr = new QDoubleSpinBox();
+        sdrRfgr->setRange(0.0, 27.0); sdrRfgr->setDecimals(0); sdrRfgr->setSuffix(" dB"); sdrRfgr->setToolTip("RFGR — RF/LNA gain reduction (higher = less RF gain)");
+        QComboBox* sdrBw = new QComboBox();
+        QCheckBox* sdrBiasT = new QCheckBox("Bias-T (4.7 V on SMA)");
+        QCheckBox* sdrRfNotch = new QCheckBox(QString::fromStdString(SdrplayProfile::rfNotchUiLabel()));
+        QCheckBox* sdrDabNotch = new QCheckBox("DAB notch");
+        QCheckBox* sdrExtRef = new QCheckBox("Reference clock OUT");
+        QCheckBox* sdrHdr = new QCheckBox("HDR mode (RSPdx < ~2 MHz)");
+        QCheckBox* sdrIqCorr = new QCheckBox("IQ correction");
+        QSpinBox* sdrAgcSet = new QSpinBox();
+        sdrAgcSet->setRange(-60, 0); sdrAgcSet->setSuffix(" dBfs"); sdrAgcSet->setToolTip("AGC setpoint");
+        QComboBox* sdrRfGainSel = new QComboBox();
+        QLabel* sdrPortHint = new QLabel();
+        sdrPortHint->setWordWrap(true);
+        sdrPortHint->setStyleSheet("color: #aaa; font-size: 11px;");
+        // RSPduo Dual Tuner host diversity / null-steer
+        QComboBox* sdrDivMode = new QComboBox();
+        sdrDivMode->addItem("Off", static_cast<int>(SdrplayDiversity::Mode::Off));
+        sdrDivMode->addItem("Equal-gain sum (diversity)", static_cast<int>(SdrplayDiversity::Mode::EqualGainSum));
+        sdrDivMode->addItem("Null-steer (A − B)", static_cast<int>(SdrplayDiversity::Mode::NullSteer));
+        QDoubleSpinBox* sdrDivPhase = new QDoubleSpinBox();
+        sdrDivPhase->setRange(-180.0, 180.0); sdrDivPhase->setDecimals(1); sdrDivPhase->setSuffix(" °");
+        sdrDivPhase->setToolTip("Relative phase applied to tuner B before combine");
+        QDoubleSpinBox* sdrDivAmp = new QDoubleSpinBox();
+        sdrDivAmp->setRange(0.0, 4.0); sdrDivAmp->setDecimals(2); sdrDivAmp->setSingleStep(0.05);
+        sdrDivAmp->setToolTip("Linear amplitude of tuner B relative to A");
+        QLabel* sdrDivHint = new QLabel();
+        sdrDivHint->setWordWrap(true);
+        sdrDivHint->setStyleSheet("color: #aaa; font-size: 11px;");
+        sdrplayLay->addRow("AGC", sdrAgc);
+        sdrplayLay->addRow("IFGR", sdrIfgr);
+        sdrplayLay->addRow("RFGR", sdrRfgr);
+        sdrplayLay->addRow("Bandwidth", sdrBw);
+        sdrplayLay->addRow("AGC setpoint", sdrAgcSet);
+        sdrplayLay->addRow("RF gain select", sdrRfGainSel);
+        sdrplayLay->addRow(sdrBiasT);
+        sdrplayLay->addRow(sdrRfNotch);
+        sdrplayLay->addRow(sdrDabNotch);
+        sdrplayLay->addRow(sdrExtRef);
+        sdrplayLay->addRow(sdrHdr);
+        sdrplayLay->addRow(sdrIqCorr);
+        sdrplayLay->addRow(sdrPortHint);
+        sdrplayLay->addRow("Diversity / null", sdrDivMode);
+        sdrplayLay->addRow("B phase", sdrDivPhase);
+        sdrplayLay->addRow("B amplitude", sdrDivAmp);
+        sdrplayLay->addRow(sdrDivHint);
+        sdrplayBox->setEnabled(false);
+        mainLay->addWidget(sdrplayBox);
+
+        auto refreshSdrplayPanel = [&](int row) {
+            if (row < 0 || row >= static_cast<int>(devs.size()) || !devs[static_cast<size_t>(row)].isSdrplay) {
+                sdrplayBox->setEnabled(false);
+                sdrplayInfo->setText("Select an SDRplay row above.");
+                return;
+            }
+            const size_t i = static_cast<size_t>(row);
+            auto* live = mgr.getDevice(i);
+            DeviceInfo d = live ? *live : devs[i];
+            sdrplayBox->setEnabled(true);
+            QString duo = d.sdrplayDuoMode.empty() ? QString() :
+                QString(" — %1").arg(QString::fromStdString(SdrplayProfile::duoModeDisplayName(d.sdrplayDuoMode)));
+            sdrplayInfo->setText(QString("%1%2  channel %3. Duo mode changes require Rescan + stream restart.")
+                .arg(QString::fromStdString(d.sdrplayModel.empty() ? d.label : d.sdrplayModel))
+                .arg(duo)
+                .arg(d.rxChannel));
+            sdrPortHint->setText(QString::fromStdString(
+                SdrplayProfile::antennaPortDescription(d.sdrplayModel, d.antenna)));
+            const bool biasOk = SdrplayProfile::biasTAllowedForAntenna(d.sdrplayModel, d.antenna);
+            sdrAgc->blockSignals(true); sdrAgc->setChecked(d.agcEnabled); sdrAgc->blockSignals(false);
+            sdrIfgr->blockSignals(true); sdrIfgr->setValue(d.ifgrDb); sdrIfgr->blockSignals(false);
+            sdrRfgr->blockSignals(true);
+            sdrRfgr->setRange(d.gainMin, d.gainMax > d.gainMin ? d.gainMax : 27.0);
+            sdrRfgr->setValue(d.rfgrDb);
+            sdrRfgr->blockSignals(false);
+            sdrBw->blockSignals(true); sdrBw->clear();
+            sdrBw->addItem("Driver default", 0.0);
+            for (double bw : d.bandwidthsHz) {
+                sdrBw->addItem(QString("%1 kHz").arg(bw / 1e3, 0, 'f', 0), bw);
+            }
+            int bwIdx = 0;
+            for (int b = 0; b < sdrBw->count(); ++b) {
+                if (std::abs(sdrBw->itemData(b).toDouble() - d.bandwidthHz) < 1.0) { bwIdx = b; break; }
+            }
+            sdrBw->setCurrentIndex(bwIdx); sdrBw->blockSignals(false);
+
+            auto hasKey = [&](const char* key) {
+                return std::find(d.sdrplaySettingKeys.begin(), d.sdrplaySettingKeys.end(), key) != d.sdrplaySettingKeys.end()
+                    || d.sdrplaySettingKeys.empty(); // allow before probe
+            };
+            auto settingBool = [&](const char* key, bool fallback) {
+                auto it = d.soapySettings.find(key);
+                if (it == d.soapySettings.end()) return fallback;
+                return SdrplayProfile::parseBoolSetting(it->second, fallback);
+            };
+            sdrBiasT->setEnabled(hasKey(SdrplaySettings::kBiasT) && biasOk);
+            if (!biasOk) sdrBiasT->setToolTip("Bias-T disabled on this port (Hi-Z / Antenna C BNC).");
+            else sdrBiasT->setToolTip("Injects ~4.7 V DC on compatible SMA ports for active antennas/LNAs.");
+            sdrRfNotch->setEnabled(hasKey(SdrplaySettings::kRfNotch));
+            sdrRfNotch->setToolTip(QString::fromStdString(SdrplayProfile::rfNotchUiTooltip()));
+            sdrDabNotch->setEnabled(hasKey(SdrplaySettings::kDabNotch));
+            sdrExtRef->setText(QString::fromStdString(SdrplayProfile::extRefUiLabel(d.sdrplayModel)));
+            sdrExtRef->setEnabled(hasKey(SdrplaySettings::kExtRef));
+            sdrExtRef->setToolTip(QString::fromStdString(SdrplayProfile::extRefUiTooltip(d.sdrplayModel)));
+            sdrHdr->setEnabled(hasKey(SdrplaySettings::kHdr));
+            sdrIqCorr->setEnabled(hasKey(SdrplaySettings::kIqCorr));
+            sdrAgcSet->setEnabled(hasKey(SdrplaySettings::kAgcSetpoint));
+            sdrRfGainSel->setEnabled(hasKey(SdrplaySettings::kRfGainSel));
+            sdrBiasT->blockSignals(true); sdrBiasT->setChecked(biasOk && settingBool(SdrplaySettings::kBiasT, false)); sdrBiasT->blockSignals(false);
+            sdrRfNotch->blockSignals(true); sdrRfNotch->setChecked(settingBool(SdrplaySettings::kRfNotch, false)); sdrRfNotch->blockSignals(false);
+            sdrDabNotch->blockSignals(true); sdrDabNotch->setChecked(settingBool(SdrplaySettings::kDabNotch, false)); sdrDabNotch->blockSignals(false);
+            sdrExtRef->blockSignals(true); sdrExtRef->setChecked(settingBool(SdrplaySettings::kExtRef, false)); sdrExtRef->blockSignals(false);
+            sdrHdr->blockSignals(true); sdrHdr->setChecked(settingBool(SdrplaySettings::kHdr, false)); sdrHdr->blockSignals(false);
+            sdrIqCorr->blockSignals(true); sdrIqCorr->setChecked(settingBool(SdrplaySettings::kIqCorr, true)); sdrIqCorr->blockSignals(false);
+            int setpoint = -30;
+            if (auto it = d.soapySettings.find(SdrplaySettings::kAgcSetpoint); it != d.soapySettings.end()) {
+                try { setpoint = std::stoi(it->second); } catch (...) {}
+            }
+            sdrAgcSet->blockSignals(true); sdrAgcSet->setValue(setpoint); sdrAgcSet->blockSignals(false);
+            sdrRfGainSel->blockSignals(true); sdrRfGainSel->clear();
+            auto optIt = d.sdrplaySettingOptions.find(SdrplaySettings::kRfGainSel);
+            if (optIt != d.sdrplaySettingOptions.end()) {
+                for (const auto& o : optIt->second) sdrRfGainSel->addItem(QString::fromStdString(o));
+            } else {
+                for (int n = 0; n <= 27; ++n) sdrRfGainSel->addItem(QString::number(n));
+            }
+            QString curSel = "4";
+            if (auto it = d.soapySettings.find(SdrplaySettings::kRfGainSel); it != d.soapySettings.end())
+                curSel = QString::fromStdString(it->second);
+            int selIdx = sdrRfGainSel->findText(curSel);
+            sdrRfGainSel->setCurrentIndex(selIdx >= 0 ? selIdx : 0);
+            sdrRfGainSel->blockSignals(false);
+
+            const bool duoDt = (d.sdrplayDuoMode == "DT") || d.isDiversityComposite;
+            sdrDivMode->setEnabled(duoDt);
+            sdrDivPhase->setEnabled(duoDt);
+            sdrDivAmp->setEnabled(duoDt);
+            auto divCfg = mgr.getDiversityConfig();
+            sdrDivMode->blockSignals(true);
+            int divIdx = sdrDivMode->findData(static_cast<int>(divCfg.mode));
+            sdrDivMode->setCurrentIndex(divIdx >= 0 ? divIdx : 0);
+            sdrDivMode->blockSignals(false);
+            sdrDivPhase->blockSignals(true); sdrDivPhase->setValue(divCfg.phaseDeg); sdrDivPhase->blockSignals(false);
+            sdrDivAmp->blockSignals(true); sdrDivAmp->setValue(divCfg.amplitudeB); sdrDivAmp->blockSignals(false);
+            if (duoDt) {
+                sdrDivHint->setText("Host DSP on Dual Tuner ch0+ch1: equal-gain sum or null-steer. "
+                                    "Creates a Diversity composite device row when enabled.");
+            } else {
+                sdrDivHint->setText("Diversity requires RSPduo Dual Tuner (two device rows).");
+            }
+        };
+
+        connect(table, &QTableWidget::currentCellChanged, &dlg, [&](int row, int, int, int) {
+            refreshSdrplayPanel(row);
+        });
+        for (size_t i = 0; i < antCombos.size(); ++i) {
+            connect(antCombos[i], QOverload<int>::of(&QComboBox::currentIndexChanged), &dlg,
+                    [&, i](int) { if (table->currentRow() == static_cast<int>(i)) refreshSdrplayPanel(static_cast<int>(i)); });
+        }
+        connect(sdrAgc, &QCheckBox::toggled, &dlg, [&](bool on) {
+            const int row = table->currentRow();
+            if (row < 0) return;
+            mgr.setLiveAgc(static_cast<size_t>(row), on);
+        });
+        connect(sdrIfgr, QOverload<double>::of(&QDoubleSpinBox::valueChanged), &dlg, [&](double v) {
+            const int row = table->currentRow();
+            if (row < 0) return;
+            mgr.setLiveGainElement(static_cast<size_t>(row), "IFGR", v);
+        });
+        connect(sdrRfgr, QOverload<double>::of(&QDoubleSpinBox::valueChanged), &dlg, [&](double v) {
+            const int row = table->currentRow();
+            if (row < 0) return;
+            mgr.setLiveGainElement(static_cast<size_t>(row), "RFGR", v);
+            if (row < static_cast<int>(gainSpins.size())) {
+                gainSpins[static_cast<size_t>(row)]->blockSignals(true);
+                gainSpins[static_cast<size_t>(row)]->setValue(v);
+                gainSpins[static_cast<size_t>(row)]->blockSignals(false);
+            }
+        });
+        connect(sdrBw, QOverload<int>::of(&QComboBox::currentIndexChanged), &dlg, [&](int) {
+            const int row = table->currentRow();
+            if (row < 0) return;
+            mgr.setLiveBandwidth(static_cast<size_t>(row), sdrBw->currentData().toDouble());
+        });
+        auto wireBoolSetting = [&](QCheckBox* box, const char* key) {
+            connect(box, &QCheckBox::toggled, &dlg, [&, key](bool on) {
+                const int row = table->currentRow();
+                if (row < 0) return;
+                mgr.setLiveSdrplaySetting(static_cast<size_t>(row), key, SdrplayProfile::boolSetting(on));
+            });
+        };
+        wireBoolSetting(sdrBiasT, SdrplaySettings::kBiasT);
+        wireBoolSetting(sdrRfNotch, SdrplaySettings::kRfNotch);
+        wireBoolSetting(sdrDabNotch, SdrplaySettings::kDabNotch);
+        wireBoolSetting(sdrExtRef, SdrplaySettings::kExtRef);
+        wireBoolSetting(sdrHdr, SdrplaySettings::kHdr);
+        wireBoolSetting(sdrIqCorr, SdrplaySettings::kIqCorr);
+        connect(sdrAgcSet, QOverload<int>::of(&QSpinBox::valueChanged), &dlg, [&](int v) {
+            const int row = table->currentRow();
+            if (row < 0) return;
+            mgr.setLiveSdrplaySetting(static_cast<size_t>(row), SdrplaySettings::kAgcSetpoint, std::to_string(v));
+        });
+        connect(sdrRfGainSel, QOverload<int>::of(&QComboBox::currentIndexChanged), &dlg, [&](int) {
+            const int row = table->currentRow();
+            if (row < 0) return;
+            mgr.setLiveSdrplaySetting(static_cast<size_t>(row), SdrplaySettings::kRfGainSel,
+                                      sdrRfGainSel->currentText().toStdString());
+        });
+        auto applyDiversityFromUi = [&]() {
+            const int row = table->currentRow();
+            if (row < 0) return;
+            SdrplayDiversity::Config cfg;
+            cfg.mode = static_cast<SdrplayDiversity::Mode>(sdrDivMode->currentData().toInt());
+            cfg.phaseDeg = static_cast<float>(sdrDivPhase->value());
+            cfg.amplitudeB = static_cast<float>(sdrDivAmp->value());
+            if (!mgr.configureDiversity(static_cast<size_t>(row), cfg)) {
+                sdrDivHint->setText("Diversity failed — need Dual Tuner ch0+ch1 streaming.");
+                sdrDivMode->blockSignals(true);
+                sdrDivMode->setCurrentIndex(0);
+                sdrDivMode->blockSignals(false);
+            } else if (cfg.mode != SdrplayDiversity::Mode::Off) {
+                const size_t listen = mgr.preferredListenDeviceIndex();
+                {
+                    std::lock_guard<std::mutex> lk(receiversMutex);
+                    for (auto& rx : receivers) {
+                        if (rx) rx->deviceIndex = listen;
+                    }
+                }
+                sdrDivHint->setText(QString("Diversity on (%1). Listen path is the composite device %2.")
+                    .arg(QString::fromStdString(SdrplayDiversity::modeName(cfg.mode)))
+                    .arg(static_cast<qulonglong>(listen)));
+            }
+        };
+        connect(sdrDivMode, QOverload<int>::of(&QComboBox::currentIndexChanged), &dlg, [&](int) { applyDiversityFromUi(); });
+        connect(sdrDivPhase, QOverload<double>::of(&QDoubleSpinBox::valueChanged), &dlg, [&](double) { applyDiversityFromUi(); });
+        connect(sdrDivAmp, QOverload<double>::of(&QDoubleSpinBox::valueChanged), &dlg, [&](double) { applyDiversityFromUi(); });
+        if (!devs.empty()) {
+            table->selectRow(0);
+            refreshSdrplayPanel(0);
+        }
+
         QHBoxLayout* btnLay = new QHBoxLayout();
         QPushButton* rescanBtn = new QPushButton("Rescan Devices");
         QPushButton* applyBtn = new QPushButton("Apply Changes");
@@ -7726,9 +8044,14 @@ void MainWindow::showDevicesDialog()
                     double rateHz = rateSpins[i]->value() * 1e6;
                     double g = gainSpins[i]->value();
                     double ppm = ppmSpins[i]->value();
-                    std::string ant = antCombos[i]->currentText().toStdString();
+                    QString antData = antCombos[i]->currentData().toString();
+                    std::string ant = antData.isEmpty()
+                        ? antCombos[i]->currentText().toStdString()
+                        : antData.toStdString();
 
                     mgr.updateDeviceParams(i, rateHz, g, ant, ppm);
+                    mgr.applyLiveSampleRate(i, rateHz);
+                    mgr.setLiveAntenna(i, ant);
                     mgr.setDirectSampling(i, directCombos[i]->currentData().toInt());
 
                     // Start/stop real streaming on enable. startStreaming itself is hardened (try/catch + stub fallback + thread guards)
@@ -9358,6 +9681,19 @@ void MainWindow::installSdrTownControlServer()
         }
     }
 
+size_t MainWindow::sdrTownControlActiveDeviceIndex()
+{
+        {
+            std::lock_guard<std::mutex> lock(receiversMutex);
+            if (!receivers.empty() && receivers.front()) {
+                const size_t idx = receivers.front()->deviceIndex;
+                const auto devs = DeviceManager::instance().getDevices();
+                if (idx < devs.size()) return idx;
+            }
+        }
+        return guiRuntimeDeviceIndex();
+    }
+
 QJsonObject MainWindow::sdrTownControlStatusSnapshot()
 {
         QJsonObject state;
@@ -9375,13 +9711,122 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
             state.insert("volume", monitorMasterVolume);
         }
 
+        auto& mgr = DeviceManager::instance();
+        const auto devs = mgr.getDevices();
+        const size_t activeIdx = sdrTownControlActiveDeviceIndex();
+        const bool haveActive = activeIdx < devs.size();
+        const DeviceInfo* active = haveActive ? &devs[activeIdx] : nullptr;
+
         {
-            auto& mgr = DeviceManager::instance();
-            const int ds = mgr.getDirectSampling(0);
+            const int ds = haveActive ? mgr.getDirectSampling(activeIdx) : mgr.getDirectSampling(0);
             state.insert("directSampling", ds);
             state.insert("directSamplingLabel",
                          ds == 1 ? QStringLiteral("I-ADC")
                                  : (ds == 2 ? QStringLiteral("Q-ADC") : QStringLiteral("Off")));
+            const bool rtlLike = active &&
+                (active->driver == "rtlsdr" || active->driver.find("rtl") != std::string::npos);
+            state.insert("rtlDirectSamplingAvailable", rtlLike && !(active && active->isSdrplay));
+        }
+
+        QJsonObject activeDevice;
+        if (active) {
+            activeDevice.insert("index", static_cast<int>(activeIdx));
+            activeDevice.insert("label", QString::fromStdString(active->label));
+            activeDevice.insert("driver", QString::fromStdString(active->driver));
+            activeDevice.insert("hardware", QString::fromStdString(active->hardware));
+            activeDevice.insert("serial", QString::fromStdString(active->serial));
+            activeDevice.insert("streaming", mgr.isStreaming(activeIdx));
+            activeDevice.insert("enabled", active->enabled);
+            activeDevice.insert("gainDb", active->gain);
+            activeDevice.insert("gainMin", active->gainMin);
+            activeDevice.insert("gainMax", active->gainMax);
+            activeDevice.insert("antenna", QString::fromStdString(active->antenna));
+            activeDevice.insert("isSdrplay", active->isSdrplay);
+            activeDevice.insert("isDiversityComposite", active->isDiversityComposite);
+        }
+        state.insert("activeDevice", activeDevice);
+        state.insert("activeDeviceIndex", static_cast<int>(haveActive ? activeIdx : -1));
+
+        // SDRplay feature panel — present only while the active device is SDRplay.
+        if (active && active->isSdrplay) {
+            QJsonObject sp;
+            sp.insert("active", true);
+            sp.insert("deviceIndex", static_cast<int>(activeIdx));
+            sp.insert("model", QString::fromStdString(
+                active->sdrplayModel.empty() ? active->label : active->sdrplayModel));
+            sp.insert("duoMode", QString::fromStdString(active->sdrplayDuoMode));
+            sp.insert("duoModeLabel", QString::fromStdString(
+                SdrplayProfile::duoModeDisplayName(active->sdrplayDuoMode)));
+            sp.insert("rxChannel", static_cast<int>(active->rxChannel));
+            sp.insert("isDiversityComposite", active->isDiversityComposite);
+            sp.insert("antenna", QString::fromStdString(active->antenna));
+            sp.insert("antennaDescription", QString::fromStdString(
+                SdrplayProfile::antennaPortDescription(active->sdrplayModel, active->antenna)));
+            QJsonArray ants;
+            for (const auto& a : active->antennas) ants.append(QString::fromStdString(a));
+            sp.insert("antennas", ants);
+            sp.insert("agcEnabled", active->agcEnabled);
+            sp.insert("ifgrDb", active->ifgrDb);
+            sp.insert("rfgrDb", active->rfgrDb);
+            sp.insert("gainMin", active->gainMin);
+            sp.insert("gainMax", active->gainMax);
+            sp.insert("bandwidthHz", active->bandwidthHz);
+            QJsonArray bws;
+            for (double bw : active->bandwidthsHz) bws.append(bw);
+            sp.insert("bandwidthsHz", bws);
+            QJsonArray keys;
+            for (const auto& k : active->sdrplaySettingKeys) keys.append(QString::fromStdString(k));
+            if (keys.isEmpty()) {
+                for (const auto& k : SdrplayProfile::knownSettingKeys())
+                    keys.append(QString::fromStdString(k));
+            }
+            sp.insert("settingKeys", keys);
+            QJsonObject settings;
+            for (const auto& kv : active->soapySettings)
+                settings.insert(QString::fromStdString(kv.first), QString::fromStdString(kv.second));
+            sp.insert("settings", settings);
+            const bool biasOk = SdrplayProfile::biasTAllowedForAntenna(
+                active->sdrplayModel, active->antenna);
+            sp.insert("biasTAllowed", biasOk);
+            sp.insert("rfNotchLabel", QString::fromStdString(SdrplayProfile::rfNotchUiLabel()));
+            sp.insert("rfNotchTooltip", QString::fromStdString(SdrplayProfile::rfNotchUiTooltip()));
+            sp.insert("extRefLabel", QString::fromStdString(
+                SdrplayProfile::extRefUiLabel(active->sdrplayModel)));
+            sp.insert("extRefTooltip", QString::fromStdString(
+                SdrplayProfile::extRefUiTooltip(active->sdrplayModel)));
+
+            auto hasKey = [&](const char* key) {
+                return std::find(active->sdrplaySettingKeys.begin(), active->sdrplaySettingKeys.end(), key)
+                           != active->sdrplaySettingKeys.end()
+                       || active->sdrplaySettingKeys.empty();
+            };
+            QJsonObject features;
+            features.insert("agc", true);
+            features.insert("ifgr", true);
+            features.insert("rfgr", true);
+            features.insert("antenna", !active->antennas.empty());
+            features.insert("bandwidth", true);
+            features.insert("biasT", hasKey(SdrplaySettings::kBiasT) && biasOk);
+            features.insert("rfNotch", hasKey(SdrplaySettings::kRfNotch));
+            features.insert("dabNotch", hasKey(SdrplaySettings::kDabNotch));
+            features.insert("extRef", hasKey(SdrplaySettings::kExtRef));
+            features.insert("hdr", hasKey(SdrplaySettings::kHdr));
+            features.insert("iqCorr", hasKey(SdrplaySettings::kIqCorr));
+            features.insert("agcSetpoint", hasKey(SdrplaySettings::kAgcSetpoint));
+            features.insert("rfGainSel", hasKey(SdrplaySettings::kRfGainSel));
+            features.insert("diversity",
+                active->sdrplayDuoMode == "DT" || active->isDiversityComposite);
+            sp.insert("features", features);
+
+            const auto divCfg = mgr.getDiversityConfig();
+            QJsonObject diversity;
+            diversity.insert("mode", QString::fromStdString(SdrplayDiversity::modeName(divCfg.mode)));
+            diversity.insert("phaseDeg", divCfg.phaseDeg);
+            diversity.insert("amplitudeB", divCfg.amplitudeB);
+            sp.insert("diversity", diversity);
+            state.insert("sdrplay", sp);
+        } else {
+            state.insert("sdrplay", QJsonValue::Null);
         }
 
         QJsonArray knownControlChannels;
@@ -9397,16 +9842,22 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
         }
         state.insert("knownControlChannels", knownControlChannels);
 
-        auto& mgr = DeviceManager::instance();
         QJsonArray devices;
-        const auto devs = mgr.getDevices();
         for (size_t i = 0; i < devs.size(); ++i) {
             QJsonObject dev;
             dev.insert("index", static_cast<int>(i));
             dev.insert("label", QString::fromStdString(devs[i].label));
+            dev.insert("driver", QString::fromStdString(devs[i].driver));
             dev.insert("streaming", mgr.isStreaming(i));
             dev.insert("enabled", devs[i].enabled);
             dev.insert("gainDb", devs[i].gain);
+            dev.insert("isSdrplay", devs[i].isSdrplay);
+            if (devs[i].isSdrplay) {
+                dev.insert("sdrplayModel", QString::fromStdString(devs[i].sdrplayModel));
+                dev.insert("sdrplayDuoMode", QString::fromStdString(devs[i].sdrplayDuoMode));
+                dev.insert("rxChannel", static_cast<int>(devs[i].rxChannel));
+                dev.insert("isDiversityComposite", devs[i].isDiversityComposite);
+            }
             devices.append(dev);
         }
         state.insert("devices", devices);
@@ -9647,9 +10098,106 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
         caps.insert("readRds", true);
         caps.insert("readTones", true);
         caps.insert("readSstv", true);
+        caps.insert("sdrplayControls", active && active->isSdrplay);
+        caps.insert("satcomScanner", true);
+        caps.insert("satcomPasses", true);
+        caps.insert("aircraftMap", true);
+        caps.insert("inmarsatAero", true);
         state.insert("capabilities", caps);
 
         return state;
+    }
+
+QJsonObject MainWindow::applySdrTownControlSdrplay(const QJsonObject& body)
+{
+        auto& mgr = DeviceManager::instance();
+        const auto devs = mgr.getDevices();
+        size_t idx = sdrTownControlActiveDeviceIndex();
+        if (body.contains("deviceIndex")) {
+            const int requested = body.value("deviceIndex").toInt(-1);
+            if (requested >= 0) idx = static_cast<size_t>(requested);
+        }
+        if (idx >= devs.size() || !devs[idx].isSdrplay) {
+            return {{"ok", false}, {"status", 400},
+                    {"error", "active device is not SDRplay — SDRplay controls unavailable"}};
+        }
+
+        if (body.contains("antenna")) {
+            const std::string ant = body.value("antenna").toString().toStdString();
+            if (!ant.empty()) mgr.setLiveAntenna(idx, ant);
+        }
+        if (body.contains("agc") || body.contains("agcEnabled")) {
+            const bool on = body.contains("agc") ? body.value("agc").toBool(false)
+                                                 : body.value("agcEnabled").toBool(false);
+            mgr.setLiveAgc(idx, on);
+        }
+        if (body.contains("ifgrDb")) {
+            const double v = body.value("ifgrDb").toDouble(std::numeric_limits<double>::quiet_NaN());
+            if (std::isfinite(v)) mgr.setLiveGainElement(idx, "IFGR", v);
+        }
+        if (body.contains("rfgrDb")) {
+            const double v = body.value("rfgrDb").toDouble(std::numeric_limits<double>::quiet_NaN());
+            if (std::isfinite(v)) {
+                mgr.setLiveGainElement(idx, "RFGR", v);
+                {
+                    std::lock_guard<std::mutex> lk(monitorParamsMutex);
+                    monitorRfGainDb = v;
+                }
+                syncMonitorVarsToReceiver(0);
+                if (rfGainSpin) {
+                    rfGainSpin->blockSignals(true);
+                    rfGainSpin->setValue(std::clamp(v, rfGainSpin->minimum(), rfGainSpin->maximum()));
+                    rfGainSpin->blockSignals(false);
+                }
+            }
+        }
+        if (body.contains("bandwidthHz")) {
+            const double v = body.value("bandwidthHz").toDouble(std::numeric_limits<double>::quiet_NaN());
+            if (std::isfinite(v)) mgr.setLiveBandwidth(idx, v);
+        }
+        if (body.contains("settings") && body.value("settings").isObject()) {
+            const QJsonObject settings = body.value("settings").toObject();
+            for (auto it = settings.begin(); it != settings.end(); ++it) {
+                mgr.setLiveSdrplaySetting(idx, it.key().toStdString(), it.value().toString().toStdString());
+            }
+        }
+        // Convenience booleans → soapy settings
+        auto setBoolKey = [&](const char* jsonKey, const char* soapyKey) {
+            if (!body.contains(jsonKey)) return;
+            const bool on = body.value(jsonKey).toBool(false);
+            mgr.setLiveSdrplaySetting(idx, soapyKey, SdrplayProfile::boolSetting(on));
+        };
+        setBoolKey("biasT", SdrplaySettings::kBiasT);
+        setBoolKey("rfNotch", SdrplaySettings::kRfNotch);
+        setBoolKey("dabNotch", SdrplaySettings::kDabNotch);
+        setBoolKey("extRef", SdrplaySettings::kExtRef);
+        setBoolKey("hdr", SdrplaySettings::kHdr);
+        setBoolKey("iqCorr", SdrplaySettings::kIqCorr);
+        if (body.contains("agcSetpoint")) {
+            mgr.setLiveSdrplaySetting(idx, SdrplaySettings::kAgcSetpoint,
+                                      std::to_string(body.value("agcSetpoint").toInt(-30)));
+        }
+        if (body.contains("rfGainSel")) {
+            mgr.setLiveSdrplaySetting(idx, SdrplaySettings::kRfGainSel,
+                                      body.value("rfGainSel").toString().toStdString());
+        }
+        if (body.contains("diversity") && body.value("diversity").isObject()) {
+            const QJsonObject d = body.value("diversity").toObject();
+            SdrplayDiversity::Config cfg = mgr.getDiversityConfig();
+            if (d.contains("mode"))
+                cfg.mode = SdrplayDiversity::modeFromName(d.value("mode").toString().toStdString());
+            if (d.contains("phaseDeg"))
+                cfg.phaseDeg = static_cast<float>(d.value("phaseDeg").toDouble(cfg.phaseDeg));
+            if (d.contains("amplitudeB"))
+                cfg.amplitudeB = static_cast<float>(d.value("amplitudeB").toDouble(cfg.amplitudeB));
+            if (!mgr.configureDiversity(idx, cfg) && cfg.mode != SdrplayDiversity::Mode::Off) {
+                return {{"ok", false}, {"status", 400},
+                        {"error", "diversity requires RSPduo Dual Tuner ch0+ch1"},
+                        {"state", sdrTownControlStatusSnapshot()}};
+            }
+        }
+
+        return {{"ok", true}, {"state", sdrTownControlStatusSnapshot()}};
     }
 
 QJsonObject MainWindow::applySdrTownControlVolume(const QJsonObject& body)
@@ -10071,6 +10619,276 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
         }
         if (path == "/v1/direct-sampling" && method == "POST") {
             return applySdrTownControlDirectSampling(body);
+        }
+        if (path == "/v1/sdrplay" && method == "POST") {
+            return applySdrTownControlSdrplay(body);
+        }
+        if (path == "/v1/satcom/status" && method == "GET") {
+            const auto snap = SatcomScannerEngine::instance().snapshot();
+            QJsonObject sat;
+            sat.insert("state", QString::fromStdString(SatcomScannerEngine::instance().stateName()));
+            sat.insert("currentHz", snap.currentHz);
+            sat.insert("currentMHz", snap.currentHz / 1e6);
+            sat.insert("lockHz", snap.lockHz);
+            sat.insert("lockMHz", snap.lockHz / 1e6);
+            sat.insert("recordHz", snap.recordHz);
+            sat.insert("audioRmsDb", snap.audioRmsDb);
+            sat.insert("deviceLabel", QString::fromStdString(snap.deviceLabel));
+            sat.insert("deviceConnected", snap.deviceConnected);
+            sat.insert("lastStatus", QString::fromStdString(snap.lastStatus));
+            sat.insert("aptPreviewPath", QString::fromStdString(snap.aptPreviewPath));
+            sat.insert("logWritten", static_cast<double>(snap.logWritten));
+            sat.insert("logDropped", static_cast<double>(snap.logDropped));
+            QJsonObject cfg;
+            cfg.insert("lowHz", snap.config.lowHz);
+            cfg.insert("highHz", snap.config.highHz);
+            cfg.insert("lowMHz", snap.config.lowHz / 1e6);
+            cfg.insert("highMHz", snap.config.highHz / 1e6);
+            cfg.insert("stepHz", snap.config.stepHz);
+            cfg.insert("dwellMs", snap.config.dwellMs);
+            cfg.insert("bandwidthHz", snap.config.bandwidthHz);
+            cfg.insert("mode", QString::fromStdString(snap.config.mode));
+            cfg.insert("squelchDb", snap.config.squelchDb);
+            sat.insert("config", cfg);
+            QJsonArray decodes;
+            for (const auto& line : snap.recentDecodes)
+                decodes.append(QString::fromStdString(line));
+            sat.insert("recentDecodes", decodes);
+            QJsonArray spectrum;
+            for (float v : snap.spectrumDb) spectrum.append(v);
+            sat.insert("spectrumDb", spectrum);
+            sat.insert("spectrumCenterHz", snap.spectrumCenterHz);
+            sat.insert("spectrumRateHz", snap.spectrumRateHz);
+            QJsonArray presets;
+            for (const auto& p : snap.config.presets) {
+                QJsonObject pj;
+                pj.insert("name", QString::fromStdString(p.name));
+                pj.insert("lowMHz", p.lowHz / 1e6);
+                pj.insert("highMHz", p.highHz / 1e6);
+                pj.insert("mode", QString::fromStdString(p.mode));
+                presets.append(pj);
+            }
+            sat.insert("presets", presets);
+            sat.insert("passArmed", snap.passArmed);
+            sat.insert("autoTrack", snap.autoTrack);
+            sat.insert("dopplerHz", snap.dopplerHz);
+            sat.insert("tunedHz", snap.tunedHz);
+            sat.insert("tunedMHz", snap.tunedHz / 1e6);
+            sat.insert("armedRole", QString::fromStdString(snap.armedRole));
+            // Merge pass planner snapshot (observer, passes, catalogue, TLE age)
+            const QJsonDocument planDoc = QJsonDocument::fromJson(
+                QByteArray::fromStdString(SatPassPlanner::instance().statusJson().dump()));
+            if (planDoc.isObject()) {
+                const QJsonObject plan = planDoc.object();
+                for (auto it = plan.begin(); it != plan.end(); ++it)
+                    sat.insert(it.key(), it.value());
+            }
+            return {{"ok", true}, {"satcom", sat}};
+        }
+        if (path == "/v1/satcom/observer" && method == "GET") {
+            return {{"ok", true}, {"observer", QJsonDocument::fromJson(
+                QByteArray::fromStdString(SatPassPlanner::instance().observer().toJson().dump())).object()}};
+        }
+        if (path == "/v1/satcom/observer" && method == "POST") {
+            SatObserverConfig o = SatPassPlanner::instance().observer();
+            if (body.contains("latDeg")) o.latDeg = body.value("latDeg").toDouble(o.latDeg);
+            if (body.contains("lonDeg")) o.lonDeg = body.value("lonDeg").toDouble(o.lonDeg);
+            if (body.contains("lat")) {
+                double v = 0;
+                if (SatObserverConfig::parseLatLonToken(body.value("lat").toString().toStdString(), true, &v))
+                    o.latDeg = v;
+            }
+            if (body.contains("lon")) {
+                double v = 0;
+                if (SatObserverConfig::parseLatLonToken(body.value("lon").toString().toStdString(), false, &v))
+                    o.lonDeg = v;
+            }
+            if (body.contains("altM")) o.altM = body.value("altM").toDouble(o.altM);
+            if (body.contains("minElevationDeg")) o.minElevationDeg = body.value("minElevationDeg").toDouble(o.minElevationDeg);
+            SatPassPlanner::instance().setObserver(o);
+            return {{"ok", true}, {"observer", QJsonDocument::fromJson(
+                QByteArray::fromStdString(o.toJson().dump())).object()}};
+        }
+        if (path == "/v1/satcom/passes" && method == "GET") {
+            SatPassPlanner::instance().refreshPasses(24.0);
+            const QJsonDocument planDoc = QJsonDocument::fromJson(
+                QByteArray::fromStdString(SatPassPlanner::instance().statusJson().dump()));
+            return {{"ok", true}, {"satcom", planDoc.object()}};
+        }
+        if (path == "/v1/satcom/catalogue" && method == "GET") {
+            QJsonObject out = QJsonDocument::fromJson(
+                                  QByteArray::fromStdString(SatPassPlanner::instance().catalogue().toJson().dump()))
+                                  .object();
+            out.insert("ok", true);
+            return out;
+        }
+        if (path == "/v1/satcom/catalogue" && method == "POST") {
+            std::vector<std::string> ids;
+            const QJsonArray arr = body.value("selected").toArray();
+            for (const auto& v : arr) ids.push_back(v.toString().toStdString());
+            SatPassPlanner::instance().setCatalogueSelection(ids);
+            QJsonObject out = QJsonDocument::fromJson(
+                                  QByteArray::fromStdString(SatPassPlanner::instance().catalogue().toJson().dump()))
+                                  .object();
+            out.insert("ok", true);
+            return out;
+        }
+        if (path == "/v1/satcom/tle/refresh" && method == "POST") {
+            std::string err;
+            const bool ok = SatPassPlanner::instance().refreshTle(&err);
+            return {{"ok", ok}, {"error", QString::fromStdString(err)},
+                    {"tleAgeSec", static_cast<double>(TleStore::instance().ageSec())}};
+        }
+        if (path == "/v1/satcom/arm" && method == "POST") {
+            if (p25FollowEnabled && !body.value("force").toBool(false) &&
+                body.value("action").toString().toLower() != "disarm" &&
+                body.value("action").toString().toLower() != "autotrack_only") {
+                return {{"ok", false}, {"status", 409},
+                        {"error", "P25 follow active — pass force=true to override"}};
+            }
+            const QString satId = body.value("satId").toString();
+            const QString downlinkId = body.value("downlinkId").toString();
+            const bool autoTrack = body.value("autoTrack").toBool(true);
+            const QString action = body.value("action").toString().toLower();
+            if (action == "autotrack_only") {
+                SatcomScannerEngine::instance().setAutoTrack(autoTrack);
+            } else if (action == "disarm" || satId == "disarm") {
+                SatcomScannerEngine::instance().disarmPass();
+            } else {
+                std::string err;
+                if (!SatcomScannerEngine::instance().armPass(satId.toStdString(), downlinkId.toStdString(),
+                                                            autoTrack, body.value("force").toBool(false), &err)) {
+                    return {{"ok", false}, {"status", 400}, {"error", QString::fromStdString(err)}};
+                }
+                SatcomScannerEngine::instance().start();
+            }
+            QJsonObject fake;
+            return handleSdrTownControlRequest("GET", "/v1/satcom/status", fake);
+        }
+        if (path == "/v1/satcom/control" && method == "POST") {
+            auto& eng = SatcomScannerEngine::instance();
+            const QString action = body.value("action").toString().trimmed().toLower();
+            if (body.contains("lowMHz") || body.contains("highMHz") || body.contains("mode") ||
+                body.contains("squelchDb") || body.contains("bandwidthKHz") || body.contains("stepKHz") ||
+                action == "set") {
+                auto cfg = eng.config();
+                if (body.contains("lowMHz")) cfg.lowHz = body.value("lowMHz").toDouble(cfg.lowHz / 1e6) * 1e6;
+                if (body.contains("highMHz")) cfg.highHz = body.value("highMHz").toDouble(cfg.highHz / 1e6) * 1e6;
+                if (body.contains("stepKHz")) cfg.stepHz = body.value("stepKHz").toDouble(cfg.stepHz / 1e3) * 1e3;
+                if (body.contains("bandwidthKHz")) cfg.bandwidthHz = body.value("bandwidthKHz").toDouble(cfg.bandwidthHz / 1e3) * 1e3;
+                if (body.contains("mode")) cfg.mode = body.value("mode").toString().toStdString();
+                if (body.contains("squelchDb")) cfg.squelchDb = body.value("squelchDb").toDouble(cfg.squelchDb);
+                if (body.contains("dwellMs")) cfg.dwellMs = body.value("dwellMs").toInt(cfg.dwellMs);
+                eng.setConfig(cfg);
+            }
+            if (body.contains("preset"))
+                eng.applyPreset(body.value("preset").toString().toStdString());
+            if (action == "start") {
+                if (!eng.start(body.value("force").toBool(false))) {
+                    return {{"ok", false}, {"status", 409},
+                            {"error", QString::fromStdString(eng.snapshot().lastStatus)}};
+                }
+            }
+            else if (action == "stop") { eng.stopRecording(); eng.stop(); }
+            else if (action == "skip") eng.skip();
+            else if (action == "record") eng.startRecording();
+            else if (action == "record_stop") eng.stopRecording();
+            else if (action != "set" && !action.isEmpty() && action != "preset") {
+                return {{"ok", false}, {"status", 400}, {"error", "unknown satcom action"}};
+            }
+            // Return fresh status
+            QJsonObject fake;
+            return handleSdrTownControlRequest("GET", "/v1/satcom/status", fake);
+        }
+        if (path == "/v1/aircraft/status" && method == "GET") {
+            const QJsonDocument doc = QJsonDocument::fromJson(
+                QByteArray::fromStdString(AdsBTrackStore::instance().statusJson().dump()));
+            QJsonObject out = doc.object();
+            out.insert("ok", true);
+            return out;
+        }
+        if (path == "/v1/aircraft/track" && method == "GET") {
+            const QString icaoHex = body.value("icao").toString();
+            bool ok = false;
+            const uint32_t icao = icaoHex.toUInt(&ok, 16);
+            if (!ok) return {{"ok", false}, {"error", "icao required"}};
+            const auto t = AdsBTrackStore::instance().trackByIcao(icao);
+            if (t.icao == 0) return {{"ok", false}, {"error", "unknown aircraft"}};
+            return {{"ok", true},
+                    {"icao", QString::fromStdString(t.icaoHex)},
+                    {"callsign", QString::fromStdString(t.callsign)},
+                    {"lat", t.latDeg},
+                    {"lon", t.lonDeg},
+                    {"altFt", t.altFt},
+                    {"gsKt", t.gsKt},
+                    {"trackDeg", t.trackDeg},
+                    {"squawk", QString::fromStdString(t.squawk)},
+                    {"type", QString::fromStdString(t.typeCode)},
+                    {"route", QString::fromStdString(t.route)},
+                    {"photoUrl", QString::fromStdString(t.photoUrl)},
+                    {"fromLocal", t.fromLocal},
+                    {"fromNetwork", t.fromNetwork},
+                    {"fromAdsc", t.fromAdsc}};
+        }
+        if (path == "/v1/aircraft/refresh" && method == "POST") {
+            std::string err;
+            const bool ok = AdsBTrackStore::instance().refreshNetwork(&err);
+            const QJsonDocument doc = QJsonDocument::fromJson(
+                QByteArray::fromStdString(AdsBTrackStore::instance().statusJson().dump()));
+            QJsonObject out = doc.object();
+            out.insert("ok", ok);
+            if (!ok) out.insert("error", QString::fromStdString(err));
+            return out;
+        }
+        if (path == "/v1/inmarsat/status" && method == "GET") {
+            const QJsonDocument doc = QJsonDocument::fromJson(
+                QByteArray::fromStdString(InmarsatEngine::instance().statusJson().dump()));
+            return {{"ok", true}, {"inmarsat", doc.object()}};
+        }
+        if (path == "/v1/inmarsat/bandplans" && method == "GET") {
+            InmarsatBandPlanStore::instance().reload(nullptr);
+            const QJsonDocument doc = QJsonDocument::fromJson(
+                QByteArray::fromStdString(InmarsatBandPlanStore::instance().catalogueJson().dump()));
+            return doc.object();
+        }
+        if (path == "/v1/inmarsat/messages" && method == "GET") {
+            const size_t limit = static_cast<size_t>(std::max(1, body.value("limit").toInt(100)));
+            const size_t offset = static_cast<size_t>(std::max(0, body.value("offset").toInt(0)));
+            const QJsonDocument doc = QJsonDocument::fromJson(
+                QByteArray::fromStdString(InmarsatMessageStore::instance().recentJson(limit, offset).dump()));
+            return doc.object();
+        }
+        if (path == "/v1/inmarsat/control" && method == "POST") {
+            const QString action = body.value("action").toString().toLower();
+            auto cfg = InmarsatEngine::instance().config();
+            if (body.contains("bandPlanId"))
+                InmarsatEngine::instance().selectBandPlan(body.value("bandPlanId").toString().toStdString());
+            if (body.contains("channelHz") || body.contains("channelMHz")) {
+                double hz = body.value("channelHz").toDouble(0.0);
+                if (hz <= 0.0 && body.contains("channelMHz"))
+                    hz = body.value("channelMHz").toDouble(0.0) * 1e6;
+                const QString mode = body.value("mode").toString();
+                const int baud = body.value("baud").toInt(0);
+                if (hz > 0.0)
+                    InmarsatEngine::instance().selectChannel(hz, mode.toStdString(), baud);
+            }
+            if (body.contains("voiceFollow") || body.contains("recordVoice") || body.contains("deviceIndex")) {
+                cfg = InmarsatEngine::instance().config();
+                if (body.contains("voiceFollow")) cfg.voiceFollow = body.value("voiceFollow").toBool(cfg.voiceFollow);
+                if (body.contains("recordVoice")) cfg.recordVoice = body.value("recordVoice").toBool(cfg.recordVoice);
+                if (body.contains("deviceIndex")) cfg.deviceIndex = static_cast<size_t>(body.value("deviceIndex").toInt(0));
+                InmarsatEngine::instance().setConfig(cfg);
+            }
+            if (action == "start") {
+                if (!InmarsatEngine::instance().start(body.value("force").toBool(false))) {
+                    return {{"ok", false}, {"status", 409},
+                            {"error", QString::fromStdString(InmarsatEngine::instance().snapshot().lastStatus)}};
+                }
+            }
+            else if (action == "stop") InmarsatEngine::instance().stop();
+            const QJsonDocument doc = QJsonDocument::fromJson(
+                QByteArray::fromStdString(InmarsatEngine::instance().statusJson().dump()));
+            return {{"ok", true}, {"inmarsat", doc.object()}};
         }
         if (path == "/v1/p25/control" && method == "POST") {
             QJsonObject tune = body;
@@ -11915,6 +12733,19 @@ void MainWindow::createMenus()
         QMenu* scanMenu = menuBar()->addMenu("&Scan");
         scanMenu->addAction("&Start Smart Scan", [](){});
         scanMenu->addAction("Band &Plans...", this, &MainWindow::showBandPlanDialog);
+        scanMenu->addSeparator();
+        scanMenu->addAction("Satcom / &Inmarsat panel...", this, [this]() {
+            auto* hub = findChild<SatcomHubWidget*>("satcomHub");
+            if (!hub) return;
+            hub->showSatcomTab();
+            for (auto* dock : findChildren<QDockWidget*>()) {
+                if (dock->objectName() == "workspace.satcom") {
+                    dock->show();
+                    dock->raise();
+                    break;
+                }
+            }
+        });
 
         // Audio — important first-class menu (per design)
         QMenu* audioMenu = menuBar()->addMenu("&Audio");
@@ -11956,6 +12787,27 @@ void MainWindow::createMenus()
                 });
             }
             window->show(); window->raise(); window->activateWindow();
+        });
+        auto raiseSatcomHub = [this](auto showTab) {
+            auto* hub = findChild<SatcomHubWidget*>("satcomHub");
+            if (!hub) return;
+            showTab(hub);
+            for (auto* dock : findChildren<QDockWidget*>()) {
+                if (dock->objectName() == "workspace.satcom") {
+                    dock->show();
+                    dock->raise();
+                    break;
+                }
+            }
+        };
+        toolsMenu->addAction("Satcom / &Inmarsat...", this, [raiseSatcomHub]() {
+            raiseSatcomHub([](SatcomHubWidget* h) { h->showSatcomTab(); });
+        });
+        toolsMenu->addAction("&Aircraft Map...", this, [raiseSatcomHub]() {
+            raiseSatcomHub([](SatcomHubWidget* h) { h->showAircraftTab(); });
+        });
+        toolsMenu->addAction("&Inmarsat Aero...", this, [raiseSatcomHub]() {
+            raiseSatcomHub([](SatcomHubWidget* h) { h->showInmarsatTab(); });
         });
         toolsMenu->addAction("&Decode Log / Transcript...", this, [this]() {
             showTranscriptWindow();

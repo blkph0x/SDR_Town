@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Current version** | **0.2.66** (experimental channel) |
+| **Current version** | **0.2.74** (experimental channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
@@ -47,6 +47,11 @@ Formerly *MaulAudio Pro*. Branding, binaries, installer, AppData paths, and rele
 - `GET /v1/status` includes monitor state and a `p25` object. From **0.2.63**, `p25.talkgroupStatusLabel` is the clean `TG <id> <alpha>` string (no voice diagnostic suffix). FUBAR uses that for the website subtitle, with an alias-file fallback on older SDR Town builds.
 - From **0.2.64**, status also exposes read-only `rds`, `tones` (CTCSS/DCS), and `sstv` blocks for the FUBAR website panels. `POST /v1/direct-sampling` sets RTL-SDR `direct_samp` (0=off, 1=I-ADC, 2=Q-ADC) for HF down to ~500 kHz. `POST /v1/mode` changes demod at the current frequency.
 - From **0.2.66**, website / local-control analog tune and mode changes fully leave P25 Monitor CC (pass `force=true` while a grant follow is live) so FUBAR mode/freq buttons stick instead of snapping back to P25.
+- From **0.2.67**, `GET /v1/status` includes `activeDevice`, `rtlDirectSamplingAvailable`, and a `sdrplay` object (or null) with model-aware features. `POST /v1/sdrplay` applies antenna/AGC/IFGR/RFGR/notches/Bias-T/HDR/clock OUT/diversity. `SdrTownControl_Request` exposes arbitrary control paths for FUBAR.
+- From **0.2.68**, Scan/Tools **Satcom Scanner** tab: band sweep/lock/record with async logging, AX.25/APRS AFSK1200 and NOAA APT grayscale decode. Local control: `GET /v1/satcom/status`, `POST /v1/satcom/control`, capability `satcomScanner`. Out of scope: commercial sat decrypt, Meteor LRPT/SatDump, full SGP4 Doppler.
+- From **0.2.69**, Satcom pass planner: home lat/lon (N/S E/W), CelesTrak TLE cache, SGP4 AOS/LOS, Auto-track Doppler retune, ISS SSTV arm/handoff. API: `/v1/satcom/observer|passes|catalogue|arm|tle/refresh`, capability `satcomPasses`.
+- From **0.2.70**, sat catalogue honesty badges + Aircraft Map (local 1090 ADS-B + OpenSky enrichment, OSM tiles, click popout). API `/v1/aircraft/status|track|refresh`, capability `aircraftMap`.
+- From **0.2.74**, SDRplay discovery checks the installed API and SoapySDRPlay3 runtime in standard SDRplay, PothosSDR, radioconda, and application-local locations, and reports “module loaded” separately from “RSP detected”. From **0.2.73**, WFM listen path no longer resets demod on soft IQ catch-up (fixes 98.1 buzz + waterfall freeze); spectrum UI downsamples. From **0.2.72**, Satcom/Inmarsat/Aircraft dock is lazy and silent on the listening preset (no UI timer / pass-track retune fighting WFM). From **0.2.71**, experimental Inmarsat L-band prototype (public band plans, ACARS/ADS-C parse). **Not RF-qualified:** no unique-word/FEC/Aero AMBE proof. Tools **Inmarsat Aero**; API `/v1/inmarsat/status|control|messages|bandplans`, capability `inmarsatAero`. ADS-C positions feed Aircraft Map (`fromAdsc`). Dual-SDR voice radio not yet. Click the satcom home map (or Shift-click the aircraft map) to set observer lat/lon for ISS SSTV, pass prediction, and Doppler. CLI: `observer`, `tle`, `satcom`, `inmarsat`, `aircraft`.
 - From **0.2.65**, opt-in **Repeater Control Monitor** (receive-only): DTMF decode, CTCSS/DCS/carrier **heard list**, and dual-watch of output+input when the IQ passband covers the pair. Status adds `tones.dtmf` and `repeater`. See `docs/REPEATER_MONITOR.md`. NFM audio path improved; DCS uses the speech discriminator tap; DTMF no longer double-fires single keypresses.
 - Analog `/v1/tune` is refused while a P25 voice follow or warm-standby hold is active so a website poll cannot yank RF back to the control channel mid-call.
 
@@ -122,7 +127,7 @@ This is **active experimental software**. It is useful for real RF testing and d
 |------|---------|
 | **Analog demod** | **WFM, AM, NFM** are solid everyday paths. **AUTO** picks mode/BW/LPF suggestions from band priors + live signal estimates. **USB / LSB / CW** exist and produce audio; they are basic receive chains, not polished DX receivers. |
 | **GUI** | Spectrum + waterfall, device manager, multi-output audio, saved frequencies, P25 control/talkgroup panes, live SIG/NF/SNR/AFC readouts, IQ capture, training capture, Help â†’ Check for Updates / Report Issue. |
-| **Devices** | RTL-SDR (primary path) and SoapySDR discovery/open. Safe stub path when hardware is absent. RF gain, sample rate, antenna, PPM (manual + cal/apply). |
+| **Devices** | RTL-SDR, **SDRplay RSP series** (SoapySDRPlay3: IFGR/RFGR, AGC, combined MW/FM + DAB notches, Bias-T, HDR, clock OUT, RSPduo Dual Tuner + host diversity/null-steer), and other SoapySDR devices. Safe stub path when hardware is absent. RF gain, sample rate, antenna, PPM (manual + cal/apply). See [docs/SDRPLAY.md](docs/SDRPLAY.md). |
 | **Audio** | miniaudio multi-output (speakers + virtual cable), per-output enable/volume, ring-fill and underrun counters. Master volume in GUI. |
 | **P25 Phase 1** | Control-channel C4FM path: frame sync, NID, TSDU/TSBK trust, grants, talkgroup list. Clear IMBE backend via mbelib when frames validate. |
 | **P25 Phase 2** | Full experimental TDMA pipeline: superframe/ISCH, XOR mask (NAC/WACN/SysID), ACCH/MAC/ESS hypotheses, Voice2/Voice4 â†’ AMBE 3600Ã—2450 (mbelib), one-RTL traffic retune + return-to-control, security gate (encrypted mute, clear only with proof). |
@@ -186,7 +191,7 @@ Tester builds: https://github.com/Blkph0x/SDR_Town/releases
 
 ## Quick start â€” GUI
 
-1. Install drivers (RTL-SDR: Zadig â†’ WinUSB as Administrator; other Soapy devices per vendor).
+1. Install drivers (RTL-SDR: Zadig → WinUSB as Administrator; SDRplay: API 3.x + SoapySDRPlay3 — see [docs/SDRPLAY.md](docs/SDRPLAY.md); other Soapy devices per vendor).
 2. Run `SDR_Town.exe` (installer or portable).
 3. **Devices â†’ Rescan / Discover Devices**, enable device, set sample rate / gain / antenna / PPM, apply.
 4. **Audio â†’ Configure Output Devices** (speakers Â± virtual cable), test tone if needed.

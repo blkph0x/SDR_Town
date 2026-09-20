@@ -57,6 +57,7 @@ bool WorkspaceLayout::applyPreset(const QString& id) {
         const auto name = dock->objectName();
         bool visible = name != "workspace.tx"; // Experimental TX is opt-in.
         if (id == "listening" && name == "workspace.p25") visible = false;
+        if (id == "listening" && name == "workspace.satcom") visible = false;
         if (id == "hf" && (name == "workspace.p25" || name == "workspace.receivers")) visible = false;
         dock->setVisible(visible);
         if (visible) {
@@ -103,6 +104,14 @@ bool WorkspaceLayout::restore(QSettings& settings) {
     const auto geometry = settings.value(settingsRoot + "geometry").toByteArray();
     if (!geometry.isEmpty()) window_->restoreGeometry(geometry);
     setLocked(settings.value(settingsRoot + "locked", false).toBool());
+    // Listening must keep Satcom/Inmarsat/Aircraft dark — restoreState can re-show
+    // the dock and wake timers that fight the WFM demod path.
+    if (preset_ == "listening" || preset_ == "hf") {
+        for (auto* dock : panels_) {
+            if (dock && dock->objectName() == "workspace.satcom")
+                dock->setVisible(false);
+        }
+    }
     return true;
 }
 

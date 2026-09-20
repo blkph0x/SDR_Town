@@ -141,38 +141,60 @@ SpectrumWidget::~SpectrumWidget() = default;
 
 void SpectrumWidget::updateSpectrum(const std::vector<float>& powerDb, double centerFreqHz, double sampleRateHz)
 {
-    QMutexLocker lock(&m_dataMutex);
-    const double previousSampleRate = m_sampleRate;
-    const double previousViewBandwidth = m_viewBandwidthHz;
-    m_powerDb = QVector<float>(powerDb.begin(), powerDb.end());
-    m_centerFreq = centerFreqHz;
-    m_sampleRate = sampleRateHz;
-    if (sampleRateHz > 0.0 && std::isfinite(sampleRateHz)) {
-        const bool wasFullBandwidthView =
-            previousViewBandwidth <= 0.0 ||
-            !std::isfinite(previousViewBandwidth) ||
-            (previousSampleRate > 0.0 && std::isfinite(previousSampleRate) &&
-             std::abs(previousViewBandwidth - previousSampleRate) <= previousSampleRate * 0.05) ||
-            previousViewBandwidth > sampleRateHz * 1.02;
-        if (wasFullBandwidthView) {
-            m_viewBandwidthHz = sampleRateHz;
-        } else {
-            m_viewBandwidthHz = std::clamp(previousViewBandwidth, 1000.0, sampleRateHz);
+    // Downsample for the UI path so a 8k/16k/64k FFT cannot freeze paint + scroll.
+    std::vector<float> uiPower = powerDb;
+    constexpr size_t kMaxUiBins = 2048;
+    if (uiPower.size() > kMaxUiBins) {
+        std::vector<float> ds(kMaxUiBins, -120.f);
+        for (size_t i = 0; i < kMaxUiBins; ++i) {
+            const size_t a = i * uiPower.size() / kMaxUiBins;
+            const size_t b = (i + 1) * uiPower.size() / kMaxUiBins;
+            float peak = -200.f;
+            for (size_t k = a; k < b && k < uiPower.size(); ++k) {
+                if (std::isfinite(uiPower[k])) peak = std::max(peak, uiPower[k]);
+            }
+            ds[i] = std::isfinite(peak) ? peak : -120.f;
+        }
+        uiPower = std::move(ds);
+    }
+
+    QVector<float> powerCopy;
+    {
+        QMutexLocker lock(&m_dataMutex);
+        const double previousSampleRate = m_sampleRate;
+        const double previousViewBandwidth = m_viewBandwidthHz;
+        m_powerDb = QVector<float>(uiPower.begin(), uiPower.end());
+        m_centerFreq = centerFreqHz;
+        m_sampleRate = sampleRateHz;
+        if (sampleRateHz > 0.0 && std::isfinite(sampleRateHz)) {
+            const bool wasFullBandwidthView =
+                previousViewBandwidth <= 0.0 ||
+                !std::isfinite(previousViewBandwidth) ||
+                (previousSampleRate > 0.0 && std::isfinite(previousSampleRate) &&
+                 std::abs(previousViewBandwidth - previousSampleRate) <= previousSampleRate * 0.05) ||
+                previousViewBandwidth > sampleRateHz * 1.02;
+            if (wasFullBandwidthView) {
+                m_viewBandwidthHz = sampleRateHz;
+            } else {
+                m_viewBandwidthHz = std::clamp(previousViewBandwidth, 1000.0, sampleRateHz);
+            }
+        }
+
+        // Keep a downsampled history only — full FFT rows were freezing zoomed paint.
+        if (!uiPower.empty()) {
+            m_highResHistory.push_back(uiPower);
+            while (m_highResHistory.size() > kMaxHighResHistory) m_highResHistory.pop_front();
+        }
+        powerCopy = m_powerDb;
+        if (uiPower.size() >= 256 && m_demoTimer) {
+            m_demoTimer->stop();
+            m_demoTimer->deleteLater();
+            m_demoTimer = nullptr;
         }
     }
-
-    // Push full high-res row to history (source of truth for zoomed render).
-    if (!powerDb.empty()) {
-        m_highResHistory.push_back(powerDb);
-        while (m_highResHistory.size() > kMaxHighResHistory) m_highResHistory.pop_front();
-    }
-
-    scrollWaterfall(powerDb); // keep image build for fast full-view / compat
-    if (powerDb.size() >= 256 && m_demoTimer) {
-        m_demoTimer->stop();
-        m_demoTimer->deleteLater();
-        m_demoTimer = nullptr;
-    }
+    // Scroll outside the data mutex so paintEvent is never blocked by waterfall memcpy.
+    if (!powerCopy.isEmpty())
+        scrollWaterfall(std::vector<float>(powerCopy.begin(), powerCopy.end()));
     update();
 }
 
@@ -257,6 +279,7 @@ void SpectrumWidget::computeFakeSpectrum()
 
 void SpectrumWidget::scrollWaterfall(const std::vector<float>& latestPower)
 {
+    QMutexLocker lock(&m_dataMutex);
     if (m_waterfall.isNull()) return;
 
     // Improved heat map / "good heat map type setup".
@@ -287,7 +310,7 @@ void SpectrumWidget::scrollWaterfall(const std::vector<float>& latestPower)
             g = 220;
             b = static_cast<int>(40 * (1-t));
         } else {
-            // yellow -> red (hot / strong signal)
+            // yellow -> red (hot / strong signals)
             float t = (norm - 0.7f) / 0.3f;
             r = 255;
             g = static_cast<int>(220 - 180 * t);
@@ -299,7 +322,8 @@ void SpectrumWidget::scrollWaterfall(const std::vector<float>& latestPower)
     int w = m_waterfall.width();
     int h = m_waterfall.height();
 
-    // scroll down (new line at top)
+    // scroll down (new line at top) — use memmove-friendly row order; still under lock
+    // but UI spectrum is capped to 2k bins so this stays cheap.
     for (int y = h-1; y > 0; --y) {
         memcpy(m_waterfall.scanLine(y), m_waterfall.scanLine(y-1), w * 4);
     }

@@ -76,6 +76,14 @@ SDRTOWN_CONTROL_API int SdrTownControl_SetDirectSampling(const SdrTownControlCon
                                                          char* responseJson,
                                                          size_t responseJsonBytes);
 
+// Generic HTTP JSON to the local SDR Town control server (e.g. POST /v1/sdrplay).
+SDRTOWN_CONTROL_API int SdrTownControl_Request(const SdrTownControlConfig* config,
+                                               const char* method,
+                                               const char* path,
+                                               const char* bodyJson,
+                                               char* responseJson,
+                                               size_t responseJsonBytes);
+
 SDRTOWN_CONTROL_API int SdrTownControl_StartP25Control(const SdrTownControlConfig* config,
                                                        double controlFrequencyHz,
                                                        int autoFollow,

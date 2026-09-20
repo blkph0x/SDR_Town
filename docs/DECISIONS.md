@@ -2,6 +2,19 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0103 - Tuner lease, observer map, Doppler ECEF, CLI (2026-09-20)
+
+Evidence: uncommitted 0.2.67–0.2.74 review. Satcom/Inmarsat `setCenterFreq` stole live WFM/P25;
+Dual Tuner Soapy make/setup raced `readStream`; diversity did not retarget listen;
+CPR used signed `fmod`; TLE used GUI-thread `QEventLoop`; Inmarsat claimed FEC/AMBE
+without unique-word. SGP4 look angles treated TEME as ECEF (range-rate missing Earth rotation).
+
+Decision: DeviceManager lease (Listen/P25 > Satcom/Inmarsat/Aircraft; `force=true` to steal).
+Doppler via `lookAnglesTeme` (GMST TEME→ECEF + ω×r). Home lat/lon from clickable OSM map
+(and `observer set`) is the observer for ISS SSTV, passes, and Doppler. TLE over WinINet
+off the GUI thread; `tle load` for fixtures. CLI covers observer/tle/satcom/inmarsat/aircraft.
+Inmarsat remains an experimental prototype (no unique-word/FEC claim). P25 DSP untouched.
+
 ## DEC-0102 - RadioReference site CSV aliases (2026-09-18)
 
 Evidence: fubarzi/TG-SITES `trs_sites_*.csv` uses RFSS, Site Dec/Hex, Description,

@@ -7,6 +7,49 @@ known-transmission RF acceptance, HF SSB input and satellite decoding are open.
 Version 0.2.58 adds the recorded-image GUI, cancellation and progressive previews;
 independent full/partial Robot36/Martin1 Qt replay parity passes (DEC-0093/0094).
 
+## Satcom Scanner v1 (0.2.68)
+
+Shipped in SDR Town **0.2.68** (FUBAR website mirror **1.1.35**):
+
+- Neon **Satcom Scanner** tab: band sweep → peak lock → demod → optional record.
+- Real decode on lock: **AX.25 / APRS AFSK 1200** (NFM audio) and **NOAA APT**
+  grayscale progressive PGM when mode=APT on ~137 MHz presets.
+- Async fixed-capacity event log (drop-oldest; no malloc/format on the hot path).
+- Local control API: `GET /v1/satcom/status`, `POST /v1/satcom/control`,
+  capability `satcomScanner`. Spectrum snapshots are rate-limited bins, not raw IQ.
+
+**Honesty limits (not in v1):** Inmarsat/Iridium/commercial decrypt, Meteor LRPT
+or SatDump process integration, full SGP4 pass planner / Doppler (catalogue
+presets + frequencies only). Scanner worker is isolated from P25 rings/follow.
+
+## Satcom Pass Planner (0.2.69)
+
+Shipped in SDR Town **0.2.69** (FUBAR **1.1.36**):
+
+- Home observer lat/lon/alt (signed degrees or N/S E/W — both hemispheres).
+- Selectable catalogue (ISS voice/APRS/SSTV, NOAA APT, SO-50, AO-91, …).
+- CelesTrak TLE HTTPS refresh + disk cache; TLE age shown in UI.
+- SGP4 upcoming passes (AOS/LOS/max el) and **Auto-track** Doppler LO retune
+  when a pass is armed (~1 Hz, P25-isolated).
+- **Arm ISS SSTV** tunes NFM + opens SSTV Images live receive.
+
+**Honesty limits:** TLE freshness matters; deep-space SGP4 omitted; no commercial
+sats; Meteor LRPT/SatDump still later; no uplink TX / sky map.
+Home lat/lon is the observer for AOS/LOS and Doppler (click the satcom map, Shift-click
+the aircraft map, or `observer set`). Doppler uses TEME→ECEF with Earth rotation.
+TLE download is off the GUI thread (`tle refresh` / Refresh TLE). Satcom/Inmarsat
+cannot retune a live listen session unless `force=true`.
+
+## Sat catalogue polish + Aircraft map (0.2.70)
+
+- Catalogue badges Voice/Data/SSTV/APT; NOAA APT labelled retired-TX/archive;
+  Meteor and some data birds are **bookmark-only** (Arm refused until a decoder exists).
+- Extra FM entries (IO-117 bookmark, ISS UHF note).
+- **Aircraft Map**: local 1090 ADS-B tracks when tuned + OpenSky enrichment;
+  hi-res OSM/Leaflet map, click popout with flight info and optional photo.
+  FUBAR website Aircraft tab mirrors read-only tracks.
+- **Not included:** Inmarsat/Iridium decrypt, Meteor LRPT imagery.
+
 ## Delivery Order
 
 1. Finish DCS symbol recovery, polarity/alias handling and replay validation.

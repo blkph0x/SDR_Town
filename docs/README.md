@@ -19,6 +19,7 @@ Do not edit `C:\Users\Blkph0x\source\repos\SovereignFoundry` from here.
 | [NATIVE_RUNTIME_QA.md](NATIVE_RUNTIME_QA.md) | Native DLL provenance, RX lifecycle and CDB shutdown acceptance. |
 | [SATELLITE_AND_SSTV.md](SATELLITE_AND_SSTV.md) | Planned SSTV/public satellite/weather scope, architecture and acceptance gates. |
 | [SSTV.md](SSTV.md) | Recorded and experimental live NFM SSTV usage, tests and limits. |
+| [SDRPLAY.md](SDRPLAY.md) | SDRplay RSP multi-model support via SoapySDRPlay3 (gains, AGC, duo, HDR). |
 | [P25_ALIASES.md](P25_ALIASES.md) | System-specific names, import format and manual precedence. |
 
 Architecture: [`../SOURCE_OF_TRUTH.md`](../SOURCE_OF_TRUTH.md).
@@ -39,5 +40,5 @@ These stay as capture archaeology. New work is ISSUES + DECISIONS + TASKS.
 
 See [RELEASING.md](RELEASING.md) for current packaging, signature, runtime and
 publication gates, and [SATELLITE_AND_SSTV.md](SATELLITE_AND_SSTV.md) for next work.
-Current tester release: [0.2.58 notes and validation scope](RELEASE_0.2.58.md).
+Current tester release: [0.2.74 notes](RELEASE_0.2.74.md).
 SSTV: [offline Robot36/Martin1 images, VIS inspection and next gates](SSTV.md).

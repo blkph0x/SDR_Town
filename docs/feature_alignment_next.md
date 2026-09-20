@@ -9,7 +9,7 @@ This maps the requested target feature set against the current codebase and turn
 | Area | Requested | Current Status | Notes |
 | --- | --- | --- | --- |
 | Hardware | RTL-SDR all versions | Partial | Real path uses SoapySDR plus RTL-SDR defaults/fallback. This should work for common RTL variants when the Soapy RTL module and WinUSB driver are installed, but there is no explicit variant database or device profile layer yet. |
-| Hardware | SDRplay RSP series | Partial | Generic SoapySDR devices can enumerate, but there is no SDRplay-specific profile, gain element mapping, IF/RF gain handling, or documented SDRplay module flow. |
+| Hardware | SDRplay RSP series | Yes (Soapy) | SoapySDRPlay3 profile: IFGR/RFGR, AGC, bandwidth, antennas, bias-T/notches/extref/HDR, RSPduo Single/Dual/Master. See [SDRPLAY.md](SDRPLAY.md). |
 | Hardware | 2.4 MHz sample rate | Yes | RTL defaults include 2.4 MS/s and Device Manager allows sample-rate changes. Default remains conservative at 2.048 MS/s for RTL stability. |
 | Hardware | RF gain 0-49 dB | Yes | RTL fallback/profile now clamps to 49.6 dB and probed devices still use advertised ranges. |
 | Hardware | Frequency correction | Yes | Per-device PPM is persisted, shown in Device Manager, exposed via CLI, applied live through native Soapy correction or corrected-tune fallback. |
@@ -59,10 +59,7 @@ Still to do from Pack A:
 
 1. Move built-in band plans to editable `band_plans.json` with import/export.
 2. Add confidence/hysteresis so AUTO does not bounce modes every FFT frame.
-3. Add SDRplay-specific notes/profile hooks:
-   - Recognize common Soapy driver keys/names.
-   - Do not fake support beyond Soapy availability.
-   - Document required SDRplay API/Soapy module setup.
+3. SDRplay-specific profile hooks — done via SoapySDRPlay3 (`docs/SDRPLAY.md`).
 
 ## Best Next Build Step
 

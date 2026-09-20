@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <string>
+#include <map>
 #include <optional>
 #include <nlohmann/json.hpp>
 #include <queue>
@@ -9,6 +10,9 @@
 #include <atomic>
 #include <thread>
 #include <complex>
+
+#include "SdrplayProfile.h"
+#include "SdrplayDiversity.h"
 
 struct Receiver;  // forward for per-rx cursor methods (full def in Receiver.h, included in .cpp)
 
@@ -31,7 +35,7 @@ struct DeviceInfo {
     // runtime
     bool enabled = false;
     double sampleRate = 2.4e6;
-    double gain = 30.0;           // simplified master gain for now
+    double gain = 30.0;           // simplified master gain for now (RFGR for SDRplay)
     double gainMin = 0.0;
     double gainMax = 80.0;
     double frequencyCorrectionPpm = 0.0; // oscillator correction; persisted and applied live when supported
@@ -43,7 +47,26 @@ struct DeviceInfo {
     // TX capability (Sprint 0 probe). RTL-class RX-only sticks stay false.
     bool canTx = false;
     std::vector<std::string> txAntennas;
-    // more per-device settings can be added
+
+    // SDRplay (SoapySDRPlay3) — unused for other drivers.
+    bool isSdrplay = false;
+    std::string sdrplayModel;
+    std::string sdrplayDuoMode;   // ST/DT/MA/MA8/SL from Soapy kwargs
+    size_t rxChannel = 0;         // Dual Tuner channel index
+    bool agcEnabled = false;
+    double ifgrDb = 40.0;
+    double rfgrDb = 4.0;
+    double bandwidthHz = 0.0;     // 0 = driver default
+    std::vector<std::string> gainElements;
+    std::vector<double> bandwidthsHz;
+    std::vector<std::string> sdrplaySettingKeys;
+    std::map<std::string, std::vector<std::string>> sdrplaySettingOptions;
+    std::map<std::string, std::string> soapySettings;
+
+    // Host-side RSPduo Dual Tuner diversity composite (not a Soapy device).
+    bool isDiversityComposite = false;
+    size_t diversitySourceA = static_cast<size_t>(-1);
+    size_t diversitySourceB = static_cast<size_t>(-1);
 };
 
 class DeviceManager {
@@ -55,7 +78,30 @@ public:
     // devices to populate antennas, sample rates, gain ranges, freq limits etc.
     // probeHardware=false for launch / initial count (completely avoids any hardware open/make
     // at startup so we never crash on open even with bad RTL driver/USB state).
-    std::vector<DeviceInfo> enumerateDevices(bool probeHardware = true);
+    enum class DeviceLeaseOwner {
+        None = 0,
+        Listen = 1,
+        P25 = 2,
+        Satcom = 3,
+        Inmarsat = 4,
+        Aircraft = 5,
+    };
+
+    std::vector<DeviceInfo> enumerateDevices(bool probeHardware = true, bool stopActiveStreams = true);
+
+    // Secondary features (satcom/Inmarsat/aircraft) must retune through a lease so they
+    // cannot steal a live listen/P25 session unless force=true.
+    bool acquireDeviceLease(size_t index, DeviceLeaseOwner owner, bool force, std::string* error);
+    void releaseDeviceLease(DeviceLeaseOwner owner);
+    DeviceLeaseOwner deviceLeaseOwner() const;
+    bool retuneWithLease(size_t index, double freqHz, DeviceLeaseOwner owner, bool force, std::string* error);
+    static const char* leaseOwnerName(DeviceLeaseOwner owner);
+
+    double getCurrentSampleRate(size_t index) const;
+    void applyLiveSampleRate(size_t index, double sampleRateHz);
+
+    size_t preferredListenDeviceIndex() const;
+    void setPreferredListenDeviceIndex(size_t index);
 
     // Activate / deactivate (for now just toggle flag + future stream start)
     bool setEnabled(size_t index, bool enabled);
@@ -152,11 +198,29 @@ public:
     void setDirectSampling(size_t index, int mode);
     int getDirectSampling(size_t index) const;
 
+    // SDRplay live controls (SoapySDRPlay3). No-ops for non-SDRplay devices.
+    void setLiveAgc(size_t index, bool enabled);
+    void setLiveGainElement(size_t index, const std::string& element, double valueDb);
+    void setLiveBandwidth(size_t index, double bandwidthHz);
+    void setLiveSdrplaySetting(size_t index, const std::string& key, const std::string& value);
+    void setLiveAntenna(size_t index, const std::string& antenna);
+    SdrplayCapabilities getSdrplayCapabilities(size_t index) const;
+    std::string getSdrplaySetupStatus() const;
+
+    // RSPduo Dual Tuner host diversity / null-steer (requires both channels streaming).
+    bool configureDiversity(size_t deviceIndexHint, SdrplayDiversity::Config config);
+    SdrplayDiversity::Config getDiversityConfig() const;
+    // Ensures a composite DeviceInfo exists for the DT pair around hint; returns its index or npos.
+    size_t ensureDiversityCompositeDevice(size_t deviceIndexHint);
+    std::vector<std::complex<float>> getDiversityCombinedIQ(size_t maxSamples) const;
+
     // Diagnostics
     std::vector<std::string> getAvailableDrivers() const;
 
     // Setup for RTL-SDR discovery (paths + module load)
     void setupSoapyForRTLSDR();
+    // Setup for SDRplay API 3.x + SoapySDRPlay3 module discovery
+    void setupSoapyForSDRplay();
 
     // --- Sprint 1: TX stream (tone / future P25 IQ). Separate from RX ring. ---
     // Hardware TX requires a canTx device. Offline CF32 dump works on any index.
@@ -255,6 +319,8 @@ private:
 #ifdef HAVE_SOAPYSDR
         SoapySDR::Device* soapyDev = nullptr;
         SoapySDR::Stream* rxStream = nullptr;
+        bool soapyShared = false; // RSPduo Dual Tuner shared device (do not unmake until last channel)
+        std::string sdrplayShareKey;
 #endif
     };
     std::vector<std::unique_ptr<StreamState>> streams;
@@ -285,6 +351,9 @@ private:
     void ensureTxStreamSlot(size_t index);
     void txThreadFunc(size_t index, uint64_t expectedGeneration);
     void rxThreadFunc(size_t index, uint64_t expectedGeneration);  // background RX loop
+    // Caller must already hold devicesMutex.
+    size_t ensureDiversityCompositeDeviceLocked(size_t deviceIndexHint);
+    void restoreDiversityCompositeAfterEnumerate();
     void resetStreamBuffers(StreamState& st);
     // Live center-frequency retune: bump stream epoch without resetting the absolute
     // sample timeline or ring contents (full resetStreamBuffers breaks P25 rolling decode).
@@ -297,4 +366,12 @@ private:
     // Real FFT power spectrum (8192-bin default, Blackman-Harris + Hann, used by rx pipeline and stub).
     // Returns fftshifted dB vector. See .cpp for radix-2 impl + windowing.
     std::vector<float> computeRealFFTPower(const std::vector<std::complex<float>>& time, size_t fftN, bool useBlackmanHarris);
+
+    mutable std::string sdrplaySetupStatus_ = "SDRplay: not checked yet";
+    SdrplayDiversity::Config diversityConfig_{};
+    size_t diversityCompositeIndex_ = static_cast<size_t>(-1);
+    size_t preferredListenDeviceIndex_ = 0;
+    mutable std::mutex leaseMutex_;
+    DeviceLeaseOwner deviceLeaseOwner_ = DeviceLeaseOwner::None;
+    size_t deviceLeaseIndex_ = static_cast<size_t>(-1);
 };

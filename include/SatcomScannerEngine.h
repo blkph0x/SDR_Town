@@ -1,0 +1,148 @@
+#pragma once
+
+#include "SatcomAsyncLog.h"
+
+#include <atomic>
+#include <complex>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include <nlohmann/json.hpp>
+
+struct SatcomPreset {
+    std::string name;
+    double lowHz = 420e6;
+    double highHz = 430e6;
+    double stepHz = 12.5e3;
+    double bandwidthHz = 250e3;
+    std::string mode = "NFM"; // NFM WFM AM USB APT APRS
+    double squelchDb = -90.0;
+};
+
+struct SatcomScannerConfig {
+    double lowHz = 420e6;
+    double highHz = 430e6;
+    double stepHz = 12.5e3;
+    int dwellMs = 80;
+    double bandwidthHz = 250e3;
+    std::string mode = "NFM";
+    double squelchDb = -90.0;
+    size_t deviceIndex = 0;
+    std::string recordDir;
+    std::string logDir;
+    bool enableAx25 = true;
+    bool enableApt = true;
+    std::vector<SatcomPreset> presets;
+
+    static SatcomScannerConfig defaults();
+    nlohmann::json toJson() const;
+    static SatcomScannerConfig fromJson(const nlohmann::json& j);
+    void load();
+    void save() const;
+};
+
+enum class SatcomScannerState {
+    Idle = 0,
+    Scanning = 1,
+    Locked = 2,
+    Recording = 3
+};
+
+struct SatcomScannerSnapshot {
+    SatcomScannerState state = SatcomScannerState::Idle;
+    SatcomScannerConfig config;
+    double currentHz = 0.0;
+    double lockHz = 0.0;
+    double recordHz = 0.0;
+    double audioRmsDb = -120.0;
+    std::string deviceLabel;
+    bool deviceConnected = false;
+    std::vector<float> spectrumDb; // downsampled for UI/API
+    double spectrumCenterHz = 0.0;
+    double spectrumRateHz = 0.0;
+    std::vector<std::string> recentDecodes;
+    std::string aptPreviewPath;
+    uint64_t logWritten = 0;
+    uint64_t logDropped = 0;
+    std::string lastStatus;
+    bool passArmed = false;
+    bool autoTrack = false;
+    double dopplerHz = 0.0;
+    double tunedHz = 0.0;
+    std::string armedRole;
+};
+
+// Lightweight AX.25 / APT hooks filled by engine after demod.
+class Ax25AprsDecoder;
+class AptImageDecoder;
+
+class SatcomScannerEngine {
+public:
+    static SatcomScannerEngine& instance();
+
+    void setConfig(const SatcomScannerConfig& cfg);
+    SatcomScannerConfig config() const;
+
+    bool start(bool force = false);
+    void stop();
+    void skip();
+    bool startRecording();
+    void stopRecording();
+    bool applyPreset(const std::string& name);
+
+    // Pass planner arm: pauses band-scan and Doppler-tracks when autoTrack.
+    bool armPass(const std::string& satId, const std::string& downlinkId, bool autoTrack = true,
+                 bool force = false, std::string* error = nullptr);
+    void disarmPass();
+    void setAutoTrack(bool on);
+    void tickPassTrack(); // ~1 Hz from UI timer
+
+    SatcomScannerSnapshot snapshot() const;
+    std::string stateName() const;
+
+    // Optional UI callback (Qt queued) when snapshot changes.
+    void setUpdateCallback(std::function<void()> cb);
+
+private:
+    SatcomScannerEngine();
+    ~SatcomScannerEngine();
+
+    void workerLoop();
+    bool detectActivity(double& peakHz, double& peakDb);
+    void processLockedAudio();
+    void pushLog(SatcomLog::EventType t, double hz, const char* text);
+
+    mutable std::mutex mutex_;
+    SatcomScannerConfig config_;
+    SatcomScannerState state_ = SatcomScannerState::Idle;
+    double currentHz_ = 0.0;
+    double lockHz_ = 0.0;
+    double recordHz_ = 0.0;
+    double audioRmsDb_ = -120.0;
+    std::string deviceLabel_;
+    bool deviceConnected_ = false;
+    std::vector<float> spectrumDb_;
+    double spectrumCenterHz_ = 0.0;
+    double spectrumRateHz_ = 0.0;
+    std::vector<std::string> recentDecodes_;
+    std::string aptPreviewPath_;
+    std::string lastStatus_;
+    bool skipRequested_ = false;
+    bool recordRequested_ = false;
+    bool recording_ = false;
+    bool passTrackActive_ = false;
+    double lastTrackHz_ = 0.0;
+
+    std::atomic<bool> run_{false};
+    std::thread worker_;
+    std::function<void()> updateCb_;
+
+    SatcomLog::AsyncLog log_;
+    std::unique_ptr<Ax25AprsDecoder> ax25_;
+    std::unique_ptr<AptImageDecoder> apt_;
+};

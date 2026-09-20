@@ -1,5 +1,9 @@
 # Task list (canonical)
 
+T-0039 | done | Tuner lease, home map, Doppler ECEF, TLE/CLI | DEC-0103. Unit tests
+[sdrplay]/[satcom]/[adsb]/[inmarsat]/[devicemanager] PASS. Live RSP still tester hardware.
+Release target **0.2.74** experimental.
+
 T-0038 | in progress | Release 0.2.62 | Hotfix cached alias resolve on control
 log path so large AppData alias DBs cannot starve P25 audio. Package, verify
 assets and updater. T-0029 Phase 2 string-verifier CI debt unchanged.

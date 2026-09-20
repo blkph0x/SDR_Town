@@ -184,6 +184,8 @@ private:
     QJsonObject applySdrTownControlTune(const QJsonObject& body);
     QJsonObject applySdrTownControlDirectSampling(const QJsonObject& body);
     QJsonObject applySdrTownControlVolume(const QJsonObject& body);
+    QJsonObject applySdrTownControlSdrplay(const QJsonObject& body);
+    size_t sdrTownControlActiveDeviceIndex();
 
     void resetP25ControlMonitorValidation(double ccHz, const QString& reason);
     void noteP25ControlMonitorDecodeWindow(const P25LiveDecodeResult& result,

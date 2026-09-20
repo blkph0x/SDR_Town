@@ -298,6 +298,22 @@ SDRTOWN_CONTROL_API int SdrTownControl_SetDirectSampling(const SdrTownControlCon
                        responseJsonBytes);
 }
 
+SDRTOWN_CONTROL_API int SdrTownControl_Request(const SdrTownControlConfig* config,
+                                               const char* method,
+                                               const char* path,
+                                               const char* bodyJson,
+                                               char* responseJson,
+                                               size_t responseJsonBytes)
+{
+    if (!method || !path) {
+        copyResponse("{\"ok\":false,\"error\":\"method and path are required\"}",
+                     responseJson, responseJsonBytes);
+        return SDRTOWN_CONTROL_BAD_ARGUMENT;
+    }
+    return requestJson(config, method, path, bodyJson ? bodyJson : "{}",
+                       responseJson, responseJsonBytes);
+}
+
 SDRTOWN_CONTROL_API int SdrTownControl_StartP25Control(const SdrTownControlConfig* config,
                                                        double controlFrequencyHz,
                                                        int autoFollow,

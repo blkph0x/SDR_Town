@@ -3,6 +3,8 @@
 #include <QHostAddress>
 #include <QJsonDocument>
 #include <QTcpSocket>
+#include <QUrl>
+#include <QUrlQuery>
 
 #include <algorithm>
 
@@ -129,8 +131,16 @@ void SdrTownControlServer::handleSocketReadyRead(QTcpSocket* socket)
 
     const QString method = QString::fromLatin1(requestParts[0]).toUpper();
     QString path = QString::fromUtf8(requestParts[1]);
+    QJsonObject queryParams;
     const int queryAt = path.indexOf('?');
-    if (queryAt >= 0) path.truncate(queryAt);
+    if (queryAt >= 0) {
+        const QUrl url(QStringLiteral("http://local") + path);
+        QUrlQuery uq(url);
+        const auto items = uq.queryItems();
+        for (const auto& item : items)
+            queryParams.insert(item.first, item.second);
+        path.truncate(queryAt);
+    }
 
     QJsonObject headers;
     int contentLength = 0;
@@ -164,6 +174,9 @@ void SdrTownControlServer::handleSocketReadyRead(QTcpSocket* socket)
             return;
         }
         body = doc.object();
+    }
+    for (auto it = queryParams.begin(); it != queryParams.end(); ++it) {
+        if (!body.contains(it.key())) body.insert(it.key(), it.value());
     }
 
     QJsonObject response;

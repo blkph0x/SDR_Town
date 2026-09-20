@@ -2,6 +2,49 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-20 - Lease / map / Doppler / CLI (0.2.74 tree)
+
+DeviceManager lease + Dual Tuner Soapy live mutex; diversity sets
+preferredListenDeviceIndex; TLE via HttpGet/WinINet; ObserverMapWidget;
+SGP4 lookAnglesTeme. Tests: [sdrplay],[satcom],[adsb],[inmarsat],[devicemanager][lease].
+
+## 2026-09-20 - Satcom hub dock + aircraft map audio fix (0.2.71)
+
+Satcom / Inmarsat / Aircraft live in one main-window dock tab (View → Satcom /
+Inmarsat), not floating windows. Aircraft map no longer runs Mode-S or Qt
+network I/O on the wrong threads; local 1090 decode is opt-in and rate-limited
+so WFM/demod no longer stalls or buzzes after opening the map.
+
+## 2026-09-20 - Native Inmarsat Aero / EGC / AMBE (0.2.71)
+
+Clean-room InmarsatEngine (DDC + PMSK/OQPSK/EGC BPSK), ACARS/C-assign/ADS-C
+parse, mbelib Aero AMBE voice follow/record, public band-plan JSON under
+`data/inmarsat/`, Tools Inmarsat widget, `/v1/inmarsat/*`, capability
+`inmarsatAero`. ADS-C merges into AdsBTrackStore (`fromAdsc`). FUBAR 1.1.38
+Inmarsat website tab. No GPL InmarScope/jaero_dsp copy.
+
+## 2026-09-20 - Sat catalogue polish + Aircraft map (0.2.70)
+
+Catalogue Voice/Data/SSTV/APT badges; NOAA retired-TX honesty; bookmark-only Arm
+guard. AdsBTrackStore (Mode-S DF17 + OpenSky), AircraftMapWidget OSM tiles +
+popout, `/v1/aircraft/*`, FUBAR 1.1.37 Aircraft tab. No Inmarsat decrypt.
+
+## 2026-09-20 - Satcom pass planner + Doppler (0.2.69)
+
+Observer lat/lon, CelesTrak TLE store, compact SGP4 passes, Auto-track arm in
+SatcomScannerEngine, SatCatalogueDialog + ISS SSTV handoff, control API
+`/v1/satcom/observer|passes|catalogue|arm|tle/refresh`, FUBAR 1.1.36 website
+mirror. Unit tests `[satcom][pass]`. Ship matching SdrTownControl.dll.
+
+## 2026-09-20 - Satcom Scanner v1 (0.2.68)
+
+Added SatcomScannerEngine + neon SatcomScannerWidget, SatcomAsyncLog (drop-oldest
+SPSC), Ax25AprsDecoder, AptImageDecoder. Local control `GET/POST /v1/satcom/*`,
+capability `satcomScanner`. FUBAR 1.1.35 website Satcom tab proxies via
+`SdrTownControl_Request`. Unit tests in `tests/test_satcom.cpp`. Ship matching
+`SdrTownControl.dll` with FUBAR. Out of scope: commercial decrypt, LRPT/SatDump,
+full SGP4 Doppler.
+
 ## 2026-09-19 - P25 audio stall from uncached alias reparse
 
 `p25EventLogText` (0.2.61 site Alpha Tag) called `loadP25AliasDatabase(readP25AliasFile)`

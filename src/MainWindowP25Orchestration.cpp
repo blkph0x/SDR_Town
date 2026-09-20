@@ -914,12 +914,12 @@ void MainWindow::startP25LiveDecodePipeline()
                             last = now;
                         } else {
                             if (!monP25VoiceDecode && (monMode == DemodMode::WFM || monMode == DemodMode::NFM)) {
-                                // Emergency-only catch-up. A tight 120 ms threshold was thrashing
-                                // discontinuities every few blocks → helicopter chop. Allow ~400 ms
-                                // of IQ slack so the demod FIR/squelch stay continuous.
+                                // Soft catch-up only. Do not thrash FIR/RDS on every lag skip —
+                                // a 120 ms threshold caused helicopter chop; discontinuity on
+                                // catch-up caused permanent WFM buzz (98.1).
                                 const size_t analogMaxLag = (sr > 0.0)
-                                    ? static_cast<size_t>(std::clamp(sr * 0.400, 32768.0, sr * 0.600))
-                                    : 32768;
+                                    ? static_cast<size_t>(std::clamp(sr * 0.500, 65536.0, sr * 0.750))
+                                    : 65536;
                                 auto window = mgr.getNewIQWindowForReceiver(i, rx, tgt, analogMaxLag);
                                 rdsStreamEpoch = window.streamEpoch;
                                 rdsIqStart = window.startAbsolute;
@@ -1112,7 +1112,15 @@ void MainWindow::startP25LiveDecodePipeline()
                             (void)need;
                         } else {
                             FmMultiplexBlock mpx;
-                            const bool decodeRds = monMode == DemodMode::WFM && !monP25ControlMute;
+                            // Prefer clean audio over RDS when the speaker ring is starving.
+                            // Dual full-rate FIRs (speech + multiplex) are what pushed WFM into
+                            // permanent analog catch-up on RTL @ 2.048 MS/s.
+                            bool audioStarving = false;
+                            if (audioOutputEngine) {
+                                const size_t queued = audioOutputEngine->getRingQueuedSamples();
+                                audioStarving = queued < static_cast<size_t>(std::max(1200.0, orate * 0.020));
+                            }
+                            const bool decodeRds = monMode == DemodMode::WFM && !monP25ControlMute && !audioStarving;
                             const bool decodeTones = monMode == DemodMode::NFM && !monP25ControlMute;
                             const bool decodeData = decodeRds || decodeTones;
 

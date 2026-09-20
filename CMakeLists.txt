@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.66 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.74 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -124,6 +124,58 @@ set(SDR_TOWN_SOURCES
     src/MainWindowP25Orchestration.cpp
     include/MainWindow.h
     src/DeviceManager.cpp
+    src/SdrplayProfile.cpp
+    include/SdrplayProfile.h
+    src/SdrplayDiversity.cpp
+    include/SdrplayDiversity.h
+    src/SatcomAsyncLog.cpp
+    include/SatcomAsyncLog.h
+    src/SatcomScannerEngine.cpp
+    include/SatcomScannerEngine.h
+    src/Ax25AprsDecoder.cpp
+    include/Ax25AprsDecoder.h
+    src/AptImageDecoder.cpp
+    include/AptImageDecoder.h
+    src/SatcomScannerWidget.cpp
+    include/SatcomScannerWidget.h
+    src/SatObserverConfig.cpp
+    include/SatObserverConfig.h
+    src/SatCatalogue.cpp
+    include/SatCatalogue.h
+    src/TleStore.cpp
+    include/TleStore.h
+    src/Sgp4.cpp
+    include/Sgp4.h
+    src/SatPassPlanner.cpp
+    include/SatPassPlanner.h
+    src/SatCatalogueDialog.cpp
+    include/SatCatalogueDialog.h
+    src/ModeS.cpp
+    include/ModeS.h
+    src/AdsBTrackStore.cpp
+    include/AdsBTrackStore.h
+    src/AircraftMapWidget.cpp
+    include/AircraftMapWidget.h
+    src/InmarsatBandPlan.cpp
+    include/InmarsatBandPlan.h
+    src/InmarsatMessageStore.cpp
+    include/InmarsatMessageStore.h
+    src/InmarsatDemod.cpp
+    include/InmarsatDemod.h
+    src/InmarsatAcars.cpp
+    include/InmarsatAcars.h
+    src/InmarsatVoice.cpp
+    include/InmarsatVoice.h
+    src/InmarsatEngine.cpp
+    include/InmarsatEngine.h
+    src/InmarsatWidget.cpp
+    include/InmarsatWidget.h
+    src/SatcomHubWidget.cpp
+    include/SatcomHubWidget.h
+    src/ObserverMapWidget.cpp
+    include/ObserverMapWidget.h
+    src/HttpGet.cpp
+    include/HttpGet.h
     src/SpectrumWidget.cpp
     src/RdsStatusWidget.cpp
     include/SpectrumWidget.h
@@ -212,12 +264,15 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Gui
     Qt6::Widgets
     Qt6::Network
+    wininet
     spdlog::spdlog
     nlohmann_json::nlohmann_json
     unofficial-sodium::sodium
     sdr_town_dsp
 )
 target_compile_definitions(${PROJECT_NAME} PRIVATE SDR_TOWN_VERSION=\"${PROJECT_VERSION}\")
+target_compile_definitions(${PROJECT_NAME} PRIVATE SDR_TOWN_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\")
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/data/inmarsat DESTINATION bin/data)
 
 # Link SoapySDR if available (for PR2 device layer)
 # Note: vcpkg soapysdr port provides target named "SoapySDR" (not namespaced :: )
@@ -337,6 +392,8 @@ if(BUILD_TESTS)
     tests/test_sstv_live_input.cpp
     tests/test_sstv_rate_converter.cpp
     tests/test_devicemanager.cpp
+    tests/test_sdrplay_profile.cpp
+    tests/test_sdrplay_diversity.cpp
     tests/test_audioengine.cpp
     tests/test_p25_audio_resampler.cpp
     src/P25AudioResampler.cpp
@@ -353,7 +410,30 @@ if(BUILD_TESTS)
     tests/test_p25tx_encode.cpp
     tests/test_p25traffic_processor.cpp
     tests/test_p25dsp.cpp
+    tests/test_satcom.cpp
+    tests/test_satcom_passes.cpp
+    tests/test_adsb.cpp
+    tests/test_inmarsat.cpp
+    src/Ax25AprsDecoder.cpp
+    src/AptImageDecoder.cpp
+    src/SatcomAsyncLog.cpp
+    src/SatObserverConfig.cpp
+    src/SatCatalogue.cpp
+    src/TleStore.cpp
+    src/HttpGet.cpp
+    src/Sgp4.cpp
+    src/SatPassPlanner.cpp
+    src/ModeS.cpp
+    src/AdsBTrackStore.cpp
+    src/InmarsatBandPlan.cpp
+    src/InmarsatMessageStore.cpp
+    src/InmarsatDemod.cpp
+    src/InmarsatAcars.cpp
+    src/InmarsatVoice.cpp
+    src/InmarsatEngine.cpp
     src/DeviceManager.cpp
+    src/SdrplayProfile.cpp
+    src/SdrplayDiversity.cpp
     src/AudioEngine.cpp
     src/AudioCapture.cpp
     src/Demod.cpp
@@ -375,10 +455,12 @@ if(BUILD_TESTS)
     Catch2::Catch2WithMain
     Qt6::Core
     Qt6::Network
+    wininet
     spdlog::spdlog
     nlohmann_json::nlohmann_json
     sdr_town_dsp
   )
+  target_compile_definitions(sdr_town_tests PRIVATE SDR_TOWN_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\")
   if(SDR_TOWN_BUILD_RDS_DSP)
     add_dependencies(sdr_town_tests rds_runtime)
     target_compile_definitions(sdr_town_tests PRIVATE SDR_TOWN_TEST_RDS_DSP=1

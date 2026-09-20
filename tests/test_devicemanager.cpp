@@ -8,6 +8,25 @@
 #include <thread>
 #include <chrono>
 
+TEST_CASE("DeviceManager secondary lease blocks live listen without force", "[devicemanager][lease]") {
+    int argc = 0;
+    char* argv[] = {nullptr};
+    QCoreApplication app(argc, argv);
+    app.setApplicationName("SDR Town Test");
+    app.setOrganizationName("SDR_Town");
+    auto& mgr = DeviceManager::instance();
+    mgr.enumerateDevices(false, false);
+    mgr.stopStreaming(0);
+    mgr.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Satcom);
+    REQUIRE(mgr.startStreaming(0, false));
+    std::string err;
+    REQUIRE_FALSE(mgr.acquireDeviceLease(0, DeviceManager::DeviceLeaseOwner::Satcom, false, &err));
+    REQUIRE_FALSE(err.empty());
+    REQUIRE(mgr.acquireDeviceLease(0, DeviceManager::DeviceLeaseOwner::Satcom, true, &err));
+    mgr.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Satcom);
+    mgr.stopStreaming(0);
+}
+
 TEST_CASE("DeviceManager Sprint 1 tone TX file dump", "[devicemanager][tx]") {
     int argc = 0;
     char* argv[] = {nullptr};

@@ -2,6 +2,23 @@
 
 Newest at the top.
 
+## 2026-09-20 - Tuner lease, home map, Doppler/TLE, CLI coverage
+
+Fixed Dual Tuner Soapy init serialization, diversity listen retarget, Mode-S CPR
+southern-hemisphere modulo, blocking TLE QEventLoop, OpenSky/query-string API
+gaps, and satcom/Inmarsat stealing a live listen tuner. Observer map click (and
+Shift-click on aircraft map) sets home lat/lon for ISS SSTV, SGP4 passes, and
+Doppler (TEME→ECEF + Earth rotation). TLE fetch is WinINet off the GUI thread;
+`tle load` reads cache files. CLI: observer/tle/satcom/inmarsat/aircraft.
+Inmarsat labeled experimental prototype (no unique-word/FEC).
+
+## 2026-09-20 - Full SDRplay multi-model Soapy support
+
+SoapySDRPlay3 profile layer: discovery/PATH for SDRplay API + module, IFGR/RFGR,
+AGC, bandwidth, bias-T/notches/extref/HDR settings, RSPduo Single/Dual/Master
+(Dual Tuner as two channel rows with shared Soapy device). Device Manager panel,
+CLI `sdrplay` commands, docs/SDRPLAY.md, profile unit tests. RTL/HackRF unchanged.
+
 ## 2026-09-19 - Alias cache hotfix for P25 audio
 
 Control-log site labels stopped doing a full `p25_aliases.json` reparse per

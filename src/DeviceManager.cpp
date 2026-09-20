@@ -1,5 +1,7 @@
 #include "DeviceManager.h"
 #include "Receiver.h"   // for getNewSamplesForReceiver(..., Receiver& rx, ... ) cursor update
+#include "SdrplayProfile.h"
+#include "SdrplayDiversity.h"
 
 #include <spdlog/spdlog.h>
 #include <fstream>
@@ -15,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <set>
+#include <map>
 #include <QCoreApplication>
 #include <cstdlib>
 #ifdef _WIN32
@@ -30,6 +33,18 @@
 // RTL/USB backends are not always safe when setFrequency/setGain/PPM happens while
 // readStream is active; that race matches the observed hang right after TG follow.
 static std::mutex gSoapyLiveIoMutex;
+
+// RSPduo Dual Tuner: one Soapy device, two RX channels/streams.
+struct SharedSdrplayDevice {
+    SoapySDR::Device* dev = nullptr;
+    int refCount = 0;
+};
+static std::mutex gSharedSdrplayMutex;
+static std::map<std::string, SharedSdrplayDevice> gSharedSdrplayDevices;
+
+static std::string sdrplayShareKey(const DeviceInfo& d) {
+    return d.serial + "@" + (d.sdrplayDuoMode.empty() ? "ST" : d.sdrplayDuoMode);
+}
 #endif
 
 DeviceManager::DeviceManager() = default;
@@ -154,8 +169,105 @@ static std::string makeDeviceStableKey(const DeviceInfo& d) {
     } else {
         key += "label:" + d.label;
     }
+    if (d.isSdrplay) {
+        if (!d.sdrplayDuoMode.empty()) key += "|duo:" + d.sdrplayDuoMode;
+        key += "|ch:" + std::to_string(d.rxChannel);
+    }
     return key;
 }
+
+#ifdef HAVE_SOAPYSDR
+static void applySdrplayProfileToDevice(SoapySDR::Device* dev, const DeviceInfo& d, size_t indexForLog) {
+    if (!dev || !d.isSdrplay) return;
+    const size_t ch = d.rxChannel;
+    try {
+        if (d.bandwidthHz > 0.0) {
+            try { dev->setBandwidth(SOAPY_SDR_RX, ch, d.bandwidthHz); } catch (...) {}
+        }
+        try { dev->setGainMode(SOAPY_SDR_RX, ch, d.agcEnabled); } catch (...) {}
+        if (!d.agcEnabled) {
+            try { dev->setGain(SOAPY_SDR_RX, ch, "IFGR", d.ifgrDb); } catch (...) {}
+            try { dev->setGain(SOAPY_SDR_RX, ch, "RFGR", d.rfgrDb); } catch (...) {}
+            if (!d.gainName.empty()) {
+                try { dev->setGain(SOAPY_SDR_RX, ch, d.gainName, d.gain); } catch (...) {}
+            }
+        }
+        for (const auto& kv : d.soapySettings) {
+            try {
+                dev->writeSetting(kv.first, kv.second);
+            } catch (const std::exception& ex) {
+                spdlog::debug("SDRplay setting {}={} failed on device {}: {}", kv.first, kv.second, indexForLog, ex.what());
+            } catch (...) {}
+        }
+        spdlog::info("Applied SDRplay profile on device {} ch{} AGC={} IFGR={} RFGR={} settings={}",
+                     indexForLog, ch, d.agcEnabled, d.ifgrDb, d.rfgrDb, d.soapySettings.size());
+    } catch (const std::exception& ex) {
+        spdlog::warn("SDRplay profile apply failed on device {}: {}", indexForLog, ex.what());
+    }
+}
+
+static void enrichSdrplayDeviceInfo(SoapySDR::Device* dev, DeviceInfo& di, size_t channel) {
+    if (!dev) return;
+    di.isSdrplay = true;
+    di.rxChannel = channel;
+    di.canTx = false;
+    di.sdrplayModel = SdrplayProfile::normalizeModel(di.hardware, di.label);
+
+    try {
+        auto gains = dev->listGains(SOAPY_SDR_RX, channel);
+        di.gainElements.assign(gains.begin(), gains.end());
+    } catch (...) {}
+    try {
+        auto ants = dev->listAntennas(SOAPY_SDR_RX, channel);
+        di.antennas.assign(ants.begin(), ants.end());
+        if (!di.antennas.empty() && di.antenna.empty()) di.antenna = di.antennas[0];
+    } catch (...) {}
+    try {
+        auto bws = dev->listBandwidths(SOAPY_SDR_RX, channel);
+        di.bandwidthsHz.assign(bws.begin(), bws.end());
+    } catch (...) {}
+    try {
+        auto info = dev->getSettingInfo();
+        di.sdrplaySettingKeys.clear();
+        di.sdrplaySettingOptions.clear();
+        for (const auto& arg : info) {
+            di.sdrplaySettingKeys.push_back(arg.key);
+            if (!arg.options.empty()) {
+                di.sdrplaySettingOptions[arg.key] = arg.options;
+            }
+        }
+    } catch (...) {}
+
+    // Prefer RFGR as the "main" gain knob (LNA / RF gain reduction).
+    di.gainName = "RFGR";
+    try {
+        auto gr = dev->getGainRange(SOAPY_SDR_RX, channel, "RFGR");
+        di.gainMin = gr.minimum();
+        di.gainMax = gr.maximum();
+        di.rfgrDb = std::clamp(di.rfgrDb, di.gainMin, di.gainMax);
+        di.gain = di.rfgrDb;
+    } catch (...) {
+        di.gainMin = 0.0;
+        di.gainMax = 27.0;
+    }
+    try {
+        auto igr = dev->getGainRange(SOAPY_SDR_RX, channel, "IFGR");
+        di.ifgrDb = std::clamp(di.ifgrDb, igr.minimum(), igr.maximum());
+    } catch (...) {}
+
+    auto caps = SdrplayProfile::capabilitiesFromProbe(
+        di.driver, di.hardware, di.label, di.gainElements, di.antennas,
+        di.bandwidthsHz, di.sdrplaySettingKeys, di.sdrplaySettingOptions);
+    if (di.soapySettings.empty()) {
+        auto defaults = SdrplayProfile::defaultSettings(caps);
+        di.soapySettings = defaults.soapySettings;
+        di.agcEnabled = defaults.agcEnabled;
+        di.ifgrDb = defaults.ifgrDb;
+        di.rfgrDb = defaults.rfgrDb;
+        di.gain = di.rfgrDb;
+    }
+}
+#endif
 
 static size_t normalizeSpectrumFftBins(size_t bins) {
     if (bins <= 4096) return 4096;
@@ -165,10 +277,15 @@ static size_t normalizeSpectrumFftBins(size_t bins) {
 }
 
 static double chooseDefaultSampleRate(const DeviceInfo& d) {
-    if (d.sampleRates.empty()) return d.driver == "rtlsdr" ? 2.048e6 : 2.4e6;
-    const std::array<double, 2> preferred = d.driver == "rtlsdr"
-        ? std::array<double, 2>{2.048e6, 2.4e6}
-        : std::array<double, 2>{2.4e6, 2.048e6};
+    if (d.sampleRates.empty()) {
+        if (d.isSdrplay) return SdrplayProfile::clampSampleRateHz(d.sdrplayDuoMode, 2.048e6);
+        return d.driver == "rtlsdr" ? 2.048e6 : 2.4e6;
+    }
+    const std::array<double, 2> preferred = d.isSdrplay
+        ? (d.sdrplayDuoMode == "DT" ? std::array<double, 2>{2.0e6, 1.0e6}
+                                    : std::array<double, 2>{2.048e6, 2.0e6})
+        : (d.driver == "rtlsdr" ? std::array<double, 2>{2.048e6, 2.4e6}
+                                : std::array<double, 2>{2.4e6, 2.048e6});
 
     for (double target : preferred) {
         for (double rate : d.sampleRates) {
@@ -179,14 +296,16 @@ static double chooseDefaultSampleRate(const DeviceInfo& d) {
     }
 
     const double target = preferred.front();
-    return *std::min_element(d.sampleRates.begin(), d.sampleRates.end(), [target](double a, double b) {
+    double picked = *std::min_element(d.sampleRates.begin(), d.sampleRates.end(), [target](double a, double b) {
         if (!std::isfinite(a)) return false;
         if (!std::isfinite(b)) return true;
         return std::abs(a - target) < std::abs(b - target);
     });
+    if (d.isSdrplay) picked = SdrplayProfile::clampSampleRateHz(d.sdrplayDuoMode, picked);
+    return picked;
 }
 
-std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
+std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware, bool stopActiveStreams) {
     std::vector<size_t> activeStreams;
     {
         std::lock_guard<std::mutex> lk(devicesMutex);
@@ -196,15 +315,24 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
             if (streams[i]->active) activeStreams.push_back(i);
         }
     }
-    for (size_t index : activeStreams) {
-        spdlog::warn("Stopping active stream {} before device re-enumeration to avoid index/device identity mismatch.", index);
-        stopStreaming(index);
+    if (stopActiveStreams) {
+        for (size_t index : activeStreams) {
+            spdlog::warn("Stopping active stream {} before device re-enumeration to avoid index/device identity mismatch.", index);
+            stopStreaming(index);
+        }
+    } else if (!activeStreams.empty()) {
+        spdlog::info("enumerateDevices skipped stream teardown ({} active); returning current device list",
+                     activeStreams.size());
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        return devices;
     }
 
+    {
     std::lock_guard<std::mutex> lk(devicesMutex);
     devices.clear();
 
     setupSoapyForRTLSDR();
+    setupSoapyForSDRplay();
 
 #ifdef HAVE_SOAPYSDR
     try {
@@ -214,137 +342,242 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
 
         spdlog::info("Soapy enumerate found {} raw results", results.size());
         for (const auto& result : results) {
-            DeviceInfo di;
-            di.driver = result.count("driver") ? result.at("driver") : "unknown";
-            di.label = result.count("label") ? result.at("label") : di.driver;
-            di.serial = result.count("serial") ? result.at("serial") : "";
-            di.hardware = result.count("hardware") ? result.at("hardware") : "";
-            std::string info = "driver=" + di.driver + " label=" + di.label;
-            if (!di.serial.empty()) info += " serial=" + di.serial;
+            DeviceInfo base;
+            base.driver = result.count("driver") ? result.at("driver") : "unknown";
+            base.label = result.count("label") ? result.at("label") : base.driver;
+            base.serial = result.count("serial") ? result.at("serial") : "";
+            base.hardware = result.count("hardware") ? result.at("hardware") : "";
+            if (result.count("mode")) base.sdrplayDuoMode = result.at("mode");
+            base.isSdrplay = SdrplayProfile::isSdrplayDriver(base.driver);
+            if (base.isSdrplay) {
+                base.sdrplayModel = SdrplayProfile::normalizeModel(base.hardware, base.label);
+                base.canTx = false;
+            }
+            std::string info = "driver=" + base.driver + " label=" + base.label;
+            if (!base.serial.empty()) info += " serial=" + base.serial;
+            if (!base.sdrplayDuoMode.empty()) info += " mode=" + base.sdrplayDuoMode;
             spdlog::info("  Soapy result: {}", info);
 
+            auto finishOne = [&](DeviceInfo di) {
+                di.stableKey = makeDeviceStableKey(di);
+                devices.push_back(std::move(di));
+            };
+
+            const bool dualTuner = base.isSdrplay && base.sdrplayDuoMode == "DT";
+            const size_t channelCount = dualTuner ? 2 : 1;
+
             if (probeHardware) {
-                // Try to open to query capabilities (gains, antennas, rates). This can be slow or crashy
-                // for some devices (especially RTL-SDR with marginal drivers). We SKIP this on initial
-                // launch enumerate (probeHardware=false) so the app never does any hardware open/make
-                // during startup, even if persisted devices are "enabled".
                 try {
                     auto dev = SoapySDR::Device::make(result);
                     if (dev) {
-                        // antennas
-                        auto ants = dev->listAntennas(SOAPY_SDR_RX, 0);
-                        di.antennas.assign(ants.begin(), ants.end());
-                        if (di.antennas.empty()) {
-                            if (di.driver == "rtlsdr") di.antennas = {"RX"};
-                            else di.antennas = {"TX/RX"};
-                        }
-                        if (!di.antennas.empty()) di.antenna = di.antennas[0];
+                        for (size_t ch = 0; ch < channelCount; ++ch) {
+                            DeviceInfo di = base;
+                            if (dualTuner) {
+                                di.label = base.label + " (ch" + std::to_string(ch) + ")";
+                                di.rxChannel = ch;
+                            }
 
-                        // sample rates (get a few)
-                        auto rates = dev->listSampleRates(SOAPY_SDR_RX, 0);
-                        for (size_t i = 0; i < rates.size() && i < 8; ++i) {
-                            di.sampleRates.push_back(rates[i]);
-                        }
-                        if (di.sampleRates.empty()) {
-                            if (di.driver == "rtlsdr") {
-                                di.sampleRates = {0.25e6, 1.024e6, 2.048e6, 2.4e6};
+                            if (di.isSdrplay) {
+                                enrichSdrplayDeviceInfo(dev, di, ch);
                             } else {
-                                di.sampleRates = {1e6, 2e6, 2.4e6, 5e6, 10e6};
-                            }
-                        }
-                        if (!di.sampleRates.empty()) di.sampleRate = chooseDefaultSampleRate(di);
+                                // antennas
+                                auto ants = dev->listAntennas(SOAPY_SDR_RX, 0);
+                                di.antennas.assign(ants.begin(), ants.end());
+                                if (di.antennas.empty()) {
+                                    if (di.driver == "rtlsdr") di.antennas = {"RX"};
+                                    else di.antennas = {"TX/RX"};
+                                }
+                                if (!di.antennas.empty()) di.antenna = di.antennas[0];
 
-                        // freq range rough
-                        auto ranges = dev->getFrequencyRange(SOAPY_SDR_RX, 0);
-                        if (!ranges.empty()) {
-                            di.minFreq = ranges.front().minimum();
-                            di.maxFreq = ranges.back().maximum();
-                        }
-
-                        // default gain (first range or current)
-                        auto gains = dev->listGains(SOAPY_SDR_RX, 0);
-                        if (!gains.empty()) {
-                            di.gainName = gains[0];
-                            auto gr = dev->getGainRange(SOAPY_SDR_RX, 0, di.gainName);
-                            di.gainMin = gr.minimum();
-                            di.gainMax = gr.maximum();
-                            if (di.driver == "rtlsdr") {
-                                di.gain = 20.0; // P1 audit smoking gun: 80 or 0.6*max overloads strong local WFM; 15-25 dB first test + BW 120-150 kHz
-                            } else {
-                                di.gain = std::min(40.0, gr.maximum() * 0.5);
-                            }
-                        } else {
-                            di.gainName = "TUNER"; // common for RTL-SDR
-                            if (di.driver == "rtlsdr") {
-                                di.gain = 20.0;
-                                di.gainMin = 0.0;
-                                di.gainMax = 49.6;
-                            }
-                        }
-
-                        // Sprint 0: TX capability probe (no TX stream opened).
-                        // RTL-SDR family cannot TX; others may expose SOAPY_SDR_TX.
-                        di.canTx = false;
-                        di.txAntennas.clear();
-                        if (di.driver == "rtlsdr") {
-                            di.canTx = false;
-                        } else {
-                            try {
-                                auto txAnts = dev->listAntennas(SOAPY_SDR_TX, 0);
-                                di.txAntennas.assign(txAnts.begin(), txAnts.end());
-                                if (!di.txAntennas.empty()) {
-                                    di.canTx = true;
-                                } else {
-                                    // Some drivers list empty antennas but still support TX
-                                    // (HackRF often exposes TX/RX). Conservative: known TX drivers.
-                                    if (di.driver == "hackrf" || di.driver == "plutosdr" ||
-                                        di.driver == "lime" || di.driver == "uhd" ||
-                                        di.driver == "bladerf" || di.driver == "soapyremote") {
-                                        di.canTx = true;
-                                        di.txAntennas = {"TX"};
+                                auto rates = dev->listSampleRates(SOAPY_SDR_RX, 0);
+                                for (size_t i = 0; i < rates.size() && i < 8; ++i) {
+                                    di.sampleRates.push_back(rates[i]);
+                                }
+                                if (di.sampleRates.empty()) {
+                                    if (di.driver == "rtlsdr") {
+                                        di.sampleRates = {0.25e6, 1.024e6, 2.048e6, 2.4e6};
+                                    } else {
+                                        di.sampleRates = {1e6, 2e6, 2.4e6, 5e6, 10e6};
                                     }
                                 }
-                            } catch (...) {
-                                if (di.driver == "hackrf" || di.driver == "plutosdr" ||
-                                    di.driver == "lime" || di.driver == "uhd") {
-                                    di.canTx = true;
+                                if (!di.sampleRates.empty()) di.sampleRate = chooseDefaultSampleRate(di);
+
+                                auto ranges = dev->getFrequencyRange(SOAPY_SDR_RX, 0);
+                                if (!ranges.empty()) {
+                                    di.minFreq = ranges.front().minimum();
+                                    di.maxFreq = ranges.back().maximum();
+                                }
+
+                                auto gains = dev->listGains(SOAPY_SDR_RX, 0);
+                                if (!gains.empty()) {
+                                    di.gainName = gains[0];
+                                    auto gr = dev->getGainRange(SOAPY_SDR_RX, 0, di.gainName);
+                                    di.gainMin = gr.minimum();
+                                    di.gainMax = gr.maximum();
+                                    if (di.driver == "rtlsdr") {
+                                        di.gain = 20.0;
+                                    } else {
+                                        di.gain = std::min(40.0, gr.maximum() * 0.5);
+                                    }
+                                } else {
+                                    di.gainName = "TUNER";
+                                    if (di.driver == "rtlsdr") {
+                                        di.gain = 20.0;
+                                        di.gainMin = 0.0;
+                                        di.gainMax = 49.6;
+                                    }
+                                }
+
+                                di.canTx = false;
+                                di.txAntennas.clear();
+                                if (di.driver != "rtlsdr") {
+                                    try {
+                                        auto txAnts = dev->listAntennas(SOAPY_SDR_TX, 0);
+                                        di.txAntennas.assign(txAnts.begin(), txAnts.end());
+                                        if (!di.txAntennas.empty()) {
+                                            di.canTx = true;
+                                        } else if (di.driver == "hackrf" || di.driver == "plutosdr" ||
+                                                   di.driver == "lime" || di.driver == "uhd" ||
+                                                   di.driver == "bladerf" || di.driver == "soapyremote") {
+                                            di.canTx = true;
+                                            di.txAntennas = {"TX"};
+                                        }
+                                    } catch (...) {
+                                        if (di.driver == "hackrf" || di.driver == "plutosdr" ||
+                                            di.driver == "lime" || di.driver == "uhd") {
+                                            di.canTx = true;
+                                        }
+                                    }
                                 }
                             }
-                        }
 
+                            // Common sample-rate / freq probe for SDRplay too
+                            if (di.isSdrplay) {
+                                try {
+                                    auto rates = dev->listSampleRates(SOAPY_SDR_RX, ch);
+                                    for (size_t i = 0; i < rates.size() && i < 12; ++i)
+                                        di.sampleRates.push_back(rates[i]);
+                                    if (di.sampleRates.empty())
+                                        di.sampleRates = {0.25e6, 1e6, 2e6, 2.048e6, 2.4e6, 3e6, 5e6, 6e6, 8e6, 10e6};
+                                    di.sampleRate = chooseDefaultSampleRate(di);
+                                } catch (...) {
+                                    di.sampleRates = {2e6, 2.048e6, 2.4e6, 5e6, 6e6, 8e6, 10e6};
+                                    di.sampleRate = 2.048e6;
+                                }
+                                try {
+                                    auto ranges = dev->getFrequencyRange(SOAPY_SDR_RX, ch);
+                                    if (!ranges.empty()) {
+                                        di.minFreq = ranges.front().minimum();
+                                        di.maxFreq = ranges.back().maximum();
+                                    }
+                                } catch (...) {
+                                    di.minFreq = 1e3;
+                                    di.maxFreq = 2e9;
+                                }
+                            }
+
+                            finishOne(std::move(di));
+                            if (!dualTuner) break;
+                        }
                         SoapySDR::Device::unmake(dev);
                     }
                 } catch (const std::exception& ex) {
-                    spdlog::warn("Could not fully probe device {}: {}", di.label, ex.what());
+                    spdlog::warn("Could not fully probe device {}: {}", base.label, ex.what());
+                    // Still publish light entries so the device is selectable.
+                    for (size_t ch = 0; ch < channelCount; ++ch) {
+                        DeviceInfo di = base;
+                        if (dualTuner) {
+                            di.label = base.label + " (ch" + std::to_string(ch) + ")";
+                            di.rxChannel = ch;
+                        }
+                        if (di.isSdrplay) {
+                            di.antennas = {"RX"};
+                            di.antenna = "RX";
+                            di.sampleRates = {2e6, 2.048e6, 2.4e6, 5e6, 6e6, 8e6, 10e6};
+                            di.sampleRate = SdrplayProfile::clampSampleRateHz(di.sdrplayDuoMode, 2.048e6);
+                            di.minFreq = 1e3;
+                            di.maxFreq = 2e9;
+                            di.gainName = "RFGR";
+                            di.gainMin = 0.0;
+                            di.gainMax = 27.0;
+                            di.gain = 4.0;
+                            di.rfgrDb = 4.0;
+                            di.ifgrDb = 40.0;
+                            di.gainElements = {"IFGR", "RFGR"};
+                        } else if (di.driver == "rtlsdr") {
+                            di.antennas = {"RX"};
+                            di.antenna = "RX";
+                            di.sampleRates = {0.25e6, 1.024e6, 2.048e6, 2.4e6};
+                            di.sampleRate = 2.048e6;
+                            di.minFreq = 24e6;
+                            di.maxFreq = 1766e6;
+                            di.gain = 20.0;
+                            di.gainMin = 0.0;
+                            di.gainMax = 49.6;
+                            di.gainName = "TUNER";
+                        } else {
+                            di.antennas = {"TX/RX"};
+                            di.antenna = "TX/RX";
+                            di.sampleRates = {1e6, 2e6, 2.4e6, 5e6, 10e6};
+                            di.sampleRate = 2.4e6;
+                            di.minFreq = 1e6;
+                            di.maxFreq = 6e9;
+                            di.gain = 40.0;
+                            di.gainMin = 0.0;
+                            di.gainMax = 80.0;
+                        }
+                        finishOne(std::move(di));
+                        if (!dualTuner) break;
+                    }
                 }
             } else {
                 // Light path (launch): use safe defaults so we never touch hardware.
-                if (di.driver == "rtlsdr") {
-                    di.antennas = {"RX"};
-                    di.antenna = "RX";
-                    di.sampleRates = {0.25e6, 1.024e6, 2.048e6, 2.4e6};
-                    di.sampleRate = 2.048e6;
-                    di.minFreq = 24e6;
-                    di.maxFreq = 1766e6;
-                    di.gain = 20.0;  // P1 audit: strong local WFM overloads RTL at high gain (was 30/80); 15-25 safe for broadcast FM. BW 120-150kHz also recommended.
-                    di.gainMin = 0.0;
-                    di.gainMax = 49.6;
-                    di.gainName = "TUNER";
-                } else {
-                    di.antennas = {"TX/RX"};
-                    di.antenna = "TX/RX";
-                    di.sampleRates = {1e6, 2e6, 2.4e6, 5e6, 10e6};
-                    di.sampleRate = 2.4e6;
-                    di.minFreq = 1e6;
-                    di.maxFreq = 6e9;
-                    di.gain = 40.0;
-                    di.gainMin = 0.0;
-                    di.gainMax = 80.0;
+                for (size_t ch = 0; ch < channelCount; ++ch) {
+                    DeviceInfo di = base;
+                    if (dualTuner) {
+                        di.label = base.label + " (ch" + std::to_string(ch) + ")";
+                        di.rxChannel = ch;
+                    }
+                    if (di.isSdrplay) {
+                        di.antennas = {"RX"};
+                        di.antenna = "RX";
+                        di.sampleRates = {2e6, 2.048e6, 2.4e6, 5e6, 6e6, 8e6, 10e6};
+                        di.sampleRate = SdrplayProfile::clampSampleRateHz(di.sdrplayDuoMode, 2.048e6);
+                        di.minFreq = 1e3;
+                        di.maxFreq = 2e9;
+                        di.gainName = "RFGR";
+                        di.gain = 4.0;
+                        di.rfgrDb = 4.0;
+                        di.ifgrDb = 40.0;
+                        di.gainMin = 0.0;
+                        di.gainMax = 27.0;
+                        di.gainElements = {"IFGR", "RFGR"};
+                    } else if (di.driver == "rtlsdr") {
+                        di.antennas = {"RX"};
+                        di.antenna = "RX";
+                        di.sampleRates = {0.25e6, 1.024e6, 2.048e6, 2.4e6};
+                        di.sampleRate = 2.048e6;
+                        di.minFreq = 24e6;
+                        di.maxFreq = 1766e6;
+                        di.gain = 20.0;
+                        di.gainMin = 0.0;
+                        di.gainMax = 49.6;
+                        di.gainName = "TUNER";
+                    } else {
+                        di.antennas = {"TX/RX"};
+                        di.antenna = "TX/RX";
+                        di.sampleRates = {1e6, 2e6, 2.4e6, 5e6, 10e6};
+                        di.sampleRate = 2.4e6;
+                        di.minFreq = 1e6;
+                        di.maxFreq = 6e9;
+                        di.gain = 40.0;
+                        di.gainMin = 0.0;
+                        di.gainMax = 80.0;
+                    }
+                    finishOne(std::move(di));
+                    if (!dualTuner) break;
                 }
             }
-
-            di.stableKey = makeDeviceStableKey(di);
-            devices.push_back(di);
         }
 
         // Always ensure an RTL-SDR entry (synthetic with safe defaults) so UI always has something.
@@ -410,13 +643,46 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware) {
     fake2.maxFreq = 1766e6;
     fake2.stableKey = makeDeviceStableKey(fake2);
     devices.push_back(fake2);
+
+    DeviceInfo fake3;
+    fake3.driver = "sdrplay";
+    fake3.label = "SDRplay RSPdx (stub)";
+    fake3.serial = "sdrplay-stub";
+    fake3.hardware = "RSPdx";
+    fake3.isSdrplay = true;
+    fake3.sdrplayModel = "RSPdx";
+    fake3.antennas = {"Antenna A", "Antenna B", "Antenna C"};
+    fake3.antenna = "Antenna A";
+    fake3.sampleRates = {2e6, 2.048e6, 2.4e6, 5e6, 6e6, 8e6, 10e6};
+    fake3.sampleRate = 2.048e6;
+    fake3.gainName = "RFGR";
+    fake3.gain = 4.0;
+    fake3.rfgrDb = 4.0;
+    fake3.ifgrDb = 40.0;
+    fake3.gainMin = 0.0;
+    fake3.gainMax = 27.0;
+    fake3.gainElements = {"IFGR", "RFGR"};
+    fake3.sdrplaySettingKeys = SdrplayProfile::knownSettingKeys();
+    fake3.soapySettings = SdrplayProfile::defaultSettings(
+        SdrplayProfile::capabilitiesFromProbe(fake3.driver, fake3.hardware, fake3.label,
+            fake3.gainElements, fake3.antennas, {}, fake3.sdrplaySettingKeys, {})).soapySettings;
+    fake3.minFreq = 1e3;
+    fake3.maxFreq = 2e9;
+    fake3.stableKey = makeDeviceStableKey(fake3);
+    devices.push_back(fake3);
 #endif
 
     // After enumerate, try to overlay saved settings (enabled, rate, gain, antenna from JSON).
     // This works for both light and full probe paths.
     loadSettings();
 
-    return devices;
+    // unlock before diversity restore — ensureDiversityCompositeDevice takes devicesMutex
+    }
+    restoreDiversityCompositeAfterEnumerate();
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        return devices;
+    }
 }
 
 bool DeviceManager::setEnabled(size_t index, bool enabled) {
@@ -438,8 +704,16 @@ void DeviceManager::updateDeviceParams(size_t index, double sampleRate, double g
     std::lock_guard<std::mutex> lk(devicesMutex);
     if (index >= devices.size()) return;
     auto& d = devices[index];
+    if (d.isSdrplay) {
+        sampleRate = SdrplayProfile::clampSampleRateHz(d.sdrplayDuoMode, sampleRate);
+        // Bias-T off when switching to a non-compatible port.
+        if (!SdrplayProfile::biasTAllowedForAntenna(d.sdrplayModel, antenna)) {
+            d.soapySettings[SdrplaySettings::kBiasT] = "false";
+        }
+    }
     d.sampleRate = sampleRate;
     d.gain = clampGainForDevice(d, gain);
+    if (d.isSdrplay) d.rfgrDb = d.gain;
     d.antenna = antenna;
     d.frequencyCorrectionPpm = clampFrequencyCorrectionPpm(frequencyCorrectionPpm);
     saveSettings();
@@ -496,6 +770,17 @@ nlohmann::json DeviceManager::toJson() const {
         j["frequencyCorrectionPpm"] = d.frequencyCorrectionPpm;
         j["antenna"] = d.antenna;
         j["directSampling"] = d.directSampling;
+        if (d.isSdrplay) {
+            j["isSdrplay"] = true;
+            j["sdrplayModel"] = d.sdrplayModel;
+            j["sdrplayDuoMode"] = d.sdrplayDuoMode;
+            j["rxChannel"] = d.rxChannel;
+            j["agcEnabled"] = d.agcEnabled;
+            j["ifgrDb"] = d.ifgrDb;
+            j["rfgrDb"] = d.rfgrDb;
+            j["bandwidthHz"] = d.bandwidthHz;
+            j["soapySettings"] = d.soapySettings;
+        }
         arr.push_back(j);
     }
     return arr;
@@ -509,7 +794,10 @@ void DeviceManager::fromJson(const nlohmann::json& j) {
             const bool stableMatch = saved.contains("stableKey") && saved["stableKey"].is_string() &&
                 saved["stableKey"].get<std::string>() == d.stableKey;
             const bool legacyMatch = saved.contains("driver") && saved["driver"] == d.driver &&
-                saved.contains("serial") && saved["serial"] == d.serial;
+                saved.contains("serial") && saved["serial"] == d.serial &&
+                (!d.isSdrplay ||
+                 ((!saved.contains("sdrplayDuoMode") || saved["sdrplayDuoMode"] == d.sdrplayDuoMode) &&
+                  (!saved.contains("rxChannel") || saved["rxChannel"].get<size_t>() == d.rxChannel)));
             if (stableMatch || legacyMatch) {
                 if (saved.contains("enabled")) d.enabled = saved["enabled"];
                 if (saved.contains("sampleRate")) d.sampleRate = saved["sampleRate"];
@@ -520,6 +808,24 @@ void DeviceManager::fromJson(const nlohmann::json& j) {
                 if (saved.contains("directSampling")) {
                     d.directSampling = clampDirectSamplingMode(saved["directSampling"].get<int>());
                     updateRtlFreqLimitsForDirectSampling(d);
+                }
+                if (d.isSdrplay) {
+                    if (saved.contains("agcEnabled")) d.agcEnabled = saved["agcEnabled"].get<bool>();
+                    if (saved.contains("ifgrDb")) d.ifgrDb = saved["ifgrDb"].get<double>();
+                    if (saved.contains("rfgrDb")) {
+                        d.rfgrDb = saved["rfgrDb"].get<double>();
+                        d.gain = clampGainForDevice(d, d.rfgrDb);
+                    } else if (saved.contains("gain")) {
+                        d.rfgrDb = d.gain;
+                    }
+                    if (saved.contains("bandwidthHz")) d.bandwidthHz = saved["bandwidthHz"].get<double>();
+                    if (saved.contains("soapySettings") && saved["soapySettings"].is_object()) {
+                        d.soapySettings.clear();
+                        for (auto it = saved["soapySettings"].begin(); it != saved["soapySettings"].end(); ++it) {
+                            if (it.value().is_string()) d.soapySettings[it.key()] = it.value().get<std::string>();
+                            else d.soapySettings[it.key()] = it.value().dump();
+                        }
+                    }
                 }
                 break;
             }
@@ -587,6 +893,14 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
         stPtr = streams[index].get();
     }
     auto& st = *stPtr;
+
+    // Diversity composite never opens Soapy — it soft-combines Dual Tuner A/B rings.
+    if (d.isDiversityComposite) {
+        attemptReal = false;
+        size_t a = d.diversitySourceA, b = d.diversitySourceB;
+        if (a != static_cast<size_t>(-1) && a != index) startStreaming(a, true);
+        if (b != static_cast<size_t>(-1) && b != index) startStreaming(b, true);
+    }
 
     bool wasActive = false;
     bool wasReal = false;
@@ -659,6 +973,16 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
         }
     }
     double useRate = d.sampleRate;
+    if (d.isSdrplay) {
+        useRate = SdrplayProfile::clampSampleRateHz(d.sdrplayDuoMode, useRate);
+        if (useRate != d.sampleRate) {
+            std::lock_guard<std::mutex> lk(devicesMutex);
+            if (index < devices.size()) {
+                devices[index].sampleRate = useRate;
+                saveSettings();
+            }
+        }
+    }
     if (useRate < 0.25e6 || useRate > 60e6) useRate = (d.driver == "rtlsdr" ? 2.048e6 : 2.4e6);
     {
         std::lock_guard<std::mutex> lk(st.queueMutex);
@@ -675,6 +999,8 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
     resetStreamBuffers(st);
 
     setupSoapyForRTLSDR();
+    if (d.isSdrplay || SdrplayProfile::isSdrplayDriver(d.driver))
+        setupSoapyForSDRplay();
 
     {
         std::lock_guard<std::mutex> lk(st.stateMutex);
@@ -707,13 +1033,31 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
         if (st.sessionGen.load() != myGen) return;
         SoapySDR::Device* localDev = nullptr;
         SoapySDR::Stream* localStream = nullptr;
+        bool dualShared = false;
+        bool ownsSharedRef = false;
+        std::string shareKey;
+        size_t rxCh = 0;
         auto cleanupLocal = [&]() {
             try {
                 if (localStream && localDev) localDev->closeStream(localStream);
-                if (localDev) SoapySDR::Device::unmake(localDev);
             } catch (...) {}
-            localDev = nullptr;
             localStream = nullptr;
+            if (dualShared && ownsSharedRef) {
+                std::lock_guard<std::mutex> shareLock(gSharedSdrplayMutex);
+                auto it = gSharedSdrplayDevices.find(shareKey);
+                if (it != gSharedSdrplayDevices.end()) {
+                    it->second.refCount = std::max(0, it->second.refCount - 1);
+                    if (it->second.refCount <= 0 && it->second.dev) {
+                        try { SoapySDR::Device::unmake(it->second.dev); } catch (...) {}
+                        gSharedSdrplayDevices.erase(it);
+                    }
+                }
+                ownsSharedRef = false;
+                localDev = nullptr;
+            } else if (localDev) {
+                try { SoapySDR::Device::unmake(localDev); } catch (...) {}
+                localDev = nullptr;
+            }
         };
         try {
             if (d.driver == "rtlsdr") {
@@ -721,26 +1065,76 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                 try { SoapySDR::loadModule(appDir + "\\SoapyRTLSDR.dll"); } catch (...) {}
                 try { SoapySDR::loadModule("C:\\Program Files\\PothosSDR\\lib\\SoapySDR\\modules0.8\\rtlsdrSupport.dll"); } catch (...) {}
             }
+            if (d.isSdrplay || SdrplayProfile::isSdrplayDriver(d.driver)) {
+                std::string appDir = QCoreApplication::applicationDirPath().toStdString();
+#ifdef _WIN32
+                for (const auto& module : SdrplayProfile::windowsSoapyModuleCandidates(appDir)) {
+                    if (GetFileAttributesA(module.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
+                    try {
+                        SoapySDR::loadModule(module);
+                    } catch (const std::exception& ex) {
+                        spdlog::debug("SDRplay stream module load skipped for {}: {}", module, ex.what());
+                    } catch (...) {
+                        spdlog::debug("SDRplay stream module load skipped for {}: unknown error", module);
+                    }
+                }
+#else
+                try { SoapySDR::loadModule(appDir + "/lib/SoapySDR/modules/sdrPlaySupport.so"); } catch (...) {}
+#endif
+            }
+
+            DeviceInfo liveInfo = d;
+            {
+                std::lock_guard<std::mutex> lk(devicesMutex);
+                if (index < devices.size()) liveInfo = devices[index];
+            }
+            rxCh = liveInfo.isSdrplay ? liveInfo.rxChannel : 0;
+            dualShared = liveInfo.isSdrplay && liveInfo.sdrplayDuoMode == "DT";
 
             SoapySDR::Kwargs args;
-            if (!d.driver.empty()) args["driver"] = d.driver;
-            if (!d.serial.empty()) args["serial"] = d.serial;
-            spdlog::info("Background: Attempting Soapy make for device {}", index);
-            localDev = SoapySDR::Device::make(args);
-            if (!localDev) throw std::runtime_error("make returned null");
+            if (!liveInfo.driver.empty()) args["driver"] = liveInfo.driver;
+            if (!liveInfo.serial.empty()) args["serial"] = liveInfo.serial;
+            if (liveInfo.isSdrplay && !liveInfo.sdrplayDuoMode.empty())
+                args["mode"] = liveInfo.sdrplayDuoMode;
 
-            localDev->setSampleRate(SOAPY_SDR_RX, 0, useRate);
-            if (!d.antenna.empty()) try { localDev->setAntenna(SOAPY_SDR_RX, 0, d.antenna); } catch (...) {}
+            if (dualShared) {
+                shareKey = sdrplayShareKey(liveInfo);
+                std::lock_guard<std::mutex> shareLock(gSharedSdrplayMutex);
+                auto& slot = gSharedSdrplayDevices[shareKey];
+                if (!slot.dev) {
+                    spdlog::info("Background: Attempting shared Soapy make for SDRplay Dual Tuner {}", shareKey);
+                    std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+                    slot.dev = SoapySDR::Device::make(args);
+                    if (!slot.dev) throw std::runtime_error("make returned null");
+                    slot.refCount = 0;
+                }
+                slot.refCount += 1;
+                ownsSharedRef = true;
+                localDev = slot.dev;
+            } else {
+                spdlog::info("Background: Attempting Soapy make for device {}", index);
+                std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+                localDev = SoapySDR::Device::make(args);
+                if (!localDev) throw std::runtime_error("make returned null");
+            }
+
+            {
+                std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+                localDev->setSampleRate(SOAPY_SDR_RX, rxCh, useRate);
+                if (!liveInfo.antenna.empty()) try { localDev->setAntenna(SOAPY_SDR_RX, rxCh, liveInfo.antenna); } catch (...) {}
+            }
 
             // Re-read the *latest* desired gain right before applying (user may have changed the main GUI
             // RF Gain spin or the Device Manager dialog *while* this background Soapy open/make/activate
             // was running in the detached thread). This is a key part of making "live" gain reliable.
             double useGain;
             std::string useGainName;
-            double usePpm = d.frequencyCorrectionPpm;
+            double usePpm = liveInfo.frequencyCorrectionPpm;
+            DeviceInfo applyInfo = liveInfo;
             {
                 std::lock_guard<std::mutex> lk(devicesMutex);
                 if (index < devices.size()) {
+                    applyInfo = devices[index];
                     useGain = clampGainForDevice(devices[index], devices[index].gain);
                     useGainName = devices[index].gainName;
                     usePpm = clampFrequencyCorrectionPpm(devices[index].frequencyCorrectionPpm);
@@ -751,15 +1145,23 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                 }
             }
 
-            try { localDev->setGainMode(SOAPY_SDR_RX, 0, false); } catch (...) {}
-            if (!useGainName.empty()) {
-                try { localDev->setGain(SOAPY_SDR_RX, 0, useGainName, useGain); } catch (...) { localDev->setGain(SOAPY_SDR_RX, 0, useGain); }
-            } else {
-                try { localDev->setGain(SOAPY_SDR_RX, 0, useGain); } catch (...) {}
-            }
-            // Direct sampling must be set before setFrequency so HF LO requests are accepted.
-            if (d.driver == "rtlsdr") {
-                applySoapyDirectSampling(localDev, d.directSampling, index);
+            {
+                std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+                if (applyInfo.isSdrplay) {
+                    applyInfo.rfgrDb = useGain;
+                    applyInfo.gain = useGain;
+                    applySdrplayProfileToDevice(localDev, applyInfo, index);
+                } else {
+                    try { localDev->setGainMode(SOAPY_SDR_RX, rxCh, false); } catch (...) {}
+                    if (!useGainName.empty()) {
+                        try { localDev->setGain(SOAPY_SDR_RX, rxCh, useGainName, useGain); } catch (...) { localDev->setGain(SOAPY_SDR_RX, rxCh, useGain); }
+                    } else {
+                        try { localDev->setGain(SOAPY_SDR_RX, rxCh, useGain); } catch (...) {}
+                    }
+                }
+                if (applyInfo.driver == "rtlsdr") {
+                    applySoapyDirectSampling(localDev, applyInfo.directSampling, index);
+                }
             }
             double center = 100e6;
             uint64_t centerTuneSeq = st.centerTuneRequestSeq.load(std::memory_order_acquire);
@@ -768,27 +1170,32 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                 center = st.currentCenter;
             }
             bool nativePpm = false;
-            try {
-                if (localDev->hasFrequencyCorrection(SOAPY_SDR_RX, 0)) {
-                    localDev->setFrequencyCorrection(SOAPY_SDR_RX, 0, usePpm);
-                    nativePpm = true;
-                    spdlog::info("Applied native frequency correction to device {}: {} ppm", index, usePpm);
+            const double tuneCenterPrep = center;
+            {
+                std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+                try {
+                    if (localDev->hasFrequencyCorrection(SOAPY_SDR_RX, rxCh)) {
+                        localDev->setFrequencyCorrection(SOAPY_SDR_RX, rxCh, usePpm);
+                        nativePpm = true;
+                        spdlog::info("Applied native frequency correction to device {}: {} ppm", index, usePpm);
+                    }
+                } catch (const std::exception& ex) {
+                    spdlog::warn("Native frequency correction unavailable for device {}: {}", index, ex.what());
+                    nativePpm = false;
+                } catch (...) {
+                    nativePpm = false;
                 }
-            } catch (const std::exception& ex) {
-                spdlog::warn("Native frequency correction unavailable for device {}: {}", index, ex.what());
-                nativePpm = false;
-            } catch (...) {
-                nativePpm = false;
-            }
-            const double tuneCenter = nativePpm ? center : correctedTuneFrequencyHz(center, usePpm);
-            try {
-                localDev->setFrequency(SOAPY_SDR_RX, 0, tuneCenter);
-                st.centerTuneAppliedSeq.store(centerTuneSeq, std::memory_order_release);
-            } catch (...) {}
+                const double tuneCenter = nativePpm ? tuneCenterPrep : correctedTuneFrequencyHz(tuneCenterPrep, usePpm);
+                try {
+                    localDev->setFrequency(SOAPY_SDR_RX, rxCh, tuneCenter);
+                    st.centerTuneAppliedSeq.store(centerTuneSeq, std::memory_order_release);
+                } catch (...) {}
 
-            localStream = localDev->setupStream(SOAPY_SDR_RX, "CF32");
-            if (!localStream) throw std::runtime_error("setupStream null");
-            localDev->activateStream(localStream);
+                std::vector<size_t> channels = {rxCh};
+                localStream = localDev->setupStream(SOAPY_SDR_RX, "CF32", channels);
+                if (!localStream) throw std::runtime_error("setupStream null");
+                localDev->activateStream(localStream);
+            }
 
             if (st.stopFlag || st.sessionGen.load() != myGen) {
                 cleanupLocal();
@@ -848,6 +1255,8 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                     } else {
                         st.soapyDev = localDev;
                         st.rxStream = localStream;
+                        st.soapyShared = dualShared;
+                        st.sdrplayShareKey = shareKey;
                         st.stopFlag.store(false, std::memory_order_release);
                         st.active = true;
                         st.isReal = true;
@@ -856,6 +1265,7 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                         st.nativeFrequencyCorrectionActive = nativePpm;
                         localDev = nullptr;
                         localStream = nullptr;
+                        ownsSharedRef = false; // StreamState now owns the shared ref
                     }
                 }
                 if (staleSession) {
@@ -982,12 +1392,18 @@ void DeviceManager::stopStreaming(size_t index) {
     // Capture and null only when Soapy types are available (fixes no-Soapy build P1).
     SoapySDR::Device* devToClose = nullptr;
     SoapySDR::Stream* streamToClose = nullptr;
+    bool sharedClose = false;
+    std::string sharedKey;
     {
         std::lock_guard<std::mutex> lk(st.stateMutex);
         devToClose = st.soapyDev;
         streamToClose = st.rxStream;
+        sharedClose = st.soapyShared;
+        sharedKey = st.sdrplayShareKey;
         st.soapyDev = nullptr;
         st.rxStream = nullptr;
+        st.soapyShared = false;
+        st.sdrplayShareKey.clear();
     }
 
     try {
@@ -997,12 +1413,36 @@ void DeviceManager::stopStreaming(size_t index) {
             spdlog::warn("Leaving Soapy device {} open because its rxThread was detached while stuck in native code.", index);
         } else if (streamToClose && devToClose) {
             std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
-            devToClose->deactivateStream(streamToClose);
-            devToClose->closeStream(streamToClose);
-            SoapySDR::Device::unmake(devToClose);
+            try { devToClose->deactivateStream(streamToClose); } catch (...) {}
+            try { devToClose->closeStream(streamToClose); } catch (...) {}
+            if (sharedClose) {
+                std::lock_guard<std::mutex> shareLock(gSharedSdrplayMutex);
+                auto it = gSharedSdrplayDevices.find(sharedKey);
+                if (it != gSharedSdrplayDevices.end()) {
+                    it->second.refCount = std::max(0, it->second.refCount - 1);
+                    if (it->second.refCount <= 0) {
+                        try { SoapySDR::Device::unmake(it->second.dev); } catch (...) {}
+                        gSharedSdrplayDevices.erase(it);
+                    }
+                }
+            } else {
+                SoapySDR::Device::unmake(devToClose);
+            }
         } else if (devToClose) {
             std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
-            SoapySDR::Device::unmake(devToClose);
+            if (sharedClose) {
+                std::lock_guard<std::mutex> shareLock(gSharedSdrplayMutex);
+                auto it = gSharedSdrplayDevices.find(sharedKey);
+                if (it != gSharedSdrplayDevices.end()) {
+                    it->second.refCount = std::max(0, it->second.refCount - 1);
+                    if (it->second.refCount <= 0) {
+                        try { SoapySDR::Device::unmake(it->second.dev); } catch (...) {}
+                        gSharedSdrplayDevices.erase(it);
+                    }
+                }
+            } else {
+                SoapySDR::Device::unmake(devToClose);
+            }
         }
     } catch (const std::exception& ex) {
         spdlog::warn("Soapy teardown reported a recoverable native issue for device {}: {}", index, ex.what());
@@ -1134,15 +1574,15 @@ void DeviceManager::setLiveGain(size_t index, double gainDb) {
         if (index >= devices.size()) return;
         useGain = clampGainForDevice(devices[index], gainDb);
         devices[index].gain = useGain;
+        if (devices[index].isSdrplay) {
+            devices[index].rfgrDb = useGain;
+            devices[index].agcEnabled = false;
+        }
         d = devices[index];
         saveSettings();
     }
 
 #ifdef HAVE_SOAPYSDR
-    // Apply live to hardware whenever we have an open Soapy device for this index and the stream is not stopped.
-    // We no longer require the "isReal" flag (which is set late in the background upgrade path).
-    // This makes GUI RF gain changes (main window spin and per-device dialog) take effect immediately on a running device.
-    // The background real-init path still does its own initial setGain from the DeviceInfo snapshot at launch time.
     bool appliedLive = false;
     if (auto* stPtr = streamState(index)) {
         auto& st = *stPtr;
@@ -1150,13 +1590,17 @@ void DeviceManager::setLiveGain(size_t index, double gainDb) {
         if (st.soapyDev && !st.stopFlag) {
             try {
                 std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
-                try { st.soapyDev->setGainMode(SOAPY_SDR_RX, 0, false); } catch (...) {}
-                if (!d.gainName.empty()) {
-                    st.soapyDev->setGain(SOAPY_SDR_RX, 0, d.gainName, useGain);
+                const size_t ch = d.isSdrplay ? d.rxChannel : 0;
+                try { st.soapyDev->setGainMode(SOAPY_SDR_RX, ch, false); } catch (...) {}
+                if (d.isSdrplay) {
+                    try { st.soapyDev->setGain(SOAPY_SDR_RX, ch, "RFGR", useGain); } catch (...) {}
+                    try { st.soapyDev->setGain(SOAPY_SDR_RX, ch, "IFGR", d.ifgrDb); } catch (...) {}
+                } else if (!d.gainName.empty()) {
+                    st.soapyDev->setGain(SOAPY_SDR_RX, ch, d.gainName, useGain);
                 } else {
-                    st.soapyDev->setGain(SOAPY_SDR_RX, 0, useGain);
+                    st.soapyDev->setGain(SOAPY_SDR_RX, ch, useGain);
                 }
-                spdlog::info("Live RF gain applied to device {}: {} dB (gainName='{}')", index, useGain, d.gainName);
+                spdlog::info("Live RF gain applied to device {}: {} dB (gainName='{}' ch={})", index, useGain, d.gainName, ch);
                 appliedLive = true;
             } catch (const std::exception& ex) {
                 spdlog::warn("Failed to apply live gain to device {}: {}", index, ex.what());
@@ -1190,6 +1634,11 @@ void DeviceManager::setFrequencyCorrection(size_t index, double ppm) {
 
 #ifdef HAVE_SOAPYSDR
     bool appliedNative = false;
+    size_t rxCh = 0;
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (index < devices.size() && devices[index].isSdrplay) rxCh = devices[index].rxChannel;
+    }
     {
         std::lock_guard<std::mutex> stateLock(st.stateMutex);
         st.frequencyCorrectionPpm = usePpm;
@@ -1197,8 +1646,8 @@ void DeviceManager::setFrequencyCorrection(size_t index, double ppm) {
         if (st.soapyDev && !st.stopFlag) {
             std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
             try {
-                if (st.soapyDev->hasFrequencyCorrection(SOAPY_SDR_RX, 0)) {
-                    st.soapyDev->setFrequencyCorrection(SOAPY_SDR_RX, 0, usePpm);
+                if (st.soapyDev->hasFrequencyCorrection(SOAPY_SDR_RX, rxCh)) {
+                    st.soapyDev->setFrequencyCorrection(SOAPY_SDR_RX, rxCh, usePpm);
                     st.nativeFrequencyCorrectionActive = true;
                     appliedNative = true;
                 }
@@ -1213,7 +1662,7 @@ void DeviceManager::setFrequencyCorrection(size_t index, double ppm) {
                 ? logicalCenter
                 : correctedTuneFrequencyHz(logicalCenter, usePpm);
             try {
-                st.soapyDev->setFrequency(SOAPY_SDR_RX, 0, tuneHz);
+                st.soapyDev->setFrequency(SOAPY_SDR_RX, rxCh, tuneHz);
             } catch (const std::exception& ex) {
                 spdlog::warn("Retune after PPM correction failed for device {}: {}", index, ex.what());
             } catch (...) {}
@@ -1284,6 +1733,432 @@ int DeviceManager::getDirectSampling(size_t index) const {
     std::lock_guard<std::mutex> lk(devicesMutex);
     if (index >= devices.size()) return 0;
     return devices[index].directSampling;
+}
+
+SdrplayCapabilities DeviceManager::getSdrplayCapabilities(size_t index) const {
+    std::lock_guard<std::mutex> lk(devicesMutex);
+    if (index >= devices.size()) return {};
+    const auto& d = devices[index];
+    return SdrplayProfile::capabilitiesFromProbe(
+        d.driver, d.hardware, d.label, d.gainElements, d.antennas,
+        d.bandwidthsHz, d.sdrplaySettingKeys, d.sdrplaySettingOptions);
+}
+
+std::string DeviceManager::getSdrplaySetupStatus() const {
+    return sdrplaySetupStatus_;
+}
+
+const char* DeviceManager::leaseOwnerName(DeviceLeaseOwner owner) {
+    switch (owner) {
+    case DeviceLeaseOwner::Listen: return "listen";
+    case DeviceLeaseOwner::P25: return "p25";
+    case DeviceLeaseOwner::Satcom: return "satcom";
+    case DeviceLeaseOwner::Inmarsat: return "inmarsat";
+    case DeviceLeaseOwner::Aircraft: return "aircraft";
+    case DeviceLeaseOwner::None:
+    default: return "none";
+    }
+}
+
+static int leasePriority(DeviceManager::DeviceLeaseOwner owner) {
+    using O = DeviceManager::DeviceLeaseOwner;
+    switch (owner) {
+    case O::P25: return 30;
+    case O::Listen: return 20;
+    case O::Satcom:
+    case O::Inmarsat:
+    case O::Aircraft: return 10;
+    default: return 0;
+    }
+}
+
+DeviceManager::DeviceLeaseOwner DeviceManager::deviceLeaseOwner() const {
+    std::lock_guard<std::mutex> lk(leaseMutex_);
+    return deviceLeaseOwner_;
+}
+
+bool DeviceManager::acquireDeviceLease(size_t index, DeviceLeaseOwner owner, bool force, std::string* error) {
+    if (owner == DeviceLeaseOwner::None) {
+        if (error) *error = "invalid lease owner";
+        return false;
+    }
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (index >= devices.size()) {
+            if (error) *error = "bad device index";
+            return false;
+        }
+    }
+    std::lock_guard<std::mutex> lk(leaseMutex_);
+    if (deviceLeaseOwner_ != DeviceLeaseOwner::None && deviceLeaseOwner_ != owner) {
+        const bool streaming = isStreaming(deviceLeaseIndex_ == static_cast<size_t>(-1) ? index : deviceLeaseIndex_);
+        if (streaming && !force && leasePriority(owner) < leasePriority(deviceLeaseOwner_)) {
+            if (error) {
+                *error = std::string("device leased by ") + leaseOwnerName(deviceLeaseOwner_) +
+                         " — pass force=true to take the tuner";
+            }
+            return false;
+        }
+    } else if (deviceLeaseOwner_ == DeviceLeaseOwner::None && !force &&
+               (owner == DeviceLeaseOwner::Satcom || owner == DeviceLeaseOwner::Inmarsat ||
+                owner == DeviceLeaseOwner::Aircraft) &&
+               isStreaming(index)) {
+        if (error) {
+            *error = "live listen session owns the tuner — pass force=true to retune";
+        }
+        return false;
+    }
+    deviceLeaseOwner_ = owner;
+    deviceLeaseIndex_ = index;
+    return true;
+}
+
+void DeviceManager::releaseDeviceLease(DeviceLeaseOwner owner) {
+    std::lock_guard<std::mutex> lk(leaseMutex_);
+    if (deviceLeaseOwner_ == owner) {
+        deviceLeaseOwner_ = DeviceLeaseOwner::None;
+        deviceLeaseIndex_ = static_cast<size_t>(-1);
+    }
+}
+
+bool DeviceManager::retuneWithLease(size_t index, double freqHz, DeviceLeaseOwner owner, bool force,
+                                    std::string* error) {
+    if (!acquireDeviceLease(index, owner, force, error)) return false;
+    setCenterFreq(index, freqHz);
+    return true;
+}
+
+double DeviceManager::getCurrentSampleRate(size_t index) const {
+    auto* st = streamState(index);
+    if (!st) {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (index >= devices.size()) return 0.0;
+        return devices[index].sampleRate;
+    }
+    std::lock_guard<std::mutex> lk(st->queueMutex);
+    return st->currentRate;
+}
+
+void DeviceManager::applyLiveSampleRate(size_t index, double sampleRateHz) {
+    DeviceInfo d;
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (index >= devices.size()) return;
+        d = devices[index];
+    }
+    if (d.isSdrplay) sampleRateHz = SdrplayProfile::clampSampleRateHz(d.sdrplayDuoMode, sampleRateHz);
+    const double live = getCurrentSampleRate(index);
+    updateDeviceParams(index, sampleRateHz, d.gain, d.antenna, d.frequencyCorrectionPpm);
+    if (isStreaming(index) && std::abs(live - sampleRateHz) > 1.0) {
+        stopStreaming(index);
+        startStreaming(index, true);
+    }
+}
+
+size_t DeviceManager::preferredListenDeviceIndex() const {
+    std::lock_guard<std::mutex> lk(devicesMutex);
+    if (preferredListenDeviceIndex_ < devices.size()) return preferredListenDeviceIndex_;
+    return 0;
+}
+
+void DeviceManager::setPreferredListenDeviceIndex(size_t index) {
+    std::lock_guard<std::mutex> lk(devicesMutex);
+    preferredListenDeviceIndex_ = index;
+}
+
+void DeviceManager::setLiveAgc(size_t index, bool enabled) {
+    DeviceInfo d;
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (index >= devices.size() || !devices[index].isSdrplay) return;
+        devices[index].agcEnabled = enabled;
+        d = devices[index];
+        saveSettings();
+    }
+#ifdef HAVE_SOAPYSDR
+    if (auto* stPtr = streamState(index)) {
+        auto& st = *stPtr;
+        std::lock_guard<std::mutex> stateLock(st.stateMutex);
+        if (st.soapyDev && !st.stopFlag) {
+            try {
+                std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+                st.soapyDev->setGainMode(SOAPY_SDR_RX, d.rxChannel, enabled);
+                if (!enabled) {
+                    try { st.soapyDev->setGain(SOAPY_SDR_RX, d.rxChannel, "IFGR", d.ifgrDb); } catch (...) {}
+                    try { st.soapyDev->setGain(SOAPY_SDR_RX, d.rxChannel, "RFGR", d.rfgrDb); } catch (...) {}
+                }
+            } catch (const std::exception& ex) {
+                spdlog::warn("Live AGC failed on device {}: {}", index, ex.what());
+            }
+        }
+    }
+#endif
+}
+
+void DeviceManager::setLiveGainElement(size_t index, const std::string& element, double valueDb) {
+    DeviceInfo d;
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (index >= devices.size() || !devices[index].isSdrplay) return;
+        if (element == "IFGR") devices[index].ifgrDb = valueDb;
+        else if (element == "RFGR") {
+            devices[index].rfgrDb = valueDb;
+            devices[index].gain = clampGainForDevice(devices[index], valueDb);
+        }
+        devices[index].agcEnabled = false;
+        d = devices[index];
+        saveSettings();
+    }
+#ifdef HAVE_SOAPYSDR
+    if (auto* stPtr = streamState(index)) {
+        auto& st = *stPtr;
+        std::lock_guard<std::mutex> stateLock(st.stateMutex);
+        if (st.soapyDev && !st.stopFlag) {
+            try {
+                std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+                try { st.soapyDev->setGainMode(SOAPY_SDR_RX, d.rxChannel, false); } catch (...) {}
+                st.soapyDev->setGain(SOAPY_SDR_RX, d.rxChannel, element, valueDb);
+            } catch (const std::exception& ex) {
+                spdlog::warn("Live gain element {} failed on device {}: {}", element, index, ex.what());
+            }
+        }
+    }
+#endif
+}
+
+void DeviceManager::setLiveBandwidth(size_t index, double bandwidthHz) {
+    DeviceInfo d;
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (index >= devices.size() || !devices[index].isSdrplay) return;
+        devices[index].bandwidthHz = bandwidthHz;
+        d = devices[index];
+        saveSettings();
+    }
+#ifdef HAVE_SOAPYSDR
+    if (bandwidthHz <= 0.0) return;
+    if (auto* stPtr = streamState(index)) {
+        auto& st = *stPtr;
+        std::lock_guard<std::mutex> stateLock(st.stateMutex);
+        if (st.soapyDev && !st.stopFlag) {
+            try {
+                std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+                st.soapyDev->setBandwidth(SOAPY_SDR_RX, d.rxChannel, bandwidthHz);
+            } catch (const std::exception& ex) {
+                spdlog::warn("Live bandwidth failed on device {}: {}", index, ex.what());
+            }
+        }
+    }
+#endif
+}
+
+void DeviceManager::setLiveSdrplaySetting(size_t index, const std::string& key, const std::string& value) {
+    DeviceInfo d;
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (index >= devices.size() || !devices[index].isSdrplay) return;
+        // Refuse Bias-T on Hi-Z / Antenna C (BNC) — forces off and skips hardware write.
+        if (key == SdrplaySettings::kBiasT &&
+            SdrplayProfile::parseBoolSetting(value, false) &&
+            !SdrplayProfile::biasTAllowedForAntenna(devices[index].sdrplayModel, devices[index].antenna)) {
+            devices[index].soapySettings[key] = "false";
+            saveSettings();
+            spdlog::warn("Bias-T blocked on device {} antenna '{}' (incompatible port)",
+                         index, devices[index].antenna);
+            return;
+        }
+        devices[index].soapySettings[key] = value;
+        d = devices[index];
+        saveSettings();
+    }
+#ifdef HAVE_SOAPYSDR
+    if (auto* stPtr = streamState(index)) {
+        auto& st = *stPtr;
+        std::lock_guard<std::mutex> stateLock(st.stateMutex);
+        if (st.soapyDev && !st.stopFlag) {
+            try {
+                std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+                st.soapyDev->writeSetting(key, value);
+            } catch (const std::exception& ex) {
+                spdlog::warn("Live SDRplay setting {}={} failed on device {}: {}", key, value, index, ex.what());
+            }
+        }
+    }
+#endif
+}
+
+void DeviceManager::setLiveAntenna(size_t index, const std::string& antenna) {
+    DeviceInfo d;
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (index >= devices.size()) return;
+        devices[index].antenna = antenna;
+        if (devices[index].isSdrplay &&
+            !SdrplayProfile::biasTAllowedForAntenna(devices[index].sdrplayModel, antenna)) {
+            devices[index].soapySettings[SdrplaySettings::kBiasT] = "false";
+        }
+        d = devices[index];
+        saveSettings();
+    }
+#ifdef HAVE_SOAPYSDR
+    if (d.isDiversityComposite) return;
+    if (auto* stPtr = streamState(index)) {
+        auto& st = *stPtr;
+        std::lock_guard<std::mutex> stateLock(st.stateMutex);
+        if (st.soapyDev && !st.stopFlag) {
+            try {
+                std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+                const size_t ch = d.isSdrplay ? d.rxChannel : 0;
+                st.soapyDev->setAntenna(SOAPY_SDR_RX, ch, antenna);
+                if (d.isSdrplay &&
+                    !SdrplayProfile::biasTAllowedForAntenna(d.sdrplayModel, antenna)) {
+                    try { st.soapyDev->writeSetting(SdrplaySettings::kBiasT, "false"); } catch (...) {}
+                }
+                spdlog::info("Live antenna applied to device {}: {}", index, antenna);
+            } catch (const std::exception& ex) {
+                spdlog::warn("Live antenna failed on device {}: {}", index, ex.what());
+            }
+        }
+    }
+#endif
+}
+
+SdrplayDiversity::Config DeviceManager::getDiversityConfig() const {
+    return diversityConfig_;
+}
+
+size_t DeviceManager::ensureDiversityCompositeDeviceLocked(size_t deviceIndexHint) {
+    if (deviceIndexHint >= devices.size()) return static_cast<size_t>(-1);
+    const auto& hint = devices[deviceIndexHint];
+    if (!hint.isSdrplay || hint.sdrplayDuoMode != "DT") return static_cast<size_t>(-1);
+
+    size_t idxA = static_cast<size_t>(-1);
+    size_t idxB = static_cast<size_t>(-1);
+    for (size_t i = 0; i < devices.size(); ++i) {
+        const auto& d = devices[i];
+        if (!d.isSdrplay || d.isDiversityComposite) continue;
+        if (d.serial != hint.serial || d.sdrplayDuoMode != "DT") continue;
+        if (d.rxChannel == 0) idxA = i;
+        if (d.rxChannel == 1) idxB = i;
+    }
+    if (idxA == static_cast<size_t>(-1) || idxB == static_cast<size_t>(-1))
+        return static_cast<size_t>(-1);
+
+    for (size_t i = 0; i < devices.size(); ++i) {
+        if (devices[i].isDiversityComposite && devices[i].serial == hint.serial) {
+            devices[i].diversitySourceA = idxA;
+            devices[i].diversitySourceB = idxB;
+            diversityCompositeIndex_ = i;
+            return i;
+        }
+    }
+
+    DeviceInfo comp;
+    comp.driver = "sdrplay";
+    comp.isSdrplay = true;
+    comp.isDiversityComposite = true;
+    comp.serial = hint.serial;
+    comp.sdrplayModel = "RSPduo";
+    comp.sdrplayDuoMode = "DT";
+    comp.label = "SDRplay Diversity (" + hint.serial + ")";
+    comp.hardware = "RSPduo-Diversity";
+    comp.antennas = {"Diversity A+B"};
+    comp.antenna = "Diversity A+B";
+    comp.sampleRates = {2e6};
+    comp.sampleRate = std::min(devices[idxA].sampleRate, devices[idxB].sampleRate);
+    if (comp.sampleRate <= 0) comp.sampleRate = 2e6;
+    comp.minFreq = std::min(devices[idxA].minFreq, devices[idxB].minFreq);
+    comp.maxFreq = std::max(devices[idxA].maxFreq, devices[idxB].maxFreq);
+    comp.gainName = "RFGR";
+    comp.gain = devices[idxA].gain;
+    comp.gainMin = devices[idxA].gainMin;
+    comp.gainMax = devices[idxA].gainMax;
+    comp.diversitySourceA = idxA;
+    comp.diversitySourceB = idxB;
+    comp.stableKey = "sdrplay|serial:" + comp.serial + "|diversity";
+    devices.push_back(std::move(comp));
+    diversityCompositeIndex_ = devices.size() - 1;
+    if (streams.size() <= diversityCompositeIndex_) streams.resize(diversityCompositeIndex_ + 1);
+    spdlog::info("Created SDRplay diversity composite device at index {} (A={}, B={})",
+                 diversityCompositeIndex_, idxA, idxB);
+    return diversityCompositeIndex_;
+}
+
+size_t DeviceManager::ensureDiversityCompositeDevice(size_t deviceIndexHint) {
+    std::lock_guard<std::mutex> lk(devicesMutex);
+    return ensureDiversityCompositeDeviceLocked(deviceIndexHint);
+}
+
+void DeviceManager::restoreDiversityCompositeAfterEnumerate() {
+    if (diversityConfig_.mode == SdrplayDiversity::Mode::Off) {
+        diversityCompositeIndex_ = static_cast<size_t>(-1);
+        return;
+    }
+    size_t hint = static_cast<size_t>(-1);
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        for (size_t i = 0; i < devices.size(); ++i) {
+            if (devices[i].isSdrplay && !devices[i].isDiversityComposite &&
+                devices[i].sdrplayDuoMode == "DT") {
+                hint = i;
+                break;
+            }
+        }
+        if (hint == static_cast<size_t>(-1)) {
+            diversityCompositeIndex_ = static_cast<size_t>(-1);
+            return;
+        }
+        ensureDiversityCompositeDeviceLocked(hint);
+    }
+}
+
+bool DeviceManager::configureDiversity(size_t deviceIndexHint, SdrplayDiversity::Config config) {
+    diversityConfig_ = config;
+    if (config.mode == SdrplayDiversity::Mode::Off) {
+        spdlog::info("SDRplay diversity disabled");
+        return true;
+    }
+    const size_t comp = ensureDiversityCompositeDevice(deviceIndexHint);
+    if (comp == static_cast<size_t>(-1)) {
+        spdlog::warn("SDRplay diversity requires Dual Tuner ch0+ch1 for the selected device");
+        diversityConfig_.mode = SdrplayDiversity::Mode::Off;
+        return false;
+    }
+    size_t a = static_cast<size_t>(-1), b = static_cast<size_t>(-1);
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (comp < devices.size()) {
+            a = devices[comp].diversitySourceA;
+            b = devices[comp].diversitySourceB;
+            devices[comp].enabled = true;
+        }
+    }
+    if (a != static_cast<size_t>(-1)) startStreaming(a, true);
+    if (b != static_cast<size_t>(-1)) startStreaming(b, true);
+    startStreaming(comp, false); // composite uses soft combine path (no Soapy)
+    setPreferredListenDeviceIndex(comp);
+    spdlog::info("SDRplay diversity enabled mode={} phase={} deg ampB={} composite={}",
+                 SdrplayDiversity::modeName(config.mode), config.phaseDeg, config.amplitudeB, comp);
+    return true;
+}
+
+std::vector<std::complex<float>> DeviceManager::getDiversityCombinedIQ(size_t maxSamples) const {
+    size_t a = static_cast<size_t>(-1), b = static_cast<size_t>(-1);
+    SdrplayDiversity::Config cfg = diversityConfig_;
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (diversityCompositeIndex_ < devices.size() && devices[diversityCompositeIndex_].isDiversityComposite) {
+            a = devices[diversityCompositeIndex_].diversitySourceA;
+            b = devices[diversityCompositeIndex_].diversitySourceB;
+        }
+    }
+    if (cfg.mode == SdrplayDiversity::Mode::Off || a == static_cast<size_t>(-1) || b == static_cast<size_t>(-1))
+        return {};
+    auto wa = const_cast<DeviceManager*>(this)->getRecentIQWindow(a, maxSamples);
+    auto wb = const_cast<DeviceManager*>(this)->getRecentIQWindow(b, maxSamples);
+    if (wa.size() > wb.size()) wa.erase(wa.begin(), wa.begin() + static_cast<std::ptrdiff_t>(wa.size() - wb.size()));
+    if (wb.size() > wa.size()) wb.erase(wb.begin(), wb.begin() + static_cast<std::ptrdiff_t>(wb.size() - wa.size()));
+    return SdrplayDiversity::combine(wa, wb, cfg);
 }
 
 size_t DeviceManager::getIQQueueDepth(size_t index) const {
@@ -1421,6 +2296,9 @@ DeviceManager::RecentIQWindow DeviceManager::getNewIQWindowForReceiver(size_t de
     // skip old samples instead of playing speech many seconds late.
     // Keep a healthy live tail (~100 ms worth of maxSamples blocks) so FIR/squelch
     // are not reset every couple of blocks (that sounds like a helicopter).
+    // IMPORTANT: soft lag skip must NOT set cursorDiscontinuity. Marking a gap here
+    // forced WFM multiplex/RDS reset every catch-up → permanent buzz + UI thrash
+    // (see sdr_town.log "analog catch-up" every ~3s on 98.1 WFM).
     if (maxLagSamples > 0 && available > static_cast<uint64_t>(maxLagSamples)) {
         const uint64_t keep = std::min<uint64_t>(
             static_cast<uint64_t>(maxSamples) * 4ull,
@@ -1428,11 +2306,10 @@ DeviceManager::RecentIQWindow DeviceManager::getNewIQWindowForReceiver(size_t de
         myLast = (total > keep) ? total - keep : 0;
         rx.lastConsumedAbsolute.store(myLast, std::memory_order_release);
         available = (total > myLast) ? (total - myLast) : 0;
-        outWindow.cursorDiscontinuity = true;
         static thread_local auto lastLagLog = std::chrono::steady_clock::time_point{};
         const auto nowLag = std::chrono::steady_clock::now();
         if (nowLag - lastLagLog > std::chrono::seconds(2)) {
-            spdlog::warn("Receiver on dev {} analog catch-up: dropped backlog to stay within {} samples of live edge.",
+            spdlog::warn("Receiver on dev {} analog catch-up: dropped backlog to stay within {} samples of live edge (soft, no demod reset).",
                 devIndex, (unsigned long long)maxLagSamples);
             lastLagLog = nowLag;
         }
@@ -1577,6 +2454,7 @@ void DeviceManager::appendIQBlock(size_t index, std::vector<std::complex<float>>
 std::vector<std::string> DeviceManager::getAvailableDrivers() const {
     // Ensure setup even for this call (const cast for simplicity since side effects are global env + module loads)
     const_cast<DeviceManager*>(this)->setupSoapyForRTLSDR();
+    const_cast<DeviceManager*>(this)->setupSoapyForSDRplay();
 
     std::set<std::string> drivers;
 #ifdef HAVE_SOAPYSDR
@@ -1590,6 +2468,7 @@ std::vector<std::string> DeviceManager::getAvailableDrivers() const {
     // Always include known for stubs / info
     drivers.insert("rtlsdr");
     drivers.insert("hackrf");
+    drivers.insert("sdrplay");
     return std::vector<std::string>(drivers.begin(), drivers.end());
 }
 
@@ -1660,14 +2539,158 @@ void DeviceManager::setupSoapyForRTLSDR() {
 #endif
 }
 
+void DeviceManager::setupSoapyForSDRplay() {
+#ifdef _WIN32
+    std::string appDir = QCoreApplication::applicationDirPath().toStdString();
+    const char* sdrplayRoots[] = {
+        "C:\\Program Files\\SDRplay",
+        "C:\\Program Files\\SDRplay\\API",
+        "C:\\Program Files\\PothosSDR",
+        "C:\\Program Files (x86)\\PothosSDR",
+        "C:\\ProgramData\\radioconda\\Library",
+        nullptr
+    };
+    std::string currentPath = getenv("PATH") ? getenv("PATH") : "";
+    static bool sdrplayPathDone = false;
+    if (!sdrplayPathDone) {
+        std::string newPath = currentPath;
+        bool changed = false;
+        for (int i = 0; sdrplayRoots[i]; ++i) {
+            std::string root = sdrplayRoots[i];
+            std::string bin = root + "\\bin";
+            if (GetFileAttributesA(bin.c_str()) != INVALID_FILE_ATTRIBUTES &&
+                newPath.find(bin) == std::string::npos) {
+                newPath = bin + ";" + newPath;
+                changed = true;
+            }
+            if (GetFileAttributesA(root.c_str()) != INVALID_FILE_ATTRIBUTES &&
+                newPath.find(root) == std::string::npos) {
+                newPath = root + ";" + newPath;
+                changed = true;
+            }
+        }
+        if (newPath.find(appDir) == std::string::npos) {
+            newPath = appDir + ";" + newPath;
+            changed = true;
+        }
+        if (changed) {
+            _putenv_s("PATH", newPath.c_str());
+            spdlog::debug("Updated process PATH for SDRplay API / SoapySDRPlay");
+        }
+        sdrplayPathDone = true;
+    }
+
+    // Prefer an existing SOAPY_SDR_ROOT; otherwise point at Pothos/radioconda if present.
+    if (!getenv("SOAPY_SDR_ROOT") || !*getenv("SOAPY_SDR_ROOT")) {
+        const char* soapyRoots[] = {
+            "C:\\Program Files\\PothosSDR",
+            "C:\\Program Files (x86)\\PothosSDR",
+            "C:\\ProgramData\\radioconda\\Library",
+            nullptr
+        };
+        for (int i = 0; soapyRoots[i]; ++i) {
+            std::string modPath = std::string(soapyRoots[i]) + "\\lib\\SoapySDR\\modules";
+            std::string modPath08 = std::string(soapyRoots[i]) + "\\lib\\SoapySDR\\modules0.8";
+            if (GetFileAttributesA(modPath.c_str()) != INVALID_FILE_ATTRIBUTES ||
+                GetFileAttributesA(modPath08.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                _putenv_s("SOAPY_SDR_ROOT", soapyRoots[i]);
+                break;
+            }
+        }
+    }
+#endif
+
+    bool apiPresent = false;
+    bool moduleLoaded = false;
+    bool deviceEnumerated = false;
+#ifdef _WIN32
+    const auto apiCandidates = SdrplayProfile::windowsApiCandidates(appDir);
+    for (const auto& candidate : apiCandidates) {
+        if (GetFileAttributesA(candidate.c_str()) != INVALID_FILE_ATTRIBUTES) {
+            apiPresent = true;
+            spdlog::debug("SDRplay API candidate found: {}", candidate);
+            break;
+        }
+    }
+#endif
+
+#ifdef HAVE_SOAPYSDR
+    static bool sdrplayModuleLoadAttempted = false;
+    static bool sdrplayModuleLoaded = false;
+    if (!sdrplayModuleLoadAttempted) {
+        sdrplayModuleLoadAttempted = true;
+        std::string appDir = QCoreApplication::applicationDirPath().toStdString();
+#ifdef _WIN32
+        for (const auto& bundled : SdrplayProfile::windowsSoapyModuleCandidates(appDir)) {
+            if (GetFileAttributesA(bundled.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
+            try {
+                SoapySDR::loadModule(bundled);
+                sdrplayModuleLoaded = true;
+                spdlog::info("Loaded SDRplay Soapy module: {}", bundled);
+            } catch (const std::exception& ex) {
+                spdlog::warn("SDRplay Soapy module load failed for {}: {}", bundled, ex.what());
+            } catch (...) {
+                spdlog::warn("SDRplay Soapy module load failed for {}: unknown error", bundled);
+            }
+        }
+#else
+        (void)appDir;
+#endif
+    }
+    moduleLoaded = sdrplayModuleLoaded;
+
+    // Confirm driver registration if possible.
+    try {
+        auto results = SoapySDR::Device::enumerate({{"driver", "sdrplay"}});
+        deviceEnumerated = !results.empty();
+        if (deviceEnumerated) moduleLoaded = true;
+        if (moduleLoaded && !deviceEnumerated) {
+            spdlog::warn("SDRplay Soapy module is loaded, but no RSP was enumerated; "
+                         "check the SDRplay API service, USB connection, and exclusive access");
+        }
+    } catch (const std::exception& ex) {
+        spdlog::warn("SDRplay enumeration failed after module load: {}", ex.what());
+    } catch (...) {
+        spdlog::warn("SDRplay enumeration failed after module load: unknown error");
+    }
+#endif
+
+#ifndef _WIN32
+    // Non-Windows hosts still report status from Soapy enumeration above.
+    if (!apiPresent) apiPresent = moduleLoaded;
+#endif
+
+    if (apiPresent && moduleLoaded && deviceEnumerated) {
+        sdrplaySetupStatus_ = "SDRplay: API and SoapySDRPlay module ready; RSP detected";
+    } else if (apiPresent && moduleLoaded) {
+        sdrplaySetupStatus_ = "SDRplay: API and SoapySDRPlay module loaded, but no RSP detected "
+                               "— check the API service, USB connection, and other SDR software";
+    } else if (!apiPresent && !moduleLoaded) {
+        sdrplaySetupStatus_ = "SDRplay: install SDRplay API 3.x and SoapySDRPlay3 (e.g. PothosSDR), then restart";
+    } else if (!apiPresent) {
+        sdrplaySetupStatus_ = "SDRplay: Soapy module present but SDRplay API DLL not found — install API 3.x from sdrplay.com";
+    } else {
+        sdrplaySetupStatus_ = "SDRplay: API found but SoapySDRPlay module missing — install PothosSDR/radioconda SoapySDRPlay3";
+    }
+    spdlog::info("{}", sdrplaySetupStatus_);
+}
+
 uint64_t DeviceManager::setCenterFreq(size_t index, double freqHz) {
     StreamState* stPtr = nullptr;
+    size_t diversityA = static_cast<size_t>(-1);
+    size_t diversityB = static_cast<size_t>(-1);
+    bool isComposite = false;
     {
         std::lock_guard<std::mutex> lk(devicesMutex);
         if (index >= devices.size()) return 0;
         if (streams.size() <= index) streams.resize(index + 1);
         if (!streams[index]) streams[index] = std::make_unique<StreamState>();
         stPtr = streams[index].get();
+        if (devices[index].isDiversityComposite) {
+            isComposite = true;
+            diversityA = devices[index].diversitySourceA;
+            diversityB = devices[index].diversitySourceB;
+        }
     }
     auto& st = *stPtr;
     {
@@ -1675,6 +2698,14 @@ uint64_t DeviceManager::setCenterFreq(size_t index, double freqHz) {
         st.currentCenter = freqHz;
     }
     const uint64_t seq = st.centerTuneRequestSeq.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+    // Keep Dual Tuner sources locked to the same LO for coherent diversity.
+    if (isComposite) {
+        if (diversityA != static_cast<size_t>(-1)) setCenterFreq(diversityA, freqHz);
+        if (diversityB != static_cast<size_t>(-1)) setCenterFreq(diversityB, freqHz);
+        st.centerTuneAppliedSeq.store(seq, std::memory_order_release);
+        return seq;
+    }
 
     bool active = false;
 #ifdef HAVE_SOAPYSDR
@@ -1801,6 +2832,124 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
     const uint64_t myGen = expectedGeneration;
     const size_t blockSize = 32768; // much larger blocks to sustain 2MS/s+ without overflow. 2048 was only ~1ms of RF at 2.048MS/s.
 
+    // Host diversity combiner: pull aligned new IQ from Dual Tuner A/B rings and append.
+    {
+        size_t srcA = static_cast<size_t>(-1), srcB = static_cast<size_t>(-1);
+        bool isComposite = false;
+        {
+            std::lock_guard<std::mutex> lk(devicesMutex);
+            if (index < devices.size() && devices[index].isDiversityComposite) {
+                isComposite = true;
+                srcA = devices[index].diversitySourceA;
+                srcB = devices[index].diversitySourceB;
+            }
+        }
+        if (isComposite) {
+            {
+                std::lock_guard<std::mutex> lk(st.stateMutex);
+                st.isReal = true; // soft-real: combined from hardware (or stub) sources
+                st.runtimeState = "diversity combine";
+            }
+            auto copyRingFrom = [](StreamState& src, uint64_t startAbs, size_t count,
+                                   std::vector<std::complex<float>>& out) {
+                std::lock_guard<std::mutex> ringLock(src.ringMutex);
+                const size_t cap = src.ringCapacity;
+                const uint64_t total = src.totalSamplesWritten.load(std::memory_order_acquire);
+                if (cap == 0 || src.iqRing.empty() || count == 0 || startAbs + count > total) {
+                    out.clear();
+                    return;
+                }
+                out.resize(count);
+                const bool powerOfTwoCap = (cap & (cap - 1)) == 0;
+                const size_t startIdx = powerOfTwoCap
+                    ? static_cast<size_t>(startAbs) & (cap - 1)
+                    : static_cast<size_t>(startAbs % static_cast<uint64_t>(cap));
+                const size_t firstPart = std::min(count, cap - startIdx);
+                std::copy(src.iqRing.begin() + static_cast<std::ptrdiff_t>(startIdx),
+                          src.iqRing.begin() + static_cast<std::ptrdiff_t>(startIdx + firstPart),
+                          out.begin());
+                if (firstPart < count) {
+                    std::copy(src.iqRing.begin(),
+                              src.iqRing.begin() + static_cast<std::ptrdiff_t>(count - firstPart),
+                              out.begin() + static_cast<std::ptrdiff_t>(firstPart));
+                }
+            };
+
+            uint64_t cursorA = 0, cursorB = 0;
+            bool primed = false;
+            auto lastSpectrumTime = std::chrono::steady_clock::now();
+            while (!st.stopFlag && st.sessionGen.load(std::memory_order_acquire) == myGen) {
+                // Pick up live phase/mode changes without restarting the stream.
+                SdrplayDiversity::Config cfg = diversityConfig_;
+                if (cfg.mode == SdrplayDiversity::Mode::Off) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                    continue;
+                }
+                auto* sa = streamState(srcA);
+                auto* sb = streamState(srcB);
+                if (!sa || !sb) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                    continue;
+                }
+                uint64_t totA = sa->totalSamplesWritten.load(std::memory_order_acquire);
+                uint64_t totB = sb->totalSamplesWritten.load(std::memory_order_acquire);
+                if (!primed) {
+                    cursorA = totA;
+                    cursorB = totB;
+                    primed = true;
+                    continue;
+                }
+                const size_t availA = (totA > cursorA) ? static_cast<size_t>(totA - cursorA) : 0;
+                const size_t availB = (totB > cursorB) ? static_cast<size_t>(totB - cursorB) : 0;
+                size_t n = std::min({availA, availB, blockSize});
+                if (n == 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                    continue;
+                }
+                std::vector<std::complex<float>> wa, wb;
+                copyRingFrom(*sa, cursorA, n, wa);
+                copyRingFrom(*sb, cursorB, n, wb);
+                cursorA += n;
+                cursorB += n;
+                if (wa.size() != n || wb.size() != n) continue;
+                auto combined = SdrplayDiversity::combine(wa, wb, cfg);
+                if (combined.empty()) continue;
+
+                // Mirror source rate/center onto composite for spectrum consumers.
+                {
+                    std::lock_guard<std::mutex> qa(sa->queueMutex);
+                    std::lock_guard<std::mutex> qb(sb->queueMutex);
+                    std::lock_guard<std::mutex> qc(st.queueMutex);
+                    st.currentRate = std::min(sa->currentRate, sb->currentRate);
+                    if (st.currentRate <= 0) st.currentRate = 2e6;
+                    st.currentCenter = sa->currentCenter;
+                }
+                appendIQBlock(index, std::move(combined));
+
+                auto now = std::chrono::steady_clock::now();
+                if (now - lastSpectrumTime > std::chrono::milliseconds(50)) {
+                    lastSpectrumTime = now;
+                    auto window = getRecentIQWindow(index, st.spectrumBins);
+                    if (window.size() >= 64) {
+                        auto power = computeRealFFTPower(window, st.spectrumBins, true);
+                        std::lock_guard<std::mutex> lk(st.queueMutex);
+                        st.latestPower = power;
+                        if (st.spectrumAvg.size() != power.size()) {
+                            st.spectrumAvg = power;
+                            st.spectrumPeak = power;
+                        } else {
+                            for (size_t i = 0; i < power.size(); ++i) {
+                                st.spectrumAvg[i] = 0.85f * st.spectrumAvg[i] + 0.15f * power[i];
+                                st.spectrumPeak[i] = std::max(st.spectrumPeak[i] * 0.995f, power[i]);
+                            }
+                        }
+                    }
+                }
+            }
+            return;
+        }
+    }
+
 #ifdef HAVE_SOAPYSDR
     SoapySDR::Device* dev = nullptr;
     SoapySDR::Stream* stream = nullptr;
@@ -1830,10 +2979,16 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
 
                     double ppm = 0.0;
                     bool nativePpm = false;
+                    size_t rxCh = 0;
                     {
                         std::lock_guard<std::mutex> lk(st.stateMutex);
                         ppm = st.frequencyCorrectionPpm;
                         nativePpm = st.nativeFrequencyCorrectionActive;
+                    }
+                    {
+                        std::lock_guard<std::mutex> lk(devicesMutex);
+                        if (index < devices.size() && devices[index].isSdrplay)
+                            rxCh = devices[index].rxChannel;
                     }
 
                     if (std::isfinite(logicalCenter) && logicalCenter > 0.0) {
@@ -1841,7 +2996,7 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                         const auto tuneStart = std::chrono::steady_clock::now();
                         try {
                             std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
-                            dev->setFrequency(SOAPY_SDR_RX, 0, tuneHz);
+                            dev->setFrequency(SOAPY_SDR_RX, rxCh, tuneHz);
                             markStreamRetune(st, logicalCenter);
                             st.centerTuneAppliedSeq.store(requestedTuneSeq, std::memory_order_release);
                             lastSpectrumTime = std::chrono::steady_clock::now();

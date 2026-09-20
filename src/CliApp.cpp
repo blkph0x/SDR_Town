@@ -37,6 +37,14 @@
 #include "RemoteDiagnostics.h"
 #include "SignalClassifier.h"
 #include "ClassifierModelBackend.h"
+#include "SdrplayProfile.h"
+#include "SatcomScannerEngine.h"
+#include "SatPassPlanner.h"
+#include "TleStore.h"
+#include "InmarsatEngine.h"
+#include "InmarsatBandPlan.h"
+#include "AdsBTrackStore.h"
+#include "Sgp4.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -1408,6 +1416,22 @@ int runCLI(int argc, char* argv[]) {
                   << "  ppm apply <device> <known_mhz> [search_khz]\n";
     };
 
+    auto printSdrplayUsage = []() {
+        std::cout << "usage:\n"
+                  << "  sdrplay status\n"
+                  << "  sdrplay show <device>\n"
+                  << "  sdrplay gains <device>\n"
+                  << "  sdrplay set <device> <key> <value>\n"
+                  << "  sdrplay agc <device> on|off\n"
+                  << "  sdrplay ifgr <device> <dB>\n"
+                  << "  sdrplay rfgr <device> <dB>\n"
+                  << "  sdrplay bw <device> <Hz|0>\n"
+                  << "  sdrplay antenna <device> <name>\n"
+                  << "  sdrplay diversity <device> off|sum|null [phase_deg] [amp_b]\n"
+                  << "keys: iqcorr_ctrl biasT_ctrl rfnotch_ctrl dabnotch_ctrl extref_ctrl hdr_ctrl rfgain_sel agc_setpoint\n"
+                  << "note: rfnotch_ctrl = combined MW/FM; extref_ctrl = clock OUT (extRefOutputEn)\n";
+    };
+
     auto runPpmCalibration = [&](bool applyCorrection, int deviceIndex, double knownFreqInput, double searchKhz) {
         if (deviceIndex < 0 || static_cast<size_t>(deviceIndex) >= mgr.getDevices().size()) {
             std::cout << "bad device index\n";
@@ -1541,6 +1565,13 @@ int runCLI(int argc, char* argv[]) {
                       << "  spectrum fft <4096|8192|16384|65536> [dev] - set waterfall FFT precision\n"
                       << "  gain <i> <db>           - set live device RF gain\n"
                       << "  ppm <i> <ppm> | ppm cal/apply <i> <known_mhz> [search_khz]\n"
+                      << "  sdrplay status|show|gains|set|agc|ifgr|rfgr|bw|antenna|diversity ...\n"
+                      << "  devices rescan         - probe hardware (stops live streams)\n"
+                      << "  observer show|set <lat> <lon> [alt_m] [min_el]\n"
+                      << "  tle status|refresh|load <path>|show [norad]\n"
+                      << "  satcom status|start [force]|stop|skip|record|arm|disarm|track\n"
+                      << "  inmarsat status|start [force]|stop|channel <mhz>|plan <id>\n"
+                      << "  aircraft status|refresh|tune [force]|track <icao>\n"
                       << "  squelch <db> [rx]       - set squelch\n"
                       << "  stats | status [rx]     - live diagnostics (gain/mode/BW/IQ/DSP/ring/underrun)\n"
                       << "  fav list|add|tune|del   - saved frequencies\n"
@@ -1583,6 +1614,13 @@ int runCLI(int argc, char* argv[]) {
                 if (rc != 0) std::cout << "test: FAIL (exit " << rc << ")\n";
                 else std::cout << "test: PASS\n";
             } else if (cmd == "list" || cmd == "devices") {
+            std::string sub;
+            iss >> sub;
+            for (auto& c : sub) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (sub == "rescan" || sub == "probe") {
+                mgr.enumerateDevices(true, true);
+                std::cout << "rescanned (streams stopped)\n";
+            }
             auto dlist = mgr.getDevices();
             for (size_t i=0; i<dlist.size(); ++i) {
                 const auto& d = dlist[i];
@@ -1836,6 +1874,303 @@ int runCLI(int argc, char* argv[]) {
                 } else {
                     std::cout << "bad device index\n";
                 }
+            }
+        } else if (cmd == "sdrplay" || cmd == "rsp") {
+            std::string sub;
+            if (!(iss >> sub)) { printSdrplayUsage(); continue; }
+            for (auto& c : sub) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (sub == "status") {
+                std::cout << mgr.getSdrplaySetupStatus() << "\n";
+                auto drivers = mgr.getAvailableDrivers();
+                std::cout << "drivers:";
+                for (const auto& d : drivers) std::cout << " " << d;
+                std::cout << "\n";
+            } else if (sub == "show" || sub == "gains") {
+                int di = 0;
+                if (!(iss >> di) || di < 0 || static_cast<size_t>(di) >= mgr.getDevices().size()) {
+                    std::cout << "bad device index\n";
+                    continue;
+                }
+                auto* d = mgr.getDevice(static_cast<size_t>(di));
+                if (!d || !d->isSdrplay) {
+                    std::cout << "device " << di << " is not SDRplay\n";
+                    continue;
+                }
+                std::cout << "label=" << d->label
+                          << " model=" << d->sdrplayModel
+                          << " duo=" << SdrplayProfile::duoModeDisplayName(d->sdrplayDuoMode)
+                          << " ch=" << d->rxChannel
+                          << " agc=" << (d->agcEnabled ? "on" : "off")
+                          << " IFGR=" << d->ifgrDb
+                          << " RFGR=" << d->rfgrDb
+                          << " bw=" << d->bandwidthHz
+                          << "\n";
+                if (sub == "gains") {
+                    std::cout << "gain elements:";
+                    for (const auto& g : d->gainElements) std::cout << " " << g;
+                    std::cout << " range RFGR=[" << d->gainMin << "," << d->gainMax << "]\n";
+                }
+                if (!d->soapySettings.empty()) {
+                    std::cout << "settings:\n";
+                    for (const auto& kv : d->soapySettings)
+                        std::cout << "  " << kv.first << "=" << kv.second << "\n";
+                }
+            } else if (sub == "set") {
+                int di = 0;
+                std::string key, value;
+                if (!(iss >> di >> key >> value)) { printSdrplayUsage(); continue; }
+                if (di < 0 || static_cast<size_t>(di) >= mgr.getDevices().size()) {
+                    std::cout << "bad device index\n";
+                    continue;
+                }
+                mgr.setLiveSdrplaySetting(static_cast<size_t>(di), key, value);
+                std::cout << "sdrplay " << di << " " << key << "=" << value << "\n";
+            } else if (sub == "agc") {
+                int di = 0;
+                std::string onoff;
+                if (!(iss >> di >> onoff)) { printSdrplayUsage(); continue; }
+                for (auto& c : onoff) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                const bool on = (onoff == "on" || onoff == "1" || onoff == "true");
+                mgr.setLiveAgc(static_cast<size_t>(di), on);
+                std::cout << "sdrplay " << di << " agc=" << (on ? "on" : "off") << "\n";
+            } else if (sub == "ifgr" || sub == "rfgr") {
+                int di = 0;
+                double db = 0.0;
+                if (!(iss >> di >> db)) { printSdrplayUsage(); continue; }
+                mgr.setLiveGainElement(static_cast<size_t>(di), sub == "ifgr" ? "IFGR" : "RFGR", db);
+                std::cout << "sdrplay " << di << " " << sub << "=" << db << "\n";
+            } else if (sub == "bw" || sub == "bandwidth") {
+                int di = 0;
+                double hz = 0.0;
+                if (!(iss >> di >> hz)) { printSdrplayUsage(); continue; }
+                mgr.setLiveBandwidth(static_cast<size_t>(di), hz);
+                std::cout << "sdrplay " << di << " bw=" << hz << "\n";
+            } else if (sub == "antenna" || sub == "ant") {
+                int di = 0;
+                std::string name;
+                if (!(iss >> di)) { printSdrplayUsage(); continue; }
+                std::getline(iss, name);
+                name = trimCopy(name);
+                if (name.empty()) { printSdrplayUsage(); continue; }
+                mgr.setLiveAntenna(static_cast<size_t>(di), name);
+                std::cout << "sdrplay " << di << " antenna=" << name << "\n";
+            } else if (sub == "diversity" || sub == "div") {
+                int di = 0;
+                std::string modeStr;
+                if (!(iss >> di >> modeStr)) { printSdrplayUsage(); continue; }
+                for (auto& c : modeStr) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                SdrplayDiversity::Config cfg = mgr.getDiversityConfig();
+                cfg.mode = SdrplayDiversity::modeFromName(modeStr);
+                double phase = cfg.phaseDeg;
+                double amp = cfg.amplitudeB;
+                if (iss >> phase) cfg.phaseDeg = static_cast<float>(phase);
+                if (iss >> amp) cfg.amplitudeB = static_cast<float>(amp);
+                if (!mgr.configureDiversity(static_cast<size_t>(di), cfg)) {
+                    std::cout << "diversity failed (need RSPduo Dual Tuner ch0+ch1)\n";
+                } else {
+                    auto live = mgr.getDiversityConfig();
+                    std::cout << "sdrplay diversity mode=" << SdrplayDiversity::modeName(live.mode)
+                              << " phase=" << live.phaseDeg
+                              << " ampB=" << live.amplitudeB << "\n";
+                    if (live.mode != SdrplayDiversity::Mode::Off) {
+                        size_t comp = mgr.ensureDiversityCompositeDevice(static_cast<size_t>(di));
+                        if (comp != static_cast<size_t>(-1))
+                            std::cout << "composite device index=" << comp << "\n";
+                    }
+                }
+            } else {
+                printSdrplayUsage();
+            }
+        } else if (cmd == "observer" || cmd == "home") {
+            std::string sub;
+            if (!(iss >> sub)) {
+                const auto o = SatPassPlanner::instance().observer();
+                std::cout << "lat=" << o.latDeg << " lon=" << o.lonDeg
+                          << " altM=" << o.altM << " minEl=" << o.minElevationDeg << "\n";
+                continue;
+            }
+            for (auto& c : sub) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (sub == "show") {
+                const auto o = SatPassPlanner::instance().observer();
+                std::cout << "lat=" << o.latDeg << " lon=" << o.lonDeg
+                          << " altM=" << o.altM << " minEl=" << o.minElevationDeg << "\n";
+            } else if (sub == "set") {
+                std::string latTok, lonTok;
+                if (!(iss >> latTok >> lonTok)) {
+                    std::cout << "usage: observer set <lat> <lon> [alt_m] [min_el]\n";
+                    continue;
+                }
+                double lat = 0, lon = 0;
+                if (!SatObserverConfig::parseLatLonToken(latTok, true, &lat) ||
+                    !SatObserverConfig::parseLatLonToken(lonTok, false, &lon)) {
+                    std::cout << "bad lat/lon (use 33.8S 151.2E or signed degrees)\n";
+                    continue;
+                }
+                auto o = SatPassPlanner::instance().observer();
+                o.latDeg = lat;
+                o.lonDeg = lon;
+                double alt = o.altM, minEl = o.minElevationDeg;
+                if (iss >> alt) o.altM = alt;
+                if (iss >> minEl) o.minElevationDeg = minEl;
+                SatPassPlanner::instance().setObserver(o);
+                AdsBTrackStore::instance().setObserver(o.latDeg, o.lonDeg);
+                std::cout << "observer lat=" << o.latDeg << " lon=" << o.lonDeg
+                          << " altM=" << o.altM << " minEl=" << o.minElevationDeg << "\n";
+            } else {
+                std::cout << "usage: observer show | observer set <lat> <lon> [alt_m] [min_el]\n";
+            }
+        } else if (cmd == "tle") {
+            std::string sub;
+            if (!(iss >> sub)) sub = "status";
+            for (auto& c : sub) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (sub == "status") {
+                std::cout << "count=" << TleStore::instance().all().size()
+                          << " ageSec=" << TleStore::instance().ageSec()
+                          << " err=" << TleStore::instance().lastError() << "\n";
+            } else if (sub == "refresh") {
+                std::string err;
+                const bool ok = SatPassPlanner::instance().refreshTle(&err);
+                std::cout << (ok ? "ok" : "fail") << " " << err << " count="
+                          << TleStore::instance().all().size() << "\n";
+            } else if (sub == "load") {
+                std::string path;
+                std::getline(iss, path);
+                while (!path.empty() && (path.front() == ' ' || path.front() == '"')) path.erase(path.begin());
+                while (!path.empty() && (path.back() == ' ' || path.back() == '"')) path.pop_back();
+                std::string err;
+                const bool ok = TleStore::instance().loadFromFile(path, &err);
+                if (ok) SatPassPlanner::instance().refreshPasses(24.0);
+                std::cout << (ok ? "ok" : "fail") << " " << err << "\n";
+            } else if (sub == "show") {
+                int norad = 0;
+                iss >> norad;
+                if (norad > 0) {
+                    auto t = TleStore::instance().get(norad);
+                    std::cout << t.name << "\n" << t.line1 << "\n" << t.line2 << "\n";
+                } else {
+                    for (const auto& t : TleStore::instance().all())
+                        std::cout << t.noradId << " " << t.name << "\n";
+                }
+            } else {
+                std::cout << "usage: tle status|refresh|load <path>|show [norad]\n";
+            }
+        } else if (cmd == "satcom") {
+            std::string sub;
+            if (!(iss >> sub)) sub = "status";
+            for (auto& c : sub) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            auto& eng = SatcomScannerEngine::instance();
+            if (sub == "status") {
+                const auto s = eng.snapshot();
+                std::cout << "state=" << eng.stateName()
+                          << " hz=" << s.currentHz
+                          << " lock=" << s.lockHz
+                          << " doppler=" << s.dopplerHz
+                          << " tuned=" << s.tunedHz
+                          << " " << s.lastStatus << "\n";
+            } else if (sub == "start") {
+                std::string extra;
+                iss >> extra;
+                const bool force = (extra == "force");
+                std::cout << (eng.start(force) ? "ok" : "fail") << " " << eng.snapshot().lastStatus << "\n";
+            } else if (sub == "stop") {
+                eng.stopRecording();
+                eng.stop();
+                std::cout << "stopped\n";
+            } else if (sub == "skip") {
+                eng.skip();
+            } else if (sub == "record") {
+                std::cout << (eng.startRecording() ? "recording\n" : "not locked\n");
+            } else if (sub == "preset") {
+                std::string name;
+                std::getline(iss, name);
+                while (!name.empty() && name.front() == ' ') name.erase(name.begin());
+                std::cout << (eng.applyPreset(name) ? "ok\n" : "unknown preset\n");
+            } else if (sub == "arm") {
+                std::string satId, dl, forceTok;
+                iss >> satId >> dl >> forceTok;
+                std::string err;
+                const bool force = (dl == "force" || forceTok == "force");
+                if (dl == "force") dl.clear();
+                const bool ok = eng.armPass(satId, dl, true, force, &err);
+                std::cout << (ok ? "ok" : "fail") << " " << err << "\n";
+            } else if (sub == "disarm") {
+                eng.disarmPass();
+                std::cout << "disarmed\n";
+            } else if (sub == "track") {
+                eng.tickPassTrack();
+                const auto s = eng.snapshot();
+                std::cout << "dopplerHz=" << s.dopplerHz << " tunedHz=" << s.tunedHz
+                          << " armed=" << s.passArmed << "\n";
+            } else {
+                std::cout << "usage: satcom status|start [force]|stop|skip|record|preset|arm|disarm|track\n";
+            }
+        } else if (cmd == "inmarsat") {
+            std::string sub;
+            if (!(iss >> sub)) sub = "status";
+            for (auto& c : sub) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            auto& eng = InmarsatEngine::instance();
+            if (sub == "status") {
+                std::cout << eng.statusJson().dump() << "\n";
+            } else if (sub == "start") {
+                std::string extra;
+                iss >> extra;
+                std::cout << (eng.start(extra == "force") ? "ok" : "fail") << " "
+                          << eng.snapshot().lastStatus << "\n";
+            } else if (sub == "stop") {
+                eng.stop();
+                std::cout << "stopped\n";
+            } else if (sub == "channel") {
+                double mhz = 0;
+                std::string mode;
+                int baud = 0;
+                iss >> mhz >> mode >> baud;
+                eng.selectChannel(mhz * 1e6, mode, baud);
+                std::cout << "channel " << mhz << " MHz\n";
+            } else if (sub == "plan") {
+                std::string id;
+                iss >> id;
+                std::cout << (eng.selectBandPlan(id) ? "ok\n" : "unknown plan\n");
+            } else {
+                std::cout << "usage: inmarsat status|start [force]|stop|channel <mhz> [mode] [baud]|plan <id>\n"
+                          << "note: experimental prototype, no unique-word/FEC\n";
+            }
+        } else if (cmd == "aircraft") {
+            std::string sub;
+            if (!(iss >> sub)) sub = "status";
+            for (auto& c : sub) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (sub == "status") {
+                std::cout << AdsBTrackStore::instance().statusJson().dump() << "\n";
+            } else if (sub == "refresh") {
+                std::string err;
+                const bool ok = AdsBTrackStore::instance().refreshNetwork(&err);
+                std::cout << (ok ? "ok" : "fail") << " " << err << "\n";
+            } else if (sub == "tune") {
+                std::string extra;
+                iss >> extra;
+                const bool force = (extra == "force");
+                std::string err;
+                if (!mgr.acquireDeviceLease(0, DeviceManager::DeviceLeaseOwner::Aircraft, force, &err)) {
+                    std::cout << "fail " << err << "\n";
+                } else {
+                    mgr.setEnabled(0, true);
+                    mgr.startStreaming(0, true);
+                    mgr.retuneWithLease(0, 1090e6, DeviceManager::DeviceLeaseOwner::Aircraft, true, nullptr);
+                    std::cout << "tuned 1090\n";
+                }
+            } else if (sub == "track") {
+                std::string hex;
+                iss >> hex;
+                bool ok = false;
+                const uint32_t icao = QString::fromStdString(hex).toUInt(&ok, 16);
+                if (!ok) {
+                    std::cout << "bad icao\n";
+                } else {
+                    const auto t = AdsBTrackStore::instance().trackByIcao(icao);
+                    std::cout << t.icaoHex << " " << t.callsign << " lat=" << t.latDeg
+                              << " lon=" << t.lonDeg << " valid=" << t.positionValid << "\n";
+                }
+            } else {
+                std::cout << "usage: aircraft status|refresh|tune [force]|track <icao>\n";
             }
         } else if (cmd == "squelch") {
             double db; int rxidx=0;
