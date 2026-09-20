@@ -97,7 +97,10 @@ struct P25RepeatedVoiceGrantDecision {
 // Registry / grant / same-call hop thresholds (moved with helpers).
 inline constexpr int kP25RegistryMaxCorrectedDibits = 10;
 inline constexpr int kP25VoiceGrantMaxCorrectedDibits = 18;
-inline constexpr int kP25PendingVoiceGrantMaxCorrectedDibits = kP25RegistryMaxCorrectedDibits;
+// A CRC-valid voice grant must not be discarded just because its channel-ID
+// table has not arrived yet. Once IDEN resolves it, the grant is subject to the
+// same action threshold as a grant that happened to arrive after the table.
+inline constexpr int kP25PendingVoiceGrantMaxCorrectedDibits = kP25VoiceGrantMaxCorrectedDibits;
 inline constexpr int kP25RepeatedVoiceGrantMaxCorrectedDibits = 24;
 inline constexpr int kP25RepeatedVoiceGrantMinHits = 2;
 inline constexpr qint64 kP25RepeatedVoiceGrantTtlMs = 5000;
