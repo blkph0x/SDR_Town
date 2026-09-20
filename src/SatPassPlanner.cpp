@@ -5,8 +5,14 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
 
 namespace {
+
+constexpr double kPi = 3.14159265358979323846;
+constexpr double kRadToDeg = 180.0 / kPi;
+constexpr double kWgs84Akm = 6378.137;
+constexpr double kWgs84E2 = 6.69437999014e-3;
 
 double unixNow() {
     return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -14,6 +20,56 @@ double unixNow() {
 
 double jdFromUnix(double unixSec) {
     return 2440587.5 + unixSec / 86400.0;
+}
+
+double normalizeLongitude(double lonDeg) {
+    while (lonDeg > 180.0) lonDeg -= 360.0;
+    while (lonDeg < -180.0) lonDeg += 360.0;
+    return lonDeg;
+}
+
+void ecefToGeodetic(const double rEcef[3], double* latDeg, double* lonDeg, double* altKm) {
+    const double x = rEcef[0];
+    const double y = rEcef[1];
+    const double z = rEcef[2];
+    const double p = std::hypot(x, y);
+    double lat = std::atan2(z, std::max(1.0e-9, p) * (1.0 - kWgs84E2));
+    double alt = 0.0;
+    for (int i = 0; i < 8; ++i) {
+        const double sinLat = std::sin(lat);
+        const double n = kWgs84Akm / std::sqrt(1.0 - kWgs84E2 * sinLat * sinLat);
+        const double cosLat = std::cos(lat);
+        alt = std::abs(cosLat) > 1.0e-9 ? p / cosLat - n : std::abs(z) - n * (1.0 - kWgs84E2);
+        const double denom = std::max(1.0e-9, n + alt);
+        lat = std::atan2(z, std::max(1.0e-9, p) * (1.0 - kWgs84E2 * n / denom));
+    }
+    if (latDeg) *latDeg = std::clamp(lat * kRadToDeg, -90.0, 90.0);
+    if (lonDeg) *lonDeg = normalizeLongitude(std::atan2(y, x) * kRadToDeg);
+    if (altKm) *altKm = alt;
+}
+
+int downlinkPriority(const SatDownlink& d) {
+    if (!d.armable) return 100;
+    if (d.role == "sstv") return 0;
+    if (d.role == "apt") return 1;
+    if (d.role == "aprs") return 2;
+    if (d.role == "data") return 3;
+    if (d.role == "voice") return 4;
+    return 5;
+}
+
+const SatDownlink* preferredDownlink(const SatCatalogueEntry& sat) {
+    const SatDownlink* best = nullptr;
+    int bestPriority = std::numeric_limits<int>::max();
+    for (const auto& d : sat.downlinks) {
+        const int priority = downlinkPriority(d);
+        if (priority < bestPriority) {
+            best = &d;
+            bestPriority = priority;
+        }
+    }
+    if (!best && !sat.downlinks.empty()) best = &sat.downlinks.front();
+    return best;
 }
 
 } // namespace
@@ -27,7 +83,8 @@ SatPassPlanner::SatPassPlanner() {
     observer_.load();
     catalogue_.load();
     TleStore::instance().loadCache();
-    lastStatus_ = "Pass planner ready";
+    if (!TleStore::instance().all().empty()) predictLocked(24.0);
+    lastStatus_ = "Pass planner ready (" + std::to_string(passes_.size()) + " passes)";
 }
 
 SatPassPlanner::~SatPassPlanner() = default;
@@ -110,6 +167,52 @@ void SatPassPlanner::refreshTleAsync(std::function<void(bool, std::string)> done
     });
 }
 
+std::vector<SatCurrentPosition> SatPassPlanner::currentPositionsLocked(double unixSec) const {
+    std::vector<SatCurrentPosition> out;
+    const double jd = jdFromUnix(unixSec);
+    const auto selected = catalogue_.selectedEntries();
+    out.reserve(selected.size());
+
+    for (const auto& sat : selected) {
+        SatCurrentPosition pos;
+        pos.satId = sat.id;
+        pos.satName = sat.name;
+        pos.noradId = sat.noradId;
+        if (const SatDownlink* dl = preferredDownlink(sat)) {
+            pos.downlinkId = dl->id;
+            pos.downlinkLabel = dl->label;
+            pos.role = dl->role;
+            pos.mode = dl->mode;
+            pos.freqHz = dl->freqHz;
+        }
+
+        const TleSet tle = TleStore::instance().get(sat.noradId);
+        Sgp4::Elements el{};
+        if (tle.noradId <= 0 || !Sgp4::parseTle(tle.line1, tle.line2, &el)) {
+            out.push_back(std::move(pos));
+            continue;
+        }
+
+        const auto state = Sgp4::propagate(el, Sgp4::minutesSinceEpoch(el, jd));
+        if (!state.ok) {
+            out.push_back(std::move(pos));
+            continue;
+        }
+
+        double rEcef[3]{}, vEcef[3]{};
+        Sgp4::temeToEcef(jd, state.r, state.v, rEcef, vEcef);
+        ecefToGeodetic(rEcef, &pos.latitudeDeg, &pos.longitudeDeg, &pos.altitudeKm);
+        Sgp4::lookAngles(rEcef, vEcef,
+                         observer_.latDeg, observer_.lonDeg, observer_.altM,
+                         &pos.elevationDeg, &pos.azimuthDeg, &pos.rangeKm, &pos.rangeRateKmS);
+        pos.tleValid = std::isfinite(pos.latitudeDeg) && std::isfinite(pos.longitudeDeg) &&
+                       std::isfinite(pos.altitudeKm) && std::isfinite(pos.elevationDeg);
+        pos.inRange = pos.tleValid && pos.elevationDeg >= observer_.minElevationDeg;
+        out.push_back(std::move(pos));
+    }
+    return out;
+}
+
 void SatPassPlanner::predictLocked(double hoursAhead) {
     passes_.clear();
     const auto obs = observer_;
@@ -124,8 +227,8 @@ void SatPassPlanner::predictLocked(double hoursAhead) {
         Sgp4::Elements el{};
         if (!Sgp4::parseTle(tle.line1, tle.line2, &el)) continue;
 
-        // Primary downlink for listing (first); arm picks specific.
-        if (sat.downlinks.empty()) continue;
+        const SatDownlink* dl = preferredDownlink(sat);
+        if (!dl || !dl->armable) continue;
 
         bool inPass = false;
         SatPassInfo cur{};
@@ -145,11 +248,11 @@ void SatPassPlanner::predictLocked(double hoursAhead) {
                 cur.satId = sat.id;
                 cur.satName = sat.name;
                 cur.noradId = sat.noradId;
-                cur.downlinkId = sat.downlinks.front().id;
-                cur.downlinkLabel = sat.downlinks.front().label;
-                cur.role = sat.downlinks.front().role;
-                cur.mode = sat.downlinks.front().mode;
-                cur.freqHz = sat.downlinks.front().freqHz;
+                cur.downlinkId = dl->id;
+                cur.downlinkLabel = dl->label;
+                cur.role = dl->role;
+                cur.mode = dl->mode;
+                cur.freqHz = dl->freqHz;
                 cur.aosUnix = t;
                 maxEl = elDeg;
             } else if (above && inPass) {
@@ -205,15 +308,7 @@ bool SatPassPlanner::arm(const std::string& satId, const std::string& downlinkId
             break;
         }
     }
-    if (!dl) {
-        for (const auto& d : sat->downlinks) {
-            if (d.armable) {
-                dl = &d;
-                break;
-            }
-        }
-    }
-    if (!dl && !sat->downlinks.empty()) dl = &sat->downlinks.front();
+    if (!dl) dl = preferredDownlink(*sat);
     if (!dl) {
         if (error) *error = "No downlink";
         return false;
@@ -224,7 +319,7 @@ bool SatPassPlanner::arm(const std::string& satId, const std::string& downlinkId
         return false;
     }
 
-    // Prefer next upcoming pass for this sat
+    // Prefer next upcoming pass for this sat and downlink.
     double aos = 0, los = 0;
     for (const auto& p : passes_) {
         if (p.satId == satId && p.losUnix > unixNow()) {
@@ -234,7 +329,7 @@ bool SatPassPlanner::arm(const std::string& satId, const std::string& downlinkId
         }
     }
     if (los <= 0) {
-        // Arm anyway for Doppler now (may be below horizon)
+        // Arm anyway for Doppler now (may be below horizon).
         aos = unixNow();
         los = unixNow() + 900.0;
     }
@@ -296,14 +391,14 @@ bool SatPassPlanner::tickAutoTrack(double* outTunedHz) {
     armed_.tunedHz = armed_.freqHz + doppler;
 
     if (now > armed_.losUnix + 60.0) {
-        // Auto-disarm shortly after LOS
+        // Auto-disarm shortly after LOS.
         armed_.armed = false;
         lastStatus_ = "Pass ended — disarmed";
         return false;
     }
 
     if (!armed_.autoTrack) return false;
-    // Only retune when above horizon (or within 2 min of AOS)
+    // Only retune when above horizon (or within 2 min of AOS).
     if (elDeg < -2.0 && now + 120.0 < armed_.aosUnix) return false;
     if (outTunedHz) *outTunedHz = armed_.tunedHz;
     return true;
@@ -315,6 +410,7 @@ SatPassPlannerSnapshot SatPassPlanner::snapshot(double hoursAhead) const {
     s.observer = observer_;
     s.catalogue = catalogue_;
     s.passes = passes_;
+    s.positions = currentPositionsLocked(unixNow());
     s.armed = armed_;
     s.tleAgeSec = TleStore::instance().ageSec();
     s.lastStatus = lastStatus_;
@@ -343,6 +439,28 @@ nlohmann::json SatPassPlanner::statusJson() const {
             {"durationSec", p.durationSec},
         });
     }
+    nlohmann::json positions = nlohmann::json::array();
+    for (const auto& p : s.positions) {
+        positions.push_back({
+            {"satId", p.satId},
+            {"satName", p.satName},
+            {"noradId", p.noradId},
+            {"tleValid", p.tleValid},
+            {"latitudeDeg", p.latitudeDeg},
+            {"longitudeDeg", p.longitudeDeg},
+            {"altitudeKm", p.altitudeKm},
+            {"elevationDeg", p.elevationDeg},
+            {"azimuthDeg", p.azimuthDeg},
+            {"rangeKm", p.rangeKm},
+            {"rangeRateKmS", p.rangeRateKmS},
+            {"inRange", p.inRange},
+            {"downlinkId", p.downlinkId},
+            {"downlinkLabel", p.downlinkLabel},
+            {"role", p.role},
+            {"mode", p.mode},
+            {"freqHz", p.freqHz},
+        });
+    }
     nlohmann::json armed = {
         {"armed", s.armed.armed},
         {"autoTrack", s.armed.autoTrack},
@@ -363,6 +481,7 @@ nlohmann::json SatPassPlanner::statusJson() const {
         {"observer", s.observer.toJson()},
         {"catalogue", s.catalogue.toJson()},
         {"passes", passes},
+        {"positions", positions},
         {"armed", armed},
         {"tleAgeSec", s.tleAgeSec},
         {"lastStatus", s.lastStatus},
@@ -380,5 +499,7 @@ nlohmann::json SatPassPlanner::publicStatusJson() const {
         minEl = j["observer"].value("minElevationDeg", 10.0);
     }
     j["observer"] = {{"configured", configured}, {"minElevationDeg", minEl}};
+    // Elevation/in-range values are observer-relative and can leak home location.
+    j.erase("positions");
     return j;
 }
