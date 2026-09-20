@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QString>
 #include <QWidget>
 
 class SpectrumWidget;
@@ -16,6 +17,7 @@ class QCheckBox;
 class QShowEvent;
 class QHideEvent;
 class ObserverMapWidget;
+struct SatPassPlannerSnapshot;
 
 class SatcomScannerWidget : public QWidget {
     Q_OBJECT
@@ -48,6 +50,8 @@ private:
     void buildUi();
     void applyNeonStyle();
     void refreshPassesTable();
+    void updateAutoCapture(const SatPassPlannerSnapshot& plan);
+    void stopAutoCapture(bool keepHandledKey);
 
     SpectrumWidget* spectrum_ = nullptr;
     QDoubleSpinBox* lowSpin_ = nullptr;
@@ -78,8 +82,14 @@ private:
     QLabel* passStatusLabel_ = nullptr;
     QTableWidget* passTable_ = nullptr;
     QCheckBox* autoTrackCheck_ = nullptr;
+    QCheckBox* autoCaptureCheck_ = nullptr;
     QComboBox* downlinkCombo_ = nullptr;
     ObserverMapWidget* observerMap_ = nullptr;
     QPushButton* refreshTleBtn_ = nullptr;
     bool tleBusy_ = false;
+
+    QString autoCapturePassKey_;
+    qint64 autoCaptureRetryAfter_ = 0;
+    bool autoCaptureOwned_ = false;
+    bool autoSstvRequested_ = false;
 };
