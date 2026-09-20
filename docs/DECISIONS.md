@@ -2,6 +2,16 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0107 - Extra SSTV modes from QSSTV/handbook (2026-09-20)
+
+Evidence: ON4QZ QSSTV `sstvparam.cpp` VIS/geometry; SSTV Handbook ch.4 SC-2 and AVT
+line times. Dayton crate had no Robot B&W, SC2-30/60/120, or AVT.
+
+Decision: vendor the MIT crate and add those layouts. Auto: VIS then line-sync
+period. AVT has no 1200 Hz line sync (handbook); VIS or forced start-of-image.
+Robot 24 is QSSTV 160x120 luminance, not a guessed YC table. Do not add FAX480
+or narrow MP/MR modes in this drop.
+
 ## DEC-0106 - Unlock pinned SSTV Dayton modes (2026-09-20)
 
 Evidence: unexcellent/sstv 16bf34aa implements 18 modes with VIS auto-detect

@@ -1,0 +1,84 @@
+[package]
+name = "sstv"
+version = "0.1.2"
+edition = "2024"
+rust-version = "1.88"
+description = "Encode and decode slow-scan television (SSTV) transmissions, no_std compatible"
+repository = "https://github.com/unexcellent/sstv"
+license = "MIT"
+readme = "README.md"
+keywords = ["sstv", "ham-radio", "amateur-radio", "no-std", "encoding"]
+categories = ["multimedia::audio", "multimedia::encoding", "embedded", "no-std"]
+include = ["/src/**/*.rs", "/build.rs", "/examples/*.rs", "/examples/patch.png", "/README.md", "/LICENSE"]
+
+[features]
+default = ["std"]
+std = []
+image = ["std", "dep:image"]
+wav = ["std", "dep:hound"]
+mp3 = ["std", "dep:mp3lame-encoder", "dep:minimp3"]
+
+[dependencies]
+libm = "0.2.8"
+image = { version = "0.25.1", optional = true }
+hound = { version = "3.5.1", optional = true }
+mp3lame-encoder = { version = "0.2.2", optional = true }
+minimp3 = { version = "0.5.1", optional = true }
+
+[dev-dependencies]
+image = "0.25.1"
+hound = "3.5.1"
+flate2 = "1.0.28"
+rand = "0.9"
+rand_distr = "0.5"
+
+[[example]]
+name = "encode"
+required-features = ["image", "wav"]
+
+[[example]]
+name = "decode"
+required-features = ["image", "wav", "mp3"]
+
+[[test]]
+name = "image_feature"
+required-features = ["image"]
+
+[[test]]
+name = "wav_feature"
+required-features = ["wav"]
+
+[[test]]
+name = "iss_recordings"
+required-features = ["wav"]
+
+[[test]]
+name = "mp3_feature"
+required-features = ["mp3"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+unreachable = "deny"
+unimplemented = "deny"
+unchecked_time_subtraction = "deny"
+todo = "deny"
+string_slice = "deny"
+panic_in_result_fn = "deny"
+panic = "deny"
+exit = "deny"
+
+as_conversions = "allow"
+arithmetic_side_effects = "allow"
+indexing_slicing = "allow"
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+# `f64::mul_add` does not exist without std.
+suboptimal_flops = "allow"

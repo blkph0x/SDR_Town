@@ -6,7 +6,7 @@ rust-version = "1.88"
 publish = false
 
 [dependencies]
-sstv = { git = "https://github.com/unexcellent/sstv", rev = "16bf34aac81b0041f5fdce52a1aef64eea0d5f6e", default-features = false, features = ["std"] }
+sstv = { path = "vendor/sstv", default-features = false, features = ["std"] }
 
 [profile.release]
 panic = "abort"

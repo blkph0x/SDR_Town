@@ -26,6 +26,16 @@ fn parse_mode(name: &str) -> Result<Mode, Box<dyn std::error::Error>> {
         "pd180" => Mode::Pd180,
         "pd240" => Mode::Pd240,
         "pd290" => Mode::Pd290,
+        "robotbw8" => Mode::RobotBw8,
+        "robotbw12" => Mode::RobotBw12,
+        "robot24" => Mode::Robot24,
+        "sc230" => Mode::WrasseSc230,
+        "sc260" => Mode::WrasseSc260,
+        "sc2120" => Mode::WrasseSc2120,
+        "avt24" => Mode::Avt24,
+        "avt90" => Mode::Avt90,
+        "avt94" => Mode::Avt94,
+        "avt188" => Mode::Avt188,
         _ => return Err("unsupported mode".into()),
     })
 }
@@ -51,6 +61,16 @@ fn mode_name(mode: Mode) -> Result<&'static str, Box<dyn std::error::Error>> {
         Mode::Pd180 => "pd180",
         Mode::Pd240 => "pd240",
         Mode::Pd290 => "pd290",
+        Mode::RobotBw8 => "robotbw8",
+        Mode::RobotBw12 => "robotbw12",
+        Mode::Robot24 => "robot24",
+        Mode::WrasseSc230 => "sc230",
+        Mode::WrasseSc260 => "sc260",
+        Mode::WrasseSc2120 => "sc2120",
+        Mode::Avt24 => "avt24",
+        Mode::Avt90 => "avt90",
+        Mode::Avt94 => "avt94",
+        Mode::Avt188 => "avt188",
         _ => return Err("detected mode is not mapped in this helper".into()),
     })
 }

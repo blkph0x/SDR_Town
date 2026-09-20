@@ -34,10 +34,20 @@ inline constexpr SstvModeSpec kSstvModes[] = {
     {"pd180", "PD 180", 96, 640, 496, 187},
     {"pd240", "PD 240", 97, 640, 496, 248},
     {"pd290", "PD 290", 94, 800, 616, 289},
+    {"robotbw8", "Robot B&W 8", 2, 160, 120, 8},
+    {"robotbw12", "Robot B&W 12", 6, 160, 120, 12},
+    {"robot24", "Robot 24", 4, 160, 120, 24},
+    {"sc230", "Wraase SC2-30", 51, 256, 128, 30},
+    {"sc260", "Wraase SC2-60", 59, 256, 256, 60},
+    {"sc2120", "Wraase SC2-120", 63, 320, 256, 122},
+    {"avt24", "AVT 24", 64, 128, 120, 23},
+    {"avt90", "AVT 90", 68, 256, 240, 90},
+    {"avt94", "AVT 94", 72, 320, 200, 94},
+    {"avt188", "AVT 188", 74, 320, 400, 188},
 };
 
 inline constexpr int kSstvModeCount = int(sizeof(kSstvModes) / sizeof(kSstvModes[0]));
-inline constexpr int kSstvMaxDurationSec = 480; // header + PD290/Pasokon P7
+inline constexpr int kSstvMaxDurationSec = 540;
 
 inline const SstvModeSpec* sstvModeById(std::string_view id) {
     for (const auto& m : kSstvModes)

@@ -1,0 +1,27 @@
+# Python tools for the SSTV interop tests. INSTALL WITH:
+#
+#     pip install --no-deps -r tests/scripts/requirements.txt
+#
+# `--no-deps` is required. The `sstv` decoder declares a dependency on the
+# legacy `PySoundFile`, which ships no native libsndfile and collides with the
+# modern `soundfile` module, making decoding fail. So we pin the full dependency
+# set explicitly and skip transitive resolution: `PySoundFile` is never
+# installed, and modern `soundfile` (which bundles libsndfile) provides the
+# `soundfile` module.
+
+# Encoder for the interop-decode test (tests/scripts/encode_with_pysstv.py).
+pysstv
+
+# Independent decoder for the encoder test (tests/scripts/decode_reference.py).
+# Not on PyPI; installed from git.
+sstv @ git+https://github.com/colaclanth/sstv
+
+# Transitive dependencies, pinned explicitly because of --no-deps. `soundfile`
+# stands in for the legacy PySoundFile that `sstv` would otherwise pull in.
+pillow
+numpy
+scipy
+cffi
+pycparser
+typing_extensions
+soundfile

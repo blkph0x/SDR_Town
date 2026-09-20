@@ -51,7 +51,7 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
     for (const auto& spec : kSstvModes)
         mode_->addItem(QString::fromUtf8(spec.label), QString::fromUtf8(spec.id));
     form->addRow("Mode",mode_);
-    hint_=new QLabel("Tune so the SSTV tones sit in 1200–2300 Hz. Automatic uses VIS; pick a mode if the header is noisy (locks on 1200 Hz line sync). AVT / Robot 8–24 / SC2-30/60/120 are not in this decoder.",this);
+    hint_=new QLabel("Tune 1200–2300 Hz. Automatic reads VIS then, if needed, line-sync period. Forced mode uses 1200 Hz sync (AVT has no line sync — VIS or start of image). Robot B&W, SC2-30/60/120 and AVT 24/90/94/188 use QSSTV/handbook timings.",this);
     hint_->setWordWrap(true);
     form->addRow(hint_);
     layout->addLayout(form);

@@ -2,6 +2,12 @@
 
 Newest at the top.
 
+## 2026-09-20 - SSTV extra modes VIS+sync auto (DEC-0107)
+
+Vendored unexcellent/sstv; added Robot B&W 8/12, Robot 24 luma, SC2-30/60/120,
+AVT 24/90/94/188. Auto: VIS then line-sync period. Helper --selftest still
+Robot36 complete. [sstv] 9369 assertions PASS.
+
 ## 2026-09-20 - SSTV Dayton modes unlocked (DEC-0106)
 
 Helper/CLI/GUI now accept the 18 modes in the pinned crate. VIS names expanded.

@@ -15,8 +15,10 @@ TEST_CASE("SSTV Dayton mode table matches VIS and dimensions", "[sstv]")
     REQUIRE(sstvModeByVis(44)->id == std::string_view("martin1"));
     REQUIRE(sstvModeByVis(60)->id == std::string_view("scottie1"));
     REQUIRE(sstvModeByVis(95)->id == std::string_view("pd120"));
-    REQUIRE_FALSE(sstvModeIdOk("avt90"));
-    REQUIRE_FALSE(sstvModeIdOk("robot8"));
+    REQUIRE(sstvModeIdOk("avt90"));
+    REQUIRE(sstvModeByVis(2)->id == std::string_view("robotbw8"));
+    REQUIRE(sstvModeByVis(64)->id == std::string_view("avt24"));
+    REQUIRE_FALSE(sstvModeIdOk("fax480"));
     REQUIRE(SstvVisDetector::modeName(8) == std::string_view("Robot 36"));
     REQUIRE(SstvVisDetector::modeName(95) == std::string_view("PD 120"));
     REQUIRE(SstvVisDetector::modeName(1) == std::string_view("Unknown"));

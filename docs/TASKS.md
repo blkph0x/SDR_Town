@@ -1,5 +1,8 @@
 # Task list (canonical)
 
+T-0045 | done | SSTV extra modes + 0.2.78 | DEC-0107 QSSTV/handbook layouts;
+Auto VIS then sync period. Robot 24 luma not YC.
+
 T-0044 | done | SSTV Dayton modes + 0.2.77 | DEC-0106. Helper selftest Robot36
 round-trip. VIS/GUI/CLI expose 18 crate modes. AVT/Robot B&W/SC2-30/60/120 not
 in crate. [sstv] 9367 assertions PASS.

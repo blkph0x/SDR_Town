@@ -49,7 +49,9 @@ build/bin/Release/SDR_Town.exe --cli --no-control-server --cmd 'sstv decode "C:\
 Use `auto` (VIS) or a Dayton-paper mode id: `robot36`, `robot72`, `martin1`,
 `martin2`, `scottie1`, `scottie2`, `scottiedx`, `pd50`…`pd290`, `wrasse180`,
 `pasokonp3/p5/p7`. Manual mode locks on 1200 Hz line sync if VIS is missing.
-AVT, Robot 8/12/24 and Wraase SC2-30/60/120 are **not** in the pinned decoder.
+AVT 24/90/94/188, Robot B&W 8/12, Robot 24, and Wraase SC2-30/60/120 use
+QSSTV VIS codes and handbook/QSSTV line tables in the vendored decoder. Auto
+uses VIS first, then line-sync period. AVT has no line sync.
 Input is demodulated mono WAV/FLAC at
 8..96 kHz, up to 360 seconds / 128 MiB, not IQ. Parent output directory must
 exist; the image directory must be new. PNGs and `sstv-report.json` record mode,
