@@ -48,8 +48,13 @@ FUBAR `CMakeLists.txt` / CHANGELOG / website in the working tree are **1.1.38**,
 
 - Satcom / Inmarsat / Aircraft website tabs
 - SDRplay IFGR/RFGR/notch/Bias-T/HDR/diversity website controls
-- Observer clickable OSM map (Town GUI has it; FUBAR 1.1.38 tree has **text** lat/lon only)
-- Tuner `force` on satcom start: FUBAR 1.1.38 `postSatcom('start')` does **not** send `force:true`. If Town is already listening, satcom start returns 409 until Take-control + force or Town-side `satcom start force`
+- **Home lat/lon is SDR Town only.** FUBAR website does not set or display observer
+  coordinates (privacy: visitors must not see the station’s exact location).
+  `GET /v1/satcom/status` public JSON has `observer.configured` only.
+  `GET /v1/aircraft/status` omits `centerLat`/`centerLon`. CLI `observer set` and
+  the Town satcom map remain the operator controls.
+- Satcom **Start** from FUBAR Take-control sends `force:true` so a listen session
+  can yield the tuner for an intentional website scan.
 - Inmarsat honesty: Town labels prototype / no unique-word/FEC. FUBAR 1.1.38 website copy still says “AMBE voice follow”
 - Town CLI (`observer`, `tle`, `satcom`, …) is Town-only; FUBAR has its own `--cli`
 

@@ -2,6 +2,17 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0104 - FUBAR must not receive or set home lat/lon (2026-09-20)
+
+Evidence: FUBAR is a public website. Visitors with Take control could read/write
+`/v1/satcom/observer` and aircraft `centerLat/centerLon`, which is the operator
+home used for ISS/Doppler. That is not a useful remote control and leaks location.
+
+Decision: Home observer stays in SDR Town GUI/CLI only. Town `publicStatusJson()`
+and aircraft HTTP status omit coordinates. FUBAR removes lat/lon UI and the
+satcom-observer proxy. Aircraft map fits aircraft tracks, not home. Satcom Start
+from Take-control may send `force=true` (radio control, not location).
+
 ## DEC-0103 - Tuner lease, observer map, Doppler ECEF, CLI (2026-09-20)
 
 Evidence: 0.2.67–0.2.74 review then tag v0.2.74 at 4f26f2e. Satcom/Inmarsat `setCenterFreq` stole live WFM/P25;

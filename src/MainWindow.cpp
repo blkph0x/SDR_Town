@@ -10675,9 +10675,9 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             sat.insert("tunedHz", snap.tunedHz);
             sat.insert("tunedMHz", snap.tunedHz / 1e6);
             sat.insert("armedRole", QString::fromStdString(snap.armedRole));
-            // Merge pass planner snapshot (observer, passes, catalogue, TLE age)
+            // Pass planner for FUBAR: no home lat/lon (set only in SDR Town GUI/CLI).
             const QJsonDocument planDoc = QJsonDocument::fromJson(
-                QByteArray::fromStdString(SatPassPlanner::instance().statusJson().dump()));
+                QByteArray::fromStdString(SatPassPlanner::instance().publicStatusJson().dump()));
             if (planDoc.isObject()) {
                 const QJsonObject plan = planDoc.object();
                 for (auto it = plan.begin(); it != plan.end(); ++it)
@@ -10712,7 +10712,7 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
         if (path == "/v1/satcom/passes" && method == "GET") {
             SatPassPlanner::instance().refreshPasses(24.0);
             const QJsonDocument planDoc = QJsonDocument::fromJson(
-                QByteArray::fromStdString(SatPassPlanner::instance().statusJson().dump()));
+                QByteArray::fromStdString(SatPassPlanner::instance().publicStatusJson().dump()));
             return {{"ok", true}, {"satcom", planDoc.object()}};
         }
         if (path == "/v1/satcom/catalogue" && method == "GET") {
@@ -10804,6 +10804,9 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             const QJsonDocument doc = QJsonDocument::fromJson(
                 QByteArray::fromStdString(AdsBTrackStore::instance().statusJson().dump()));
             QJsonObject out = doc.object();
+            out.remove("centerLat");
+            out.remove("centerLon");
+            out.remove("radiusNm");
             out.insert("ok", true);
             return out;
         }

@@ -1,5 +1,8 @@
 # Code notes (tree map)
 
+DEC-0104: FUBAR/website never gets home lat/lon. `publicStatusJson()` and
+aircraft HTTP status omit coordinates. Observer set stays GUI/CLI.
+
 DEC-0103 (0.2.74): DeviceManager lease + `retuneWithLease`; Dual Tuner Soapy
 calls under `gSoapyLiveIoMutex`; diversity sets `preferredListenDeviceIndex`.
 SdrplayProfile discovers API/module paths, does not ship vendor DLLs.

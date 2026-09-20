@@ -2,6 +2,12 @@
 
 Newest at the top.
 
+## 2026-09-20 - DEC-0104 FUBAR must not see/set home lat/lon
+
+Public website no longer proxies observer GET/POST or shows lat/lon. Town
+satcom/aircraft HTTP status omits coordinates. Home map stays in SDR Town.
+FUBAR satcom Start uses force=true under Take-control.
+
 ## 2026-09-20 - FUBAR pairing recorded from both READMEs
 
 `SdrTownControl.dll` is the companion bridge (FUBAR LoadLibrary beside FUBAR.exe).

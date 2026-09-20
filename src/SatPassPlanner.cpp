@@ -367,3 +367,16 @@ nlohmann::json SatPassPlanner::statusJson() const {
         {"predicting", s.predicting},
     };
 }
+
+nlohmann::json SatPassPlanner::publicStatusJson() const {
+    auto j = statusJson();
+    bool configured = false;
+    double minEl = 10.0;
+    if (j.contains("observer") && j["observer"].is_object()) {
+        configured = std::abs(j["observer"].value("latDeg", 0.0)) > 1e-9 ||
+                     std::abs(j["observer"].value("lonDeg", 0.0)) > 1e-9;
+        minEl = j["observer"].value("minElevationDeg", 10.0);
+    }
+    j["observer"] = {{"configured", configured}, {"minElevationDeg", minEl}};
+    return j;
+}

@@ -94,6 +94,23 @@ TEST_CASE("TLE loadFromFile parses 3-line sets", "[satcom][pass][tle]")
     REQUIRE(t.line1.find("25544") != std::string::npos);
 }
 
+TEST_CASE("Public satcom JSON omits home lat/lon", "[satcom][pass]")
+{
+    SatObserverConfig o;
+    o.latDeg = -33.87;
+    o.lonDeg = 151.21;
+    o.altM = 50;
+    SatPassPlanner::instance().setObserver(o);
+    const auto pub = SatPassPlanner::instance().publicStatusJson();
+    REQUIRE(pub.contains("observer"));
+    REQUIRE(pub["observer"].value("configured", false));
+    REQUIRE_FALSE(pub["observer"].contains("latDeg"));
+    REQUIRE_FALSE(pub["observer"].contains("lonDeg"));
+    REQUIRE_FALSE(pub["observer"].contains("altM"));
+    const auto full = SatPassPlanner::instance().statusJson();
+    REQUIRE(full["observer"].value("latDeg", 0.0) == Catch::Approx(-33.87).margin(1e-6));
+}
+
 TEST_CASE("Pass planner AOS ordering with injected TLE", "[satcom][pass]")
 {
     TleSet t;

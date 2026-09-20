@@ -81,6 +81,8 @@ public:
 
     SatPassPlannerSnapshot snapshot(double hoursAhead = 24.0) const;
     nlohmann::json statusJson() const;
+    // Same as statusJson but no lat/lon/alt — for FUBAR/website (home stays in SDR Town).
+    nlohmann::json publicStatusJson() const;
 
     void setUpdateCallback(std::function<void()> cb);
 
