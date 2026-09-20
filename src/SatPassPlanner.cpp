@@ -184,6 +184,7 @@ std::vector<SatCurrentPosition> SatPassPlanner::currentPositionsLocked(double un
             pos.role = dl->role;
             pos.mode = dl->mode;
             pos.freqHz = dl->freqHz;
+            pos.armable = dl->armable;
         }
 
         const TleSet tle = TleStore::instance().get(sat.noradId);
@@ -454,6 +455,7 @@ nlohmann::json SatPassPlanner::statusJson() const {
             {"rangeKm", p.rangeKm},
             {"rangeRateKmS", p.rangeRateKmS},
             {"inRange", p.inRange},
+            {"armable", p.armable},
             {"downlinkId", p.downlinkId},
             {"downlinkLabel", p.downlinkLabel},
             {"role", p.role},
