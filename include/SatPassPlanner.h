@@ -27,6 +27,29 @@ struct SatPassInfo {
     double durationSec = 0.0;
 };
 
+// Instantaneous propagated position for one selected catalogue entry.  Latitude,
+// longitude and altitude describe the sub-satellite point.  Elevation/azimuth are
+// relative to the configured observer.
+struct SatCurrentPosition {
+    std::string satId;
+    std::string satName;
+    int noradId = 0;
+    bool tleValid = false;
+    double latitudeDeg = 0.0;
+    double longitudeDeg = 0.0;
+    double altitudeKm = 0.0;
+    double elevationDeg = -90.0;
+    double azimuthDeg = 0.0;
+    double rangeKm = 0.0;
+    double rangeRateKmS = 0.0;
+    bool inRange = false;
+    std::string downlinkId;
+    std::string downlinkLabel;
+    std::string role;
+    std::string mode;
+    double freqHz = 0.0;
+};
+
 struct SatArmedState {
     bool armed = false;
     bool autoTrack = true;
@@ -46,6 +69,7 @@ struct SatPassPlannerSnapshot {
     SatObserverConfig observer;
     SatCatalogue catalogue;
     std::vector<SatPassInfo> passes;
+    std::vector<SatCurrentPosition> positions;
     SatArmedState armed;
     int64_t tleAgeSec = -1;
     std::string lastStatus;
@@ -91,6 +115,7 @@ private:
     ~SatPassPlanner();
 
     void predictLocked(double hoursAhead);
+    std::vector<SatCurrentPosition> currentPositionsLocked(double unixSec) const;
     void notify();
 
     mutable std::mutex mutex_;
