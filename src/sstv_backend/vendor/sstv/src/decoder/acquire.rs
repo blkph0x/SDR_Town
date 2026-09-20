@@ -250,18 +250,50 @@ fn read_vis_bits<I: Iterator<Item = i16>>(
                 }
             }
         }
-        if tones_ok && ones.is_multiple_of(2)
-            && let Some(mode) = Mode::from_vis_code(code)
-        {
-            // The ten bits span 300ms; image data follows the stop bit.
-            let mut sequence_start = start_bit as f64 + samples(300.0);
-            if mode.has_starting_sync_pulse() {
-                sequence_start += stream.samples_in(mode.layout().sync_pulse().1);
+        if tones_ok {
+            let mode = if ones.is_multiple_of(2) {
+                Mode::from_vis_code(code)
+            } else {
+                None
+            };
+            let mode = mode.or_else(|| nearest_vis(code));
+            if let Some(mode) = mode {
+                let mut sequence_start = start_bit as f64 + samples(300.0);
+                if mode.has_starting_sync_pulse() {
+                    sequence_start += stream.samples_in(mode.layout().sync_pulse().1);
+                }
+                return Some((mode, sequence_start));
             }
-            return Some((mode, sequence_start));
         }
     }
     read_vis_word(stream, start_bit)
+}
+
+fn nearest_vis(code: u8) -> Option<Mode> {
+    let mut best_distance = 8u32;
+    let mut best = None;
+    let mut ties = 0u32;
+    for mode in Mode::ALL {
+        let vis = mode.vis_code();
+        if vis == 0 {
+            continue;
+        }
+        let distance = (vis ^ code).count_ones();
+        match distance.cmp(&best_distance) {
+            core::cmp::Ordering::Less => {
+                best_distance = distance;
+                best = Some(mode);
+                ties = 1;
+            }
+            core::cmp::Ordering::Equal => ties += 1,
+            core::cmp::Ordering::Greater => {}
+        }
+    }
+    if ties == 1 && best_distance <= 1 {
+        best
+    } else {
+        None
+    }
 }
 
 /// QSSTV 16-bit VIS: start + 16 data bits + stop (low byte 0x23).

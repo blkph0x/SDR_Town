@@ -46,11 +46,11 @@ preview quality is not an RF/protocol correctness guarantee.
 build/bin/Release/SDR_Town.exe --cli --no-control-server --cmd 'sstv decode "C:\recordings\sstv.wav" "C:\recordings\new-images" auto'
 ```
 
-Use `auto` (VIS) or a mode id from Tools → SSTV Images (`robot36`, `martin1`,
-`scottie3`, `fax480`, `mp73`, `sc124`, …). Manual mode locks on 1200 Hz line
-sync if VIS is missing. Auto: 7-bit VIS, then QSSTV 16-bit VIS (MP/MR/ML),
-then closest line-sync period. AVT has no line sync. FAX480 has no VIS.
-Narrow 2172 Hz modes are not supported. MR175 is omitted (VIS collides with MR140).
+Use `auto` (VIS then HamDRM) or a mode id from Tools → SSTV Images (`robot36`,
+`martin1`, `scottie3`, `fax480`, `mp73`, `hamdrm`, …). Manual analogue locks on
+1200 Hz line sync if VIS is missing. Auto: 7-bit VIS (Hamming-1), 16-bit
+MP/MR/ML, closest line-sync, then HamDRM Mode B 2.5 kHz. AVT has no line sync.
+FAX480 has no VIS. Narrow 2172 Hz analogue and EasyPal file-RS are not supported.
 Input is demodulated mono WAV/FLAC at
 8..96 kHz, up to 360 seconds / 128 MiB, not IQ. Parent output directory must
 exist; the image directory must be new. PNGs and `sstv-report.json` record mode,

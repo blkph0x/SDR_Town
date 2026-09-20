@@ -2,6 +2,20 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0109 - Analogue spec audit + HamDRM digital SSTV (2026-09-20)
+
+Evidence: Dayton N7CXI paper (Scottie 138.240/88.064/345.6 ms, PD equal Y/RY/BY
+scans, SC2-180 320×256); HB9TLK HamDRM page (Mode B, 48 kHz, FFT 1024, Tg/Tu=1/4,
+15 symbols, 51 carriers @ 2.5 kHz, 40-bit FAC). The user spec's Scottie 2 69 ms,
+PD half-chroma, SC2-180 256×256, and PD290 VIS 103 contradict Dayton/QSSTV.
+
+Decision: keep analogue timings on Dayton/handbook/QSSTV. Interpolated full-period
+discriminator stays (not a broken 10 ms PLL). VIS Hamming distance ≤1 on parity
+fail. HamDRM is a second engine (Mode B 2.5 kHz, 4-QAM MSC, K=7 conv 133/171,
+STWN RGB payload). Not EasyPal file-level RS (undocumented / incompatible with
+EasyDRF). Auto file decode tries analogue then HamDRM. Wide 300–2800 Hz prefilter
+for auto/hamdrm; 1–2.4 kHz for forced analogue.
+
 ## DEC-0108 - Leftover SSTV families from handbook/QSSTV (2026-09-20)
 
 Evidence: SSTV Handbook ch.4 Martin M3/M4, Scottie S3/S4, Wraase SC-1 24/48/48Q/96

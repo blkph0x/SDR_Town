@@ -64,6 +64,7 @@ inline constexpr SstvModeSpec kSstvModes[] = {
     {"ml240", "ML240", 0, 640, 496, 240},
     {"ml280", "ML280", 0, 640, 496, 280},
     {"ml320", "ML320", 0, 640, 496, 320},
+    {"hamdrm", "HamDRM digital", 0, 320, 256, 30},
 };
 
 inline constexpr int kSstvModeCount = int(sizeof(kSstvModes) / sizeof(kSstvModes[0]));
@@ -87,6 +88,7 @@ inline bool sstvModeIdOk(std::string_view id) {
 }
 
 inline bool sstvModeDimensionsOk(std::string_view id, int w, int h) {
+    if (id == "hamdrm") return w >= 8 && h >= 8 && w <= 800 && h <= 616;
     if (const auto* m = sstvModeById(id)) return w == m->width && h == m->height;
     return false;
 }

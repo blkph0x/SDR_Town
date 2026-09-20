@@ -15,6 +15,7 @@ add_custom_command(OUTPUT "${SSTV_EXE}"
         --manifest-path "${CMAKE_SOURCE_DIR}/src/sstv_backend/Cargo.toml"
         --target-dir "${CMAKE_BINARY_DIR}/sstv-backend"
     DEPENDS src/sstv_backend/Cargo.toml src/sstv_backend/Cargo.lock src/sstv_backend/src/main.rs src/sstv_backend/src/pcm.rs
+        src/sstv_backend/src/hamdrm.rs
         src/sstv_backend/vendor/sstv/src/modes/mod.rs src/sstv_backend/vendor/sstv/src/modes/extra.rs
         src/sstv_backend/vendor/sstv/src/modes/martin.rs src/sstv_backend/vendor/sstv/src/modes/scottie.rs
         src/sstv_backend/vendor/sstv/src/decoder/acquire.rs src/sstv_backend/vendor/sstv/tests/all_modes.rs

@@ -61,8 +61,11 @@ nlohmann::json decodeSstvImageFile(const QString& input,const QString& output,co
     std::array<qint16,4096> integers{};
     uint64_t total=0;
     double hpY=0, lpY=0, prevX=0;
-    const double hpA=1.0/(1.0+2*3.14159265358979323846*1000.0/double(rate));
-    const double lpA=1.0/(1.0+2*3.14159265358979323846*2500.0/double(rate));
+    const bool wideband = mode == QLatin1String("hamdrm") || mode == QLatin1String("auto");
+    const double hpHz = wideband ? 300.0 : 1000.0;
+    const double lpHz = wideband ? 2800.0 : 2400.0;
+    const double hpA=1.0/(1.0+2*3.14159265358979323846*hpHz/double(rate));
+    const double lpA=1.0/(1.0+2*3.14159265358979323846*lpHz/double(rate));
     QCryptographicHash pcmHash(QCryptographicHash::Sha256);
     for(;;) {
         checkCancelled();

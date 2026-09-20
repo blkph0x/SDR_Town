@@ -21,8 +21,8 @@ Visitors never connect to SDR Town. They use the FUBAR site; FUBAR uses the DLL.
 
 | App | Latest tag | Ships / expects |
 |-----|------------|-----------------|
-| SDR Town | **v0.2.79** | `SdrTownControl-0.2.79-win64.dll` |
-| FUBAR | **v1.1.40** | Matching 0.2.79 DLL. Website: P25/RDS/tones/SSTV Auto+mode list+Receive/Finish, Take control, SDRplay, satcom (no home lat/lon), aircraft, Inmarsat prototype (no voice follow). |
+| SDR Town | **v0.2.80** | `SdrTownControl-0.2.80-win64.dll` |
+| FUBAR | **v1.1.41** | Matching 0.2.80 DLL. Website SSTV list includes HamDRM digital. |
 
 ## Website vs Town GUI
 
@@ -39,9 +39,9 @@ Visitors never connect to SDR Town. They use the FUBAR site; FUBAR uses the DLL.
 Unique-word/FEC, verified C-assign, Aero AMBE, dual-SDR voice, live RF acceptance.
 See `docs/INMARSAT.md`.
 
-## Tester pairing for 0.2.79 / 1.1.40
+## Tester pairing for 0.2.80 / 1.1.41
 
-1. Install Town **0.2.79** and FUBAR **1.1.40**.
-2. Confirm `SdrTownControl.dll` beside `FUBAR.exe` is from 0.2.79.
+1. Install Town **0.2.80** and FUBAR **1.1.41**.
+2. Confirm `SdrTownControl.dll` beside `FUBAR.exe` is from 0.2.80.
 3. Town listening; FUBAR on VB-CABLE; Tools → Settings → SDR Town control.
 4. Close other SDRplay clients if using an RSP.

@@ -51,7 +51,7 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
     for (const auto& spec : kSstvModes)
         mode_->addItem(QString::fromUtf8(spec.label), QString::fromUtf8(spec.id));
     form->addRow("Mode",mode_);
-    hint_=new QLabel("Tune 1200–2300 Hz. Automatic reads 7-bit VIS, then QSSTV 16-bit VIS (MP/MR/ML), then 1200 Hz line-sync period. Forced mode uses line sync (AVT has none — VIS or start of image). FAX480 has no VIS. Narrow 2172 Hz modes are not supported.",this);
+    hint_=new QLabel("Analogue: 1200–2300 Hz, PLL discriminator. Auto = VIS (Hamming-1), 16-bit MP/MR/ML, line-sync, then HamDRM OFDM. HamDRM is HB9TLK Mode B 2.5 kHz (not EasyPal file-RS). Forced analogue uses line sync; AVT needs VIS.",this);
     hint_->setWordWrap(true);
     form->addRow(hint_);
     layout->addLayout(form);
