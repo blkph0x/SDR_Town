@@ -3,6 +3,10 @@ SDR TOWN — CAUSE / EFFECT EXECUTION MAP
 ================================================================================
 VERSION: 1.0.0  |  COMPANION TO: SOURCE_OF_TRUTH.md
 STATUS RULE: Flip [ ] to [X] only after the verification gate for that REQ is met.
+DEC-0103 checkpoint (0.2.74): tuner lease, observer map, TEME-ECEF Doppler, TLE
+off GUI thread, CLI coverage. Unit tests `[sdrplay],[satcom],[adsb],[inmarsat],[devicemanager]`
+PASS. Tag v0.2.74 / 4f26f2e published. REQ-P2.2…P2.6 remain [ ]. Live RSP not a
+gate. Package follow-up T-0041 recorded from the published ZIP, not guessed.
 DEC-0100 checkpoint: system-scoped presentation aliases pass schema/isolation,
 manual-override, storage conflict and actual GUI workflow tests. No grant or
 audio-path mutation; directory sourcing and external formats remain separate.

@@ -2,6 +2,14 @@
 
 Newest at the top.
 
+## 2026-09-20 - SoT/tracker reconciliation after v0.2.74
+
+Reconciled SOURCE_OF_TRUTH, TASKS, BACKLOG, ISSUES, CODE_NOTES, CAUSE_EFFECT_MAP
+to published v0.2.74 (4f26f2e). Did not flip REQ-P2.2…P2.6. Closed T-0038/T-0040
+from release evidence. Opened T-0041 from inspecting the published portable ZIP:
+missing `data/inmarsat`, leftover `SdrTownControl-0.2.71-win64.dll`. SDRplay
+vendor files remain host-installed by design.
+
 ## 2026-09-20 - Tuner lease, home map, Doppler/TLE, CLI coverage
 
 Fixed Dual Tuner Soapy init serialization, diversity listen retarget, Mode-S CPR

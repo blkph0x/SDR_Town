@@ -1,5 +1,14 @@
 # Code notes (tree map)
 
+DEC-0103 (0.2.74): DeviceManager lease + `retuneWithLease`; Dual Tuner Soapy
+calls under `gSoapyLiveIoMutex`; diversity sets `preferredListenDeviceIndex`.
+SdrplayProfile discovers API/module paths, does not ship vendor DLLs.
+ObserverMapWidget + SatPassPlanner observer JSON; Sgp4 `lookAnglesTeme` /
+`dopplerShiftHz`; TleStore WinINet `httpGetUrl`. Satcom/Inmarsat/Aircraft in
+SatcomHubWidget (lazy tabs). CLI: observer/tle/satcom/inmarsat/aircraft.
+ModeS CPR positive modulo. InmarsatEngine chronological IQ cursor; experimental
+status JSON. Tests: test_sdrplay_*, test_satcom*, test_adsb, test_inmarsat.
+
 DEC-0100/0101/0102: P25Aliases is a bounded Qt JSON model/merge/resolve and
 atomic storage module with RadioReference CSV talkgroup and site imports.
 P25AliasDialog stages imports/manual edits and only commits on Save.

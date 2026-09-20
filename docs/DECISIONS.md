@@ -4,7 +4,7 @@ Format: ID, date, status, evidence, decision, consequences.
 
 ## DEC-0103 - Tuner lease, observer map, Doppler ECEF, CLI (2026-09-20)
 
-Evidence: uncommitted 0.2.67–0.2.74 review. Satcom/Inmarsat `setCenterFreq` stole live WFM/P25;
+Evidence: 0.2.67–0.2.74 review then tag v0.2.74 at 4f26f2e. Satcom/Inmarsat `setCenterFreq` stole live WFM/P25;
 Dual Tuner Soapy make/setup raced `readStream`; diversity did not retarget listen;
 CPR used signed `fmod`; TLE used GUI-thread `QEventLoop`; Inmarsat claimed FEC/AMBE
 without unique-word. SGP4 look angles treated TEME as ECEF (range-rate missing Earth rotation).

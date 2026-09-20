@@ -573,6 +573,9 @@ add_custom_target(deploy
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/scripts/install_remote_diag_task.ps1"
             "${DEPLOY_STAGING}/scripts/install_remote_diag_task.ps1"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/data/inmarsat"
+            "${DEPLOY_STAGING}/data/inmarsat"
     COMMAND ${CMAKE_COMMAND} -E remove -f
             "${DEPLOY_STAGING}/MaulAudioPro.exe"
             "${DEPLOY_STAGING}/maulaudio_tests.exe"

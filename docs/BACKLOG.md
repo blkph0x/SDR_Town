@@ -5,13 +5,17 @@ for humans/agents. Update status in the same commit as the work.
 
 Status: `open` | `in_progress` | `blocked` | `done`
 
-## User-authorized receive expansion (2026-09-17)
+## User-authorized receive expansion (2026-09-17; 0.2.74 shipped 2026-09-20)
 
-User explicitly deferred further P25 optimization and requested independent RX
-features. This does not close the historical P25 acceptance gates below. Current
-feature queue: T-0020 DCS, T-0021 shared decoder contracts, T-0022 SSTV, T-0025
-AX.25/APRS, then T-0023/T-0024 satellite planning/weather RX. See
-SATELLITE_AND_SSTV.md. Preserve the tested P25 path; no new TX scope.
+User deferred further P25 DSP and authorized independent RX features. That does
+**not** close REQ-P2.2…P2.6 / ISS-0001. v0.2.74 experimental is GitHub Latest
+(tag 4f26f2e): SDRplay Soapy profile, satcom/observer/TLE/Doppler, aircraft map,
+Inmarsat prototype, tuner lease, CLI. P25 path unchanged from 0.2.66.
+
+Still open after 0.2.74 (not invented as done): T-0041 package follow-up,
+T-0031 live SSTV RF image, T-0029 string-verifier debt, T-0036 AX.25 backend
+qualification, T-0020/T-0019 tone RF acceptance, T-0024 Meteor LRPT. Live RSP
+is tester hardware, not a SoT gate.
 
 ---
 
@@ -80,6 +84,9 @@ From `SOURCE_OF_TRUTH.md` roadmap / TX shells — parked until clear continuous 
 
 ## Suggested next sessions (in order)
 
-1. **B-0001** live re-prove on HEAD after Apply-arm fix (`ecf9303`) — capture + CADENCE / voicetest.
-2. Only then touch **B-0002…B-0006** with named A–E evidence.
-3. Spec gap **B-0010** when operator has TIA excerpts.
+1. Tester RSP/RTL run of **v0.2.74** (Device Manager three-stage SDRplay status;
+   do not claim hardware acceptance from this desk).
+2. **T-0041** package follow-up (inmarsat JSON in staging; stop leftover
+   `SdrTownControl-0.2.71-win64.dll` glob) — new version, do not retag 0.2.74.
+3. Remaining decoder acceptance: T-0031 SSTV RF, T-0036 AX.25, T-0020 DCS RF.
+4. Historical P25 **B-0001** remains open and deferred until the user reopens it.

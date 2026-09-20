@@ -3,10 +3,16 @@ if(NOT IS_DIRECTORY "${SOURCE}" OR NOT IS_DIRECTORY "${DESTINATION}")
 endif()
 
 # Never publish local replay audio, logs, captures, or old executables.
+# Skip leftover versioned control DLLs (SdrTownControl-0.2.N-win64.dll) from prior
+# local builds; testers need SdrTownControl.dll only.
 file(GLOB RUNTIME_DLLS "${SOURCE}/*.dll")
-if(RUNTIME_DLLS)
-    file(COPY ${RUNTIME_DLLS} DESTINATION "${DESTINATION}")
-endif()
+foreach(DLL ${RUNTIME_DLLS})
+    get_filename_component(DLL_NAME "${DLL}" NAME)
+    if(DLL_NAME MATCHES "^SdrTownControl-.+-win64\\.dll$")
+        continue()
+    endif()
+    file(COPY "${DLL}" DESTINATION "${DESTINATION}")
+endforeach()
 if(EXISTS "${SOURCE}/qt.conf")
     file(COPY "${SOURCE}/qt.conf" DESTINATION "${DESTINATION}")
 endif()

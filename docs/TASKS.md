@@ -1,12 +1,28 @@
 # Task list (canonical)
 
-T-0039 | done | Tuner lease, home map, Doppler ECEF, TLE/CLI | DEC-0103. Unit tests
-[sdrplay]/[satcom]/[adsb]/[inmarsat]/[devicemanager] PASS. Live RSP still tester hardware.
-Release target **0.2.74** experimental.
+T-0041 | open | 0.2.74 package follow-up | Evidence from the published portable
+ZIP: (1) `data/inmarsat/*.json` is not in deploy_staging (CMake install rule
+goes to bin/data; packaging copies Release via StageRuntime.cmake). Inmarsat
+UI then uses the built-in 4f2 fallback. (2) StageRuntime glob-copied
+`SdrTownControl-0.2.71-win64.dll` from the Release folder; testers should use
+`SdrTownControl.dll` / GitHub `SdrTownControl-0.2.74-win64.dll`. Do not
+overwrite tag v0.2.74. Next patch copies `data/inmarsat` into staging and
+skips versioned leftover control DLLs. SDRplay API/module remain host-installed
+by design (`docs/SDRPLAY.md`).
 
-T-0038 | in progress | Release 0.2.62 | Hotfix cached alias resolve on control
-log path so large AppData alias DBs cannot starve P25 audio. Package, verify
-assets and updater. T-0029 Phase 2 string-verifier CI debt unchanged.
+T-0040 | done | Release 0.2.74 | Tag v0.2.74 at 4f26f2e, branch pushed, GitHub
+Latest experimental with installer, portable ZIP, SdrTownControl-0.2.74-win64.dll,
+update.json/.sig, SHA256SUMS. CTest 3/3 PASS during scripts/release.ps1.
+P25 DSP unchanged. Live RSP/SSTV RF acceptance not claimed. Packaging gaps
+are T-0041, not hidden.
+
+T-0039 | done | Tuner lease, home map, Doppler ECEF, TLE/CLI | DEC-0103. Unit tests
+[sdrplay],[satcom],[adsb],[inmarsat],[devicemanager] PASS. Live RSP still tester hardware.
+Shipped in **0.2.74** (T-0040).
+
+T-0038 | done | Release 0.2.62 | Alias-cache hotfix shipped; later superseded as
+Latest by 0.2.66 then 0.2.74 (T-0040). T-0029 Phase 2 string-verifier CI debt
+unchanged.
 
 T-0037 | done | Release 0.2.61 | Package CSV alias import + status Alpha Tag
 labels; assets and updater verified. Known Windows CI Phase 2 string-verifier
@@ -132,18 +148,19 @@ export, Robot36/Martin1 auto/manual acquisition and partial-image status. Both
 independent recordings pass; actual app/helper pixel parity and input/overwrite
 failures pass. GUI preview/gallery, live integration and other modes remain open.
 
-T-0023 | open | Public satellite catalogue/pass planner | Source-dated per-link
-capability, hardware/coverage checks, orbital data, SGP4/Doppler and device-aware
-scheduling. No automatic claim of all-satellite coverage. Depends on T-0021.
+T-0023 | in_progress | Public satellite catalogue/pass planner | 0.2.74 ships
+observer map/CLI, CelesTrak TLE (WinINet), compact SGP4, lookAnglesTeme Doppler,
+ISS SSTV arm, satcom GUI/API. Unit tests `[satcom][pass]`. Live pass/Doppler RF
+acceptance and worldwide catalogue coverage remain open. Depends on T-0021.
 
-T-0024 | open | Weather satellite RX | Meteor LRPT first; NOAA APT archive
-replay; expand validated public HRPT/AHRPT/LRIT/HRIT and higher-rate links per
-hardware/coverage/mission. SatDump integration/license review before selection.
-Depends on T-0021 and T-0023 for live scheduling; offline fixtures can precede it.
+T-0024 | open | Weather satellite RX | 0.2.74 satcom has experimental NOAA APT
+grayscale preview (not line-sync/slant qualified). Meteor LRPT first for a
+claimed weather decoder; SatDump integration/license review before selection.
+Depends on T-0021 and T-0023 for live scheduling.
 
-T-0025 | open | AX.25/APRS and public satellite telemetry | Packet validation
-first, per-mission fields next; evaluate gr-satellites with pinned fixtures and
-license review. Depends on T-0021; feeds satellite work without changing P25.
+T-0025 | open | AX.25/APRS and public satellite telemetry | 0.2.74 satcom lock
+path has an experimental AFSK correlator. Do not claim audio/packet decode until
+T-0036 pins a backend, license and independent recording. Depends on T-0021.
 
 T-0019 | open | NFM CTCSS RF acceptance | DEC-0081 independent raw FM
 tap, conservative tone bank, GUI display and bounded CLI replay diagnostics.

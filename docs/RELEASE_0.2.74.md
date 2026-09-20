@@ -12,10 +12,12 @@ Paired with FUBAR for website control. Ship matching `SdrTownControl-0.2.74-win6
 
 ## Honest limits
 
-- **Inmarsat** is a prototype (band plans + ACARS/ADS-C parse). No unique-word/FEC/Aero AMBE claim.
+- **SDRplay vendor files are not in this ZIP/installer.** Testers need API 3.x + SoapySDRPlay3 already on the PC (`docs/SDRPLAY.md`).
+- **Inmarsat** is a prototype (band plans + ACARS/ADS-C parse). No unique-word/FEC/Aero AMBE claim. This package does **not** include `data/inmarsat/*.json`; the UI uses the built-in 4f2 fallback (T-0041).
 - Satcom/Inmarsat **cannot retune** while listen/P25 owns the device unless `force=true`.
 - AX.25/APT/ADS-B are experimental. Meteor LRPT / commercial sat / dual-SDR Inmarsat voice are not in this build.
-- P25 DSP is unchanged from 0.2.66.
+- P25 DSP is unchanged from 0.2.66. REQ-P2.2…P2.6 remain open.
+- Portable ZIP also contains leftover `SdrTownControl-0.2.71-win64.dll` from a Release-folder glob. Use `SdrTownControl.dll` or the GitHub `SdrTownControl-0.2.74-win64.dll` asset (T-0041).
 
 ## Assets
 

@@ -2,6 +2,15 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-20 - v0.2.74 published; package inspection
+
+`scripts/release.ps1 -Version 0.2.74` CTest 3/3 PASS. Tag v0.2.74 = 4f26f2e.
+GitHub Latest experimental. Portable ZIP listing: `SoapySDR.dll`,
+`SoapyRTLSDR.dll`, `rtlsdr.dll`; no `sdrplay_api.dll` / `sdrPlaySupport.dll`
+(by design). ZIP has `SdrTownControl.dll` and leftover
+`SdrTownControl-0.2.71-win64.dll`. No `data/inmarsat` tree in staging/ZIP.
+T-0041 opened from that listing.
+
 ## 2026-09-20 - Lease / map / Doppler / CLI (0.2.74 tree)
 
 DeviceManager lease + Dual Tuner Soapy live mutex; diversity sets

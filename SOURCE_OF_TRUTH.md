@@ -78,8 +78,20 @@ Working well (keep; do not destabilize for P25 experiments):
   [X] Phase 2 superframe / ISCH / XOR mask generation (NAC/WACN/SysID)
   [X] Encrypted mute (security fail-closed when proof says encrypted)
   [X] Updater: GitHub latest + Ed25519 manifest when key configured
+      (published tester: v0.2.74 experimental, tag 4f26f2e)
 
-Active / not done:
+Shipped experimental in v0.2.74 (user deferred further P25 work and authorized
+receive expansion). These are not P25 SoT gates and are not live-RF accepted:
+  [X] SDRplay SoapySDRPlay3 profile/UI/CLI/API. Host must already have API 3.x
+      + sdrPlaySupport.dll. Installer does not redistribute those vendor files.
+  [X] Satcom scanner, observer map, TLE/SGP4 Doppler, ISS SSTV arm (unit tests;
+      live pass/Doppler RF acceptance open)
+  [X] Aircraft map (OpenSky + optional local 1090)
+  [X] Inmarsat prototype UI/API/CLI (ACARS/ADS-C parse; no unique-word/FEC)
+  [X] Tuner lease: satcom/Inmarsat/aircraft cannot steal listen without force
+  [X] CLI: observer, tle, satcom, inmarsat, aircraft, sdrplay, devices rescan
+
+Active / not done (P25 product gate — still open; user deferred further P25 DSP):
   [X] REQ-P2.0  Classify every audio hole as A–E before changing gates
   [X] REQ-P2.1  Unique selected-slot Voice2/4 extraction at speech rate
   [ ] REQ-P2.2  Feed policy: once-clear, play this slot until squelch
@@ -89,12 +101,17 @@ Active / not done:
   [ ] REQ-P2.5  Follow hold: do not return-to-CC during a proven call
   [ ] REQ-P2.6  Isolation non-regression (encrypted + wrong-slot)
 
-Roadmap only (do not start while Phase 2 voice is open):
-  [ ] DMR / NXDN / pager / satellite decoders
+Roadmap (not in 0.2.74 as production features):
+  [ ] DMR / NXDN / pager
+  [ ] Meteor LRPT / SatDump / qualified NOAA APT line-sync
   [ ] Production Smart Scan (priority / lockout / hold product)
   [ ] ONNX classifier backend (placeholder today)
   [ ] Authenticode
   [ ] P25 Phase 2 clear TX on air (sprints 0–4 are lab shells)
+  [ ] Package follow-up T-0041: copy data/inmarsat into deploy staging; stop
+      glob-copying leftover SdrTownControl-*-win64.dll into the portable ZIP
+      (0.2.74 zip contains unused SdrTownControl-0.2.71-win64.dll; testers use
+      SdrTownControl.dll / the versioned 0.2.74 asset on GitHub)
 
 Historical marker, not a green SoT checkbox:
   p25-clear-continuous-20260810 — isolation PASS, continuity PARTIAL.
