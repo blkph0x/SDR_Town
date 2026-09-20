@@ -27,8 +27,8 @@ struct SatPassInfo {
     double durationSec = 0.0;
 };
 
-// Instantaneous propagated position for one selected catalogue entry.  Latitude,
-// longitude and altitude describe the sub-satellite point.  Elevation/azimuth are
+// Instantaneous propagated position for one selected catalogue entry. Latitude,
+// longitude and altitude describe the sub-satellite point. Elevation/azimuth are
 // relative to the configured observer.
 struct SatCurrentPosition {
     std::string satId;
@@ -43,6 +43,7 @@ struct SatCurrentPosition {
     double rangeKm = 0.0;
     double rangeRateKmS = 0.0;
     bool inRange = false;
+    bool armable = false;
     std::string downlinkId;
     std::string downlinkLabel;
     std::string role;
