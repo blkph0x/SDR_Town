@@ -439,13 +439,15 @@ void SatcomScannerEngine::finishSstvCapture(bool cancel) {
 bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& downlinkId,
                                   bool autoTrack, bool force, std::string* error) {
     finishSstvCapture(false);
+    auto& deviceManager = DeviceManager::instance();
     std::string err;
     const size_t dev = config().deviceIndex;
-    if (!DeviceManager::instance().acquireDeviceLease(dev, DeviceManager::DeviceLeaseOwner::Satcom, force, &err)) {
+    if (!deviceManager.acquireDeviceLease(dev, DeviceManager::DeviceLeaseOwner::Satcom, force, &err)) {
         if (error) *error = err;
         return false;
     }
     if (!SatPassPlanner::instance().arm(satId, downlinkId, autoTrack, &err)) {
+        deviceManager.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Satcom);
         if (error) *error = err;
         return false;
     }
@@ -482,10 +484,51 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
         }
         sstvOutputDir_.clear();
         lastStatus_ = "Pass armed";
-        if (run_.load()) state_ = SatcomScannerState::Locked;
+        if (run_.load(std::memory_order_acquire)) state_ = SatcomScannerState::Locked;
         config_.save();
     }
     demodResetRequested_ = true;
+
+    // Always issue the base-frequency tune, even when Doppler auto-track is
+    // disabled. Previously tickPassTrack() returned early in that mode, leaving
+    // an apparently armed pass on the receiver's old frequency.
+    if (!deviceManager.retuneWithLease(dev, snap.armed.freqHz,
+                                       DeviceManager::DeviceLeaseOwner::Satcom,
+                                       true, &err)) {
+        const std::string tuneError = err.empty() ? "Could not tune pass receiver" : err;
+        {
+            std::lock_guard<std::mutex> lk(mutex_);
+            passTrackActive_ = false;
+            armedRole_.clear();
+            state_ = run_.load(std::memory_order_acquire)
+                ? SatcomScannerState::Scanning
+                : SatcomScannerState::Idle;
+            lastStatus_ = tuneError;
+        }
+        SatPassPlanner::instance().disarm();
+        deviceManager.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Satcom);
+        if (error) *error = tuneError;
+        return false;
+    }
+
+    // Enter the locked pass path before the worker starts. This avoids a race
+    // where the old UI started a band scan first and only armed the pass later.
+    if (!run_.load(std::memory_order_acquire) && !start(force)) {
+        std::string startError;
+        {
+            std::lock_guard<std::mutex> lk(mutex_);
+            startError = lastStatus_;
+            passTrackActive_ = false;
+            armedRole_.clear();
+            state_ = SatcomScannerState::Idle;
+            lastStatus_ = startError.empty() ? "Could not start pass receiver" : startError;
+        }
+        SatPassPlanner::instance().disarm();
+        deviceManager.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Satcom);
+        if (error) *error = startError.empty() ? "Could not start pass receiver" : startError;
+        return false;
+    }
+
     pushLog(SatcomLog::EventType::Lock, snap.armed.freqHz, "pass arm");
     tickPassTrack();
     if (snap.armed.role == "sstv") startSstvCapture(satId, snap.armed.downlinkId);
