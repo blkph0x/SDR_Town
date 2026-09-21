@@ -5,7 +5,8 @@ This change addresses two independently reported Windows problems.
 ## RSPdx discovery
 
 - Read the SDRplay API installation directory from the official Windows registry key in both 64-bit and 32-bit registry views.
-- Continue to support explicit environment overrides and conventional SDRplay/PothosSDR locations.
+- Keep explicit `SDRPLAY_API_DIR` and `SOAPY_SDR_ROOT` overrides ahead of registry and conventional-location discovery, so portable and managed installations remain deterministic.
+- Continue to support conventional SDRplay, PothosSDR, and radioconda locations.
 - Treat `SoapySDR::loadModule()` as successful only when it returns an empty error string.
 - Preserve the exact module-loader error in Device Manager diagnostics.
 - Retry module loading on a later Rescan until a real load succeeds.
