@@ -11,6 +11,8 @@ TEST_CASE("SdrplayProfile detects driver names", "[sdrplay]") {
 
 TEST_CASE("SdrplayProfile normalizes models from label/hardware", "[sdrplay]") {
     CHECK(SdrplayProfile::normalizeModel("RSPdx", "unused") == "RSPdx");
+    CHECK(SdrplayProfile::normalizeModel("", "SDRplay Dev0 RSPdx 12345") == "RSPdx");
+    CHECK(SdrplayProfile::normalizeModel("", "SDRplay Dev0 RSPdx-R2 12345") == "RSPdx-R2");
     CHECK(SdrplayProfile::normalizeModel("", "SDRplay Dev0 RSPduo 123 - Dual Tuner") == "RSPduo");
     CHECK(SdrplayProfile::normalizeModel("", "RSP1A serial") == "RSP1A");
     CHECK(SdrplayProfile::normalizeModel("", "RSP1B") == "RSP1B");
@@ -88,11 +90,17 @@ TEST_CASE("SdrplayProfile covers installed Windows runtime layouts", "[sdrplay]"
     const auto modules = SdrplayProfile::windowsSoapyModuleCandidates("C:\\SDR Town");
     CHECK(std::find(api.begin(), api.end(), "C:\\SDR Town\\sdrplay_api.dll") != api.end());
     CHECK(std::find(api.begin(), api.end(),
+                    "C:\\Program Files\\SDRplay\\API\\x64\\sdrplay_api.dll") != api.end());
+    CHECK(std::find(api.begin(), api.end(),
+                    "C:\\Program Files\\SDRplay\\API\\x86\\sdrplay_api.dll") != api.end());
+    CHECK(std::find(api.begin(), api.end(),
                     "C:\\Program Files\\PothosSDR\\bin\\sdrplay_api.dll") != api.end());
     CHECK(std::find(api.begin(), api.end(),
                     "C:\\Program Files (x86)\\PothosSDR\\bin\\sdrplay_api.dll") != api.end());
     CHECK(std::find(api.begin(), api.end(),
                     "C:\\ProgramData\\radioconda\\Library\\bin\\sdrplay_api.dll") != api.end());
+    CHECK(std::find(modules.begin(), modules.end(),
+                    "C:\\Program Files\\PothosSDR\\bin\\sdrPlaySupport.dll") != modules.end());
     CHECK(std::find(modules.begin(), modules.end(),
                     "C:\\Program Files\\PothosSDR\\lib\\SoapySDR\\modules0.8\\sdrPlaySupport.dll") != modules.end());
     CHECK(std::find(modules.begin(), modules.end(),
