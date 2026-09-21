@@ -24,23 +24,15 @@ jobs:
           from pathlib import Path
           p = Path('src/SatcomScannerEngine.cpp')
           s = p.read_text(encoding='utf-8')
-          old = '''            processLockedAudio();
-              std::function<void()> cb;
-              {
-                  std::lock_guard<std::mutex> lk(mutex_);
-                  cb = updateCb_;
-              }
-              if (cb) { try { cb(); } catch (...) {} }
-              std::this_thread::sleep_for(std::chrono::milliseconds(20));
-          '''
-          new = '''            processLockedAudio();
-              // The visible widget already snapshots at 2 Hz. Do not enqueue a Qt
-              // callback for every 20 ms IQ block during an armed pass.
-              std::this_thread::sleep_for(std::chrono::milliseconds(20));
-          '''
-          if s.count(old) != 1:
-              raise SystemExit(f'pass callback block count={s.count(old)}')
-          p.write_text(s.replace(old, new, 1), encoding='utf-8', newline='\n')
+          pass_start = s.index('        if (passHold) {')
+          callback_start = s.index('            std::function<void()> cb;', pass_start)
+          sleep_start = s.index('            std::this_thread::sleep_for(std::chrono::milliseconds(20));', callback_start)
+          replacement = (
+              '            // The visible widget already snapshots at 2 Hz. Do not enqueue a Qt\n'
+              '            // callback for every 20 ms IQ block during an armed pass.\n'
+          )
+          s = s[:callback_start] + replacement + s[sleep_start:]
+          p.write_text(s, encoding='utf-8', newline='\n')
           PY
       - name: Remove one-shot workflow and commit
         shell: bash
