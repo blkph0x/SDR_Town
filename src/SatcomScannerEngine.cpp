@@ -269,10 +269,11 @@ bool SatcomScannerEngine::start(bool force) {
         lastStatus_ = err;
         return false;
     }
-    if (run_.exchange(true)) return true;
-    // A previous worker can have exited after setting run_ false. Join that
-    // completed thread before assigning a replacement std::thread.
+    if (run_.load(std::memory_order_acquire)) return true;
+    // Join a previous completed/ending worker before making run_ true again;
+    // otherwise an old worker could observe the new true state and never exit.
     if (worker_.joinable()) worker_.join();
+    if (run_.exchange(true, std::memory_order_acq_rel)) return true;
     {
         std::lock_guard<std::mutex> lk(mutex_);
         state_ = passTrackActive_ ? SatcomScannerState::Locked : SatcomScannerState::Scanning;
