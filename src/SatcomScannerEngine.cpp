@@ -489,6 +489,28 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
     }
     demodResetRequested_ = true;
 
+    // Always issue the base-frequency tune, even when Doppler auto-track is
+    // disabled. Previously tickPassTrack() returned early in that mode, leaving
+    // an apparently armed pass on the receiver's old frequency.
+    if (!deviceManager.retuneWithLease(dev, snap.armed.freqHz,
+                                       DeviceManager::DeviceLeaseOwner::Satcom,
+                                       true, &err)) {
+        const std::string tuneError = err.empty() ? "Could not tune pass receiver" : err;
+        {
+            std::lock_guard<std::mutex> lk(mutex_);
+            passTrackActive_ = false;
+            armedRole_.clear();
+            state_ = run_.load(std::memory_order_acquire)
+                ? SatcomScannerState::Scanning
+                : SatcomScannerState::Idle;
+            lastStatus_ = tuneError;
+        }
+        SatPassPlanner::instance().disarm();
+        deviceManager.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Satcom);
+        if (error) *error = tuneError;
+        return false;
+    }
+
     // Enter the locked pass path before the worker starts. This avoids a race
     // where the old UI started a band scan first and only armed the pass later.
     if (!run_.load(std::memory_order_acquire) && !start(force)) {

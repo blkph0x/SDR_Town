@@ -1824,7 +1824,14 @@ void DeviceManager::releaseDeviceLease(DeviceLeaseOwner owner) {
 bool DeviceManager::retuneWithLease(size_t index, double freqHz, DeviceLeaseOwner owner, bool force,
                                     std::string* error) {
     if (!acquireDeviceLease(index, owner, force, error)) return false;
-    setCenterFreq(index, freqHz);
+    const uint64_t requestSeq = setCenterFreq(index, freqHz);
+    if (requestSeq == 0) {
+        if (error) {
+            *error = "device index " + std::to_string(index) +
+                     " is unavailable; rescan devices and select a valid receiver";
+        }
+        return false;
+    }
     return true;
 }
 
