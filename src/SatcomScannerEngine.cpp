@@ -270,6 +270,9 @@ bool SatcomScannerEngine::start(bool force) {
         return false;
     }
     if (run_.exchange(true)) return true;
+    // A previous worker can have exited after setting run_ false. Join that
+    // completed thread before assigning a replacement std::thread.
+    if (worker_.joinable()) worker_.join();
     {
         std::lock_guard<std::mutex> lk(mutex_);
         state_ = passTrackActive_ ? SatcomScannerState::Locked : SatcomScannerState::Scanning;
