@@ -17,7 +17,9 @@ The proprietary SDRplay API and SoapySDRPlay3 module are still external dependen
 - Use the downlink attached to the selected pass row.
 - Treat the explicit **Arm pass** and **Arm ISS SSTV** buttons as permission to take tuner control.
 - Configure the locked pass frequency before starting the Satcom worker.
+- Always issue the initial base-frequency tune, including when Doppler auto-track is disabled.
 - Make `SatcomScannerEngine::armPass()` start the receiver itself when required.
+- Reject stale or invalid configured device indices instead of reporting a successful tune.
 - Release the tuner lease and disarm cleanly if any part of startup fails.
 - Keep background automatic pass capture non-forcing so it does not interrupt another active owner.
 
