@@ -2603,6 +2603,8 @@ void DeviceManager::setupSoapyForSDRplay() {
     bool apiPresent = false;
     bool moduleLoaded = false;
     bool deviceEnumerated = false;
+    std::string modulePath;
+    std::string moduleError;
 #ifdef _WIN32
     const auto apiCandidates = SdrplayProfile::windowsApiCandidates(appDir);
     for (const auto& candidate : apiCandidates) {
@@ -2615,21 +2617,31 @@ void DeviceManager::setupSoapyForSDRplay() {
 #endif
 
 #ifdef HAVE_SOAPYSDR
-    static bool sdrplayModuleLoadAttempted = false;
     static bool sdrplayModuleLoaded = false;
-    if (!sdrplayModuleLoadAttempted) {
-        sdrplayModuleLoadAttempted = true;
+    static std::string sdrplayModulePath;
+    static std::string sdrplayModuleError;
+    if (!sdrplayModuleLoaded) {
         std::string appDir = QCoreApplication::applicationDirPath().toStdString();
+        sdrplayModuleError.clear();
 #ifdef _WIN32
         for (const auto& bundled : SdrplayProfile::windowsSoapyModuleCandidates(appDir)) {
             if (GetFileAttributesA(bundled.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
             try {
-                SoapySDR::loadModule(bundled);
-                sdrplayModuleLoaded = true;
-                spdlog::info("Loaded SDRplay Soapy module: {}", bundled);
+                const std::string loadError = SoapySDR::loadModule(bundled);
+                if (loadError.empty()) {
+                    sdrplayModuleLoaded = true;
+                    sdrplayModulePath = bundled;
+                    sdrplayModuleError.clear();
+                    spdlog::info("Loaded SDRplay Soapy module: {}", bundled);
+                    break;
+                }
+                sdrplayModuleError = bundled + ": " + loadError;
+                spdlog::warn("SDRplay Soapy module rejected {}: {}", bundled, loadError);
             } catch (const std::exception& ex) {
+                sdrplayModuleError = bundled + ": " + ex.what();
                 spdlog::warn("SDRplay Soapy module load failed for {}: {}", bundled, ex.what());
             } catch (...) {
+                sdrplayModuleError = bundled + ": unknown loader error";
                 spdlog::warn("SDRplay Soapy module load failed for {}: unknown error", bundled);
             }
         }
@@ -2638,12 +2650,21 @@ void DeviceManager::setupSoapyForSDRplay() {
 #endif
     }
     moduleLoaded = sdrplayModuleLoaded;
+    modulePath = sdrplayModulePath;
+    moduleError = sdrplayModuleError;
 
     // Confirm driver registration if possible.
     try {
         auto results = SoapySDR::Device::enumerate({{"driver", "sdrplay"}});
         deviceEnumerated = !results.empty();
-        if (deviceEnumerated) moduleLoaded = true;
+        if (deviceEnumerated) {
+            moduleLoaded = true;
+            sdrplayModuleLoaded = true;
+            if (sdrplayModulePath.empty())
+                sdrplayModulePath = "registered SoapySDRPlay driver";
+            modulePath = sdrplayModulePath;
+            moduleError.clear();
+        }
         if (moduleLoaded && !deviceEnumerated) {
             spdlog::warn("SDRplay Soapy module is loaded, but no RSP was enumerated; "
                          "check the SDRplay API service, USB connection, and exclusive access");
@@ -2662,9 +2683,13 @@ void DeviceManager::setupSoapyForSDRplay() {
 
     if (apiPresent && moduleLoaded && deviceEnumerated) {
         sdrplaySetupStatus_ = "SDRplay: API and SoapySDRPlay module ready; RSP detected";
+        if (!modulePath.empty()) sdrplaySetupStatus_ += " (" + modulePath + ")";
     } else if (apiPresent && moduleLoaded) {
         sdrplaySetupStatus_ = "SDRplay: API and SoapySDRPlay module loaded, but no RSP detected "
                                "— check the API service, USB connection, and other SDR software";
+    } else if (apiPresent && !moduleLoaded && !moduleError.empty()) {
+        sdrplaySetupStatus_ = "SDRplay: SoapySDRPlay module failed to load — " + moduleError +
+                               " — install a matching 64-bit module, then Rescan";
     } else if (!apiPresent && !moduleLoaded) {
         sdrplaySetupStatus_ = "SDRplay: install SDRplay API 3.x and SoapySDRPlay3 (e.g. PothosSDR), then restart";
     } else if (!apiPresent) {

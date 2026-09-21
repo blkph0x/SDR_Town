@@ -411,22 +411,16 @@ void SatcomScannerWidget::onArmSelected() {
         return;
     }
     const QString satId = passTable_->item(row, 1)->data(Qt::UserRole).toString();
-    QString dlId = downlinkCombo_->currentData().toString();
-    if (dlId.isEmpty()) dlId = passTable_->item(row, 2)->data(Qt::UserRole).toString();
+    const QString dlId = passTable_->item(row, 2)->data(Qt::UserRole).toString();
 
     auto& engine = SatcomScannerEngine::instance();
-    const bool wasIdle = engine.snapshot().state == SatcomScannerState::Idle;
-    if (!engine.start(false)) {
-        QMessageBox::warning(this, "Arm", QString::fromStdString(engine.snapshot().lastStatus));
-        return;
-    }
     std::string err;
     if (!engine.armPass(satId.toStdString(), dlId.toStdString(),
-                        autoTrackCheck_->isChecked(), false, &err)) {
-        if (wasIdle) engine.stop();
+                        autoTrackCheck_->isChecked(), true, &err)) {
         QMessageBox::warning(this, "Arm", QString::fromStdString(err.empty() ? "Arm failed" : err));
         return;
     }
+    refreshUi();
 }
 
 void SatcomScannerWidget::onDisarm() {
@@ -441,20 +435,15 @@ void SatcomScannerWidget::onDisarm() {
 
 void SatcomScannerWidget::onArmSstv() {
     auto& engine = SatcomScannerEngine::instance();
-    const bool wasIdle = engine.snapshot().state == SatcomScannerState::Idle;
-    if (!engine.start(false)) {
-        QMessageBox::warning(this, "ISS SSTV", QString::fromStdString(engine.snapshot().lastStatus));
-        return;
-    }
     std::string err;
-    if (!engine.armPass("iss", "iss-sstv", autoTrackCheck_->isChecked(), false, &err)) {
-        if (wasIdle) engine.stop();
+    if (!engine.armPass("iss", "iss-sstv", autoTrackCheck_->isChecked(), true, &err)) {
         QMessageBox::warning(this, "ISS SSTV", QString::fromStdString(err.empty() ? "Arm failed" : err));
         return;
     }
     engine.startRecording();
     recordingUi_ = true;
     emit requestOpenSstvLive();
+    refreshUi();
 }
 
 void SatcomScannerWidget::stopAutoCapture(bool keepHandledKey) {
