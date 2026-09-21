@@ -1,0 +1,35 @@
+name: Apply satcom auto-arm runtime fix
+
+on:
+  push:
+    branches: [fix/satcom-auto-arm-runtime]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[satcom-arm-runtime-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fix branch
+        uses: actions/checkout@v7
+        with:
+          ref: fix/satcom-auto-arm-runtime
+          fetch-depth: 1
+
+      - name: Apply precise source patch
+        run: python scripts/apply_satcom_auto_arm_runtime_fix.py
+
+      - name: Remove one-shot patch machinery
+        run: |
+          git rm scripts/apply_satcom_auto_arm_runtime_fix.py
+          git rm .github/workflows/apply-satcom-auto-arm-runtime-fix.yml
+
+      - name: Commit patched sources
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add include src tests
+          git commit -m "fix(satcom): start and auto-arm selected receiver [satcom-arm-runtime-applied]"
+          git push origin HEAD:fix/satcom-auto-arm-runtime
