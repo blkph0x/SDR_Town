@@ -988,12 +988,8 @@ void SatcomScannerEngine::workerLoop() {
             tickPassTrack();
             refreshSpectrumSnapshot();
             processLockedAudio();
-            std::function<void()> cb;
-            {
-                std::lock_guard<std::mutex> lk(mutex_);
-                cb = updateCb_;
-            }
-            if (cb) { try { cb(); } catch (...) {} }
+            // The visible widget already snapshots at 2 Hz. Do not enqueue a Qt
+            // callback for every 20 ms IQ block during an armed pass.
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             continue;
         }
