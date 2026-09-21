@@ -1777,6 +1777,12 @@ DeviceManager::DeviceLeaseOwner DeviceManager::deviceLeaseOwner() const {
     return deviceLeaseOwner_;
 }
 
+bool DeviceManager::deviceLeaseMatches(size_t index, DeviceLeaseOwner owner) const {
+    std::lock_guard<std::mutex> lk(leaseMutex_);
+    return owner != DeviceLeaseOwner::None &&
+           deviceLeaseOwner_ == owner && deviceLeaseIndex_ == index;
+}
+
 bool DeviceManager::acquireDeviceLease(size_t index, DeviceLeaseOwner owner, bool force, std::string* error) {
     if (owner == DeviceLeaseOwner::None) {
         if (error) *error = "invalid lease owner";

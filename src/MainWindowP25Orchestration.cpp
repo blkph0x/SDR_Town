@@ -304,6 +304,16 @@ void MainWindow::startP25LiveDecodePipeline()
                         didWork = true;
                         continue;
                     }
+                    // A Satcom lease means the same physical receiver has been
+                    // intentionally retuned away from ordinary listening. Pause
+                    // this logical receiver at the live edge so it cannot mix
+                    // stale/aliased PCM into the shared output. It resumes
+                    // automatically after Satcom releases the lease.
+                    if (mgr.deviceLeaseMatches(i, DeviceManager::DeviceLeaseOwner::Satcom)) {
+                        mgr.setReceiverCursorToLiveEdge(i, rx);
+                        didWork = true;
+                        continue;
+                    }
                     if (i >= mgr.getDevices().size() || !mgr.isStreaming(i)) {
                         if (rxP25VoiceDecodeSnapshot && rxP25VoicePhase2Snapshot) {
                             logP25VoiceSchedulerEarly("stream-not-ready",

@@ -23,9 +23,12 @@ TEST_CASE("DeviceManager secondary lease blocks live listen without force", "[de
     REQUIRE_FALSE(mgr.acquireDeviceLease(0, DeviceManager::DeviceLeaseOwner::Satcom, false, &err));
     REQUIRE_FALSE(err.empty());
     REQUIRE(mgr.acquireDeviceLease(0, DeviceManager::DeviceLeaseOwner::Satcom, true, &err));
+    REQUIRE(mgr.deviceLeaseMatches(0, DeviceManager::DeviceLeaseOwner::Satcom));
+    REQUIRE_FALSE(mgr.deviceLeaseMatches(0, DeviceManager::DeviceLeaseOwner::P25));
     REQUIRE(mgr.retuneWithLease(0, 145.8e6, DeviceManager::DeviceLeaseOwner::Satcom, true, &err));
     REQUIRE(mgr.getCurrentCenterFreq(0) == 145.8e6);
     mgr.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Satcom);
+    REQUIRE_FALSE(mgr.deviceLeaseMatches(0, DeviceManager::DeviceLeaseOwner::Satcom));
 
     err.clear();
     const size_t invalidIndex = mgr.getDevices().size() + 100;

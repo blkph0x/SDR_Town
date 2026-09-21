@@ -94,6 +94,7 @@ public:
     bool acquireDeviceLease(size_t index, DeviceLeaseOwner owner, bool force, std::string* error);
     void releaseDeviceLease(DeviceLeaseOwner owner);
     DeviceLeaseOwner deviceLeaseOwner() const;
+    bool deviceLeaseMatches(size_t index, DeviceLeaseOwner owner) const;
     bool retuneWithLease(size_t index, double freqHz, DeviceLeaseOwner owner, bool force, std::string* error);
     static const char* leaseOwnerName(DeviceLeaseOwner owner);
 
