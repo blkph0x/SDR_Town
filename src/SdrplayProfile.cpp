@@ -48,6 +48,12 @@ void appendRoot(std::vector<std::string>& roots, const std::string& base,
 std::vector<std::string> windowsSoapyRoots() {
     std::vector<std::string> roots;
 
+    // Explicit overrides are first so portable and managed installations win.
+    if (const char* api = std::getenv("SDRPLAY_API_DIR"); api && *api)
+        appendRoot(roots, api);
+    if (const char* root = std::getenv("SOAPY_SDR_ROOT"); root && *root)
+        appendRoot(roots, root);
+
 #ifdef _WIN32
     // The official API installer records its real install directory here.
     // Check both registry views so a 64-bit portable build also finds API
@@ -78,12 +84,6 @@ std::vector<std::string> windowsSoapyRoots() {
     appendRegistryInstall(KEY_WOW64_64KEY);
     appendRegistryInstall(KEY_WOW64_32KEY);
 #endif
-
-    // Explicit overrides are first so portable and managed installations win.
-    if (const char* api = std::getenv("SDRPLAY_API_DIR"); api && *api)
-        appendRoot(roots, api);
-    if (const char* root = std::getenv("SOAPY_SDR_ROOT"); root && *root)
-        appendRoot(roots, root);
 
     const char* programFiles64 = std::getenv("ProgramW6432");
     if (!programFiles64 || !*programFiles64) programFiles64 = std::getenv("ProgramFiles");
