@@ -2,89 +2,34 @@ from pathlib import Path
 
 path = Path("src/SdrplayProfile.cpp")
 text = path.read_text(encoding="utf-8")
-old = '''std::vector<std::string> windowsSoapyRoots() {
-    std::vector<std::string> roots;
 
-#ifdef _WIN32
-    // The official API installer records its real install directory here.
-    // Check both registry views so a 64-bit portable build also finds API
-    // installations written by a 32-bit installer helper.
-    const auto appendRegistryInstall = [&](REGSAM view) {
-        HKEY key = nullptr;
-        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
-                          "SOFTWARE\\\\SDRplay\\\\Service\\\\API",
-                          0, KEY_READ | view, &key) != ERROR_SUCCESS || !key) return;
-        char value[32768]{};
-        DWORD type = 0;
-        DWORD bytes = static_cast<DWORD>(sizeof(value));
-        const LSTATUS status = RegQueryValueExA(
-            key, "Install_Dir", nullptr, &type,
-            reinterpret_cast<LPBYTE>(value), &bytes);
-        RegCloseKey(key);
-        if (status != ERROR_SUCCESS || bytes <= 1 ||
-            (type != REG_SZ && type != REG_EXPAND_SZ)) return;
-        std::string installDir(value);
-        if (type == REG_EXPAND_SZ) {
-            char expanded[32768]{};
-            const DWORD n = ExpandEnvironmentStringsA(
-                installDir.c_str(), expanded, static_cast<DWORD>(sizeof(expanded)));
-            if (n > 0 && n <= sizeof(expanded)) installDir.assign(expanded);
-        }
-        appendRoot(roots, installDir);
-    };
-    appendRegistryInstall(KEY_WOW64_64KEY);
-    appendRegistryInstall(KEY_WOW64_32KEY);
-#endif
+function_start = text.index("std::vector<std::string> windowsSoapyRoots() {")
+registry_start = text.index("#ifdef _WIN32", function_start)
+registry_end = text.index("#endif", registry_start) + len("#endif")
+overrides_start = text.index(
+    "    // Explicit overrides are first so portable and managed installations win.",
+    registry_end,
+)
+overrides_end = text.index("\n\n    const char* programFiles64", overrides_start)
 
-    // Explicit overrides are first so portable and managed installations win.
-    if (const char* api = std::getenv("SDRPLAY_API_DIR"); api && *api)
-        appendRoot(roots, api);
-    if (const char* root = std::getenv("SOAPY_SDR_ROOT"); root && *root)
-        appendRoot(roots, root);
-'''
-new = '''std::vector<std::string> windowsSoapyRoots() {
-    std::vector<std::string> roots;
+registry_block = text[registry_start:registry_end]
+overrides_block = text[overrides_start:overrides_end]
 
-    // Explicit overrides are first so portable and managed installations win.
-    if (const char* api = std::getenv("SDRPLAY_API_DIR"); api && *api)
-        appendRoot(roots, api);
-    if (const char* root = std::getenv("SOAPY_SDR_ROOT"); root && *root)
-        appendRoot(roots, root);
+if registry_start >= overrides_start:
+    raise SystemExit("registry block is not before override block")
+if text.count("const char* api = std::getenv(\"SDRPLAY_API_DIR\")") != 1:
+    raise SystemExit("unexpected SDRPLAY_API_DIR override count")
+if text.count("appendRegistryInstall(KEY_WOW64_64KEY)") != 1:
+    raise SystemExit("unexpected SDRplay registry block count")
 
-#ifdef _WIN32
-    // The official API installer records its real install directory here.
-    // Check both registry views so a 64-bit portable build also finds API
-    // installations written by a 32-bit installer helper.
-    const auto appendRegistryInstall = [&](REGSAM view) {
-        HKEY key = nullptr;
-        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
-                          "SOFTWARE\\\\SDRplay\\\\Service\\\\API",
-                          0, KEY_READ | view, &key) != ERROR_SUCCESS || !key) return;
-        char value[32768]{};
-        DWORD type = 0;
-        DWORD bytes = static_cast<DWORD>(sizeof(value));
-        const LSTATUS status = RegQueryValueExA(
-            key, "Install_Dir", nullptr, &type,
-            reinterpret_cast<LPBYTE>(value), &bytes);
-        RegCloseKey(key);
-        if (status != ERROR_SUCCESS || bytes <= 1 ||
-            (type != REG_SZ && type != REG_EXPAND_SZ)) return;
-        std::string installDir(value);
-        if (type == REG_EXPAND_SZ) {
-            char expanded[32768]{};
-            const DWORD n = ExpandEnvironmentStringsA(
-                installDir.c_str(), expanded, static_cast<DWORD>(sizeof(expanded)));
-            if (n > 0 && n <= sizeof(expanded)) installDir.assign(expanded);
-        }
-        appendRoot(roots, installDir);
-    };
-    appendRegistryInstall(KEY_WOW64_64KEY);
-    appendRegistryInstall(KEY_WOW64_32KEY);
-#endif
-'''
-if text.count(old) != 1:
-    raise SystemExit(f"expected one roots block, found {text.count(old)}")
-path.write_text(text.replace(old, new), encoding="utf-8", newline="\n")
+updated = (
+    text[:registry_start]
+    + overrides_block
+    + "\n\n"
+    + registry_block
+    + text[overrides_end:]
+)
+path.write_text(updated, encoding="utf-8", newline="\n")
 
 for temporary in (
     ".github/workflows/apply-sdrplay-root-order.yml",
