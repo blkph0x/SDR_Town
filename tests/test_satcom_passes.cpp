@@ -100,6 +100,11 @@ TEST_CASE("TLE loadFromFile parses 3-line sets", "[satcom][pass][tle]")
 
 TEST_CASE("Selected satellite snapshot exposes finite map coordinates", "[satcom][pass][map]")
 {
+    // Construct the planner before injecting the fixture. Its constructor loads
+    // the on-disk cache into the singleton TleStore, so injecting first made this
+    // test depend on Catch2's randomized test order.
+    auto& planner = SatPassPlanner::instance();
+
     TleSet t;
     t.noradId = 25544;
     t.name = "ISS (ZARYA)";
@@ -112,12 +117,12 @@ TEST_CASE("Selected satellite snapshot exposes finite map coordinates", "[satcom
     observer.lonDeg = 151.21;
     observer.altM = 50.0;
     observer.minElevationDeg = 10.0;
-    SatPassPlanner::instance().setObserver(observer);
-    SatPassPlanner::instance().setCatalogueSelection({"iss"});
+    planner.setObserver(observer);
+    planner.setCatalogueSelection({"iss"});
 
     // Evaluate at the exact TLE epoch (2021-01-01T00:00:00Z). This verifies
     // the map projection without coupling the test to the runner's wall clock.
-    const auto positions = SatPassPlanner::instance().currentPositionsAt(1609459200.0);
+    const auto positions = planner.currentPositionsAt(1609459200.0);
     REQUIRE(positions.size() == 1);
     const auto& pos = positions.front();
     REQUIRE(pos.satId == "iss");
@@ -137,10 +142,10 @@ TEST_CASE("Selected satellite snapshot exposes finite map coordinates", "[satcom
     REQUIRE(pos.downlinkId == "iss-sstv");
     REQUIRE(pos.role == "sstv");
 
-    const auto local = SatPassPlanner::instance().statusJson();
+    const auto local = planner.statusJson();
     REQUIRE(local.contains("positions"));
     REQUIRE(local["positions"].size() == 1);
-    const auto pub = SatPassPlanner::instance().publicStatusJson();
+    const auto pub = planner.publicStatusJson();
     REQUIRE_FALSE(pub.contains("positions"));
 }
 
@@ -201,6 +206,10 @@ TEST_CASE("Public satcom JSON omits home lat/lon", "[satcom][pass]")
 
 TEST_CASE("Pass planner AOS ordering with injected TLE", "[satcom][pass]")
 {
+    // Keep the fixture independent of whether another test has already created
+    // the planner singleton and loaded the disk cache.
+    auto& planner = SatPassPlanner::instance();
+
     TleSet t;
     t.noradId = 25544;
     t.name = "ISS";
@@ -213,10 +222,10 @@ TEST_CASE("Pass planner AOS ordering with injected TLE", "[satcom][pass]")
     o.lonDeg = 151.21;
     o.altM = 50;
     o.minElevationDeg = 5.0;
-    SatPassPlanner::instance().setObserver(o);
-    SatPassPlanner::instance().setCatalogueSelection({"iss"});
-    SatPassPlanner::instance().refreshPasses(48.0);
-    const auto snap = SatPassPlanner::instance().snapshot();
+    planner.setObserver(o);
+    planner.setCatalogueSelection({"iss"});
+    planner.refreshPasses(48.0);
+    const auto snap = planner.snapshot();
     // May be empty if epoch is far from now — still must be sorted when present
     for (size_t i = 1; i < snap.passes.size(); ++i)
         REQUIRE(snap.passes[i].aosUnix >= snap.passes[i - 1].aosUnix);
