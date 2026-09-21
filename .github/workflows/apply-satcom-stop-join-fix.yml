@@ -1,0 +1,48 @@
+name: Apply satcom stop join fix
+
+on:
+  push:
+    branches: [fix/satcom-auto-arm-runtime]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[satcom-stop-join-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/satcom-auto-arm-runtime
+          fetch-depth: 1
+      - name: Replace stop lifecycle block
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path('src/SatcomScannerEngine.cpp')
+          s = p.read_text(encoding='utf-8')
+          pattern = (r'void SatcomScannerEngine::stop\(\) \{\n'
+                     r'\s*const bool wasRunning = run_\.exchange\(false\);\n'
+                     r'\s*if \(wasRunning && worker_\.joinable\(\)\) worker_\.join\(\);')
+          replacement = '''void SatcomScannerEngine::stop() {
+              run_.store(false, std::memory_order_release);
+              // Join even when the worker cleared run_ itself after an early error.
+              if (worker_.joinable()) worker_.join();'''
+          s, count = re.subn(pattern, replacement, s, count=1)
+          if count != 1:
+              raise SystemExit(f'stop lifecycle regex count={count}')
+          if 'const bool wasRunning = run_.exchange(false)' in s:
+              raise SystemExit('old stop lifecycle remains after replacement')
+          p.write_text(s, encoding='utf-8', newline='\n')
+          PY
+      - name: Remove one-shot workflow and commit
+        run: |
+          git rm .github/workflows/apply-satcom-stop-join-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/SatcomScannerEngine.cpp
+          git diff --cached --check
+          git commit -m "fix(satcom): always join worker on stop [satcom-stop-join-applied]"
+          git push origin HEAD:fix/satcom-auto-arm-runtime
