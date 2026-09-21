@@ -2,102 +2,61 @@ name: Apply 0.2.82 release metadata
 
 on:
   push:
-    branches: [release/v0.2.82]
+    branches:
+      - release/v0.2.82
 
 permissions:
   contents: write
 
 jobs:
   apply:
-    if: ${{ !contains(github.event.head_commit.message, '[release-0.2.82-applied]') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           ref: release/v0.2.82
           fetch-depth: 1
 
-      - name: Apply version and release metadata
+      - name: Set release version
         shell: bash
         run: |
-          python - <<'PY'
-          from pathlib import Path
+          set -euo pipefail
+          sed -i 's/project(SDR_Town VERSION 0\.2\.80 LANGUAGES CXX)/project(SDR_Town VERSION 0.2.82 LANGUAGES CXX)/' CMakeLists.txt
+          grep -q 'project(SDR_Town VERSION 0.2.82 LANGUAGES CXX)' CMakeLists.txt
+          sed -i 's/| \*\*Current version\*\* | \*\*0\.2\.80\*\* (experimental channel) |/| **Current version** | **0.2.82** (experimental channel) |/' README.md
+          sed -i 's/CURRENT VERSION IN TREE: 0\.2\.80/CURRENT VERSION IN TREE: 0.2.82/' SOURCE_OF_TRUTH.md
+          cat > docs/RELEASE_0.2.82.md <<'EOF'
+          # SDR Town 0.2.82
 
-          def replace_once(path: str, old: str, new: str) -> None:
-              p = Path(path)
-              text = p.read_text(encoding='utf-8-sig')
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{path}: expected one match for {old!r}, found {count}')
-              p.write_text(text.replace(old, new, 1), encoding='utf-8', newline='\n')
+          This release contains the tested P25 talkgroup hotfix, RSPdx runtime discovery improvements, and the completed satellite arm/capture runtime repair.
 
-          replace_once(
-              'CMakeLists.txt',
-              'project(SDR_Town VERSION 0.2.80 LANGUAGES CXX)',
-              'project(SDR_Town VERSION 0.2.82 LANGUAGES CXX)')
-          replace_once(
-              'README.md',
-              '| **Current version** | **0.2.80** (experimental channel) |',
-              '| **Current version** | **0.2.82** (experimental channel) |')
-          replace_once(
-              'SOURCE_OF_TRUTH.md',
-              'CURRENT VERSION IN TREE: 0.2.80',
-              'CURRENT VERSION IN TREE: 0.2.82')
+          ## Satellite receiver fixes
 
-          workflow = Path('.github/workflows/windows-ci.yml')
-          text = workflow.read_text(encoding='utf-8')
-          old = '''          - Manual Arm pass and Arm ISS SSTV actions use the selected pass downlink, explicitly take tuner control, configure the locked pass frequency before the worker starts, and start the Satcom receiver themselves.
-          - Failed pass startup now rolls back the planner state and tuner lease instead of leaving a false armed state.
-          - Automatic background pass capture remains non-forcing and will not steal a tuner from another active owner.
-'''
-          new = '''          - Manual Arm pass and Arm ISS SSTV now resolve the selected physical receiver, start its stream, tune the chosen downlink, enter locked decoding, and roll back cleanly on failure.
-          - Automatic satellite capture runs from the always-present hub, persists the receiver by stable identity, and works while the Satcom panel is hidden.
-          - Automatic capture may temporarily take an ordinary listening receiver, but never takes an active P25, Inmarsat, or Aircraft owner; LOS restores the prior listening centre.
-          - Satcom demodulation uses DeviceManager's current IQ centre during asynchronous hardware tuning, with Doppler tracking applied to the downlink target.
-'''
-          if text.count(old) != 1:
-              raise SystemExit(f'windows-ci.yml: release-note block count={text.count(old)}')
-          text = text.replace(old, new, 1)
-          text = text.replace(
-              '          Rollback branch: backup/pre-arm-pass-hotfix-20260921.',
-              '          Rollback branch: backup/pre-satcom-auto-arm-runtime-20260921.',
-              1)
-          workflow.write_text(text, encoding='utf-8', newline='\n')
+          - Automatic capture runs from the always-present Satcom hub, including while the panel is hidden.
+          - The Satcom receiver is selected explicitly and persisted by stable device identity rather than a fragile enumeration index.
+          - Manual Arm pass and Arm ISS SSTV start the selected stream, tune the downlink, enter locked decoding, and apply Doppler tracking.
+          - Automatic capture may take a normal listening receiver but will not take an active P25, Inmarsat, or Aircraft owner.
+          - At LOS, automatically owned capture is finalised and the previous listening centre is restored.
+          - Decoder input uses the current DeviceManager IQ centre during asynchronous hardware tuning.
+          - Failed startup or tuning rolls back planner state, leases, streams, and worker lifecycle cleanly.
 
-          Path('docs/RELEASE_0.2.82.md').write_text('''# SDR Town 0.2.82
+          ## Other included fixes
 
-This release contains the tested P25 talkgroup hotfix, RSPdx runtime discovery improvements, and the completed satellite arm/capture runtime repair.
+          - RSPdx and RSPdx-R2 discovery covers the official SDRplay API x64 layout and reports module or dependency failures more clearly.
+          - P25 talkgroups populate even when unknown to RadioReference; known TGIDs receive their unambiguous alpha tag.
+          - Selected satellites are propagated on the observer map, with supported SSTV, APRS, and APT capture paths retained.
 
-## Satellite receiver fixes
+          Rollback branch: backup/pre-satcom-auto-arm-runtime-20260921.
+          EOF
+          sed -i 's/^          //' docs/RELEASE_0.2.82.md
 
-- Automatic capture runs once per second from the always-present Satcom hub, including while the panel is hidden.
-- The Satcom receiver is selected explicitly and persisted by stable device identity rather than a fragile enumeration index.
-- Manual **Arm pass** and **Arm ISS SSTV** start the selected stream, tune the selected downlink, enter locked decoding, and apply Doppler tracking.
-- Automatic capture can temporarily take a normal listening receiver but will not take an active P25, Inmarsat, or Aircraft owner.
-- At LOS, automatically owned capture is finalised and the previous listening centre is restored.
-- Decoder input now uses the current DeviceManager IQ centre during asynchronous hardware tuning.
-- Failed startup/tuning rolls back planner state, leases, streams, and worker lifecycle cleanly.
-
-## Other included fixes
-
-- RSPdx/RSPdx-R2 discovery covers the official SDRplay API x64 installation layout and reports module/dependency failures more clearly.
-- P25 talkgroups populate even when unknown to RadioReference; known TGIDs receive their unambiguous alpha tag.
-- Selected satellites are propagated on the observer map, with supported SSTV/APRS/APT capture paths retained.
-
-## Validation
-
-Windows CI builds the Release application and native tests, runs core and Qt/live-decoder test suites, creates a clean portable staging directory, produces a ZIP and SHA-256 file, and publishes both assets from `release/v0.2.82`.
-
-Rollback branch: `backup/pre-satcom-auto-arm-runtime-20260921`.
-''', encoding='utf-8', newline='\n')
-          PY
-
-      - name: Remove one-shot workflow and commit
+      - name: Commit final release tree
         shell: bash
         run: |
+          set -euo pipefail
           git rm .github/workflows/apply-release-0.2.82.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add CMakeLists.txt README.md SOURCE_OF_TRUTH.md docs/RELEASE_0.2.82.md .github/workflows/windows-ci.yml
-          git commit -m "release: version SDR Town 0.2.82 [release-0.2.82-applied]"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add CMakeLists.txt README.md SOURCE_OF_TRUTH.md docs/RELEASE_0.2.82.md
+          git commit -m 'release: version SDR Town 0.2.82'
           git push origin HEAD:release/v0.2.82
