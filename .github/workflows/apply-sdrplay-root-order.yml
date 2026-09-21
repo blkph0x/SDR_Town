@@ -1,0 +1,29 @@
+name: Apply SDRplay runtime override precedence
+
+on:
+  push:
+    branches:
+      - fix/rspdx-arm-pass
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/rspdx-arm-pass
+          fetch-depth: 0
+      - name: Reorder SDRplay runtime roots
+        run: python3 scripts/reorder_sdrplay_roots.py
+      - name: Commit source change
+        run: |
+          git config user.name "SDR Town CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Honor explicit SDRplay runtime overrides"
+          git push origin HEAD:fix/rspdx-arm-pass
