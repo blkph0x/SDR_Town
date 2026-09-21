@@ -33,10 +33,12 @@ struct SatcomScannerConfig {
     std::string mode = "NFM";
     double squelchDb = -90.0;
     size_t deviceIndex = 0;
+    std::string deviceStableKey;
     std::string recordDir;
     std::string logDir;
     bool enableAx25 = true;
     bool enableApt = true;
+    bool autoCapture = true;
     std::vector<SatcomPreset> presets;
 
     static SatcomScannerConfig defaults();
@@ -90,6 +92,9 @@ public:
 
     void setConfig(const SatcomScannerConfig& cfg);
     SatcomScannerConfig config() const;
+    void setAutoCaptureEnabled(bool on);
+    bool autoCaptureEnabled() const;
+    size_t resolveDeviceIndex(std::string* error = nullptr);
 
     bool start(bool force = false);
     void stop();

@@ -5,6 +5,7 @@
 #include "SpectrumWidget.h"
 #include "ObserverMapWidget.h"
 #include "AdsBTrackStore.h"
+#include "DeviceManager.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -142,10 +143,12 @@ void SatcomScannerWidget::buildUi() {
     bwSpin_->setSuffix(" kHz");
     modeCombo_ = new QComboBox();
     modeCombo_->addItems({"NFM", "WFM", "AM", "USB", "APT", "APRS"});
+    deviceCombo_ = new QComboBox();
     stepSpin_ = new QDoubleSpinBox();
     stepSpin_->setDecimals(3);
     stepSpin_->setSuffix(" kHz");
     presetCombo_ = new QComboBox();
+    optsLay->addRow("RECEIVER", deviceCombo_);
     optsLay->addRow("BANDWIDTH", bwSpin_);
     optsLay->addRow("MODE", modeCombo_);
     optsLay->addRow("STEP", stepSpin_);
@@ -205,11 +208,11 @@ void SatcomScannerWidget::buildUi() {
     autoTrackCheck_->setChecked(true);
     armCol->addWidget(autoTrackCheck_);
     autoCaptureCheck_ = new QCheckBox("Auto capture selected sats in range");
-    autoCaptureCheck_->setChecked(true);
+    autoCaptureCheck_->setChecked(SatcomScannerEngine::instance().autoCaptureEnabled());
     autoCaptureCheck_->setToolTip(
-        "While this Satcom panel is visible, arm the best selected in-range satellite, "
-        "track Doppler, save detected audio, and run available APRS/APT/SSTV paths. "
-        "It will not force the tuner away from another active owner.");
+        "Runs in the background: when a selected, supported satellite reaches the configured "
+        "minimum elevation, SDR Town takes the selected receiver, tunes with Doppler, records "
+        "when a signal is present, and runs the available APRS/APT/SSTV decoder.");
     armCol->addWidget(autoCaptureCheck_);
     auto* armBtn = new QPushButton("Arm pass");
     auto* sstvBtn = new QPushButton("Arm ISS SSTV");
@@ -230,8 +233,20 @@ void SatcomScannerWidget::buildUi() {
         SatcomScannerEngine::instance().setAutoTrack(on);
     });
     connect(autoCaptureCheck_, &QCheckBox::toggled, this, [this](bool on) {
+        SatcomScannerEngine::instance().setAutoCaptureEnabled(on);
         if (!on && autoCaptureOwned_) stopAutoCapture(false);
-        if (on) refreshPassesTable();
+        refreshPassesTable();
+    });
+    connect(deviceCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int row) {
+        if (row < 0) return;
+        bool ok = false;
+        const size_t index = static_cast<size_t>(deviceCombo_->itemData(row).toString().toULongLong(&ok));
+        const auto devices = DeviceManager::instance().getDevices();
+        if (!ok || index >= devices.size()) return;
+        auto cfg = SatcomScannerEngine::instance().config();
+        cfg.deviceIndex = index;
+        cfg.deviceStableKey = devices[index].stableKey;
+        SatcomScannerEngine::instance().setConfig(cfg);
     });
 
     spectrum_ = new SpectrumWidget(this);
@@ -323,6 +338,15 @@ void SatcomScannerWidget::applyFieldsToConfig() {
     cfg.bandwidthHz = bwSpin_->value() * 1e3;
     cfg.mode = modeCombo_->currentText().toStdString();
     cfg.squelchDb = squelchSpin_->value();
+    if (deviceCombo_ && deviceCombo_->currentIndex() >= 0) {
+        bool ok = false;
+        const size_t index = static_cast<size_t>(deviceCombo_->currentData().toString().toULongLong(&ok));
+        const auto devices = DeviceManager::instance().getDevices();
+        if (ok && index < devices.size()) {
+            cfg.deviceIndex = index;
+            cfg.deviceStableKey = devices[index].stableKey;
+        }
+    }
     SatcomScannerEngine::instance().setConfig(cfg);
 }
 
@@ -413,6 +437,7 @@ void SatcomScannerWidget::onArmSelected() {
     const QString satId = passTable_->item(row, 1)->data(Qt::UserRole).toString();
     const QString dlId = passTable_->item(row, 2)->data(Qt::UserRole).toString();
 
+    applyFieldsToConfig();
     auto& engine = SatcomScannerEngine::instance();
     std::string err;
     if (!engine.armPass(satId.toStdString(), dlId.toStdString(),
@@ -434,6 +459,7 @@ void SatcomScannerWidget::onDisarm() {
 }
 
 void SatcomScannerWidget::onArmSstv() {
+    applyFieldsToConfig();
     auto& engine = SatcomScannerEngine::instance();
     std::string err;
     if (!engine.armPass("iss", "iss-sstv", autoTrackCheck_->isChecked(), true, &err)) {
@@ -624,16 +650,41 @@ void SatcomScannerWidget::refreshPassesTable() {
         passStatusLabel_->setText(QString::fromStdString(plan.lastStatus.empty() ? "No pass armed" : plan.lastStatus));
     }
 
-    updateAutoCapture(plan);
 }
 
 void SatcomScannerWidget::refreshUi() {
-    // Doppler retune is driven by the scanner worker only while a pass is armed.
+    // Resolve stale saved indices (for example an RTL placeholder at index 0)
+    // before presenting or starting the satcom receiver.
+    SatcomScannerEngine::instance().resolveDeviceIndex(nullptr);
     const auto snap = SatcomScannerEngine::instance().snapshot();
     const auto& cfg = snap.config;
 
     static int passTableThrottle = 0;
     const bool refreshPasses = (++passTableThrottle % 4) == 0; // ~2 s while visible
+
+    const auto devices = DeviceManager::instance().getDevices();
+    bool rebuildDevices = deviceCombo_->count() != static_cast<int>(devices.size());
+    if (!rebuildDevices) {
+        for (int i = 0; i < deviceCombo_->count(); ++i) {
+            const QString expected = QString("%1 — %2")
+                .arg(i).arg(QString::fromStdString(devices[static_cast<size_t>(i)].label));
+            if (deviceCombo_->itemText(i) != expected) { rebuildDevices = true; break; }
+        }
+    }
+    deviceCombo_->blockSignals(true);
+    if (rebuildDevices) {
+        deviceCombo_->clear();
+        for (size_t i = 0; i < devices.size(); ++i) {
+            deviceCombo_->addItem(
+                QString("%1 — %2").arg(static_cast<qulonglong>(i))
+                    .arg(QString::fromStdString(devices[i].label)),
+                QString::number(static_cast<qulonglong>(i)));
+        }
+    }
+    const int selectedDevice = deviceCombo_->findData(
+        QString::number(static_cast<qulonglong>(cfg.deviceIndex)));
+    if (selectedDevice >= 0) deviceCombo_->setCurrentIndex(selectedDevice);
+    deviceCombo_->blockSignals(false);
 
     if (!lowSpin_->hasFocus()) lowSpin_->setValue(cfg.lowHz / 1e6);
     if (!highSpin_->hasFocus()) highSpin_->setValue(cfg.highHz / 1e6);
