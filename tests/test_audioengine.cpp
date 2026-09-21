@@ -116,3 +116,16 @@ TEST_CASE("AudioEngine multi-device and push", "[audioengine]") {
 
     delete eng;
 }
+
+
+TEST_CASE("AudioEngine exposes a live primary playback instance", "[audioengine][satcom]") {
+    AudioEngine* before = AudioEngine::primaryInstance();
+    auto* candidate = new AudioEngine();
+    if (before) {
+        REQUIRE(AudioEngine::primaryInstance() == before);
+    } else {
+        REQUIRE(AudioEngine::primaryInstance() == candidate);
+    }
+    delete candidate;
+    if (!before) REQUIRE(AudioEngine::primaryInstance() == nullptr);
+}

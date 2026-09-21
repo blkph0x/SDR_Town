@@ -49,6 +49,8 @@ static void stopAndUninitOutput(const std::shared_ptr<AudioEngine::ActiveOutput>
 }
 }
 
+std::atomic<AudioEngine*> AudioEngine::s_primaryInstance{nullptr};
+
 static void data_callback(ma_device* pDevice, void* pOutput, const void* /*pInput*/, ma_uint32 frameCount)
 {
     // P1: direct pointer from this device's pUserData (set at startDevice time) avoids any m_active walk or find from RT thread.
@@ -142,6 +144,10 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* /*pInpu
 
 AudioEngine::AudioEngine()
 {
+    AudioEngine* expected = nullptr;
+    s_primaryInstance.compare_exchange_strong(
+        expected, this, std::memory_order_acq_rel, std::memory_order_acquire);
+
     ma_context_config ctxCfg = ma_context_config_init();
     if (ma_context_init(nullptr, 0, &ctxCfg, &m_context) != MA_SUCCESS) {
         spdlog::error("miniaudio context init failed");
@@ -154,6 +160,10 @@ AudioEngine::AudioEngine()
 
 AudioEngine::~AudioEngine()
 {
+    AudioEngine* expected = this;
+    s_primaryInstance.compare_exchange_strong(
+        expected, nullptr, std::memory_order_acq_rel, std::memory_order_acquire);
+
     std::vector<std::shared_ptr<ActiveOutput>> oldOutputs;
     {
         std::lock_guard<std::mutex> lk(audioMutex);
@@ -172,6 +182,11 @@ AudioEngine::~AudioEngine()
         ma_context_uninit(&m_context);
     }
     spdlog::info("AudioEngine destroyed");
+}
+
+AudioEngine* AudioEngine::primaryInstance() noexcept
+{
+    return s_primaryInstance.load(std::memory_order_acquire);
 }
 
 std::vector<AudioDeviceInfo> AudioEngine::enumeratePlaybackDevices()

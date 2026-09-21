@@ -12787,6 +12787,9 @@ void MainWindow::stopAllStreaming()
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+        SatcomScannerEngine::instance().stopRecording();
+        SatcomScannerEngine::instance().stop();
+        SatcomScannerEngine::instance().disarmPass();
         if (workspaceLayout && !guiRuntimeConfig.hasStartupWork()) {
             QSettings settings;
             workspaceLayout->save(settings);

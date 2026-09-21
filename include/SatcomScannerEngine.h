@@ -83,8 +83,10 @@ struct SatcomScannerSnapshot {
 
 class Ax25AprsDecoder;
 class AptImageDecoder;
+class AudioEngine;
 class Demodulator;
 class SstvReceiverFeed;
+struct Receiver;
 
 class SatcomScannerEngine {
 public:
@@ -121,8 +123,11 @@ private:
     ~SatcomScannerEngine();
 
     void workerLoop();
+    bool refreshSpectrumSnapshot(double* peakHz = nullptr, double* peakDb = nullptr);
     bool detectActivity(double& peakHz, double& peakDb);
     void processLockedAudio();
+    void resetIqCursor(size_t deviceIndex);
+    AudioEngine* ensureAudioOutput();
     void pushLog(SatcomLog::EventType t, double hz, const char* text);
     std::string makeCaptureStem(const std::string& satId, const std::string& downlinkId) const;
     void writeRecordingMetadata(const std::string& path) const;
@@ -163,6 +168,10 @@ private:
     std::unique_ptr<Ax25AprsDecoder> ax25_;
     std::unique_ptr<AptImageDecoder> apt_;
     std::unique_ptr<Demodulator> demod_;
+    std::unique_ptr<Receiver> iqReceiver_;
+    std::unique_ptr<AudioEngine> ownedAudio_;
+    mutable std::mutex audioMutex_;
+    int64_t lastAudioAttemptMs_ = 0;
     std::atomic<bool> demodResetRequested_{true};
 
     std::shared_ptr<SstvReceiverFeed> sstvFeed_;

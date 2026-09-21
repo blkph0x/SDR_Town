@@ -352,7 +352,7 @@ void SatcomScannerWidget::applyFieldsToConfig() {
 
 void SatcomScannerWidget::onStart() {
     applyFieldsToConfig();
-    if (!SatcomScannerEngine::instance().start(false)) {
+    if (!SatcomScannerEngine::instance().start(true)) {
         QMessageBox::warning(this, "Satcom",
             QString::fromStdString(SatcomScannerEngine::instance().snapshot().lastStatus));
     }
@@ -658,6 +658,8 @@ void SatcomScannerWidget::refreshUi() {
     SatcomScannerEngine::instance().resolveDeviceIndex(nullptr);
     const auto snap = SatcomScannerEngine::instance().snapshot();
     const auto& cfg = snap.config;
+    spectrum_->setSquelchThreshold(cfg.squelchDb);
+    spectrum_->setLiveRms(snap.audioRmsDb);
 
     static int passTableThrottle = 0;
     const bool refreshPasses = (++passTableThrottle % 4) == 0; // ~2 s while visible

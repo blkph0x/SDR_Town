@@ -28,6 +28,10 @@ public:
     AudioEngine();
     ~AudioEngine();
 
+    // First live AudioEngine in this process. Feature workers use this shared
+    // playback path; nullptr means no engine has been constructed yet.
+    static AudioEngine* primaryInstance() noexcept;
+
     // Enumeration (call once or on demand). Remaps active outputs' enum indices
     // by device name so a dialog re-enumerate cannot orphan the live device list.
     std::vector<AudioDeviceInfo> enumeratePlaybackDevices();
@@ -98,6 +102,8 @@ public:
     struct ActiveOutput;
 
 private:
+    static std::atomic<AudioEngine*> s_primaryInstance;
+
     static constexpr uint8_t kRingSampleReal = 0;
     static constexpr uint8_t kRingSampleBridge = 1;
 
