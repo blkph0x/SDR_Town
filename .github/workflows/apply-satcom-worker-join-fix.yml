@@ -1,0 +1,57 @@
+name: Apply satcom worker join fix
+
+on:
+  push:
+    branches: [fix/satcom-auto-arm-runtime]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[satcom-worker-join-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/satcom-auto-arm-runtime
+          fetch-depth: 1
+      - name: Patch stale worker cleanup
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/SatcomScannerEngine.cpp')
+          s = p.read_text(encoding='utf-8')
+          old = '''    if (run_.exchange(true)) return true;
+              {
+          '''
+          new = '''    if (run_.exchange(true)) return true;
+              // A previous worker can have exited after setting run_ false. Join that
+              // completed thread before assigning a replacement std::thread.
+              if (worker_.joinable()) worker_.join();
+              {
+          '''
+          if s.count(old) != 1:
+              raise SystemExit(f'start worker pattern count={s.count(old)}')
+          s = s.replace(old, new, 1)
+          old = '''    const bool wasRunning = run_.exchange(false);
+              if (wasRunning && worker_.joinable()) worker_.join();
+          '''
+          new = '''    run_.exchange(false);
+              // Join even when the worker already cleared run_ on an early startup
+              // error; a joinable completed thread must never reach destruction.
+              if (worker_.joinable()) worker_.join();
+          '''
+          if s.count(old) != 1:
+              raise SystemExit(f'stop worker pattern count={s.count(old)}')
+          p.write_text(s, encoding='utf-8', newline='\n')
+          PY
+      - name: Remove one-shot workflow and commit
+        run: |
+          git rm .github/workflows/apply-satcom-worker-join-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/SatcomScannerEngine.cpp
+          git commit -m "fix(satcom): join completed worker before restart [satcom-worker-join-applied]"
+          git push origin HEAD:fix/satcom-auto-arm-runtime
