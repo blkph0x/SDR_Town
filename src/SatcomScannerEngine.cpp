@@ -288,8 +288,9 @@ bool SatcomScannerEngine::start(bool force) {
 }
 
 void SatcomScannerEngine::stop() {
-    const bool wasRunning = run_.exchange(false);
-    if (wasRunning && worker_.joinable()) worker_.join();
+    run_.store(false, std::memory_order_release);
+    // Join even when the worker cleared run_ itself after an early error.
+    if (worker_.joinable()) worker_.join();
     {
         std::lock_guard<std::mutex> lk(mutex_);
         state_ = SatcomScannerState::Idle;
