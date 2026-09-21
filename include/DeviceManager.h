@@ -97,6 +97,7 @@ public:
     bool retuneWithLease(size_t index, double freqHz, DeviceLeaseOwner owner, bool force, std::string* error);
     static const char* leaseOwnerName(DeviceLeaseOwner owner);
 
+    double getCurrentCenterFreq(size_t index) const;
     double getCurrentSampleRate(size_t index) const;
     void applyLiveSampleRate(size_t index, double sampleRateHz);
 

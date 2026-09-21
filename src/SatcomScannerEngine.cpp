@@ -44,6 +44,15 @@ std::string safeToken(std::string value) {
     return value;
 }
 
+bool isPlaceholderDevice(const DeviceInfo& device) {
+    std::string label = device.label;
+    std::transform(label.begin(), label.end(), label.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return label.find("placeholder") != std::string::npos ||
+           label.find("(stub)") != std::string::npos;
+}
+
 } // namespace
 
 SatcomScannerConfig SatcomScannerConfig::defaults() {
@@ -71,10 +80,12 @@ nlohmann::json SatcomScannerConfig::toJson() const {
     j["mode"] = mode;
     j["squelchDb"] = squelchDb;
     j["deviceIndex"] = deviceIndex;
+    j["deviceStableKey"] = deviceStableKey;
     j["recordDir"] = recordDir;
     j["logDir"] = logDir;
     j["enableAx25"] = enableAx25;
     j["enableApt"] = enableApt;
+    j["autoCapture"] = autoCapture;
     nlohmann::json arr = nlohmann::json::array();
     for (const auto& p : presets) {
         arr.push_back({
@@ -98,10 +109,12 @@ SatcomScannerConfig SatcomScannerConfig::fromJson(const nlohmann::json& j) {
     c.mode = j.value("mode", c.mode);
     c.squelchDb = j.value("squelchDb", c.squelchDb);
     c.deviceIndex = j.value("deviceIndex", c.deviceIndex);
+    c.deviceStableKey = j.value("deviceStableKey", c.deviceStableKey);
     c.recordDir = j.value("recordDir", c.recordDir);
     c.logDir = j.value("logDir", c.logDir);
     c.enableAx25 = j.value("enableAx25", c.enableAx25);
     c.enableApt = j.value("enableApt", c.enableApt);
+    c.autoCapture = j.value("autoCapture", c.autoCapture);
     if (j.contains("presets") && j["presets"].is_array()) {
         c.presets.clear();
         for (const auto& pj : j["presets"]) {
@@ -171,6 +184,61 @@ SatcomScannerConfig SatcomScannerEngine::config() const {
     return config_;
 }
 
+void SatcomScannerEngine::setAutoCaptureEnabled(bool on) {
+    std::lock_guard<std::mutex> lk(mutex_);
+    config_.autoCapture = on;
+    config_.save();
+}
+
+bool SatcomScannerEngine::autoCaptureEnabled() const {
+    std::lock_guard<std::mutex> lk(mutex_);
+    return config_.autoCapture;
+}
+
+size_t SatcomScannerEngine::resolveDeviceIndex(std::string* error) {
+    auto& manager = DeviceManager::instance();
+    const auto devices = manager.getDevices();
+    if (devices.empty()) {
+        if (error) *error = "No SDR devices are available; rescan devices first";
+        return static_cast<size_t>(-1);
+    }
+
+    SatcomScannerConfig cfg = config();
+    size_t chosen = static_cast<size_t>(-1);
+    if (!cfg.deviceStableKey.empty()) {
+        for (size_t i = 0; i < devices.size(); ++i) {
+            if (devices[i].stableKey == cfg.deviceStableKey) { chosen = i; break; }
+        }
+    }
+    if (chosen == static_cast<size_t>(-1) && cfg.deviceIndex < devices.size() &&
+        !isPlaceholderDevice(devices[cfg.deviceIndex])) {
+        chosen = cfg.deviceIndex;
+    }
+    auto choose = [&](auto predicate) {
+        if (chosen != static_cast<size_t>(-1)) return;
+        for (size_t i = 0; i < devices.size(); ++i) {
+            if (!isPlaceholderDevice(devices[i]) && predicate(i, devices[i])) {
+                chosen = i;
+                return;
+            }
+        }
+    };
+    choose([&](size_t i, const DeviceInfo&) { return manager.isStreaming(i); });
+    choose([](size_t, const DeviceInfo& d) { return d.enabled; });
+    choose([](size_t, const DeviceInfo& d) { return d.isSdrplay; });
+    choose([](size_t, const DeviceInfo&) { return true; });
+    if (chosen == static_cast<size_t>(-1))
+        chosen = cfg.deviceIndex < devices.size() ? cfg.deviceIndex : 0;
+
+    const std::string stableKey = devices[chosen].stableKey;
+    if (cfg.deviceIndex != chosen || cfg.deviceStableKey != stableKey) {
+        cfg.deviceIndex = chosen;
+        cfg.deviceStableKey = stableKey;
+        setConfig(cfg);
+    }
+    return chosen;
+}
+
 void SatcomScannerEngine::setUpdateCallback(std::function<void()> cb) {
     std::lock_guard<std::mutex> lk(mutex_);
     updateCb_ = std::move(cb);
@@ -190,7 +258,12 @@ std::string SatcomScannerEngine::makeCaptureStem(const std::string& satId,
 
 bool SatcomScannerEngine::start(bool force) {
     std::string err;
-    const size_t dev = config().deviceIndex;
+    const size_t dev = resolveDeviceIndex(&err);
+    if (dev == static_cast<size_t>(-1)) {
+        std::lock_guard<std::mutex> lk(mutex_);
+        lastStatus_ = err.empty() ? "No receiver selected" : err;
+        return false;
+    }
     if (!DeviceManager::instance().acquireDeviceLease(dev, DeviceManager::DeviceLeaseOwner::Satcom, force, &err)) {
         std::lock_guard<std::mutex> lk(mutex_);
         lastStatus_ = err;
@@ -441,7 +514,12 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
     finishSstvCapture(false);
     auto& deviceManager = DeviceManager::instance();
     std::string err;
-    const size_t dev = config().deviceIndex;
+    const size_t dev = resolveDeviceIndex(&err);
+    if (dev == static_cast<size_t>(-1)) {
+        if (error) *error = err.empty() ? "No receiver selected" : err;
+        return false;
+    }
+    const bool streamWasRunning = deviceManager.isStreaming(dev);
     if (!deviceManager.acquireDeviceLease(dev, DeviceManager::DeviceLeaseOwner::Satcom, force, &err)) {
         if (error) *error = err;
         return false;
@@ -489,6 +567,25 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
     }
     demodResetRequested_ = true;
 
+    // Arm Pass owns the complete receiver transition. Start the selected
+    // stream before queuing the tune so both manual and automatic paths enter
+    // the same locked/decode state instead of merely changing planner flags.
+    if (!deviceManager.setEnabled(dev, true) || !deviceManager.startStreaming(dev, true)) {
+        const std::string startError = "Could not start selected satellite receiver";
+        {
+            std::lock_guard<std::mutex> lk(mutex_);
+            passTrackActive_ = false;
+            armedRole_.clear();
+            state_ = SatcomScannerState::Idle;
+            lastStatus_ = startError;
+        }
+        SatPassPlanner::instance().disarm();
+        deviceManager.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Satcom);
+        if (!streamWasRunning) deviceManager.stopStreaming(dev);
+        if (error) *error = startError;
+        return false;
+    }
+
     // Always issue the base-frequency tune, even when Doppler auto-track is
     // disabled. Previously tickPassTrack() returned early in that mode, leaving
     // an apparently armed pass on the receiver's old frequency.
@@ -507,6 +604,7 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
         }
         SatPassPlanner::instance().disarm();
         deviceManager.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Satcom);
+        if (!streamWasRunning) deviceManager.stopStreaming(dev);
         if (error) *error = tuneError;
         return false;
     }
@@ -525,6 +623,7 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
         }
         SatPassPlanner::instance().disarm();
         deviceManager.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Satcom);
+        if (!streamWasRunning) deviceManager.stopStreaming(dev);
         if (error) *error = startError.empty() ? "Could not start pass receiver" : startError;
         return false;
     }
@@ -665,10 +764,12 @@ void SatcomScannerEngine::processLockedAudio() {
     }
 
     if (demodResetRequested_.exchange(false)) demod_->resetState();
+    const double reportedCenter = mgr.getCurrentCenterFreq(dev);
+    const double iqCenterHz = reportedCenter > 0.0 ? reportedCenter : lockHz;
     double rms = -120.0;
     FmMultiplexBlock multiplex;
     FmMultiplexBlock* multiplexOut = role == "sstv" ? &multiplex : nullptr;
-    auto audio = demod_->demodulateToAudio(iq, sr, lockHz, lockHz, modeFromString(mode),
+    auto audio = demod_->demodulateToAudio(iq, sr, iqCenterHz, lockHz, modeFromString(mode),
                                            rms, 3000.0, -120.0, 1.0, 75.0, 0.96, bw,
                                            0, 48000.0,
                                            std::numeric_limits<double>::quiet_NaN(), true,
@@ -747,8 +848,16 @@ void SatcomScannerEngine::workerLoop() {
         if (!passTrackActive_) currentHz_ = config_.lowHz;
     }
 
-    mgr.setEnabled(config().deviceIndex, true);
-    mgr.startStreaming(config().deviceIndex, true);
+    if (!mgr.setEnabled(config().deviceIndex, true) ||
+        !mgr.startStreaming(config().deviceIndex, true)) {
+        std::lock_guard<std::mutex> lk(mutex_);
+        deviceConnected_ = false;
+        lastStatus_ = "Could not start selected receiver";
+        state_ = SatcomScannerState::Idle;
+        run_ = false;
+        mgr.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Satcom);
+        return;
+    }
 
     while (run_.load(std::memory_order_acquire)) {
         SatcomScannerConfig cfg;

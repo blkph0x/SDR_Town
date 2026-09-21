@@ -1835,6 +1835,13 @@ bool DeviceManager::retuneWithLease(size_t index, double freqHz, DeviceLeaseOwne
     return true;
 }
 
+double DeviceManager::getCurrentCenterFreq(size_t index) const {
+    auto* st = streamState(index);
+    if (!st) return 0.0;
+    std::lock_guard<std::mutex> lk(st->queueMutex);
+    return st->currentCenter;
+}
+
 double DeviceManager::getCurrentSampleRate(size_t index) const {
     auto* st = streamState(index);
     if (!st) {

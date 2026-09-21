@@ -23,6 +23,8 @@ TEST_CASE("DeviceManager secondary lease blocks live listen without force", "[de
     REQUIRE_FALSE(mgr.acquireDeviceLease(0, DeviceManager::DeviceLeaseOwner::Satcom, false, &err));
     REQUIRE_FALSE(err.empty());
     REQUIRE(mgr.acquireDeviceLease(0, DeviceManager::DeviceLeaseOwner::Satcom, true, &err));
+    REQUIRE(mgr.retuneWithLease(0, 145.8e6, DeviceManager::DeviceLeaseOwner::Satcom, true, &err));
+    REQUIRE(mgr.getCurrentCenterFreq(0) == 145.8e6);
     mgr.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Satcom);
 
     err.clear();

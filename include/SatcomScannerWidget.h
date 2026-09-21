@@ -59,6 +59,7 @@ private:
     QDoubleSpinBox* stepSpin_ = nullptr;
     QDoubleSpinBox* bwSpin_ = nullptr;
     QComboBox* modeCombo_ = nullptr;
+    QComboBox* deviceCombo_ = nullptr;
     QComboBox* presetCombo_ = nullptr;
     QSlider* squelchSlider_ = nullptr;
     QDoubleSpinBox* squelchSpin_ = nullptr;
