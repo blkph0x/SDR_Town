@@ -4,6 +4,11 @@
 #include <string>
 #include <vector>
 
+#ifdef _MSC_VER
+// windowsSoapyRoots() reads the SDRplay API installer key via RegOpenKeyEx.
+#pragma comment(lib, "Advapi32.lib")
+#endif
+
 // Model-aware SDRplay capability/settings layer for SoapySDRPlay3 (API 3.x).
 // No native sdrplay_api linkage — capabilities come from Soapy probe results.
 
