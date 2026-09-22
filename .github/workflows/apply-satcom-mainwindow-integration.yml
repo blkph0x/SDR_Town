@@ -1,0 +1,52 @@
+name: Apply Satcom MainWindow integration
+
+on:
+  push:
+    branches:
+      - fix/satcom-mainwindow-integration
+    paths:
+      - scripts/apply_satcom_mainwindow_integration.py
+      - .github/workflows/apply-satcom-mainwindow-integration.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-satcom-mainwindow-integration
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: Generate reviewed Satcom host patch
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v7
+        with:
+          ref: fix/satcom-mainwindow-integration
+          fetch-depth: 0
+
+      - name: Apply deterministic integration patch
+        run: python3 scripts/apply_satcom_mainwindow_integration.py
+
+      - name: Validate generated source contracts
+        run: |
+          python3 scripts/test_no_p25_guard.py
+          python3 scripts/verify_satcom_host_integration.py
+          python3 -m py_compile scripts/verify_no_p25_changes.py
+          git diff --check
+
+      - name: Remove one-shot generator
+        run: |
+          rm -f scripts/apply_satcom_mainwindow_integration.py
+          rm -f .github/workflows/apply-satcom-mainwindow-integration.yml
+
+      - name: Commit generated source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Integrate Satcom with MainWindow receiver and audio session"
+          git push origin HEAD:fix/satcom-mainwindow-integration
