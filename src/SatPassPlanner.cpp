@@ -82,9 +82,15 @@ SatPassPlanner& SatPassPlanner::instance() {
 SatPassPlanner::SatPassPlanner() {
     observer_.load();
     catalogue_.load();
-    TleStore::instance().loadCache();
-    if (!TleStore::instance().all().empty()) predictLocked(24.0);
-    lastStatus_ = "Pass planner ready (" + std::to_string(passes_.size()) + " passes)";
+    const bool loaded = TleStore::instance().loadCache();
+    const size_t count = TleStore::instance().size();
+    if (count > 0) predictLocked(24.0);
+    if (loaded || count > 0) {
+        lastStatus_ = "Loaded " + std::to_string(count) + " cached TLE sets (" +
+                      std::to_string(passes_.size()) + " passes)";
+    } else {
+        lastStatus_ = "Pass planner ready — no valid TLE cache";
+    }
 }
 
 SatPassPlanner::~SatPassPlanner() = default;
@@ -108,9 +114,16 @@ void SatPassPlanner::setObserver(const SatObserverConfig& obs) {
         std::lock_guard<std::mutex> lk(mutex_);
         observer_ = obs;
         observer_.save();
-        lastStatus_ = "Observer updated";
+        lastStatus_ = "Saving observer location";
     }
     refreshPasses(24.0);
+    {
+        std::lock_guard<std::mutex> lk(mutex_);
+        lastStatus_ = "Location saved: " + std::to_string(observer_.latDeg) + ", " +
+                      std::to_string(observer_.lonDeg) + " (" +
+                      std::to_string(passes_.size()) + " passes)";
+    }
+    notify();
 }
 
 SatObserverConfig SatPassPlanner::observer() const {
@@ -135,36 +148,75 @@ void SatPassPlanner::setCatalogueSelection(const std::vector<std::string>& selec
 }
 
 void SatPassPlanner::ensureTleLoaded() {
-    if (TleStore::instance().all().empty())
-        TleStore::instance().loadCache();
+    if (TleStore::instance().size() == 0) TleStore::instance().loadCache();
 }
 
 bool SatPassPlanner::refreshTle(std::string* error) {
     ensureTleLoaded();
-    std::string err;
-    const bool ok = TleStore::instance().refreshFromNetwork(&err);
+    if (TleStore::instance().size() > 0) refreshPasses(24.0);
+
+    std::string networkError;
+    const bool networkOk = TleStore::instance().refreshFromNetwork(&networkError);
+    const size_t count = TleStore::instance().size();
+    const bool usable = networkOk || count > 0;
+    if (usable) refreshPasses(24.0);
+
     {
         std::lock_guard<std::mutex> lk(mutex_);
-        lastStatus_ = ok ? "TLE refreshed from CelesTrak" : ("TLE refresh failed: " + err);
+        if (networkOk) {
+            lastStatus_ = "TLE refreshed: " + std::to_string(count) + " sets";
+        } else if (count > 0) {
+            lastStatus_ = "TLE network refresh failed; using " + std::to_string(count) +
+                          " cached sets" +
+                          (networkError.empty() ? std::string{} : ": " + networkError);
+        } else {
+            lastStatus_ = "TLE refresh failed" +
+                          (networkError.empty() ? std::string{} : ": " + networkError);
+        }
     }
-    if (!ok && error) *error = err;
-    if (ok) refreshPasses(24.0);
+
+    if (error) {
+        if (usable) error->clear();
+        else *error = networkError;
+    }
     notify();
-    return ok;
+    return usable;
 }
 
 void SatPassPlanner::refreshTleAsync(std::function<void(bool, std::string)> done) {
-    TleStore::instance().refreshFromNetworkAsync([this, done = std::move(done)](bool ok, std::string err) {
+    ensureTleLoaded();
+    const size_t cachedCount = TleStore::instance().size();
+    if (cachedCount > 0) {
+        refreshPasses(24.0);
         {
             std::lock_guard<std::mutex> lk(mutex_);
-            lastStatus_ = ok
-                ? ("TLE refreshed: " + std::to_string(TleStore::instance().all().size()) + " sets")
-                : ("TLE refresh failed: " + err);
+            lastStatus_ = "Using " + std::to_string(cachedCount) +
+                          " cached TLE sets while checking CelesTrak";
         }
-        if (ok) refreshPasses(24.0);
         notify();
-        if (done) done(ok, err);
-    });
+    }
+
+    TleStore::instance().refreshFromNetworkAsync(
+        [this, done = std::move(done)](bool networkOk, std::string networkError) mutable {
+            const size_t count = TleStore::instance().size();
+            const bool usable = networkOk || count > 0;
+            if (usable) refreshPasses(24.0);
+            {
+                std::lock_guard<std::mutex> lk(mutex_);
+                if (networkOk) {
+                    lastStatus_ = "TLE refreshed: " + std::to_string(count) + " sets";
+                } else if (count > 0) {
+                    lastStatus_ = "TLE network refresh failed; using " +
+                                  std::to_string(count) + " cached sets" +
+                                  (networkError.empty() ? std::string{} : ": " + networkError);
+                } else {
+                    lastStatus_ = "TLE refresh failed" +
+                                  (networkError.empty() ? std::string{} : ": " + networkError);
+                }
+            }
+            notify();
+            if (done) done(usable, usable ? std::string{} : networkError);
+        });
 }
 
 std::vector<SatCurrentPosition> SatPassPlanner::currentPositionsLocked(double unixSec) const {
@@ -220,7 +272,7 @@ void SatPassPlanner::predictLocked(double hoursAhead) {
     const auto selected = catalogue_.selectedEntries();
     const double t0 = unixNow();
     const double t1 = t0 + hoursAhead * 3600.0;
-    const double step = 30.0; // seconds
+    const double step = 30.0;
 
     for (const auto& sat : selected) {
         const TleSet tle = TleStore::instance().get(sat.noradId);
@@ -241,7 +293,8 @@ void SatPassPlanner::predictLocked(double hoursAhead) {
             const auto st = Sgp4::propagate(el, mins);
             if (!st.ok) continue;
             double elDeg = 0, az = 0, range = 0, rr = 0;
-            Sgp4::lookAnglesTeme(jd, st.r, st.v, obs.latDeg, obs.lonDeg, obs.altM, &elDeg, &az, &range, &rr);
+            Sgp4::lookAnglesTeme(jd, st.r, st.v, obs.latDeg, obs.lonDeg, obs.altM,
+                                 &elDeg, &az, &range, &rr);
             const bool above = elDeg >= obs.minElevationDeg;
             if (above && !inPass) {
                 inPass = true;
@@ -320,7 +373,6 @@ bool SatPassPlanner::arm(const std::string& satId, const std::string& downlinkId
         return false;
     }
 
-    // Prefer next upcoming pass for this sat and downlink.
     double aos = 0, los = 0;
     for (const auto& p : passes_) {
         if (p.satId == satId && p.losUnix > unixNow()) {
@@ -330,7 +382,6 @@ bool SatPassPlanner::arm(const std::string& satId, const std::string& downlinkId
         }
     }
     if (los <= 0) {
-        // Arm anyway for Doppler now (may be below horizon).
         aos = unixNow();
         los = unixNow() + 900.0;
     }
@@ -392,14 +443,12 @@ bool SatPassPlanner::tickAutoTrack(double* outTunedHz) {
     armed_.tunedHz = armed_.freqHz + doppler;
 
     if (now > armed_.losUnix + 60.0) {
-        // Auto-disarm shortly after LOS.
         armed_.armed = false;
         lastStatus_ = "Pass ended — disarmed";
         return false;
     }
 
     if (!armed_.autoTrack) return false;
-    // Only retune when above horizon (or within 2 min of AOS).
     if (elDeg < -2.0 && now + 120.0 < armed_.aosUnix) return false;
     if (outTunedHz) *outTunedHz = armed_.tunedHz;
     return true;
@@ -501,7 +550,6 @@ nlohmann::json SatPassPlanner::publicStatusJson() const {
         minEl = j["observer"].value("minElevationDeg", 10.0);
     }
     j["observer"] = {{"configured", configured}, {"minElevationDeg", minEl}};
-    // Elevation/in-range values are observer-relative and can leak home location.
     j.erase("positions");
     return j;
 }

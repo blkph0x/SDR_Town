@@ -31,7 +31,6 @@ TEST_CASE("Observer parses both hemispheres", "[satcom][pass]")
 
 TEST_CASE("SGP4 parses TLE and produces finite state", "[satcom][pass][sgp4]")
 {
-    // Classic ISS-like sample TLE (epoch / elements illustrative)
     const std::string l1 =
         "1 25544U 98067A   21001.00000000  .00002182  00000-0  40864-4 0  9990";
     const std::string l2 =
@@ -98,11 +97,44 @@ TEST_CASE("TLE loadFromFile parses 3-line sets", "[satcom][pass][tle]")
     REQUIRE(t.line1.find("25544") != std::string::npos);
 }
 
+TEST_CASE("TLE loadFromFile accepts true 2-line sets", "[satcom][pass][tle]")
+{
+    const QString path = QDir::temp().filePath("sdr_town_tle_two_line_test.txt");
+    {
+        std::ofstream out(path.toStdString());
+        out << "1 25544U 98067A   21001.00000000  .00002182  00000-0  40864-4 0  9990\n"
+            << "2 25544  51.6456 247.4627 0003000  45.0000 315.0000 15.48900000200000\n";
+    }
+    std::string err;
+    REQUIRE(TleStore::instance().loadFromFile(path.toStdString(), &err));
+    const auto tle = TleStore::instance().get(25544);
+    REQUIRE(tle.noradId == 25544);
+    CHECK(tle.name == "NORAD 25544");
+}
+
+TEST_CASE("Malformed TLE input never clears the active store", "[satcom][pass][tle]")
+{
+    TleSet keep;
+    keep.noradId = 99999;
+    keep.name = "KEEP ME";
+    keep.line1 = "1 99999U 24001A   26001.00000000  .00000000  00000-0  00000-0 0  9991";
+    keep.line2 = "2 99999  51.6000 120.0000 0001000  10.0000 350.0000 15.50000000100001";
+    TleStore::instance().upsert(keep);
+    REQUIRE(TleStore::instance().hasTle(99999));
+
+    const QString path = QDir::temp().filePath("sdr_town_tle_invalid_test.txt");
+    {
+        std::ofstream out(path.toStdString());
+        out << "This is not a TLE response\n<html>proxy error</html>\n";
+    }
+    std::string err;
+    REQUIRE_FALSE(TleStore::instance().loadFromFile(path.toStdString(), &err));
+    REQUIRE(TleStore::instance().hasTle(99999));
+    CHECK(TleStore::instance().get(99999).name == "KEEP ME");
+}
+
 TEST_CASE("Selected satellite snapshot exposes finite map coordinates", "[satcom][pass][map]")
 {
-    // Construct the planner before injecting the fixture. Its constructor loads
-    // the on-disk cache into the singleton TleStore, so injecting first made this
-    // test depend on Catch2's randomized test order.
     auto& planner = SatPassPlanner::instance();
 
     TleSet t;
@@ -120,8 +152,6 @@ TEST_CASE("Selected satellite snapshot exposes finite map coordinates", "[satcom
     planner.setObserver(observer);
     planner.setCatalogueSelection({"iss"});
 
-    // Evaluate at the exact TLE epoch (2021-01-01T00:00:00Z). This verifies
-    // the map projection without coupling the test to the runner's wall clock.
     const auto positions = planner.currentPositionsAt(1609459200.0);
     REQUIRE(positions.size() == 1);
     const auto& pos = positions.front();
@@ -206,8 +236,6 @@ TEST_CASE("Public satcom JSON omits home lat/lon", "[satcom][pass]")
 
 TEST_CASE("Pass planner AOS ordering with injected TLE", "[satcom][pass]")
 {
-    // Keep the fixture independent of whether another test has already created
-    // the planner singleton and loaded the disk cache.
     auto& planner = SatPassPlanner::instance();
 
     TleSet t;
@@ -226,7 +254,6 @@ TEST_CASE("Pass planner AOS ordering with injected TLE", "[satcom][pass]")
     planner.setCatalogueSelection({"iss"});
     planner.refreshPasses(48.0);
     const auto snap = planner.snapshot();
-    // May be empty if epoch is far from now — still must be sorted when present
     for (size_t i = 1; i < snap.passes.size(); ++i)
         REQUIRE(snap.passes[i].aosUnix >= snap.passes[i - 1].aosUnix);
 }

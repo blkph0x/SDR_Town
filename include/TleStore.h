@@ -18,21 +18,24 @@ class TleStore {
 public:
     static TleStore& instance();
 
-    // Load cache from disk. Returns true if any TLEs present.
+    // Load cache from disk. A failed load never clears already-valid in-memory TLEs.
     bool loadCache();
     void saveCache() const;
 
     // Fetch CelesTrak group files over HTTPS (blocking; call from CLI or a worker).
+    // Existing cache data is retained if every network request fails or returns invalid data.
     bool refreshFromNetwork(std::string* error = nullptr);
     void refreshFromNetworkAsync(std::function<void(bool ok, std::string error)> done);
 
+    // Load an explicit TLE file. A malformed file never destroys the active store.
     bool loadFromFile(const std::string& path, std::string* error = nullptr);
 
     bool hasTle(int noradId) const;
     TleSet get(int noradId) const;
     std::vector<TleSet> all() const;
+    size_t size() const;
 
-    // Seconds since last successful refresh (or file mtime). -1 if unknown.
+    // Seconds since last successful refresh (or cache file modification time). -1 if unknown.
     int64_t ageSec() const;
     std::string lastError() const;
 
@@ -41,11 +44,15 @@ public:
 
 private:
     TleStore() = default;
-    int parseTleText(const std::string& text);
+    using TleMap = std::map<int, TleSet>;
+
+    static int parseTleText(const std::string& text, TleMap* output);
     static int noradFromLine1(const std::string& line1);
+    static bool writeCacheSnapshot(const TleMap& sets, int64_t refreshedUnix,
+                                   std::string* error = nullptr);
 
     mutable std::mutex mutex_;
-    std::map<int, TleSet> byNorad_;
+    TleMap byNorad_;
     int64_t refreshedUnix_ = 0;
     std::string lastError_;
 };
