@@ -365,7 +365,7 @@ void SatcomScannerWidget::applyFieldsToConfig() {
 
 void SatcomScannerWidget::onStart() {
     applyFieldsToConfig();
-    if (!SatcomScannerEngine::instance().start(false)) {
+    if (!SatcomScannerEngine::instance().start(true)) {
         QMessageBox::warning(this, "Satcom",
             QString::fromStdString(SatcomScannerEngine::instance().snapshot().lastStatus));
     }
@@ -570,7 +570,7 @@ void SatcomScannerWidget::updateAutoCapture(const SatPassPlannerSnapshot& plan) 
 
     const auto before = engine.snapshot();
     autoEngineWasRunning_ = before.state != SatcomScannerState::Idle;
-    if (!engine.start(false)) {
+    if (!engine.start(true)) {
         autoEngineWasRunning_ = false;
         autoCaptureRetryAfter_ = now + 30;
         if (passStatusLabel_)
@@ -579,7 +579,7 @@ void SatcomScannerWidget::updateAutoCapture(const SatPassPlannerSnapshot& plan) 
     }
 
     std::string error;
-    if (!engine.armPass(best->satId, best->downlinkId, true, false, &error)) {
+    if (!engine.armPass(best->satId, best->downlinkId, true, true, &error)) {
         if (!autoEngineWasRunning_) engine.stop();
         autoEngineWasRunning_ = false;
         autoCaptureRetryAfter_ = now + 30;
