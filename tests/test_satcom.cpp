@@ -10,6 +10,8 @@
 #include <complex>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <numbers>
 #include <string>
 #include <vector>
@@ -101,6 +103,92 @@ std::vector<std::complex<float>> iqSequence(int first, int count)
     return out;
 }
 
+void putSyncA(std::vector<uint8_t>& words, size_t offset)
+{
+    constexpr uint8_t low = 11;
+    constexpr uint8_t high = 244;
+    std::fill_n(words.begin() + static_cast<std::ptrdiff_t>(offset), 39, low);
+    for (int pulse = 0; pulse < 7; ++pulse) {
+        const size_t begin = offset + 4 + static_cast<size_t>(pulse * 4);
+        words[begin] = high;
+        words[begin + 1] = high;
+    }
+}
+
+void putSyncB(std::vector<uint8_t>& words, size_t offset)
+{
+    constexpr uint8_t low = 11;
+    constexpr uint8_t high = 244;
+    std::fill_n(words.begin() + static_cast<std::ptrdiff_t>(offset), 39, low);
+    for (int pulse = 0; pulse < 7; ++pulse) {
+        const size_t begin = offset + 4 + static_cast<size_t>(pulse * 5);
+        words[begin] = high;
+        words[begin + 1] = high;
+    }
+}
+
+std::vector<uint8_t> makeAptLineWords()
+{
+    constexpr size_t lineWords = 2080;
+    constexpr size_t halfLineWords = 1040;
+    constexpr size_t syncWords = 39;
+    constexpr size_t spaceWords = 47;
+    constexpr size_t imageWords = 909;
+    constexpr size_t telemetryWords = 45;
+    static_assert(syncWords + spaceWords + imageWords + telemetryWords == halfLineWords);
+
+    std::vector<uint8_t> words(lineWords, 32);
+    putSyncA(words, 0);
+    std::fill(words.begin() + static_cast<std::ptrdiff_t>(syncWords),
+              words.begin() + static_cast<std::ptrdiff_t>(syncWords + spaceWords), 24);
+    for (size_t i = 0; i < imageWords; ++i) {
+        words[syncWords + spaceWords + i] =
+            static_cast<uint8_t>(24 + (i * 210) / (imageWords - 1));
+    }
+    for (size_t i = 0; i < telemetryWords; ++i) {
+        words[syncWords + spaceWords + imageWords + i] =
+            static_cast<uint8_t>(20 + (i / 5) * 23);
+    }
+
+    putSyncB(words, halfLineWords);
+    std::fill(words.begin() + static_cast<std::ptrdiff_t>(halfLineWords + syncWords),
+              words.begin() + static_cast<std::ptrdiff_t>(halfLineWords + syncWords + spaceWords), 24);
+    for (size_t i = 0; i < imageWords; ++i) {
+        words[halfLineWords + syncWords + spaceWords + i] =
+            static_cast<uint8_t>(234 - (i * 210) / (imageWords - 1));
+    }
+    for (size_t i = 0; i < telemetryWords; ++i) {
+        words[halfLineWords + syncWords + spaceWords + imageWords + i] =
+            static_cast<uint8_t>(227 - (i / 5) * 23);
+    }
+    return words;
+}
+
+std::vector<float> aptSubcarrierEncode(const std::vector<uint8_t>& words,
+                                       double sampleRate,
+                                       size_t leadingSamples = 0)
+{
+    constexpr double wordRate = 4160.0;
+    constexpr double subcarrier = 2400.0;
+    const size_t bodySamples = static_cast<size_t>(
+        std::ceil((static_cast<double>(words.size()) + 8.0) * sampleRate / wordRate));
+    std::vector<float> pcm(leadingSamples + bodySamples, 0.0f);
+    double phase = 0.31; // deliberately not aligned to the decoder oscillator
+    const double phaseIncrement = 2.0 * std::numbers::pi_v<double> * subcarrier / sampleRate;
+    for (size_t n = 0; n < bodySamples; ++n) {
+        const size_t wordIndex = std::min(
+            words.size() - 1,
+            static_cast<size_t>(std::floor(static_cast<double>(n) * wordRate / sampleRate)));
+        const double normalized = static_cast<double>(words[wordIndex]) / 255.0;
+        const double envelope = 0.05 + 0.90 * normalized;
+        pcm[leadingSamples + n] = static_cast<float>(envelope * std::sin(phase));
+        phase += phaseIncrement;
+        if (phase >= 2.0 * std::numbers::pi_v<double>)
+            phase -= 2.0 * std::numbers::pi_v<double>;
+    }
+    return pcm;
+}
+
 } // namespace
 
 TEST_CASE("AX.25 FCS matches known payload", "[satcom][ax25]")
@@ -149,10 +237,11 @@ TEST_CASE("AX.25 AFSK1200 survives arbitrary chunk and sample alignment", "[satc
     Ax25AprsDecoder decoder;
     std::vector<std::string> output;
     const size_t chunkPattern[] = {37, 511, 83, 1024, 19, 257};
+    constexpr size_t chunkPatternCount = sizeof(chunkPattern) / sizeof(chunkPattern[0]);
     size_t offset = 0;
     size_t pattern = 0;
     while (offset < pcm.size()) {
-        const size_t count = std::min(chunkPattern[pattern % std::size(chunkPattern)],
+        const size_t count = std::min(chunkPattern[pattern % chunkPatternCount],
                                       pcm.size() - offset);
         auto completed = decoder.processAudio(pcm.data() + offset, count, rate);
         output.insert(output.end(), completed.begin(), completed.end());
@@ -203,30 +292,63 @@ TEST_CASE("Satcom IQ cursor reports ring gaps and stream epochs", "[satcom][iq]"
     CHECK(epoch.streamEpoch == 8);
 }
 
-TEST_CASE("APT decoder assembles grayscale lines from envelope", "[satcom][apt]")
+TEST_CASE("APT decoder recovers synchronized NOAA line from 2400 Hz subcarrier", "[satcom][apt]")
 {
+    const auto words = makeAptLineWords();
+    const double rate = 48000.0;
+    const auto pcm = aptSubcarrierEncode(words, rate, 23);
+
     AptImageDecoder apt;
-    const double rate = 11025.0;
-    // Enough samples for at least one full 2080-pixel line (~5512.5 samples/line).
-    const size_t n = static_cast<size_t>(rate * 3.0);
-    std::vector<float> pcm(n);
-    for (size_t i = 0; i < n; ++i) {
-        const double t = static_cast<double>(i) / rate;
-        // AM-like carrier with slow amplitude ramp (visible gradient).
-        const double env = 0.2 + 0.6 *
-            (0.5 + 0.5 * std::sin(2.0 * std::numbers::pi_v<double> * 2.0 * t));
-        pcm[i] = static_cast<float>(
-            env * std::sin(2.0 * std::numbers::pi_v<double> * 2400.0 * t));
+    bool gotLine = false;
+    const size_t chunkPattern[] = {113, 4096, 71, 997, 2048, 29};
+    constexpr size_t chunkPatternCount = sizeof(chunkPattern) / sizeof(chunkPattern[0]);
+    size_t offset = 0;
+    size_t pattern = 0;
+    while (offset < pcm.size()) {
+        const size_t count = std::min(chunkPattern[pattern % chunkPatternCount],
+                                      pcm.size() - offset);
+        if (apt.processAudio(pcm.data() + offset, count, rate)) gotLine = true;
+        offset += count;
+        ++pattern;
     }
+
+    REQUIRE(gotLine);
+    REQUIRE(apt.height() == 1);
+    REQUIRE(apt.width() == 2080);
+    REQUIRE(apt.syncCount() >= 1);
+    REQUIRE(apt.lastSyncScore() > 0.65);
+    REQUIRE(apt.lastSyncBScore() > 0.60);
+    REQUIRE(apt.lines().front().size() == 2080);
+    CHECK(apt.lines().front()[0] < apt.lines().front()[5]);
+    CHECK(apt.lines().front()[100] < apt.lines().front()[900]);
+    CHECK(apt.lines().front()[1140] > apt.lines().front()[1950]);
+
+    const auto outputPath = std::filesystem::temp_directory_path() /
+                            "sdr_town_noaa_apt_synthetic.pgm";
+    std::error_code ignored;
+    std::filesystem::remove(outputPath, ignored);
+    REQUIRE(apt.writePgm(outputPath.string()));
+    REQUIRE(apt.lastPath() == outputPath.string());
+    REQUIRE(std::filesystem::file_size(outputPath) > 2080);
+    std::filesystem::remove(outputPath, ignored);
+}
+
+TEST_CASE("APT decoder does not invent lines without NOAA sync", "[satcom][apt]")
+{
+    const double rate = 48000.0;
+    std::vector<uint8_t> flatWords(2080 * 3, 128);
+    const auto pcm = aptSubcarrierEncode(flatWords, rate, 11);
+
+    AptImageDecoder apt;
     bool gotLine = false;
     for (size_t offset = 0; offset < pcm.size();) {
-        const size_t chunk = std::min<size_t>(512, pcm.size() - offset);
-        if (apt.processAudio(pcm.data() + offset, chunk, rate)) gotLine = true;
-        offset += chunk;
+        const size_t count = std::min<size_t>(733, pcm.size() - offset);
+        gotLine = apt.processAudio(pcm.data() + offset, count, rate) || gotLine;
+        offset += count;
     }
-    REQUIRE(gotLine);
-    REQUIRE(apt.height() >= 1);
-    REQUIRE(apt.width() == 2080);
+    CHECK_FALSE(gotLine);
+    CHECK(apt.height() == 0);
+    CHECK(apt.syncCount() == 0);
 }
 
 TEST_CASE("Satcom async log drops oldest under flood", "[satcom][log]")
