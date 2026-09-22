@@ -230,7 +230,7 @@ private:
     std::mutex audioMutex_;
     AudioEngine* audio_ = nullptr; // borrowed from MainWindow or fallbackAudio_
     std::unique_ptr<AudioEngine> fallbackAudio_;
-    bool usingSharedAudio_ = false;
+    std::atomic<bool> usingSharedAudio_{false};
     bool hostTakeoverActive_ = false;
 
     std::shared_ptr<SstvReceiverFeed> sstvFeed_;
