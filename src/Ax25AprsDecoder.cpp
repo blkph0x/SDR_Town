@@ -72,12 +72,6 @@ std::string Ax25AprsDecoder::formatUiFrame(const std::vector<uint8_t>& infoFrame
     return destination + ">" + source + ":" + info;
 }
 
-void Ax25AprsDecoder::resetCandidate(Candidate& candidate, bool keepTiming) {
-    const int timing = candidate.samplesUntilDecision;
-    candidate = Candidate{};
-    if (keepTiming) candidate.samplesUntilDecision = std::max(1, timing);
-}
-
 void Ax25AprsDecoder::configureForRate(double sampleRateHz) {
     if (!candidates_.empty() && std::abs(sampleRateHz - configuredRateHz_) < 0.5)
         return;
@@ -87,10 +81,10 @@ void Ax25AprsDecoder::configureForRate(double sampleRateHz) {
     markPhase_ = 0.0;
     spacePhase_ = 0.0;
 
-    // Eight phase hypotheses are sufficient at the normal 48 kHz input while
-    // keeping packet processing inexpensive.  A valid CRC arbitrates between
-    // candidates and duplicate successful decodes are collapsed.
-    const int phaseCount = std::max(1, std::min(8, samplesPerBit_));
+    // Use one timing hypothesis per input sample for normal audio rates.  The
+    // upper bound keeps malformed extreme rates from creating an unbounded
+    // workload.  CRC validation arbitrates successful candidates.
+    const int phaseCount = std::max(1, std::min(64, samplesPerBit_));
     candidates_.assign(static_cast<size_t>(phaseCount), Candidate{});
     for (int phase = 0; phase < phaseCount; ++phase) {
         candidates_[static_cast<size_t>(phase)].samplesUntilDecision =
@@ -106,20 +100,40 @@ void Ax25AprsDecoder::emitFrame(const std::vector<uint8_t>& frameWithFcs) {
         outFrames_.push_back(text);
 }
 
-void Ax25AprsDecoder::onByte(Candidate& candidate, uint8_t byte) {
-    if (byte == 0x7E) {
-        if (candidate.inFrame && candidate.frameBuf.size() >= 17)
-            emitFrame(candidate.frameBuf);
-        candidate.frameBuf.clear();
-        candidate.inFrame = true;
-        return;
+void Ax25AprsDecoder::decodeRawFrameBits(const std::vector<bool>& rawBits) {
+    if (rawBits.empty()) return;
+
+    std::vector<uint8_t> bytes;
+    bytes.reserve(rawBits.size() / 8);
+    uint8_t byte = 0;
+    int bitCount = 0;
+    int ones = 0;
+
+    for (const bool bit : rawBits) {
+        if (bit) {
+            ++ones;
+            // Six one bits cannot occur inside a correctly bit-stuffed payload.
+            if (ones >= 6) return;
+        } else {
+            if (ones == 5) {
+                // Stuffed zero: remove it without advancing the output byte.
+                ones = 0;
+                continue;
+            }
+            ones = 0;
+        }
+
+        byte |= static_cast<uint8_t>((bit ? 1 : 0) << bitCount);
+        ++bitCount;
+        if (bitCount == 8) {
+            bytes.push_back(byte);
+            byte = 0;
+            bitCount = 0;
+        }
     }
-    if (!candidate.inFrame) return;
-    candidate.frameBuf.push_back(byte);
-    if (candidate.frameBuf.size() > 2048) {
-        candidate.inFrame = false;
-        candidate.frameBuf.clear();
-    }
+
+    if (bitCount != 0 || bytes.size() < 17) return;
+    emitFrame(bytes);
 }
 
 void Ax25AprsDecoder::bitIn(Candidate& candidate, bool toneIsMark) {
@@ -127,33 +141,43 @@ void Ax25AprsDecoder::bitIn(Candidate& candidate, bool toneIsMark) {
     const bool dataBit = toneIsMark == candidate.lastTone;
     candidate.lastTone = toneIsMark;
 
-    if (dataBit) {
-        ++candidate.ones;
-        if (candidate.ones >= 7) {
-            // HDLC abort/idle.  Keep the tone and timing hypotheses, but reset
-            // byte/frame assembly so the next flag can acquire cleanly.
-            candidate.inFrame = false;
-            candidate.frameBuf.clear();
-            candidate.ones = 0;
-            candidate.byteAcc = 0;
-            candidate.bitCount = 0;
-            return;
+    if (candidate.inFrame) candidate.rawFrameBits.push_back(dataBit);
+
+    // HDLC flags are not byte-aligned relative to an arbitrary audio start.
+    // Shift the newest raw bit into the MSB; after eight arrivals, 0x7E means
+    // the most recent eight LSB-first bits were 0,1,1,1,1,1,1,0.
+    candidate.rawShift = static_cast<uint8_t>(
+        (candidate.rawShift >> 1) | (dataBit ? 0x80 : 0x00));
+    candidate.rawBitsSeen = static_cast<uint8_t>(
+        std::min<int>(8, static_cast<int>(candidate.rawBitsSeen) + 1));
+
+    if (candidate.rawBitsSeen >= 8 && candidate.rawShift == 0x7E) {
+        if (candidate.inFrame && candidate.rawFrameBits.size() >= 8) {
+            candidate.rawFrameBits.resize(candidate.rawFrameBits.size() - 8);
+            decodeRawFrameBits(candidate.rawFrameBits);
         }
-    } else {
-        if (candidate.ones == 5) {
-            // Stuffed zero after five consecutive one bits.
-            candidate.ones = 0;
-            return;
-        }
-        candidate.ones = 0;
+        candidate.rawFrameBits.clear();
+        candidate.inFrame = true;
+        candidate.consecutiveOnes = 0;
+        return;
     }
 
-    candidate.byteAcc |= static_cast<uint8_t>((dataBit ? 1 : 0) << candidate.bitCount);
-    ++candidate.bitCount;
-    if (candidate.bitCount >= 8) {
-        onByte(candidate, candidate.byteAcc);
-        candidate.byteAcc = 0;
-        candidate.bitCount = 0;
+    if (dataBit) ++candidate.consecutiveOnes;
+    else candidate.consecutiveOnes = 0;
+
+    if (candidate.consecutiveOnes >= 7) {
+        // HDLC abort/idle. The next bitwise flag can reacquire from any phase.
+        candidate.inFrame = false;
+        candidate.rawFrameBits.clear();
+        candidate.consecutiveOnes = 0;
+        candidate.rawShift = 0;
+        candidate.rawBitsSeen = 0;
+        return;
+    }
+
+    if (candidate.rawFrameBits.size() > 16384) {
+        candidate.inFrame = false;
+        candidate.rawFrameBits.clear();
     }
 }
 
