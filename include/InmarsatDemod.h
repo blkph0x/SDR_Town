@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 enum class InmarsatDemodMode {
@@ -15,15 +16,24 @@ enum class InmarsatDemodMode {
 };
 
 struct InmarsatDemodStats {
+    // Physical-layer carrier/coherence indication only.  This is deliberately
+    // separate from protocol lock: no unique-word/FEC implementation exists in
+    // this front-end yet, so locked and framesOut remain false/zero.
+    bool carrierDetected = false;
     bool locked = false;
-    double ebnoDb = 0.0;
-    double freqOffsetHz = 0.0;
+    double quality = 0.0;       // 0..1 PSK/MSK moment coherence
+    double ebnoDb = 0.0;        // reserved until a validated estimator exists
+    double freqOffsetHz = 0.0;  // carrier-loop estimate where available
+    uint64_t symbolsOut = 0;
     uint64_t bitsOut = 0;
-    uint64_t framesOut = 0;
+    uint64_t rawBlocksOut = 0;
+    uint64_t framesOut = 0;     // validated protocol frames only
 };
 
-// Clean-room DDC + PMSK / continuous OQPSK / EGC BPSK front-end.
-// Outputs packed soft/hard bytes for higher-layer ACARS / AMBE / EGC parsers.
+// Clean-room DDC plus conservative PMSK / OQPSK / BPSK physical-layer probe.
+// The byte sink receives unvalidated diagnostic bit blocks only.  Callers must
+// not treat these blocks as Aero/ACARS/EGC frames until unique-word acquisition,
+// deinterleaving and FEC validation are implemented above this class.
 class InmarsatDemod {
 public:
     using ByteSink = std::function<void(const uint8_t* data, size_t len)>;
@@ -32,7 +42,7 @@ public:
     void setMode(InmarsatDemodMode mode);
     void setChannelOffset(double offsetHz);
 
-    // Process interleaved IQ (complex float). channelOffsetHz relative to capture CF.
+    // Process IQ as complex float. channelOffsetHz is relative to capture CF.
     void process(const std::complex<float>* iq, size_t n);
 
     void setByteSink(ByteSink sink) { sink_ = std::move(sink); }
@@ -42,26 +52,39 @@ public:
     static double symbolRate(InmarsatDemodMode m);
 
 private:
+    void configureRates();
     void ddcAndDecimate(const std::complex<float>* iq, size_t n,
                         std::vector<std::complex<float>>& out);
     void demodPmsk(const std::vector<std::complex<float>>& baseband);
     void demodOqpsk(const std::vector<std::complex<float>>& baseband);
     void demodBpsk(const std::vector<std::complex<float>>& baseband);
+    void updateCarrierQuality(const std::complex<float>& symbol, int momentOrder);
     void emitBits(const uint8_t* bits, size_t nBits);
+    void clearRawAssembler();
 
     InmarsatDemodMode mode_ = InmarsatDemodMode::AeroOqpsk10500;
     double sampleRateHz_ = 2.048e6;
     double channelOffsetHz_ = 0.0;
-    double phase_ = 0.0;
     double ncoPhase_ = 0.0;
     double costasPhase_ = 0.0;
     double costasFreq_ = 0.0;
     double symbolPhase_ = 0.0;
+    double basebandRateHz_ = 0.0;
+    int decimation_ = 1;
+    int decimationPhase_ = 0;
+    std::complex<float> lowpassState_{0.f, 0.f};
     std::complex<float> prevSample_{1.f, 0.f};
-    std::vector<std::complex<float>> iirState_;
-    std::vector<uint8_t> bitBuf_;
-    std::vector<uint8_t> byteAcc_;
-    int bitCount_ = 0;
+    std::complex<double> symbolAccumulator_{0.0, 0.0};
+    double differentialAccumulator_ = 0.0;
+    uint32_t symbolAccumulatorCount_ = 0;
+    std::complex<double> momentAverage_{0.0, 0.0};
+    double signalPowerAverage_ = 0.0;
+    uint32_t carrierGoodSymbols_ = 0;
+    uint32_t carrierBadSymbols_ = 0;
+
+    uint8_t packedByte_ = 0;
+    int packedBitCount_ = 0;
+    std::vector<uint8_t> rawBlock_;
     ByteSink sink_;
     InmarsatDemodStats stats_;
 };
