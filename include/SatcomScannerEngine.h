@@ -221,6 +221,7 @@ private:
     SatcomIqCursor iqCursor_;
     std::atomic<uint64_t> iqDiscontinuities_{0};
     std::atomic<uint64_t> sstvSourceEpoch_{1};
+    std::atomic<uint64_t> sstvAudioFirstSample_{0};
 
     std::mutex audioMutex_;
     std::unique_ptr<AudioEngine> audio_;
