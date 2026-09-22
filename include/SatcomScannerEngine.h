@@ -7,6 +7,7 @@
 #include <complex>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -22,7 +23,7 @@ struct SatcomPreset {
     double highHz = 430e6;
     double stepHz = 12.5e3;
     double bandwidthHz = 250e3;
-    std::string mode = "NFM"; // NFM WFM AM USB APT APRS
+    std::string mode = "NFM";
     double squelchDb = -90.0;
 };
 
@@ -70,7 +71,7 @@ struct SatcomScannerSnapshot {
     std::string streamState;
     bool audioMonitoring = false;
     uint64_t iqDiscontinuities = 0;
-    std::vector<float> spectrumDb; // downsampled for UI/API
+    std::vector<float> spectrumDb;
     double spectrumCenterHz = 0.0;
     double spectrumRateHz = 0.0;
     std::vector<std::string> recentDecodes;
@@ -85,6 +86,7 @@ struct SatcomScannerSnapshot {
     double dopplerHz = 0.0;
     double tunedHz = 0.0;
     std::string armedRole;
+    size_t activeDeviceIndex = std::numeric_limits<size_t>::max();
 };
 
 class Ax25AprsDecoder;
@@ -123,6 +125,8 @@ public:
     }
     size_t resolveDeviceIndex(std::string* error = nullptr);
 
+    // Manual Start/Arm uses force=true and takes over an ordinary Listen stream.
+    // P25 ownership is always protected and is never interrupted by this class.
     bool start(bool force = false);
     void stop();
     void skip();
@@ -130,17 +134,14 @@ public:
     void stopRecording();
     bool applyPreset(const std::string& name);
 
-    // Pass planner arm: pauses band-scan and Doppler-tracks when autoTrack.
     bool armPass(const std::string& satId, const std::string& downlinkId, bool autoTrack = true,
                  bool force = false, std::string* error = nullptr);
     void disarmPass();
     void setAutoTrack(bool on);
-    void tickPassTrack(); // ~1 Hz from worker while armed
+    void tickPassTrack();
 
     SatcomScannerSnapshot snapshot() const;
     std::string stateName() const;
-
-    // Optional UI callback (Qt queued) when snapshot changes.
     void setUpdateCallback(std::function<void()> cb);
 
 private:
@@ -156,10 +157,12 @@ private:
 
     void workerLoop();
     bool refreshSpectrum(size_t deviceIndex, double* peakHz = nullptr, double* peakDb = nullptr);
-    bool detectActivity(double& peakHz, double& peakDb);
+    bool detectActivity(size_t deviceIndex, double& peakHz, double& peakDb);
     void processLockedAudio();
     void resetChronologicalInput();
     SatcomIqCursor::Result pullNewIq(size_t deviceIndex, size_t maxSamples);
+    bool prepareReceiverForSatcom(size_t deviceIndex, bool force, std::string* error);
+    bool tuneAndConfirm(size_t deviceIndex, double frequencyHz, int timeoutMs, std::string* error);
     bool waitForOperationalStream(size_t deviceIndex, int timeoutMs, std::string* error);
     bool ensureAudioOutput(std::string* error = nullptr);
     void pushMonitorAudio(const float* samples, size_t count);
@@ -201,6 +204,7 @@ private:
     bool passTrackActive_ = false;
     bool passStartedEngine_ = false;
     double lastTrackHz_ = 0.0;
+    size_t activeDeviceIndex_ = static_cast<size_t>(-1);
     std::optional<PreviousDeviceState> previousDeviceState_;
 
     std::atomic<bool> run_{false};
