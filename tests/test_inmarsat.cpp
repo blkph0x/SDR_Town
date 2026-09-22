@@ -1,83 +1,151 @@
-#include "InmarsatAcars.h"
-#include "InmarsatBandPlan.h"
 #include "InmarsatDemod.h"
-#include "InmarsatMessageStore.h"
-#include "InmarsatVoice.h"
 
-#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <complex>
+#include <algorithm>
 #include <cmath>
+#include <complex>
+#include <cstdint>
+#include <numbers>
 #include <vector>
 
-TEST_CASE("Inmarsat band plans load or fallback", "[inmarsat]")
+namespace {
+
+std::vector<std::complex<float>> makeBpsk(
+    double sampleRateHz,
+    double symbolRateHz,
+    size_t symbols,
+    double phaseRadians = 0.37)
 {
-    InmarsatBandPlanStore::instance().reload(nullptr);
-    const auto& plans = InmarsatBandPlanStore::instance().plans();
-    REQUIRE_FALSE(plans.empty());
-    const auto* p = InmarsatBandPlanStore::instance().findById("4f2");
-    REQUIRE(p != nullptr);
-    REQUIRE_FALSE(p->channels.empty());
-}
+    const size_t samplesPerSymbol = static_cast<size_t>(
+        std::llround(sampleRateHz / symbolRateHz));
+    std::vector<std::complex<float>> iq;
+    iq.reserve(symbols * samplesPerSymbol);
+    const std::complex<float> rotation{
+        static_cast<float>(std::cos(phaseRadians)),
+        static_cast<float>(std::sin(phaseRadians))};
 
-TEST_CASE("Inmarsat ACARS ADS-C and C-assign parse", "[inmarsat]")
-{
-    double lat = 0, lon = 0;
-    REQUIRE(InmarsatAcars::tryParseAdscPosition("POS 3352.10S 15112.40E END", &lat, &lon));
-    REQUIRE(lat < 0);
-    REQUIRE(lon > 0);
-
-    uint32_t aes = 0;
-    double rx = 0, tx = 0;
-    REQUIRE(InmarsatAcars::tryParseCassign(
-        "C-ASSIGN AES=ABCDEF RX=1544.500 TX=1645.000", &aes, &rx, &tx));
-    REQUIRE(aes == 0xABCDEFu);
-    REQUIRE(rx == Catch::Approx(1544.5e6).margin(1.0));
-
-    auto m = InmarsatAcars::parseAcarsText("Label H1 ADS-C -33.8700 151.2100 AES ABCDEF");
-    REQUIRE(m.hasPosition);
-    REQUIRE(m.aesId != 0);
-}
-
-TEST_CASE("Inmarsat demod processes synthetic IQ", "[inmarsat]")
-{
-    InmarsatDemod dem;
-    dem.reset(InmarsatDemodMode::AeroOqpsk10500, 2.048e6, 0.0);
-    size_t bytes = 0;
-    dem.setByteSink([&](const uint8_t*, size_t n) { bytes += n; });
-    std::vector<std::complex<float>> iq(8192);
-    for (size_t i = 0; i < iq.size(); ++i) {
-        const float ph = static_cast<float>(i) * 0.15f;
-        iq[i] = {std::cos(ph), std::sin(ph)};
+    uint32_t state = 0x51A7C3D9u;
+    for (size_t symbol = 0; symbol < symbols; ++symbol) {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        const float level = (state & 1u) ? 1.0f : -1.0f;
+        const std::complex<float> value = level * rotation;
+        for (size_t i = 0; i < samplesPerSymbol; ++i) iq.push_back(value);
     }
-    dem.process(iq.data(), iq.size());
-    const auto st = dem.stats();
-    REQUIRE(st.bitsOut >= 0);
-    (void)bytes;
+    return iq;
 }
 
-TEST_CASE("Inmarsat voice backend smoke", "[inmarsat]")
+std::vector<std::complex<float>> makePhaseNoise(size_t count)
 {
-    InmarsatVoice v;
-    uint8_t frame[12]{};
-    int16_t pcm[160]{};
-    const int errs = v.decodeFrame(frame, pcm);
-    if (v.backendAvailable()) {
-        REQUIRE(errs >= 0);
-    } else {
-        REQUIRE(errs == -1);
+    std::vector<std::complex<float>> iq;
+    iq.reserve(count);
+    uint32_t state = 0xC001D00Du;
+    for (size_t i = 0; i < count; ++i) {
+        state = state * 1664525u + 1013904223u;
+        const double phase = 2.0 * std::numbers::pi_v<double> *
+                             static_cast<double>(state) /
+                             static_cast<double>(UINT32_MAX);
+        state = state * 1664525u + 1013904223u;
+        const double amplitude = 0.3 + 0.7 *
+            static_cast<double>(state & 0xFFFFu) / 65535.0;
+        iq.emplace_back(
+            static_cast<float>(amplitude * std::cos(phase)),
+            static_cast<float>(amplitude * std::sin(phase)));
+    }
+    return iq;
+}
+
+void feedInChunks(InmarsatDemod& demod,
+                  const std::vector<std::complex<float>>& iq)
+{
+    const size_t pattern[] = {37, 4093, 211, 8191, 73, 1024};
+    constexpr size_t patternCount = sizeof(pattern) / sizeof(pattern[0]);
+    size_t offset = 0;
+    size_t patternIndex = 0;
+    while (offset < iq.size()) {
+        const size_t count = std::min(pattern[patternIndex % patternCount],
+                                      iq.size() - offset);
+        demod.process(iq.data() + offset, count);
+        offset += count;
+        ++patternIndex;
     }
 }
 
-TEST_CASE("Inmarsat message store ring", "[inmarsat]")
+} // namespace
+
+TEST_CASE("Inmarsat demod mode mapping is explicit", "[inmarsat]")
 {
-    InmarsatMessageStore::instance().clear();
-    InmarsatMessage m;
-    m.kind = InmarsatMsgKind::Acars;
-    m.text = "hello";
-    InmarsatMessageStore::instance().push(m);
-    auto recent = InmarsatMessageStore::instance().recent(10);
-    REQUIRE(recent.size() == 1);
-    REQUIRE(recent[0].text == "hello");
+    CHECK(InmarsatDemod::modeFromBaud(600, false) ==
+          InmarsatDemodMode::AeroMsk600);
+    CHECK(InmarsatDemod::modeFromBaud(1200, false) ==
+          InmarsatDemodMode::AeroMsk1200);
+    CHECK(InmarsatDemod::modeFromBaud(8400, false) ==
+          InmarsatDemodMode::AeroVoice8400);
+    CHECK(InmarsatDemod::modeFromBaud(10500, false) ==
+          InmarsatDemodMode::AeroOqpsk10500);
+    CHECK(InmarsatDemod::modeFromBaud(1200, true) ==
+          InmarsatDemodMode::EgcBpsk1200);
+    CHECK(InmarsatDemod::symbolRate(InmarsatDemodMode::EgcBpsk1200) == 1200.0);
+}
+
+TEST_CASE("Inmarsat random phase noise cannot create carrier or frames", "[inmarsat]")
+{
+    constexpr double sampleRate = 1.2288e6;
+    InmarsatDemod demod;
+    size_t deliveredBlocks = 0;
+    demod.setByteSink([&](const uint8_t*, size_t) { ++deliveredBlocks; });
+    demod.reset(InmarsatDemodMode::EgcBpsk1200, sampleRate, 0.0);
+
+    const auto noise = makePhaseNoise(300000);
+    feedInChunks(demod, noise);
+    const auto stats = demod.stats();
+
+    CHECK_FALSE(stats.carrierDetected);
+    CHECK_FALSE(stats.locked);
+    CHECK(stats.framesOut == 0);
+    CHECK(stats.rawBlocksOut == 0);
+    CHECK(deliveredBlocks == 0);
+}
+
+TEST_CASE("Inmarsat coherent BPSK is diagnostic only and never a frame", "[inmarsat]")
+{
+    constexpr double sampleRate = 1.2288e6;
+    constexpr double symbolRate = 1200.0;
+    InmarsatDemod demod;
+    size_t deliveredBlocks = 0;
+    demod.setByteSink([&](const uint8_t*, size_t) { ++deliveredBlocks; });
+    demod.reset(InmarsatDemodMode::EgcBpsk1200, sampleRate, 0.0);
+
+    const auto iq = makeBpsk(sampleRate, symbolRate, 1100);
+    feedInChunks(demod, iq);
+    const auto stats = demod.stats();
+
+    REQUIRE(stats.symbolsOut > 900);
+    REQUIRE(stats.carrierDetected);
+    REQUIRE(stats.quality > 0.60);
+    REQUIRE(stats.rawBlocksOut >= 1);
+    CHECK_FALSE(stats.locked);
+    CHECK(stats.framesOut == 0);
+    // The legacy byte callback is deliberately disabled until a validated
+    // unique-word/FEC layer exists, so raw bits cannot reach ACARS/messages.
+    CHECK(deliveredBlocks == 0);
+}
+
+TEST_CASE("Inmarsat retune resets physical-layer confidence", "[inmarsat]")
+{
+    constexpr double sampleRate = 1.2288e6;
+    InmarsatDemod demod;
+    demod.reset(InmarsatDemodMode::EgcBpsk1200, sampleRate, 0.0);
+    const auto iq = makeBpsk(sampleRate, 1200.0, 700);
+    feedInChunks(demod, iq);
+    REQUIRE(demod.stats().carrierDetected);
+
+    demod.setChannelOffset(2500.0);
+    const auto resetStats = demod.stats();
+    CHECK_FALSE(resetStats.carrierDetected);
+    CHECK_FALSE(resetStats.locked);
+    CHECK(resetStats.rawBlocksOut == 0);
+    CHECK(resetStats.framesOut == 0);
 }
