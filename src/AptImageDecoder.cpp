@@ -4,6 +4,7 @@
 #include <cmath>
 #include <fstream>
 #include <numbers>
+#include <utility>
 
 namespace {
 constexpr double kTwoPi = 2.0 * std::numbers::pi_v<double>;
@@ -49,11 +50,8 @@ void AptImageDecoder::resetSignalState(bool clearLines) {
     quadratureLp2_ = 0.0f;
     wordEnvelopeSum_ = 0.0;
     wordEnvelopeCount_ = 0;
-    levelInitialized_ = false;
-    lowLevel_ = 0.0f;
-    highLevel_ = 1.0f;
-    syncSearch_.clear();
-    lineAcc_.clear();
+    syncSearchRaw_.clear();
+    lineRaw_.clear();
     collectingLine_ = false;
     lastSyncScore_ = 0.0;
     lastSyncBScore_ = 0.0;
@@ -69,7 +67,7 @@ void AptImageDecoder::reset() {
 }
 
 double AptImageDecoder::correlation(
-    const std::vector<uint8_t>& samples,
+    const std::vector<float>& samples,
     size_t offset,
     const std::array<float, kSyncWords>& pattern)
 {
@@ -94,58 +92,57 @@ double AptImageDecoder::correlation(
         samplePower += sample * sample;
         patternPower += expected * expected;
     }
-    if (samplePower <= 1e-9 || patternPower <= 1e-9) return 0.0;
+    if (samplePower <= 1e-12 || patternPower <= 1e-12) return 0.0;
     return numerator / std::sqrt(samplePower * patternPower);
 }
 
-uint8_t AptImageDecoder::normalizeEnvelope(float envelope) {
-    if (!std::isfinite(envelope) || envelope < 0.0f) envelope = 0.0f;
-    if (!levelInitialized_) {
-        lowLevel_ = envelope;
-        highLevel_ = envelope + std::max(1e-4f, std::abs(envelope) * 0.05f);
-        levelInitialized_ = true;
+std::vector<uint8_t> AptImageDecoder::normalizeLine(const std::vector<float>& envelopes) {
+    if (envelopes.empty()) return {};
+
+    std::vector<float> sorted = envelopes;
+    std::sort(sorted.begin(), sorted.end());
+    const size_t lowIndex = std::min(sorted.size() - 1, sorted.size() / 100);
+    const size_t highIndex = std::min(sorted.size() - 1, (sorted.size() * 99) / 100);
+    const float low = sorted[lowIndex];
+    const float high = sorted[highIndex];
+    const float span = std::max(1e-6f, high - low);
+
+    std::vector<uint8_t> pixels;
+    pixels.reserve(envelopes.size());
+    for (float envelope : envelopes) {
+        if (!std::isfinite(envelope)) envelope = low;
+        const float normalized = std::clamp((envelope - low) / span, 0.0f, 1.0f);
+        pixels.push_back(static_cast<uint8_t>(std::lround(normalized * 255.0f)));
     }
-
-    // Follow newly observed extrema immediately but release them slowly. This
-    // accommodates receiver gain changes without erasing the 11/244 sync
-    // contrast or pumping each image line independently.
-    if (envelope < lowLevel_) lowLevel_ = envelope;
-    else lowLevel_ += 0.00005f * (envelope - lowLevel_);
-
-    if (envelope > highLevel_) highLevel_ = envelope;
-    else highLevel_ += 0.00005f * (envelope - highLevel_);
-
-    const float span = std::max(1e-4f, highLevel_ - lowLevel_);
-    const float normalized = std::clamp((envelope - lowLevel_) / span, 0.0f, 1.0f);
-    return static_cast<uint8_t>(std::lround(normalized * 255.0f));
+    return pixels;
 }
 
 bool AptImageDecoder::pushWord(float envelope) {
-    const uint8_t word = normalizeEnvelope(envelope);
+    if (!std::isfinite(envelope) || envelope < 0.0f) envelope = 0.0f;
 
     if (collectingLine_) {
-        lineAcc_.push_back(word);
-        if (lineAcc_.size() < static_cast<size_t>(kLineWords)) return false;
+        lineRaw_.push_back(envelope);
+        if (lineRaw_.size() < static_cast<size_t>(kLineWords)) return false;
 
-        lastSyncBScore_ = correlation(lineAcc_, kHalfLineWords, syncBTemplate());
-        lines_.push_back(lineAcc_);
+        lastSyncBScore_ = correlation(lineRaw_, kHalfLineWords, syncBTemplate());
+        lines_.push_back(normalizeLine(lineRaw_));
         if (lines_.size() > 1200) lines_.erase(lines_.begin());
-        lineAcc_.clear();
-        syncSearch_.clear();
+        lineRaw_.clear();
+        syncSearchRaw_.clear();
         collectingLine_ = false;
         return true;
     }
 
-    syncSearch_.push_back(word);
-    if (syncSearch_.size() > static_cast<size_t>(kSyncWords))
-        syncSearch_.erase(syncSearch_.begin());
-    if (syncSearch_.size() < static_cast<size_t>(kSyncWords)) return false;
+    syncSearchRaw_.push_back(envelope);
+    if (syncSearchRaw_.size() > static_cast<size_t>(kSyncWords))
+        syncSearchRaw_.erase(syncSearchRaw_.begin());
+    if (syncSearchRaw_.size() < static_cast<size_t>(kSyncWords)) return false;
 
-    lastSyncScore_ = correlation(syncSearch_, 0, syncATemplate());
+    lastSyncScore_ = correlation(syncSearchRaw_, 0, syncATemplate());
     if (lastSyncScore_ < 0.72) return false;
 
-    lineAcc_ = syncSearch_;
-    syncSearch_.clear();
+    lineRaw_ = syncSearchRaw_;
+    syncSearchRaw_.clear();
     collectingLine_ = true;
     ++syncCount_;
     return false;
@@ -157,7 +154,9 @@ bool AptImageDecoder::processAudio(const float* samples, size_t count, double sa
 
     if (sampleRateHz_ <= 0.0 || std::abs(sampleRateHz - sampleRateHz_) > 0.5) {
         const bool preserveCompletedImage = !lines_.empty();
-        auto completed = preserveCompletedImage ? std::move(lines_) : std::vector<std::vector<uint8_t>>{};
+        auto completed = preserveCompletedImage
+            ? std::move(lines_)
+            : std::vector<std::vector<uint8_t>>{};
         const uint64_t priorSyncCount = syncCount_;
         resetSignalState(false);
         sampleRateHz_ = sampleRateHz;
