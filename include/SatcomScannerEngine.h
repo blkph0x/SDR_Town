@@ -101,6 +101,7 @@ public:
     SatcomScannerConfig config() const;
     void setAutoCaptureEnabled(bool on);
     bool autoCaptureEnabled() const;
+    void setMonitorAudioEnabled(bool on);
     size_t resolveDeviceIndex(std::string* error = nullptr);
 
     bool start(bool force = false);
