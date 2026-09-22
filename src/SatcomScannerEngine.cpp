@@ -19,6 +19,7 @@
 #include <cctype>
 #include <fstream>
 #include <limits>
+#include <utility>
 #include <spdlog/spdlog.h>
 
 namespace {
@@ -31,7 +32,11 @@ std::string configPath() {
 
 DemodMode modeFromString(const std::string& m) {
     if (m == "WFM") return DemodMode::WFM;
-    if (m == "AM" || m == "APT") return DemodMode::AM;
+    if (m == "AM") return DemodMode::AM;
+    // NOAA APT uses a 2400 Hz AM subcarrier carried on an FM RF downlink.
+    // The AptImageDecoder performs the subcarrier envelope recovery after the
+    // RF FM discriminator, so APT must never select the RF AM demodulator.
+    if (m == "APT") return DemodMode::NFM;
     if (m == "USB") return DemodMode::USB;
     if (m == "LSB") return DemodMode::LSB;
     return DemodMode::NFM; // NFM / APRS / SSTV
@@ -541,6 +546,7 @@ void SatcomScannerEngine::stop() {
         recording_ = false;
         recordRequested_ = false;
         passTrackActive_ = false;
+        passStartedEngine_ = false;
         deviceConnected_ = false;
         streamState_ = "stopped";
         lastStatus_ = "Stopped";
@@ -584,8 +590,16 @@ bool SatcomScannerEngine::startRecording() {
     }
     QDir().mkpath(QFileInfo(QString::fromStdString(path)).absolutePath());
     std::ofstream create(path, std::ios::binary | std::ios::trunc);
+    if (!create) {
+        std::lock_guard<std::mutex> lk(mutex_);
+        recording_ = false;
+        recordRequested_ = false;
+        if (state_ == SatcomScannerState::Recording) state_ = SatcomScannerState::Locked;
+        lastStatus_ = "Could not create recording: " + path;
+        return false;
+    }
     pushLog(SatcomLog::EventType::RecordStart, hz, "record");
-    return static_cast<bool>(create);
+    return true;
 }
 
 void SatcomScannerEngine::writeRecordingMetadata(const std::string& path) const {
@@ -794,11 +808,13 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
         if (error) *error = err;
         return false;
     }
+    const bool engineWasRunning = run_.load(std::memory_order_acquire);
     const auto snap = SatPassPlanner::instance().snapshot();
     const std::string stem = makeCaptureStem(satId, snap.armed.downlinkId);
     {
         std::lock_guard<std::mutex> lk(mutex_);
         passTrackActive_ = true;
+        passStartedEngine_ = !engineWasRunning;
         armedRole_ = snap.armed.role;
         config_.mode = snap.armed.mode.empty() ? "NFM" : snap.armed.mode;
         if (config_.mode == "sstv" || snap.armed.role == "sstv") config_.mode = "NFM";
@@ -831,7 +847,7 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
     }
     resetChronologicalInput();
 
-    if (!run_.load(std::memory_order_acquire)) {
+    if (!engineWasRunning) {
         if (worker_.joinable()) worker_.join();
         if (!manager.setEnabled(dev, true) || !manager.startStreaming(dev, true) ||
             !waitForOperationalStream(dev, 10000, &err)) {
@@ -841,6 +857,7 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
             {
                 std::lock_guard<std::mutex> lk(mutex_);
                 passTrackActive_ = false;
+                passStartedEngine_ = false;
                 armedRole_.clear();
                 state_ = SatcomScannerState::Idle;
                 deviceConnected_ = false;
@@ -862,6 +879,7 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
         {
             std::lock_guard<std::mutex> lk(mutex_);
             passTrackActive_ = false;
+            passStartedEngine_ = false;
             armedRole_.clear();
             state_ = run_.load(std::memory_order_acquire)
                 ? SatcomScannerState::Scanning
@@ -869,7 +887,7 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
             lastStatus_ = tuneError;
         }
         SatPassPlanner::instance().disarm();
-        if (!run_.load(std::memory_order_acquire)) restorePreviousDeviceState();
+        if (!engineWasRunning) restorePreviousDeviceState();
         if (error) *error = tuneError;
         return false;
     }
@@ -891,18 +909,19 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
             std::lock_guard<std::mutex> lk(mutex_);
             lastStatus_ = tuneError;
             passTrackActive_ = false;
+            passStartedEngine_ = false;
             state_ = run_.load(std::memory_order_acquire)
                 ? SatcomScannerState::Scanning
                 : SatcomScannerState::Idle;
         }
         SatPassPlanner::instance().disarm();
-        if (!run_.load(std::memory_order_acquire)) restorePreviousDeviceState();
+        if (!engineWasRunning) restorePreviousDeviceState();
         if (error) *error = tuneError;
         return false;
     }
 
     resetChronologicalInput();
-    if (!run_.load(std::memory_order_acquire)) {
+    if (!engineWasRunning) {
         run_.store(true, std::memory_order_release);
         iqDiscontinuities_.store(0, std::memory_order_release);
         worker_ = std::thread(&SatcomScannerEngine::workerLoop, this);
@@ -926,9 +945,12 @@ void SatcomScannerEngine::disarmPass() {
     stopRecording();
     finishSstvCapture(false);
     SatPassPlanner::instance().disarm();
+    bool stopPassOnly = false;
     const bool running = run_.load(std::memory_order_acquire);
     {
         std::lock_guard<std::mutex> lk(mutex_);
+        stopPassOnly = passStartedEngine_;
+        passStartedEngine_ = false;
         passTrackActive_ = false;
         armedRole_.clear();
         lockHz_ = 0.0;
@@ -936,6 +958,10 @@ void SatcomScannerEngine::disarmPass() {
         lastStatus_ = running ? "Pass disarmed - scanning" : "Pass disarmed";
     }
     resetChronologicalInput();
+    if (stopPassOnly) {
+        stop();
+        return;
+    }
     if (!running) {
         shutdownAudioOutput();
         restorePreviousDeviceState();
@@ -952,22 +978,32 @@ void SatcomScannerEngine::tickPassTrack() {
     if (!SatPassPlanner::instance().tickAutoTrack(&tuned)) {
         const bool stillArmed = SatPassPlanner::instance().snapshot().armed.armed;
         bool ended = false;
+        bool stopPassOnly = false;
         {
             std::lock_guard<std::mutex> lk(mutex_);
             if (!stillArmed && passTrackActive_) {
                 passTrackActive_ = false;
                 ended = true;
+                stopPassOnly = passStartedEngine_;
+                passStartedEngine_ = false;
                 lockHz_ = 0.0;
-                state_ = run_.load(std::memory_order_acquire)
-                    ? SatcomScannerState::Scanning
-                    : SatcomScannerState::Idle;
-                lastStatus_ = "Pass ended - scanning";
+                state_ = stopPassOnly
+                    ? SatcomScannerState::Idle
+                    : (run_.load(std::memory_order_acquire)
+                        ? SatcomScannerState::Scanning
+                        : SatcomScannerState::Idle);
+                lastStatus_ = stopPassOnly ? "Pass ended - receiver restored" : "Pass ended - scanning";
             }
         }
         if (ended) {
             stopRecording();
             finishSstvCapture(false);
             resetChronologicalInput();
+            if (stopPassOnly) {
+                run_.store(false, std::memory_order_release);
+                shutdownAudioOutput();
+                restorePreviousDeviceState();
+            }
         }
         return;
     }
@@ -1133,7 +1169,7 @@ void SatcomScannerEngine::processLockedAudio() {
         }
     }
 
-    if (doApt && (mode == "APT" || mode == "AM")) {
+    if (doApt && (role == "apt" || mode == "APT" || mode == "AM")) {
         if (apt_->processAudio(audio.data(), audio.size(), 48000.0)) {
             std::string path;
             {
@@ -1149,6 +1185,7 @@ void SatcomScannerEngine::processLockedAudio() {
             if (apt_->writePgm(path)) {
                 std::lock_guard<std::mutex> lk(mutex_);
                 aptPreviewPath_ = path;
+                lastStatus_ = "APT image updated: " + path;
             }
         }
     }
@@ -1172,6 +1209,7 @@ void SatcomScannerEngine::processLockedAudio() {
 
 void SatcomScannerEngine::workerLoop() {
     auto& manager = DeviceManager::instance();
+    bool lostHardware = false;
     {
         std::lock_guard<std::mutex> lk(mutex_);
         const auto devices = manager.getDevices();
@@ -1213,6 +1251,7 @@ void SatcomScannerEngine::workerLoop() {
                 lastStatus_ = "Satellite receiver lost live hardware: " + streamState_;
             }
             pushLog(SatcomLog::EventType::Info, currentHz_, "live hardware stream lost");
+            lostHardware = true;
             run_.store(false, std::memory_order_release);
             notifyUpdate();
             break;
@@ -1220,6 +1259,7 @@ void SatcomScannerEngine::workerLoop() {
 
         if (passHold) {
             tickPassTrack();
+            if (!run_.load(std::memory_order_acquire)) break;
             processLockedAudio();
             notifyUpdate();
             std::this_thread::sleep_for(std::chrono::milliseconds(40));
@@ -1293,5 +1333,17 @@ void SatcomScannerEngine::workerLoop() {
         std::lock_guard<std::mutex> lk(mutex_);
         state_ = SatcomScannerState::Idle;
         deviceConnected_ = false;
+        passTrackActive_ = false;
+        passStartedEngine_ = false;
+    }
+
+    if (lostHardware) {
+        stopRecording();
+        finishSstvCapture(false);
+        SatPassPlanner::instance().disarm();
+        shutdownAudioOutput();
+        resetChronologicalInput();
+        restorePreviousDeviceState();
+        notifyUpdate();
     }
 }
