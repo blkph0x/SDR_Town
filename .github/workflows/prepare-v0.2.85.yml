@@ -17,47 +17,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set exact project version and release notes
+      - name: Set exact project version
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-
-          cmake = Path('CMakeLists.txt')
-          text = cmake.read_text(encoding='utf-8')
-          old = 'project(SDR_Town VERSION 0.2.82 LANGUAGES CXX)'
-          new = 'project(SDR_Town VERSION 0.2.85 LANGUAGES CXX)'
-          if text.count(old) != 1:
-              raise SystemExit(f'expected exactly one {old!r}, found {text.count(old)}')
-          cmake.write_text(text.replace(old, new, 1), encoding='utf-8', newline='\n')
-
-          Path('docs/RELEASE_0.2.85.md').write_text('''# SDR Town 0.2.85
-
-## Receiver takeover recovery
-
-- Satcom **START / TAKE OVER**, **Arm pass**, and **Arm ISS SSTV** now reuse an already-live hardware receiver instead of stopping it and falling back through the temporary DeviceManager stub/open path.
-- Manual Satcom operation can take control from an ordinary Listen session and restores the previous receiver frequency/state on Stop or pass end.
-- The existing Satcom receiver selector remains available for users with a second SDR. P25 ownership is never interrupted.
-- Inmarsat now has a stable receiver selector, **START / TAKE OVER**, live-hardware/IQ validation, applied-tune confirmation, failure rollback, and previous receiver restoration.
-
-## SSTV demodulation
-
-- ISS/ARISS SSTV remains NFM, which is the correct downlink demodulation for 145.800 MHz transmissions.
-- SSTV is not a simultaneous USB/LSB mix. HF SSTV uses the selected sideband; explicit USB and LSB sources are now accepted and preserved by the live SSTV input path.
-- The packaged SSTV helper and notices remain mandatory release contents.
-
-## Safety and validation
-
-- No protected P25 receive, control, follow, traffic, Phase 1/2, vocoder, or P25 audio pipeline file was changed.
-- Frozen-P25 guard, MSVC Release build, core tests, Qt/live-decoder tests, SSTV backend tests, release verifier, clean portable staging, ZIP creation, and checksum generation must pass before publication.
-- Rollback branch: `backup/pre-satcom-inmarsat-recovery-20260922`.
-''', encoding='utf-8', newline='\n')
-          PY
-
+          python -c "from pathlib import Path; p=Path('CMakeLists.txt'); s=p.read_text(encoding='utf-8'); old='project(SDR_Town VERSION 0.2.82 LANGUAGES CXX)'; new='project(SDR_Town VERSION 0.2.85 LANGUAGES CXX)'; assert s.count(old)==1, f'expected one version line, found {s.count(old)}'; p.write_text(s.replace(old,new,1),encoding='utf-8',newline='\\n')"
           rm .github/workflows/prepare-v0.2.85.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add CMakeLists.txt docs/RELEASE_0.2.85.md .github/workflows/prepare-v0.2.85.yml
+          git add CMakeLists.txt .github/workflows/prepare-v0.2.85.yml
           git commit -m 'chore: set SDR Town version to 0.2.85'
           git push origin HEAD:prep/v0.2.85
