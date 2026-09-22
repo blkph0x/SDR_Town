@@ -505,7 +505,13 @@ bool SatcomScannerEngine::waitForOperationalStream(size_t deviceIndex, int timeo
             const auto probe = manager.getRecentIQWindowWithCursor(deviceIndex, 4096);
             if (!probe.samples.empty() && probe.endAbsolute > probe.startAbsolute) return true;
         }
-        if (containsInsensitive(lastState, "failed") || containsInsensitive(lastState, "stub")) {
+
+        // DeviceManager deliberately runs a safe stub while Soapy opens the real
+        // device in the background. "opening hardware (stub active)" is therefore
+        // a normal transitional state, not a failure. Only terminal states abort.
+        if (containsInsensitive(lastState, "hardware failed") ||
+            containsInsensitive(lastState, "driver stuck") ||
+            lastState == "simulated/stub") {
             if (error) *error = "Receiver did not enter live hardware mode: " + lastState;
             return false;
         }
