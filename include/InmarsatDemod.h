@@ -16,7 +16,7 @@ enum class InmarsatDemodMode {
 };
 
 struct InmarsatDemodStats {
-    // Physical-layer carrier/coherence indication only.  This is deliberately
+    // Physical-layer carrier/coherence indication only. This is deliberately
     // separate from protocol lock: no unique-word/FEC implementation exists in
     // this front-end yet, so locked and framesOut remain false/zero.
     bool carrierDetected = false;
@@ -31,9 +31,9 @@ struct InmarsatDemodStats {
 };
 
 // Clean-room DDC plus conservative PMSK / OQPSK / BPSK physical-layer probe.
-// The byte sink receives unvalidated diagnostic bit blocks only.  Callers must
-// not treat these blocks as Aero/ACARS/EGC frames until unique-word acquisition,
-// deinterleaving and FEC validation are implemented above this class.
+// Raw bit blocks are counted for diagnostics but are not delivered to ACARS,
+// message or voice-follow layers until framing, deinterleaving and FEC can
+// validate them.
 class InmarsatDemod {
 public:
     using ByteSink = std::function<void(const uint8_t* data, size_t len)>;
@@ -45,7 +45,10 @@ public:
     // Process IQ as complex float. channelOffsetHz is relative to capture CF.
     void process(const std::complex<float>* iq, size_t n);
 
-    void setByteSink(ByteSink sink) { sink_ = std::move(sink); }
+    // Compatibility hook retained for existing callers. The sink is ignored
+    // deliberately: emitting unframed physical-layer bytes as protocol data is
+    // unsafe and previously produced false ACARS/message/voice events.
+    void setByteSink(ByteSink) { sink_ = {}; }
     InmarsatDemodStats stats() const { return stats_; }
 
     static InmarsatDemodMode modeFromBaud(int baud, bool egc);
