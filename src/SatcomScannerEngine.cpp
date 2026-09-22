@@ -39,6 +39,10 @@ DemodMode modeFromString(const std::string& mode) {
     return DemodMode::NFM;
 }
 
+bool isSstvSidebandMode(const std::string& mode) {
+    return mode == "USB" || mode == "LSB";
+}
+
 std::string safeToken(std::string value) {
     for (char& c : value) {
         const unsigned char u = static_cast<unsigned char>(c);
@@ -378,23 +382,21 @@ bool SatcomScannerEngine::prepareReceiverForSatcom(size_t deviceIndex, bool forc
     }
 
     bool wasStreaming = false;
+    std::string existingState;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         wasStreaming = previousDeviceState_.has_value() && previousDeviceState_->wasStreaming;
-        lastStatus_ = wasStreaming && force
-            ? "Taking over active Listen receiver"
+        existingState = manager.getRuntimeStateLabel(deviceIndex);
+        lastStatus_ = wasStreaming && existingState == "live hardware"
+            ? "Taking over active Listen receiver without reopening hardware"
             : "Starting selected Satcom receiver";
     }
 
-    // A running Listen stream must be recycled after ownership changes. Merely
-    // changing the lease leaves the existing stream and main receiver lifecycle
-    // attached, which is why the old workaround required disabling the device.
-    if (wasStreaming && force) {
-        manager.stopStreaming(deviceIndex);
-        manager.setEnabled(deviceIndex, false);
-        std::this_thread::sleep_for(std::chrono::milliseconds(60));
-    }
-
+    // Do not stop a healthy live stream during takeover. DeviceManager starts a
+    // temporary stub before its asynchronous Soapy open; recycling a working
+    // receiver here caused Start/Arm to fall back to "opening hardware (stub active)".
+    // startStreaming(true) is idempotent for an already-live stream and upgrades a
+    // pre-existing safe stub when that is genuinely required.
     if (!manager.setEnabled(deviceIndex, true) || !manager.startStreaming(deviceIndex, true)) {
         const std::string message = "Could not start selected Satcom receiver";
         {
@@ -474,6 +476,7 @@ void SatcomScannerEngine::resetChronologicalInput() {
         iqCursor_.reset();
     }
     sstvSourceEpoch_.fetch_add(1, std::memory_order_acq_rel);
+    sstvAudioFirstSample_.store(0, std::memory_order_release);
     demodResetRequested_.store(true, std::memory_order_release);
 }
 
@@ -941,12 +944,13 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
         passStartedEngine_ = !engineWasRunning;
         armedRole_ = plan.armed.role;
         config_.mode = plan.armed.mode.empty() ? "NFM" : plan.armed.mode;
-        if (config_.mode == "sstv" || plan.armed.role == "sstv") config_.mode = "NFM";
+        if (config_.mode == "sstv") config_.mode = "NFM";
         if (plan.armed.role == "apt") {
             config_.mode = "APT";
             config_.bandwidthHz = 40e3;
-        } else if (plan.armed.role == "aprs" || plan.armed.role == "sstv" ||
-                   plan.armed.role == "voice") {
+        } else if (plan.armed.role == "sstv") {
+            config_.bandwidthHz = isSstvSidebandMode(config_.mode) ? 3e3 : 15e3;
+        } else if (plan.armed.role == "aprs" || plan.armed.role == "voice") {
             config_.bandwidthHz = 15e3;
         } else {
             config_.bandwidthHz = std::min(config_.bandwidthHz, 25e3);
@@ -1001,7 +1005,7 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
         state_ = SatcomScannerState::Locked;
         deviceConnected_ = true;
         streamState_ = "live hardware";
-        lastStatus_ = "Pass armed - tune confirmed";
+        lastStatus_ = "Pass armed - tune confirmed (" + config_.mode + ")";
     }
 
     pushLog(SatcomLog::EventType::Lock, plan.armed.freqHz, "pass arm tune confirmed");
@@ -1191,6 +1195,7 @@ void SatcomScannerEngine::processLockedAudio() {
     if (input.discontinuity) {
         iqDiscontinuities_.fetch_add(1, std::memory_order_acq_rel);
         sstvSourceEpoch_.fetch_add(1, std::memory_order_acq_rel);
+        sstvAudioFirstSample_.store(0, std::memory_order_release);
         demod_->resetState();
         ax25_->reset();
         apt_->reset();
@@ -1214,11 +1219,15 @@ void SatcomScannerEngine::processLockedAudio() {
 
     const double reportedCenter = manager.getCurrentCenterFreq(deviceIndex);
     const double iqCenterHz = reportedCenter > 0.0 ? reportedCenter : lockFrequencyHz;
+    const DemodMode demodMode = modeFromString(mode);
+    const bool nfmSstv = role == "sstv" && demodMode == DemodMode::NFM;
+    const bool ssbSstv = role == "sstv" &&
+                         (demodMode == DemodMode::USB || demodMode == DemodMode::LSB);
     double rmsDb = -120.0;
     FmMultiplexBlock multiplex;
-    FmMultiplexBlock* multiplexOutput = role == "sstv" ? &multiplex : nullptr;
+    FmMultiplexBlock* multiplexOutput = nfmSstv ? &multiplex : nullptr;
     auto audio = demod_->demodulateToAudio(
-        input.samples, sampleRate, iqCenterHz, lockFrequencyHz, modeFromString(mode),
+        input.samples, sampleRate, iqCenterHz, lockFrequencyHz, demodMode,
         rmsDb, 3000.0, -120.0, 1.0, 75.0, 0.96, bandwidthHz,
         0, 48000.0,
         std::numeric_limits<double>::quiet_NaN(), true,
@@ -1228,10 +1237,31 @@ void SatcomScannerEngine::processLockedAudio() {
         audioRmsDb_ = rmsDb;
     }
 
-    if (multiplexOutput && !multiplex.samples.empty()) {
-        sstvFeed_->publish(multiplex, sstvSourceEpoch_.load(std::memory_order_acquire));
+    if (nfmSstv && !multiplex.samples.empty()) {
+        sstvFeed_->publish(multiplex,
+                           sstvSourceEpoch_.load(std::memory_order_acquire),
+                           DemodMode::NFM);
     }
     if (audio.empty()) return;
+
+    if (ssbSstv) {
+        size_t offset = 0;
+        while (offset < audio.size()) {
+            const size_t count = std::min(
+                SstvInputEvent::maxSamples, audio.size() - offset);
+            FmMultiplexBlock block;
+            block.samples.assign(audio.begin() + static_cast<std::ptrdiff_t>(offset),
+                                 audio.begin() + static_cast<std::ptrdiff_t>(offset + count));
+            block.sampleRate = 48000.0;
+            block.targetHz = lockFrequencyHz;
+            block.epoch = sstvSourceEpoch_.load(std::memory_order_acquire);
+            block.firstSample = sstvAudioFirstSample_.fetch_add(
+                count, std::memory_order_acq_rel);
+            block.discontinuity = false;
+            sstvFeed_->publish(block, block.epoch, demodMode);
+            offset += count;
+        }
+    }
 
     pushMonitorAudio(audio.data(), audio.size());
 

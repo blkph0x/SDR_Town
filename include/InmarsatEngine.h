@@ -8,8 +8,10 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -26,6 +28,7 @@ enum class InmarsatEngineState {
 
 struct InmarsatEngineConfig {
     size_t deviceIndex = 0;
+    std::string deviceStableKey;
     std::string bandPlanId = "4f2";
     double channelHz = 1542935000.0;
     std::string mode = "aero_oqpsk"; // aero_msk | aero_oqpsk | aero_voice | egc
@@ -59,6 +62,10 @@ struct InmarsatEngineSnapshot {
     uint64_t voiceFrames = 0;
     std::string bandPlanName;
     std::string lastStatus;
+    std::string deviceLabel;
+    std::string streamState;
+    bool deviceConnected = false;
+    size_t activeDeviceIndex = std::numeric_limits<size_t>::max();
     std::vector<float> spectrumDb;
     double spectrumCenterHz = 0.0;
     double spectrumRateHz = 0.0;
@@ -87,6 +94,13 @@ private:
     InmarsatEngine();
     ~InmarsatEngine();
 
+    struct PreviousDeviceState {
+        size_t deviceIndex = std::numeric_limits<size_t>::max();
+        bool wasEnabled = false;
+        bool wasStreaming = false;
+        double centerHz = 0.0;
+    };
+
     void workerLoop();
     void processIq();
     void onDecodedBytes(const uint8_t* data, size_t len);
@@ -95,6 +109,11 @@ private:
     void returnToControl();
     void notify();
     InmarsatDemodMode demodModeLocked() const;
+    size_t resolveDeviceIndex(std::string* error = nullptr);
+    bool waitForOperationalStream(size_t deviceIndex, int timeoutMs, std::string* error);
+    bool tuneAndConfirm(size_t deviceIndex, double frequencyHz, int timeoutMs, std::string* error);
+    void capturePreviousDeviceState(size_t deviceIndex);
+    void restorePreviousDeviceState();
 
     mutable std::mutex mutex_;
     InmarsatEngineConfig config_;
@@ -113,6 +132,11 @@ private:
     uint64_t voiceFrames_ = 0;
     std::string bandPlanName_;
     std::string lastStatus_ = "Inmarsat idle";
+    std::string deviceLabel_;
+    std::string streamState_ = "stopped";
+    bool deviceConnected_ = false;
+    size_t activeDeviceIndex_ = std::numeric_limits<size_t>::max();
+    std::optional<PreviousDeviceState> previousDeviceState_;
     std::vector<float> spectrumDb_;
     double spectrumCenterHz_ = 0.0;
     double spectrumRateHz_ = 0.0;

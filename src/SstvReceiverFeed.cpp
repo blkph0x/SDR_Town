@@ -27,13 +27,14 @@ void SstvReceiverFeed::finish(const std::shared_ptr<SstvLiveInput>& input) {
     if(missed_.exchange(false)) input_->invalidate(SstvInputGap::Contention);
     input_->finish();
 }
-void SstvReceiverFeed::publish(const FmMultiplexBlock& block,uint64_t sourceId) {
+void SstvReceiverFeed::publish(const FmMultiplexBlock& block, uint64_t sourceId,
+                               DemodMode mode) {
     if(!attached_.load()) return;
     std::unique_lock lock(mutex_,std::try_to_lock);
     if(!lock.owns_lock()) {missed_=true;return;}
     if(!input_) return;
     if(missed_.exchange(false)) input_->invalidate(SstvInputGap::Contention);
-    input_->tryPush(block,sourceId,DemodMode::NFM);
+    input_->tryPush(block,sourceId,mode);
 }
 void SstvReceiverFeed::discontinuity() {
     if(!attached_.load()) return;

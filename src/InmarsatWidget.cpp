@@ -2,6 +2,7 @@
 #include "InmarsatEngine.h"
 #include "InmarsatBandPlan.h"
 #include "InmarsatMessageStore.h"
+#include "DeviceManager.h"
 
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -10,6 +11,7 @@
 #include <QHideEvent>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QShowEvent>
@@ -17,15 +19,33 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include <limits>
+
+namespace {
+
+QString receiverDisplayText(size_t index, const DeviceInfo& device, bool streaming) {
+    const QString state = streaming ? "LIVE" : (device.enabled ? "READY" : "AVAILABLE");
+    return QString("%1 — %2 [%3]")
+        .arg(static_cast<qulonglong>(index))
+        .arg(QString::fromStdString(device.label), state);
+}
+
+bool isPlaceholder(const DeviceInfo& device) {
+    const QString label = QString::fromStdString(device.label).toLower();
+    return label.contains("placeholder") || label.contains("(stub)");
+}
+
+} // namespace
+
 InmarsatWidget::InmarsatWidget(QWidget* parent)
     : QWidget(parent)
 {
     buildUi();
     applyNeonStyle();
+    refreshDevices();
     reloadBandPlans();
     refreshTimer_ = new QTimer(this);
     connect(refreshTimer_, &QTimer::timeout, this, &InmarsatWidget::refreshUi);
-    // Timer starts only while visible — must not poll on the main listening path.
     InmarsatEngine::instance().setUpdateCallback([this]() {
         QMetaObject::invokeMethod(this, "refreshUi", Qt::QueuedConnection);
     });
@@ -33,6 +53,7 @@ InmarsatWidget::InmarsatWidget(QWidget* parent)
 
 void InmarsatWidget::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);
+    refreshDevices();
     if (refreshTimer_ && !refreshTimer_->isActive()) refreshTimer_->start(500);
     refreshUi();
 }
@@ -63,6 +84,7 @@ void InmarsatWidget::applyNeonStyle() {
             padding: 8px 12px; font-weight: 800; min-width: 90px;
         }
         QPushButton:hover { background: #132213; }
+        QPushButton:disabled { color: #2a5a2a; border-color: #1a331a; }
         QCheckBox { color: #39FF14; }
     )");
 }
@@ -72,7 +94,17 @@ void InmarsatWidget::buildUi() {
     auto* title = new QLabel("INMARSAT AERO / EGC");
     title->setStyleSheet("font-size: 22px; font-weight: 900; letter-spacing: 2px;");
     root->addWidget(title);
-    root->addWidget(new QLabel("Experimental prototype: no unique-word/FEC. ADS-C parse + band plans only. Not RF-qualified."));
+    root->addWidget(new QLabel(
+        "Experimental physical-layer monitor: receiver/tuning are real; validated unique-word/FEC and voice follow are not implemented."));
+
+    auto* receiverRow = new QHBoxLayout();
+    receiverRow->addWidget(new QLabel("INMARSAT RX DEVICE"));
+    deviceCombo_ = new QComboBox();
+    deviceCombo_->setToolTip(
+        "Choose the SDR used by Inmarsat. START / TAKE OVER reuses an already-live Listen "
+        "receiver without reopening it, or starts the selected idle receiver. P25 is never interrupted.");
+    receiverRow->addWidget(deviceCombo_, 1);
+    root->addLayout(receiverRow);
 
     auto* top = new QHBoxLayout();
     top->addWidget(new QLabel("BAND PLAN"));
@@ -86,8 +118,11 @@ void InmarsatWidget::buildUi() {
     recordCheck_->setEnabled(false);
     top->addWidget(voiceFollowCheck_);
     top->addWidget(recordCheck_);
-    startBtn_ = new QPushButton("Start");
-    stopBtn_ = new QPushButton("Stop");
+    startBtn_ = new QPushButton("START / TAKE OVER");
+    startBtn_->setToolTip(
+        "Start on the selected real SDR and tune the chosen channel. An ordinary Listen session "
+        "is temporarily retuned and restored after Stop.");
+    stopBtn_ = new QPushButton("STOP / RESTORE");
     top->addWidget(startBtn_);
     top->addWidget(stopBtn_);
     root->addLayout(top);
@@ -100,8 +135,9 @@ void InmarsatWidget::buildUi() {
     channelTable_->setMaximumHeight(220);
     root->addWidget(channelTable_);
 
-    lockLabel_ = new QLabel("Lock: —");
+    lockLabel_ = new QLabel("Receiver: —");
     statusLabel_ = new QLabel("Idle");
+    statusLabel_->setWordWrap(true);
     root->addWidget(lockLabel_);
     root->addWidget(statusLabel_);
 
@@ -111,90 +147,178 @@ void InmarsatWidget::buildUi() {
 
     connect(startBtn_, &QPushButton::clicked, this, &InmarsatWidget::onStart);
     connect(stopBtn_, &QPushButton::clicked, this, &InmarsatWidget::onStop);
-    connect(planCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &InmarsatWidget::onBandPlanChanged);
-    connect(channelTable_, &QTableWidget::cellDoubleClicked, this, &InmarsatWidget::onChannelActivated);
-    connect(voiceFollowCheck_, &QCheckBox::toggled, this, &InmarsatWidget::onVoiceFollowToggled);
-    connect(recordCheck_, &QCheckBox::toggled, this, &InmarsatWidget::onRecordToggled);
+    connect(planCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &InmarsatWidget::onBandPlanChanged);
+    connect(channelTable_, &QTableWidget::cellDoubleClicked,
+            this, &InmarsatWidget::onChannelActivated);
+    connect(voiceFollowCheck_, &QCheckBox::toggled,
+            this, &InmarsatWidget::onVoiceFollowToggled);
+    connect(recordCheck_, &QCheckBox::toggled,
+            this, &InmarsatWidget::onRecordToggled);
+    connect(deviceCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int row) {
+        if (row < 0) return;
+        bool ok = false;
+        const size_t index = static_cast<size_t>(
+            deviceCombo_->itemData(row).toString().toULongLong(&ok));
+        const auto devices = DeviceManager::instance().getDevices();
+        if (!ok || index >= devices.size() || isPlaceholder(devices[index])) return;
+        auto config = InmarsatEngine::instance().config();
+        config.deviceIndex = index;
+        config.deviceStableKey = devices[index].stableKey;
+        InmarsatEngine::instance().setConfig(config);
+        statusLabel_->setText(
+            "Inmarsat receiver selected: " + QString::fromStdString(devices[index].label));
+    });
+}
+
+void InmarsatWidget::refreshDevices() {
+    if (!deviceCombo_) return;
+    const auto devices = DeviceManager::instance().getDevices();
+    const auto config = InmarsatEngine::instance().config();
+
+    struct Item { QString text; QString data; };
+    std::vector<Item> items;
+    int selectedRow = -1;
+    for (size_t index = 0; index < devices.size(); ++index) {
+        if (isPlaceholder(devices[index])) continue;
+        const QString data = QString::number(static_cast<qulonglong>(index));
+        items.push_back({receiverDisplayText(index, devices[index],
+                                             DeviceManager::instance().isStreaming(index)), data});
+        if ((!config.deviceStableKey.empty() && devices[index].stableKey == config.deviceStableKey) ||
+            (config.deviceStableKey.empty() && config.deviceIndex == index)) {
+            selectedRow = static_cast<int>(items.size()) - 1;
+        }
+    }
+
+    bool rebuild = deviceCombo_->count() != static_cast<int>(items.size());
+    if (!rebuild) {
+        for (int row = 0; row < deviceCombo_->count(); ++row) {
+            if (deviceCombo_->itemText(row) != items[static_cast<size_t>(row)].text ||
+                deviceCombo_->itemData(row).toString() != items[static_cast<size_t>(row)].data) {
+                rebuild = true;
+                break;
+            }
+        }
+    }
+    if (!rebuild) return;
+
+    deviceCombo_->blockSignals(true);
+    deviceCombo_->clear();
+    for (const auto& item : items) deviceCombo_->addItem(item.text, item.data);
+    if (selectedRow < 0 && !items.empty()) selectedRow = 0;
+    deviceCombo_->setCurrentIndex(selectedRow);
+    deviceCombo_->setEnabled(!items.empty());
+    deviceCombo_->blockSignals(false);
 }
 
 void InmarsatWidget::reloadBandPlans() {
     planCombo_->blockSignals(true);
     planCombo_->clear();
     const auto& plans = InmarsatBandPlanStore::instance().plans();
-    const auto cfg = InmarsatEngine::instance().config();
-    int sel = 0;
-    for (int i = 0; i < static_cast<int>(plans.size()); ++i) {
-        planCombo_->addItem(QString::fromStdString(plans[i].name + " (" + plans[i].id + ")"),
-                            QString::fromStdString(plans[i].id));
-        if (plans[i].id == cfg.bandPlanId) sel = i;
+    const auto config = InmarsatEngine::instance().config();
+    int selected = 0;
+    for (int index = 0; index < static_cast<int>(plans.size()); ++index) {
+        planCombo_->addItem(
+            QString::fromStdString(plans[index].name + " (" + plans[index].id + ")"),
+            QString::fromStdString(plans[index].id));
+        if (plans[index].id == config.bandPlanId) selected = index;
     }
-    planCombo_->setCurrentIndex(sel);
+    planCombo_->setCurrentIndex(selected);
     planCombo_->blockSignals(false);
-    onBandPlanChanged(sel);
+    onBandPlanChanged(selected);
 }
 
 void InmarsatWidget::onBandPlanChanged(int index) {
     if (index < 0) return;
     const QString id = planCombo_->itemData(index).toString();
-    InmarsatEngine::instance().selectBandPlan(id.toStdString());
-    const auto* p = InmarsatBandPlanStore::instance().findById(id.toStdString());
+    if (!InmarsatEngine::instance().selectBandPlan(id.toStdString())) {
+        statusLabel_->setText("Could not select/restart the requested Inmarsat band plan");
+    }
+    const auto* plan = InmarsatBandPlanStore::instance().findById(id.toStdString());
     channelTable_->setRowCount(0);
-    if (!p) return;
-    channelTable_->setRowCount(static_cast<int>(p->channels.size()));
-    for (int r = 0; r < static_cast<int>(p->channels.size()); ++r) {
-        const auto& c = p->channels[static_cast<size_t>(r)];
-        channelTable_->setItem(r, 0, new QTableWidgetItem(QString::fromStdString(c.label)));
-        channelTable_->setItem(r, 1, new QTableWidgetItem(QString::number(c.freqHz / 1e6, 'f', 3)));
-        channelTable_->setItem(r, 2, new QTableWidgetItem(QString::fromStdString(c.mode)));
-        channelTable_->setItem(r, 3, new QTableWidgetItem(QString::number(c.baud)));
+    if (!plan) return;
+    channelTable_->setRowCount(static_cast<int>(plan->channels.size()));
+    for (int row = 0; row < static_cast<int>(plan->channels.size()); ++row) {
+        const auto& channel = plan->channels[static_cast<size_t>(row)];
+        channelTable_->setItem(row, 0, new QTableWidgetItem(QString::fromStdString(channel.label)));
+        channelTable_->setItem(row, 1, new QTableWidgetItem(QString::number(channel.freqHz / 1e6, 'f', 3)));
+        channelTable_->setItem(row, 2, new QTableWidgetItem(QString::fromStdString(channel.mode)));
+        channelTable_->setItem(row, 3, new QTableWidgetItem(QString::number(channel.baud)));
     }
 }
 
 void InmarsatWidget::onChannelActivated(int row, int) {
     if (row < 0) return;
     const QString id = planCombo_->currentData().toString();
-    const auto* p = InmarsatBandPlanStore::instance().findById(id.toStdString());
-    if (!p || row >= static_cast<int>(p->channels.size())) return;
-    const auto& c = p->channels[static_cast<size_t>(row)];
-    InmarsatEngine::instance().selectChannel(c.freqHz, c.mode, c.baud);
+    const auto* plan = InmarsatBandPlanStore::instance().findById(id.toStdString());
+    if (!plan || row >= static_cast<int>(plan->channels.size())) return;
+    const auto& channel = plan->channels[static_cast<size_t>(row)];
+    if (!InmarsatEngine::instance().selectChannel(channel.freqHz, channel.mode, channel.baud)) {
+        QMessageBox::warning(this, "Inmarsat", "Could not tune/restart the selected channel.");
+    }
 }
 
-void InmarsatWidget::onVoiceFollowToggled(bool on) {
-    auto cfg = InmarsatEngine::instance().config();
-    cfg.voiceFollow = on;
-    InmarsatEngine::instance().setConfig(cfg);
+void InmarsatWidget::onVoiceFollowToggled(bool enabled) {
+    auto config = InmarsatEngine::instance().config();
+    config.voiceFollow = enabled;
+    InmarsatEngine::instance().setConfig(config);
 }
 
-void InmarsatWidget::onRecordToggled(bool on) {
-    auto cfg = InmarsatEngine::instance().config();
-    cfg.recordVoice = on;
-    InmarsatEngine::instance().setConfig(cfg);
+void InmarsatWidget::onRecordToggled(bool enabled) {
+    auto config = InmarsatEngine::instance().config();
+    config.recordVoice = enabled;
+    InmarsatEngine::instance().setConfig(config);
 }
 
-void InmarsatWidget::onStart() { InmarsatEngine::instance().start(); }
-void InmarsatWidget::onStop() { InmarsatEngine::instance().stop(); }
+void InmarsatWidget::onStart() {
+    refreshDevices();
+    if (!InmarsatEngine::instance().start(true)) {
+        QMessageBox::warning(
+            this, "Inmarsat",
+            QString::fromStdString(InmarsatEngine::instance().snapshot().lastStatus));
+    }
+}
+
+void InmarsatWidget::onStop() {
+    InmarsatEngine::instance().stop();
+}
 
 void InmarsatWidget::refreshUi() {
-    const auto snap = InmarsatEngine::instance().snapshot();
-    statusLabel_->setText(QString::fromStdString(snap.lastStatus));
-    lockLabel_->setText(QString("State=%1  Lock=%2  Eb/N0=%3 dB  Tuned=%4 MHz  Msgs=%5  VoiceFrames=%6%7")
-                            .arg(QString::fromStdString(InmarsatEngine::instance().stateName()))
-                            .arg(snap.locked ? "YES" : "no")
-                            .arg(snap.ebnoDb, 0, 'f', 1)
-                            .arg(snap.tunedHz / 1e6, 0, 'f', 3)
-                            .arg(snap.messages)
-                            .arg(snap.voiceFrames)
-                            .arg(snap.followingVoice ? "  [VOICE FOLLOW]" : ""));
+    refreshDevices();
+    const auto snapshot = InmarsatEngine::instance().snapshot();
+    statusLabel_->setText(QString::fromStdString(snapshot.lastStatus));
+
+    const QString device = snapshot.activeDeviceIndex == std::numeric_limits<size_t>::max()
+        ? QString::fromStdString(snapshot.deviceLabel.empty() ? "selected receiver" : snapshot.deviceLabel)
+        : QString("RX %1: %2")
+              .arg(static_cast<qulonglong>(snapshot.activeDeviceIndex))
+              .arg(QString::fromStdString(snapshot.deviceLabel));
+    lockLabel_->setText(
+        QString("%1  Stream=%2  Carrier=%3  Quality=%4  FrameLock=%5  Tuned=%6 MHz  Raw=%7  Valid=%8")
+            .arg(device)
+            .arg(QString::fromStdString(snapshot.streamState))
+            .arg(snapshot.carrierDetected ? "YES" : "no")
+            .arg(snapshot.quality, 0, 'f', 2)
+            .arg(snapshot.locked ? "YES" : "no")
+            .arg(snapshot.tunedHz / 1e6, 0, 'f', 3)
+            .arg(snapshot.rawBlocks)
+            .arg(snapshot.validatedFrames));
+
+    const bool running = snapshot.state != InmarsatEngineState::Idle;
+    startBtn_->setEnabled(!running);
+    stopBtn_->setEnabled(running);
+    deviceCombo_->setEnabled(!running && deviceCombo_->count() > 0);
+
     voiceFollowCheck_->blockSignals(true);
-    voiceFollowCheck_->setChecked(snap.config.voiceFollow);
+    voiceFollowCheck_->setChecked(snapshot.config.voiceFollow);
     voiceFollowCheck_->blockSignals(false);
     recordCheck_->blockSignals(true);
-    recordCheck_->setChecked(snap.config.recordVoice);
+    recordCheck_->setChecked(snapshot.config.recordVoice);
     recordCheck_->blockSignals(false);
 
-    const auto msgs = InmarsatMessageStore::instance().recent(40);
+    const auto messages = InmarsatMessageStore::instance().recent(40);
     QString text;
-    for (auto it = msgs.rbegin(); it != msgs.rend(); ++it) {
+    for (auto it = messages.rbegin(); it != messages.rend(); ++it) {
         text += QString("[%1] %2 %3\n")
                     .arg(InmarsatMessage::kindName(it->kind))
                     .arg(QString::fromStdString(it->label))
