@@ -179,6 +179,7 @@ private:
     bool recordRequested_ = false;
     bool recording_ = false;
     bool passTrackActive_ = false;
+    bool passStartedEngine_ = false;
     double lastTrackHz_ = 0.0;
     std::optional<PreviousDeviceState> previousDeviceState_;
 
