@@ -35,10 +35,10 @@ private:
 
     static const std::array<float, kSyncWords>& syncATemplate();
     static const std::array<float, kSyncWords>& syncBTemplate();
-    static double correlation(const std::vector<uint8_t>& samples, size_t offset,
+    static double correlation(const std::vector<float>& samples, size_t offset,
                               const std::array<float, kSyncWords>& pattern);
+    static std::vector<uint8_t> normalizeLine(const std::vector<float>& envelopes);
 
-    uint8_t normalizeEnvelope(float envelope);
     bool pushWord(float envelope);
     void resetSignalState(bool clearLines);
 
@@ -52,12 +52,8 @@ private:
     double wordEnvelopeSum_ = 0.0;
     uint32_t wordEnvelopeCount_ = 0;
 
-    bool levelInitialized_ = false;
-    float lowLevel_ = 0.0f;
-    float highLevel_ = 1.0f;
-
-    std::vector<uint8_t> syncSearch_;
-    std::vector<uint8_t> lineAcc_;
+    std::vector<float> syncSearchRaw_;
+    std::vector<float> lineRaw_;
     bool collectingLine_ = false;
     std::vector<std::vector<uint8_t>> lines_;
     uint64_t syncCount_ = 0;
