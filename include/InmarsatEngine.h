@@ -30,7 +30,7 @@ struct InmarsatEngineConfig {
     double channelHz = 1542935000.0;
     std::string mode = "aero_oqpsk"; // aero_msk | aero_oqpsk | aero_voice | egc
     int baud = 10500;
-    bool voiceFollow = false; // not implemented: no unique-word / C-assign proof
+    bool voiceFollow = false; // disabled until validated assignment frames exist
     bool recordVoice = false;
     std::string recordDir;
 
@@ -44,13 +44,17 @@ struct InmarsatEngineConfig {
 struct InmarsatEngineSnapshot {
     InmarsatEngineState state = InmarsatEngineState::Idle;
     InmarsatEngineConfig config;
-    bool locked = false;
+    bool carrierDetected = false;
+    bool locked = false; // validated protocol lock only
+    double quality = 0.0;
     double ebnoDb = 0.0;
     double tunedHz = 0.0;
     double controlHz = 0.0;
     double voiceHz = 0.0;
     bool followingVoice = false;
     bool recording = false;
+    uint64_t rawBlocks = 0;
+    uint64_t validatedFrames = 0;
     uint64_t messages = 0;
     uint64_t voiceFrames = 0;
     std::string bandPlanName;
@@ -95,12 +99,16 @@ private:
     mutable std::mutex mutex_;
     InmarsatEngineConfig config_;
     InmarsatEngineState state_ = InmarsatEngineState::Idle;
+    bool carrierDetected_ = false;
     bool locked_ = false;
+    double quality_ = 0.0;
     double ebnoDb_ = 0.0;
     double tunedHz_ = 0.0;
     double controlHz_ = 0.0;
     double voiceHz_ = 0.0;
     bool followingVoice_ = false;
+    uint64_t rawBlocks_ = 0;
+    uint64_t validatedFrames_ = 0;
     uint64_t messages_ = 0;
     uint64_t voiceFrames_ = 0;
     std::string bandPlanName_;
