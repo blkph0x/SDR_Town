@@ -63,6 +63,7 @@ private:
     QComboBox* presetCombo_ = nullptr;
     QSlider* squelchSlider_ = nullptr;
     QDoubleSpinBox* squelchSpin_ = nullptr;
+    QCheckBox* monitorAudioCheck_ = nullptr;
     QPushButton* startBtn_ = nullptr;
     QPushButton* skipBtn_ = nullptr;
     QPushButton* recordBtn_ = nullptr;
@@ -70,6 +71,7 @@ private:
     QLabel* statusDevice_ = nullptr;
     QLabel* statusScan_ = nullptr;
     QLabel* statusRec_ = nullptr;
+    QLabel* statusHealth_ = nullptr;
     QLabel* audioMeter_ = nullptr;
     QPlainTextEdit* logView_ = nullptr;
     QTimer* refreshTimer_ = nullptr;

@@ -1,0 +1,106 @@
+name: Non-P25 hardening gate
+
+on:
+  push:
+    branches:
+      - "hardening/**"
+  pull_request:
+    paths:
+      - "include/**"
+      - "src/**"
+      - "tests/**"
+      - "scripts/**"
+      - "cmake/**"
+      - ".github/workflows/**"
+      - "CMakeLists.txt"
+      - "vcpkg.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: non-p25-hardening-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frozen-p25-and-pure-dsp:
+    name: Frozen P25 / standalone DSP
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out proposed head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Fetch master for the complete branch comparison
+        shell: bash
+        run: git fetch --no-tags origin master
+
+      - name: Reject every protected P25/shared-path change on this branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$(git merge-base origin/master HEAD)"
+          echo "Comparing complete branch against ${base}"
+          python3 scripts/verify_no_p25_changes.py --base "${base}" --head HEAD
+          python3 scripts/test_no_p25_guard.py
+
+      - name: Compile standalone non-P25 smoke binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++20 -O2 -Wall -Wextra -pedantic \
+            -Iinclude \
+            tests/non_p25_smoke.cpp \
+            src/Ax25AprsDecoder.cpp \
+            src/AptImageDecoder.cpp \
+            src/ModeS.cpp \
+            src/InmarsatDemod.cpp \
+            src/SdrplayProfile.cpp \
+            -o non_p25_smoke
+
+      - name: Run standalone non-P25 smoke binary
+        shell: bash
+        run: ./non_p25_smoke
+
+      - name: Check Python hardening tools
+        shell: bash
+        run: |
+          python3 -m py_compile \
+            scripts/verify_no_p25_changes.py \
+            scripts/test_no_p25_guard.py
+
+  sstv-helper:
+    name: SSTV helper transport and self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - name: Test helper and vendored decoder
+        shell: bash
+        run: cargo test --locked --manifest-path src/sstv_backend/Cargo.toml
+      - name: Exercise packaged helper protocol
+        shell: bash
+        run: cargo run --locked --release --manifest-path src/sstv_backend/Cargo.toml -- --selftest
+
+  windows-runtime-syntax:
+    name: Windows SDRplay preflight syntax
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Parse preflight without opening hardware
+        shell: pwsh
+        run: |
+          $source = Get-Content -LiteralPath scripts/sdrplay_preflight.ps1 -Raw
+          [void][scriptblock]::Create($source)
+          Write-Host "SDRplay preflight PowerShell syntax is valid."

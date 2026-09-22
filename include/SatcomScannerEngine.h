@@ -1,6 +1,7 @@
 #pragma once
 
 #include "SatcomAsyncLog.h"
+#include "SatcomIqCursor.h"
 
 #include <atomic>
 #include <complex>
@@ -8,6 +9,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -39,6 +41,7 @@ struct SatcomScannerConfig {
     bool enableAx25 = true;
     bool enableApt = true;
     bool autoCapture = true;
+    bool monitorAudio = true;
     std::vector<SatcomPreset> presets;
 
     static SatcomScannerConfig defaults();
@@ -64,6 +67,9 @@ struct SatcomScannerSnapshot {
     double audioRmsDb = -120.0;
     std::string deviceLabel;
     bool deviceConnected = false;
+    std::string streamState;
+    bool audioMonitoring = false;
+    uint64_t iqDiscontinuities = 0;
     std::vector<float> spectrumDb; // downsampled for UI/API
     double spectrumCenterHz = 0.0;
     double spectrumRateHz = 0.0;
@@ -83,6 +89,7 @@ struct SatcomScannerSnapshot {
 
 class Ax25AprsDecoder;
 class AptImageDecoder;
+class AudioEngine;
 class Demodulator;
 class SstvReceiverFeed;
 
@@ -94,6 +101,26 @@ public:
     SatcomScannerConfig config() const;
     void setAutoCaptureEnabled(bool on);
     bool autoCaptureEnabled() const;
+    void setMonitorAudioEnabled(bool on) {
+        const bool active = run_.load(std::memory_order_acquire);
+        {
+            std::lock_guard<std::mutex> lk(mutex_);
+            config_.monitorAudio = on;
+            config_.save();
+            if (!on) audioMonitoring_ = false;
+        }
+
+        if (!on) {
+            shutdownAudioOutput();
+        } else if (active) {
+            std::string error;
+            if (!ensureAudioOutput(&error) && !error.empty()) {
+                std::lock_guard<std::mutex> lk(mutex_);
+                lastStatus_ = error;
+            }
+        }
+        notifyUpdate();
+    }
     size_t resolveDeviceIndex(std::string* error = nullptr);
 
     bool start(bool force = false);
@@ -120,9 +147,26 @@ private:
     SatcomScannerEngine();
     ~SatcomScannerEngine();
 
+    struct PreviousDeviceState {
+        size_t deviceIndex = static_cast<size_t>(-1);
+        bool wasEnabled = false;
+        bool wasStreaming = false;
+        double centerHz = 0.0;
+    };
+
     void workerLoop();
+    bool refreshSpectrum(size_t deviceIndex, double* peakHz = nullptr, double* peakDb = nullptr);
     bool detectActivity(double& peakHz, double& peakDb);
     void processLockedAudio();
+    void resetChronologicalInput();
+    SatcomIqCursor::Result pullNewIq(size_t deviceIndex, size_t maxSamples);
+    bool waitForOperationalStream(size_t deviceIndex, int timeoutMs, std::string* error);
+    bool ensureAudioOutput(std::string* error = nullptr);
+    void pushMonitorAudio(const float* samples, size_t count);
+    void shutdownAudioOutput();
+    void capturePreviousDeviceState(size_t deviceIndex);
+    void restorePreviousDeviceState();
+    void notifyUpdate();
     void pushLog(SatcomLog::EventType t, double hz, const char* text);
     std::string makeCaptureStem(const std::string& satId, const std::string& downlinkId) const;
     void writeRecordingMetadata(const std::string& path) const;
@@ -138,6 +182,8 @@ private:
     double audioRmsDb_ = -120.0;
     std::string deviceLabel_;
     bool deviceConnected_ = false;
+    std::string streamState_ = "stopped";
+    bool audioMonitoring_ = false;
     std::vector<float> spectrumDb_;
     double spectrumCenterHz_ = 0.0;
     double spectrumRateHz_ = 0.0;
@@ -153,7 +199,9 @@ private:
     bool recordRequested_ = false;
     bool recording_ = false;
     bool passTrackActive_ = false;
+    bool passStartedEngine_ = false;
     double lastTrackHz_ = 0.0;
+    std::optional<PreviousDeviceState> previousDeviceState_;
 
     std::atomic<bool> run_{false};
     std::thread worker_;
@@ -164,6 +212,14 @@ private:
     std::unique_ptr<AptImageDecoder> apt_;
     std::unique_ptr<Demodulator> demod_;
     std::atomic<bool> demodResetRequested_{true};
+
+    std::mutex iqMutex_;
+    SatcomIqCursor iqCursor_;
+    std::atomic<uint64_t> iqDiscontinuities_{0};
+    std::atomic<uint64_t> sstvSourceEpoch_{1};
+
+    std::mutex audioMutex_;
+    std::unique_ptr<AudioEngine> audio_;
 
     std::shared_ptr<SstvReceiverFeed> sstvFeed_;
     mutable std::mutex sstvMutex_;

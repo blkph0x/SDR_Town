@@ -3,7 +3,7 @@ name: Windows CI
 on:
   workflow_dispatch:
   push:
-    branches: [master, main, 'ci/**', 'feature/**', 'release/**', 'refactor/**', 'fix/**']
+    branches: [master, main, 'ci/**', 'feature/**', 'release/**', 'refactor/**', 'fix/**', 'hardening/**']
   pull_request:
     branches: [master, main]
 
@@ -27,8 +27,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          fetch-depth: 1
+          fetch-depth: 0
           submodules: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Enforce frozen P25 pipeline
+        shell: pwsh
+        run: |
+          python scripts/test_no_p25_guard.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_BASE_REF)) {
+            $base = "origin/$env:GITHUB_BASE_REF"
+          } elseif (-not [string]::IsNullOrWhiteSpace($env:GITHUB_EVENT_BEFORE) -and
+                    $env:GITHUB_EVENT_BEFORE -notmatch '^0+$') {
+            $base = $env:GITHUB_EVENT_BEFORE
+          } else {
+            $base = "origin/master"
+          }
+          Write-Host "Checking frozen P25 paths between $base and HEAD"
+          python scripts/verify_no_p25_changes.py --base $base --head HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Checkout required build and packaging submodules
         shell: pwsh
@@ -55,6 +78,9 @@ jobs:
           cache: true
           setup-python: false
 
+      - name: Install pinned Rust for SSTV
+        uses: dtolnay/rust-toolchain@1.88.0
+
       - name: Bootstrap vcpkg
         shell: pwsh
         run: |
@@ -71,6 +97,7 @@ jobs:
             -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" `
             -DBUILD_TESTS=ON `
             -DSDR_TOWN_ENABLE_MBELIB=ON `
+            -DSDR_TOWN_ENABLE_SSTV_IMAGES=ON `
             -DSDR_TOWN_BUILD_RDS_DSP=OFF
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -111,10 +138,11 @@ jobs:
           & $exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Setup Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
+      - name: Run SSTV backend tests
+        shell: pwsh
+        run: |
+          ctest --test-dir build -C Release -R SstvTransportRust --output-on-failure
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Release verifier negative tests
         shell: pwsh
@@ -131,6 +159,15 @@ jobs:
           $stage = Join-Path $env:GITHUB_WORKSPACE "build/deploy_staging"
           $exe = Join-Path $stage "SDR_Town.exe"
           if (-not (Test-Path $exe)) { throw "deploy staging did not produce SDR_Town.exe" }
+
+          $sstv = Join-Path $stage "sdrtown_sstv.exe"
+          if (-not (Test-Path $sstv)) {
+            throw "portable staging is missing required SSTV image backend sdrtown_sstv.exe"
+          }
+          $sstvLicense = Join-Path $stage "licenses/sstv/sstv-MIT.txt"
+          if (-not (Test-Path $sstvLicense)) {
+            throw "portable staging is missing required SSTV notices"
+          }
 
           $windeployqt = Join-Path $env:QT_ROOT_DIR "bin/windeployqt.exe"
           if (-not (Test-Path $windeployqt)) { throw "windeployqt.exe not found" }
@@ -173,6 +210,8 @@ jobs:
             commit = $env:GITHUB_SHA
             workflowRun = $env:GITHUB_RUN_ID
             generatedUtc = (Get-Date).ToUniversalTime().ToString("o")
+            sstvBackend = "required"
+            p25PipelineGuard = "passed"
           }
           $buildInfo | ConvertTo-Json | Set-Content `
             (Join-Path $stage "build-info.json") -Encoding utf8
@@ -195,6 +234,8 @@ jobs:
           Add-Content $env:GITHUB_STEP_SUMMARY "- Asset: ``$assetName``"
           Add-Content $env:GITHUB_STEP_SUMMARY "- SHA-256: ``$hash``"
           Add-Content $env:GITHUB_STEP_SUMMARY "- Commit: ``$env:GITHUB_SHA``"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- SSTV backend: required and packaged"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- P25 pipeline guard: passed"
 
       - name: Upload tested portable build
         uses: actions/upload-artifact@v7
@@ -231,15 +272,14 @@ jobs:
             $notes = @"
           Automated tested SDR Town build.
 
-          - RSPdx/RSPdx-R2 discovery now reads the SDRplay API installer directory from the official Windows registry key in both registry views.
-          - SoapySDRPlay module loading now checks the loader result, reports the actual dependency or ABI error, and retries on a later device Rescan until loading succeeds.
-          - Manual Arm pass and Arm ISS SSTV actions use the selected pass downlink, explicitly take tuner control, configure the locked pass frequency before the worker starts, and start the Satcom receiver themselves.
-          - Failed pass startup now rolls back the planner state and tuner lease instead of leaving a false armed state.
-          - Automatic background pass capture remains non-forcing and will not steal a tuner from another active owner.
-          - Previous tested P25 talkgroup discovery, alpha-tag mapping, satellite map, Doppler, capture, APRS/APT/SSTV, and packaging fixes are included.
+          - The frozen P25 pipeline was not modified and the non-P25 path guard passed.
+          - The SSTV image backend and notices are mandatory contents of the portable package.
+          - RSPdx/RSPdx-R2 discovery reads the SDRplay API installer directory from the official Windows registry key in both registry views.
+          - SoapySDRPlay module loading reports dependency or ABI errors and retries on a later device Rescan.
+          - Manual Scan, Arm pass, ISS SSTV and automatic in-range capture can take control from an ordinary Listen session and restore the previous receiver state afterward.
+          - Satcom refuses to interrupt a P25-owned receiver and reports the ownership conflict instead.
+          - Failed pass startup rolls back planner state and the tuner lease.
           - Built and tested by Windows CI from commit $env:GITHUB_SHA.
-
-          Rollback branch: backup/pre-arm-pass-hotfix-20260921.
           "@
             $lowerTag = $tag.ToLowerInvariant()
             $isPrerelease = $lowerTag -match '(alpha|beta|rc|preview|test|pre)'
