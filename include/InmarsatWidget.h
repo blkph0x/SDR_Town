@@ -35,7 +35,9 @@ private:
     void buildUi();
     void applyNeonStyle();
     void reloadBandPlans();
+    void refreshDevices();
 
+    QComboBox* deviceCombo_ = nullptr;
     QComboBox* planCombo_ = nullptr;
     QTableWidget* channelTable_ = nullptr;
     QPushButton* startBtn_ = nullptr;
