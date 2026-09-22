@@ -4,6 +4,8 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <iomanip>
+#include <sstream>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -29,6 +31,19 @@ std::string toLower(std::string s) {
         return static_cast<char>(std::tolower(c));
     });
     return s;
+}
+
+std::string compactToken(const std::string& value) {
+    std::string out;
+    out.reserve(value.size());
+    for (unsigned char c : value) {
+        if (std::isalnum(c)) out.push_back(static_cast<char>(std::tolower(c)));
+    }
+    return out;
+}
+
+bool containsInsensitive(const std::string& haystack, const std::string& needle) {
+    return toLower(haystack).find(toLower(needle)) != std::string::npos;
 }
 
 void appendUnique(std::vector<std::string>& values, const std::string& value) {
@@ -61,7 +76,7 @@ std::vector<std::string> windowsSoapyRoots() {
     const auto appendRegistryInstall = [&](REGSAM view) {
         HKEY key = nullptr;
         if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
-                          "SOFTWARE\SDRplay\Service\API",
+                          "SOFTWARE\\SDRplay\\Service\\API",
                           0, KEY_READ | view, &key) != ERROR_SUCCESS || !key) return;
         char value[32768]{};
         DWORD type = 0;
@@ -115,8 +130,46 @@ std::vector<std::string> windowsSoapyRoots() {
     return roots;
 }
 
-bool containsInsensitive(const std::string& hay, const char* needle) {
-    return toLower(hay).find(toLower(needle)) != std::string::npos;
+SdrplayPortCapabilities port(
+    std::string driverName,
+    std::string displayName,
+    std::string connector,
+    std::vector<std::string> aliases,
+    double minHz,
+    double maxHz,
+    bool biasT,
+    bool highImpedance = false)
+{
+    SdrplayPortCapabilities value;
+    value.driverName = std::move(driverName);
+    value.displayName = std::move(displayName);
+    value.connector = std::move(connector);
+    value.aliases = std::move(aliases);
+    value.minFrequencyHz = minHz;
+    value.maxFrequencyHz = maxHz;
+    value.biasTAllowed = biasT;
+    value.highImpedance = highImpedance;
+    return value;
+}
+
+bool portMatches(const SdrplayPortCapabilities& candidate, const std::string& antenna) {
+    const std::string wanted = compactToken(antenna);
+    if (wanted.empty()) return false;
+    if (compactToken(candidate.driverName) == wanted || compactToken(candidate.displayName) == wanted)
+        return true;
+    return std::any_of(candidate.aliases.begin(), candidate.aliases.end(), [&](const std::string& alias) {
+        return compactToken(alias) == wanted;
+    });
+}
+
+std::string formatFrequency(double hz) {
+    std::ostringstream out;
+    out << std::setprecision(6);
+    if (hz >= 1.0e9) out << (hz / 1.0e9) << " GHz";
+    else if (hz >= 1.0e6) out << (hz / 1.0e6) << " MHz";
+    else if (hz >= 1.0e3) out << (hz / 1.0e3) << " kHz";
+    else out << hz << " Hz";
+    return out.str();
 }
 
 #ifdef _WIN32
@@ -187,6 +240,8 @@ std::string normalizeModel(const std::string& hardware, const std::string& label
         if (containsInsensitive(h, token) || containsInsensitive(l, token)) return model;
         return {};
     };
+    if (auto m = match("nrsp-st", "nRSP-ST"); !m.empty()) return m;
+    if (auto m = match("nrspst", "nRSP-ST"); !m.empty()) return m;
     if (auto m = match("rspdx-r2", "RSPdx-R2"); !m.empty()) return m;
     if (auto m = match("rspdxr2", "RSPdx-R2"); !m.empty()) return m;
     if (auto m = match("rspdx", "RSPdx"); !m.empty()) return m;
@@ -249,18 +304,18 @@ SdrplayCapabilities capabilitiesFromProbe(
     caps.bandwidthsHz = bandwidthsHz;
     caps.settingKeys = settingKeys;
     caps.settingOptions = settingOptions;
-    caps.hasAgc = true;
+    caps.probeVerified = !gainElements.empty() || !antennas.empty() ||
+                         !bandwidthsHz.empty() || !settingKeys.empty() ||
+                         !settingOptions.empty();
+    caps.hasAgc = caps.probeVerified;
 
     for (const auto& g : gainElements) {
         const auto gl = toLower(g);
-        if (gl == "ifgr" || gl.find("if") != std::string::npos) caps.hasIfgr = true;
-        if (gl == "rfgr" || gl.find("rf") != std::string::npos) caps.hasRfgr = true;
+        if (gl == "ifgr" || gl.find("ifgr") != std::string::npos) caps.hasIfgr = true;
+        if (gl == "rfgr" || gl.find("rfgr") != std::string::npos) caps.hasRfgr = true;
     }
-    // SoapySDRPlay always exposes IFGR/RFGR when probe succeeds; fill defaults if empty.
-    if (caps.gainElements.empty()) {
-        caps.gainElements = {"IFGR", "RFGR"};
-        caps.hasIfgr = caps.hasRfgr = true;
-    }
+    // Do not invent IFGR/RFGR or setting support when an installed module did
+    // not return them.  The static model table describes physical safety only.
     return caps;
 }
 
@@ -272,8 +327,10 @@ SdrplaySettings defaultSettings(const SdrplayCapabilities& caps) {
     s.rfgrDb = 4.0;
     s.bandwidthHz = 0.0;
     s.rxChannel = 0;
-    s.soapySettings[SdrplaySettings::kIqCorr] = "true";
-    s.soapySettings[SdrplaySettings::kAgcSetpoint] = "-30";
+    if (settingSupported(caps, SdrplaySettings::kIqCorr))
+        s.soapySettings[SdrplaySettings::kIqCorr] = "true";
+    if (settingSupported(caps, SdrplaySettings::kAgcSetpoint))
+        s.soapySettings[SdrplaySettings::kAgcSetpoint] = "-30";
     if (settingSupported(caps, SdrplaySettings::kBiasT))
         s.soapySettings[SdrplaySettings::kBiasT] = "false";
     if (settingSupported(caps, SdrplaySettings::kRfNotch))
@@ -290,12 +347,7 @@ SdrplaySettings defaultSettings(const SdrplayCapabilities& caps) {
 }
 
 bool settingSupported(const SdrplayCapabilities& caps, const std::string& key) {
-    if (!caps.isSdrplay) return false;
-    if (caps.settingKeys.empty()) {
-        // Before probe, allow known keys so UI can still persist; apply will no-op if unsupported.
-        const auto& known = knownSettingKeys();
-        return std::find(known.begin(), known.end(), key) != known.end();
-    }
+    if (!caps.isSdrplay || !caps.probeVerified || caps.settingKeys.empty()) return false;
     return std::find(caps.settingKeys.begin(), caps.settingKeys.end(), key) != caps.settingKeys.end();
 }
 
@@ -308,40 +360,139 @@ bool parseBoolSetting(const std::string& value, bool fallback) {
     return fallback;
 }
 
-std::string antennaPortDescription(const std::string& model, const std::string& antenna) {
-    const auto m = toLower(model);
-    const auto a = toLower(antenna);
-    if (a == "rx") return "Single SMA (1 kHz–2 GHz)";
-    if (a == "antenna a") {
-        if (m.find("rspdx") != std::string::npos) return "Port A SMA (1 kHz–2 GHz), Bias-T capable";
-        if (m.find("rsp2") != std::string::npos) return "Antenna A SMA, Bias-T capable";
-        return "Antenna A SMA";
+SdrplayModelCapabilities modelCapabilities(const std::string& model) {
+    const std::string normalized = normalizeModel(model, model);
+    SdrplayModelCapabilities caps;
+    caps.model = normalized;
+
+    if (normalized == "nRSP-ST") {
+        caps.hardwareApiSupported = false;
+        caps.websocketOnly = true;
+        caps.tunerCount = 1;
+        return caps;
     }
-    if (a == "antenna b") {
-        if (m.find("rspdx") != std::string::npos) return "Port B SMA (1 kHz–2 GHz), Bias-T capable";
-        return "Antenna B SMA";
+    if (normalized == "RSPdx" || normalized == "RSPdx-R2") {
+        caps.ports = {
+            port("Antenna A", "Port A", "SMA", {"A", "Port A", "ANT A"}, 1.0e3, 2.0e9, true),
+            port("Antenna B", "Port B", "SMA", {"B", "Port B", "ANT B"}, 1.0e3, 2.0e9, true),
+            port("Antenna C", "Port C", "BNC", {"C", "Port C", "ANT C"}, 1.0e3, 200.0e6, false),
+        };
+        return caps;
     }
-    if (a == "antenna c") {
-        return "Port C BNC (1 kHz–200 MHz) — no Bias-T";
+    if (normalized == "RSPduo") {
+        caps.tunerCount = 2;
+        caps.ports = {
+            port("Tuner 1 50 ohm", "Tuner 1", "SMA 50 ohm",
+                 {"Tuner 1 Port A", "Tuner 1 50", "RX1", "Antenna A"},
+                 1.0e3, 2.0e9, true),
+            port("Tuner 2 50 ohm", "Tuner 2", "SMA 50 ohm",
+                 {"Tuner 2 Port B", "Tuner 2 50", "RX2", "Antenna B"},
+                 1.0e3, 2.0e9, true),
+            port("Tuner 1 Hi-Z", "Tuner 1 Hi-Z", "balanced high impedance",
+                 {"Hi-Z", "HiZ", "High Z", "Tuner 1 HiZ"},
+                 1.0e3, 30.0e6, false, true),
+        };
+        return caps;
     }
-    if (a == "hi-z" || a.find("hi-z") != std::string::npos || a.find("hiz") != std::string::npos) {
-        return "Hi-Z balanced HF input (long wire) — no Bias-T";
+    if (normalized == "RSP2") {
+        caps.ports = {
+            port("Antenna A", "Antenna A", "SMA 50 ohm", {"A", "Port A"},
+                 1.0e3, 2.0e9, false),
+            port("Antenna B", "Antenna B", "SMA 50 ohm", {"B", "Port B"},
+                 1.0e3, 2.0e9, true),
+            port("Hi-Z", "Hi-Z", "balanced high impedance", {"HiZ", "High Z"},
+                 1.0e3, 30.0e6, false, true),
+        };
+        return caps;
     }
-    if (a.find("tuner 1 50") != std::string::npos) return "Tuner 1 Port A SMA 50 Ω, Bias-T capable";
-    if (a.find("tuner 2 50") != std::string::npos) return "Tuner 2 Port B SMA 50 Ω, Bias-T capable";
-    if (a.find("tuner 1 hi") != std::string::npos) return "Tuner 1 Hi-Z — no Bias-T";
-    return antenna.empty() ? "Unknown port" : antenna;
+    if (normalized == "RSP1A" || normalized == "RSP1B") {
+        caps.ports = {
+            port("RX", "RF input", "SMA", {"Antenna", "Antenna A", "Port A"},
+                 1.0e3, 2.0e9, true),
+        };
+        return caps;
+    }
+    if (normalized == "RSP1") {
+        caps.ports = {
+            port("RX", "RF input", "SMA", {"Antenna", "Antenna A", "Port A"},
+                 10.0e3, 2.0e9, false),
+        };
+        return caps;
+    }
+    return caps;
 }
 
-bool biasTAllowedForAntenna(const std::string& /*model*/, const std::string& antenna) {
-    const auto a = toLower(antenna);
-    if (a.empty() || a == "rx") return true; // RSP1A/1B single SMA
-    if (a == "antenna c") return false;
-    if (a == "hi-z" || a.find("hi-z") != std::string::npos || a.find("hiz") != std::string::npos)
-        return false;
-    if (a.find("tuner 1 hi") != std::string::npos) return false;
-    // Antenna A/B and Tuner 1/2 50 ohm allow Bias-T on models that expose the setting.
-    return true;
+std::optional<SdrplayPortCapabilities> antennaCapabilities(
+    const std::string& model, const std::string& antenna)
+{
+    const auto caps = modelCapabilities(model);
+    if (caps.ports.empty()) return std::nullopt;
+    if (antenna.empty() && caps.ports.size() == 1) return caps.ports.front();
+    for (const auto& candidate : caps.ports) {
+        if (portMatches(candidate, antenna)) return candidate;
+    }
+    return std::nullopt;
+}
+
+bool frequencyAllowedForAntenna(
+    const std::string& model, const std::string& antenna, double frequencyHz)
+{
+    if (!std::isfinite(frequencyHz) || frequencyHz <= 0.0) return false;
+    const auto caps = antennaCapabilities(model, antenna);
+    if (!caps) return false;
+    return frequencyHz >= caps->minFrequencyHz && frequencyHz <= caps->maxFrequencyHz;
+}
+
+std::string antennaFrequencyError(
+    const std::string& model, const std::string& antenna, double frequencyHz)
+{
+    if (frequencyAllowedForAntenna(model, antenna, frequencyHz)) return {};
+    const auto caps = antennaCapabilities(model, antenna);
+    if (!caps) {
+        return "No verified physical port profile is available for " +
+               (model.empty() ? std::string("this SDRplay model") : model) +
+               " / " + (antenna.empty() ? std::string("the selected antenna") : antenna) + ".";
+    }
+    return formatFrequency(frequencyHz) + " is outside " + caps->displayName +
+           " (" + caps->connector + ") range " +
+           formatFrequency(caps->minFrequencyHz) + " to " +
+           formatFrequency(caps->maxFrequencyHz) + ".";
+}
+
+bool usesHardwareApi(const std::string& model) {
+    return modelCapabilities(model).hardwareApiSupported;
+}
+
+bool usesWebsocketApi(const std::string& model) {
+    return modelCapabilities(model).websocketOnly;
+}
+
+std::string backendDescription(const std::string& model) {
+    const auto caps = modelCapabilities(model);
+    if (caps.websocketOnly)
+        return "SDRconnect WebSocket API (network receiver; not SDRplay Hardware API / SoapySDRPlay3)";
+    if (caps.hardwareApiSupported)
+        return "SDRplay Hardware API 3.x via SoapySDRPlay3";
+    return "Unknown SDRplay backend";
+}
+
+std::string antennaPortDescription(const std::string& model, const std::string& antenna) {
+    const auto caps = antennaCapabilities(model, antenna);
+    if (!caps) {
+        if (usesWebsocketApi(model)) return backendDescription(model);
+        return antenna.empty() ? "Unknown port (not verified)" : antenna + " (not verified)";
+    }
+    std::string text = caps->displayName + " " + caps->connector + " (" +
+                       formatFrequency(caps->minFrequencyHz) + " to " +
+                       formatFrequency(caps->maxFrequencyHz) + ")";
+    if (caps->highImpedance) text += ", high impedance";
+    text += caps->biasTAllowed ? ", Bias-T capable" : ", no Bias-T";
+    return text;
+}
+
+bool biasTAllowedForAntenna(const std::string& model, const std::string& antenna) {
+    const auto caps = antennaCapabilities(model, antenna);
+    return caps.has_value() && caps->biasTAllowed;
 }
 
 double maxSampleRateHz(const std::string& duoMode) {
@@ -364,7 +515,7 @@ std::string rfNotchUiLabel() {
 }
 
 std::string rfNotchUiTooltip() {
-    return "SoapySDRPlay rfnotch_ctrl → API rfNotchEnable. One hardware broadcast notch "
+    return "SoapySDRPlay rfnotch_ctrl -> API rfNotchEnable. One hardware broadcast notch "
            "(MW + FM band regions together). Separate MW vs FM toggles are not exposed by "
            "SoapySDRPlay3 or the public API structs.";
 }
@@ -383,12 +534,12 @@ std::string extRefUiLabel(const std::string& model) {
 std::string extRefUiTooltip(const std::string& model) {
     const auto m = toLower(model);
     if (m.find("rspduo") != std::string::npos) {
-        return "Soapy extref_ctrl → API extRefOutputEn. Enables RSPduo reference clock "
+        return "Soapy extref_ctrl -> API extRefOutputEn. Enables RSPduo reference clock "
                "OUTPUT for daisy-chain / second unit sync. External clock INPUT / GPSDO "
                "lock is not a separate Soapy setting.";
     }
     if (m.find("rsp2") != std::string::npos) {
-        return "Soapy extref_ctrl → API extRefOutputEn (RSP2 reference clock output enable).";
+        return "Soapy extref_ctrl -> API extRefOutputEn (RSP2 reference clock output enable).";
     }
     if (m.find("rspdx") != std::string::npos) {
         return "Soapy exposes extref_ctrl when the module lists it. RSPdx MCX is typically "
@@ -404,7 +555,7 @@ std::vector<std::string> windowsApiCandidates(const std::string& appDir) {
     for (const auto& root : windowsSoapyRoots()) {
         appendUnique(paths, root + "\\sdrplay_api.dll");
         appendUnique(paths, root + "\\bin\\sdrplay_api.dll");
-        // The official API installer keeps the 64-bit DLL under API\x64.
+        // The official API installer keeps the 64-bit DLL under API\\x64.
         // Keep the other architecture layouts for developer and future builds.
         appendUnique(paths, root + "\\x64\\sdrplay_api.dll");
         appendUnique(paths, root + "\\x86\\sdrplay_api.dll");
@@ -435,7 +586,7 @@ namespace {
 
 // DeviceManager asks Soapy to load sdrPlaySupport.dll during its first scan.
 // Preload the vendor API here so Windows can resolve that module's dependency
-// even when the official installer placed it in SDRplay\API\x64, which is not
+// even when the official installer placed it in SDRplay\\API\\x64, which is not
 // normally on PATH. The handle intentionally lives for the process lifetime.
 HMODULE gSdrplayApiHandle = nullptr;
 
