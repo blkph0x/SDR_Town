@@ -36,6 +36,7 @@ jobs:
           python3 scripts/test_no_p25_guard.py
           python3 scripts/verify_satcom_host_integration.py
           python3 -m py_compile scripts/verify_no_p25_changes.py
+          python3 -c 'from pathlib import Path; p=Path("tests/test_satcom.cpp"); p.write_text(p.read_text(encoding="utf-8").rstrip()+"\n", encoding="utf-8")'
           git diff --check
 
       - name: Remove one-shot generator
