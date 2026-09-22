@@ -263,8 +263,9 @@ void testInmarsatFailClosed() {
 }
 
 void testSdrplayProfile() {
-    const auto rspDx = SdrplayProfile::physicalModelCapabilities("RSPdx-R2");
-    require(rspDx.isSdrplay && rspDx.ports.size() == 3,
+    const auto rspDx = SdrplayProfile::modelCapabilities("RSPdx-R2");
+    require(rspDx.model == "RSPdx-R2" && rspDx.hardwareApiSupported &&
+            !rspDx.websocketOnly && rspDx.ports.size() == 3,
             "RSPdx-R2 physical ports");
     require(SdrplayProfile::frequencyAllowedForAntenna(
                 "RSPdx-R2", "Antenna C", 199.9e6),
@@ -281,7 +282,8 @@ void testSdrplayProfile() {
             failedProbe.antennas.empty() && failedProbe.gainElements.empty() &&
             failedProbe.settingKeys.empty(),
             "failed SDRplay probe does not invent runtime controls");
-    require(SdrplayProfile::isNetworkOnlyModel("nRSP-ST"),
+    require(SdrplayProfile::usesWebsocketApi("nRSP-ST") &&
+            !SdrplayProfile::usesHardwareApi("nRSP-ST"),
             "nRSP-ST is kept off the USB Hardware API path");
 }
 
