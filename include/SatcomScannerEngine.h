@@ -101,7 +101,26 @@ public:
     SatcomScannerConfig config() const;
     void setAutoCaptureEnabled(bool on);
     bool autoCaptureEnabled() const;
-    void setMonitorAudioEnabled(bool on);
+    void setMonitorAudioEnabled(bool on) {
+        const bool active = run_.load(std::memory_order_acquire);
+        {
+            std::lock_guard<std::mutex> lk(mutex_);
+            config_.monitorAudio = on;
+            config_.save();
+            if (!on) audioMonitoring_ = false;
+        }
+
+        if (!on) {
+            shutdownAudioOutput();
+        } else if (active) {
+            std::string error;
+            if (!ensureAudioOutput(&error) && !error.empty()) {
+                std::lock_guard<std::mutex> lk(mutex_);
+                lastStatus_ = error;
+            }
+        }
+        notifyUpdate();
+    }
     size_t resolveDeviceIndex(std::string* error = nullptr);
 
     bool start(bool force = false);
