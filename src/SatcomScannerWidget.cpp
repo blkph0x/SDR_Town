@@ -273,8 +273,13 @@ void SatcomScannerWidget::buildUi() {
     squelchSpin_->setDecimals(1);
     squelchSlider_ = new QSlider(Qt::Horizontal);
     squelchSlider_->setRange(-1400, 0);
+    monitorAudioCheck_ = new QCheckBox("MONITOR AUDIO");
+    monitorAudioCheck_->setToolTip(
+        "Route the active satellite demodulator to the default playback device. "
+        "This is an isolated Satcom output and does not alter the P25 audio path.");
     sqLay->addWidget(squelchSpin_);
     sqLay->addWidget(squelchSlider_, 1);
+    sqLay->addWidget(monitorAudioCheck_);
     transport->addWidget(sqBox, 1);
     root->addLayout(transport);
 
@@ -289,6 +294,10 @@ void SatcomScannerWidget::buildUi() {
     status->addWidget(audioMeter_);
     root->addLayout(status);
 
+    statusHealth_ = new QLabel("STREAM: stopped   AUDIO: off   IQ DISCONTINUITIES: 0");
+    statusHealth_->setWordWrap(true);
+    root->addWidget(statusHealth_);
+
     logView_ = new QPlainTextEdit();
     logView_->setReadOnly(true);
     logView_->setMaximumBlockCount(500);
@@ -300,6 +309,9 @@ void SatcomScannerWidget::buildUi() {
     connect(stopBtn_, &QPushButton::clicked, this, &SatcomScannerWidget::onStop);
     connect(skipBtn_, &QPushButton::clicked, this, &SatcomScannerWidget::onSkip);
     connect(recordBtn_, &QPushButton::clicked, this, &SatcomScannerWidget::onRecord);
+    connect(monitorAudioCheck_, &QCheckBox::toggled, this, [](bool on) {
+        SatcomScannerEngine::instance().setMonitorAudioEnabled(on);
+    });
     connect(squelchSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double v) {
         squelchSlider_->blockSignals(true);
         squelchSlider_->setValue(static_cast<int>(v * 10.0));
@@ -338,6 +350,7 @@ void SatcomScannerWidget::applyFieldsToConfig() {
     cfg.bandwidthHz = bwSpin_->value() * 1e3;
     cfg.mode = modeCombo_->currentText().toStdString();
     cfg.squelchDb = squelchSpin_->value();
+    cfg.monitorAudio = monitorAudioCheck_ && monitorAudioCheck_->isChecked();
     if (deviceCombo_ && deviceCombo_->currentIndex() >= 0) {
         bool ok = false;
         const size_t index = static_cast<size_t>(deviceCombo_->currentData().toString().toULongLong(&ok));
@@ -383,27 +396,28 @@ void SatcomScannerWidget::onRecord() {
 }
 
 void SatcomScannerWidget::onApplyObserver() {
-    SatObserverConfig o = SatPassPlanner::instance().observer();
-    double lat = 0, lon = 0;
+    SatObserverConfig observer = SatPassPlanner::instance().observer();
+    double lat = 0.0;
+    double lon = 0.0;
     if (!SatObserverConfig::parseLatLonToken(latEdit_->text().toStdString(), true, &lat) ||
         !SatObserverConfig::parseLatLonToken(lonEdit_->text().toStdString(), false, &lon)) {
         QMessageBox::warning(this, "Observer", "Enter lat/lon as signed degrees or with N/S E/W (both hemispheres).");
         return;
     }
-    o.latDeg = lat;
-    o.lonDeg = lon;
-    o.altM = altSpin_->value();
-    o.minElevationDeg = minElSpin_->value();
-    SatPassPlanner::instance().setObserver(o);
-    AdsBTrackStore::instance().setObserver(o.latDeg, o.lonDeg);
-    if (observerMap_) observerMap_->setMarker(o.latDeg, o.lonDeg);
+    observer.latDeg = lat;
+    observer.lonDeg = lon;
+    observer.altM = altSpin_->value();
+    observer.minElevationDeg = minElSpin_->value();
+    SatPassPlanner::instance().setObserver(observer);
+    AdsBTrackStore::instance().setObserver(observer.latDeg, observer.lonDeg);
+    if (observerMap_) observerMap_->setMarker(observer.latDeg, observer.lonDeg);
     refreshPassesTable();
 }
 
 void SatcomScannerWidget::onSelectSats() {
-    SatCatalogueDialog dlg(this);
-    if (dlg.exec() != QDialog::Accepted) return;
-    SatPassPlanner::instance().setCatalogueSelection(dlg.selectedIds());
+    SatCatalogueDialog dialog(this);
+    if (dialog.exec() != QDialog::Accepted) return;
+    SatPassPlanner::instance().setCatalogueSelection(dialog.selectedIds());
     autoCapturePassKey_.clear();
     refreshPassesTable();
 }
@@ -413,14 +427,14 @@ void SatcomScannerWidget::onRefreshTle() {
     tleBusy_ = true;
     if (refreshTleBtn_) refreshTleBtn_->setEnabled(false);
     tleAgeLabel_->setText("TLE: downloading…");
-    SatPassPlanner::instance().refreshTleAsync([this](bool ok, std::string err) {
-        QMetaObject::invokeMethod(this, [this, ok, err]() {
+    SatPassPlanner::instance().refreshTleAsync([this](bool ok, std::string error) {
+        QMetaObject::invokeMethod(this, [this, ok, error]() {
             tleBusy_ = false;
             if (refreshTleBtn_) refreshTleBtn_->setEnabled(true);
             if (!ok) {
                 tleAgeLabel_->setText("TLE: failed");
                 QMessageBox::warning(this, "TLE",
-                                     QString::fromStdString(err.empty() ? "Refresh failed" : err));
+                                     QString::fromStdString(error.empty() ? "Refresh failed" : error));
             }
             refreshPassesTable();
             refreshUi();
@@ -435,14 +449,14 @@ void SatcomScannerWidget::onArmSelected() {
         return;
     }
     const QString satId = passTable_->item(row, 1)->data(Qt::UserRole).toString();
-    const QString dlId = passTable_->item(row, 2)->data(Qt::UserRole).toString();
+    const QString downlinkId = passTable_->item(row, 2)->data(Qt::UserRole).toString();
 
     applyFieldsToConfig();
     auto& engine = SatcomScannerEngine::instance();
-    std::string err;
-    if (!engine.armPass(satId.toStdString(), dlId.toStdString(),
-                        autoTrackCheck_->isChecked(), true, &err)) {
-        QMessageBox::warning(this, "Arm", QString::fromStdString(err.empty() ? "Arm failed" : err));
+    std::string error;
+    if (!engine.armPass(satId.toStdString(), downlinkId.toStdString(),
+                        autoTrackCheck_->isChecked(), true, &error)) {
+        QMessageBox::warning(this, "Arm", QString::fromStdString(error.empty() ? "Arm failed" : error));
         return;
     }
     refreshUi();
@@ -461,9 +475,9 @@ void SatcomScannerWidget::onDisarm() {
 void SatcomScannerWidget::onArmSstv() {
     applyFieldsToConfig();
     auto& engine = SatcomScannerEngine::instance();
-    std::string err;
-    if (!engine.armPass("iss", "iss-sstv", autoTrackCheck_->isChecked(), true, &err)) {
-        QMessageBox::warning(this, "ISS SSTV", QString::fromStdString(err.empty() ? "Arm failed" : err));
+    std::string error;
+    if (!engine.armPass("iss", "iss-sstv", autoTrackCheck_->isChecked(), true, &error)) {
+        QMessageBox::warning(this, "ISS SSTV", QString::fromStdString(error.empty() ? "Arm failed" : error));
         return;
     }
     engine.startRecording();
@@ -496,9 +510,9 @@ void SatcomScannerWidget::updateAutoCapture(const SatPassPlannerSnapshot& plan) 
 
     const qint64 now = QDateTime::currentSecsSinceEpoch();
     bool handledStillInRange = false;
-    for (const auto& p : plan.positions) {
-        const QString key = QString::fromStdString(p.satId + "/" + p.downlinkId);
-        if (p.tleValid && p.inRange && key == autoCapturePassKey_) {
+    for (const auto& position : plan.positions) {
+        const QString key = QString::fromStdString(position.satId + "/" + position.downlinkId);
+        if (position.tleValid && position.inRange && key == autoCapturePassKey_) {
             handledStillInRange = true;
             break;
         }
@@ -538,13 +552,17 @@ void SatcomScannerWidget::updateAutoCapture(const SatPassPlannerSnapshot& plan) 
 
     const SatCurrentPosition* best = nullptr;
     double bestScore = -std::numeric_limits<double>::infinity();
-    for (const auto& p : plan.positions) {
-        if (!p.tleValid || !p.inRange || p.downlinkId.empty() || p.freqHz <= 0.0) continue;
-        const QString key = QString::fromStdString(p.satId + "/" + p.downlinkId);
+    for (const auto& position : plan.positions) {
+        if (!position.tleValid || !position.inRange || position.downlinkId.empty() ||
+            position.freqHz <= 0.0) {
+            continue;
+        }
+        const QString key = QString::fromStdString(position.satId + "/" + position.downlinkId);
         if (key == autoCapturePassKey_) continue;
-        const double score = 10000.0 - 1000.0 * autoCapturePriority(p.role) + p.elevationDeg;
+        const double score = 10000.0 - 1000.0 * autoCapturePriority(position.role) +
+                             position.elevationDeg;
         if (!best || score > bestScore) {
-            best = &p;
+            best = &position;
             bestScore = score;
         }
     }
@@ -560,13 +578,13 @@ void SatcomScannerWidget::updateAutoCapture(const SatPassPlannerSnapshot& plan) 
         return;
     }
 
-    std::string err;
-    if (!engine.armPass(best->satId, best->downlinkId, true, false, &err)) {
+    std::string error;
+    if (!engine.armPass(best->satId, best->downlinkId, true, false, &error)) {
         if (!autoEngineWasRunning_) engine.stop();
         autoEngineWasRunning_ = false;
         autoCaptureRetryAfter_ = now + 30;
         if (passStatusLabel_)
-            passStatusLabel_->setText("Auto arm failed: " + QString::fromStdString(err));
+            passStatusLabel_->setText("Auto arm failed: " + QString::fromStdString(error));
         return;
     }
 
@@ -585,47 +603,49 @@ void SatcomScannerWidget::refreshPassesTable() {
     const auto plan = SatPassPlanner::instance().snapshot();
     // Downlink combo from catalogue
     if (downlinkCombo_->count() == 0) {
-        for (const auto& e : plan.catalogue.entries()) {
-            for (const auto& d : e.downlinks) {
+        for (const auto& entry : plan.catalogue.entries()) {
+            for (const auto& downlink : entry.downlinks) {
                 downlinkCombo_->addItem(
-                    QString("%1 — %2").arg(QString::fromStdString(e.name), QString::fromStdString(d.label)),
-                    QString::fromStdString(d.id));
+                    QString("%1 — %2").arg(QString::fromStdString(entry.name),
+                                            QString::fromStdString(downlink.label)),
+                    QString::fromStdString(downlink.id));
             }
         }
     }
 
     passTable_->setRowCount(static_cast<int>(plan.passes.size()));
     for (int i = 0; i < static_cast<int>(plan.passes.size()); ++i) {
-        const auto& p = plan.passes[static_cast<size_t>(i)];
-        const QDateTime aos = QDateTime::fromSecsSinceEpoch(static_cast<qint64>(p.aosUnix), Qt::LocalTime);
+        const auto& pass = plan.passes[static_cast<size_t>(i)];
+        const QDateTime aos = QDateTime::fromSecsSinceEpoch(
+            static_cast<qint64>(pass.aosUnix), Qt::LocalTime);
         auto* aosItem = new QTableWidgetItem(aos.toString("dd MMM HH:mm"));
-        aosItem->setData(Qt::UserRole, QString::fromStdString(p.satId));
+        aosItem->setData(Qt::UserRole, QString::fromStdString(pass.satId));
         passTable_->setItem(i, 0, aosItem);
-        auto* satItem = new QTableWidgetItem(QString::fromStdString(p.satName));
-        satItem->setData(Qt::UserRole, QString::fromStdString(p.satId));
+        auto* satItem = new QTableWidgetItem(QString::fromStdString(pass.satName));
+        satItem->setData(Qt::UserRole, QString::fromStdString(pass.satId));
         passTable_->setItem(i, 1, satItem);
-        auto* dlItem = new QTableWidgetItem(QString::fromStdString(p.downlinkLabel));
-        dlItem->setData(Qt::UserRole, QString::fromStdString(p.downlinkId));
-        passTable_->setItem(i, 2, dlItem);
-        passTable_->setItem(i, 3, new QTableWidgetItem(QString::number(p.maxElDeg, 'f', 1)));
-        passTable_->setItem(i, 4, new QTableWidgetItem(QString::number(p.durationSec / 60.0, 'f', 1) + "m"));
-        passTable_->setItem(i, 5, new QTableWidgetItem(QString::number(p.freqHz / 1e6, 'f', 4)));
+        auto* downlinkItem = new QTableWidgetItem(QString::fromStdString(pass.downlinkLabel));
+        downlinkItem->setData(Qt::UserRole, QString::fromStdString(pass.downlinkId));
+        passTable_->setItem(i, 2, downlinkItem);
+        passTable_->setItem(i, 3, new QTableWidgetItem(QString::number(pass.maxElDeg, 'f', 1)));
+        passTable_->setItem(i, 4, new QTableWidgetItem(QString::number(pass.durationSec / 60.0, 'f', 1) + "m"));
+        passTable_->setItem(i, 5, new QTableWidgetItem(QString::number(pass.freqHz / 1e6, 'f', 4)));
     }
 
     if (observerMap_) {
         std::vector<SatelliteMapMarker> markers;
         markers.reserve(plan.positions.size());
-        for (const auto& pos : plan.positions) {
+        for (const auto& position : plan.positions) {
             SatelliteMapMarker marker;
-            marker.id = QString::fromStdString(pos.satId);
-            marker.name = QString::fromStdString(pos.satName);
-            marker.latDeg = pos.latitudeDeg;
-            marker.lonDeg = pos.longitudeDeg;
-            marker.altitudeKm = pos.altitudeKm;
-            marker.elevationDeg = pos.elevationDeg;
-            marker.valid = pos.tleValid;
-            marker.inRange = pos.inRange;
-            marker.armed = plan.armed.armed && plan.armed.satId == pos.satId;
+            marker.id = QString::fromStdString(position.satId);
+            marker.name = QString::fromStdString(position.satName);
+            marker.latDeg = position.latitudeDeg;
+            marker.lonDeg = position.longitudeDeg;
+            marker.altitudeKm = position.altitudeKm;
+            marker.elevationDeg = position.elevationDeg;
+            marker.valid = position.tleValid;
+            marker.inRange = position.inRange;
+            marker.armed = plan.armed.armed && plan.armed.satId == position.satId;
             markers.push_back(std::move(marker));
         }
         observerMap_->setSatellites(markers);
@@ -647,9 +667,9 @@ void SatcomScannerWidget::refreshPassesTable() {
                 .arg(plan.armed.dopplerHz, 0, 'f', 0)
                 .arg(plan.armed.tunedHz / 1e6, 0, 'f', 4));
     } else if (!autoCaptureOwned_) {
-        passStatusLabel_->setText(QString::fromStdString(plan.lastStatus.empty() ? "No pass armed" : plan.lastStatus));
+        passStatusLabel_->setText(
+            QString::fromStdString(plan.lastStatus.empty() ? "No pass armed" : plan.lastStatus));
     }
-
 }
 
 void SatcomScannerWidget::refreshUi() {
@@ -668,7 +688,10 @@ void SatcomScannerWidget::refreshUi() {
         for (int i = 0; i < deviceCombo_->count(); ++i) {
             const QString expected = QString("%1 — %2")
                 .arg(i).arg(QString::fromStdString(devices[static_cast<size_t>(i)].label));
-            if (deviceCombo_->itemText(i) != expected) { rebuildDevices = true; break; }
+            if (deviceCombo_->itemText(i) != expected) {
+                rebuildDevices = true;
+                break;
+            }
         }
     }
     deviceCombo_->blockSignals(true);
@@ -691,17 +714,22 @@ void SatcomScannerWidget::refreshUi() {
     if (!stepSpin_->hasFocus()) stepSpin_->setValue(cfg.stepHz / 1e3);
     if (!bwSpin_->hasFocus()) bwSpin_->setValue(cfg.bandwidthHz / 1e3);
     if (!modeCombo_->hasFocus()) {
-        const int idx = modeCombo_->findText(QString::fromStdString(cfg.mode));
-        if (idx >= 0) modeCombo_->setCurrentIndex(idx);
+        const int index = modeCombo_->findText(QString::fromStdString(cfg.mode));
+        if (index >= 0) modeCombo_->setCurrentIndex(index);
     }
     if (!squelchSpin_->hasFocus()) {
         squelchSpin_->setValue(cfg.squelchDb);
         squelchSlider_->setValue(static_cast<int>(cfg.squelchDb * 10.0));
     }
+    if (monitorAudioCheck_) {
+        monitorAudioCheck_->blockSignals(true);
+        monitorAudioCheck_->setChecked(cfg.monitorAudio);
+        monitorAudioCheck_->blockSignals(false);
+    }
 
     if (presetCombo_->count() == 0) {
-        for (const auto& p : cfg.presets)
-            presetCombo_->addItem(QString::fromStdString(p.name));
+        for (const auto& preset : cfg.presets)
+            presetCombo_->addItem(QString::fromStdString(preset.name));
     }
 
     if (!snap.spectrumDb.empty()) {
@@ -709,19 +737,25 @@ void SatcomScannerWidget::refreshUi() {
         spectrum_->setFreqRange(cfg.lowHz, cfg.highHz);
     }
 
+    const QString streamState = QString::fromStdString(
+        snap.streamState.empty() ? "stopped" : snap.streamState);
     statusDevice_->setText(snap.deviceConnected
-        ? QString("● %1").arg(QString::fromStdString(snap.deviceLabel))
-        : "○ NO DEVICE");
-    if (snap.passArmed)
-        statusScan_->setText(QString("PASS %1 MHz (doppler %+2.0f Hz)")
+        ? QString("● %1 — %2").arg(QString::fromStdString(snap.deviceLabel), streamState)
+        : QString("○ %1 — %2").arg(
+              snap.deviceLabel.empty() ? "NO DEVICE" : QString::fromStdString(snap.deviceLabel),
+              streamState));
+    if (snap.passArmed) {
+        statusScan_->setText(QString("PASS %1 MHz (doppler %2 Hz)")
                                  .arg(snap.tunedHz / 1e6, 0, 'f', 4)
-                                 .arg(snap.dopplerHz));
-    else if (snap.state == SatcomScannerState::Scanning)
+                                 .arg(snap.dopplerHz, 0, 'f', 0));
+    } else if (snap.state == SatcomScannerState::Scanning) {
         statusScan_->setText(QString("Scanning… %1 MHz").arg(snap.currentHz / 1e6, 0, 'f', 3));
-    else if (snap.state == SatcomScannerState::Locked || snap.state == SatcomScannerState::Recording)
+    } else if (snap.state == SatcomScannerState::Locked ||
+               snap.state == SatcomScannerState::Recording) {
         statusScan_->setText(QString("Locked %1 MHz").arg(snap.lockHz / 1e6, 0, 'f', 3));
-    else
+    } else {
         statusScan_->setText(QString::fromStdString(snap.lastStatus.empty() ? "Idle" : snap.lastStatus));
+    }
 
     recordingUi_ = snap.state == SatcomScannerState::Recording;
     if (recordingUi_)
@@ -729,27 +763,45 @@ void SatcomScannerWidget::refreshUi() {
     else
         statusRec_->setText("○ Not recording");
 
-    const double norm = std::clamp((snap.audioRmsDb + 100.0) / 60.0, 0.0, 1.0);
-    const int bars = static_cast<int>(norm * 10.0);
+    const double normalized = std::clamp((snap.audioRmsDb + 100.0) / 60.0, 0.0, 1.0);
+    const int bars = static_cast<int>(normalized * 10.0);
     QString meter = "[";
     for (int i = 0; i < 10; ++i) meter += (i < bars ? "#" : "-");
     meter += "]";
     audioMeter_->setText(meter);
 
+    const QString outputDetail = !snap.sstvOutputDir.empty()
+        ? QString("   SSTV: %1").arg(QString::fromStdString(snap.sstvOutputDir))
+        : (!snap.aptPreviewPath.empty()
+            ? QString("   APT: %1").arg(QString::fromStdString(snap.aptPreviewPath))
+            : QString());
+    statusHealth_->setText(
+        QString("STREAM: %1   AUDIO: %2   IQ DISCONTINUITIES: %3   LOG DROPS: %4%5")
+            .arg(streamState)
+            .arg(snap.audioMonitoring ? "ON" : (cfg.monitorAudio ? "UNAVAILABLE" : "OFF"))
+            .arg(static_cast<qulonglong>(snap.iqDiscontinuities))
+            .arg(static_cast<qulonglong>(snap.logDropped))
+            .arg(outputDetail));
+    const bool active = snap.state != SatcomScannerState::Idle || snap.passArmed;
+    const bool healthy = !active || (snap.deviceConnected && snap.streamState == "live hardware");
+    statusHealth_->setStyleSheet(healthy
+        ? "color: #39FF14; font-weight: 700;"
+        : "color: #ff4d4d; font-weight: 900;");
+
     if (!snap.recentDecodes.empty()) {
         QString all;
-        const size_t n = snap.recentDecodes.size();
-        const size_t start = n > 40 ? n - 40 : 0;
-        for (size_t i = start; i < n; ++i)
+        const size_t count = snap.recentDecodes.size();
+        const size_t start = count > 40 ? count - 40 : 0;
+        for (size_t i = start; i < count; ++i)
             all += QString::fromStdString(snap.recentDecodes[i]) + "\n";
         if (logView_->toPlainText() != all) logView_->setPlainText(all);
     }
 
-    const bool active = snap.state != SatcomScannerState::Idle || snap.passArmed;
     startBtn_->setEnabled(!active || snap.passArmed);
     stopBtn_->setEnabled(active);
     skipBtn_->setEnabled(active && !snap.passArmed);
-    recordBtn_->setEnabled(snap.state == SatcomScannerState::Locked || snap.state == SatcomScannerState::Recording || snap.passArmed);
+    recordBtn_->setEnabled(snap.state == SatcomScannerState::Locked ||
+                           snap.state == SatcomScannerState::Recording || snap.passArmed);
     recordBtn_->setText(recordingUi_ ? "STOP REC" : "RECORD");
 
     if (refreshPasses) refreshPassesTable();
