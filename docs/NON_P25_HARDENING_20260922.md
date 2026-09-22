@@ -18,9 +18,10 @@ Protected shared files include `DeviceManager`, `Receiver`, `Demod`, `AudioEngin
 - Detects stream epochs, ring overruns and discontinuities, and resets all satellite decoder state after a gap.
 - Keeps spectrum and waterfall data live while scanning, locked and pass-armed.
 - Uses an isolated Satcom audio output and keeps its queue close to real time.
+- Manual Scan and automatic in-range capture can take control from an ordinary Listen session without requiring the device to be disabled first.
+- P25 ownership remains a hard boundary: Satcom refuses to interrupt a P25-owned receiver.
 - Requires `live hardware` state and real IQ before reporting startup success.
 - Confirms a requested pass tune before decoder activation.
-- Refuses to take a receiver owned by P25.
 - Saves and restores the previous device stream/frequency after a pass-only session.
 - Records IQ discontinuity counts in capture metadata.
 - Displays stream, speaker, discontinuity, log-drop and decoder-output health in the UI.
