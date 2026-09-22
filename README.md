@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Current version** | **0.2.82** (experimental channel) |
+| **Current version** | **0.2.85** (experimental channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
