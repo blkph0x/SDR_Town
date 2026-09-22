@@ -276,9 +276,9 @@ jobs:
           - The SSTV image backend and notices are mandatory contents of the portable package.
           - RSPdx/RSPdx-R2 discovery reads the SDRplay API installer directory from the official Windows registry key in both registry views.
           - SoapySDRPlay module loading reports dependency or ABI errors and retries on a later device Rescan.
-          - Manual Arm pass and Arm ISS SSTV actions take tuner control, configure the pass frequency, and start the Satcom receiver.
+          - Manual Scan, Arm pass, ISS SSTV and automatic in-range capture can take control from an ordinary Listen session and restore the previous receiver state afterward.
+          - Satcom refuses to interrupt a P25-owned receiver and reports the ownership conflict instead.
           - Failed pass startup rolls back planner state and the tuner lease.
-          - Automatic background pass capture remains non-forcing and will not steal a tuner from another active owner.
           - Built and tested by Windows CI from commit $env:GITHUB_SHA.
           "@
             $lowerTag = $tag.ToLowerInvariant()
