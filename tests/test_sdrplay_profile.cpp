@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include "SdrplayProfile.h"
+
 #include <algorithm>
+#include <cmath>
 
 TEST_CASE("SdrplayProfile detects driver names", "[sdrplay]") {
     CHECK(SdrplayProfile::isSdrplayDriver("sdrplay"));
@@ -9,7 +11,7 @@ TEST_CASE("SdrplayProfile detects driver names", "[sdrplay]") {
     CHECK_FALSE(SdrplayProfile::isSdrplayDriver("hackrf"));
 }
 
-TEST_CASE("SdrplayProfile normalizes models from label/hardware", "[sdrplay]") {
+TEST_CASE("SdrplayProfile normalizes USB and network models", "[sdrplay]") {
     CHECK(SdrplayProfile::normalizeModel("RSPdx", "unused") == "RSPdx");
     CHECK(SdrplayProfile::normalizeModel("", "SDRplay Dev0 RSPdx 12345") == "RSPdx");
     CHECK(SdrplayProfile::normalizeModel("", "SDRplay Dev0 RSPdx-R2 12345") == "RSPdx-R2");
@@ -18,6 +20,7 @@ TEST_CASE("SdrplayProfile normalizes models from label/hardware", "[sdrplay]") {
     CHECK(SdrplayProfile::normalizeModel("", "RSP1B") == "RSP1B");
     CHECK(SdrplayProfile::normalizeModel("RSPdx-R2", "") == "RSPdx-R2");
     CHECK(SdrplayProfile::normalizeModel("", "RSP2pro") == "RSP2");
+    CHECK(SdrplayProfile::normalizeModel("", "SDRplay nRSP-ST network receiver") == "nRSP-ST");
 }
 
 TEST_CASE("SdrplayProfile duo mode display names", "[sdrplay]") {
@@ -28,7 +31,7 @@ TEST_CASE("SdrplayProfile duo mode display names", "[sdrplay]") {
     CHECK(SdrplayProfile::duoModeDisplayName("SL") == "Slave");
 }
 
-TEST_CASE("SdrplayProfile capabilities and defaults", "[sdrplay]") {
+TEST_CASE("SdrplayProfile uses only probed driver controls", "[sdrplay]") {
     auto caps = SdrplayProfile::capabilitiesFromProbe(
         "sdrplay", "RSPdx", "SDRplay RSPdx",
         {"IFGR", "RFGR"},
@@ -37,7 +40,9 @@ TEST_CASE("SdrplayProfile capabilities and defaults", "[sdrplay]") {
         {"iqcorr_ctrl", "biasT_ctrl", "rfnotch_ctrl", "dabnotch_ctrl", "hdr_ctrl", "agc_setpoint", "rfgain_sel"},
         {{"rfgain_sel", {"0", "1", "2", "3", "4"}}});
     CHECK(caps.isSdrplay);
+    CHECK(caps.probeVerified);
     CHECK(caps.model == "RSPdx");
+    CHECK(caps.hasAgc);
     CHECK(caps.hasIfgr);
     CHECK(caps.hasRfgr);
     CHECK(SdrplayProfile::settingSupported(caps, SdrplaySettings::kHdr));
@@ -51,6 +56,19 @@ TEST_CASE("SdrplayProfile capabilities and defaults", "[sdrplay]") {
     CHECK(SdrplayProfile::parseBoolSetting("true"));
     CHECK_FALSE(SdrplayProfile::parseBoolSetting("false"));
     CHECK(SdrplayProfile::boolSetting(true) == "true");
+}
+
+TEST_CASE("SdrplayProfile does not invent capabilities after an empty probe", "[sdrplay]") {
+    auto caps = SdrplayProfile::capabilitiesFromProbe(
+        "sdrplay", "RSPdx", "SDRplay RSPdx", {}, {}, {}, {}, {});
+    CHECK(caps.isSdrplay);
+    CHECK_FALSE(caps.probeVerified);
+    CHECK_FALSE(caps.hasAgc);
+    CHECK_FALSE(caps.hasIfgr);
+    CHECK_FALSE(caps.hasRfgr);
+    CHECK(caps.gainElements.empty());
+    CHECK_FALSE(SdrplayProfile::settingSupported(caps, SdrplaySettings::kBiasT));
+    CHECK(SdrplayProfile::defaultSettings(caps).soapySettings.empty());
 }
 
 TEST_CASE("SdrplayProfile ignores non-SDRplay probes", "[sdrplay]") {
@@ -68,12 +86,36 @@ TEST_CASE("SdrplayProfile known setting keys cover SoapySDRPlay3", "[sdrplay]") 
     CHECK(std::find(keys.begin(), keys.end(), SdrplaySettings::kHdr) != keys.end());
 }
 
+TEST_CASE("SdrplayProfile enforces connector-specific tuning ranges", "[sdrplay]") {
+    const auto dxC = SdrplayProfile::antennaCapabilities("RSPdx-R2", "Antenna C");
+    REQUIRE(dxC.has_value());
+    CHECK(dxC->connector == "BNC");
+    CHECK(dxC->maxFrequencyHz == 200.0e6);
+    CHECK(SdrplayProfile::frequencyAllowedForAntenna("RSPdx-R2", "Antenna C", 199.9e6));
+    CHECK_FALSE(SdrplayProfile::frequencyAllowedForAntenna("RSPdx-R2", "Antenna C", 200.1e6));
+    CHECK(SdrplayProfile::antennaFrequencyError("RSPdx-R2", "Antenna C", 438.5e6).find("BNC") != std::string::npos);
+
+    const auto duoHz = SdrplayProfile::antennaCapabilities("RSPduo", "Tuner 1 Hi-Z");
+    REQUIRE(duoHz.has_value());
+    CHECK(duoHz->highImpedance);
+    CHECK(duoHz->maxFrequencyHz == 30.0e6);
+    CHECK(SdrplayProfile::frequencyAllowedForAntenna("RSPduo", "Hi-Z", 14.2e6));
+    CHECK_FALSE(SdrplayProfile::frequencyAllowedForAntenna("RSPduo", "Hi-Z", 145.8e6));
+
+    CHECK(SdrplayProfile::frequencyAllowedForAntenna("RSP1B", "RX", 1.0e3));
+    CHECK(SdrplayProfile::frequencyAllowedForAntenna("RSP1B", "RX", 2.0e9));
+    CHECK_FALSE(SdrplayProfile::frequencyAllowedForAntenna("unknown", "RX", 100.0e6));
+}
+
 TEST_CASE("SdrplayProfile antenna ports Bias-T and dual rate limits", "[sdrplay]") {
     CHECK(SdrplayProfile::biasTAllowedForAntenna("RSPdx", "Antenna A"));
     CHECK(SdrplayProfile::biasTAllowedForAntenna("RSPdx", "Antenna B"));
     CHECK_FALSE(SdrplayProfile::biasTAllowedForAntenna("RSPdx", "Antenna C"));
     CHECK_FALSE(SdrplayProfile::biasTAllowedForAntenna("RSPduo", "Tuner 1 Hi-Z"));
     CHECK(SdrplayProfile::biasTAllowedForAntenna("RSPduo", "Tuner 1 50 ohm"));
+    CHECK_FALSE(SdrplayProfile::biasTAllowedForAntenna("RSP2", "Antenna A"));
+    CHECK(SdrplayProfile::biasTAllowedForAntenna("RSP2", "Antenna B"));
+    CHECK_FALSE(SdrplayProfile::biasTAllowedForAntenna("unknown", "mystery"));
     CHECK(SdrplayProfile::maxSampleRateHz("ST") == 10.0e6);
     CHECK(SdrplayProfile::maxSampleRateHz("DT") == 2.0e6);
     CHECK(SdrplayProfile::clampSampleRateHz("DT", 5e6) == 2.0e6);
@@ -83,6 +125,14 @@ TEST_CASE("SdrplayProfile antenna ports Bias-T and dual rate limits", "[sdrplay]
     CHECK(SdrplayProfile::rfNotchUiTooltip().find("rfNotchEnable") != std::string::npos);
     CHECK(SdrplayProfile::extRefUiLabel("RSPduo").find("OUT") != std::string::npos);
     CHECK(SdrplayProfile::extRefUiTooltip("RSPduo").find("extRefOutputEn") != std::string::npos);
+}
+
+TEST_CASE("SdrplayProfile distinguishes USB Hardware API and nRSP WebSocket", "[sdrplay]") {
+    CHECK(SdrplayProfile::usesHardwareApi("RSP1B"));
+    CHECK_FALSE(SdrplayProfile::usesWebsocketApi("RSP1B"));
+    CHECK_FALSE(SdrplayProfile::usesHardwareApi("nRSP-ST"));
+    CHECK(SdrplayProfile::usesWebsocketApi("nRSP-ST"));
+    CHECK(SdrplayProfile::backendDescription("nRSP-ST").find("WebSocket") != std::string::npos);
 }
 
 TEST_CASE("SdrplayProfile covers installed Windows runtime layouts", "[sdrplay]") {
