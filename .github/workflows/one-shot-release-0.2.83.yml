@@ -1,0 +1,101 @@
+name: One-shot prepare SDR Town 0.2.83
+
+on:
+  push:
+    branches: ['release-prep/v0.2.83']
+    paths:
+      - '.github/workflows/one-shot-release-0.2.83.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout release preparation branch
+        uses: actions/checkout@v7
+        with:
+          ref: release-prep/v0.2.83
+          fetch-depth: 0
+
+      - name: Set version and release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          replacements = {
+              Path('CMakeLists.txt'): (
+                  'project(SDR_Town VERSION 0.2.82 LANGUAGES CXX)',
+                  'project(SDR_Town VERSION 0.2.83 LANGUAGES CXX)',
+              ),
+              Path('README.md'): (
+                  '**Current version** | **0.2.82** (experimental channel)',
+                  '**Current version** | **0.2.83** (experimental channel)',
+              ),
+              Path('SOURCE_OF_TRUTH.md'): (
+                  'CURRENT VERSION IN TREE: 0.2.82',
+                  'CURRENT VERSION IN TREE: 0.2.83',
+              ),
+          }
+
+          for path, (old, new) in replacements.items():
+              text = path.read_text(encoding='utf-8')
+              found = text.count(old)
+              if found != 1:
+                  raise SystemExit(f'{path}: expected one occurrence of {old!r}, found {found}')
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          notes = '''# SDR Town 0.2.83
+
+This release hardens the non-P25 receive paths while deliberately leaving the complete P25 receive, control, follow, traffic, Phase 1/2, vocoder and audio chain unchanged.
+
+## Satcom
+
+- Manual Scan and automatic in-range capture can take control from an ordinary active Listen session without requiring the device to be disabled first.
+- Satcom refuses to interrupt a P25-owned receiver.
+- Satellite IQ is consumed chronologically rather than replaying overlapping recent windows.
+- Spectrum and waterfall remain live while scanning, locked and pass-armed.
+- Satcom has an independent low-latency monitor-audio path.
+- Pass startup verifies real hardware, real IQ and the applied tune before decoder activation.
+- Previous receiver streaming and centre frequency are restored after Satcom releases a pass-only session.
+
+## SSTV and HamDRM
+
+- Release builds now require and package the Rust SSTV helper and license notices.
+- CI exercises the helper transport and self-test before packaging.
+
+## SDRplay
+
+- Runtime discovery and preflight diagnostics cover official SDRplay, PothosSDR, radioconda, environment and portable layouts.
+- Failed probes no longer invent antennas, gain stages or settings.
+- Model and connector capability checks enforce antenna-specific frequency and Bias-T limits.
+- nRSP-ST is identified as a network/WebSocket receiver rather than a USB Hardware API device.
+
+## Other receive-path hardening
+
+- AX.25/APRS: Bell 202 timing search, HDLC/NRZI handling, bit de-stuffing and FCS-gated output.
+- NOAA APT: FM-downlink handling, coherent 2400 Hz subcarrier recovery, Sync A/B acquisition and 2080-word line construction.
+- ADS-B/Mode-S: CRC, CPR, subtype-2 velocity, fractional sample phase, preamble confidence and duplicate suppression corrections.
+- Inmarsat: unframed physical-layer bits are prevented from masquerading as validated protocol messages.
+
+## Safety and validation
+
+- A repository guard rejected any change to protected P25 or shared P25-critical RF/audio paths.
+- Full MSVC Release build, core tests, Qt/live-decoder tests, SSTV tests, release verification and portable packaging passed before merge.
+- Rollback branch: `backup/pre-non-p25-hardening-20260922`.
+
+Physical SDR reception, satellite transmission timing and model-specific SDRplay hardware behaviour still require field testing on connected equipment.
+'''
+          Path('docs/RELEASE_0.2.83.md').write_text(notes, encoding='utf-8')
+          Path('.github/workflows/one-shot-release-0.2.83.yml').unlink()
+          PY
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add CMakeLists.txt README.md SOURCE_OF_TRUTH.md docs/RELEASE_0.2.83.md \
+            .github/workflows/one-shot-release-0.2.83.yml
+          git commit -m 'release: set version 0.2.83'
+          git push origin HEAD:release-prep/v0.2.83
