@@ -1,0 +1,32 @@
+name: Align v0.2.85 source metadata
+
+on:
+  push:
+    branches:
+      - prep/v0.2.85
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Align source version metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -c "from pathlib import Path; p=Path('README.md'); s=p.read_text(encoding='utf-8'); old='| **Current version** | **0.2.82** (experimental channel) |'; new='| **Current version** | **0.2.85** (experimental channel) |'; assert s.count(old)==1, f'README version occurrences: {s.count(old)}'; p.write_text(s.replace(old,new,1),encoding='utf-8',newline='\\n')"
+          python -c "from pathlib import Path; p=Path('SOURCE_OF_TRUTH.md'); s=p.read_text(encoding='utf-8'); old='CURRENT VERSION IN TREE: 0.2.82'; new='CURRENT VERSION IN TREE: 0.2.85'; assert s.count(old)==1, f'SOURCE version occurrences: {s.count(old)}'; p.write_text(s.replace(old,new,1),encoding='utf-8',newline='\\n')"
+          grep -F 'project(SDR_Town VERSION 0.2.85 LANGUAGES CXX)' CMakeLists.txt
+          rm .github/workflows/prepare-v0.2.85-docs.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add README.md SOURCE_OF_TRUTH.md .github/workflows/prepare-v0.2.85-docs.yml
+          git commit -m 'docs: align current version with 0.2.85'
+          git push origin HEAD:prep/v0.2.85
