@@ -7,7 +7,8 @@ public:
     std::shared_ptr<SstvLiveInput> attach();
     void detach(const std::shared_ptr<SstvLiveInput>& input);
     void finish(const std::shared_ptr<SstvLiveInput>& input);
-    void publish(const FmMultiplexBlock& block,uint64_t sourceId);
+    void publish(const FmMultiplexBlock& block, uint64_t sourceId,
+                 DemodMode mode = DemodMode::NFM);
     void discontinuity();
     std::optional<SstvInputStats> stats() const; // Control/diagnostics only, may lock.
 private:
