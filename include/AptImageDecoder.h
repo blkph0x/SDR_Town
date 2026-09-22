@@ -47,6 +47,10 @@ private:
     double wordPhase_ = 0.0;
     float inPhaseLp_ = 0.0f;
     float quadratureLp_ = 0.0f;
+    float inPhaseLp2_ = 0.0f;
+    float quadratureLp2_ = 0.0f;
+    double wordEnvelopeSum_ = 0.0;
+    uint32_t wordEnvelopeCount_ = 0;
 
     bool levelInitialized_ = false;
     float lowLevel_ = 0.0f;
