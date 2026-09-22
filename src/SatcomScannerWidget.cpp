@@ -149,7 +149,7 @@ void SatcomScannerWidget::buildUi() {
     bwSpin_->setRange(1.0, 2000.0);
     bwSpin_->setSuffix(" kHz");
     modeCombo_ = new QComboBox();
-    modeCombo_->addItems({"NFM", "WFM", "AM", "USB", "APT", "APRS"});
+    modeCombo_->addItems({"NFM", "WFM", "AM", "USB", "LSB", "APT", "APRS"});
     deviceCombo_ = new QComboBox();
     deviceCombo_->setToolTip(
         "Choose the SDR used by Satcom. Select a second receiver to keep the main Listen receiver "
@@ -295,8 +295,9 @@ void SatcomScannerWidget::buildUi() {
     squelchSlider_->setRange(-1400, 0);
     monitorAudioCheck_ = new QCheckBox("MONITOR AUDIO");
     monitorAudioCheck_->setToolTip(
-        "Route the active satellite demodulator to the default playback device. "
-        "This is an isolated Satcom output and does not alter the P25 audio path.");
+        "Route the active satellite demodulator through the configured SDR Town playback output. "
+        "If Satcom selected the active Listen receiver, ordinary Listen audio is parked and restored "
+        "when Satcom stops; a second selected SDR can run independently.");
     squelchLayout->addWidget(squelchSpin_);
     squelchLayout->addWidget(squelchSlider_, 1);
     squelchLayout->addWidget(monitorAudioCheck_);
@@ -850,7 +851,9 @@ void SatcomScannerWidget::refreshUi() {
     statusHealth_->setText(
         QString("STREAM: %1   AUDIO: %2   IQ DISCONTINUITIES: %3   LOG DROPS: %4%5")
             .arg(streamState)
-            .arg(snapshot.audioMonitoring ? "ON" : (config.monitorAudio ? "UNAVAILABLE" : "OFF"))
+            .arg(snapshot.audioMonitoring
+                ? (snapshot.sharedMainAudio ? "ON (SDR TOWN)" : "ON (STANDALONE)")
+                : (config.monitorAudio ? "UNAVAILABLE" : "OFF"))
             .arg(static_cast<qulonglong>(snapshot.iqDiscontinuities))
             .arg(static_cast<qulonglong>(snapshot.logDropped))
             .arg(outputDetail));

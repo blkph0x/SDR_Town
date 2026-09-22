@@ -57,6 +57,41 @@ def main() -> int:
         ["src/SatcomScannerEngine.cpp", "src/P25VoiceDecode.cpp", "src/ModeS.cpp"]
     )
     assert blocked == [("src/P25VoiceDecode.cpp", "src/P25*")]
+
+    allowed_diff = """diff --git a/src/MainWindow.cpp b/src/MainWindow.cpp
+--- a/src/MainWindow.cpp
++++ b/src/MainWindow.cpp
+@@ -1,0 +2 @@
++#include "SatcomHostServices.h"
+@@ -10,0 +12,3 @@
++// SATCOM_HOST_INTEGRATION_BEGIN
++SatcomHostServices::instance().install({});
++// SATCOM_HOST_INTEGRATION_END
+"""
+    allowed, detail = MODULE.mainwindow_satcom_diff_allowed(allowed_diff)
+    assert allowed, detail
+
+    outside_marker = """diff --git a/src/MainWindow.cpp b/src/MainWindow.cpp
+--- a/src/MainWindow.cpp
++++ b/src/MainWindow.cpp
+@@ -10,0 +11 @@
++currentMonitorFreq = 0.0;
+"""
+    allowed, _ = MODULE.mainwindow_satcom_diff_allowed(outside_marker)
+    assert not allowed
+
+    destructive = """diff --git a/src/MainWindow.cpp b/src/MainWindow.cpp
+--- a/src/MainWindow.cpp
++++ b/src/MainWindow.cpp
+@@ -10 +10 @@
+-currentMonitorFreq = 100e6;
++// SATCOM_HOST_INTEGRATION_BEGIN
++currentMonitorFreq = 0.0;
++// SATCOM_HOST_INTEGRATION_END
+"""
+    allowed, _ = MODULE.mainwindow_satcom_diff_allowed(destructive)
+    assert not allowed
+
     print("P25 guard self-test passed")
     return 0
 

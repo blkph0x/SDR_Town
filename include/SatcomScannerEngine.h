@@ -70,6 +70,8 @@ struct SatcomScannerSnapshot {
     bool deviceConnected = false;
     std::string streamState;
     bool audioMonitoring = false;
+    bool sharedMainAudio = false;
+    bool hostTakeoverActive = false;
     uint64_t iqDiscontinuities = 0;
     std::vector<float> spectrumDb;
     double spectrumCenterHz = 0.0;
@@ -165,6 +167,8 @@ private:
     bool tuneAndConfirm(size_t deviceIndex, double frequencyHz, int timeoutMs, std::string* error);
     bool waitForOperationalStream(size_t deviceIndex, int timeoutMs, std::string* error);
     bool ensureAudioOutput(std::string* error = nullptr);
+    bool beginHostTakeover(size_t deviceIndex, std::string* error);
+    void endHostTakeover();
     void pushMonitorAudio(const float* samples, size_t count);
     void shutdownAudioOutput();
     void capturePreviousDeviceState(size_t deviceIndex);
@@ -224,7 +228,10 @@ private:
     std::atomic<uint64_t> sstvAudioFirstSample_{0};
 
     std::mutex audioMutex_;
-    std::unique_ptr<AudioEngine> audio_;
+    AudioEngine* audio_ = nullptr; // borrowed from MainWindow or fallbackAudio_
+    std::unique_ptr<AudioEngine> fallbackAudio_;
+    bool usingSharedAudio_ = false;
+    bool hostTakeoverActive_ = false;
 
     std::shared_ptr<SstvReceiverFeed> sstvFeed_;
     mutable std::mutex sstvMutex_;

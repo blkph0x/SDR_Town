@@ -18,6 +18,7 @@
 #include "InmarsatBandPlan.h"
 #include "InmarsatMessageStore.h"
 #include "SatcomScannerEngine.h"
+#include "SatcomHostServices.h"
 #include "SatPassPlanner.h"
 #include "SatObserverConfig.h"
 #include "TleStore.h"
@@ -4910,6 +4911,167 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         {
             auto* hub = new SatcomHubWidget(this);
             hub->setObjectName("satcomHub");
+            // SATCOM_HOST_INTEGRATION_BEGIN
+            struct SatcomMainWindowSessionState {
+                std::mutex mutex;
+                bool active = false;
+                bool tookOverListen = false;
+                size_t deviceIndex = static_cast<size_t>(-1);
+                std::vector<std::pair<std::weak_ptr<Receiver>, bool>> receiverStates;
+            };
+            auto satcomHostState = std::make_shared<SatcomMainWindowSessionState>();
+
+            SatcomHostCallbacks satcomCallbacks;
+            satcomCallbacks.beginReceiverTakeover =
+                [this, satcomHostState](size_t deviceIndex, std::string* error) -> bool {
+                    auto beginOnGui = [this, satcomHostState, deviceIndex]()
+                        -> std::pair<bool, std::string> {
+                        if (shutdownStarted.load(std::memory_order_acquire)) {
+                            return {false, "SDR Town is shutting down"};
+                        }
+
+                        std::lock_guard<std::mutex> sessionLock(satcomHostState->mutex);
+                        if (satcomHostState->active) {
+                            if (satcomHostState->deviceIndex == deviceIndex)
+                                return {true, {}};
+                            return {false, "Another Satcom receiver takeover is already active"};
+                        }
+
+                        std::unique_lock<std::mutex> receiverListLock(
+                            receiversMutex, std::try_to_lock);
+                        if (!receiverListLock.owns_lock()) {
+                            return {false, "Listen receiver is busy; try Satcom Start again"};
+                        }
+
+                        std::vector<std::shared_ptr<Receiver>> matching;
+                        for (const auto& rx : receivers) {
+                            if (rx && rx->deviceIndex == deviceIndex) matching.push_back(rx);
+                        }
+
+                        std::vector<std::unique_lock<std::mutex>> receiverLocks;
+                        receiverLocks.reserve(matching.size());
+                        for (const auto& rx : matching) {
+                            receiverLocks.emplace_back(rx->stateMutex, std::try_to_lock);
+                            if (!receiverLocks.back().owns_lock()) {
+                                return {false, "Listen receiver state is busy; try Satcom Start again"};
+                            }
+                        }
+
+                        for (const auto& rx : matching) {
+                            if (rx->active &&
+                                (rx->p25VoiceDecodeEnabled ||
+                                 rx->p25IndependentTrafficSource ||
+                                 rx->p25ControlChannelMute)) {
+                                return {false,
+                                    "P25 is active on the selected receiver; choose another SDR"};
+                            }
+                        }
+
+                        satcomHostState->receiverStates.clear();
+                        satcomHostState->tookOverListen = false;
+                        for (const auto& rx : matching) {
+                            satcomHostState->receiverStates.emplace_back(rx, rx->active);
+                            if (rx->active) {
+                                satcomHostState->tookOverListen = true;
+                                rx->active = false;
+                            }
+                        }
+                        satcomHostState->active = true;
+                        satcomHostState->deviceIndex = deviceIndex;
+                        setProperty("satcomTakeoverActive", true);
+                        return {true, {}};
+                    };
+
+                    std::pair<bool, std::string> result;
+                    if (QThread::currentThread() == thread()) {
+                        result = beginOnGui();
+                    } else {
+                        const bool invoked = QMetaObject::invokeMethod(
+                            this,
+                            [&]() { result = beginOnGui(); },
+                            Qt::BlockingQueuedConnection);
+                        if (!invoked) result = {false, "Main SDR Town window is unavailable"};
+                    }
+                    if (error) *error = result.second;
+                    return result.first;
+                };
+
+            satcomCallbacks.endReceiverTakeover = [this, satcomHostState]() {
+                auto endOnGui = [this, satcomHostState]() {
+                    std::lock_guard<std::mutex> sessionLock(satcomHostState->mutex);
+                    if (!satcomHostState->active) return;
+
+                    std::lock_guard<std::mutex> receiverListLock(receiversMutex);
+                    for (const auto& saved : satcomHostState->receiverStates) {
+                        if (auto rx = saved.first.lock()) {
+                            std::lock_guard<std::mutex> receiverLock(rx->stateMutex);
+                            rx->active = saved.second;
+                        }
+                    }
+                    satcomHostState->receiverStates.clear();
+                    satcomHostState->active = false;
+                    satcomHostState->tookOverListen = false;
+                    satcomHostState->deviceIndex = static_cast<size_t>(-1);
+                    setProperty("satcomTakeoverActive", false);
+                    statusBar()->showMessage(
+                        "Satcom stopped — previous Listen receiver restored", 3500);
+                };
+
+                if (QThread::currentThread() == thread()) {
+                    endOnGui();
+                } else {
+                    QMetaObject::invokeMethod(this, endOnGui, Qt::QueuedConnection);
+                }
+            };
+
+            satcomCallbacks.acquireAudioEngine = [this](std::string* error) -> AudioEngine* {
+                AudioEngine* result = nullptr;
+                auto acquireOnGui = [this, &result]() {
+                    result = ensureAudioOutputActive("Satcom monitor");
+                };
+                if (QThread::currentThread() == thread()) {
+                    acquireOnGui();
+                } else {
+                    const bool invoked = QMetaObject::invokeMethod(
+                        this, acquireOnGui, Qt::BlockingQueuedConnection);
+                    if (!invoked && error) *error = "Main SDR Town audio service is unavailable";
+                }
+                if (!result && error && error->empty())
+                    *error = "No configured SDR Town playback output is active";
+                return result;
+            };
+
+            satcomCallbacks.publishSpectrum =
+                [this, satcomHostState](const std::vector<float>& powerDb,
+                                        double centerHz,
+                                        double sampleRateHz) {
+                    bool mirrorMainSpectrum = false;
+                    {
+                        std::lock_guard<std::mutex> lock(satcomHostState->mutex);
+                        mirrorMainSpectrum =
+                            satcomHostState->active && satcomHostState->tookOverListen;
+                    }
+                    if (!mirrorMainSpectrum) return;
+                    QMetaObject::invokeMethod(
+                        this,
+                        [this, powerDb, centerHz, sampleRateHz]() {
+                            if (spectrumWidget)
+                                spectrumWidget->updateSpectrum(
+                                    powerDb, centerHz, sampleRateHz);
+                        },
+                        Qt::QueuedConnection);
+                };
+
+            satcomCallbacks.publishStatus = [this](const std::string& status) {
+                const QString message = QString::fromStdString(status);
+                QMetaObject::invokeMethod(
+                    this,
+                    [this, message]() { statusBar()->showMessage(message, 3000); },
+                    Qt::QueuedConnection);
+            };
+
+            SatcomHostServices::instance().install(std::move(satcomCallbacks));
+            // SATCOM_HOST_INTEGRATION_END
             connect(hub, &SatcomHubWidget::requestOpenSstvLive, this, [this]() {
                 for (QAction* a : menuBar()->actions()) {
                     if (!a->menu()) continue;
@@ -12731,6 +12893,12 @@ IqTestCaptureResult MainWindow::captureIqTestWindow(const std::string& label,  d
 
 void MainWindow::stopAllStreaming()
 {
+        // SATCOM_HOST_INTEGRATION_BEGIN
+        // Satcom owns a worker, device lease and a borrowed MainWindow audio
+        // pointer. End that session before the shared GUI/audio/device services.
+        SatcomScannerEngine::instance().stop();
+        SatcomHostServices::instance().clear();
+        // SATCOM_HOST_INTEGRATION_END
         if (stopAllStreamingStarted.exchange(true, std::memory_order_acq_rel)) {
             // closeEvent() and aboutToQuit can both fire during a normal close.  Teardown of
             // Soapy/miniaudio is not guaranteed to be re-entrant, so keep shutdown one-shot.
