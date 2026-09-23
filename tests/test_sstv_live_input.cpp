@@ -243,5 +243,6 @@ TEST_CASE("SSTV RF auto selection detects sideband energy and safe fallbacks","[
     CHECK(SstvRfMode::select("auto",DemodMode::AUTO,145.8e6,symmetric,145.8e6,rate).mode==DemodMode::NFM);
     CHECK(SstvRfMode::select("auto",DemodMode::AUTO,7.171e6).mode==DemodMode::LSB);
     CHECK(SstvRfMode::select("auto",DemodMode::AUTO,14.230e6).mode==DemodMode::USB);
+    CHECK(SstvRfMode::select("auto",DemodMode::NFM,14.230e6).mode==DemodMode::USB);
     CHECK(SstvRfMode::select("nfm",DemodMode::USB,14.230e6).mode==DemodMode::NFM);
 }
