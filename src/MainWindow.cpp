@@ -11282,7 +11282,7 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             if (!window->startLive(output, mode)) {
                 return {{"ok", false}, {"status", 400},
                         {"error", window->statusMessage().isEmpty()
-                                      ? QStringLiteral("Live SSTV did not start (choose Auto/NFM/USB/LSB and a new output folder)")
+                                      ? QStringLiteral("Live SSTV did not start (need NFM, new output folder)")
                                       : window->statusMessage()}};
             }
             return {{"ok", true}, {"state", sdrTownControlStatusSnapshot()}};
