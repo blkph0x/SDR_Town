@@ -31,17 +31,15 @@ jobs:
       - name: Apply guarded source patch
         run: python3 scripts/apply_hf_epoch_and_sstv_fix.py
 
-      - name: Validate frozen P25 and HF contracts
+      - name: Validate generated source contracts
         shell: bash
         run: |
           set -euo pipefail
           python3 scripts/test_no_p25_guard.py
           python3 scripts/verify_hf_integration.py
-          base="$(git merge-base origin/master HEAD)"
-          python3 scripts/verify_no_p25_changes.py --base "${base}" --head HEAD
           git diff --check
 
-      - name: Commit source-only fix
+      - name: Commit generated source locally
         shell: bash
         run: |
           set -euo pipefail
@@ -55,4 +53,15 @@ jobs:
             tests/test_hf_demod.cpp \
             docs/HF_RECEIVE.md
           git commit -m "Reset HF state on stream epochs and preserve SSTV provenance"
-          git push origin HEAD:fix/hf-receive-hardening
+
+      - name: Validate committed frozen-P25 boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$(git merge-base origin/master HEAD)"
+          python3 scripts/verify_no_p25_changes.py --base "${base}" --head HEAD
+          python3 scripts/verify_hf_integration.py
+
+      - name: Push validated source commit
+        shell: bash
+        run: git push origin HEAD:fix/hf-receive-hardening
