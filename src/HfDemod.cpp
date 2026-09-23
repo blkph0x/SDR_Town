@@ -82,12 +82,26 @@ struct State {
     double decoderRate = 0.0;
 };
 
-std::mutex registryMutex;
-std::unordered_map<const void*, std::shared_ptr<State>> registry;
+// Demod.cpp retains one legacy process-lifetime Demodulator for compatibility.
+// Static destruction order across translation units is unspecified, so an ordinary
+// namespace-static mutex/map here can be destroyed before that Demodulator calls
+// HfDemod::release() during process shutdown. Keep the tiny registry infrastructure
+// alive until process termination; normal Demodulator destruction still erases its
+// per-owner State, so this does not accumulate receiver DSP state during runtime.
+std::mutex& registryMutex() {
+    static auto* mutex = new std::mutex();
+    return *mutex;
+}
+
+std::unordered_map<const void*, std::shared_ptr<State>>& registry() {
+    static auto* states =
+        new std::unordered_map<const void*, std::shared_ptr<State>>();
+    return *states;
+}
 
 std::shared_ptr<State> stateFor(const void* owner) {
-    std::lock_guard<std::mutex> lock(registryMutex);
-    auto& slot = registry[owner];
+    std::lock_guard<std::mutex> lock(registryMutex());
+    auto& slot = registry()[owner];
     if (!slot) slot = std::make_shared<State>();
     return slot;
 }
@@ -681,9 +695,10 @@ void reset(const void* owner) noexcept {
     if (!owner) return;
     std::shared_ptr<State> state;
     {
-        std::lock_guard<std::mutex> lock(registryMutex);
-        const auto found = registry.find(owner);
-        if (found == registry.end()) return;
+        std::lock_guard<std::mutex> lock(registryMutex());
+        auto& states = registry();
+        const auto found = states.find(owner);
+        if (found == states.end()) return;
         state = found->second;
     }
     std::lock_guard<std::mutex> stateLock(state->mutex);
@@ -692,8 +707,8 @@ void reset(const void* owner) noexcept {
 
 void release(const void* owner) noexcept {
     if (!owner) return;
-    std::lock_guard<std::mutex> lock(registryMutex);
-    registry.erase(owner);
+    std::lock_guard<std::mutex> lock(registryMutex());
+    registry().erase(owner);
 }
 
 } // namespace HfDemod
