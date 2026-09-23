@@ -86,25 +86,14 @@ void SatcomHubWidget::hideEvent(QHideEvent* event) {
 
 void SatcomHubWidget::stopAutoCapture(bool keepHandledKey) {
     auto& engine = SatcomScannerEngine::instance();
-    auto& manager = DeviceManager::instance();
     engine.stopRecording();
     engine.disarmPass();
     if (autoEngineWasRunning_) engine.skip();
     else engine.stop();
 
-    // If auto-capture temporarily took a live listening receiver, put it back
-    // on the exact centre frequency it had before AOS and restore listen lease
-    // semantics. Never restore over a P25/Inmarsat/Aircraft owner.
-    if (!autoEngineWasRunning_ && autoDeviceIndex_ != static_cast<size_t>(-1) &&
-        std::isfinite(autoPreviousCenterHz_) && autoPreviousCenterHz_ > 0.0) {
-        auto previous = static_cast<DeviceManager::DeviceLeaseOwner>(autoPreviousLeaseOwner_);
-        if (previous == DeviceManager::DeviceLeaseOwner::None ||
-            previous == DeviceManager::DeviceLeaseOwner::Satcom) {
-            previous = DeviceManager::DeviceLeaseOwner::Listen;
-        }
-        std::string ignored;
-        manager.retuneWithLease(autoDeviceIndex_, autoPreviousCenterHz_, previous, true, &ignored);
-    }
+    // SatcomScannerEngine owns the single authoritative device/session restore.
+    // Do not retune a second time here: the host callback reactivates Listen only
+    // after the original hardware centre and stream state are restored.
 
     autoCaptureOwned_ = false;
     autoEngineWasRunning_ = false;

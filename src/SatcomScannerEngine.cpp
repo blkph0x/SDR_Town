@@ -1,5 +1,6 @@
 #include "SatcomScannerEngine.h"
 #include "AudioEngine.h"
+#include "SatcomHostServices.h"
 #include "Ax25AprsDecoder.h"
 #include "AptImageDecoder.h"
 #include "DeviceManager.h"
@@ -353,6 +354,55 @@ void SatcomScannerEngine::restorePreviousDeviceState() {
     manager.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Satcom);
 }
 
+bool SatcomScannerEngine::beginHostTakeover(size_t deviceIndex, std::string* error) {
+    auto& host = SatcomHostServices::instance();
+    if (!host.installed()) {
+        if (error) error->clear();
+        return true;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (hostTakeoverActive_) {
+            if (error) error->clear();
+            return true;
+        }
+    }
+
+    std::string hostError;
+    if (!host.beginReceiverTakeover(deviceIndex, &hostError)) {
+        const std::string message = hostError.empty()
+            ? "SDR Town could not park the selected Listen receiver"
+            : hostError;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            lastStatus_ = message;
+        }
+        if (error) *error = message;
+        return false;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        hostTakeoverActive_ = true;
+    }
+    host.publishStatus("Satcom owns the selected receiver");
+    if (error) error->clear();
+    return true;
+}
+
+void SatcomScannerEngine::endHostTakeover() {
+    bool active = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        active = hostTakeoverActive_;
+        hostTakeoverActive_ = false;
+    }
+    if (!active) return;
+    SatcomHostServices::instance().endReceiverTakeover();
+    SatcomHostServices::instance().publishStatus("Satcom receiver released");
+}
+
 bool SatcomScannerEngine::prepareReceiverForSatcom(size_t deviceIndex, bool force,
                                                    std::string* error) {
     auto& manager = DeviceManager::instance();
@@ -428,6 +478,10 @@ bool SatcomScannerEngine::prepareReceiverForSatcom(size_t deviceIndex, bool forc
         deviceLabel_ = deviceIndex < devices.size() ? devices[deviceIndex].label : "receiver";
         deviceConnected_ = true;
         streamState_ = "live hardware";
+    }
+    if (!beginHostTakeover(deviceIndex, error)) {
+        restorePreviousDeviceState();
+        return false;
     }
     if (error) error->clear();
     return true;
@@ -541,6 +595,40 @@ bool SatcomScannerEngine::ensureAudioOutput(std::string* error) {
         return true;
     }
 
+    std::string hostError;
+    if (AudioEngine* shared =
+            SatcomHostServices::instance().acquireAudioEngine(&hostError)) {
+        if (shared->activeOutputCount() == 0) {
+            if (error) *error = hostError.empty()
+                ? "Configured SDR Town playback output is unavailable"
+                : hostError;
+            std::lock_guard<std::mutex> stateLock(mutex_);
+            audioMonitoring_ = false;
+            return false;
+        }
+        fallbackAudio_.reset();
+        audio_ = shared;
+        usingSharedAudio_ = true;
+        {
+            std::lock_guard<std::mutex> stateLock(mutex_);
+            audioMonitoring_ = true;
+            lastStatus_ = "Satellite audio routed through SDR Town";
+        }
+        if (error) error->clear();
+        return true;
+    }
+
+    // In the GUI, never open a competing miniaudio device behind MainWindow.
+    // A fallback is retained only for standalone/CLI tests where no host exists.
+    if (SatcomHostServices::instance().installed()) {
+        if (error) *error = hostError.empty()
+            ? "SDR Town playback output could not be activated"
+            : hostError;
+        std::lock_guard<std::mutex> stateLock(mutex_);
+        audioMonitoring_ = false;
+        return false;
+    }
+
     try {
         auto candidate = std::make_unique<AudioEngine>();
         const auto outputs = candidate->enumeratePlaybackDevices();
@@ -564,7 +652,9 @@ bool SatcomScannerEngine::ensureAudioOutput(std::string* error) {
             audioMonitoring_ = false;
             return false;
         }
-        audio_ = std::move(candidate);
+        fallbackAudio_ = std::move(candidate);
+        audio_ = fallbackAudio_.get();
+        usingSharedAudio_ = false;
         std::lock_guard<std::mutex> stateLock(mutex_);
         audioMonitoring_ = true;
         return true;
@@ -582,17 +672,23 @@ void SatcomScannerEngine::pushMonitorAudio(const float* samples, size_t count) {
     if (!samples || count == 0) return;
     std::lock_guard<std::mutex> lock(audioMutex_);
     if (!audio_) return;
-    audio_->trimQueuedAudio(12000);
+    // The MainWindow engine can also be carrying Listen audio from a second SDR.
+    // Trimming that shared queue would discard another receiver's PCM. Keep the
+    // Satcom-only latency clamp only for the standalone fallback engine.
+    if (!usingSharedAudio_.load(std::memory_order_acquire))
+        audio_->trimQueuedAudio(12000);
     audio_->pushAudio(samples, count);
 }
 
 void SatcomScannerEngine::shutdownAudioOutput() {
-    std::unique_ptr<AudioEngine> old;
+    std::unique_ptr<AudioEngine> oldFallback;
     {
         std::lock_guard<std::mutex> lock(audioMutex_);
-        old = std::move(audio_);
+        audio_ = nullptr;
+        usingSharedAudio_ = false;
+        oldFallback = std::move(fallbackAudio_);
     }
-    if (old) old->clearBuffers();
+    if (oldFallback) oldFallback->clearBuffers();
     std::lock_guard<std::mutex> stateLock(mutex_);
     audioMonitoring_ = false;
 }
@@ -630,6 +726,7 @@ bool SatcomScannerEngine::start(bool force) {
             lastStatus_ = deviceError;
         }
         restorePreviousDeviceState();
+        endHostTakeover();
         return false;
     }
 
@@ -673,6 +770,7 @@ void SatcomScannerEngine::stop() {
     }
     resetChronologicalInput();
     restorePreviousDeviceState();
+    endHostTakeover();
     pushLog(SatcomLog::EventType::Stop, currentHz_, "scan stop");
     notifyUpdate();
 }
@@ -818,6 +916,8 @@ SatcomScannerSnapshot SatcomScannerEngine::snapshot() const {
         snapshot.deviceConnected = deviceConnected_;
         snapshot.streamState = streamState_;
         snapshot.audioMonitoring = audioMonitoring_;
+        snapshot.sharedMainAudio = usingSharedAudio_.load(std::memory_order_acquire);
+        snapshot.hostTakeoverActive = hostTakeoverActive_;
         snapshot.spectrumDb = spectrumDb_;
         snapshot.spectrumCenterHz = spectrumCenterHz_;
         snapshot.spectrumRateHz = spectrumRateHz_;
@@ -985,7 +1085,10 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
             lastStatus_ = failure;
         }
         SatPassPlanner::instance().disarm();
-        if (!engineWasRunning) restorePreviousDeviceState();
+        if (!engineWasRunning) {
+            restorePreviousDeviceState();
+            endHostTakeover();
+        }
         if (error) *error = failure;
         return false;
     }
@@ -1040,6 +1143,7 @@ void SatcomScannerEngine::disarmPass() {
     if (!running) {
         shutdownAudioOutput();
         restorePreviousDeviceState();
+        endHostTakeover();
     }
     notifyUpdate();
 }
@@ -1080,6 +1184,7 @@ void SatcomScannerEngine::tickPassTrack() {
                 run_.store(false, std::memory_order_release);
                 shutdownAudioOutput();
                 restorePreviousDeviceState();
+                endHostTakeover();
             }
         }
         return;
@@ -1154,6 +1259,7 @@ bool SatcomScannerEngine::refreshSpectrum(size_t deviceIndex, double* peakHz,
         streamState_ = manager.getRuntimeStateLabel(deviceIndex);
         deviceConnected_ = streamState_ == "live hardware";
     }
+    SatcomHostServices::instance().publishSpectrum(power, center, rate);
     return true;
 }
 
@@ -1453,6 +1559,7 @@ void SatcomScannerEngine::workerLoop() {
         shutdownAudioOutput();
         resetChronologicalInput();
         restorePreviousDeviceState();
+        endHostTakeover();
         notifyUpdate();
     }
 }

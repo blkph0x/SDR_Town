@@ -2,6 +2,7 @@
 #include "Ax25AprsDecoder.h"
 #include "SatcomAsyncLog.h"
 #include "SatcomIqCursor.h"
+#include "SatcomHostServices.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -363,4 +364,71 @@ TEST_CASE("Satcom async log drops oldest under flood", "[satcom][log]")
     const auto lines = log.recentLines(20);
     REQUIRE(lines.size() <= 20);
     REQUIRE_FALSE(lines.empty());
+}
+
+TEST_CASE("Satcom host services forward MainWindow ownership", "[satcom][host]")
+{
+    auto& host = SatcomHostServices::instance();
+    host.clear();
+    struct Reset {
+        SatcomHostServices& host;
+        ~Reset() { host.clear(); }
+    } reset{host};
+
+    int beginCount = 0;
+    int endCount = 0;
+    int spectrumCount = 0;
+    int statusCount = 0;
+    size_t selectedDevice = static_cast<size_t>(-1);
+    double publishedCenter = 0.0;
+
+    SatcomHostCallbacks callbacks;
+    callbacks.beginReceiverTakeover =
+        [&](size_t deviceIndex, std::string* error) {
+            ++beginCount;
+            selectedDevice = deviceIndex;
+            if (error) error->clear();
+            return true;
+        };
+    callbacks.endReceiverTakeover = [&]() { ++endCount; };
+    callbacks.acquireAudioEngine = [](std::string* error) -> AudioEngine* {
+        if (error) *error = "test has no audio device";
+        return nullptr;
+    };
+    callbacks.publishSpectrum =
+        [&](const std::vector<float>& power, double centerHz, double) {
+            ++spectrumCount;
+            publishedCenter = centerHz;
+            CHECK(power.size() == 3);
+        };
+    callbacks.publishStatus = [&](const std::string& status) {
+        ++statusCount;
+        CHECK(status == "armed");
+    };
+    host.install(std::move(callbacks));
+
+    REQUIRE(host.installed());
+    std::string error;
+    REQUIRE(host.beginReceiverTakeover(2, &error));
+    CHECK(error.empty());
+    CHECK(beginCount == 1);
+    CHECK(selectedDevice == 2);
+
+    host.publishSpectrum({-100.0f, -80.0f, -95.0f}, 145.8e6, 2.048e6);
+    CHECK(spectrumCount == 1);
+    CHECK(publishedCenter == 145.8e6);
+
+    host.publishStatus("armed");
+    CHECK(statusCount == 1);
+    host.endReceiverTakeover();
+    CHECK(endCount == 1);
+
+    CHECK(host.acquireAudioEngine(&error) == nullptr);
+    CHECK(error == "test has no audio device");
+
+    host.clear();
+    CHECK_FALSE(host.installed());
+    error = "stale";
+    CHECK(host.beginReceiverTakeover(9, &error));
+    CHECK(error.empty());
 }

@@ -47,6 +47,11 @@ PROTECTED_PATTERNS: tuple[str, ...] = (
     "include/MainWindow.h",
 )
 
+SATCOM_MAINWINDOW_PATH = "src/MainWindow.cpp"
+SATCOM_MARKER_BEGIN = "// SATCOM_HOST_INTEGRATION_BEGIN"
+SATCOM_MARKER_END = "// SATCOM_HOST_INTEGRATION_END"
+SATCOM_HOST_INCLUDE = '#include "SatcomHostServices.h"'
+
 
 def normalize_path(path: str) -> str:
     return path.strip().replace("\\", "/").lstrip("./")
@@ -70,6 +75,60 @@ def protected_paths(paths: Iterable[str]) -> list[tuple[str, str]]:
         if reason is not None:
             blocked.append((path, reason))
     return blocked
+
+
+def mainwindow_satcom_diff_allowed(diff_text: str) -> tuple[bool, str]:
+    # Allow only additive, explicitly marked Satcom host wiring in MainWindow.
+    marker_depth = 0
+    saw_marker = False
+    for line in diff_text.splitlines():
+        if (line.startswith("diff --git ") or line.startswith("index ") or
+                line.startswith("--- ") or line.startswith("+++ ") or
+                line.startswith("@@")):
+            continue
+        if line.startswith("-"):
+            return False, "MainWindow Satcom integration may not remove or replace existing lines"
+        if not line.startswith("+"):
+            continue
+
+        content = line[1:]
+        stripped = content.strip()
+        if content == SATCOM_HOST_INCLUDE:
+            continue
+        if stripped == SATCOM_MARKER_BEGIN:
+            marker_depth += 1
+            saw_marker = True
+            continue
+        if stripped == SATCOM_MARKER_END:
+            marker_depth -= 1
+            if marker_depth < 0:
+                return False, "Satcom integration marker order is invalid"
+            continue
+        if marker_depth > 0:
+            continue
+        return False, f"unmarked MainWindow addition: {content[:100]!r}"
+
+    if marker_depth != 0:
+        return False, "Satcom integration markers are unbalanced"
+    if not saw_marker:
+        return False, "no Satcom integration marker block was found"
+    return True, ""
+
+
+def git_path_diff(base: str, head: str, path: str) -> str:
+    command = ["git", "diff", "--unified=0", f"{base}...{head}", "--", path]
+    try:
+        result = subprocess.run(
+            command,
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except subprocess.CalledProcessError as exc:
+        detail = exc.stderr.strip() or exc.stdout.strip() or str(exc)
+        raise RuntimeError(f"could not inspect {path!r}: {detail}") from exc
+    return result.stdout
 
 
 def git_changed_paths(base: str, head: str) -> list[str]:
@@ -131,7 +190,22 @@ def main() -> int:
         print(f"P25 guard error: {exc}", file=sys.stderr)
         return 2
 
-    blocked = protected_paths(changed)
+    blocked = []
+    for path, pattern in protected_paths(changed):
+        if path == SATCOM_MAINWINDOW_PATH and args.paths is None:
+            try:
+                allowed, detail = mainwindow_satcom_diff_allowed(
+                    git_path_diff(args.base, args.head, path)
+                )
+            except RuntimeError as exc:
+                print(f"P25 guard error: {exc}", file=sys.stderr)
+                return 2
+            if allowed:
+                print("P25 guard: accepted additive marked Satcom host wiring in MainWindow.")
+                continue
+            pattern = f"{pattern}; {detail}"
+        blocked.append((path, pattern))
+
     if blocked:
         print("ERROR: this branch is not allowed to modify the frozen P25 pipeline.", file=sys.stderr)
         print("Protected changes detected:", file=sys.stderr)
