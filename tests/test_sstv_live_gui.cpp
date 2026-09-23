@@ -38,7 +38,7 @@ TEST_CASE("Live SSTV GUI finish saves and cancel releases its receiver","[sstv-l
         QTemporaryDir directory; REQUIRE(directory.isValid());
         auto feed=std::make_shared<SstvReceiverFeed>();
         SstvWindow window(decodeSstvImageFile);
-        window.setLiveSource([feed](const auto& finish)->SstvWindow::Decode {
+        window.setLiveSource([feed](const auto& finish,const auto&)->SstvWindow::Decode {
             return [feed,finish](const auto&,const auto& output,const auto& mode,const auto& cancel,const auto& preview) {
                 return decodeSstvLive(feed,[]{},output,mode,[finish]{return finish->load();},cancel,preview);
             };
@@ -47,10 +47,13 @@ TEST_CASE("Live SSTV GUI finish saves and cancel releases its receiver","[sstv-l
         REQUIRE(window.startLive(directory.filePath("live"),"auto"));
         REQUIRE_FALSE(window.startLive(directory.filePath("duplicate"),"auto"));
         REQUIRE_FALSE(window.findChild<QComboBox*>("sstvSource")->isEnabled());
+        REQUIRE(window.findChild<QComboBox*>("sstvRfMode") != nullptr);
+        REQUIRE_FALSE(window.findChild<QComboBox*>("sstvRfMode")->isEnabled());
         QTimer::singleShot(100,&window,[&]{if(cancel) window.close();else window.finishLive();});
         REQUIRE(wait(window));
         CHECK(QFileInfo::exists(directory.filePath("live/sstv-report.json"))==!cancel);
         CHECK(window.findChild<QComboBox*>("sstvSource")->isEnabled());
+        CHECK(window.findChild<QComboBox*>("sstvRfMode")->isEnabled());
         auto next=feed->attach(); feed->detach(next);
         window.close();
     }
@@ -74,7 +77,7 @@ TEST_CASE("Live SSTV window saves independently verified streamed images","[sstv
     REQUIRE((status==MA_SUCCESS || status==MA_AT_END)); REQUIRE(read==length);
     auto feed=std::make_shared<SstvReceiverFeed>();
     SstvWindow window(decodeSstvImageFile);
-    window.setLiveSource([&](const auto& finish)->SstvWindow::Decode {
+    window.setLiveSource([&](const auto& finish,const auto&)->SstvWindow::Decode {
         return [&,finish](const auto&,const auto& output,const auto& mode,const auto& cancel,const auto& preview) {
             size_t offset=0; bool beforeAttach=true;
             // Deterministic source advances one block per worker poll, through the
