@@ -22,7 +22,7 @@ class SstvWindow final : public QDialog {
 public:
     using Decode = std::function<nlohmann::json(const QString&, const QString&, const QString&,
                                                const std::function<bool()>&, const SstvPreview&)>;
-    using LiveOpen = std::function<Decode(const std::shared_ptr<std::atomic<bool>>&)>;
+    using LiveOpen = std::function<Decode(const std::shared_ptr<std::atomic<bool>>&, const QString&)>;
     explicit SstvWindow(Decode decode, QWidget* parent = nullptr);
     ~SstvWindow() override;
     bool startDecode(const QString& input, const QString& output, const QString& mode);
@@ -37,6 +37,7 @@ public:
     QStringList imageLabels() const;
     bool liveSelected() const;
     QString selectedMode() const;
+    QString selectedRfMode() const;
 signals:
     void decodeFinished(bool success);
 protected:
@@ -53,7 +54,7 @@ private:
     QThread* worker_ = nullptr;
     bool closePending_ = false;
     QLineEdit *input_, *output_;
-    QComboBox *mode_, *source_;
+    QComboBox *mode_, *source_, *rfMode_;
     QPushButton *open_, *destination_, *decodeButton_, *cancelButton_, *folder_;
     QPushButton* finishButton_;
     QLabel *status_ = nullptr;
