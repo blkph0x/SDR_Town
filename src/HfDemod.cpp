@@ -72,6 +72,7 @@ struct State {
     float squelchGain = 0.0f;
     int squelchHang = 0;
     float clickFade = 0.0f;
+    int startupMuteSamples = 0;
 
     uint64_t decoderEpoch = 0;
     uint64_t decoderSamples = 0;
@@ -112,6 +113,12 @@ void clearStreamingState(State& state) {
     state.squelchGain = 0.0f;
     state.squelchHang = 0;
     state.clickFade = 0.0f;
+    // Hold output through the FIR group delay and the first few milliseconds of
+    // detector/carrier settling. Without this, the all-zero delay line creates
+    // a one-block AM step that can hit the final limiter and masks the actual
+    // audio low-pass response used by decoder workflows.
+    state.startupMuteSamples = static_cast<int>(0.012 * kWorkRateHz) +
+        static_cast<int>(state.channelTaps.size() / 2);
     state.decoderContinuous = false;
     state.explicitReset = false;
 }
@@ -624,6 +631,12 @@ std::vector<float> demodulate(
             coefficient * (gate - state->squelchGain);
         state->squelchGain =
             std::clamp(state->squelchGain, 0.0f, 1.0f);
+
+        if (state->startupMuteSamples > 0) {
+            --state->startupMuteSamples;
+            sample = 0.0f;
+            continue;
+        }
 
         state->clickFade +=
             static_cast<float>(
