@@ -37,6 +37,10 @@ def main() -> int:
             "engine does not acquire MainWindow audio")
     require("SatcomHostServices::instance().publishSpectrum" in engine_cpp,
             "engine does not publish shared spectrum")
+    require("if (!usingSharedAudio_.load(std::memory_order_acquire))" in engine_cpp,
+            "shared MainWindow audio queue can still be trimmed by Satcom")
+    require("snapshot.sharedMainAudio = usingSharedAudio_.load(std::memory_order_acquire);" in engine_cpp,
+            "shared audio status is not read atomically")
     require("restorePreviousDeviceState();\n    endHostTakeover();" in engine_cpp,
             "receiver restoration is not followed by host restoration")
 
