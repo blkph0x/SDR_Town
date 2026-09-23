@@ -49,6 +49,7 @@ jobs:
           python3 scripts/verify_no_p25_changes.py --base "${base}" --head HEAD
           python3 scripts/test_no_p25_guard.py
           python3 scripts/verify_satcom_host_integration.py
+          python3 scripts/verify_hf_integration.py
 
       - name: Compile standalone non-P25 smoke binary
         shell: bash
@@ -68,13 +69,25 @@ jobs:
         shell: bash
         run: ./non_p25_smoke
 
+      - name: Compile and run isolated HF smoke binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++20 -O2 -Wall -Wextra -pedantic \
+            -Iinclude \
+            tests/hf_smoke.cpp \
+            src/HfDemod.cpp \
+            -o hf_smoke
+          ./hf_smoke
+
       - name: Check Python hardening tools
         shell: bash
         run: |
           python3 -m py_compile \
             scripts/verify_no_p25_changes.py \
             scripts/test_no_p25_guard.py \
-            scripts/verify_satcom_host_integration.py
+            scripts/verify_satcom_host_integration.py \
+            scripts/verify_hf_integration.py
 
   sstv-helper:
     name: SSTV helper transport and self-test
