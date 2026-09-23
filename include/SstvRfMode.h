@@ -40,10 +40,9 @@ inline Selection select(const std::string& requested,
     const DemodMode explicitMode = parseExplicit(requested);
     if (supported(explicitMode)) return {explicitMode, 1.0, "explicit"};
 
-    // Auto first respects an already-valid live receiver mode. This avoids
-    // retuning an operator who has already centred/selected the correct sideband.
-    if (supported(currentMode)) return {currentMode, 0.98, "current receiver mode"};
-
+    // Auto uses measured sideband energy first. This is important when the
+    // receiver is still on its default NFM mode but the tuned HF SSTV signal is
+    // actually USB or LSB.
     if (!spectrumDb.empty() && spectrumRateHz > 0.0 &&
         std::isfinite(spectrumCenterHz) && std::isfinite(targetHz)) {
         const double binHz = spectrumRateHz / static_cast<double>(spectrumDb.size());
@@ -88,6 +87,9 @@ inline Selection select(const std::string& requested,
                 return {DemodMode::NFM, 0.72, "symmetric VHF/UHF channel"};
         }
     }
+
+    if (supported(currentMode))
+        return {currentMode, 0.82, "current receiver mode fallback"};
 
     // Evidence-free fallback follows common amateur SSB convention. It is
     // deliberately reported as a fallback so the UI never presents it as a
