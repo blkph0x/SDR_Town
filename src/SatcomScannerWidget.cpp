@@ -6,6 +6,7 @@
 #include "ObserverMapWidget.h"
 #include "AdsBTrackStore.h"
 #include "DeviceManager.h"
+#include "SdrDeviceCandidate.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -43,7 +44,10 @@ int autoCapturePriority(const std::string& role) {
 }
 
 QString receiverDisplayText(size_t index, const DeviceInfo& device, bool streaming) {
-    const QString state = streaming ? "LIVE" : (device.enabled ? "READY" : "AVAILABLE");
+    const QString state = streaming ? "LIVE"
+        : (device.enabled ? "READY"
+           : (SdrDeviceCandidate::isDeferredHardwareProxyLabel(device.label)
+                  ? "PROBE ON START" : "AVAILABLE"));
     return QString("%1 — %2 [%3]")
         .arg(static_cast<qulonglong>(index))
         .arg(QString::fromStdString(device.label), state);

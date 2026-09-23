@@ -3,6 +3,7 @@
 #include "InmarsatBandPlan.h"
 #include "InmarsatMessageStore.h"
 #include "DeviceManager.h"
+#include "SdrDeviceCandidate.h"
 
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -24,15 +25,13 @@
 namespace {
 
 QString receiverDisplayText(size_t index, const DeviceInfo& device, bool streaming) {
-    const QString state = streaming ? "LIVE" : (device.enabled ? "READY" : "AVAILABLE");
+    const QString state = streaming ? "LIVE"
+        : (device.enabled ? "READY"
+           : (SdrDeviceCandidate::isDeferredHardwareProxyLabel(device.label)
+                  ? "PROBE ON START" : "AVAILABLE"));
     return QString("%1 — %2 [%3]")
         .arg(static_cast<qulonglong>(index))
         .arg(QString::fromStdString(device.label), state);
-}
-
-bool isPlaceholder(const DeviceInfo& device) {
-    const QString label = QString::fromStdString(device.label).toLower();
-    return label.contains("placeholder") || label.contains("(stub)");
 }
 
 } // namespace
@@ -161,7 +160,8 @@ void InmarsatWidget::buildUi() {
         const size_t index = static_cast<size_t>(
             deviceCombo_->itemData(row).toString().toULongLong(&ok));
         const auto devices = DeviceManager::instance().getDevices();
-        if (!ok || index >= devices.size() || isPlaceholder(devices[index])) return;
+        if (!ok || index >= devices.size() ||
+            !SdrDeviceCandidate::canAttemptRealHardware(devices[index].label)) return;
         auto config = InmarsatEngine::instance().config();
         config.deviceIndex = index;
         config.deviceStableKey = devices[index].stableKey;
@@ -180,7 +180,7 @@ void InmarsatWidget::refreshDevices() {
     std::vector<Item> items;
     int selectedRow = -1;
     for (size_t index = 0; index < devices.size(); ++index) {
-        if (isPlaceholder(devices[index])) continue;
+        if (!SdrDeviceCandidate::canAttemptRealHardware(devices[index].label)) continue;
         const QString data = QString::number(static_cast<qulonglong>(index));
         items.push_back({receiverDisplayText(index, devices[index],
                                              DeviceManager::instance().isStreaming(index)), data});

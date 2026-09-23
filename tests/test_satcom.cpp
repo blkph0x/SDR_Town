@@ -3,6 +3,7 @@
 #include "SatcomAsyncLog.h"
 #include "SatcomIqCursor.h"
 #include "SatcomHostServices.h"
+#include "SdrDeviceCandidate.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -191,6 +192,18 @@ std::vector<float> aptSubcarrierEncode(const std::vector<uint8_t>& words,
 }
 
 } // namespace
+
+TEST_CASE("Deferred hardware proxy is eligible but demo stubs are rejected", "[satcom][device]")
+{
+    CHECK(SdrDeviceCandidate::isDeferredHardwareProxyLabel(
+        "RTL-SDR placeholder (enable will try hardware)"));
+    CHECK(SdrDeviceCandidate::canAttemptRealHardware(
+        "RTL-SDR placeholder (enable will try hardware)"));
+    CHECK(SdrDeviceCandidate::canAttemptRealHardware("SDRplay RSPdx"));
+    CHECK_FALSE(SdrDeviceCandidate::canAttemptRealHardware("RTL-SDR (stub)"));
+    CHECK_FALSE(SdrDeviceCandidate::canAttemptRealHardware("SDRplay RSPdx (stub)"));
+    CHECK_FALSE(SdrDeviceCandidate::canAttemptRealHardware("generic placeholder"));
+}
 
 TEST_CASE("AX.25 FCS matches known payload", "[satcom][ax25]")
 {

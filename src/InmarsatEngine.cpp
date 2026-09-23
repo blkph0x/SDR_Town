@@ -4,6 +4,7 @@
 #include "AdsBTrackStore.h"
 #include "DeviceManager.h"
 #include "Receiver.h"
+#include "SdrDeviceCandidate.h"
 
 #include <QDir>
 #include <QStandardPaths>
@@ -26,15 +27,6 @@ std::string configPath() {
 
 double unixNow() {
     return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
-}
-
-bool isPlaceholderDevice(const DeviceInfo& device) {
-    std::string label = device.label;
-    std::transform(label.begin(), label.end(), label.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    return label.find("placeholder") != std::string::npos ||
-           label.find("(stub)") != std::string::npos;
 }
 
 bool containsInsensitive(std::string value, std::string token) {
@@ -182,21 +174,21 @@ size_t InmarsatEngine::resolveDeviceIndex(std::string* error) {
     size_t chosen = std::numeric_limits<size_t>::max();
     if (!selected.deviceStableKey.empty()) {
         for (size_t i = 0; i < devices.size(); ++i) {
-            if (devices[i].stableKey == selected.deviceStableKey && !isPlaceholderDevice(devices[i])) {
+            if (devices[i].stableKey == selected.deviceStableKey && SdrDeviceCandidate::canAttemptRealHardware(devices[i].label)) {
                 chosen = i;
                 break;
             }
         }
     }
     if (chosen == std::numeric_limits<size_t>::max() && selected.deviceIndex < devices.size() &&
-        !isPlaceholderDevice(devices[selected.deviceIndex])) {
+        SdrDeviceCandidate::canAttemptRealHardware(devices[selected.deviceIndex].label)) {
         chosen = selected.deviceIndex;
     }
 
     const auto choose = [&](auto predicate) {
         if (chosen != std::numeric_limits<size_t>::max()) return;
         for (size_t i = 0; i < devices.size(); ++i) {
-            if (!isPlaceholderDevice(devices[i]) && predicate(i, devices[i])) {
+            if (SdrDeviceCandidate::canAttemptRealHardware(devices[i].label) && predicate(i, devices[i])) {
                 chosen = i;
                 return;
             }
@@ -208,7 +200,7 @@ size_t InmarsatEngine::resolveDeviceIndex(std::string* error) {
     choose([](size_t, const DeviceInfo&) { return true; });
 
     if (chosen == std::numeric_limits<size_t>::max()) {
-        if (error) *error = "No real SDR device is available; placeholder/stub devices cannot run Inmarsat";
+        if (error) *error = "No hardware-capable SDR entry is available. Rescan devices; explicit (stub) demo entries cannot run Inmarsat.";
         return chosen;
     }
 
