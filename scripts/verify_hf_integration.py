@@ -22,6 +22,7 @@ def main() -> int:
     cmake = text("CMakeLists.txt")
     tests = text("tests/test_hf_demod.cpp")
     docs = text("docs/HF_RECEIVE.md")
+    satcom = text("src/SatcomScannerEngine.cpp")
 
     require("bool supports(DemodMode mode) noexcept;" in header,
             "mode ownership declaration missing")
@@ -46,8 +47,9 @@ def main() -> int:
             "HF delegate marker missing or duplicated")
     require("if (HfDemod::supports(mode))" in demod,
             "mode-gated HF delegate missing")
-    require("HfDemod::supports(lastResetMode)" in demod,
-            "HF reset is not limited to the previous HF mode")
+    require("HfDemod::reset(this);" in demod and
+            "HfDemod::supports(lastResetMode)" not in demod,
+            "HF stream-epoch reset is conditional on stale legacy mode state")
     require("HfDemod::release(this);" in demod,
             "per-demodulator HF state is not released")
 
@@ -69,6 +71,12 @@ def main() -> int:
     require("startupMuteSamples" in source and
             "detector/carrier settling" in source,
             "HF detector startup transient guard missing")
+    require("(nfmSstv || ssbSstv) ? &multiplex : nullptr" in satcom,
+            "Satcom sideband SSTV does not request the clean HF decoder block")
+    require("if ((nfmSstv || ssbSstv) && !multiplex.samples.empty())" in satcom,
+            "Satcom does not publish USB/LSB decoder provenance")
+    require("block.samples.assign(audio.begin()" not in satcom,
+            "Satcom still reconstructs SSTV input from speaker audio")
     require("multi-megasample SDR streams" in tests,
             "multi-MS/s alias regression coverage missing")
     require("NFM, WFM and AUTO never enter the HF module" in docs,

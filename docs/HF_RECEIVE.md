@@ -47,8 +47,8 @@ Important properties:
   streaming state.
 - Stale WFM bandwidth/LPF settings are rejected when entering HF. Safe
   mode defaults are used instead.
-- SSB decoder audio is published with sample provenance and discontinuity
-  information for live HF SSTV.
+- The Satcom/HF receive session publishes clean pre-squelch SSB decoder
+  audio with sample provenance and discontinuity information for live HF SSTV.
 - The existing NFM, WFM and P25 paths remain in the legacy demodulator and
   are not routed through the HF module.
 

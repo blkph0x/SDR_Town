@@ -1323,7 +1323,11 @@ void SatcomScannerEngine::processLockedAudio() {
                          (demodMode == DemodMode::USB || demodMode == DemodMode::LSB);
     double rmsDb = -120.0;
     FmMultiplexBlock multiplex;
-    FmMultiplexBlock* multiplexOutput = nfmSstv ? &multiplex : nullptr;
+    // Request the demodulator's clean pre-squelch decoder block for
+    // both FM and sideband SSTV. Reconstructing USB/LSB input from speaker
+    // audio loses provenance and can include output gain/gating artifacts.
+    FmMultiplexBlock* multiplexOutput =
+        (nfmSstv || ssbSstv) ? &multiplex : nullptr;
     auto audio = demod_->demodulateToAudio(
         input.samples, sampleRate, iqCenterHz, lockFrequencyHz, demodMode,
         rmsDb, 3000.0, -120.0, 1.0, 75.0, 0.96, bandwidthHz,
@@ -1335,31 +1339,12 @@ void SatcomScannerEngine::processLockedAudio() {
         audioRmsDb_ = rmsDb;
     }
 
-    if (nfmSstv && !multiplex.samples.empty()) {
+    if ((nfmSstv || ssbSstv) && !multiplex.samples.empty()) {
         sstvFeed_->publish(multiplex,
                            sstvSourceEpoch_.load(std::memory_order_acquire),
-                           DemodMode::NFM);
+                           demodMode);
     }
     if (audio.empty()) return;
-
-    if (ssbSstv) {
-        size_t offset = 0;
-        while (offset < audio.size()) {
-            const size_t count = std::min(
-                SstvInputEvent::maxSamples, audio.size() - offset);
-            FmMultiplexBlock block;
-            block.samples.assign(audio.begin() + static_cast<std::ptrdiff_t>(offset),
-                                 audio.begin() + static_cast<std::ptrdiff_t>(offset + count));
-            block.sampleRate = 48000.0;
-            block.targetHz = lockFrequencyHz;
-            block.epoch = sstvSourceEpoch_.load(std::memory_order_acquire);
-            block.firstSample = sstvAudioFirstSample_.fetch_add(
-                count, std::memory_order_acq_rel);
-            block.discontinuity = false;
-            sstvFeed_->publish(block, block.epoch, demodMode);
-            offset += count;
-        }
-    }
 
     pushMonitorAudio(audio.data(), audio.size());
 

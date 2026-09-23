@@ -392,7 +392,10 @@ Demodulator::~Demodulator() {
 
 void Demodulator::resetState() {
     // HF_RECEIVE_RESET_BEGIN
-    if (HfDemod::supports(lastResetMode)) HfDemod::reset(this);
+    // reset() is a no-op when this Demodulator has never entered an HF mode.
+    // Do not rely on the legacy lastResetMode field: the isolated HF delegate
+    // returns before the legacy narrowband state machine updates that field.
+    HfDemod::reset(this);
     // HF_RECEIVE_RESET_END
     resetMultiplexState(); // Explicit retune/reset, unlike speech-only AFC resets.
     dspStateNeedsReset = true;

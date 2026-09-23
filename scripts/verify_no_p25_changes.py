@@ -56,7 +56,7 @@ HF_DEMOD_PATH = "src/Demod.cpp"
 HF_INCLUDE = '#include "HfDemod.h"\n'
 HF_OLD_DESTRUCTOR = "Demodulator::~Demodulator() = default;\n"
 HF_LIFECYCLE_BLOCK = '// HF_RECEIVE_LIFECYCLE_BEGIN\nDemodulator::~Demodulator() {\n    HfDemod::release(this);\n}\n// HF_RECEIVE_LIFECYCLE_END\n'
-HF_RESET_BLOCK = '    // HF_RECEIVE_RESET_BEGIN\n    if (HfDemod::supports(lastResetMode)) HfDemod::reset(this);\n    // HF_RECEIVE_RESET_END\n'
+HF_RESET_BLOCK = '    // HF_RECEIVE_RESET_BEGIN\n    // reset() is a no-op when this Demodulator has never entered an HF mode.\n    // Do not rely on the legacy lastResetMode field: the isolated HF delegate\n    // returns before the legacy narrowband state machine updates that field.\n    HfDemod::reset(this);\n    // HF_RECEIVE_RESET_END\n'
 HF_DELEGATE_BLOCK = '    // HF_RECEIVE_DELEGATE_BEGIN\n    if (HfDemod::supports(mode)) {\n        mpxContinuous = false;\n        return HfDemod::demodulate(\n            this, iq, sr, cf, target, mode, rmsOut, lpfHz, squelchDb,\n            gain, channelBwHz, target_audio_samples, outputRate,\n            externalSquelchLevelDb, audioLpfEnabled, multiplex,\n            dataIdentityHz);\n    }\n    // HF_RECEIVE_DELEGATE_END\n'
 
 

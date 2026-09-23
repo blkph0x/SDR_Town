@@ -310,6 +310,31 @@ TEST_CASE("HF SSB decoder tap is continuous for live SSTV", "[hf][sstv]") {
     REQUIRE(toneAmplitude(secondTap.samples, 48000.0, 1900.0) > 0.08);
 }
 
+TEST_CASE("HF explicit reset starts a new decoder epoch", "[hf][sstv][reset]") {
+    constexpr double inputRate = 192000.0;
+    const auto iq = analyticTone(inputRate, 0.25, 1900.0, 0.15f);
+
+    Demodulator demod;
+    FmMultiplexBlock firstTap;
+    FmMultiplexBlock continuousTap;
+    FmMultiplexBlock resetTap;
+    processHf(demod, iq, inputRate, DemodMode::USB, 6000.0, 3000.0,
+              &firstTap);
+    processHf(demod, iq, inputRate, DemodMode::USB, 6000.0, 3000.0,
+              &continuousTap);
+
+    REQUIRE_FALSE(firstTap.samples.empty());
+    REQUIRE_FALSE(continuousTap.discontinuity);
+    demod.resetState();
+    processHf(demod, iq, inputRate, DemodMode::USB, 6000.0, 3000.0,
+              &resetTap);
+
+    REQUIRE_FALSE(resetTap.samples.empty());
+    REQUIRE(resetTap.discontinuity);
+    REQUIRE(resetTap.epoch > continuousTap.epoch);
+    REQUIRE(resetTap.firstSample == 0);
+}
+
 TEST_CASE("HF dispatch is limited to AM USB LSB and CW", "[hf][guard]") {
     REQUIRE(HfDemod::supports(DemodMode::AM));
     REQUIRE(HfDemod::supports(DemodMode::USB));
