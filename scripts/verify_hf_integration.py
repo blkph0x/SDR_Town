@@ -66,6 +66,9 @@ def main() -> int:
             "multi-MS/s anti-alias hardening missing")
     require("0.38 * std::min(1.0, outputRateHz / inputRateHz)" in source,
             "HF anti-alias transition band missing")
+    require("startupMuteSamples" in source and
+            "detector/carrier settling" in source,
+            "HF detector startup transient guard missing")
     require("multi-megasample SDR streams" in tests,
             "multi-MS/s alias regression coverage missing")
     require("NFM, WFM and AUTO never enter the HF module" in docs,
