@@ -1,5 +1,7 @@
 #include "MainWindow.h"
 #include "SstvWindow.h"
+#include "HfDemod.h"
+#include "SstvRfMode.h"
 #include "SstvImageFile.h"
 #include "SstvLiveSession.h"
 #include "SstvModes.h"
@@ -10763,17 +10765,165 @@ SstvWindow* MainWindow::ensureSstvWindow()
     if (window) return window;
     window = new SstvWindow(decodeSstvImageFile, this);
     window->setObjectName(QStringLiteral("sstvWindow"));
-    window->setLiveSource([this](const std::shared_ptr<std::atomic<bool>>& finish) -> SstvWindow::Decode {
+    window->setLiveSource([this](const std::shared_ptr<std::atomic<bool>>& finish,
+                                 const QString& requestedRfMode) -> SstvWindow::Decode {
         std::shared_ptr<Receiver> receiver;
         { std::lock_guard lock(receiversMutex); if (!receivers.empty()) receiver = receivers.front(); }
-        if (!receiver) throw std::runtime_error("Start the main receiver in NFM first");
-        return [receiver, finish](const QString&, const QString& output, const QString& mode, const auto& cancel, const auto& preview) {
-            const auto validate = [receiver] {
-                std::lock_guard lock(receiver->stateMutex);
-                if (!receiver->active || receiver->mode != DemodMode::NFM || receiver->p25VoiceDecodeEnabled || receiver->p25ControlChannelMute)
-                    throw std::runtime_error("Live SSTV requires an active main NFM receiver, not P25");
+        if (!receiver) throw std::runtime_error("Start the main receiver first");
+
+        DemodMode originalMode = DemodMode::NFM;
+        double originalBwHz = 12500.0;
+        double originalLpfHz = 3000.0;
+        bool originalLpfEnabled = true;
+        double targetHz = 0.0;
+        size_t deviceIndex = 0;
+        {
+            std::lock_guard lock(receiver->stateMutex);
+            if (!receiver->active)
+                throw std::runtime_error("Start the main receiver before live SSTV");
+            if (receiver->p25VoiceDecodeEnabled || receiver->p25ControlChannelMute)
+                throw std::runtime_error("Live SSTV cannot take over an active P25 receiver");
+            originalMode = receiver->mode;
+            originalBwHz = receiver->channelBwHz;
+            originalLpfHz = receiver->lpfHz;
+            originalLpfEnabled = receiver->audioLpfEnabled;
+            targetHz = receiver->freqHz;
+            deviceIndex = receiver->deviceIndex;
+        }
+
+        std::vector<float> spectrum;
+        double spectrumCenterHz = 0.0;
+        double spectrumRateHz = 0.0;
+        DeviceManager::instance().getLatestSpectrum(
+            deviceIndex, spectrum, spectrumCenterHz, spectrumRateHz);
+
+        const auto selection = SstvRfMode::select(
+            requestedRfMode.toStdString(), originalMode, targetHz,
+            spectrum, spectrumCenterHz, spectrumRateHz);
+
+        const double selectedBwHz =
+            selection.mode == DemodMode::NFM ? 15000.0 : 6000.0;
+        const double selectedLpfHz = 3000.0;
+
+        {
+            std::lock_guard lock(receiver->stateMutex);
+            receiver->mode = selection.mode;
+            receiver->channelBwHz = selectedBwHz;
+            receiver->lpfHz = selectedLpfHz;
+            receiver->audioLpfEnabled = true;
+        }
+        {
+            std::lock_guard<std::mutex> lock(monitorParamsMutex);
+            currentMonitorMode = selection.mode;
+            autoDetectMode = false;
+            monitorChannelBwHz = selectedBwHz;
+            monitorLpfHz = selectedLpfHz;
+            monitorAudioLpfEnabled = true;
+        }
+
+        if (monitorModeCombo) {
+            const QSignalBlocker blocker(monitorModeCombo);
+            monitorModeCombo->setCurrentText(QString::fromLatin1(SstvRfMode::name(selection.mode)));
+        }
+        if (bwSpin) {
+            const QSignalBlocker blocker(bwSpin);
+            bwSpin->setValue(selectedBwHz / 1000.0);
+        }
+        if (lpfSpin) {
+            const QSignalBlocker blocker(lpfSpin);
+            lpfSpin->setValue(selectedLpfHz / 1000.0);
+        }
+
+        if (selection.mode == DemodMode::USB || selection.mode == DemodMode::LSB) {
+            HfDemod::setDecoderSink(
+                &receiver->demod,
+                [feed = receiver->sstvFeed, deviceIndex](const FmMultiplexBlock& block, DemodMode mode) {
+                    feed->publish(block, deviceIndex, mode);
+                });
+        } else {
+            HfDemod::clearDecoderSink(&receiver->demod);
+        }
+
+        if (statusBar()) {
+            statusBar()->showMessage(
+                QString("SSTV RF: %1 (%2, confidence %3%)")
+                    .arg(QString::fromLatin1(SstvRfMode::name(selection.mode)))
+                    .arg(QString::fromStdString(selection.reason))
+                    .arg(selection.confidence * 100.0, 0, 'f', 0),
+                5000);
+        }
+
+        return [this, receiver, finish, selection,
+                originalMode, originalBwHz, originalLpfHz, originalLpfEnabled,
+                targetHz](const QString&, const QString& output, const QString& mode,
+                          const auto& cancel, const auto& preview) {
+            const auto restore = [this, receiver, selection,
+                                  originalMode, originalBwHz, originalLpfHz,
+                                  originalLpfEnabled, targetHz] {
+                HfDemod::clearDecoderSink(&receiver->demod);
+
+                bool restoreUi = false;
+                {
+                    std::lock_guard lock(receiver->stateMutex);
+                    if (receiver->mode == selection.mode &&
+                        std::abs(receiver->freqHz - targetHz) < 1.0) {
+                        receiver->mode = originalMode;
+                        receiver->channelBwHz = originalBwHz;
+                        receiver->lpfHz = originalLpfHz;
+                        receiver->audioLpfEnabled = originalLpfEnabled;
+                        restoreUi = true;
+                    }
+                }
+                receiver->sstvFeed->discontinuity();
+
+                if (restoreUi) {
+                    QMetaObject::invokeMethod(this, [this, originalMode, originalBwHz,
+                                                     originalLpfHz, originalLpfEnabled] {
+                        {
+                            std::lock_guard<std::mutex> lock(monitorParamsMutex);
+                            currentMonitorMode = originalMode;
+                            autoDetectMode = (originalMode == DemodMode::AUTO);
+                            monitorChannelBwHz = originalBwHz;
+                            monitorLpfHz = originalLpfHz;
+                            monitorAudioLpfEnabled = originalLpfEnabled;
+                        }
+                        if (monitorModeCombo) {
+                            const QSignalBlocker blocker(monitorModeCombo);
+                            monitorModeCombo->setCurrentText(modeToQString(originalMode));
+                        }
+                        if (bwSpin) {
+                            const QSignalBlocker blocker(bwSpin);
+                            bwSpin->setValue(originalBwHz / 1000.0);
+                        }
+                        if (lpfSpin) {
+                            const QSignalBlocker blocker(lpfSpin);
+                            lpfSpin->setValue(originalLpfHz / 1000.0);
+                        }
+                    }, Qt::QueuedConnection);
+                }
             };
-            return decodeSstvLive(receiver->sstvFeed, validate, output, mode, [finish] { return finish->load(); }, cancel, preview);
+
+            const auto validate = [receiver, selection] {
+                std::lock_guard lock(receiver->stateMutex);
+                if (!receiver->active ||
+                    receiver->mode != selection.mode ||
+                    receiver->p25VoiceDecodeEnabled ||
+                    receiver->p25ControlChannelMute) {
+                    throw std::runtime_error(
+                        "Live SSTV receiver changed or entered P25; session stopped");
+                }
+            };
+
+            try {
+                auto report = decodeSstvLive(
+                    receiver->sstvFeed, validate, output, mode,
+                    [finish] { return finish->load(); }, cancel, preview);
+                restore();
+                return report;
+            } catch (...) {
+                restore();
+                throw;
+            }
         };
     });
     return window;
@@ -11132,7 +11282,7 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             if (!window->startLive(output, mode)) {
                 return {{"ok", false}, {"status", 400},
                         {"error", window->statusMessage().isEmpty()
-                                      ? QStringLiteral("Live SSTV did not start (need NFM, new output folder)")
+                                      ? QStringLiteral("Live SSTV did not start (choose Auto/NFM/USB/LSB and a new output folder)")
                                       : window->statusMessage()}};
             }
             return {{"ok", true}, {"state", sdrTownControlStatusSnapshot()}};
