@@ -181,6 +181,8 @@ set(SDR_TOWN_SOURCES
     include/SpectrumWidget.h
     src/AudioEngine.cpp
     src/Demod.cpp
+    src/HfDemod.cpp
+    include/HfDemod.h
     src/P25Control.cpp
     src/P25LiveDecoder.cpp
     src/P25FollowStateMachine.cpp
@@ -402,6 +404,7 @@ if(BUILD_TESTS)
     src/BandPlan.cpp
     tests/test_audiocapture.cpp
     tests/test_demod.cpp
+    tests/test_hf_demod.cpp
     tests/test_p25control.cpp
     tests/test_p25live.cpp
     tests/test_p25follow.cpp
@@ -438,6 +441,7 @@ if(BUILD_TESTS)
     src/AudioEngine.cpp
     src/AudioCapture.cpp
     src/Demod.cpp
+    src/HfDemod.cpp
     src/P25Control.cpp
     src/P25LiveDecoder.cpp
     src/P25FollowStateMachine.cpp

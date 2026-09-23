@@ -1,5 +1,6 @@
 #define _USE_MATH_DEFINES
 #include "Demod.h"
+#include "HfDemod.h"
 #include "SignalClassifier.h"
 #include <algorithm>
 #include <cmath>
@@ -383,9 +384,16 @@ double detectChannelBandwidthAround(const std::vector<float>& powerDb,
 }
 
 Demodulator::Demodulator() = default;
-Demodulator::~Demodulator() = default;
+// HF_RECEIVE_LIFECYCLE_BEGIN
+Demodulator::~Demodulator() {
+    HfDemod::release(this);
+}
+// HF_RECEIVE_LIFECYCLE_END
 
 void Demodulator::resetState() {
+    // HF_RECEIVE_RESET_BEGIN
+    if (HfDemod::supports(lastResetMode)) HfDemod::reset(this);
+    // HF_RECEIVE_RESET_END
     resetMultiplexState(); // Explicit retune/reset, unlike speech-only AFC resets.
     dspStateNeedsReset = true;
     nfmCicSum = {0.f, 0.f};
@@ -408,6 +416,17 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
     // Treat any leaked AUTO as conservative NFM rather than WFM; otherwise AUTO
     // uses broadcast-FM deviation/bandwidth and breaks narrowband reception.
     if (mode == DemodMode::AUTO) mode = DemodMode::NFM;
+
+    // HF_RECEIVE_DELEGATE_BEGIN
+    if (HfDemod::supports(mode)) {
+        mpxContinuous = false;
+        return HfDemod::demodulate(
+            this, iq, sr, cf, target, mode, rmsOut, lpfHz, squelchDb,
+            gain, channelBwHz, target_audio_samples, outputRate,
+            externalSquelchLevelDb, audioLpfEnabled, multiplex,
+            dataIdentityHz);
+    }
+    // HF_RECEIVE_DELEGATE_END
 
     rmsOut = -100;
     if (iq.empty()) return {};
