@@ -32,6 +32,13 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
     auto* form=new QFormLayout;
     source_=new QComboBox(this); source_->setObjectName("sstvSource");
     source_->addItem("Recording","file"); form->addRow("Source",source_);
+    rfMode_=new QComboBox(this); rfMode_->setObjectName("sstvRfMode");
+    rfMode_->addItem("Auto detect / follow receiver","auto");
+    rfMode_->addItem("NFM","nfm");
+    rfMode_->addItem("USB","usb");
+    rfMode_->addItem("LSB","lsb");
+    rfMode_->setToolTip("Live RF demodulation. Auto follows an existing NFM/USB/LSB receiver, otherwise compares sideband energy and uses a documented band fallback.");
+    form->addRow("Live RF demod",rfMode_);
     auto row=[&](QLineEdit*& edit,QPushButton*& button,const QString& label,QStyle::StandardPixmap icon) {
         auto* container=new QWidget(this);
         auto* horizontal=new QHBoxLayout(container);
@@ -108,7 +115,7 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
 void SstvWindow::setLiveSource(LiveOpen open) {
     if(busy()) return;
     liveOpen_=std::move(open);
-    if(liveOpen_ && source_->findData("live")<0) source_->addItem("Live NFM - main receiver","live");
+    if(liveOpen_ && source_->findData("live")<0) source_->addItem("Live receiver - Auto/NFM/USB/LSB","live");
     setWindowTitle(liveOpen_?"SSTV Images":"SSTV Recorded Images");
 }
 bool SstvWindow::startLive(const QString& output,const QString& mode) {
@@ -134,13 +141,13 @@ bool SstvWindow::startDecode(const QString& input,const QString& output,const QS
     Decode decode=decode_;
     finish_.reset();
     if(live) {
-        try {finish_=std::make_shared<std::atomic<bool>>(false); decode=liveOpen_(finish_);}
+        try {finish_=std::make_shared<std::atomic<bool>>(false); decode=liveOpen_(finish_,rfMode_->currentData().toString());}
         catch(const std::exception& error) {status_->setText(QString::fromUtf8(error.what())); finish_.reset();return false;}
     }
     if(!live) input_->setText(input);
     output_->setText(output); mode_->setCurrentIndex(mode_->findData(mode));
     images_->clear(); original_=QImage(); resultDirectory_.clear(); updatePreview();
-    status_->setText(live?"Listening for SSTV...":"Decoding..."); setBusy(true);
+    status_->setText(live?QString("Listening for SSTV (%1 RF)...").arg(rfMode_->currentText()):"Decoding..."); setBusy(true);
     struct Result {
         nlohmann::json report; QString error;
         std::mutex mutex;
@@ -197,7 +204,8 @@ bool SstvWindow::startDecode(const QString& input,const QString& output,const QS
 void SstvWindow::setBusy(bool value) {
     for(auto* widget:std::array<QWidget*,6>{input_,output_,mode_,open_,destination_,decodeButton_}) widget->setEnabled(!value);
     const bool live=source_->currentData()=="live";
-    source_->setEnabled(!value); input_->setEnabled(!value && !live); open_->setEnabled(!value && !live);
+    source_->setEnabled(!value); rfMode_->setEnabled(!value && live);
+    input_->setEnabled(!value && !live); open_->setEnabled(!value && !live);
     decodeButton_->setText(live?"Receive":"Decode");
     finishButton_->setVisible(live); finishButton_->setEnabled(value && live);
     cancelButton_->setEnabled(value); folder_->setEnabled(!value && !resultDirectory_.isEmpty());
@@ -243,6 +251,9 @@ QString SstvWindow::statusMessage() const {
 
 QString SstvWindow::selectedMode() const {
     return mode_ ? mode_->currentData().toString() : QStringLiteral("auto");
+}
+QString SstvWindow::selectedRfMode() const {
+    return rfMode_ ? rfMode_->currentData().toString() : QStringLiteral("auto");
 }
 bool SstvWindow::liveSelected() const {
     return source_ && source_->currentData().toString() == QStringLiteral("live");
