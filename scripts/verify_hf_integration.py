@@ -61,6 +61,13 @@ def main() -> int:
             "stale WFM-to-HF profile regression coverage missing")
     require("decoder tap is continuous" in tests,
             "HF SSTV continuity coverage missing")
+    require("adaptiveResamplerHalf" in source and
+            "kMaximumResamplerHalf = 1024" in source,
+            "multi-MS/s anti-alias hardening missing")
+    require("0.38 * std::min(1.0, outputRateHz / inputRateHz)" in source,
+            "HF anti-alias transition band missing")
+    require("multi-megasample SDR streams" in tests,
+            "multi-MS/s alias regression coverage missing")
     require("NFM, WFM and AUTO never enter the HF module" in docs,
             "P25/non-HF isolation is not documented")
 

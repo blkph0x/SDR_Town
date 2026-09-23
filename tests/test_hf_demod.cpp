@@ -319,3 +319,34 @@ TEST_CASE("HF dispatch is limited to AM USB LSB and CW", "[hf][guard]") {
     REQUIRE_FALSE(HfDemod::supports(DemodMode::WFM));
     REQUIRE_FALSE(HfDemod::supports(DemodMode::AUTO));
 }
+
+
+TEST_CASE("HF rate conversion rejects aliases from multi-megasample SDR streams",
+          "[hf][resampler][alias]") {
+    constexpr double wantedHz = 1500.0;
+    constexpr double aliasHz = 48000.0 + wantedHz;
+
+    for (const auto [inputRate, duration] :
+         {std::pair{2.4e6, 0.12}, std::pair{10.0e6, 0.05}}) {
+        const auto wantedIq = analyticTone(
+            inputRate, duration, wantedHz, 0.15f);
+        const auto aliasIq = analyticTone(
+            inputRate, duration, aliasHz, 0.90f);
+
+        Demodulator wantedDemod;
+        Demodulator aliasDemod;
+        const auto wanted = processHf(
+            wantedDemod, wantedIq, inputRate,
+            DemodMode::USB, 6000.0, 3000.0);
+        const auto aliased = processHf(
+            aliasDemod, aliasIq, inputRate,
+            DemodMode::USB, 6000.0, 3000.0);
+
+        INFO("input rate " << inputRate);
+        REQUIRE(wanted.size() > 1000);
+        REQUIRE(allFinite(wanted));
+        REQUIRE(allFinite(aliased));
+        REQUIRE(tailRms(wanted) >
+                std::max(1.0e-9, tailRms(aliased)) * 20.0);
+    }
+}

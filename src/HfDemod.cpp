@@ -17,7 +17,8 @@ namespace {
 
 constexpr double kPi = 3.141592653589793238462643383279502884;
 constexpr double kWorkRateHz = 48000.0;
-constexpr int kResamplerHalf = 24;
+constexpr int kMinimumResamplerHalf = 24;
+constexpr int kMaximumResamplerHalf = 1024;
 
 double sinc(double value) noexcept {
     if (std::abs(value) < 1.0e-12) return 1.0;
@@ -49,7 +50,8 @@ struct State {
     std::complex<float> iqDc{0.0f, 0.0f};
 
     std::vector<std::complex<float>> resampleBuffer;
-    double resamplePosition = static_cast<double>(kResamplerHalf);
+    int resamplerHalf = kMinimumResamplerHalf;
+    double resamplePosition = static_cast<double>(kMinimumResamplerHalf);
 
     std::vector<std::complex<float>> channelTaps;
     std::vector<std::complex<float>> channelDelay;
@@ -94,8 +96,10 @@ void clearStreamingState(State& state) {
     state.impulseMean = 0.0f;
     state.impulseLastGood = {};
     state.iqDc = {};
-    state.resampleBuffer.assign(static_cast<size_t>(kResamplerHalf), {});
-    state.resamplePosition = static_cast<double>(kResamplerHalf);
+    const int half = std::clamp(
+        state.resamplerHalf, kMinimumResamplerHalf, kMaximumResamplerHalf);
+    state.resampleBuffer.assign(static_cast<size_t>(half), {});
+    state.resamplePosition = static_cast<double>(half);
     state.channelDelay.assign(state.channelTaps.size(), {});
     state.channelWrite = 0;
     state.carrier = 1.0f;
@@ -184,6 +188,8 @@ std::vector<std::complex<float>> resampleComplex(
     if (input.empty()) return {};
     if (std::abs(inputRateHz - outputRateHz) < 0.5) return input;
 
+    const int half = std::clamp(
+        state.resamplerHalf, kMinimumResamplerHalf, kMaximumResamplerHalf);
     state.resampleBuffer.insert(
         state.resampleBuffer.end(), input.begin(), input.end());
 
@@ -192,17 +198,20 @@ std::vector<std::complex<float>> resampleComplex(
         std::ceil(input.size() * outputRateHz / inputRateHz)) + 2);
 
     const double step = inputRateHz / outputRateHz;
+    // HF only needs the inner audio/data channel. Keeping the anti-alias
+    // cutoff below the final Nyquist edge creates a real transition band
+    // even when the device is running at several MS/s.
     const double cutoffCyclesPerInput =
-        0.45 * std::min(1.0, outputRateHz / inputRateHz);
+        0.38 * std::min(1.0, outputRateHz / inputRateHz);
 
-    while (state.resamplePosition + kResamplerHalf <
+    while (state.resamplePosition + half <
            static_cast<double>(state.resampleBuffer.size())) {
         const long center = static_cast<long>(std::floor(state.resamplePosition));
         std::complex<double> accumulated{};
         double coefficientSum = 0.0;
 
-        for (int offset = -kResamplerHalf + 1;
-             offset <= kResamplerHalf; ++offset) {
+        for (int offset = -half + 1;
+             offset <= half; ++offset) {
             const long index = center + offset;
             if (index < 0 ||
                 index >= static_cast<long>(state.resampleBuffer.size())) {
@@ -213,7 +222,7 @@ std::vector<std::complex<float>> resampleComplex(
             const double coefficient =
                 2.0 * cutoffCyclesPerInput *
                 sinc(2.0 * cutoffCyclesPerInput * distance) *
-                blackman(distance / static_cast<double>(kResamplerHalf));
+                blackman(distance / static_cast<double>(half));
             accumulated += std::complex<double>(
                 state.resampleBuffer[static_cast<size_t>(index)].real(),
                 state.resampleBuffer[static_cast<size_t>(index)].imag()) *
@@ -232,7 +241,7 @@ std::vector<std::complex<float>> resampleComplex(
 
     const long removable =
         static_cast<long>(std::floor(state.resamplePosition)) -
-        kResamplerHalf;
+        half;
     if (removable > 0) {
         const size_t drop = std::min(
             static_cast<size_t>(removable), state.resampleBuffer.size());
@@ -286,6 +295,15 @@ double defaultChannelBandwidth(DemodMode mode) noexcept {
         case DemodMode::LSB: return 6000.0;
         default: return 6000.0;
     }
+}
+
+int adaptiveResamplerHalf(double inputRateHz, double outputRateHz) noexcept {
+    if (!(inputRateHz > 0.0) || !(outputRateHz > 0.0))
+        return kMinimumResamplerHalf;
+    const double ratio = std::max(1.0, inputRateHz / outputRateHz);
+    return std::clamp(
+        static_cast<int>(std::ceil(8.0 * ratio)),
+        kMinimumResamplerHalf, kMaximumResamplerHalf);
 }
 
 bool materiallyDifferent(double left, double right, double tolerance) noexcept {
@@ -405,6 +423,7 @@ std::vector<float> demodulate(
             state->channelTaps = designComplexBandpass(
                 workRateHz, -halfWidth, halfWidth, 257);
         }
+        state->resamplerHalf = adaptiveResamplerHalf(inputRateHz, workRateHz);
         clearStreamingState(*state);
     }
 

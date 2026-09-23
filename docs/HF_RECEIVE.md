@@ -40,6 +40,9 @@ Important properties:
 - Strong signals reduce AGC gain quickly. Gain rises slowly after a signal
   fades, reducing pumping and noise blasts.
 - Very short impulsive samples are replaced before the channel filter.
+- The streaming rate converter expands its anti-alias kernel for common
+  multi-megasample SDR rates, preventing signals near 48 kHz multiples
+  from folding into the selected HF audio channel.
 - Tune, sample-rate, mode, bandwidth and explicit reset changes clear all
   streaming state.
 - Stale WFM bandwidth/LPF settings are rejected when entering HF. Safe
@@ -113,6 +116,7 @@ The automated HF suite verifies:
 - AM level normalisation
 - CW beat-note generation and adjacent-carrier rejection
 - safe fallback from stale wideband settings
+- multi-MS/s rate conversion and alias rejection at 2.4 and 10 MS/s
 - continuous USB/LSB decoder audio for SSTV
 - strict dispatch: NFM, WFM and AUTO never enter the HF module
 

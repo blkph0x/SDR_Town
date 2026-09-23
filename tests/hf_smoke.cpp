@@ -68,6 +68,25 @@ int main() {
     require(!wanted.empty(), "USB produced no audio");
     require(rms(wanted) > rms(rejected) * 20.0,
             "USB opposite-sideband rejection is below 26 dB");
+
+    int highRateWantedOwner = 3;
+    int highRateAliasOwner = 4;
+    constexpr double highRate = 2.4e6;
+    const auto highRateWantedIq = tone(
+        highRate, 0.12, 1500.0, 0.15f);
+    const auto highRateAliasIq = tone(
+        highRate, 0.12, 49500.0, 0.90f);
+    const auto highRateWanted = HfDemod::demodulate(
+        &highRateWantedOwner, highRateWantedIq, highRate, frequency, frequency,
+        DemodMode::USB, levelDb, 3000.0, -120.0, 1.0,
+        6000.0, 0, 48000.0);
+    const auto highRateAliased = HfDemod::demodulate(
+        &highRateAliasOwner, highRateAliasIq, highRate, frequency, frequency,
+        DemodMode::USB, levelDb, 3000.0, -120.0, 1.0,
+        6000.0, 0, 48000.0);
+    require(rms(highRateWanted) > rms(highRateAliased) * 20.0,
+            "2.4 MS/s anti-alias rejection is below 26 dB");
+
     require(HfDemod::supports(DemodMode::AM), "AM ownership missing");
     require(HfDemod::supports(DemodMode::USB), "USB ownership missing");
     require(HfDemod::supports(DemodMode::LSB), "LSB ownership missing");
@@ -79,6 +98,8 @@ int main() {
 
     HfDemod::release(&wantedOwner);
     HfDemod::release(&rejectedOwner);
+    HfDemod::release(&highRateWantedOwner);
+    HfDemod::release(&highRateAliasOwner);
     std::cout << "HF standalone smoke passed\n";
     return 0;
 }
