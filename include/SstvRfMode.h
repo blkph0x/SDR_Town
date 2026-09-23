@@ -89,8 +89,13 @@ inline Selection select(const std::string& requested,
         }
     }
 
-    if (supported(currentMode))
-        return {currentMode, 0.82, "current receiver mode fallback"};
+    // A selected sideband is useful prior knowledge on HF. Do not let a
+    // stale/default NFM receiver mode override HF Auto when spectrum evidence
+    // is weak; NFM is a sensible fallback only above the HF range.
+    if (currentMode == DemodMode::USB || currentMode == DemodMode::LSB)
+        return {currentMode, 0.82, "current sideband fallback"};
+    if (currentMode == DemodMode::NFM && targetHz >= 30.0e6)
+        return {currentMode, 0.82, "current NFM fallback"};
 
     // Evidence-free fallback follows common amateur SSB convention. It is
     // deliberately reported as a fallback so the UI never presents it as a
