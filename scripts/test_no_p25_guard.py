@@ -92,6 +92,53 @@ def main() -> int:
     allowed, _ = MODULE.mainwindow_satcom_diff_allowed(destructive)
     assert not allowed
 
+    base_demod = '''#include "Demod.h"
+Demodulator::~Demodulator() = default;
+void Demodulator::resetState() {
+    resetMultiplexState();
+}
+void run() {
+    if (mode == DemodMode::AUTO) mode = DemodMode::NFM;
+    rmsOut = -100;
+}
+'''
+    head_demod = base_demod.replace(
+        '#include "Demod.h"\n',
+        '#include "Demod.h"\n' + MODULE.HF_INCLUDE,
+    ).replace(
+        MODULE.HF_OLD_DESTRUCTOR,
+        MODULE.HF_LIFECYCLE_BLOCK,
+    ).replace(
+        "void Demodulator::resetState() {\n",
+        "void Demodulator::resetState() {\n" + MODULE.HF_RESET_BLOCK,
+    ).replace(
+        "    if (mode == DemodMode::AUTO) mode = DemodMode::NFM;\n",
+        "    if (mode == DemodMode::AUTO) mode = DemodMode::NFM;\n"
+        + MODULE.HF_DELEGATE_BLOCK,
+    )
+
+    transformed = head_demod
+    for block, replacement in (
+        (MODULE.HF_INCLUDE, ""),
+        (MODULE.HF_LIFECYCLE_BLOCK, MODULE.HF_OLD_DESTRUCTOR),
+        (MODULE.HF_RESET_BLOCK, ""),
+        (MODULE.HF_DELEGATE_BLOCK, ""),
+    ):
+        assert transformed.count(block) == 1
+        transformed = transformed.replace(block, replacement, 1)
+    assert transformed == base_demod
+
+    tampered = head_demod + "\n// unrelated P25-path change\n"
+    transformed = tampered
+    for block, replacement in (
+        (MODULE.HF_INCLUDE, ""),
+        (MODULE.HF_LIFECYCLE_BLOCK, MODULE.HF_OLD_DESTRUCTOR),
+        (MODULE.HF_RESET_BLOCK, ""),
+        (MODULE.HF_DELEGATE_BLOCK, ""),
+    ):
+        transformed = transformed.replace(block, replacement, 1)
+    assert transformed != base_demod
+
     print("P25 guard self-test passed")
     return 0
 

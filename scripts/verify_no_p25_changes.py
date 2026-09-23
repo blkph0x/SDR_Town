@@ -52,6 +52,13 @@ SATCOM_MARKER_BEGIN = "// SATCOM_HOST_INTEGRATION_BEGIN"
 SATCOM_MARKER_END = "// SATCOM_HOST_INTEGRATION_END"
 SATCOM_HOST_INCLUDE = '#include "SatcomHostServices.h"'
 
+HF_DEMOD_PATH = "src/Demod.cpp"
+HF_INCLUDE = '#include "HfDemod.h"\n'
+HF_OLD_DESTRUCTOR = "Demodulator::~Demodulator() = default;\n"
+HF_LIFECYCLE_BLOCK = '// HF_RECEIVE_LIFECYCLE_BEGIN\nDemodulator::~Demodulator() {\n    HfDemod::release(this);\n}\n// HF_RECEIVE_LIFECYCLE_END\n'
+HF_RESET_BLOCK = '    // HF_RECEIVE_RESET_BEGIN\n    // reset() is a no-op when this Demodulator has never entered an HF mode.\n    // Do not rely on the legacy lastResetMode field: the isolated HF delegate\n    // returns before the legacy narrowband state machine updates that field.\n    HfDemod::reset(this);\n    // HF_RECEIVE_RESET_END\n'
+HF_DELEGATE_BLOCK = '    // HF_RECEIVE_DELEGATE_BEGIN\n    if (HfDemod::supports(mode)) {\n        mpxContinuous = false;\n        return HfDemod::demodulate(\n            this, iq, sr, cf, target, mode, rmsOut, lpfHz, squelchDb,\n            gain, channelBwHz, target_audio_samples, outputRate,\n            externalSquelchLevelDb, audioLpfEnabled, multiplex,\n            dataIdentityHz);\n    }\n    // HF_RECEIVE_DELEGATE_END\n'
+
 
 def normalize_path(path: str) -> str:
     return path.strip().replace("\\", "/").lstrip("./")
@@ -112,6 +119,52 @@ def mainwindow_satcom_diff_allowed(diff_text: str) -> tuple[bool, str]:
         return False, "Satcom integration markers are unbalanced"
     if not saw_marker:
         return False, "no Satcom integration marker block was found"
+    return True, ""
+
+
+def git_file_text(ref: str, path: str) -> str:
+    command = ["git", "show", f"{ref}:{path}"]
+    try:
+        result = subprocess.run(
+            command,
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except subprocess.CalledProcessError as exc:
+        detail = exc.stderr.strip() or exc.stdout.strip() or str(exc)
+        raise RuntimeError(
+            f"could not read {path!r} from {ref!r}: {detail}"
+        ) from exc
+    return result.stdout
+
+
+def demod_hf_change_allowed(base: str, head: str) -> tuple[bool, str]:
+    base_text = git_file_text(base, HF_DEMOD_PATH)
+    head_text = git_file_text(head, HF_DEMOD_PATH)
+    transformed = head_text
+
+    exact_blocks = (
+        (HF_INCLUDE, ""),
+        (HF_LIFECYCLE_BLOCK, HF_OLD_DESTRUCTOR),
+        (HF_RESET_BLOCK, ""),
+        (HF_DELEGATE_BLOCK, ""),
+    )
+    for block, replacement in exact_blocks:
+        count = transformed.count(block)
+        if count != 1:
+            return False, (
+                "isolated HF integration block is missing or duplicated: "
+                f"{block.splitlines()[0]!r} count={count}"
+            )
+        transformed = transformed.replace(block, replacement, 1)
+
+    if transformed != base_text:
+        return False, (
+            "Demod.cpp changed outside the exact AM/USB/LSB/CW "
+            "integration blocks"
+        )
     return True, ""
 
 
@@ -192,6 +245,21 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
+        if path == HF_DEMOD_PATH and args.paths is None:
+            try:
+                allowed, detail = demod_hf_change_allowed(
+                    args.base, args.head
+                )
+            except RuntimeError as exc:
+                print(f"P25 guard error: {exc}", file=sys.stderr)
+                return 2
+            if allowed:
+                print(
+                    "P25 guard: accepted exact isolated AM/USB/LSB/CW "
+                    "delegation; legacy Demod.cpp is otherwise byte-identical."
+                )
+                continue
+            pattern = f"{pattern}; {detail}"
         if path == SATCOM_MAINWINDOW_PATH and args.paths is None:
             try:
                 allowed, detail = mainwindow_satcom_diff_allowed(
