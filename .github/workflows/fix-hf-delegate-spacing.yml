@@ -1,0 +1,53 @@
+name: Fix HF delegate spacing
+
+on:
+  push:
+    branches:
+      - fix/hf-receive-hardening
+    paths:
+      - scripts/fix_hf_delegate_spacing.py
+      - .github/workflows/fix-hf-delegate-spacing.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fix-hf-delegate-spacing
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: Preserve exact legacy Demod bytes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v7
+        with:
+          ref: fix/hf-receive-hardening
+          fetch-depth: 0
+
+      - name: Apply exact spacing correction
+        run: python3 scripts/fix_hf_delegate_spacing.py
+
+      - name: Prove frozen P25/shared path is unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin master
+          base="$(git merge-base origin/master HEAD)"
+          python3 scripts/verify_no_p25_changes.py --base "${base}" --head HEAD
+          python3 scripts/test_no_p25_guard.py
+          python3 scripts/verify_hf_integration.py
+          git diff --check
+
+      - name: Commit corrected marker boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/Demod.cpp
+          git commit -m "Preserve exact legacy Demod bytes around HF delegation"
+          git push origin HEAD:fix/hf-receive-hardening
