@@ -113,12 +113,13 @@ void clearStreamingState(State& state) {
     state.squelchGain = 0.0f;
     state.squelchHang = 0;
     state.clickFade = 0.0f;
-    // Hold output through the FIR group delay and the first few milliseconds of
-    // detector/carrier settling. Without this, the all-zero delay line creates
-    // a one-block AM step that can hit the final limiter and masks the actual
-    // audio low-pass response used by decoder workflows.
-    state.startupMuteSamples = static_cast<int>(0.012 * kWorkRateHz) +
-        static_cast<int>(state.channelTaps.size() / 2);
+    // AM envelope normalization needs a short acquisition interval while the
+    // channel FIR fills. SSB and CW must not prepend silence: doing so changes
+    // whole-block pitch/timing measurements and delays weak-signal decoder data.
+    state.startupMuteSamples = state.mode == DemodMode::AM
+        ? static_cast<int>(0.012 * kWorkRateHz) +
+              static_cast<int>(state.channelTaps.size() / 2)
+        : 0;
     state.decoderContinuous = false;
     state.explicitReset = false;
 }
@@ -490,14 +491,34 @@ std::vector<float> demodulate(
 
     std::vector<float> audio(channel.size());
     if (mode == DemodMode::AM) {
+        // Prime the carrier estimator from settled samples in this block. Using
+        // the first all-zero FIR output as the carrier reference produces a huge
+        // normalized step as the delay line fills, which can drive both filtered
+        // and decoder-bypass paths into the limiter and erase their difference.
+        if (!state->carrierValid) {
+            const size_t settledAt = std::min(
+                channel.size(), state->channelTaps.size() / 2);
+            double carrierSum = 0.0;
+            size_t carrierCount = 0;
+            for (size_t index = settledAt; index < channel.size(); ++index) {
+                carrierSum += std::abs(channel[index]);
+                ++carrierCount;
+            }
+            if (carrierCount == 0) {
+                for (const auto& sample : channel) carrierSum += std::abs(sample);
+                carrierCount = channel.size();
+            }
+            state->carrier = std::max(
+                static_cast<float>(carrierSum /
+                    static_cast<double>(std::max<size_t>(1, carrierCount))),
+                1.0e-5f);
+            state->carrierValid = true;
+        }
+
         const float carrierAlpha = static_cast<float>(
             1.0 - std::exp(-2.0 * kPi * 4.0 / workRateHz));
         for (size_t index = 0; index < channel.size(); ++index) {
             const float envelope = std::abs(channel[index]);
-            if (!state->carrierValid) {
-                state->carrier = std::max(envelope, 1.0e-5f);
-                state->carrierValid = true;
-            }
             state->carrier +=
                 carrierAlpha * (envelope - state->carrier);
             audio[index] =

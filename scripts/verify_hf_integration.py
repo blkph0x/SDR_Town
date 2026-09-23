@@ -69,8 +69,11 @@ def main() -> int:
     require("0.38 * std::min(1.0, outputRateHz / inputRateHz)" in source,
             "HF anti-alias transition band missing")
     require("startupMuteSamples" in source and
-            "detector/carrier settling" in source,
-            "HF detector startup transient guard missing")
+            "state.mode == DemodMode::AM" in source,
+            "HF startup settling is not limited to AM")
+    require("Prime the carrier estimator from settled samples" in source and
+            "carrierSum" in source,
+            "AM carrier acquisition can still normalize against FIR startup zeros")
     require("(nfmSstv || ssbSstv) ? &multiplex : nullptr" in satcom,
             "Satcom sideband SSTV does not request the clean HF decoder block")
     require("if ((nfmSstv || ssbSstv) && !multiplex.samples.empty())" in satcom,
