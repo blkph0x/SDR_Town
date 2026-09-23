@@ -672,7 +672,11 @@ void SatcomScannerEngine::pushMonitorAudio(const float* samples, size_t count) {
     if (!samples || count == 0) return;
     std::lock_guard<std::mutex> lock(audioMutex_);
     if (!audio_) return;
-    audio_->trimQueuedAudio(12000);
+    // The MainWindow engine can also be carrying Listen audio from a second SDR.
+    // Trimming that shared queue would discard another receiver's PCM. Keep the
+    // Satcom-only latency clamp only for the standalone fallback engine.
+    if (!usingSharedAudio_.load(std::memory_order_acquire))
+        audio_->trimQueuedAudio(12000);
     audio_->pushAudio(samples, count);
 }
 
@@ -912,7 +916,7 @@ SatcomScannerSnapshot SatcomScannerEngine::snapshot() const {
         snapshot.deviceConnected = deviceConnected_;
         snapshot.streamState = streamState_;
         snapshot.audioMonitoring = audioMonitoring_;
-        snapshot.sharedMainAudio = usingSharedAudio_;
+        snapshot.sharedMainAudio = usingSharedAudio_.load(std::memory_order_acquire);
         snapshot.hostTakeoverActive = hostTakeoverActive_;
         snapshot.spectrumDb = spectrumDb_;
         snapshot.spectrumCenterHz = spectrumCenterHz_;
