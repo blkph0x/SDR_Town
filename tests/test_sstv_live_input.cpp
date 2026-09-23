@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include "SstvLiveInput.h"
 #include "SstvReceiverFeed.h"
+#include "SstvRfMode.h"
 #include <limits>
 #include <thread>
 
@@ -216,4 +217,32 @@ TEST_CASE("SSTV receiver detach quiesces an active producer","[sstv][live-input]
         stopped=stopped && !session->stats().active;
     }
     done=true; producer.join(); REQUIRE(stopped);
+}
+
+
+TEST_CASE("SSTV RF auto selection detects sideband energy and safe fallbacks","[sstv][rf-mode]") {
+    constexpr size_t bins=4096;
+    constexpr double rate=48000.0;
+    constexpr double center=14.230e6;
+    const double binHz=rate/double(bins);
+    std::vector<float> usb(bins,-120.0f),lsb(bins,-120.0f),symmetric(bins,-120.0f);
+    auto paint=[&](std::vector<float>& p,double offset,float level) {
+        const double start=center-rate*0.5;
+        const size_t index=std::min(bins-1,size_t((center+offset-start)/binHz));
+        for(int d=-4;d<=4;++d) {
+            const long at=long(index)+d;
+            if(at>=0 && at<long(bins)) p[size_t(at)]=level;
+        }
+    };
+    paint(usb,1700.0f,-45.0f); paint(usb,-1700.0f,-80.0f);
+    paint(lsb,-1700.0f,-45.0f); paint(lsb,1700.0f,-80.0f);
+    paint(symmetric,-1700.0f,-48.0f); paint(symmetric,1700.0f,-48.0f);
+
+    CHECK(SstvRfMode::select("auto",DemodMode::NFM,center,usb,center,rate).mode==DemodMode::USB);
+    CHECK(SstvRfMode::select("auto",DemodMode::NFM,center,lsb,center,rate).mode==DemodMode::LSB);
+    CHECK(SstvRfMode::select("auto",DemodMode::AUTO,145.8e6,symmetric,145.8e6,rate).mode==DemodMode::NFM);
+    CHECK(SstvRfMode::select("auto",DemodMode::AUTO,7.171e6).mode==DemodMode::LSB);
+    CHECK(SstvRfMode::select("auto",DemodMode::AUTO,14.230e6).mode==DemodMode::USB);
+    CHECK(SstvRfMode::select("auto",DemodMode::NFM,14.230e6).mode==DemodMode::USB);
+    CHECK(SstvRfMode::select("nfm",DemodMode::USB,14.230e6).mode==DemodMode::NFM);
 }

@@ -19,6 +19,7 @@ constexpr double kPi = 3.141592653589793238462643383279502884;
 constexpr double kWorkRateHz = 48000.0;
 constexpr int kMinimumResamplerHalf = 24;
 constexpr int kMaximumResamplerHalf = 1024;
+constexpr double kCoarseTargetRateHz = 192000.0;
 
 double sinc(double value) noexcept {
     if (std::abs(value) < 1.0e-12) return 1.0;
@@ -44,7 +45,16 @@ struct State {
     double audioLowPassHz = 0.0;
     double outputRate = 0.0;
 
-    double mixerPhase = 0.0;
+    std::complex<double> mixerOscillator{1.0, 0.0};
+    std::complex<double> mixerStep{1.0, 0.0};
+    uint32_t mixerNormalizeCounter = 0;
+
+    int coarseFactor = 1;
+    int coarsePhase = 0;
+    std::vector<float> coarseTaps;
+    std::vector<std::complex<float>> coarseDelay;
+    size_t coarseWrite = 0;
+
     float impulseMean = 0.0f;
     std::complex<float> impulseLastGood{0.0f, 0.0f};
     std::complex<float> iqDc{0.0f, 0.0f};
@@ -80,6 +90,7 @@ struct State {
     double decoderIdentityHz = 0.0;
     DemodMode decoderMode = DemodMode::AM;
     double decoderRate = 0.0;
+    DecoderSink decoderSink;
 };
 
 // Demod.cpp retains one legacy process-lifetime Demodulator for compatibility.
@@ -107,7 +118,11 @@ std::shared_ptr<State> stateFor(const void* owner) {
 }
 
 void clearStreamingState(State& state) {
-    state.mixerPhase = 0.0;
+    state.mixerOscillator = {1.0, 0.0};
+    state.mixerNormalizeCounter = 0;
+    state.coarsePhase = 0;
+    state.coarseDelay.assign(state.coarseTaps.size(), {});
+    state.coarseWrite = 0;
     state.impulseMean = 0.0f;
     state.impulseLastGood = {};
     state.iqDc = {};
@@ -197,6 +212,75 @@ std::vector<std::complex<float>> filterComplex(
         }
         output[n] = accumulated;
         if (++state.channelWrite == count) state.channelWrite = 0;
+    }
+    return output;
+}
+
+int coarseDecimationFactor(double inputRateHz) noexcept {
+    if (!(inputRateHz > kCoarseTargetRateHz)) return 1;
+    return std::max(1, static_cast<int>(std::floor(inputRateHz / kCoarseTargetRateHz)));
+}
+
+std::vector<float> designCoarseDecimatorTaps(int factor)
+{
+    if (factor <= 1) return {1.0f};
+
+    // Preserve the inner HF channel while establishing a real transition band
+    // before integer downsampling.  A fixed 95-tap Blackman FIR is evaluated
+    // only once per decimated output sample (polyphase-style scheduling), not
+    // once for every input sample.
+    constexpr int taps = 95;
+    constexpr int half = taps / 2;
+    const double cutoff = 0.40 / static_cast<double>(factor);
+    std::vector<float> result(taps);
+    double sum = 0.0;
+    for (int index = 0; index < taps; ++index) {
+        const int offset = index - half;
+        const double window = blackman(
+            static_cast<double>(offset) / static_cast<double>(half));
+        const double value =
+            2.0 * cutoff * sinc(2.0 * cutoff * static_cast<double>(offset)) *
+            window;
+        result[static_cast<size_t>(index)] = static_cast<float>(value);
+        sum += value;
+    }
+    if (std::abs(sum) > 1.0e-12) {
+        for (auto& tap : result) tap /= static_cast<float>(sum);
+    }
+    return result;
+}
+
+std::vector<std::complex<float>> coarseDecimate(
+    State& state,
+    const std::vector<std::complex<float>>& input)
+{
+    if (state.coarseFactor <= 1 || input.empty()) return input;
+    if (state.coarseTaps.empty()) return {};
+
+    if (state.coarseDelay.size() != state.coarseTaps.size()) {
+        state.coarseDelay.assign(state.coarseTaps.size(), {});
+        state.coarseWrite = 0;
+        state.coarsePhase = 0;
+    }
+
+    std::vector<std::complex<float>> output;
+    output.reserve(input.size() / static_cast<size_t>(state.coarseFactor) + 2);
+    const size_t tapCount = state.coarseTaps.size();
+
+    for (const auto& sample : input) {
+        state.coarseDelay[state.coarseWrite] = sample;
+        if (++state.coarseWrite == tapCount) state.coarseWrite = 0;
+
+        if (++state.coarsePhase < state.coarseFactor) continue;
+        state.coarsePhase = 0;
+
+        std::complex<float> accumulated{};
+        size_t at = state.coarseWrite == 0 ? tapCount - 1 : state.coarseWrite - 1;
+        for (size_t k = 0; k < tapCount; ++k) {
+            accumulated += state.coarseDelay[at] * state.coarseTaps[k];
+            at = at == 0 ? tapCount - 1 : at - 1;
+        }
+        output.push_back(accumulated);
     }
     return output;
 }
@@ -445,12 +529,16 @@ std::vector<float> demodulate(
             state->channelTaps = designComplexBandpass(
                 workRateHz, -halfWidth, halfWidth, 257);
         }
-        state->resamplerHalf = adaptiveResamplerHalf(inputRateHz, workRateHz);
+        state->coarseFactor = coarseDecimationFactor(inputRateHz);
+        state->coarseTaps = designCoarseDecimatorTaps(state->coarseFactor);
+        const double coarseRateHz = inputRateHz / static_cast<double>(state->coarseFactor);
+        state->resamplerHalf = adaptiveResamplerHalf(coarseRateHz, workRateHz);
+        const double phaseStep =
+            2.0 * kPi * (targetHz - centerHz) / inputRateHz;
+        state->mixerStep = std::polar(1.0, -phaseStep);
         clearStreamingState(*state);
     }
 
-    const double phaseStep =
-        2.0 * kPi * (targetHz - centerHz) / inputRateHz;
     const float dcAlpha = static_cast<float>(
         1.0 - std::exp(-2.0 * kPi * 2.0 / inputRateHz));
     const float impulseAlpha = static_cast<float>(
@@ -460,11 +548,15 @@ std::vector<float> demodulate(
     mixed.reserve(iq.size());
     for (const auto& inputSample : iq) {
         const std::complex<float> oscillator(
-            static_cast<float>(std::cos(state->mixerPhase)),
-            static_cast<float>(-std::sin(state->mixerPhase)));
+            static_cast<float>(state->mixerOscillator.real()),
+            static_cast<float>(state->mixerOscillator.imag()));
         std::complex<float> sample = inputSample * oscillator;
-        state->mixerPhase =
-            std::remainder(state->mixerPhase + phaseStep, 2.0 * kPi);
+        state->mixerOscillator *= state->mixerStep;
+        if (++state->mixerNormalizeCounter >= 4096u) {
+            const double magnitude = std::abs(state->mixerOscillator);
+            if (magnitude > 1.0e-12) state->mixerOscillator /= magnitude;
+            state->mixerNormalizeCounter = 0;
+        }
 
         const float magnitude = std::abs(sample);
         if (state->impulseMean <= 1.0e-7f) {
@@ -488,8 +580,11 @@ std::vector<float> demodulate(
         mixed.push_back(sample);
     }
 
+    auto coarse = coarseDecimate(*state, mixed);
+    const double coarseRateHz =
+        inputRateHz / static_cast<double>(std::max(1, state->coarseFactor));
     auto atWorkRate = resampleComplex(
-        *state, mixed, inputRateHz, workRateHz);
+        *state, coarse, coarseRateHz, workRateHz);
     if (atWorkRate.empty()) return {};
 
     auto channel = filterComplex(*state, atWorkRate);
@@ -612,8 +707,8 @@ std::vector<float> demodulate(
 
     const std::vector<float> decoderSource = audio;
 
-    if (decoderAudio && (mode == DemodMode::USB ||
-                         mode == DemodMode::LSB)) {
+    if ((decoderAudio || state->decoderSink) &&
+        (mode == DemodMode::USB || mode == DemodMode::LSB)) {
         const double identity = std::isfinite(dataIdentityHz)
             ? dataIdentityHz : targetHz;
         const bool discontinuity =
@@ -626,18 +721,24 @@ std::vector<float> demodulate(
             ++state->decoderEpoch;
             state->decoderSamples = 0;
         }
-        decoderAudio->samples = decoderSource;
-        decoderAudio->sampleRate = workRateHz;
-        decoderAudio->targetHz = identity;
-        decoderAudio->epoch = state->decoderEpoch;
-        decoderAudio->firstSample = state->decoderSamples;
-        decoderAudio->discontinuity = discontinuity;
-        decoderAudio->resetReasons = discontinuity ? 1u : 0u;
-        state->decoderSamples += decoderAudio->samples.size();
+
+        FmMultiplexBlock block;
+        block.samples = decoderSource;
+        block.sampleRate = workRateHz;
+        block.targetHz = identity;
+        block.epoch = state->decoderEpoch;
+        block.firstSample = state->decoderSamples;
+        block.discontinuity = discontinuity;
+        block.resetReasons = discontinuity ? 1u : 0u;
+
+        state->decoderSamples += block.samples.size();
         state->decoderContinuous = true;
         state->decoderMode = mode;
         state->decoderRate = workRateHz;
         state->decoderIdentityHz = identity;
+
+        if (decoderAudio) *decoderAudio = block;
+        if (state->decoderSink) state->decoderSink(block, mode);
     } else {
         state->decoderContinuous = false;
     }
@@ -689,6 +790,29 @@ std::vector<float> demodulate(
             outputRateHz / workRateHz));
     }
     return resizeAudio(audio, requested);
+}
+
+void setDecoderSink(const void* owner, DecoderSink sink) {
+    if (!owner) return;
+    auto state = stateFor(owner);
+    std::lock_guard<std::mutex> stateLock(state->mutex);
+    state->decoderSink = std::move(sink);
+    state->decoderContinuous = false;
+}
+
+void clearDecoderSink(const void* owner) noexcept {
+    if (!owner) return;
+    std::shared_ptr<State> state;
+    {
+        std::lock_guard<std::mutex> lock(registryMutex());
+        auto& states = registry();
+        const auto found = states.find(owner);
+        if (found == states.end()) return;
+        state = found->second;
+    }
+    std::lock_guard<std::mutex> stateLock(state->mutex);
+    state->decoderSink = {};
+    state->decoderContinuous = false;
 }
 
 void reset(const void* owner) noexcept {

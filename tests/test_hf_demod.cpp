@@ -375,3 +375,63 @@ TEST_CASE("HF rate conversion rejects aliases from multi-megasample SDR streams"
                 std::max(1.0e-9, tailRms(aliased)) * 20.0);
     }
 }
+
+
+TEST_CASE("HF USB decoder sink publishes clean live SSTV audio without a tap pointer",
+          "[hf][sstv][sink]") {
+    constexpr double inputRate=192000.0;
+    const auto iq=analyticTone(inputRate,0.30,1900.0,0.15f);
+    Demodulator demod;
+    FmMultiplexBlock received;
+    DemodMode receivedMode=DemodMode::AM;
+    int calls=0;
+    HfDemod::setDecoderSink(&demod,[&](const FmMultiplexBlock& block,DemodMode mode) {
+        received=block; receivedMode=mode; ++calls;
+    });
+    const auto audio=processHf(demod,iq,inputRate,DemodMode::USB,6000.0,3000.0,nullptr);
+    HfDemod::clearDecoderSink(&demod);
+
+    REQUIRE_FALSE(audio.empty());
+    REQUIRE(calls==1);
+    REQUIRE(receivedMode==DemodMode::USB);
+    REQUIRE_FALSE(received.samples.empty());
+    REQUIRE(received.sampleRate==48000.0);
+    REQUIRE(received.discontinuity);
+    REQUIRE(toneAmplitude(received.samples,48000.0,1900.0)>0.08);
+}
+
+TEST_CASE("HF high-rate frontend remains continuous across realtime-sized blocks",
+          "[hf][qbranch][streaming]") {
+    constexpr double inputRate=2.048e6;
+    constexpr double toneHz=1500.0;
+    const auto iq=analyticTone(inputRate,0.18,toneHz,0.12f);
+
+    Demodulator demod;
+    std::vector<float> joined;
+    constexpr size_t block=32768;
+    for(size_t begin=0;begin<iq.size();begin+=block) {
+        const size_t end=std::min(iq.size(),begin+block);
+        std::vector<std::complex<float>> part(iq.begin()+begin,iq.begin()+end);
+        auto audio=processHf(demod,part,inputRate,DemodMode::USB,6000.0,3000.0);
+        joined.insert(joined.end(),audio.begin(),audio.end());
+    }
+
+    REQUIRE(joined.size()>5000);
+    REQUIRE(allFinite(joined));
+    REQUIRE(peak(joined)<=0.981f);
+    REQUIRE(toneAmplitude(joined,48000.0,toneHz)>0.07);
+}
+
+TEST_CASE("HF AM at RTL direct-sampling rate stays intelligible and bounded",
+          "[hf][am][qbranch]") {
+    constexpr double inputRate=2.048e6;
+    Demodulator demod;
+    const auto audio=processHf(
+        demod,amTone(inputRate,0.18,1000.0,0.28f,0.60f),
+        inputRate,DemodMode::AM,10000.0,5000.0);
+
+    REQUIRE(audio.size()>5000);
+    REQUIRE(allFinite(audio));
+    REQUIRE(peak(audio)<=0.981f);
+    REQUIRE(toneAmplitude(audio,48000.0,1000.0)>0.08);
+}
