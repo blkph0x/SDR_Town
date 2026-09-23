@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Current version** | **0.2.87** (experimental channel) |
+| **Current version** | **0.2.88** (experimental channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
@@ -125,7 +125,7 @@ This is **active experimental software**. It is useful for real RF testing and d
 
 | Area | Reality |
 |------|---------|
-| **Analog demod** | **WFM, AM, NFM** are solid everyday paths. **AUTO** picks mode/BW/LPF suggestions from band priors + live signal estimates. **USB / LSB / CW** exist and produce audio; they are basic receive chains, not polished DX receivers. |
+| **Analog demod** | **WFM, AM, NFM** are solid everyday paths. **AUTO** picks mode/BW/LPF suggestions from band priors + live signal estimates. **USB / LSB / CW** now use isolated stateful HF filtering, AGC, sideband rejection and multi-MS/s anti-aliasing with automated regression coverage; wider real-world DX qualification remains ongoing. |
 | **GUI** | Spectrum + waterfall, device manager, multi-output audio, saved frequencies, P25 control/talkgroup panes, live SIG/NF/SNR/AFC readouts, IQ capture, training capture, Help â†’ Check for Updates / Report Issue. |
 | **Devices** | RTL-SDR, **SDRplay RSP series** (SoapySDRPlay3: IFGR/RFGR, AGC, combined MW/FM + DAB notches, Bias-T, HDR, clock OUT, RSPduo Dual Tuner + host diversity/null-steer), and other SoapySDR devices. Safe stub path when hardware is absent. RF gain, sample rate, antenna, PPM (manual + cal/apply). See [docs/SDRPLAY.md](docs/SDRPLAY.md). |
 | **Audio** | miniaudio multi-output (speakers + virtual cable), per-output enable/volume, ring-fill and underrun counters. Master volume in GUI. |
@@ -554,6 +554,6 @@ See `LICENSE.txt`.
 - Issues and PRs: https://github.com/Blkph0x/SDR_Town  
 
 **Bottom line:** WFM/AM/NFM, RDS, workspaces, band plans, SDRplay Soapy, satcom/TLE/Doppler,
-aircraft map, and analogue SSTV (plus HamDRM selftest) ship in **0.2.80**. P25, live SSTV RF,
+aircraft map, analogue SSTV (plus HamDRM selftest), and the hardened AM/USB/LSB/CW HF receive path ship in **0.2.88**. P25, live SSTV RF,
 Inmarsat, and HamDRM on-air remain experimental. No universal reception or clear-audio
 percentage is claimed. Pair FUBAR **1.1.41** with this Town DLL.
