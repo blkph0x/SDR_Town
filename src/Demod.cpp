@@ -427,7 +427,6 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
             dataIdentityHz);
     }
     // HF_RECEIVE_DELEGATE_END
-
     rmsOut = -100;
     if (iq.empty()) return {};
     if (sr <= 0.0 || !std::isfinite(sr)) return {};
