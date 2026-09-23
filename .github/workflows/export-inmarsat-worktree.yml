@@ -1,0 +1,35 @@
+name: Export Inmarsat feature worktree
+
+on:
+  push:
+    branches:
+      - feature/inmarsat-multivfo-fec-voice-follow
+    paths:
+      - .github/workflows/export-inmarsat-worktree.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/inmarsat-multivfo-fec-voice-follow
+          fetch-depth: 0
+          submodules: false
+      - name: Create source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          git archive --format=zip --output=SDR_Town-feature-source.zip HEAD
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: SDR_Town-feature-source
+          path: SDR_Town-feature-source.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
