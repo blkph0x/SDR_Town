@@ -52,6 +52,10 @@ SATCOM_MARKER_BEGIN = "// SATCOM_HOST_INTEGRATION_BEGIN"
 SATCOM_MARKER_END = "// SATCOM_HOST_INTEGRATION_END"
 SATCOM_HOST_INCLUDE = '#include "SatcomHostServices.h"'
 
+SSTV_MAINWINDOW_INCLUDES = ('#include "HfDemod.h"\n', '#include "SstvRfMode.h"\n')
+SSTV_FUNCTION_START = "SstvWindow* MainWindow::ensureSstvWindow()\n"
+SSTV_FUNCTION_END = "QJsonObject MainWindow::handleSdrTownControlRequest"
+
 HF_DEMOD_PATH = "src/Demod.cpp"
 HF_INCLUDE = '#include "HfDemod.h"\n'
 HF_OLD_DESTRUCTOR = "Demodulator::~Demodulator() = default;\n"
@@ -119,6 +123,40 @@ def mainwindow_satcom_diff_allowed(diff_text: str) -> tuple[bool, str]:
         return False, "Satcom integration markers are unbalanced"
     if not saw_marker:
         return False, "no Satcom integration marker block was found"
+    return True, ""
+
+
+def mainwindow_sstv_change_allowed(base: str, head: str) -> tuple[bool, str]:
+    base_text = git_file_text(base, SATCOM_MAINWINDOW_PATH)
+    head_text = git_file_text(head, SATCOM_MAINWINDOW_PATH)
+    transformed = head_text
+
+    for include in SSTV_MAINWINDOW_INCLUDES:
+        count = transformed.count(include)
+        base_count = base_text.count(include)
+        if count != base_count + 1:
+            return False, f"SSTV MainWindow include count changed unexpectedly: {include.strip()!r}"
+        transformed = transformed.replace(include, "", 1)
+
+    def function_span(text: str) -> tuple[int, int] | None:
+        start = text.find(SSTV_FUNCTION_START)
+        if start < 0:
+            return None
+        end = text.find(SSTV_FUNCTION_END, start)
+        if end < 0:
+            return None
+        return start, end
+
+    base_span = function_span(base_text)
+    head_span = function_span(transformed)
+    if not base_span or not head_span:
+        return False, "could not isolate ensureSstvWindow from MainWindow"
+
+    bs, be = base_span
+    hs, he = head_span
+    transformed = transformed[:hs] + base_text[bs:be] + transformed[he:]
+    if transformed != base_text:
+        return False, "MainWindow changed outside the isolated SSTV live-source function"
     return True, ""
 
 
@@ -262,16 +300,20 @@ def main() -> int:
             pattern = f"{pattern}; {detail}"
         if path == SATCOM_MAINWINDOW_PATH and args.paths is None:
             try:
-                allowed, detail = mainwindow_satcom_diff_allowed(
+                allowed, detail = mainwindow_sstv_change_allowed(args.base, args.head)
+                if allowed:
+                    print("P25 guard: accepted isolated SSTV live-source wiring; MainWindow is otherwise byte-identical.")
+                    continue
+                satcom_allowed, satcom_detail = mainwindow_satcom_diff_allowed(
                     git_path_diff(args.base, args.head, path)
                 )
             except RuntimeError as exc:
                 print(f"P25 guard error: {exc}", file=sys.stderr)
                 return 2
-            if allowed:
+            if satcom_allowed:
                 print("P25 guard: accepted additive marked Satcom host wiring in MainWindow.")
                 continue
-            pattern = f"{pattern}; {detail}"
+            pattern = f"{pattern}; SSTV={detail}; Satcom={satcom_detail}"
         blocked.append((path, pattern))
 
     if blocked:
