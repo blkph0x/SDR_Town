@@ -3,7 +3,6 @@
 #include "Demod.h"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <complex>
 #include <cstdint>
@@ -20,7 +19,6 @@ constexpr double kPi = 3.141592653589793238462643383279502884;
 constexpr double kWorkRateHz = 48000.0;
 constexpr int kMinimumResamplerHalf = 24;
 constexpr int kMaximumResamplerHalf = 1024;
-constexpr int kCicOrder = 4;
 constexpr double kCoarseTargetRateHz = 192000.0;
 
 double sinc(double value) noexcept {
@@ -53,8 +51,9 @@ struct State {
 
     int coarseFactor = 1;
     int coarsePhase = 0;
-    std::array<std::complex<double>, kCicOrder> cicIntegrator{};
-    std::array<std::complex<double>, kCicOrder> cicCombDelay{};
+    std::vector<float> coarseTaps;
+    std::vector<std::complex<float>> coarseDelay;
+    size_t coarseWrite = 0;
 
     float impulseMean = 0.0f;
     std::complex<float> impulseLastGood{0.0f, 0.0f};
@@ -122,8 +121,8 @@ void clearStreamingState(State& state) {
     state.mixerOscillator = {1.0, 0.0};
     state.mixerNormalizeCounter = 0;
     state.coarsePhase = 0;
-    state.cicIntegrator = {};
-    state.cicCombDelay = {};
+    state.coarseDelay.assign(state.coarseTaps.size(), {});
+    state.coarseWrite = 0;
     state.impulseMean = 0.0f;
     state.impulseLastGood = {};
     state.iqDc = {};
@@ -222,38 +221,66 @@ int coarseDecimationFactor(double inputRateHz) noexcept {
     return std::max(1, static_cast<int>(std::floor(inputRateHz / kCoarseTargetRateHz)));
 }
 
+std::vector<float> designCoarseDecimatorTaps(int factor)
+{
+    if (factor <= 1) return {1.0f};
+
+    // Preserve the inner HF channel while establishing a real transition band
+    // before integer downsampling.  A fixed 95-tap Blackman FIR is evaluated
+    // only once per decimated output sample (polyphase-style scheduling), not
+    // once for every input sample.
+    constexpr int taps = 95;
+    constexpr int half = taps / 2;
+    const double cutoff = 0.40 / static_cast<double>(factor);
+    std::vector<float> result(taps);
+    double sum = 0.0;
+    for (int index = 0; index < taps; ++index) {
+        const int offset = index - half;
+        const double window = blackman(
+            static_cast<double>(offset) / static_cast<double>(half));
+        const double value =
+            2.0 * cutoff * sinc(2.0 * cutoff * static_cast<double>(offset)) *
+            window;
+        result[static_cast<size_t>(index)] = static_cast<float>(value);
+        sum += value;
+    }
+    if (std::abs(sum) > 1.0e-12) {
+        for (auto& tap : result) tap /= static_cast<float>(sum);
+    }
+    return result;
+}
+
 std::vector<std::complex<float>> coarseDecimate(
     State& state,
     const std::vector<std::complex<float>>& input)
 {
     if (state.coarseFactor <= 1 || input.empty()) return input;
+    if (state.coarseTaps.empty()) return {};
+
+    if (state.coarseDelay.size() != state.coarseTaps.size()) {
+        state.coarseDelay.assign(state.coarseTaps.size(), {});
+        state.coarseWrite = 0;
+        state.coarsePhase = 0;
+    }
 
     std::vector<std::complex<float>> output;
     output.reserve(input.size() / static_cast<size_t>(state.coarseFactor) + 2);
-
-    double gain = 1.0;
-    for (int i = 0; i < kCicOrder; ++i) gain *= state.coarseFactor;
+    const size_t tapCount = state.coarseTaps.size();
 
     for (const auto& sample : input) {
-        std::complex<double> value(sample.real(), sample.imag());
-        for (int stage = 0; stage < kCicOrder; ++stage) {
-            state.cicIntegrator[stage] += value;
-            value = state.cicIntegrator[stage];
-        }
+        state.coarseDelay[state.coarseWrite] = sample;
+        if (++state.coarseWrite == tapCount) state.coarseWrite = 0;
 
         if (++state.coarsePhase < state.coarseFactor) continue;
         state.coarsePhase = 0;
 
-        for (int stage = 0; stage < kCicOrder; ++stage) {
-            const auto previous = state.cicCombDelay[stage];
-            state.cicCombDelay[stage] = value;
-            value -= previous;
+        std::complex<float> accumulated{};
+        size_t at = state.coarseWrite == 0 ? tapCount - 1 : state.coarseWrite - 1;
+        for (size_t k = 0; k < tapCount; ++k) {
+            accumulated += state.coarseDelay[at] * state.coarseTaps[k];
+            at = at == 0 ? tapCount - 1 : at - 1;
         }
-
-        value /= gain;
-        output.emplace_back(
-            static_cast<float>(value.real()),
-            static_cast<float>(value.imag()));
+        output.push_back(accumulated);
     }
     return output;
 }
@@ -503,6 +530,7 @@ std::vector<float> demodulate(
                 workRateHz, -halfWidth, halfWidth, 257);
         }
         state->coarseFactor = coarseDecimationFactor(inputRateHz);
+        state->coarseTaps = designCoarseDecimatorTaps(state->coarseFactor);
         const double coarseRateHz = inputRateHz / static_cast<double>(state->coarseFactor);
         state->resamplerHalf = adaptiveResamplerHalf(coarseRateHz, workRateHz);
         const double phaseStep =
