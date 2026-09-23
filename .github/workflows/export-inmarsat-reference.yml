@@ -1,0 +1,44 @@
+name: Export pinned Inmarsat reference sources
+
+on:
+  push:
+    branches:
+      - feature/inmarsat-multivfo-fec-voice-follow
+    paths:
+      - .github/workflows/export-inmarsat-reference.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Fetch pinned references
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/jontio/libaeroambe.git libaeroambe
+          git -C libaeroambe checkout df7eebf17ca6396cc545bff4869dbeccc1e7dfcd -- mbelib-master libaeroambe README.md
+          git clone --filter=blob:none --no-checkout https://github.com/airframesio/xng.git xng
+          git -C xng checkout 096c805278faa0a904de7d98066bf4cf395cb6c2 -- \
+            crates/xng-dsp/src/viterbi.rs \
+            crates/xng-dsp/src/scramble.rs \
+            crates/xng-mode-aero/src/frame.rs \
+            crates/xng-mode-aero/src/cchannel.rs \
+            crates/xng-mode-aero/src/su.rs \
+            crates/xng-mode-aero/src/oqpsk.rs \
+            crates/xng-mode-stdc/src/frame.rs \
+            docs/notes/AERO.md docs/notes/STDC.md \
+            crates/xng-mode-aero/PROVENANCE.md crates/xng-mode-stdc/PROVENANCE.md \
+            LICENSE-MIT LICENSE-APACHE
+          zip -qr inmarsat-reference.zip libaeroambe xng
+      - name: Upload pinned references
+        uses: actions/upload-artifact@v4
+        with:
+          name: inmarsat-pinned-reference
+          path: inmarsat-reference.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
