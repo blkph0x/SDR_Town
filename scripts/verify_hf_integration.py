@@ -67,8 +67,12 @@ def main() -> int:
             "main-receiver SSB SSTV sink coverage missing")
     require("RTL direct-sampling rate stays intelligible" in tests,
             "Q-branch AM realtime regression coverage missing")
-    require("coarseDecimate" in source and "kCicOrder = 4" in source,
-            "staged high-rate HF decimator missing")
+    require("coarseDecimate" in source and "designCoarseDecimatorTaps" in source,
+            "bounded staged high-rate HF decimator missing")
+    require("coarseTaps" in source and "coarseDelay" in source,
+            "streaming HF FIR decimator state missing")
+    require("cicIntegrator" not in source,
+            "unbounded CIC integrator state must not return")
     require("mixerOscillator *= state->mixerStep" in source,
             "recursive HF NCO missing; per-sample trig regression possible")
     require("adaptiveResamplerHalf" in source and
