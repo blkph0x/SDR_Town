@@ -63,9 +63,17 @@ def main() -> int:
             "stale WFM-to-HF profile regression coverage missing")
     require("decoder tap is continuous" in tests,
             "HF SSTV continuity coverage missing")
+    require("decoder sink publishes clean live SSTV audio" in tests,
+            "main-receiver SSB SSTV sink coverage missing")
+    require("RTL direct-sampling rate stays intelligible" in tests,
+            "Q-branch AM realtime regression coverage missing")
+    require("coarseDecimate" in source and "kCicOrder = 4" in source,
+            "staged high-rate HF decimator missing")
+    require("mixerOscillator *= state->mixerStep" in source,
+            "recursive HF NCO missing; per-sample trig regression possible")
     require("adaptiveResamplerHalf" in source and
             "kMaximumResamplerHalf = 1024" in source,
-            "multi-MS/s anti-alias hardening missing")
+            "fractional HF resampler hardening missing")
     require("0.38 * std::min(1.0, outputRateHz / inputRateHz)" in source,
             "HF anti-alias transition band missing")
     require("startupMuteSamples" in source and
