@@ -1,0 +1,58 @@
+name: Apply HF epoch and SSTV fix
+
+on:
+  push:
+    branches:
+      - fix/hf-receive-hardening
+    paths:
+      - scripts/apply_hf_epoch_and_sstv_fix.py
+      - .github/workflows/apply-hf-epoch-and-sstv-fix.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-hf-epoch-and-sstv-fix
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: Patch HF epoch reset and sideband SSTV source
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v7
+        with:
+          ref: fix/hf-receive-hardening
+          fetch-depth: 0
+
+      - name: Apply guarded source patch
+        run: python3 scripts/apply_hf_epoch_and_sstv_fix.py
+
+      - name: Validate frozen P25 and HF contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/test_no_p25_guard.py
+          python3 scripts/verify_hf_integration.py
+          base="$(git merge-base origin/master HEAD)"
+          python3 scripts/verify_no_p25_changes.py --base "${base}" --head HEAD
+          git diff --check
+
+      - name: Commit source-only fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            src/Demod.cpp \
+            src/SatcomScannerEngine.cpp \
+            scripts/verify_no_p25_changes.py \
+            scripts/verify_hf_integration.py \
+            tests/test_hf_demod.cpp \
+            docs/HF_RECEIVE.md
+          git commit -m "Reset HF state on stream epochs and preserve SSTV provenance"
+          git push origin HEAD:fix/hf-receive-hardening
