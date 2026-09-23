@@ -1,6 +1,7 @@
 #pragma once
 
 #include <complex>
+#include <functional>
 #include <cstddef>
 #include <limits>
 #include <vector>
@@ -9,6 +10,8 @@ enum class DemodMode;
 struct FmMultiplexBlock;
 
 namespace HfDemod {
+
+using DecoderSink = std::function<void(const FmMultiplexBlock&, DemodMode)>;
 
 // Returns true only for the analogue HF modes owned by this isolated path.
 bool supports(DemodMode mode) noexcept;
@@ -34,6 +37,8 @@ std::vector<float> demodulate(
     FmMultiplexBlock* decoderAudio = nullptr,
     double dataIdentityHz = std::numeric_limits<double>::quiet_NaN());
 
+void setDecoderSink(const void* owner, DecoderSink sink);
+void clearDecoderSink(const void* owner) noexcept;
 void reset(const void* owner) noexcept;
 void release(const void* owner) noexcept;
 
