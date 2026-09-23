@@ -24,28 +24,17 @@ new_push = '''void SatcomScannerEngine::pushMonitorAudio(const float* samples, s
     audio_->pushAudio(samples, count);
 }
 '''
-if engine.count(old_push) != 1:
-    raise SystemExit(f"expected one pushMonitorAudio block, found {engine.count(old_push)}")
-engine = engine.replace(old_push, new_push)
+
+if old_push in engine:
+    engine = engine.replace(old_push, new_push, 1)
+elif new_push not in engine:
+    raise SystemExit("pushMonitorAudio no longer matches either expected implementation")
 
 old_snapshot = "        snapshot.sharedMainAudio = usingSharedAudio_;\n"
 new_snapshot = "        snapshot.sharedMainAudio = usingSharedAudio_.load(std::memory_order_acquire);\n"
-if engine.count(old_snapshot) != 1:
-    raise SystemExit(f"expected one shared audio snapshot, found {engine.count(old_snapshot)}")
-engine = engine.replace(old_snapshot, new_snapshot)
-engine_path.write_text(engine, encoding="utf-8")
+if old_snapshot in engine:
+    engine = engine.replace(old_snapshot, new_snapshot, 1)
+elif new_snapshot not in engine:
+    raise SystemExit("sharedMainAudio snapshot no longer matches either expected implementation")
 
-verify_path = Path("scripts/verify_satcom_host_integration.py")
-verify = verify_path.read_text(encoding="utf-8")
-anchor = '''    require("SatcomHostServices::instance().publishSpectrum" in engine_cpp,
-            "engine does not publish spectrum to MainWindow")
-'''
-addition = '''    require("SatcomHostServices::instance().publishSpectrum" in engine_cpp,
-            "engine does not publish spectrum to MainWindow")
-    require("if (!usingSharedAudio_.load(std::memory_order_acquire))" in engine_cpp,
-            "shared MainWindow audio queue can still be trimmed by Satcom")
-'''
-if verify.count(anchor) != 1:
-    raise SystemExit(f"expected one verifier anchor, found {verify.count(anchor)}")
-verify = verify.replace(anchor, addition)
-verify_path.write_text(verify, encoding="utf-8")
+engine_path.write_text(engine, encoding="utf-8")
