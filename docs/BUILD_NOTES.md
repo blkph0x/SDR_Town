@@ -2,6 +2,22 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-24 - 0.2.89 published package verification
+
+`scripts/release.ps1 -Version 0.2.89 -Channel experimental` rebuilt the committed
+source, repeated CTest 4/4 PASS (53.51 s), staged a clean runtime, built NSIS and
+portable assets, signed the updater manifest and passed verify_release.py.
+Source `560cf852c9ee0efc838268ac96defd2b97393c57`; asset-metadata tag `3820791`.
+GitHub Latest v0.2.89 has all eight expected assets in uploaded state. Remote
+SHA-256 digests and byte lengths match local files for every asset.
+
+Extracted the actual ZIP into build-audit-20260924/package-smoke-0289, removed
+development Qt/plugin paths and restricted PATH to Windows directories. Packaged
+--version reports 0.2.89, SSTV --selftest completes Robot36, and actual GUI dry-run
+starts/exits without errors/warnings and without opening RX. This is a local
+runtime smoke check, not a clean-OS install or live hardware acceptance test.
+Evidence: release-0289.txt, package-gui-0289.json and packaged build-info.json.
+
 ## 2026-09-24 - 0.2.89 candidate and additional repair gates
 
 Same Windows/MSVC/Qt host as below. Release app and both test targets built.

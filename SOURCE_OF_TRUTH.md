@@ -78,7 +78,7 @@ Working well (keep; do not destabilize for P25 experiments):
   [X] Phase 2 superframe / ISCH / XOR mask generation (NAC/WACN/SysID)
   [X] Encrypted mute (security fail-closed when proof says encrypted)
   [X] Updater: GitHub latest + Ed25519 manifest when key configured
-      (published tester: v0.2.80 experimental)
+      (published tester: v0.2.89 experimental)
 
 Shipped experimental in v0.2.74 (user deferred further P25 work and authorized
 receive expansion). These are not P25 SoT gates and are not live-RF accepted:

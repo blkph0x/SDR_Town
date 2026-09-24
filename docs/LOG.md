@@ -2,6 +2,18 @@
 
 Newest at the top.
 
+## 2026-09-24 - 0.2.89 published for remote testing
+
+Fast-forwarded original-folder master to repaired source 560cf85; published
+v0.2.89 at asset-metadata commit 3820791. Installer, portable ZIP, versioned
+control DLL, individual hashes, SHA256SUMS and signed updater manifest verified
+locally and against GitHub's uploaded asset digests. Latest release is 0.2.89,
+experimental channel (existing Latest/updater distribution convention).
+Packaged GUI and SSTV helper smoke tests pass without development Qt paths.
+No Desktop/TEST overwrite, capture deletion, P25 audio-algorithm change or
+FUBAR release. Remaining audit gates stay open; work continues in the original
+Desktop/maulaudio_pro folder on master.
+
 ## 2026-09-24 - 0.2.89 tester release candidate
 
 User authorized code and asset publication. Continued the repair report with
