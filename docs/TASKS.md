@@ -1,5 +1,9 @@
 # Task list (canonical)
 
+T-0047 current subtask | in_progress | CI release fixture repair | DEC-0118 /
+ISS-0014. Reproduce failed run 35979813492, repair packaging tests without
+weakening verification, run locally and confirm the remote build/package gate.
+
 T-0046 | done | 2026-09-24 source/branch reconciliation and receive-chain audit |
 DEC-0110; docs/AUDIT_20260924.md. Original folder fast-forwarded to exact 0.2.88
 tester source. Local work preserved; 15 exact-tree duplicate remote branches

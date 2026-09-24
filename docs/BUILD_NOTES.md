@@ -2,6 +2,23 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-24 - DEC-0118 Windows CI fixture repair
+
+Failed run 35979813492 / source 3aa5ce4 reproduced locally: release-verifier suite
+11 tests, 2 failures + 2 errors; first error Missing runtime: build-info.json.
+The app/native/Qt/Rust steps on that runner had already passed. Failure prevented
+portable staging/upload, not compilation or RF tests.
+
+Isolated repair worktree, Windows host, Python 3.12 (CI version):
+`py -3.12 scripts/test_verify_release.py -v`: 15/15 PASS (1.03 s), including
+2 missing-notice subcases and 4 provenance-tamper subcases. Valid/BOM fixtures
+reach mocked signature verification exactly once; invalid provenance never does.
+`python scripts/validate_github_workflows.py --self-test`: selftest and 3 YAML
+files PASS. `python scripts/test_no_p25_guard.py`: PASS.
+`scripts/test_release_commands.ps1`: PASS native failure propagation, real
+temporary-manifest signing, unchanged trust anchor and wrong-key rejection.
+No runtime/C++/DSP changes; remote full-build confirmation follows this commit.
+
 ## 2026-09-24 - 0.2.89 published package verification
 
 `scripts/release.ps1 -Version 0.2.89 -Channel experimental` rebuilt the committed

@@ -48,6 +48,9 @@ if ($cmakeText -notmatch "project\(SDR_Town VERSION\s+$escapedVersion\s+LANGUAGE
     throw "CMakeLists.txt project version must be $Version before packaging this release."
 }
 
+# DEC-0118: exercise the same packaging-contract gate as CI before building.
+Invoke-Checked python @('scripts/test_verify_release.py')
+
 # 1. Ensure clean branded build
 Write-Host "`n[1/6] Running clean deploy + windeployqt + cpack..." -ForegroundColor Yellow
 Invoke-Checked cmake @('-S', '.', '-B', 'build', '-DSDR_TOWN_ENABLE_SSTV_IMAGES=ON')

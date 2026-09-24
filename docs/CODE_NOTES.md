@@ -1,5 +1,14 @@
 # Code notes (tree map)
 
+2026-09-24 / DEC-0118 CI fixture repair:
+- test_verify_release.py builds an independent valid portable fixture, including
+  source/executable provenance and SGP4 notices. Repacking helpers preserve ZIP
+  uniqueness; negative cases prove missing/tampered metadata cannot reach signing.
+- windows-ci.yml runs these cheap checks immediately after Python setup and
+  includes sourceCommit/executableSha256 in CI artifact build-info.json.
+- release.ps1 uses the identical negative-test gate before configure/build.
+  Production verify_release.py, signing keys, updater and DSP remain unchanged.
+
 2026-09-24 / DEC-0114..0115 release follow-up:
 - SatcomDoppler is a worker-owned, phase-continuous IQ translator. Pass tracking
   retains the arm-time RF center and nominal decoder identity; the planner only

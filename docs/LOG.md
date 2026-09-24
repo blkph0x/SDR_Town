@@ -2,6 +2,15 @@
 
 Newest at the top.
 
+## 2026-09-24 - GitHub Windows CI failure isolated and repaired
+
+Run 35979813492 failed on stale disposable release-test data, after successful
+app/core/Qt/SSTV build gates. Added the missing provenance and SGP4 notices to
+the fixture, targeted negative cases and early CI/local-release preflight.
+Production verification was not weakened. Local tests pass (BUILD_NOTES).
+Repair isolated from uncommitted SSTV RF work; no release version/tag/asset is
+changed. Full remote run will confirm staging and artifact upload too.
+
 ## 2026-09-24 - 0.2.89 published for remote testing
 
 Fast-forwarded original-folder master to repaired source 560cf85; published

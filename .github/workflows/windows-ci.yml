@@ -35,6 +35,12 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Release verifier negative tests
+        shell: pwsh
+        run: |
+          python scripts/test_verify_release.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Enforce frozen P25 pipeline
         shell: pwsh
         run: |
@@ -144,12 +150,6 @@ jobs:
           ctest --test-dir build -C Release -R SstvTransportRust --output-on-failure
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Release verifier negative tests
-        shell: pwsh
-        run: |
-          python scripts/test_verify_release.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
       - name: Build clean portable staging directory
         shell: pwsh
         run: |
@@ -208,6 +208,8 @@ jobs:
             projectVersion = $projectVersion
             branch = $refName
             commit = $env:GITHUB_SHA
+            sourceCommit = $env:GITHUB_SHA
+            executableSha256 = (Get-FileHash (Join-Path $stage "SDR_Town.exe") -Algorithm SHA256).Hash.ToLowerInvariant()
             workflowRun = $env:GITHUB_RUN_ID
             generatedUtc = (Get-Date).ToUniversalTime().ToString("o")
             sstvBackend = "required"

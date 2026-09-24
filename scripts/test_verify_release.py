@@ -27,13 +27,18 @@ class ReleaseTests(unittest.TestCase):
                  'SoapySDR.dll', 'SoapyRTLSDR.dll', 'Qt6Core.dll', 'Qt6Widgets.dll',
                  'platforms/qwindows.dll', 'licenses/rtlsdr-COPYRIGHT.txt',
                  'sdrtown_sstv.exe', 'licenses/sstv/sstv-MIT.txt',
-                 'licenses/sstv/libm-LICENSE.txt', 'licenses/sstv/rust-COPYRIGHT-library.html')
-        with zipfile.ZipFile(self.portable, 'w') as archive:
-            for name in names:
-                path = self.staging / name
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(b'runtime fixture')
-                archive.write(path, name)
+                 'licenses/sstv/libm-LICENSE.txt', 'licenses/sstv/rust-COPYRIGHT-library.html',
+                 'licenses/sgp4/LICENSE', 'licenses/sgp4/README.sdr-town.md')
+        for name in names:
+            path = self.staging / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'runtime fixture')
+        # DEC-0118: a valid fixture must reach signature verification, including
+        # the source/executable provenance that real release.ps1 packages carry.
+        self.build_info = {'version': self.version, 'sourceCommit': '0123456789abcdef' * 2 + '01234567',
+                           'executableSha256': digest(self.staging / 'SDR_Town.exe')}
+        self.write_build_info()
+        self.write_portable()
         rtl = self.root / 'build/vcpkg_installed/x64-windows/bin/rtlsdr.dll'
         rtl.parent.mkdir(parents=True)
         rtl.write_bytes(b'runtime fixture')
@@ -50,6 +55,17 @@ class ReleaseTests(unittest.TestCase):
     def write_manifest(self):
         (self.root / 'update.json').write_text(json.dumps(self.manifest))
 
+    def write_build_info(self, encoding='utf-8'):
+        (self.staging / 'build-info.json').write_text(json.dumps(self.build_info), encoding=encoding)
+
+    def write_portable(self):
+        # Rebuild instead of appending replacement entries: duplicate ZIP paths
+        # are correctly rejected before provenance validation.
+        with zipfile.ZipFile(self.portable, 'w') as archive:
+            for path in sorted(self.staging.rglob('*')):
+                if path.is_file():
+                    archive.write(path, path.relative_to(self.staging).as_posix())
+
     def write_sums(self):
         (self.root / 'SHA256SUMS.txt').write_text('\n'.join(
             f'{digest(p)}  {p.name}' for p in (self.installer, self.portable, self.control)))
@@ -60,8 +76,58 @@ class ReleaseTests(unittest.TestCase):
     @patch('verify_release.subprocess.run')
     def test_valid_layout_invokes_signature_verifier(self, run):
         self.run_verify()
+        run.assert_called_once()
         self.assertIn('-verify', run.call_args.args[0])
         self.assertTrue(run.call_args.kwargs['check'])
+
+    @patch('verify_release.subprocess.run')
+    def test_bom_build_info_is_accepted(self, run):
+        self.write_build_info(encoding='utf-8-sig')
+        self.write_portable()
+        self.write_sums()
+        self.run_verify()
+        run.assert_called_once()
+
+    @patch('verify_release.subprocess.run')
+    def test_missing_build_info(self, run):
+        (self.staging / 'build-info.json').unlink()
+        self.write_portable()
+        self.write_sums()
+        with self.assertRaisesRegex(ValueError, 'Missing runtime: build-info.json'):
+            self.run_verify()
+        run.assert_not_called()
+
+    @patch('verify_release.subprocess.run')
+    def test_missing_sgp4_notices(self, run):
+        for name in ('licenses/sgp4/LICENSE', 'licenses/sgp4/README.sdr-town.md'):
+            with self.subTest(name=name):
+                path = self.staging / name
+                original = path.read_bytes()
+                path.unlink()
+                self.write_portable()
+                self.write_sums()
+                with self.assertRaisesRegex(ValueError, 'Missing runtime: ' + name):
+                    self.run_verify()
+                path.write_bytes(original)
+        run.assert_not_called()
+
+    @patch('verify_release.subprocess.run')
+    def test_build_provenance_mismatches(self, run):
+        original = dict(self.build_info)
+        for key, value, message in (
+            ('version', '9.9.9', 'Build provenance version mismatch'),
+            ('sourceCommit', 'not-a-commit', 'Build provenance commit missing'),
+            ('sourceCommit', 'a' * 39, 'Build provenance commit missing'),
+            ('executableSha256', '0' * 64, 'Executable differs from build provenance'),
+        ):
+            with self.subTest(field=key, value=value):
+                self.build_info = dict(original, **{key: value})
+                self.write_build_info()
+                self.write_portable()
+                self.write_sums()
+                with self.assertRaisesRegex(ValueError, message):
+                    self.run_verify()
+        run.assert_not_called()
 
     def test_installer_tamper(self):
         self.installer.write_bytes(b'tampered')

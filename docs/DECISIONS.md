@@ -2,6 +2,20 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0118 - Release verifier fixtures must satisfy the current contract (2026-09-24)
+
+Windows CI run 35979813492 built the app and passed native/SSTV tests, then failed
+four packaging tests with `Missing runtime: build-info.json`. The production
+verifier acquired source/executable provenance and SGP4 licence requirements in
+560cf85, but its disposable test package did not. Reproduced locally: 11 tests,
+2 failures and 2 errors. Update the independent valid fixture; do not weaken the
+production verifier. Add negative cases for missing provenance/licenses, bad
+version/commit/executable hash, plus BOM-bearing JSON. Run this cheap gate before
+the expensive CI build and as a local release preflight so the paths agree.
+Keep CI artifact provenance's source/hash fields consistent with release.ps1;
+retain its existing commit field for consumers. This repair is isolated from
+unpublished SSTV application changes and does not modify runtime DSP or assets.
+
 ## DEC-0116 - Test the actual talkgroup table without radio globals (2026-09-24)
 
 The sorted-refresh regression initially failed to link: the workspace target
