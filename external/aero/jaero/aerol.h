@@ -424,7 +424,7 @@ public:
             data[j] = data.at(j)^pre_state.at(position);
             position++;
         }
-        
+
         }
     void reset()
     {

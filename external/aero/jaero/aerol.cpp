@@ -705,7 +705,7 @@ bool PreambleDetector::setPreamble(quint64 bitpreamble,int len)
     return true;
 }
 bool PreambleDetector::Update(int val)
-{ 
+{
     for(int i=0;i<(buffer.size()-1);i++)buffer[i]=buffer[i+1];
     buffer[buffer.size()-1]=val;
     if(buffer==preamble){buffer.fill(0);return true;}

@@ -217,7 +217,7 @@ private:
 
     bool cpuReduce=false;
 
-   
+
 
 public slots:
     void CenterFreqChangedSlot(double freq_center);

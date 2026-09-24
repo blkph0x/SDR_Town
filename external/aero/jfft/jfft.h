@@ -80,7 +80,7 @@ public:
         fft(x.data(),x.size(),INVERSE);
     }
 
-#ifdef QT_CORE_LIB    
+#ifdef QT_CORE_LIB
     //convenience functions QVector form
     void fft_real(QVector<double> &real,QVector<cpx_type> &complex)
     {

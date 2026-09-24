@@ -7,7 +7,7 @@
 #include <stdexcept>
 
 JConvolutionalCodec::JConvolutionalCodec(QObject *parent) : QObject(parent)
-{  
+{
     paddinglength=24*4;
 
     correct_convolutional_polynomial_t poly[2];
