@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Current version** | **0.2.88** (experimental channel) |
+| **Current version** | **0.2.89** (experimental channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
@@ -13,6 +13,16 @@
 | **Pairs with** | [FUBAR](https://github.com/blkph0x/FUBAR) (VOX capture, public live website, optional remote tune) |
 
 Formerly *MaulAudio Pro*. Branding, binaries, installer, AppData paths, and release assets all use **SDR Town** / `SDR_Town`.
+
+### 0.2.89 receive-chain repairs
+
+HF blanker recovery, sample-clock continuity and processing speed; complete
+reference-tested SGP4 orbit propagation; phase-continuous digital satellite
+Doppler; system-scoped P25 metadata and stable talkgroup selection; direct
+sampling error reporting; and SSTV file/live transport consistency. P25 audio
+DSP and WFM/NFM demodulation algorithms are unchanged. This remains a tester
+build, not hardware or protocol certification. See the [repair report and open
+gates](docs/AUDIT_20260924.md) and [release notes](docs/RELEASE_0.2.89.md).
 
 ## SDR Town + FUBAR
 
@@ -38,7 +48,7 @@ Formerly *MaulAudio Pro*. Branding, binaries, installer, AppData paths, and rele
 2. In SDR Town, start the receiver (and P25 Monitor CC / auto-follow if that is your station). Confirm the status bar shows local control on `127.0.0.1:8765` (loopback only).
 3. Route SDR Town audio to **VB-CABLE** (or another capture endpoint FUBAR can open).
 4. In FUBAR, select that cable as the input, enable **Public website**, and set **Now playing**.
-5. Place a **matching** `SdrTownControl.dll` next to `FUBAR.exe`. This Town **0.2.80** release ships `SdrTownControl-0.2.80-win64.dll` (rename to `SdrTownControl.dll`). Pair with FUBAR **1.1.41**. See [pairing versions and gaps](docs/FUBAR_PAIRING.md).
+5. Place a **matching** `SdrTownControl.dll` next to `FUBAR.exe`. This Town **0.2.89** release ships `SdrTownControl-0.2.89-win64.dll` (rename to `SdrTownControl.dll`). FUBAR was not changed or re-qualified in this receive-chain repair pass. See [pairing versions and gaps](docs/FUBAR_PAIRING.md).
 6. **Tools → Settings** in FUBAR: enable SDR Town control and pick allowed actions. FUBAR **1.1.41** website has P25/RDS/tones/SSTV (Auto + HamDRM list, Receive/Finish/Cancel), Satcom, Inmarsat, Aircraft, and SDRplay. **Home lat/lon is Town-only** (not on the public site).
 
 ### Control API notes (for FUBAR and other local clients)
@@ -94,16 +104,21 @@ Runtime hardening: the release now stages the configured RTL-SDR DLL instead of
 retaining an old copy. The reproduced local shutdown access violation is fixed;
 see [native debugger tests and hardware limits](docs/NATIVE_RUNTIME_QA.md).
 
+Unreleased receive-chain repairs and their remaining acceptance gates are tracked
+in [the September 24 audit](docs/AUDIT_20260924.md). This working tree is not a
+new published release; P25 audio algorithms are preserved.
+
 SSTV (**Tools > SSTV Images**, CLI `sstv decode` / `sstv inspect`):
 
 - **Analogue:** Dayton Martin/Scottie/Robot/PD/Pasokon/SC2-180 plus handbook/QSSTV
   leftovers (Robot B&W, SC2-30/60/120, AVT, M3/M4, S3/S4, SC-1, FAX480, MP/MR/ML).
   Auto = 7-bit VIS (Hamming-1), then 16-bit VIS, then closest 1200 Hz line-sync.
 - **Digital:** **HamDRM** (HB9TLK Mode B 2.5 kHz). File Auto retries HamDRM if
-  analogue finds no picture. Not EasyPal file-level RS.
-- **Live NFM:** main receiver discriminator audio, Receive / Finish and save /
+  analogue finds no picture. This is a private STWN prototype, file-only,
+  not an interoperable EasyPal/HamDRM implementation.
+- **Live NFM / USB / LSB:** main receiver decoder audio, Receive / Finish and save /
   Cancel. Does not retune the radio. Known-transmission RF acceptance is still open.
-  HF SSB live input is not supported.
+  Analog live modes share the helper capability list; digital STWN is file-only.
 
 `sstv decode "file.wav" "new-output-directory" auto`  
 `sstv decode "file.wav" "new-output-directory" hamdrm`  

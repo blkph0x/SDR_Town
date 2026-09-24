@@ -60,12 +60,6 @@ nlohmann::json decodeSstvImageFile(const QString& input,const QString& output,co
     std::array<float,4096> samples{};
     std::array<qint16,4096> integers{};
     uint64_t total=0;
-    double hpY=0, lpY=0, prevX=0;
-    const bool wideband = mode == QLatin1String("hamdrm") || mode == QLatin1String("auto");
-    const double hpHz = wideband ? 300.0 : 1000.0;
-    const double lpHz = wideband ? 2800.0 : 2400.0;
-    const double hpA=1.0/(1.0+2*3.14159265358979323846*hpHz/double(rate));
-    const double lpA=1.0/(1.0+2*3.14159265358979323846*lpHz/double(rate));
     QCryptographicHash pcmHash(QCryptographicHash::Sha256);
     for(;;) {
         checkCancelled();
@@ -76,10 +70,9 @@ nlohmann::json decodeSstvImageFile(const QString& input,const QString& output,co
         require(count<=limit-total,"SSTV image audio exceeds duration budget");
         for(size_t i=0;i<count;++i) {
             require(std::isfinite(samples[i]),"Non-finite SSTV audio");
-            const double x=double(samples[i]);
-            hpY=hpA*(hpY+x-prevX); prevX=x;
-            lpY+=lpA*(hpY-lpY);
-            const auto value=static_cast<qint16>(std::lround(std::clamp(lpY,-1.0,32767.0/32768.0)*32768.0));
+            // DEC-0113: match the live helper's PCM contract; file-only filtering
+            // altered line acquisition and made replay differ from the live feed.
+            const auto value=static_cast<qint16>(std::lround(std::clamp(double(samples[i]),-1.0,32767.0/32768.0)*32768.0));
             integers[i]=qToLittleEndian(value);
         }
         const QByteArrayView bytes(reinterpret_cast<const char*>(integers.data()),qsizetype(count*2));

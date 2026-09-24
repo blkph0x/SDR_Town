@@ -101,7 +101,7 @@ TEST_CASE("SSTV GUI actual recording matches direct file decoder", "[sstv-gui-re
     QTemporaryDir directory;
     REQUIRE(directory.isValid());
     const auto expected=decodeSstvImageFile(input,directory.filePath("direct"),"auto");
-    REQUIRE(expected.at("images").size()==1);
+    REQUIRE_FALSE(expected.at("images").empty());
     const bool partial=qEnvironmentVariable("SDR_TOWN_SSTV_GUI_PARTIAL")=="1";
     CHECK(expected.at("images")[0].at("complete").get<bool>()==!partial);
     std::atomic<int> previews=0;
@@ -117,10 +117,12 @@ TEST_CASE("SSTV GUI actual recording matches direct file decoder", "[sstv-gui-re
     REQUIRE(finish(window));
     CHECK(previews>1);
     const auto* list=window.findChild<QListWidget*>("sstvImages");
-    REQUIRE(list->count()==1); CHECK(ticks>0);
+    REQUIRE(list->count()==expected.at("images").size()); CHECK(ticks>0);
     CHECK(list->item(0)->text().contains(partial?"Partial":"Complete"));
-    const auto name=QString::fromStdString(expected.at("images")[0].at("file").get<std::string>());
-    CHECK(QImage(directory.filePath("gui/"+name))==QImage(directory.filePath("direct/"+name)));
+    for (const auto& image : expected.at("images")) {
+        const auto name=QString::fromStdString(image.at("file").get<std::string>());
+        CHECK(QImage(directory.filePath("gui/"+name))==QImage(directory.filePath("direct/"+name)));
+    }
     CHECK_FALSE(window.findChild<QLabel*>("sstvPreview")->pixmap().isNull());
     const auto screenshot=qEnvironmentVariable("SDR_TOWN_SSTV_GUI_SCREENSHOT");
     if(!screenshot.isEmpty()) {

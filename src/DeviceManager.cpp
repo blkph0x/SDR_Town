@@ -111,15 +111,26 @@ static int clampDirectSamplingMode(int mode) {
     return mode;
 }
 
+static bool isRtlBlogV4(const DeviceInfo& d) {
+    std::string name = d.label + " " + d.hardware;
+    std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+    return d.driver == "rtlsdr" && name.find("blog") != std::string::npos && name.find("v4") != std::string::npos;
+}
+
 static void updateRtlFreqLimitsForDirectSampling(DeviceInfo& d) {
     if (d.driver != "rtlsdr") return;
+    if (d.tunerMaxFreq <= 0) {
+        d.tunerMinFreq = d.minFreq;
+        d.tunerMaxFreq = d.maxFreq;
+    }
+    if (isRtlBlogV4(d)) d.directSampling = 0;
     if (d.directSampling > 0) {
         // R820T bypassed — ADC samples HF directly (~500 kHz usable floor).
         d.minFreq = 500e3;
         d.maxFreq = 28.8e6;
     } else {
-        d.minFreq = 24e6;
-        d.maxFreq = 1766e6;
+        d.minFreq = d.tunerMinFreq;
+        d.maxFreq = d.tunerMaxFreq;
     }
 }
 
@@ -130,9 +141,12 @@ static bool applySoapyDirectSampling(SoapySDR::Device* dev, int mode, size_t ind
     const std::string value = std::to_string(useMode);
     // SoapyRTLSDR primary key is direct_samp; try aliases for forks.
     static const char* kKeys[] = {"direct_samp", "directSamp", "direct_sampling"};
+    const auto settings = dev->getSettingInfo();
     for (const char* key : kKeys) {
+        if (std::none_of(settings.begin(), settings.end(), [key](const auto& setting) { return setting.key == key; })) continue;
         try {
             dev->writeSetting(key, value);
+            if (dev->readSetting(key) != value) continue;
             spdlog::info("Applied RTL direct sampling on device {}: {}={} ({})",
                          indexForLog, key, value,
                          useMode == 0 ? "tuner/off" : (useMode == 1 ? "I-ADC" : "Q-ADC"));
@@ -854,6 +868,7 @@ void DeviceManager::resetStreamBuffers(StreamState& st) {
         }
         st.ringWriteIdx.store(0, std::memory_order_release);
         st.totalSamplesWritten.store(0, std::memory_order_release);
+        st.retuneValidFromAbsolute.store(0, std::memory_order_release);
         st.streamEpoch.fetch_add(1, std::memory_order_acq_rel);
     }
 }
@@ -990,7 +1005,7 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
         st.currentRate = useRate;
     }
     const uint64_t initialTuneSeq = st.centerTuneRequestSeq.load(std::memory_order_acquire);
-    st.centerTuneAppliedSeq.store(initialTuneSeq, std::memory_order_release);
+    if (!attemptReal) st.centerTuneAppliedSeq.store(initialTuneSeq, std::memory_order_release);
     st.frequencyCorrectionPpm = clampFrequencyCorrectionPpm(d.frequencyCorrectionPpm);
     st.nativeFrequencyCorrectionActive = false;
 
@@ -1160,7 +1175,8 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                     }
                 }
                 if (applyInfo.driver == "rtlsdr") {
-                    applySoapyDirectSampling(localDev, applyInfo.directSampling, index);
+                    if (!applySoapyDirectSampling(localDev, applyInfo.directSampling, index) && applyInfo.directSampling != 0)
+                        throw std::runtime_error("RTL driver did not confirm requested direct-sampling mode");
                 }
             }
             double center = 100e6;
@@ -1682,51 +1698,66 @@ void DeviceManager::setFrequencyCorrection(size_t index, double ppm) {
 #endif
 }
 
-void DeviceManager::setDirectSampling(size_t index, int mode) {
-    const int useMode = clampDirectSamplingMode(mode);
+bool DeviceManager::setDirectSampling(size_t index, int mode, std::string* error) {
+    const auto fail = [&](const std::string& message) {
+        if (error) *error = message;
+        spdlog::warn("Direct sampling device {}: {}", index, message);
+        return false;
+    };
+    if (mode < 0 || mode > 2) return fail("Invalid direct-sampling mode");
+    DeviceInfo info;
     {
-        std::lock_guard<std::mutex> lk(devicesMutex);
-        if (index >= devices.size()) return;
-        devices[index].directSampling = useMode;
-        updateRtlFreqLimitsForDirectSampling(devices[index]);
-        saveSettings();
+        std::lock_guard<std::mutex> lock(devicesMutex);
+        if (index >= devices.size()) return fail("Device is unavailable");
+        info = devices[index];
+    }
+    if (info.driver != "rtlsdr") return mode == 0 ? true : fail("Device does not use RTL direct sampling");
+    if (mode != 0 && isRtlBlogV4(info)) return fail("RTL-SDR Blog V4 uses native HF; leave direct sampling off");
+    if (mode == info.directSampling) {
+        if (error) error->clear();
+        return true; // Startup verifies persisted settings; repeated Apply must not reset IQ.
     }
 
 #ifdef HAVE_SOAPYSDR
-    auto* stPtr = streamState(index);
-    if (!stPtr) return;
-    auto& st = *stPtr;
-
-    double logicalCenter = 0.0;
-    {
-        std::lock_guard<std::mutex> qlk(st.queueMutex);
-        logicalCenter = st.currentCenter;
-    }
-
-    bool appliedLive = false;
-    {
-        std::lock_guard<std::mutex> stateLock(st.stateMutex);
-        if (st.soapyDev && !st.stopFlag) {
-            std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
-            appliedLive = applySoapyDirectSampling(st.soapyDev, useMode, index);
-            if (std::isfinite(logicalCenter) && logicalCenter > 0.0) {
-                const double tuneHz = st.nativeFrequencyCorrectionActive
-                    ? logicalCenter
-                    : correctedTuneFrequencyHz(logicalCenter, st.frequencyCorrectionPpm);
-                try {
-                    st.soapyDev->setFrequency(SOAPY_SDR_RX, 0, tuneHz);
-                } catch (const std::exception& ex) {
-                    spdlog::warn("Retune after direct sampling change failed for device {}: {}",
-                                 index, ex.what());
-                } catch (...) {}
+    if (auto* st = streamState(index)) {
+        double center = 0.0;
+        {
+            std::lock_guard<std::mutex> lock(st->queueMutex);
+            center = st->currentCenter;
+        }
+        std::lock_guard<std::mutex> stateLock(st->stateMutex);
+        if (st->soapyDev && !st->stopFlag) {
+            std::lock_guard<std::mutex> ioLock(gSoapyLiveIoMutex);
+            try {
+                if (!applySoapyDirectSampling(st->soapyDev, mode, index))
+                    throw std::runtime_error("Driver did not confirm direct-sampling mode");
+                const double tune = st->nativeFrequencyCorrectionActive ? center :
+                    correctedTuneFrequencyHz(center, st->frequencyCorrectionPpm);
+                if (center > 0) st->soapyDev->setFrequency(SOAPY_SDR_RX, info.rxChannel, tune);
+                // Direct-sampling switches change IQ provenance even at the same RF.
+                resetStreamBuffers(*st);
+            } catch (const std::exception& ex) {
+                try { applySoapyDirectSampling(st->soapyDev, info.directSampling, index); } catch (...) {}
+                resetStreamBuffers(*st);
+                return fail(ex.what());
+            } catch (...) {
+                try { applySoapyDirectSampling(st->soapyDev, info.directSampling, index); } catch (...) {}
+                resetStreamBuffers(*st);
+                return fail("Driver failed to change direct sampling");
             }
         }
     }
-    if (!appliedLive) {
-        spdlog::debug("Direct sampling for device {} recorded as {} (model updated; applied on next real start).",
-                      index, useMode);
-    }
 #endif
+    {
+        std::lock_guard<std::mutex> lock(devicesMutex);
+        if (index >= devices.size() || devices[index].stableKey != info.stableKey)
+            return fail("Device changed during direct-sampling request");
+        devices[index].directSampling = mode;
+        updateRtlFreqLimitsForDirectSampling(devices[index]);
+        saveSettings();
+    }
+    if (error) error->clear();
+    return true;
 }
 
 int DeviceManager::getDirectSampling(size_t index) const {
@@ -1823,6 +1854,10 @@ void DeviceManager::releaseDeviceLease(DeviceLeaseOwner owner) {
 
 bool DeviceManager::retuneWithLease(size_t index, double freqHz, DeviceLeaseOwner owner, bool force,
                                     std::string* error) {
+    if (!std::isfinite(freqHz) || freqHz <= 0) {
+        if (error) *error = "Center frequency must be finite and positive";
+        return false;
+    }
     if (!acquireDeviceLease(index, owner, force, error)) return false;
     const uint64_t requestSeq = setCenterFreq(index, freqHz);
     if (requestSeq == 0) {
@@ -2436,11 +2471,10 @@ void DeviceManager::setReceiverCursorBeforeLiveEdge(size_t devIndex, Receiver& r
     rx.lastConsumedAbsolute.store(cursor, std::memory_order_release);
 }
 
-void DeviceManager::appendIQBlock(size_t index, std::vector<std::complex<float>>&& block) {
+void DeviceManager::appendIQBlock(size_t index, StreamState& st, std::vector<std::complex<float>>&& block) {
     if (block.empty()) return;
-    auto* stPtr = streamState(index);
-    if (!stPtr) return;
-    auto& st = *stPtr;
+    // DEC-0115: RX owns this state. No device lookup while holding live-I/O;
+    // enumeration and settings can already hold devicesMutex/stateMutex.
 
     // Feed the per-rx ring *first* while we still own the data (before any move into queue).
     if (st.ringCapacity > 0) {
@@ -2715,6 +2749,8 @@ void DeviceManager::setupSoapyForSDRplay() {
 }
 
 uint64_t DeviceManager::setCenterFreq(size_t index, double freqHz) {
+    if (!std::isfinite(freqHz) || freqHz <= 0.0)
+        throw std::invalid_argument("Center frequency must be finite and positive");
     StreamState* stPtr = nullptr;
     size_t diversityA = static_cast<size_t>(-1);
     size_t diversityB = static_cast<size_t>(-1);
@@ -2789,12 +2825,14 @@ bool DeviceManager::waitForCenterTuneApplied(size_t index, uint64_t requestSeq, 
     const auto deadline = std::chrono::steady_clock::now() +
         std::chrono::milliseconds(std::max(0, timeoutMs));
     do {
+        if (stPtr->centerTuneFailedSeq.load(std::memory_order_acquire) == requestSeq) return false;
         if (stPtr->centerTuneAppliedSeq.load(std::memory_order_acquire) >= requestSeq) {
             return true;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     } while (std::chrono::steady_clock::now() < deadline);
-    return stPtr->centerTuneAppliedSeq.load(std::memory_order_acquire) >= requestSeq;
+    return stPtr->centerTuneFailedSeq.load(std::memory_order_acquire) != requestSeq &&
+           stPtr->centerTuneAppliedSeq.load(std::memory_order_acquire) >= requestSeq;
 }
 
 // Real radix-2 FFT implementation (iterative, double precision for dynamic range).
@@ -2963,7 +3001,7 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                     if (st.currentRate <= 0) st.currentRate = 2e6;
                     st.currentCenter = sa->currentCenter;
                 }
-                appendIQBlock(index, std::move(combined));
+                appendIQBlock(index, st, std::move(combined));
 
                 auto now = std::chrono::steady_clock::now();
                 if (now - lastSpectrumTime > std::chrono::milliseconds(50)) {
@@ -3009,7 +3047,8 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
             while (!st.stopFlag && st.sessionGen.load(std::memory_order_acquire) == myGen) {
                 const uint64_t requestedTuneSeq = st.centerTuneRequestSeq.load(std::memory_order_acquire);
                 const uint64_t appliedTuneSeq = st.centerTuneAppliedSeq.load(std::memory_order_acquire);
-                if (requestedTuneSeq != appliedTuneSeq) {
+                const uint64_t failedTuneSeq = st.centerTuneFailedSeq.load(std::memory_order_acquire);
+                if (requestedTuneSeq > std::max(appliedTuneSeq, failedTuneSeq)) {
                     double logicalCenter = 0.0;
                     {
                         std::lock_guard<std::mutex> lk(st.queueMutex);
@@ -3046,14 +3085,14 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                                 spdlog::debug("Applied queued center freq {} for device {} (hardware tune {}, ppm {}, seq {})", logicalCenter, index, tuneHz, ppm, requestedTuneSeq);
                             }
                         } catch (const std::exception& ex) {
-                            st.centerTuneAppliedSeq.store(requestedTuneSeq, std::memory_order_release);
+                            st.centerTuneFailedSeq.store(requestedTuneSeq, std::memory_order_release);
                             spdlog::warn("Queued center retune failed for device {} to {} Hz: {}", index, logicalCenter, ex.what());
                         } catch (...) {
-                            st.centerTuneAppliedSeq.store(requestedTuneSeq, std::memory_order_release);
+                            st.centerTuneFailedSeq.store(requestedTuneSeq, std::memory_order_release);
                             spdlog::warn("Queued center retune failed for device {} to {} Hz with unknown native error.", index, logicalCenter);
                         }
                     } else {
-                        st.centerTuneAppliedSeq.store(requestedTuneSeq, std::memory_order_release);
+                        st.centerTuneFailedSeq.store(requestedTuneSeq, std::memory_order_release);
                         spdlog::warn("Ignoring invalid queued center freq {} for device {} (seq {})", logicalCenter, index, requestedTuneSeq);
                     }
                 }
@@ -3065,6 +3104,13 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                 {
                     std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
                     numElems = dev->readStream(stream, buffs, blockSize, flags, timeNs, 100000);
+                    // A mode switch holds the same lock and invalidates the ring.
+                    // Publish before releasing it so pre-switch IQ cannot enter
+                    // the new epoch after resetStreamBuffers().
+                    if (numElems > 0) {
+                        const auto count = std::min(static_cast<size_t>(numElems), blockSize);
+                        appendIQBlock(index, st, std::vector<std::complex<float>>(buff.begin(), buff.begin() + count));
+                    }
                 }
                 if (numElems < 0) {
                     ++consecutiveReadErrors;
@@ -3101,9 +3147,6 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                     consecutiveReadTimeouts = 0;
                     consecutiveReadErrors = 0;
                     if (numRead > blockSize) numRead = blockSize;
-                    std::vector<std::complex<float>> block(buff.begin(), buff.begin() + numRead);
-                    // Centralized: feeds ring before move into queue (fixes ring getting no samples after move)
-                    appendIQBlock(index, std::move(block));
 
                     // === State-of-the-art spectrum pipeline (P1 audit + this stabilization) ===
                     // - Real radix-2 FFT, selectable 4K/8K/16K/64K bins
@@ -3256,7 +3299,7 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
             const float im = (rand() % 1000 - 500) * 0.00005f;
             block[i] = {re, im};
         }
-        appendIQBlock(index, std::move(block));
+        appendIQBlock(index, st, std::move(block));
 
         {
             std::lock_guard<std::mutex> lk(st.queueMutex);

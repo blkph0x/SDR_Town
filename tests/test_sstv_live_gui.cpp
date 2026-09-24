@@ -98,9 +98,13 @@ TEST_CASE("Live SSTV window saves independently verified streamed images","[sstv
     });
     window.show(); REQUIRE(window.startLive(directory.filePath("live"),mode));
     REQUIRE(wait(window));
-    const auto* images=window.findChild<QListWidget*>("sstvImages"); REQUIRE(images->count()==1);
-    const auto file=QString::fromStdString(expected.at("images")[0].at("file").get<std::string>());
-    CHECK(QImage(directory.filePath("live/"+file))==QImage(directory.filePath("reference/"+file)));
+    const auto* images=window.findChild<QListWidget*>("sstvImages");
+    REQUIRE_FALSE(expected.at("images").empty());
+    REQUIRE(images->count()==expected.at("images").size());
+    for (const auto& image : expected.at("images")) {
+        const auto file=QString::fromStdString(image.at("file").get<std::string>());
+        CHECK(QImage(directory.filePath("live/"+file))==QImage(directory.filePath("reference/"+file)));
+    }
     CHECK_FALSE(window.findChild<QLabel*>("sstvPreview")->pixmap().isNull());
     const auto screenshot=qEnvironmentVariable("SDR_TOWN_SSTV_LIVE_SCREENSHOT");
     if(!screenshot.isEmpty()) {

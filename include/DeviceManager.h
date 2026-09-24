@@ -32,6 +32,8 @@ struct DeviceInfo {
     std::vector<double> sampleRates; // some common or full range later
     double minFreq = 0;
     double maxFreq = 0;
+    double tunerMinFreq = 0;
+    double tunerMaxFreq = 0;
     // runtime
     bool enabled = false;
     double sampleRate = 2.4e6;
@@ -196,7 +198,7 @@ public:
 
     // RTL-SDR direct sampling (HF). mode: 0=off, 1=I-ADC, 2=Q-ADC.
     // Persisted and applied live via Soapy writeSetting("direct_samp", ...).
-    void setDirectSampling(size_t index, int mode);
+    bool setDirectSampling(size_t index, int mode, std::string* error = nullptr);
     int getDirectSampling(size_t index) const;
 
     // SDRplay live controls (SoapySDRPlay3). No-ops for non-SDRplay devices.
@@ -293,6 +295,7 @@ private:
         std::atomic<bool> stopFlag{false};
         std::atomic<uint64_t> centerTuneRequestSeq{0};
         std::atomic<uint64_t> centerTuneAppliedSeq{0};
+        std::atomic<uint64_t> centerTuneFailedSeq{0};
 
         // P1 audit: session generation to make init thread publishing and stop teardown safe.
         // Init thread captures the gen at launch; only publishes (soapyDev, active, rxThread, isReal)
@@ -362,7 +365,7 @@ private:
 
     // Centralized append for both the consuming deque (for getNext/spectrum) and the per-rx ring.
     // Feeds ring *before* moving into queue so ring always gets the samples. Fixes the WFM ring bug.
-    void appendIQBlock(size_t index, std::vector<std::complex<float>>&& block);
+    void appendIQBlock(size_t index, StreamState& state, std::vector<std::complex<float>>&& block);
 
     // Real FFT power spectrum (8192-bin default, Blackman-Harris + Hann, used by rx pipeline and stub).
     // Returns fftshifted dB vector. See .cpp for radix-2 impl + windowing.

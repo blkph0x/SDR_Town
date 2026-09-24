@@ -1,6 +1,69 @@
 #include "P25Aliases.h"
-#include "P25AliasDialog.h"
 #include <catch2/catch_test_macros.hpp>
+#include "P25TalkgroupRegistry.h"
+#include <QTableWidget>
+
+TEST_CASE("Talkgroup table selection follows identity not refreshed row order", "[aliases][identity]") {
+    P25TalkgroupEntry first, second;
+    first.controlFreqHz = second.controlFreqHz = 420.350e6;
+    first.talkgroupId = 1; second.talkgroupId = 2;
+    QTableWidget table(1, 1);
+    auto* item = new QTableWidgetItem("1");
+    item->setData(Qt::UserRole, p25TalkgroupKey(first));
+    table.setItem(0, 0, item);
+    table.setCurrentCell(0, 0);
+    REQUIRE(selectedP25TalkgroupIndex(&table, {second, first}) == 1);
+    REQUIRE(selectedP25TalkgroupIndex(&table, {second}) == -1);
+    REQUIRE(selectedP25TalkgroupIndex(nullptr, {first}) == -1);
+}
+
+TEST_CASE("Sorted talkgroup refresh preserves selection after edits and clears deletion", "[aliases][identity]") {
+    P25TalkgroupEntry first, second;
+    first.controlFreqHz = second.controlFreqHz = 420.350e6;
+    first.talkgroupId = 100; second.talkgroupId = 200;
+    first.alphaTag = "Zulu"; second.alphaTag = "Alpha";
+    QTableWidget table(0, 10);
+    table.setSortingEnabled(true);
+    table.sortItems(2, Qt::AscendingOrder);
+    populateP25TalkgroupTable(&table, {first, second});
+    REQUIRE(selectP25Talkgroup(&table, first));
+    REQUIRE(table.currentRow() == 1);
+    REQUIRE(selectedP25TalkgroupIndex(&table, {first, second}) == 0);
+    first.alphaTag = "Aardvark";
+    first.verified = true;
+    populateP25TalkgroupTable(&table, {second, first});
+    REQUIRE(table.currentRow() == 0);
+    REQUIRE(selectedP25TalkgroupIndex(&table, {second, first}) == 1);
+    REQUIRE(selectP25Talkgroup(&table, second));
+    REQUIRE(table.currentRow() == 1);
+    populateP25TalkgroupTable(&table, {first});
+    REQUIRE(selectedP25TalkgroupIndex(&table, {first}) == -1);
+    REQUIRE_FALSE(selectP25Talkgroup(&table, second));
+    REQUIRE_FALSE(selectP25Talkgroup(nullptr, first));
+}
+
+TEST_CASE("Talkgroup metadata cannot cross control source or known system", "[p25][aliases][identity]") {
+    P25TalkgroupEntry a, b;
+    a.talkgroupId = b.talkgroupId = 30003;
+    a.controlFreqHz = b.controlFreqHz = 420.350e6;
+    REQUIRE(p25SameMetadataSource(a, b));
+    b.controlFreqHz = 420.475e6;
+    REQUIRE_FALSE(p25SameMetadataSource(a, b));
+    b.controlFreqHz = a.controlFreqHz;
+    a.p25MaskParamsKnown = b.p25MaskParamsKnown = true;
+    a.systemId = 1; b.systemId = 2;
+    REQUIRE_FALSE(p25SameMetadataSource(a, b));
+    b.systemId = 1;
+    REQUIRE(p25SameMetadataSource(a, b));
+    b.nac = 0x123;
+    REQUIRE_FALSE(p25SameMetadataSource(a, b));
+    b.nac = 0;
+    a.siteId = 1; b.siteId = 2;
+    REQUIRE_FALSE(p25SameMetadataSource(a, b));
+    b.controlFreqHz = 0;
+    REQUIRE_FALSE(p25SameMetadataSource(a, b));
+}
+#include "P25AliasDialog.h"
 #include <QTemporaryDir>
 #include <QFile>
 #include <QFileInfo>

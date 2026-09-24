@@ -64,7 +64,7 @@ inline constexpr SstvModeSpec kSstvModes[] = {
     {"ml240", "ML240", 0, 640, 496, 240},
     {"ml280", "ML280", 0, 640, 496, 280},
     {"ml320", "ML320", 0, 640, 496, 320},
-    {"hamdrm", "HamDRM digital", 0, 320, 256, 30},
+    {"hamdrm", "Digital STWN prototype (file only)", 0, 320, 256, 30},
 };
 
 inline constexpr int kSstvModeCount = int(sizeof(kSstvModes) / sizeof(kSstvModes[0]));
@@ -85,6 +85,10 @@ inline const SstvModeSpec* sstvModeByVis(unsigned vis) {
 
 inline bool sstvModeIdOk(std::string_view id) {
     return id == "auto" || sstvModeById(id) != nullptr;
+}
+
+inline bool sstvStreamingModeOk(std::string_view id) {
+    return sstvModeIdOk(id) && id != "hamdrm";
 }
 
 inline bool sstvModeDimensionsOk(std::string_view id, int w, int h) {

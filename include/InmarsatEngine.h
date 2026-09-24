@@ -102,7 +102,7 @@ private:
     };
 
     void workerLoop();
-    void processIq();
+    bool processIq();
     void onDecodedBytes(const uint8_t* data, size_t len);
     void onMessage(const InmarsatMessage& msg);
     void applyVoiceFollow(const InmarsatMessage& msg);

@@ -38,12 +38,46 @@ const MAP: [&str; SYMS] = [
 
 const PILOT: (f64, f64) = (1.0, 0.0);
 
-pub fn encode_image(width: u32, height: u32, pixels: &[RgbPixel]) -> Result<Vec<i16>, &'static str> {
-    if pixels.len() != width as usize * height as usize {
-        return Err("hamdrm pixel count");
+#[cfg(test)]
+mod safety_tests {
+    use super::*;
+
+    #[test]
+    fn invalid_dimensions_rejected_before_allocation() {
+        for (w, h) in [(0u32, 8u32), (8, 0), (u32::MAX, u32::MAX), (801, 616)] {
+            let mut bytes = Vec::from(*b"STWN");
+            bytes.extend_from_slice(&w.to_le_bytes());
+            bytes.extend_from_slice(&h.to_le_bytes());
+            assert_eq!(parse_payload(&bytes).err(), Some("hamdrm dimensions"));
+            assert_eq!(encode_image(w, h, &[]).err(), Some("hamdrm dimensions"));
+        }
+        assert!(decode_samples(&[], 0).is_err());
     }
+
+    #[test]
+    fn oversize_transmission_never_returns_truncated_audio() {
+        assert_eq!(encode_bytes(&vec![0; 800 * 616 * 3]).err(), Some("hamdrm image exceeds 120 second transmit budget"));
+    }
+
+    #[test]
+    fn fac_corruption_is_rejected() {
+        let mut frame = encode_bytes(&[1, 2, 3]).unwrap();
+        assert!(decode_frame_bits(&frame[..FRAME]).is_ok());
+        // Muting every FAC-containing symbol produces a deterministically
+        // invalid CRC without depending on random noise or a noisy RF capture.
+        for (sym, row) in MAP.iter().enumerate() {
+            if row.contains('X') { frame[sym * SYMBOL..(sym + 1) * SYMBOL].fill(0); }
+        }
+        assert!(decode_frame_bits(&frame[..FRAME]).is_err());
+    }
+}
+
+pub fn encode_image(width: u32, height: u32, pixels: &[RgbPixel]) -> Result<Vec<i16>, &'static str> {
     if !(8..=800).contains(&width) || !(8..=616).contains(&height) {
         return Err("hamdrm dimensions");
+    }
+    if pixels.len() != width as usize * height as usize {
+        return Err("hamdrm pixel count");
     }
     let mut payload = Vec::from(*b"STWN");
     payload.extend_from_slice(&width.to_le_bytes());
@@ -59,6 +93,9 @@ pub fn encode_image(width: u32, height: u32, pixels: &[RgbPixel]) -> Result<Vec<
 }
 
 pub fn decode_samples(samples: &[i16], rate: u32) -> Result<(u32, u32, Vec<RgbPixel>), &'static str> {
+    if !(8000..=96000).contains(&rate) || samples.len() > rate as usize * 480 {
+        return Err("hamdrm input budget");
+    }
     let samples = if rate == SAMPLE_RATE {
         samples.to_vec()
     } else {
@@ -109,6 +146,12 @@ fn encode_bytes(payload: &[u8]) -> Result<Vec<i16>, &'static str> {
         for i in (0..8).rev() {
             bits.push((byte >> i) & 1);
         }
+    }
+    // Reject an oversized image before synthesis, never return a truncated TX.
+    let bits_per_frame = MAP.iter().map(|r| r.bytes().filter(|b| *b == b'.').count() * 2).sum::<usize>();
+    let frames = bits.len().div_ceil(bits_per_frame);
+    if frames > SAMPLE_RATE as usize * 120 / FRAME {
+        return Err("hamdrm image exceeds 120 second transmit budget");
     }
     let mut fac = [0u8; 40];
     fac[0] = 0;
@@ -176,9 +219,6 @@ fn encode_bytes(payload: &[u8]) -> Result<Vec<i16>, &'static str> {
             frame[offset + GUARD..offset + SYMBOL].copy_from_slice(&time);
         }
         pcm.extend_from_slice(&frame);
-        if pcm.len() > SAMPLE_RATE as usize * 120 {
-            break;
-        }
     }
     let peak = pcm.iter().fold(1e-9_f64, |m, x| m.max(x.abs()));
     Ok(pcm
@@ -225,7 +265,9 @@ fn decode_frame_bits(frame: &[i16]) -> Result<Vec<u8>, &'static str> {
     for b in 0..8 {
         got = (got << 1) | fac_bits[32 + b];
     }
-    let _ = (got, crc);
+    if got != crc {
+        return Err("hamdrm FAC CRC");
+    }
     Ok(hard(&msc_llr))
 }
 
@@ -235,6 +277,9 @@ fn parse_payload(bytes: &[u8]) -> Result<(u32, u32, Vec<RgbPixel>), &'static str
     }
     let width = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
     let height = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
+    if !(8..=800).contains(&width) || !(8..=616).contains(&height) {
+        return Err("hamdrm dimensions");
+    }
     let rgb_len = width as usize * height as usize * 3;
     if bytes.len() < 16 + rgb_len {
         return Err("hamdrm payload short");

@@ -10,6 +10,9 @@
 #include <QStandardPaths>
 #include <QStringList>
 #include <QTableWidgetItem>
+#include <QSaveFile>
+#include <QLockFile>
+#include <QSignalBlocker>
 
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
@@ -356,20 +359,6 @@ static P25VoiceProtocol p25VoiceProtocolFromStorage(std::string text)
     return P25VoiceProtocol::Unknown;
 }
 
-QString p25VoiceProtocolShort(P25VoiceProtocol protocol)
-{
-    switch (protocol) {
-        case P25VoiceProtocol::Phase1FDMA: return "P1";
-        case P25VoiceProtocol::Phase2TDMA: return "P2";
-        case P25VoiceProtocol::Unknown:
-        default: return "-";
-    }
-}
-
-bool p25TalkgroupIsPhase2(const P25TalkgroupEntry& tg)
-{
-    return tg.voiceProtocol == P25VoiceProtocol::Phase2TDMA || tg.phase2Candidate || tg.tdmaSlotKnown;
-}
 
 static QString p25Phase2GrantHoldKey(uint32_t talkgroupId, uint16_t channel, double voiceFrequencyHz)
 {
@@ -799,7 +788,7 @@ bool p25RefreshFollowGrantFromRegistry(P25TalkgroupEntry& tg,
     const P25TalkgroupEntry* best = nullptr;
     int bestScore = -1;
     for (const auto& candidate : talkgroups) {
-        if (candidate.talkgroupId != tg.talkgroupId) continue;
+        if (candidate.talkgroupId != tg.talkgroupId || !p25SameMetadataSource(tg, candidate)) continue;
         if (tg.firstSeenMs > 0 && candidate.lastSeenMs > 0 &&
             candidate.lastSeenMs + 250 < tg.firstSeenMs) {
             continue;
@@ -936,23 +925,18 @@ void saveP25Talkgroups(const std::vector<P25TalkgroupEntry>& talkgroups)
         });
     }
     try {
-        std::ofstream f(p25TalkgroupsPath().toStdString());
-        if (f.is_open()) f << arr.dump(2);
+        const auto path = p25TalkgroupsPath();
+        QLockFile lock(path + ".lock");
+        if (!lock.tryLock(0)) throw std::runtime_error("Talkgroup registry is being written by another process");
+        const auto bytes = QByteArray::fromStdString(arr.dump(2));
+        QSaveFile file(path);
+        if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit())
+            throw std::runtime_error("Atomic talkgroup registry save failed");
     } catch (const std::exception& ex) {
         spdlog::warn("Failed to save p25_talkgroups.json: {}", ex.what());
     }
 }
 
-static QString p25TimeText(qint64 ms)
-{
-    if (ms <= 0) return "-";
-    return QDateTime::fromMSecsSinceEpoch(ms).toString("yyyy-MM-dd HH:mm:ss");
-}
-
-QString p25HexId(uint32_t value, int width)
-{
-    return QString("0x%1").arg(value, width, 16, QLatin1Char('0')).toUpper();
-}
 
 QString p25BytesToHex(const std::vector<uint8_t>& bytes)
 {
@@ -1207,9 +1191,13 @@ QString p25TalkgroupStatusLabel(uint32_t talkgroupId,
         const P25TalkgroupEntry* best = nullptr;
         for (const auto& tg : cached) {
             if (tg.talkgroupId != talkgroupId) continue;
-            if (systemKnown && tg.p25MaskParamsKnown &&
-                (tg.wacn != wacn || tg.systemId != systemId)) {
+            if (systemKnown && (!tg.p25MaskParamsKnown ||
+                tg.wacn != wacn || tg.systemId != systemId)) {
                 continue;
+            }
+            if (!systemKnown && best && !p25SameMetadataSource(*best, tg)) {
+                best = nullptr;
+                break;
             }
             best = &tg;
             if (systemKnown && tg.p25MaskParamsKnown &&
@@ -1220,60 +1208,13 @@ QString p25TalkgroupStatusLabel(uint32_t talkgroupId,
         if (best && !best->alphaTag.empty()) {
             manual = QString::fromStdString(best->alphaTag);
         }
-        if (!systemKnown && best && best->p25MaskParamsKnown) {
-            wacn = best->wacn;
-            systemId = best->systemId;
-            systemKnown = true;
-        }
+        // Unknown system identity stays unknown; the alias resolver handles
+        // only unambiguous presentation fallback and cannot grant RF identity.
     } catch (...) {
     }
     return formatP25TalkgroupStatusLabel(talkgroupId, systemKnown, wacn, systemId, manual);
 }
 
-void populateP25TalkgroupTable(QTableWidget* table, const std::vector<P25TalkgroupEntry>& talkgroups)
-{
-    if (!table) return;
-    P25AliasLists aliases;
-    QString aliasError;
-    try { aliases=loadP25AliasDatabase(readP25AliasFile(p25AliasesPath())); }
-    catch(const std::exception& e) { aliasError=QString::fromUtf8(e.what()); }
-    table->setRowCount(static_cast<int>(talkgroups.size()));
-    for (int row = 0; row < static_cast<int>(talkgroups.size()); ++row) {
-        const auto& tg = talkgroups[static_cast<size_t>(row)];
-        QString status = tg.scannerEnabled ? "Scanner"
-                       : tg.verified ? "Verified"
-                       : "Discovered";
-        QString protocol = p25TalkgroupIsPhase2(tg) ? "P2" : p25VoiceProtocolShort(tg.voiceProtocol);
-        if (tg.tdmaSlotKnown) protocol += QString(" S%1").arg(static_cast<int>(tg.tdmaSlot));
-        if (p25TalkgroupIsPhase2(tg) && tg.p25MaskParamsKnown) protocol += " Meta";
-        if (protocol != "-") status = protocol + " / " + status;
-        table->setItem(row, 0, new QTableWidgetItem(QString::number(tg.controlFreqHz / 1e6, 'f', 5)));
-        table->setItem(row, 1, new QTableWidgetItem(QString::number(tg.talkgroupId)));
-        // Presentation only: aliases never mutate grant, scanner or encryption fields.
-        auto* aliasItem=new QTableWidgetItem(resolveP25Alias(aliases,tg.p25MaskParamsKnown,
-            tg.wacn,tg.systemId,tg.talkgroupId,QString::fromStdString(tg.alphaTag)));
-        QString tip = aliasError.isEmpty()
-            ? QString("WACN %1 / System %2; manual Alpha Tag takes precedence")
-                .arg(tg.wacn,5,16,QChar('0')).arg(tg.systemId,3,16,QChar('0'))
-            : "Alias database error: "+aliasError;
-        if (aliasError.isEmpty() && tg.siteId != 0) {
-            const auto siteName = resolveP25SiteAlias(
-                aliases, tg.p25MaskParamsKnown, tg.wacn, tg.systemId, tg.rfssId, tg.siteId);
-            tip += siteName.isEmpty()
-                ? QString("\nSite %1 / RFSS %2").arg(tg.siteId).arg(tg.rfssId)
-                : QString("\nSite %1 / RFSS %2: %3").arg(tg.siteId).arg(tg.rfssId).arg(siteName);
-        }
-        aliasItem->setToolTip(tip);
-        table->setItem(row, 2, aliasItem);
-        table->setItem(row, 3, new QTableWidgetItem(tg.lastVoiceFreqHz > 0.0 ? QString::number(tg.lastVoiceFreqHz / 1e6, 'f', 5) : "-"));
-        table->setItem(row, 4, new QTableWidgetItem(tg.lastSourceId ? p25HexId(tg.lastSourceId, 6) : "-"));
-        table->setItem(row, 5, new QTableWidgetItem(QString::number(tg.hitCount)));
-        table->setItem(row, 6, new QTableWidgetItem(QString::number(tg.userPriority)));
-        table->setItem(row, 7, new QTableWidgetItem(tg.encryptionKnown ? (tg.encrypted ? "Yes" : "No") : "Unknown"));
-        table->setItem(row, 8, new QTableWidgetItem(status));
-        table->setItem(row, 9, new QTableWidgetItem(p25TimeText(tg.lastSeenMs)));
-    }
-}
 
 bool sameP25Talkgroup(const P25TalkgroupEntry& tg, double controlFreqHz, uint32_t talkgroupId)
 {

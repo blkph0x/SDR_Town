@@ -63,7 +63,7 @@ def main() -> int:
             "stale WFM-to-HF profile regression coverage missing")
     require("decoder tap is continuous" in tests,
             "HF SSTV continuity coverage missing")
-    require("adaptiveResamplerHalf" in source and
+    require("state.coefficients" in source and
             "kMaximumResamplerHalf = 1024" in source,
             "multi-MS/s anti-alias hardening missing")
     require("0.38 * std::min(1.0, outputRateHz / inputRateHz)" in source,
@@ -71,10 +71,10 @@ def main() -> int:
     require("startupMuteSamples" in source and
             "state.mode == DemodMode::AM" in source,
             "HF startup settling is not limited to AM")
-    require("Prime the carrier estimator from settled samples" in source and
-            "carrierSum" in source,
+    require("carrierPrimingSamples" in source and
+            "carrierPrimingSum / settle" in source,
             "AM carrier acquisition can still normalize against FIR startup zeros")
-    require("(nfmSstv || ssbSstv) ? &multiplex : nullptr" in satcom,
+    require("(nfmSstv || ssbSstv || aprsData || aptData) ? &multiplex : nullptr" in satcom,
             "Satcom sideband SSTV does not request the clean HF decoder block")
     require("if ((nfmSstv || ssbSstv) && !multiplex.samples.empty())" in satcom,
             "Satcom does not publish USB/LSB decoder provenance")

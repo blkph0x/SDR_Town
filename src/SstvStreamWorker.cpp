@@ -27,7 +27,7 @@ SstvStreamResult decodeSstvStream(const SstvStreamRead& next,const QString& mode
     require(QCoreApplication::instance()!=nullptr,"SSTV worker needs an application instance");
     require(QThread::currentThread()!=QCoreApplication::instance()->thread(),"SSTV streaming must run off the GUI thread");
     require(bool(next),"SSTV stream source is missing");
-    require(mode=="auto" || mode=="robot36" || mode=="martin1","Unsupported SSTV streaming mode");
+    require(sstvStreamingModeOk(mode.toStdString()),"Unsupported SSTV streaming mode (digital prototype is file-only)");
     const auto cancel=[&]{require(!cancelled || !cancelled(),"SSTV stream cancelled");};
     cancel();
     const auto helper=QDir(QCoreApplication::applicationDirPath()).filePath("sdrtown_sstv.exe");

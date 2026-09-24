@@ -32,6 +32,20 @@ double blackman(double normalized) noexcept {
     return 0.42 - 0.5 * std::cos(phase) + 0.08 * std::cos(2.0 * phase);
 }
 
+struct SincResampler {
+    int half = kMinimumResamplerHalf;
+    double position = kMinimumResamplerHalf;
+    double inputRate = 0.0;
+    double outputRate = 0.0;
+    std::vector<std::complex<float>> buffer;
+    std::vector<float> coefficients;
+
+    void reset() {
+        buffer.assign(static_cast<size_t>(half), {});
+        position = half;
+    }
+};
+
 struct State {
     std::mutex mutex;
     bool configured = false;
@@ -44,14 +58,14 @@ struct State {
     double audioLowPassHz = 0.0;
     double outputRate = 0.0;
 
-    double mixerPhase = 0.0;
+    std::complex<double> oscillator{1.0, 0.0};
+    uint32_t oscillatorSamples = 0;
     float impulseMean = 0.0f;
     std::complex<float> impulseLastGood{0.0f, 0.0f};
     std::complex<float> iqDc{0.0f, 0.0f};
 
-    std::vector<std::complex<float>> resampleBuffer;
-    int resamplerHalf = kMinimumResamplerHalf;
-    double resamplePosition = static_cast<double>(kMinimumResamplerHalf);
+    SincResampler iqResampler;
+    SincResampler audioResampler;
 
     std::vector<std::complex<float>> channelTaps;
     std::vector<std::complex<float>> channelDelay;
@@ -59,6 +73,8 @@ struct State {
 
     float carrier = 1.0f;
     bool carrierValid = false;
+    size_t carrierPrimingSamples = 0;
+    double carrierPrimingSum = 0.0;
     double cwPhase = 0.0;
 
     float agcEnvelope = 0.0f;
@@ -107,14 +123,15 @@ std::shared_ptr<State> stateFor(const void* owner) {
 }
 
 void clearStreamingState(State& state) {
-    state.mixerPhase = 0.0;
+    state.carrierPrimingSamples = 0;
+    state.carrierPrimingSum = 0;
+    state.oscillator = {1.0, 0.0};
+    state.oscillatorSamples = 0;
     state.impulseMean = 0.0f;
     state.impulseLastGood = {};
     state.iqDc = {};
-    const int half = std::clamp(
-        state.resamplerHalf, kMinimumResamplerHalf, kMaximumResamplerHalf);
-    state.resampleBuffer.assign(static_cast<size_t>(half), {});
-    state.resamplePosition = static_cast<double>(half);
+    state.iqResampler.reset();
+    state.audioResampler.reset();
     state.channelDelay.assign(state.channelTaps.size(), {});
     state.channelWrite = 0;
     state.carrier = 1.0f;
@@ -202,7 +219,7 @@ std::vector<std::complex<float>> filterComplex(
 }
 
 std::vector<std::complex<float>> resampleComplex(
-    State& state,
+    SincResampler& state,
     const std::vector<std::complex<float>>& input,
     double inputRateHz,
     double outputRateHz)
@@ -210,92 +227,70 @@ std::vector<std::complex<float>> resampleComplex(
     if (input.empty()) return {};
     if (std::abs(inputRateHz - outputRateHz) < 0.5) return input;
 
-    const int half = std::clamp(
-        state.resamplerHalf, kMinimumResamplerHalf, kMaximumResamplerHalf);
-    state.resampleBuffer.insert(
-        state.resampleBuffer.end(), input.begin(), input.end());
+    // DEC-0111: tabulate the original sinc/window, not a weaker coarse
+    // decimator. Interpolated fractional phases preserve its stopband.
+    constexpr int phases = 1024;
+    if (state.inputRate != inputRateHz || state.outputRate != outputRateHz) {
+        state.inputRate = inputRateHz;
+        state.outputRate = outputRateHz;
+        state.half = std::clamp(static_cast<int>(std::ceil(
+            8.0 * std::max(1.0, inputRateHz / outputRateHz))),
+            kMinimumResamplerHalf, kMaximumResamplerHalf);
+        state.reset();
+        const int taps = state.half * 2;
+        state.coefficients.resize(static_cast<size_t>(phases + 1) * taps);
+        const double cutoff = 0.38 * std::min(1.0, outputRateHz / inputRateHz);
+        for (int phase = 0; phase <= phases; ++phase) {
+            double sum = 0.0;
+            float* row = state.coefficients.data() + static_cast<size_t>(phase) * taps;
+            for (int tap = 0; tap < taps; ++tap) {
+                const double distance = static_cast<double>(phase) / phases -
+                                        (tap - state.half + 1);
+                row[tap] = static_cast<float>(2.0 * cutoff *
+                    sinc(2.0 * cutoff * distance) * blackman(distance / state.half));
+                sum += row[tap];
+            }
+            for (int tap = 0; tap < taps; ++tap) row[tap] /= static_cast<float>(sum);
+        }
+    }
+    const int half = state.half;
+    state.buffer.insert(state.buffer.end(), input.begin(), input.end());
 
     std::vector<std::complex<float>> output;
     output.reserve(static_cast<size_t>(
         std::ceil(input.size() * outputRateHz / inputRateHz)) + 2);
 
     const double step = inputRateHz / outputRateHz;
-    // HF only needs the inner audio/data channel. Keeping the anti-alias
-    // cutoff below the final Nyquist edge creates a real transition band
-    // even when the device is running at several MS/s.
-    const double cutoffCyclesPerInput =
-        0.38 * std::min(1.0, outputRateHz / inputRateHz);
-
-    while (state.resamplePosition + half <
-           static_cast<double>(state.resampleBuffer.size())) {
-        const long center = static_cast<long>(std::floor(state.resamplePosition));
+    while (state.position + half < static_cast<double>(state.buffer.size())) {
+        const long center = static_cast<long>(std::floor(state.position));
         std::complex<double> accumulated{};
-        double coefficientSum = 0.0;
-
-        for (int offset = -half + 1;
-             offset <= half; ++offset) {
-            const long index = center + offset;
-            if (index < 0 ||
-                index >= static_cast<long>(state.resampleBuffer.size())) {
-                continue;
-            }
-            const double distance =
-                state.resamplePosition - static_cast<double>(index);
-            const double coefficient =
-                2.0 * cutoffCyclesPerInput *
-                sinc(2.0 * cutoffCyclesPerInput * distance) *
-                blackman(distance / static_cast<double>(half));
-            accumulated += std::complex<double>(
-                state.resampleBuffer[static_cast<size_t>(index)].real(),
-                state.resampleBuffer[static_cast<size_t>(index)].imag()) *
-                coefficient;
-            coefficientSum += coefficient;
-        }
-
-        if (std::abs(coefficientSum) > 1.0e-12) {
-            accumulated /= coefficientSum;
+        const double fraction = (state.position - center) * phases;
+        const int phase = std::min(static_cast<int>(fraction), phases - 1);
+        const float blend = static_cast<float>(fraction - phase);
+        const int taps = half * 2;
+        const float* row = state.coefficients.data() + static_cast<size_t>(phase) * taps;
+        const auto* samples = state.buffer.data() + center - half + 1;
+        for (int tap = 0; tap < taps; ++tap) {
+            const double coefficient = row[tap] + blend * (row[tap + taps] - row[tap]);
+            accumulated += std::complex<double>(samples[tap].real(), samples[tap].imag()) * coefficient;
         }
         output.emplace_back(
             static_cast<float>(accumulated.real()),
             static_cast<float>(accumulated.imag()));
-        state.resamplePosition += step;
+        state.position += step;
     }
 
     const long removable =
-        static_cast<long>(std::floor(state.resamplePosition)) -
+        static_cast<long>(std::floor(state.position)) -
         half;
     if (removable > 0) {
         const size_t drop = std::min(
-            static_cast<size_t>(removable), state.resampleBuffer.size());
-        state.resampleBuffer.erase(
-            state.resampleBuffer.begin(),
-            state.resampleBuffer.begin() + static_cast<std::ptrdiff_t>(drop));
-        state.resamplePosition -= static_cast<double>(drop);
+            static_cast<size_t>(removable), state.buffer.size());
+        state.buffer.erase(state.buffer.begin(),
+            state.buffer.begin() + static_cast<std::ptrdiff_t>(drop));
+        state.position -= static_cast<double>(drop);
     }
 
-    return output;
-}
-
-std::vector<float> resizeAudio(
-    const std::vector<float>& input, size_t requested)
-{
-    if (requested == 0 || input.size() == requested) return input;
-    if (input.empty()) return std::vector<float>(requested, 0.0f);
-    if (requested == 1) return {input.front()};
-
-    std::vector<float> output(requested);
-    const double scale = static_cast<double>(input.size() - 1) /
-                         static_cast<double>(requested - 1);
-    for (size_t index = 0; index < requested; ++index) {
-        const double position = static_cast<double>(index) * scale;
-        const size_t left = std::min(
-            static_cast<size_t>(position), input.size() - 1);
-        const size_t right = std::min(left + 1, input.size() - 1);
-        const float fraction = static_cast<float>(
-            position - static_cast<double>(left));
-        output[index] =
-            input[left] * (1.0f - fraction) + input[right] * fraction;
-    }
     return output;
 }
 
@@ -317,15 +312,6 @@ double defaultChannelBandwidth(DemodMode mode) noexcept {
         case DemodMode::LSB: return 6000.0;
         default: return 6000.0;
     }
-}
-
-int adaptiveResamplerHalf(double inputRateHz, double outputRateHz) noexcept {
-    if (!(inputRateHz > 0.0) || !(outputRateHz > 0.0))
-        return kMinimumResamplerHalf;
-    const double ratio = std::max(1.0, inputRateHz / outputRateHz);
-    return std::clamp(
-        static_cast<int>(std::ceil(8.0 * ratio)),
-        kMinimumResamplerHalf, kMaximumResamplerHalf);
 }
 
 bool materiallyDifferent(double left, double right, double tolerance) noexcept {
@@ -445,12 +431,12 @@ std::vector<float> demodulate(
             state->channelTaps = designComplexBandpass(
                 workRateHz, -halfWidth, halfWidth, 257);
         }
-        state->resamplerHalf = adaptiveResamplerHalf(inputRateHz, workRateHz);
         clearStreamingState(*state);
     }
 
     const double phaseStep =
         2.0 * kPi * (targetHz - centerHz) / inputRateHz;
+    const std::complex<double> oscillatorStep(std::cos(phaseStep), -std::sin(phaseStep));
     const float dcAlpha = static_cast<float>(
         1.0 - std::exp(-2.0 * kPi * 2.0 / inputRateHz));
     const float impulseAlpha = static_cast<float>(
@@ -459,12 +445,14 @@ std::vector<float> demodulate(
     std::vector<std::complex<float>> mixed;
     mixed.reserve(iq.size());
     for (const auto& inputSample : iq) {
-        const std::complex<float> oscillator(
-            static_cast<float>(std::cos(state->mixerPhase)),
-            static_cast<float>(-std::sin(state->mixerPhase)));
+        const std::complex<float> oscillator(state->oscillator);
         std::complex<float> sample = inputSample * oscillator;
-        state->mixerPhase =
-            std::remainder(state->mixerPhase + phaseStep, 2.0 * kPi);
+        state->oscillator *= oscillatorStep;
+        // Bound floating-point recurrence drift independently of input chunks.
+        if (++state->oscillatorSamples == 4096) {
+            state->oscillator /= std::abs(state->oscillator);
+            state->oscillatorSamples = 0;
+        }
 
         const float magnitude = std::abs(sample);
         if (state->impulseMean <= 1.0e-7f) {
@@ -476,10 +464,11 @@ std::vector<float> demodulate(
         if (magnitude > threshold && state->impulseMean > 1.0e-5f) {
             sample = state->impulseLastGood * 0.35f;
         } else {
-            state->impulseMean +=
-                impulseAlpha * (magnitude - state->impulseMean);
             state->impulseLastGood = sample;
         }
+        // A01: rejected samples still inform the level estimate. Otherwise a
+        // sustained stronger carrier remains classified as an impulse forever.
+        state->impulseMean += impulseAlpha * (magnitude - state->impulseMean);
 
         if (mode == DemodMode::USB || mode == DemodMode::LSB) {
             state->iqDc += dcAlpha * (sample - state->iqDc);
@@ -489,7 +478,7 @@ std::vector<float> demodulate(
     }
 
     auto atWorkRate = resampleComplex(
-        *state, mixed, inputRateHz, workRateHz);
+        state->iqResampler, mixed, inputRateHz, workRateHz);
     if (atWorkRate.empty()) return {};
 
     auto channel = filterComplex(*state, atWorkRate);
@@ -505,34 +494,22 @@ std::vector<float> demodulate(
 
     std::vector<float> audio(channel.size());
     if (mode == DemodMode::AM) {
-        // Prime the carrier estimator from settled samples in this block. Using
-        // the first all-zero FIR output as the carrier reference produces a huge
-        // normalized step as the delay line fills, which can drive both filtered
-        // and decoder-bypass paths into the limiter and erase their difference.
-        if (!state->carrierValid) {
-            const size_t settledAt = std::min(
-                channel.size(), state->channelTaps.size() / 2);
-            double carrierSum = 0.0;
-            size_t carrierCount = 0;
-            for (size_t index = settledAt; index < channel.size(); ++index) {
-                carrierSum += std::abs(channel[index]);
-                ++carrierCount;
-            }
-            if (carrierCount == 0) {
-                for (const auto& sample : channel) carrierSum += std::abs(sample);
-                carrierCount = channel.size();
-            }
-            state->carrier = std::max(
-                static_cast<float>(carrierSum /
-                    static_cast<double>(std::max<size_t>(1, carrierCount))),
-                1.0e-5f);
-            state->carrierValid = true;
-        }
 
         const float carrierAlpha = static_cast<float>(
             1.0 - std::exp(-2.0 * kPi * 4.0 / workRateHz));
         for (size_t index = 0; index < channel.size(); ++index) {
             const float envelope = std::abs(channel[index]);
+            if (!state->carrierValid) {
+                // DEC-0113: prime on the sample clock, not callback boundaries.
+                const size_t settle = state->channelTaps.size();
+                if (state->carrierPrimingSamples >= settle) state->carrierPrimingSum += envelope;
+                if (++state->carrierPrimingSamples >= settle * 2) {
+                    state->carrier = std::max(1.0e-5f, static_cast<float>(state->carrierPrimingSum / settle));
+                    state->carrierValid = true;
+                }
+                audio[index] = 0;
+                continue;
+            }
             state->carrier +=
                 carrierAlpha * (envelope - state->carrier);
             audio[index] =
@@ -564,8 +541,6 @@ std::vector<float> demodulate(
             1.0 - std::exp(-1.0 / (0.120 * workRateHz)));
         const float reduceGain = static_cast<float>(
             1.0 - std::exp(-1.0 / (0.003 * workRateHz)));
-        const float increaseGain = static_cast<float>(
-            1.0 - std::exp(-1.0 / (0.350 * workRateHz)));
         constexpr float targetLevel = 0.28f;
 
         for (auto& sample : audio) {
@@ -579,7 +554,9 @@ std::vector<float> demodulate(
                 targetLevel / std::max(state->agcEnvelope, 0.003f),
                 0.03f, 50.0f);
             const float gainCoefficient =
-                desired < state->agcGain ? reduceGain : increaseGain;
+                desired < state->agcGain ? reduceGain : 1.0f;
+            // The envelope already owns the 120 ms release. A second slow
+            // gain-release integrator compounds recovery after real overload.
             state->agcGain +=
                 gainCoefficient * (desired - state->agcGain);
             sample *= state->agcGain;
@@ -682,13 +659,17 @@ std::vector<float> demodulate(
         sample = std::clamp(sample, -0.98f, 0.98f);
     }
 
-    size_t requested = targetAudioSamples;
-    if (requested == 0 && std::abs(outputRateHz - workRateHz) >= 0.5) {
-        requested = static_cast<size_t>(std::llround(
-            static_cast<double>(audio.size()) *
-            outputRateHz / workRateHz));
-    }
-    return resizeAudio(audio, requested);
+    // DEC-0111: the input clock owns the output count. A legacy per-block
+    // requested length must not stretch speech or duplicate endpoints.
+    (void)targetAudioSamples;
+    if (std::abs(outputRateHz - workRateHz) < 0.5) return audio;
+    std::vector<std::complex<float>> audioInput;
+    audioInput.reserve(audio.size());
+    for (float sample : audio) audioInput.emplace_back(sample, 0.0f);
+    const auto converted = resampleComplex(state->audioResampler, audioInput, workRateHz, outputRateHz);
+    audio.resize(converted.size());
+    for (size_t i = 0; i < converted.size(); ++i) audio[i] = converted[i].real();
+    return audio;
 }
 
 void reset(const void* owner) noexcept {

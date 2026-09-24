@@ -1,5 +1,37 @@
 # Code notes (tree map)
 
+2026-09-24 / DEC-0114..0115 release follow-up:
+- SatcomDoppler is a worker-owned, phase-continuous IQ translator. Pass tracking
+  retains the arm-time RF center and nominal decoder identity; the planner only
+  updates the desired digital offset. Out-of-capture channels are rejected.
+- SatcomScannerEngine consumes short IQ and processes decoder data even without
+  speaker output. IQ discontinuities/reset requests also reset its oscillator.
+- DeviceManager appendIQBlock uses the RX-owned StreamState; no devicesMutex
+  lookup under the driver lock. It only publishes to the ring and queue.
+- Talkgroup buttons no longer undo identity-based selection with a row index
+  after refreshing. Add/edit selects the saved identity. P25TalkgroupPresentation
+  holds the unchanged table/label helpers, linked by the app and workspace tests
+  without pulling radio runtime globals into GUI tests (DEC-0116).
+- release.ps1 adds version/source/executable provenance and versioned release
+  notes; verify_release.py checks that provenance and the SGP4 license payload.
+
+2026-09-24 / DEC-0111..0113 receive-chain repairs:
+- HfDemod: cached/interpolated sinc resampling, continuous oscillator/output
+  clock, recovering blanker and sample-clock AM priming. GUI observes HF gaps.
+- Sgp4 wraps pinned external/sgp4; independent fixtures/tests include deep space.
+- DeviceManager separates failed/applied tune sequences; DS validates driver
+  settings, preserves native tuner bounds, targets selected device and invalidates
+  IQ atomically with read publication. Remaining ownership contracts: audit A17.
+- P25TalkgroupRegistry scopes metadata by control source/system; stable table
+  identities and atomic writes. P25Aliases parsed cache is mutex protected.
+  These do not change P25 decoder, security gate, scheduling or vocoder math.
+- InmarsatEngine separates UI notification cadence from IQ draining.
+- SatcomSignalSelection restricts acquisition to configured RF bounds;
+  SatcomScannerEngine uses discriminator blocks for data instead of speaker PCM.
+- SstvModes supplies file/live capabilities. MainWindow publishes USB/LSB taps.
+  File/stream helper inputs now agree; digital row transport, CRC and bounds are
+  explicit. STWN remains an experimental non-interoperable file format.
+
 DEC-0104: FUBAR/website never gets home lat/lon. `publicStatusJson()` and
 aircraft HTTP status omit coordinates. Observer set stays GUI/CLI.
 

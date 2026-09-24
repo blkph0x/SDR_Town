@@ -925,6 +925,20 @@ void MainWindow::startP25LiveDecodePipeline()
                                 rdsIqStart = window.startAbsolute;
                                 rdsSourceGap = window.cursorDiscontinuity;
                                 iq = std::move(window.samples);
+                            } else if (!monP25VoiceDecode &&
+                                       (monMode == DemodMode::AM || monMode == DemodMode::USB ||
+                                        monMode == DemodMode::LSB || monMode == DemodMode::CW)) {
+                                const auto expected = rx.lastConsumedAbsolute.load(std::memory_order_acquire);
+                                const auto epoch = rx.lastSeenStreamEpoch.load(std::memory_order_acquire);
+                                // A02: bound HF listening latency using the existing analog
+                                // budget, but preserve gap evidence for stateful HF filters.
+                                const size_t maxLag = static_cast<size_t>(std::max(65536.0, sr * 0.5));
+                                auto window = mgr.getNewIQWindowForReceiver(i, rx, tgt, maxLag);
+                                rdsSourceGap = window.cursorDiscontinuity || window.streamEpoch != epoch ||
+                                               (!window.samples.empty() && window.startAbsolute != expected);
+                                rdsStreamEpoch = window.streamEpoch;
+                                rdsIqStart = window.startAbsolute;
+                                iq = std::move(window.samples);
                             } else {
                                 iq = mgr.getNewSamplesForReceiver(i, rx, tgt);
                             }
@@ -1035,7 +1049,7 @@ void MainWindow::startP25LiveDecodePipeline()
                             didWork = true;
                             continue;
                         }
-                        if (monMode != DemodMode::NFM || monP25ControlMute || monP25VoiceDecode || rdsSourceGap)
+                        if ((monMode != DemodMode::NFM && monMode != DemodMode::USB && monMode != DemodMode::LSB) || monP25ControlMute || monP25VoiceDecode || rdsSourceGap)
                             rx.sstvFeed->discontinuity(); // Metadata only; never touches the P25/audio decoder.
                         if (p25ShouldSuppressAnalogDemod(monP25VoiceDecode,
                                                          monP25ControlMute,
@@ -1122,7 +1136,8 @@ void MainWindow::startP25LiveDecodePipeline()
                             }
                             const bool decodeRds = monMode == DemodMode::WFM && !monP25ControlMute && !audioStarving;
                             const bool decodeTones = monMode == DemodMode::NFM && !monP25ControlMute;
-                            const bool decodeData = decodeRds || decodeTones;
+                            const bool decodeSsbSstv = (monMode == DemodMode::USB || monMode == DemodMode::LSB) && !monP25ControlMute;
+                            const bool decodeData = decodeRds || decodeTones || decodeSsbSstv;
 
                             bool repEnabled = false, repDualWanted = false, repLogDtmf = false,
                                 repLogTones = false, repLogCarrier = false;
@@ -1194,6 +1209,10 @@ void MainWindow::startP25LiveDecodePipeline()
                                 rx.dcs.reset();
                                 if (repEnabled) rx.dtmf.reset();
                             }
+                            if (rdsSourceGap && (monMode == DemodMode::AM || monMode == DemodMode::USB ||
+                                                monMode == DemodMode::LSB || monMode == DemodMode::CW)) {
+                                rx.demod.resetState();
+                            }
                             ch = rx.demod.demodulateToAudio(iq, sr, cf, audioTargetHz, monMode,
                                 rms, monLpf, monSquelch, monGain, monWfmDe,
                                 monWfmNotch, monBw, need, orate, rfSquelchLevel, monAudioLpfEnabled,
@@ -1206,7 +1225,7 @@ void MainWindow::startP25LiveDecodePipeline()
                                     if (repEnabled) rx.dtmf.reset();
                                     rx.rds->process({mpx.samples, DecoderInputDomain::FmMultiplex,
                                         mpx.sampleRate, mpx.targetHz, i, mpx.epoch, mpx.firstSample, mpx.discontinuity});
-                                } else {
+                                } else if (decodeTones) {
                                     rx.rds->reset();
                                     if (mpx.discontinuity && mpx.epoch <= 32) spdlog::info("NFM data reset reasons={} rate={} bw={} epoch={} iqEpoch={} iqStart={} previousEnd={}",
                                         mpx.resetReasons, mpx.sampleRate, monBw, mpx.epoch, rdsStreamEpoch, rdsIqStart, rx.rdsNextIq);
@@ -1230,6 +1249,11 @@ void MainWindow::startP25LiveDecodePipeline()
                                             RdsMpxDecoder::monotonicMs());
                                     }
                                     rx.sstvFeed->publish(mpx, i);
+                                } else if (decodeSsbSstv) {
+                                    rx.rds->reset();
+                                    rx.ctcss.reset();
+                                    rx.dcs.reset();
+                                    rx.sstvFeed->publish(mpx, i, monMode);
                                 }
                                 rx.rdsIqEpoch = rdsStreamEpoch;
                                 rx.rdsNextIq = rdsIqStart + iq.size();

@@ -287,21 +287,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if length.is_some_and(|length| length != consumed * 2) { return Err("PCM changed while reading".into()); }
     if active { return Err("unterminated image event stream".into()); }
     if count == 0 && mode == Mode::Auto && args[1] != "--stdin" {
-        return write_hamdrm_image(PathBuf::from(&args[1]), rate, PathBuf::from(&args[3]));
+        return write_hamdrm_image(PathBuf::from(&args[1]), rate, PathBuf::from(&args[3]), progress);
     }
     Ok(())
 }
 
 fn run_hamdrm_file(args: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error>> {
+    if args[1] == "--stdin" { return Err("digital STWN prototype is file-only".into()); }
     let rate: u32 = args[2].to_str().ok_or("invalid rate")?.parse()?;
     if !(8000..=96000).contains(&rate) { return Err("sample rate outside 8..96 kHz".into()); }
     let output = PathBuf::from(&args[3]);
     fs::create_dir(&output)?;
-    write_hamdrm_image(PathBuf::from(&args[1]), rate, output)
+    write_hamdrm_image(PathBuf::from(&args[1]), rate, output, args.len() == 6)
 }
 
-fn write_hamdrm_image(pcm: PathBuf, rate: u32, output: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    let bytes = fs::read(&pcm)?;
+fn write_hamdrm_image(pcm: PathBuf, rate: u32, output: PathBuf, progress: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let mut bytes = Vec::new();
+    fs::File::open(&pcm)?.take(u64::from(rate) * 480 * 2 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > u64::from(rate) * 480 * 2 { return Err("PCM budget exceeded".into()); }
     if bytes.len() % 2 != 0 { return Err("invalid PCM length".into()); }
     let samples: Vec<i16> = bytes.chunks_exact(2).map(|c| i16::from_le_bytes([c[0], c[1]])).collect();
     let (width, height, pixels) = hamdrm::decode_samples(&samples, rate).map_err(|e| e.to_string())?;
@@ -314,7 +317,16 @@ fn write_hamdrm_image(pcm: PathBuf, rate: u32, output: PathBuf) -> Result<(), Bo
     }
     let file = "image-0.rgb";
     fs::OpenOptions::new().write(true).create_new(true).open(output.join(file))?.write_all(&canvas)?;
+    if progress {
+        use std::fmt::Write as _;
+        for (y, row) in canvas.chunks_exact(width as usize * 3).enumerate() {
+            let mut hex = String::with_capacity(row.len() * 2);
+            for byte in row { write!(&mut hex, "{byte:02x}")?; }
+            println!("{{\"kind\":\"row\",\"schema\":1,\"image\":0,\"mode\":\"hamdrm\",\"width\":{width},\"height\":{height},\"row\":{y},\"rgb\":\"{hex}\"}}");
+        }
+    }
     println!("{{\"schema\":1,\"backend\":\"{REVISION}\",\"file\":\"{file}\",\"mode\":\"hamdrm\",\"width\":{width},\"height\":{height},\"rows\":{height},\"complete\":true}}");
+    io::stdout().flush()?;
     Ok(())
 }
 

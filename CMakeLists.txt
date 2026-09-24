@@ -1,12 +1,18 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.88 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.89 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
+
+# DEC-0112: pinned Vallado-derived core (MSVC symbol rename only).
+set_source_files_properties(external/sgp4/SGP4.c PROPERTIES LANGUAGE CXX)
+add_library(sdr_town_sgp4 STATIC external/sgp4/SGP4.c)
+install(FILES external/sgp4/LICENSE external/sgp4/README.sdr-town.md DESTINATION licenses/sgp4)
+set_target_properties(sdr_town_sgp4 PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
 
 # Nice output dirs
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
@@ -94,6 +100,7 @@ set(SDR_TOWN_SOURCES
     src/P25VoiceTiming.cpp
     include/P25VoiceTiming.h
     src/P25TalkgroupRegistry.cpp
+    src/P25TalkgroupPresentation.cpp
     include/P25TalkgroupRegistry.h
     src/P25AppGlobals.cpp
     include/P25AppGlobals.h
@@ -271,6 +278,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     nlohmann_json::nlohmann_json
     unofficial-sodium::sodium
     sdr_town_dsp
+    sdr_town_sgp4
 )
 target_compile_definitions(${PROJECT_NAME} PRIVATE SDR_TOWN_VERSION=\"${PROJECT_VERSION}\")
 target_compile_definitions(${PROJECT_NAME} PRIVATE SDR_TOWN_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\")
@@ -464,6 +472,7 @@ if(BUILD_TESTS)
     spdlog::spdlog
     nlohmann_json::nlohmann_json
     sdr_town_dsp
+    sdr_town_sgp4
   )
   target_compile_definitions(sdr_town_tests PRIVATE SDR_TOWN_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\")
   if(SDR_TOWN_BUILD_RDS_DSP)
@@ -496,6 +505,7 @@ if(BUILD_TESTS)
 
   add_executable(sdr_town_workspace_tests tests/test_workspace.cpp src/WorkspaceLayout.cpp
     tests/test_p25_aliases.cpp src/P25Aliases.cpp src/P25AliasCsv.cpp src/P25AliasDialog.cpp
+    src/P25TalkgroupPresentation.cpp
     tests/test_sstv_gui.cpp tests/sstv_miniaudio.cpp src/SstvWindow.cpp include/SstvWindow.h src/SstvImageFile.cpp
     tests/test_sstv_progress.cpp src/SstvProgress.cpp
     tests/test_sstv_stream_worker.cpp src/SstvStreamWorker.cpp src/SstvRateConverter.cpp src/SstvLiveInput.cpp
@@ -558,6 +568,9 @@ add_custom_target(deploy
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/tools/diagnostics"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/scripts"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/licenses/sgp4"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/external/sgp4/LICENSE"
+            "${CMAKE_SOURCE_DIR}/external/sgp4/README.sdr-town.md" "${DEPLOY_STAGING}/licenses/sgp4"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}/external/redsea-block"
             "${DEPLOY_STAGING}/licenses/redsea-block"

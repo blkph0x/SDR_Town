@@ -2,7 +2,7 @@
 
 #include <string>
 
-// Compact SGP4 (near-Earth) for LEO pass / Doppler. Deep-space omitted.
+// Validated wrapper around the pinned full SGP4 core (near-Earth/deep-space).
 namespace Sgp4 {
 
 struct Elements {
@@ -29,7 +29,7 @@ struct State {
 bool parseTle(const std::string& line1, const std::string& line2, Elements* out);
 State propagate(const Elements& el, double minutesFromEpoch);
 
-// Observer geodetic → ECEF km; TEME≈ECEF for short-horizon elevation (good enough for LEO UI).
+// Observer geodetic to ECEF km. Convert TEME with temeToEcef before lookAngles.
 void geodeticToEcef(double latDeg, double lonDeg, double altM, double ecef[3]);
 void lookAngles(const double satEcef[3], const double satVel[3],
                 double latDeg, double lonDeg, double altM,

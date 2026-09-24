@@ -7,6 +7,17 @@
 #include <fstream>
 #include <thread>
 #include <chrono>
+#include <limits>
+
+TEST_CASE("DeviceManager rejects invalid tuning and direct-sampling requests", "[devicemanager][validation]") {
+    auto& manager = DeviceManager::instance();
+    REQUIRE_THROWS(manager.setCenterFreq(0, std::numeric_limits<double>::quiet_NaN()));
+    REQUIRE_THROWS(manager.setCenterFreq(0, -1));
+    std::string error;
+    REQUIRE_FALSE(manager.setDirectSampling(0, 3, &error));
+    REQUIRE_FALSE(error.empty());
+    REQUIRE_FALSE(manager.setDirectSampling(std::numeric_limits<size_t>::max(), 2, &error));
+}
 
 TEST_CASE("DeviceManager secondary lease blocks live listen without force", "[devicemanager][lease]") {
     int argc = 0;

@@ -2,6 +2,97 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-24 - 0.2.89 candidate and additional repair gates
+
+Same Windows/MSVC/Qt host as below. Release app and both test targets built.
+`ctest --test-dir build -C Release --output-on-failure`: 4/4 PASS in 41.32 s.
+UnitTests: 367 passed / 1 optional fixture skipped, 205443 assertions.
+WorkspaceTests: 31 passed / 5 optional fixture/import skips, 381 assertions.
+Rust transport: 8 passed; helper selftest passed. No skipped test is live-RF proof.
+
+- New Doppler regressions: 3 cases / 669 assertions pass. Positive/negative/
+  zero updates preserve phase; split and whole IQ match; invalid targets do not
+  mutate state. USB PCM matches an unshifted reference through small blocks and
+  changing offsets; decoder epoch/sample clock stays continuous.
+- Actual sorted talkgroup renderer: selection survives alias edits/reorder;
+  deletion leaves no unrelated selected identity. Add/edit selection is by key.
+- Actual GUI dry-run: no startup errors/warnings, receiver stopped, clean exit;
+  native screenshot inspected (`build-audit-20260924/gui-0289.png`).
+- Repeated `python scripts/test_sstv_worker.py` on native Windows: all 16
+  recorded Robot36/Martin, complete/partial, forced/auto worker/live-GUI cases
+  pass pixel parity. Static HF integration guard and first-party whitespace
+  checks pass; upstream SGP4 source/vector whitespace is retained verbatim.
+
+Build failures recorded: new table test first lacked populateP25TalkgroupTable;
+linking the whole registry then required decoder functions and a speaker global.
+DEC-0116 separates unchanged presentation code; rebuilt app/workspace targets
+and complete CTest pass. No test renderer stubs substituted for production code.
+
+Evidence: build-audit-20260924/build-0289-presentation.txt, ctest-0289.txt,
+doppler-0289.txt, sstv-0289-recordings.txt and gui-0289.json. These build outputs
+are local/ignored, not shipped. Package/hash/signature verification runs as the
+release gate. Live pass, RSP/direct-sampling hardware matrix and long soak remain
+open. No P25 DSP/vocoder/security or WFM/NFM algorithm change in this batch.
+
+## 2026-09-24 - Receive-chain repair branch, Windows Release
+
+Host/compiler: Ryzen 9 3900X, MSVC 2022 x64, Qt 6.11.1. Built SDR_Town,
+sdr_town_tests and sdr_town_workspace_tests from canonical Desktop folder.
+Commands: cmake --build build --config Release --target SDR_Town
+sdr_town_tests sdr_town_workspace_tests --parallel 3 (several incremental runs).
+Optional Vulkan warning and upstream mbelib CMake deprecation remain nonfatal.
+
+Evidence under ignored build-audit-20260924/:
+- repair-targeted.txt: HF/SGP4/scan/input validation, 18 cases / 5,439 assertions PASS.
+- core-full.txt: all default core cases excluding network/device-manager,
+  359 PASS, one fixture skip, 204,728 assertions. Includes P25 and analog units.
+- device-contracts.txt: stub lease + input validation, 2 cases / 13 assertions PASS.
+- workspace-final.txt: native Windows Qt suite, 30 PASS, 5 optional fixture skips,
+  371 assertions. Recording skips separately exercised by scripts below.
+- sstv-worker-recordings.txt and sstv-worker-windows.txt: test_sstv_worker.py,
+  16 scenarios each, full/partial Robot36/Martin1, auto/forced, worker/live GUI,
+  all output images/rows/completion match reference. Native screenshots inspected.
+- sstv-gui-recordings.txt: test_sstv_gui.py, 4 direct-file GUI cases PASS.
+- sstv-independent.txt: independent helper images complete; Robot36 RGB MAE
+  10.406 < 15 gate; Martin1 MAE 20.779 reported (no numeric gate in that script).
+- CTest SstvTransportRust + SstvBackendSelftest 2/2 PASS; digital selftest MAE 0
+  (private 32x32 STWN roundtrip only). verify_hf_integration.py PASS (static guard).
+- hf-audit-final.txt: 2.048/2.4/10 MS/s one-second inputs in 0.076/0.088/0.262 s;
+  strong-carrier recovery matches fresh decoder 0.164843 RMS. Folding-band
+  rejection gates >80 dB pass without the PR #32 coarse-decimator regression.
+
+Failures investigated, not hidden: HF test fixture initially quantized large
+phases to float before sin/cos; corrected generator to double precision. Corrected
+AM acquisition dependence on callback size; whole/split tests now cover all HF
+modes at two output rates. Official SGP4 33334 is an intentional invalid case,
+not a vector to emulate. Qt offscreen initially lacked its platform plugin path;
+supplied installed Qt plugin path, then repeated GUI tests on native Windows.
+SSTV record tests exposed extra file filtering; removed it and compared all image
+records after fixing stale single-image-only test assumptions.
+
+No real RSP/V3/V4 acceptance. Enumeration found a generic R820T; the installed
+SDRplay module returned sdrplay_api_Open failure and no SDRplay service was listed.
+No claim this diagnoses the remote father's computer. No P25 RF/audio retest,
+long soak, sanitizer or independent Inmarsat/HamDRM/complete APT qualification.
+
+## 2026-09-24 - Audit at a2ac437 (0.2.88); no product rebuild
+
+Windows Ryzen 9 3900X, MSVC x64 /std:c++20 /O2 /EHsc, Qt 6.11.1 offscreen.
+Existing HF and non-P25 smoke executables compiled and PASS. Non-P25 harness
+initial link omitted Advapi32; adding that required link library resolved it.
+Scratch Qt build initially lacked miniaudio include path; harness corrected.
+Qt aliases/SSTV tests: 24 passed, 3 optional-fixture skips, 8,901 assertions PASS.
+Installed 2,237-TG alias JSON parsed repeatedly at 7.10 ms/iteration (no disk or
+widget cost). Real CSV parsed read-only. Separate temporary test settings used.
+Packaged helper --selftest-hamdrm PASS (32x32 private-format roundtrip only).
+
+Diagnostic failures: HF weak-to-strong tone goes silent on master and PR #32;
+master processes about 1 second IQ in 1.05 seconds at 2.4 MS/s and 2.71 seconds
+at 10 MS/s. PR #32 improves speed but gives only about 3.4 dB rejection of a
+10 MS/s coarse-decimation alias test. SGP4 official case 00005 position errors
+1,633.895 km at epoch and 821.384 km at +360 min. Details and scratch artifact
+locations: AUDIT_20260924.md. No live RF or full application acceptance claimed.
+
 ## 2026-09-20 - Live CelesTrak TLE
 
 PowerShell and WinHTTP GET of gp.php GROUP=stations/weather/amateur return 200

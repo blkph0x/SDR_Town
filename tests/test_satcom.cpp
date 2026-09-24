@@ -2,6 +2,8 @@
 #include "Ax25AprsDecoder.h"
 #include "SatcomAsyncLog.h"
 #include "SatcomIqCursor.h"
+#include "SatcomDoppler.h"
+#include "Demod.h"
 #include "SatcomHostServices.h"
 #include "SdrDeviceCandidate.h"
 
@@ -14,6 +16,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <numbers>
 #include <string>
 #include <vector>
@@ -304,6 +307,112 @@ TEST_CASE("Satcom IQ cursor reports ring gaps and stream epochs", "[satcom][iq]"
     REQUIRE(epoch.discontinuity);
     REQUIRE(epoch.samples.size() == 4);
     CHECK(epoch.streamEpoch == 8);
+}
+
+TEST_CASE("Satellite Doppler translates both signs without phase jumps", "[satcom][doppler]")
+{
+    constexpr double rate = 192000.0;
+    constexpr double nominal = 145800000.0;
+    constexpr double twoPi = 2.0 * std::numbers::pi;
+    SatcomDoppler whole, split;
+    double phase = 0.0;
+    uint64_t position = 0;
+    for (double offset : {3100.0, -1700.0, 0.0, 8100.0, -8900.0}) {
+        std::vector<std::complex<float>> signal(16387);
+        for (auto& sample : signal) {
+            sample = static_cast<std::complex<float>>(std::polar(0.5, phase));
+            phase = std::remainder(phase + twoPi * (offset + 1500.0) / rate, twoPi);
+        }
+        auto expected = signal;
+        REQUIRE(whole.translate(expected, rate, nominal, nominal + offset, nominal, 3000));
+        std::vector<std::complex<float>> actual;
+        for (size_t start = 0; start < signal.size();) {
+            const size_t count = std::min<size_t>(511, signal.size() - start);
+            std::vector<std::complex<float>> part(signal.begin() + start, signal.begin() + start + count);
+            REQUIRE(split.translate(part, rate, nominal, nominal + offset, nominal, 3000));
+            actual.insert(actual.end(), part.begin(), part.end());
+            start += count;
+        }
+        REQUIRE(actual == expected);
+        double maxError = 0.0;
+        for (auto sample : actual) {
+            const auto ideal = std::polar(0.5, twoPi * 1500.0 * position++ / rate);
+            maxError = std::max(maxError, std::abs(std::complex<double>(sample) - ideal));
+        }
+        CHECK(maxError < 1e-6);
+    }
+}
+
+TEST_CASE("Satellite Doppler rejects uncaptured channels without mutating state", "[satcom][doppler]")
+{
+    SatcomDoppler mixer, reference;
+    std::vector<std::complex<float>> iq(8193, {0.5f, 0.25f});
+    auto expected = iq;
+    REQUIRE(mixer.translate(iq, 48000, 100000, 101000, 100000, 3000));
+    REQUIRE(reference.translate(expected, 48000, 100000, 101000, 100000, 3000));
+    const auto before = iq;
+    CHECK_FALSE(mixer.translate(iq, 48000, 100000, 123000, 100000, 3000));
+    CHECK_FALSE(mixer.translate(iq, 48000, 100000, 100000, 123000, 3000));
+    CHECK_FALSE(mixer.translate(iq, 0, 100000, 100000, 100000, 3000));
+    CHECK_FALSE(mixer.translate(iq, 48000, 100000,
+                                std::numeric_limits<double>::quiet_NaN(), 100000, 3000));
+    CHECK(iq == before);
+    REQUIRE(mixer.translate(iq, 48000, 100000, 99000, 100000, 3000));
+    REQUIRE(reference.translate(expected, 48000, 100000, 99000, 100000, 3000));
+    CHECK(iq == expected);
+    mixer.reset();
+    iq.assign(8193, {0.5f, 0.25f});
+    expected = iq;
+    REQUIRE(mixer.translate(iq, 48000, 100000, 100000, 100000, 3000));
+    CHECK(iq == expected);
+}
+
+TEST_CASE("Satellite sideband decoder keeps its clock through Doppler updates", "[satcom][doppler][hf]")
+{
+    constexpr double rate = 192000.0, nominal = 145800000.0;
+    constexpr double twoPi = 2.0 * std::numbers::pi;
+    SatcomDoppler mixer;
+    Demodulator tracked, reference;
+    double rfPhase = 0.0, voicePhase = 0.0, rms = 0.0;
+    uint64_t epoch = 0, nextSample = 0;
+    double maxError = 0.0;
+    size_t totalAudio = 0;
+    // Include blocks below the scanner's former 1024-sample discard threshold.
+    const size_t sizes[] = {17, 511, 8192, 71, 4096};
+    for (size_t block = 0; block < 80; ++block) {
+        const double offset = block < 20 ? 3100.0 : (block < 50 ? -1700.0 : 0.0);
+        std::vector<std::complex<float>> iq(sizes[block % 5]), ideal(iq.size());
+        for (size_t i = 0; i < iq.size(); ++i) {
+            iq[i] = static_cast<std::complex<float>>(std::polar(0.2, rfPhase));
+            ideal[i] = static_cast<std::complex<float>>(std::polar(0.2, voicePhase));
+            rfPhase = std::remainder(rfPhase + twoPi * (offset + 1500.0) / rate, twoPi);
+            voicePhase = std::remainder(voicePhase + twoPi * 1500.0 / rate, twoPi);
+        }
+        REQUIRE(mixer.translate(iq, rate, nominal, nominal + offset, nominal, 3000));
+        FmMultiplexBlock data;
+        const auto actual = tracked.demodulateToAudio(iq, rate, nominal, nominal,
+            DemodMode::USB, rms, 3000, -120, 1, 75, .96, 3000, 0, 48000,
+            std::numeric_limits<double>::quiet_NaN(), true, &data, nominal);
+        const auto expected = reference.demodulateToAudio(ideal, rate, nominal, nominal,
+            DemodMode::USB, rms, 3000, -120, 1, 75, .96, 3000, 0, 48000);
+        REQUIRE(actual.size() == expected.size());
+        for (size_t i = 0; i < actual.size(); ++i)
+            maxError = std::max(maxError, double(std::abs(actual[i] - expected[i])));
+        totalAudio += actual.size();
+        if (!data.samples.empty()) {
+            if (nextSample) {
+                CHECK_FALSE(data.discontinuity);
+                CHECK(data.epoch == epoch);
+            }
+            CHECK(data.firstSample == nextSample);
+            CHECK(data.targetHz == nominal);
+            epoch = data.epoch;
+            nextSample += data.samples.size();
+        }
+    }
+    CHECK(totalAudio > 48000);
+    CHECK(nextSample > 0);
+    CHECK(maxError < 1e-4);
 }
 
 TEST_CASE("APT decoder recovers synchronized NOAA line from 2400 Hz subcarrier", "[satcom][apt]")

@@ -24,7 +24,8 @@ std::vector<std::complex<float>> analyticTone(
         const double phase =
             2.0 * kPi * frequencyHz *
             static_cast<double>(index) / sampleRate;
-        samples[index] = std::polar(amplitude, static_cast<float>(phase));
+        samples[index] = {amplitude * static_cast<float>(std::cos(phase)),
+                          amplitude * static_cast<float>(std::sin(phase))};
     }
     return samples;
 }
@@ -343,6 +344,58 @@ TEST_CASE("HF dispatch is limited to AM USB LSB and CW", "[hf][guard]") {
     REQUIRE_FALSE(HfDemod::supports(DemodMode::NFM));
     REQUIRE_FALSE(HfDemod::supports(DemodMode::WFM));
     REQUIRE_FALSE(HfDemod::supports(DemodMode::AUTO));
+}
+
+TEST_CASE("HF blanker recovers from a sustained stronger carrier", "[hf][regression]") {
+    constexpr double rate = 192000;
+    auto input = analyticTone(rate, 1.0, 1500, 0.01f);
+    const auto strong = analyticTone(rate, 2.0, 1500, 0.5f);
+    input.insert(input.end(), strong.begin(), strong.end());
+    Demodulator stepped, fresh;
+    const auto recovered = processHf(stepped, input, rate, DemodMode::USB, 6000, 3000);
+    const auto reference = processHf(fresh, strong, rate, DemodMode::USB, 6000, 3000);
+    REQUIRE(tailRms(recovered, 0.25) > tailRms(reference, 0.25) * 0.9);
+    REQUIRE(tailRms(recovered, 0.25) < tailRms(reference, 0.25) * 1.1);
+}
+
+TEST_CASE("HF output clock is independent of IQ block sizes and requested counts", "[hf][regression]") {
+    for (auto mode : {DemodMode::USB, DemodMode::LSB, DemodMode::AM, DemodMode::CW}) {
+    const auto input = mode == DemodMode::AM ? amTone(192000, 0.4, 1500, 0.1f, 0.4f)
+        : analyticTone(192000, 0.4, mode == DemodMode::LSB ? -1500 : 1500, 0.1f);
+    for (double outputRate : {44100.0, 48000.0}) {
+        int wholeOwner = 0, splitOwner = 0;
+        double rms = 0;
+        auto run = [&](int* owner, const auto& iq, size_t hint) {
+            return HfDemod::demodulate(owner, iq, 192000, 14.2e6, 14.2e6,
+                mode, rms, 3000, -120, 1, 6000, hint, outputRate);
+        };
+        const auto whole = run(&wholeOwner, input, 123);
+        std::vector<float> split;
+        for (size_t at = 0; at < input.size();) {
+            const size_t count = std::min<size_t>(1 + (at * 17 + 53) % 8192, input.size() - at);
+            std::vector<std::complex<float>> block(input.begin() + at, input.begin() + at + count);
+            const auto audio = run(&splitOwner, block, static_cast<size_t>(std::round(count * outputRate / 192000)));
+            split.insert(split.end(), audio.begin(), audio.end());
+            at += count;
+        }
+        REQUIRE(whole.size() == split.size());
+        double error = 0;
+        for (size_t i = 0; i < whole.size(); ++i) error = std::max(error, double(std::abs(whole[i] - split[i])));
+        REQUIRE(error < 1e-5);
+        REQUIRE(whole.size() > outputRate * 0.39);
+        HfDemod::release(&wholeOwner);
+        HfDemod::release(&splitOwner);
+    }
+    }
+}
+
+TEST_CASE("HF rejects the audited coarse-decimator folding bands", "[hf][regression][alias]") {
+    for (const auto [rate, blocker] : {std::pair{2.4e6, 201500.0}, std::pair{10e6, 10e6 / 52.0 + 1500.0}}) {
+        Demodulator wantedDemod, blockerDemod;
+        const auto wanted = processHf(wantedDemod, analyticTone(rate, 0.2, 1500, 0.1f), rate, DemodMode::USB, 6000, 3000);
+        const auto rejected = processHf(blockerDemod, analyticTone(rate, 0.2, blocker, 0.1f), rate, DemodMode::USB, 6000, 3000);
+        REQUIRE(tailRms(wanted) > std::max(1e-12, tailRms(rejected)) * 10000);
+    }
 }
 
 

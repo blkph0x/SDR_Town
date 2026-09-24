@@ -4,23 +4,29 @@ Version **0.2.80** ships analogue SSTV (Dayton + handbook/QSSTV leftovers) and
 **HamDRM** digital (HB9TLK Mode B 2.5 kHz), plus experimental live NFM input
 and classic VIS inspection. Known-transmission RF acceptance remains open.
 
-## Live NFM
+## Live NFM / USB / LSB (current repair branch)
 
-1. Start and tune the main receiver to an SSTV transmission in NFM. P25 monitor
+1. Start and tune the main receiver to an SSTV transmission in NFM, USB or LSB. P25 monitor
    or voice-follow mode must be off. SSTV does not tune or reconfigure the radio.
-2. Open **Tools > SSTV Images**, choose **Live NFM - main receiver**, Automatic
-   (or a forced analogue / HamDRM mode), and a new output directory whose parent exists.
+2. Open **Tools > SSTV Images**, choose **Live NFM / USB / LSB - main receiver**, Automatic
+   (or a forced analogue mode), and a new output directory whose parent exists.
 3. Press **Receive**. Scanlines appear progressively. **Finish and save** stops
    accepting new input, drains queued samples, and saves validated PNGs/report.
    **Cancel** or closing the window discards provisional output.
 
-The source is raw NFM discriminator audio before speaker LPF/EQ/squelch/volume.
+NFM uses raw discriminator audio before speaker LPF/EQ/squelch/volume; USB/LSB
+uses the HF decoder tap before speaker squelch and output volume.
 A retune, stream gap, overrun or mode/device loss aborts the session rather than
 joining incompatible samples; restart explicitly. Sessions are bounded to six
 minutes and four images. No automated repeated acquisition yet. Partial images
-are labelled and retain black missing rows. HF USB/LSB audio is not supported
-by this live source. Finishing after an image begins can save a partial image;
+are labelled and retain black missing rows. Finishing after an image begins can save a partial image;
 all rows received does not guarantee a noise-free image.
+
+Digital `hamdrm` is a private STWN file-only prototype, not an interoperable
+EasyPal decoder. It now rejects failed FAC CRC, invalid dimensions and oversized
+transmissions instead of silently truncating. It shares the validated row-preview
+protocol but is deliberately unavailable for live input. Live analog RF and
+satellite Doppler acceptance remain open; see AUDIT_20260924.md.
 
 Independent recordings exercise the real live GUI/feed/converter/helper path,
 but are not a substitute for an off-air image from a known transmission.

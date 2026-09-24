@@ -1,5 +1,6 @@
 #include "SstvStreamWorker.h"
 #include "SstvImageFile.h"
+#include "SstvModes.h"
 #include "miniaudio.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -50,6 +51,19 @@ TEST_CASE("SSTV stream idle cancellation reaps worker without requiring input","
     REQUIRE(entered); REQUIRE(clock.elapsed()<6000);
 }
 
+TEST_CASE("Every advertised analog SSTV mode can open a live worker", "[sstv-stream-worker]") {
+    requireBackend();
+    for (const auto& spec : kSstvModes) {
+        const QString mode = QString::fromUtf8(spec.id);
+        if (!sstvStreamingModeOk(spec.id)) continue;
+        CAPTURE(spec.id);
+        auto task = std::async(std::launch::async, [mode] {
+            return decodeSstvStream([]()->SstvStreamItem { return SstvStreamEnd{}; }, mode);
+        });
+        REQUIRE(task.get().inputSamples == 0);
+    }
+}
+
 TEST_CASE("SSTV stream rejects gaps and silently changed identities","[sstv-stream-worker]") {
     requireBackend();
     for(int change=0;change<9;++change) {
@@ -87,7 +101,7 @@ TEST_CASE("SSTV combined queue converter helper matches independent recorded pix
     const auto mode=qEnvironmentVariable("SDR_TOWN_SSTV_STREAM_MODE","auto");
     QTemporaryDir output; REQUIRE(output.isValid());
     const auto expected=decodeSstvImageFile(reference,output.filePath("expected"),mode);
-    REQUIRE(expected.at("images").size()==1);
+    REQUIRE_FALSE(expected.at("images").empty());
     std::atomic<bool> cancel=false,wrongThread=false;
     std::atomic<int> previews=0;
     auto task=std::async(std::launch::async,[&] {
@@ -123,13 +137,15 @@ TEST_CASE("SSTV combined queue converter helper matches independent recorded pix
         QApplication::processEvents();
     if(clock.elapsed()>=20000) cancel=true;
     const auto result=task.get();
-    REQUIRE(result.images.size()==1); REQUIRE(previews>1); REQUIRE_FALSE(wrongThread);
-    const auto& metadata=expected.at("images")[0];
+    REQUIRE(result.images.size()==expected.at("images").size()); REQUIRE(previews>1); REQUIRE_FALSE(wrongThread);
+    for (size_t index = 0; index < result.images.size(); ++index) {
+    const auto& metadata=expected.at("images")[index];
     const auto name=QString::fromStdString(metadata.at("file").get<std::string>());
     const QImage saved(output.filePath("expected/"+name));
-    INFO("stream format="<<int(result.images[0].format())<<" PNG format="<<int(saved.format()));
-    REQUIRE(result.images[0]==saved.convertToFormat(QImage::Format_RGB888));
-    REQUIRE(result.metadata[0]["rows"]==metadata["rows"]);
-    REQUIRE(result.metadata[0]["complete"]==metadata["complete"]);
+    INFO("image=" << index);
+    REQUIRE(result.images[index]==saved.convertToFormat(QImage::Format_RGB888));
+    REQUIRE(result.metadata[index]["rows"]==metadata["rows"]);
+    REQUIRE(result.metadata[index]["complete"]==metadata["complete"]);
+    }
     REQUIRE(result.sourceId==7); REQUIRE(result.inputSamples>0); REQUIRE(result.outputSamples>0);
 }

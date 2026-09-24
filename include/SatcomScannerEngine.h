@@ -1,4 +1,5 @@
 #pragma once
+#include "SatcomDoppler.h"
 
 #include "SatcomAsyncLog.h"
 #include "SatcomIqCursor.h"
@@ -208,6 +209,7 @@ private:
     bool passTrackActive_ = false;
     bool passStartedEngine_ = false;
     double lastTrackHz_ = 0.0;
+    double passNominalHz_ = 0.0;
     size_t activeDeviceIndex_ = static_cast<size_t>(-1);
     std::optional<PreviousDeviceState> previousDeviceState_;
 
@@ -219,6 +221,7 @@ private:
     std::unique_ptr<Ax25AprsDecoder> ax25_;
     std::unique_ptr<AptImageDecoder> apt_;
     std::unique_ptr<Demodulator> demod_;
+    SatcomDoppler doppler_;
     std::atomic<bool> demodResetRequested_{true};
 
     std::mutex iqMutex_;

@@ -2,6 +2,11 @@
 
 In-tree trackers are canonical. GitHub issues/PRs are a public mirror.
 
+Current baseline review: [2026-09-24 audit and repair plan](AUDIT_20260924.md).
+It reconciles the original source folder to 0.2.88 and records measured HF,
+orbit-prediction and pending-PR regressions, plus receiver integration gaps.
+Tester repair release: [0.2.89 notes and remaining gates](RELEASE_0.2.89.md).
+
 Method: Athanor process (`DEVELOPMENT_RULES.md`) on this product tree.
 Do not edit `C:\Users\Blkph0x\source\repos\SovereignFoundry` from here.
 

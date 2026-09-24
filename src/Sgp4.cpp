@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <ctime>
+#include "../external/sgp4/SGP4.h"
 
 namespace Sgp4 {
 namespace {
@@ -11,15 +12,6 @@ namespace {
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kTwoPi = 2.0 * kPi;
 constexpr double kDeg2Rad = kPi / 180.0;
-constexpr double kXke = 0.0743669161331734132; // sqrt(GM) earth (er^1.5/min) classic WGS
-constexpr double kXkmper = 6378.135;
-constexpr double kAe = 1.0;
-constexpr double kCk2 = 5.413079e-4;
-constexpr double kCk4 = 0.62098875e-6;
-constexpr double kS = 1.012229;
-constexpr double kQoms2t = 1.88027916e-9;
-constexpr double kXj3 = -2.53881e-6;
-constexpr double kZhr = 0.2617993877991494;
 
 double gstime(double jd) {
     double tut1 = (jd - 2451545.0) / 36525.0;
@@ -64,7 +56,10 @@ double julianNowUtc() {
 }
 
 bool parseTle(const std::string& line1, const std::string& line2, Elements* out) {
-    if (!out || line1.size() < 69 || line2.size() < 69) return false;
+    if (!out) return false;
+    *out = {};
+    if (line1.size() < 69 || line2.size() < 69 || line1[0] != '1' || line2[0] != '2' ||
+        line1.substr(2, 5) != line2.substr(2, 5)) return false;
     Elements el{};
     try {
         el.satnum = std::stoi(line1.substr(2, 5));
@@ -76,24 +71,6 @@ bool parseTle(const std::string& line1, const std::string& line2, Elements* out)
         el.epochJd = julianDay(year, 1, 1, 0, 0, 0.0) + day - 1.0;
 
         el.ndot = std::stod(line1.substr(33, 10));
-        // bstar: 12345-6 style
-        std::string bs = line1.substr(53, 8);
-        // trim
-        while (!bs.empty() && bs.front() == ' ') bs.erase(bs.begin());
-        if (bs.size() >= 2) {
-            const char signExp = bs.back();
-            bs.pop_back();
-            char signMant = '+';
-            if (!bs.empty() && (bs[0] == '+' || bs[0] == '-')) {
-                signMant = bs[0];
-                bs.erase(bs.begin());
-            }
-            double mant = std::stod(std::string("0.") + bs);
-            if (signMant == '-') mant = -mant;
-            const int expv = signExp - '0';
-            // last char is sign of exponent in classic TLE; actually format is NNNNN±N
-            // line1 cols 54-61: bstar as ±NNNNN±N
-        }
         // More reliable bstar parse: cols 53-59 mantissa, 60-61 exp
         {
             const char s1 = line1[53];
@@ -114,7 +91,11 @@ bool parseTle(const std::string& line1, const std::string& line2, Elements* out)
         el.mo = std::stod(line2.substr(43, 8)) * kDeg2Rad;
         const double nRevDay = std::stod(line2.substr(52, 11));
         el.no = nRevDay * kTwoPi / 1440.0; // rad/min
-        el.valid = el.no > 0.0 && el.ecco < 1.0;
+        el.valid = std::isfinite(el.no) && el.no > 0.0 && std::isfinite(el.ecco) &&
+                   el.ecco >= 0.0 && el.ecco < 1.0 && std::isfinite(el.inclo) &&
+                   el.inclo >= 0.0 && el.inclo <= kPi && std::isfinite(el.epochJd) &&
+                   std::isfinite(el.bstar) && std::isfinite(el.nodeo) &&
+                   std::isfinite(el.argpo) && std::isfinite(el.mo);
         *out = el;
         return el.valid;
     } catch (...) {
@@ -127,145 +108,35 @@ double minutesSinceEpoch(const Elements& el, double jdUtc) {
 }
 
 State propagate(const Elements& el, double tsince) {
-    State st{};
-    if (!el.valid) return st;
+    State state{};
+    if (!el.valid || !std::isfinite(tsince) || !std::isfinite(el.epochJd) ||
+        !std::isfinite(el.no) || el.no <= 0 || !std::isfinite(el.ecco) ||
+        el.ecco < 0 || el.ecco >= 1 || !std::isfinite(el.inclo) ||
+        el.inclo < 0 || el.inclo > kPi || !std::isfinite(el.nodeo) ||
+        !std::isfinite(el.argpo) || !std::isfinite(el.mo) ||
+        !std::isfinite(el.bstar)) return state;
 
-    const double cosio = std::cos(el.inclo);
-    const double sinio = std::sin(el.inclo);
-    const double ao = std::pow(kXke / el.no, 2.0 / 3.0);
-    const double del1 = 1.5 * kCk2 * (3.0 * cosio * cosio - 1.0) / (ao * ao * std::pow(1.0 - el.ecco * el.ecco, 1.5));
-    const double a1 = ao * (1.0 - del1 / 3.0 - del1 * del1 - 134.0 * del1 * del1 * del1 / 81.0);
-    const double delo = 1.5 * kCk2 * (3.0 * cosio * cosio - 1.0) / (a1 * a1 * std::pow(1.0 - el.ecco * el.ecco, 1.5));
-    const double xnodp = el.no / (1.0 + delo);
-    const double aodp = a1 / (1.0 - delo);
-
-    const bool isimp = (aodp * (1.0 - el.ecco) / kAe) < (220.0 / kXkmper + kAe);
-    double s4 = kS;
-    double qoms24 = kQoms2t;
-    const double perige = (aodp * (1.0 - el.ecco) - kAe) * kXkmper;
-    if (perige < 156.0) {
-        s4 = perige - 78.0;
-        if (perige <= 98.0) s4 = 20.0;
-        qoms24 = std::pow((120.0 - s4) * kAe / kXkmper, 4.0);
-        s4 = s4 / kXkmper + kAe;
-    }
-
-    const double pinvsq = 1.0 / (aodp * aodp * (1.0 - el.ecco * el.ecco) * (1.0 - el.ecco * el.ecco));
-    const double tsi = 1.0 / (aodp - s4);
-    const double eta = aodp * el.ecco * tsi;
-    const double etasq = eta * eta;
-    const double eeta = el.ecco * eta;
-    const double psisq = std::abs(1.0 - etasq);
-    const double coef = qoms24 * std::pow(tsi, 4.0);
-    const double coef1 = coef / std::pow(psisq, 3.5);
-    const double c2 = coef1 * xnodp *
-                      (aodp * (1.0 + 1.5 * etasq + eeta * (4.0 + etasq)) +
-                       0.75 * kCk2 * tsi / psisq * el.no *
-                           (3.0 * cosio * cosio - 1.0) * (8.0 + 3.0 * etasq * (8.0 + etasq)));
-    const double c1 = el.bstar * c2;
-    const double sinio2 = sinio * sinio;
-    const double a3ovk2 = -kXj3 / kCk2 * std::pow(kAe, 3.0);
-    const double c3 = coef * tsi * a3ovk2 * xnodp * kAe * sinio / el.ecco;
-    const double x1mth2 = 1.0 - cosio * cosio;
-    const double c4 = 2.0 * xnodp * coef1 * aodp * (1.0 - el.ecco * el.ecco) *
-                      (eta * (2.0 + 0.5 * etasq) + el.ecco * (0.5 + 2.0 * etasq) -
-                       2.0 * kCk2 * tsi / (aodp * psisq) *
-                           (-3.0 * (1.0 - cosio * cosio) * (1.0 - 2.0 * eeta + etasq * (1.5 - 0.5 * eeta)) +
-                            0.75 * (1.0 - cosio * cosio) * (2.0 * etasq - eeta * (1.0 + etasq)) * std::cos(2.0 * el.argpo)));
-    double c5 = 0.0;
-    if (!isimp)
-        c5 = 2.0 * coef1 * aodp * (1.0 - el.ecco * el.ecco) * (1.0 + 2.75 * (etasq + eeta) + eeta * etasq);
-
-    const double theta2 = cosio * cosio;
-    const double pinh = 1.0 - el.ecco * el.ecco;
-    const double xmdot = xnodp + 0.5 * xnodp * kCk2 * pinvsq * (3.0 * theta2 - 1.0) * std::sqrt(pinh);
-    const double x1m5th = 1.0 - 5.0 * theta2;
-    const double xhdot1 = -2.0 * xnodp * kCk2 * pinvsq * cosio;
-    const double omgdot = -0.5 * xnodp * kCk2 * pinvsq * x1m5th;
-    const double xnodot = xhdot1 + 0.5 * xhdot1 * kCk2 * pinvsq * (4.0 - 19.0 * theta2);
-
-    const double xmdf = el.mo + xmdot * tsince;
-    const double omgadf = el.argpo + omgdot * tsince;
-    const double xnoddf = el.nodeo + xnodot * tsince;
-    double tsq = tsince * tsince;
-    double xnode = xnoddf + xnodot * 1.5 * c1 * tsq;
-    double tempa = 1.0 - c1 * tsince;
-    double tempe = el.bstar * c4 * tsince;
-    double templ = xnodp * 1.5 * c1 * tsq;
-    if (!isimp) {
-        const double tcube = tsq * tsince;
-        const double tfour = tcube * tsince;
-        const double d2 = 4.0 * aodp * tsi * c1 * c1;
-        const double d3 = (17.0 * aodp + s4) * tsi * d2 * c1 / 3.0;
-        const double d4 = 0.5 * tsi * d2 * c1 * aodp * tsi * (221.0 * aodp + 31.0 * s4) * c1 / 3.0;
-        tempa = tempa - d2 * tsq - d3 * tcube - d4 * tfour;
-        tempe = tempe + el.bstar * c5 * (std::sin(xmdf) - std::sin(el.mo));
-        templ = templ + xnodp * (d2 * 2.0 * tsq + d3 * 3.0 * tcube + d4 * 2.0 * tfour) * 0.25;
-    }
-    double a = aodp * tempa * tempa;
-    double e = el.ecco - tempe;
-    if (e >= 1.0 || e < -0.001) return st;
-    e = std::max(1.0e-6, e);
-    const double xl = xmdf + omgadf + xnode + templ;
-    const double beta = std::sqrt(1.0 - e * e);
-    const double xn = kXke / std::pow(a, 1.5);
-
-    // Kepler
-    double u = wrapPi(xl - xnode);
-    double eo1 = u;
-    for (int i = 0; i < 10; ++i) {
-        const double sineo1 = std::sin(eo1);
-        const double coseo1 = std::cos(eo1);
-        const double tem5 = 1.0 - coseo1 * e;
-        const double delta = (u - eo1 + e * sineo1) / tem5;
-        eo1 += delta;
-        if (std::abs(delta) < 1e-12) break;
-    }
-    const double sineo1 = std::sin(eo1);
-    const double coseo1 = std::cos(eo1);
-    const double el2 = e * e;
-    const double pl = a * (1.0 - el2);
-    const double r = a * (1.0 - e * coseo1);
-    const double rdot = kXke * std::sqrt(a) * e * sineo1 / r;
-    const double rfdot = kXke * std::sqrt(pl) / r;
-    const double betal = std::sqrt(1.0 - el2);
-    const double cosu = (coseo1 - e) / (1.0 - e * coseo1);
-    const double sinu = betal * sineo1 / (1.0 - e * coseo1);
-    const double uang = std::atan2(sinu, cosu);
-    const double sin2u = 2.0 * sinu * cosu;
-    const double cos2u = 2.0 * cosu * cosu - 1.0;
-    const double rk = r * (1.0 - 1.5 * kCk2 * std::sqrt(1.0 - el2) * (3.0 * cosio * cosio - 1.0) / (pl * pl)) +
-                      0.5 * kCk2 * x1mth2 * cos2u / pl;
-    const double uk = uang - 0.25 * kCk2 * (7.0 * cosio * cosio - 1.0) * sin2u / pl;
-    const double xnodek = xnode + 1.5 * kCk2 * cosio * sin2u / pl;
-    const double xinck = el.inclo + 1.5 * kCk2 * cosio * sinio * cos2u / pl;
-    const double rdotk = rdot - xn * kCk2 * x1mth2 * sin2u / pl;
-    const double rfdotk = rfdot + xn * kCk2 * ((1.0 - cosio * cosio) * cos2u + 1.5 * (1.0 - 3.0 * theta2)) / pl;
-
-    const double sinuk = std::sin(uk);
-    const double cosuk = std::cos(uk);
-    const double sinik = std::sin(xinck);
-    const double cosik = std::cos(xinck);
-    const double sinnok = std::sin(xnodek);
-    const double cosnok = std::cos(xnodek);
-    const double xmx = -sinnok * cosik;
-    const double xmy = cosnok * cosik;
-    const double ux = xmx * sinuk + cosnok * cosuk;
-    const double uy = xmy * sinuk + sinnok * cosuk;
-    const double uz = sinik * sinuk;
-    const double vx = xmx * cosuk - cosnok * sinuk;
-    const double vy = xmy * cosuk - sinnok * sinuk;
-    const double vz = sinik * cosuk;
-
-    st.r[0] = rk * ux * kXkmper;
-    st.r[1] = rk * uy * kXkmper;
-    st.r[2] = rk * uz * kXkmper;
-    const double vkmps = kXkmper / 60.0; // er/min → km/s
-    st.v[0] = (rdotk * ux + rfdotk * vx) * vkmps;
-    st.v[1] = (rdotk * uy + rfdotk * vy) * vkmps;
-    st.v[2] = (rdotk * uz + rfdotk * vz) * vkmps;
-    st.ok = std::isfinite(st.r[0]) && std::isfinite(st.v[0]);
-    return st;
+    // DEC-0112: initialize a private record for independent, thread-safe and
+    // non-monotonic queries, including the deep-space integrator.
+    ElsetRec rec{};
+    rec.whichconst = wgs72;
+    rec.jdsatepoch = std::floor(el.epochJd);
+    rec.jdsatepochF = el.epochJd - rec.jdsatepoch;
+    rec.no_kozai = el.no;
+    rec.ecco = el.ecco;
+    rec.inclo = el.inclo;
+    rec.nodeo = el.nodeo;
+    rec.argpo = el.argpo;
+    rec.mo = el.mo;
+    rec.bstar = el.bstar;
+    rec.ndot = el.ndot * kTwoPi / (1440.0 * 1440.0);
+    rec.nddot = el.nddot * kTwoPi / (1440.0 * 1440.0 * 1440.0);
+    if (!sgp4init('i', &rec) || rec.error != 0) return state;
+    if (!sgp4(&rec, tsince, state.r, state.v) || rec.error != 0) return State{};
+    state.ok = true;
+    for (int i = 0; i < 3; ++i)
+        state.ok = state.ok && std::isfinite(state.r[i]) && std::isfinite(state.v[i]);
+    return state;
 }
 
 void geodeticToEcef(double latDeg, double lonDeg, double altM, double ecef[3]) {

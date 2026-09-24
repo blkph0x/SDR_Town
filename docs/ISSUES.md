@@ -2,6 +2,21 @@
 
 Never delete a row. Close with a commit hash and a sentence.
 
+## ISS-0012 - 0.2.88 receive-chain audit findings (2026-09-24, OPEN)
+
+See [AUDIT_20260924.md](AUDIT_20260924.md) A01-A17 for exact locations, evidence,
+impact, repair method and gates. Measured failures: HF stronger-signal blanker
+latch, HF throughput at 2.4/10 MS/s, PR #32 high-rate alias leakage, and SGP4
+reference-vector mismatch. Additional code-proven issues cover Inmarsat input
+rate, tune failure acknowledgment, cross-system follow metadata, direct-sampling
+capabilities, Doppler/SSTV continuity and scanner/data-tap/helper integration.
+No claim that alias import caused the reported live follow failures. The repair
+status table at the top of AUDIT_20260924.md records implemented and open items.
+HF/orbit regressions and SSTV file/live mismatch are repaired with executable
+tests. Doppler now uses fixed RF and continuous digital correction; live pass
+acceptance remains open. Hardware lifecycle, APT profile and protocol acceptance
+remain open; preserve P25 DSP. Implementation queue T-0047 is not complete.
+
 2026-09-20 v0.2.74 published at 4f26f2e (GitHub Latest experimental). P25 DSP
 unchanged. SDRplay vendor API/SoapySDRPlay3 are **not** in the installer by
 design (`docs/SDRPLAY.md`); host install + exclusive RSP access required.

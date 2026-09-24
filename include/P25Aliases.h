@@ -34,6 +34,7 @@ QString formatP25TalkgroupStatusLabel(unsigned talkgroupId,bool systemKnown,unsi
 QString resolveCachedP25SiteAlias(bool systemKnown,unsigned wacn,unsigned systemId,
                                   unsigned rfss,unsigned siteId,const QString& manual={});
 void invalidateP25AliasCache();
+P25AliasLists snapshotP25AliasDatabase();
 QString p25AliasesPath();
 QByteArray readP25AliasFile(const QString& path);
 P25AliasLists loadP25AliasDatabase(const QByteArray& bytes);

@@ -52,16 +52,23 @@ def verify(root, version, installer):
                     f'Unsafe ZIP path: {name}')
             require(path.suffix.lower() not in ('.pem', '.key', '.pdb', '.log', '.wav', '.iq', '.cf32'),
                     f'Private/debug/capture artifact in ZIP: {name}')
-        required = ('SDR_Town.exe', 'SdrTownControl.dll', 'sdrtown_rds_dsp.dll', 'rtlsdr.dll',
+        required = ('SDR_Town.exe', 'build-info.json', 'SdrTownControl.dll', 'sdrtown_rds_dsp.dll', 'rtlsdr.dll',
                     'SoapySDR.dll', 'SoapyRTLSDR.dll', 'Qt6Core.dll', 'Qt6Widgets.dll',
                     'platforms/qwindows.dll', 'licenses/rtlsdr-COPYRIGHT.txt',
                     'sdrtown_sstv.exe', 'licenses/sstv/sstv-MIT.txt',
-                    'licenses/sstv/libm-LICENSE.txt', 'licenses/sstv/rust-COPYRIGHT-library.html')
+                    'licenses/sstv/libm-LICENSE.txt', 'licenses/sstv/rust-COPYRIGHT-library.html',
+                    'licenses/sgp4/LICENSE', 'licenses/sgp4/README.sdr-town.md')
         for name in required:
             require(name in names, f'Missing runtime: {name}')
             require(archive.read(name) == (root / 'build/deploy_staging' / name).read_bytes(),
                     f'Staging mismatch: {name}')
         require(archive.read('SdrTownControl.dll') == control.read_bytes(), 'Standalone control DLL mismatch')
+        build_info = json.loads(archive.read('build-info.json').decode('utf-8-sig'))
+        require(build_info['version'] == version, 'Build provenance version mismatch')
+        require(re.fullmatch(r'[0-9a-f]{40}', build_info['sourceCommit']) is not None,
+                'Build provenance commit missing')
+        require(build_info['executableSha256'] == hashlib.sha256(archive.read('SDR_Town.exe')).hexdigest(),
+                'Executable differs from build provenance')
         require(archive.read('rtlsdr.dll') ==
                 (root / 'build/vcpkg_installed/x64-windows/bin/rtlsdr.dll').read_bytes(),
                 'RTL runtime differs from configured dependency')

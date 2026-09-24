@@ -51,7 +51,7 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
     for (const auto& spec : kSstvModes)
         mode_->addItem(QString::fromUtf8(spec.label), QString::fromUtf8(spec.id));
     form->addRow("Mode",mode_);
-    hint_=new QLabel("Analogue: 1200–2300 Hz, PLL discriminator. Auto = VIS (Hamming-1), 16-bit MP/MR/ML, line-sync, then HamDRM OFDM. HamDRM is HB9TLK Mode B 2.5 kHz (not EasyPal file-RS). Forced analogue uses line sync; AVT needs VIS.",this);
+    hint_=new QLabel("Digital STWN is experimental and file-only. Not EasyPal compatible.",this);
     hint_->setWordWrap(true);
     form->addRow(hint_);
     layout->addLayout(form);
@@ -108,7 +108,7 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
 void SstvWindow::setLiveSource(LiveOpen open) {
     if(busy()) return;
     liveOpen_=std::move(open);
-    if(liveOpen_ && source_->findData("live")<0) source_->addItem("Live NFM - main receiver","live");
+    if(liveOpen_ && source_->findData("live")<0) source_->addItem("Live NFM / USB / LSB - main receiver","live");
     setWindowTitle(liveOpen_?"SSTV Images":"SSTV Recorded Images");
 }
 bool SstvWindow::startLive(const QString& output,const QString& mode) {
@@ -134,6 +134,9 @@ bool SstvWindow::startDecode(const QString& input,const QString& output,const QS
     Decode decode=decode_;
     finish_.reset();
     if(live) {
+        if(!sstvStreamingModeOk(mode.toStdString())) {
+            status_->setText("Digital STWN is an experimental file-only format, not a live HamDRM decoder."); return false;
+        }
         try {finish_=std::make_shared<std::atomic<bool>>(false); decode=liveOpen_(finish_);}
         catch(const std::exception& error) {status_->setText(QString::fromUtf8(error.what())); finish_.reset();return false;}
     }

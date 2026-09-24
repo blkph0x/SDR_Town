@@ -39,6 +39,8 @@ $existingTag = git tag --list "v$Version"
 if ($LASTEXITCODE -ne 0 -or $existingTag) {
     throw "Tag v$Version already exists or could not be checked."
 }
+$sourceCommit = git rev-parse HEAD
+if ($LASTEXITCODE -ne 0) { throw "Cannot identify release source commit." }
 
 $cmakeText = Get-Content CMakeLists.txt -Raw
 $escapedVersion = [regex]::Escape($Version)
@@ -63,6 +65,16 @@ if (Test-Path $qtWindeploy) {
 }
 
 Invoke-Checked cmake @('--build', 'build', '--config', 'Release', '--target', 'deploy', '-j', '4')
+
+# Record the reviewed source commit, not the later asset-metadata commit.
+$buildInfo = [ordered]@{
+    version = $Version
+    channel = $Channel
+    sourceCommit = $sourceCommit.Trim()
+    builtUtc = [DateTime]::UtcNow.ToString('o')
+    executableSha256 = (Get-FileHash 'build\deploy_staging\SDR_Town.exe' -Algorithm SHA256).Hash.ToLower()
+}
+$buildInfo | ConvertTo-Json | Set-Content 'build\deploy_staging\build-info.json' -Encoding utf8
 
 if (-not [string]::IsNullOrWhiteSpace($RemoteDiagnosticsUrl)) {
     $portableStaging = "build\deploy_staging"
@@ -175,7 +187,9 @@ if (-not $SkipAssets) {
     if ($gh -and (Test-Path $gh)) {
         $assets = @($setup, $setupShaFile, $portableZip, $controlDll, "$controlDll.sha256", "update.json", "update.json.sig", "SHA256SUMS.txt")
         $notes = if ($Channel -eq "experimental") { "Experimental tester build. Fresh installer, portable ZIP, manifest, and hashes for the in-app updater." } else { "Stable build. Fresh installer, portable ZIP, manifest, and hashes for the in-app updater." }
-        $ghArgs = @("release", "create", "v$Version") + $assets + @("--title", "SDR Town $Version ($Channel)", "--notes", $notes, "--repo", "Blkph0x/SDR_Town", "--verify-tag", "--latest")
+        $notesFile = Join-Path $root "docs\RELEASE_$Version.md"
+        $notesArgs = if (Test-Path -LiteralPath $notesFile) { @('--notes-file', $notesFile) } else { @('--notes', $notes) }
+        $ghArgs = @("release", "create", "v$Version") + $assets + @("--title", "SDR Town $Version ($Channel)") + $notesArgs + @("--repo", "Blkph0x/SDR_Town", "--verify-tag", "--latest")
         Invoke-Checked $gh $ghArgs
         Write-Host "  Assets uploaded via gh."
     } else {

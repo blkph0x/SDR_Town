@@ -4193,9 +4193,9 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         connect(p25TgRefreshBtn, &QPushButton::clicked, this, refreshP25Talkgroups);
         connect(p25TgDeleteBtn, &QPushButton::clicked, this,
             [this, p25TgTable, p25TgFollowBtn, refreshP25Talkgroups, clearP25VoiceFollowState]() {
-                const int row = p25TgTable ? p25TgTable->currentRow() : -1;
                 auto talkgroups = loadP25Talkgroups();
-                if (row < 0 || row >= static_cast<int>(talkgroups.size())) return;
+                const int row = selectedP25TalkgroupIndex(p25TgTable, talkgroups);
+                if (row < 0) return;
                 const auto removed = talkgroups[static_cast<size_t>(row)];
                 const auto answer = QMessageBox::question(this,
                     "Delete P25 Talkgroup",
@@ -4212,7 +4212,6 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     appendP25LogLine(QString("Stopped follow because TG %1 was deleted.").arg(removed.talkgroupId));
                 }
                 refreshP25Talkgroups();
-                if (p25TgTable && row < p25TgTable->rowCount()) p25TgTable->selectRow(row);
                 statusBar()->showMessage(QString("Deleted P25 TG %1").arg(removed.talkgroupId), 2000);
             });
         connect(p25ScanBtn, &QPushButton::toggled, this, [this, p25Status](bool on) {
@@ -4359,6 +4358,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             auto it = std::find_if(talkgroups.begin(), talkgroups.end(), [&](const P25TalkgroupEntry& tg) {
                 return sameP25Talkgroup(tg, controlHz, static_cast<uint32_t>(tgid));
             });
+            const size_t savedIndex = static_cast<size_t>(it - talkgroups.begin());
             if (it == talkgroups.end()) {
                 P25TalkgroupEntry entry;
                 entry.controlFreqHz = controlHz;
@@ -4375,24 +4375,23 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             }
             saveP25Talkgroups(talkgroups);
             refreshP25Talkgroups();
-            if (p25TgTable) p25TgTable->selectRow(static_cast<int>(talkgroups.size()) - 1);
+            selectP25Talkgroup(p25TgTable, talkgroups[savedIndex]);
             statusBar()->showMessage(QString("P25 TG %1 saved for CC %2 MHz").arg(tgid).arg(controlHz / 1e6, 0, 'f', 5), 2500);
         });
         connect(p25TgVerifyBtn, &QPushButton::clicked, this, [this, p25TgTable, refreshP25Talkgroups]() {
-            const int row = p25TgTable ? p25TgTable->currentRow() : -1;
             auto talkgroups = loadP25Talkgroups();
-            if (row < 0 || row >= static_cast<int>(talkgroups.size())) return;
+            const int row = selectedP25TalkgroupIndex(p25TgTable, talkgroups);
+            if (row < 0) return;
             talkgroups[static_cast<size_t>(row)].verified = true;
             talkgroups[static_cast<size_t>(row)].lastSeenMs = QDateTime::currentMSecsSinceEpoch();
             saveP25Talkgroups(talkgroups);
             refreshP25Talkgroups();
-            if (p25TgTable) p25TgTable->selectRow(row);
             statusBar()->showMessage(QString("Verified P25 TG %1").arg(talkgroups[static_cast<size_t>(row)].talkgroupId), 2000);
         });
         connect(p25TgScannerBtn, &QPushButton::clicked, this, [this, p25TgTable, savedTable, refreshP25Talkgroups]() {
-            const int row = p25TgTable ? p25TgTable->currentRow() : -1;
             auto talkgroups = loadP25Talkgroups();
-            if (row < 0 || row >= static_cast<int>(talkgroups.size())) return;
+            const int row = selectedP25TalkgroupIndex(p25TgTable, talkgroups);
+            if (row < 0) return;
             auto& tg = talkgroups[static_cast<size_t>(row)];
             if (tg.encryptionKnown && tg.encrypted) {
                 statusBar()->showMessage(QString("P25 TG %1 is encrypted; not adding to scanner").arg(tg.talkgroupId), 3500);
@@ -4431,13 +4430,12 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             }
 
             refreshP25Talkgroups();
-            if (p25TgTable) p25TgTable->selectRow(row);
             statusBar()->showMessage(QString("Added P25 TG %1 to scanner list").arg(tg.talkgroupId), 2500);
         });
         connect(p25TgPriorityBtn, &QPushButton::clicked, this, [this, p25TgTable, refreshP25Talkgroups]() {
-            const int row = p25TgTable ? p25TgTable->currentRow() : -1;
             auto talkgroups = loadP25Talkgroups();
-            if (row < 0 || row >= static_cast<int>(talkgroups.size())) return;
+            const int row = selectedP25TalkgroupIndex(p25TgTable, talkgroups);
+            if (row < 0) return;
             auto& tg = talkgroups[static_cast<size_t>(row)];
             bool ok = false;
             const int pri = QInputDialog::getInt(
@@ -4454,7 +4452,6 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             tg.lastSeenMs = QDateTime::currentMSecsSinceEpoch();
             saveP25Talkgroups(talkgroups);
             refreshP25Talkgroups();
-            if (p25TgTable) p25TgTable->selectRow(row);
             statusBar()->showMessage(QString("P25 TG %1 userPriority=%2").arg(tg.talkgroupId).arg(pri), 2500);
         });
         connect(p25TgFollowBtn, &QPushButton::clicked, this, [this, p25TgFollowBtn, p25TgTable, p25Status, tuneP25Path, clearP25VoiceFollowState, scheduleP25VoiceFollowArm]() {
@@ -4470,13 +4467,18 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
 
             const int row = p25TgTable ? p25TgTable->currentRow() : -1;
             auto talkgroups = loadP25Talkgroups();
-            if (row < 0 || row >= static_cast<int>(talkgroups.size())) {
+            const auto* selectedItem = row >= 0 ? p25TgTable->item(row, 0) : nullptr;
+            const auto selectedKey = selectedItem ? selectedItem->data(Qt::UserRole).toString() : QString();
+            const auto selected = std::find_if(talkgroups.begin(), talkgroups.end(), [&](const auto& item) {
+                return !selectedKey.isEmpty() && p25TalkgroupKey(item) == selectedKey;
+            });
+            if (selected == talkgroups.end()) {
                 p25TgFollowBtn->setChecked(false);
                 p25Status->setText("Select a TG first");
                 return;
             }
 
-            auto tg = talkgroups[static_cast<size_t>(row)];
+            auto tg = *selected;
             p25AugmentTalkgroupFromKnownSite(tg, talkgroups, tg.controlFreqHz);
             if (tg.encryptionKnown && tg.encrypted && !p25TalkgroupIsPhase2(tg)) {
                 p25TgFollowBtn->setChecked(false);
@@ -4556,7 +4558,14 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 statusBar()->showMessage("No SDR device for direct sampling yet.", 2500);
                 return;
             }
-            mgr.setDirectSampling(0, mode);
+            std::string error;
+            const auto device = mgr.preferredListenDeviceIndex();
+            if (!mgr.setDirectSampling(device, mode, &error)) {
+                const QSignalBlocker blocker(directSamp);
+                directSamp->setCurrentIndex(directSamp->findData(mgr.getDirectSampling(device)));
+                statusBar()->showMessage(QString::fromStdString(error), 5000);
+                return;
+            }
             if (mode > 0) {
                 statusBar()->showMessage(QString("RTL direct sampling %1 — HF ~500 kHz–28 MHz enabled. Tune below 24 MHz now.")
                     .arg(mode == 1 ? "I-ADC" : "Q-ADC"), 5000);
@@ -7923,8 +7932,14 @@ void MainWindow::showDevicesDialog()
             direct->setToolTip("RTL-SDR HF: Q-ADC or I-ADC enables ~500 kHz–28 MHz. Off uses the normal VHF/UHF tuner.");
             table->setCellWidget(row, 8, direct);
             directCombos.push_back(direct);
-            connect(direct, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [i, direct](int) {
-                DeviceManager::instance().setDirectSampling(i, direct->currentData().toInt());
+            connect(direct, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, i, direct](int) {
+                std::string error;
+                auto& manager = DeviceManager::instance();
+                if (!manager.setDirectSampling(i, direct->currentData().toInt(), &error)) {
+                    const QSignalBlocker blocker(direct);
+                    direct->setCurrentIndex(direct->findData(manager.getDirectSampling(i)));
+                    statusBar()->showMessage(QString::fromStdString(error), 5000);
+                }
             });
 
             // Freq range
@@ -10220,6 +10235,7 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
         autoMode.insert("id", "auto");
         autoMode.insert("label", "Automatic (VIS then line-sync)");
         autoMode.insert("vis", 0);
+        autoMode.insert("live", true);
         modeList.append(autoMode);
         for (const auto& spec : kSstvModes) {
             QJsonObject m;
@@ -10229,6 +10245,7 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
             m.insert("width", spec.width);
             m.insert("height", spec.height);
             m.insert("durationSec", spec.durationSec);
+            m.insert("live", sstvStreamingModeOk(spec.id));
             modeList.append(m);
         }
         sstv.insert("modes", modeList);
@@ -10422,7 +10439,9 @@ QJsonObject MainWindow::applySdrTownControlDirectSampling(const QJsonObject& bod
         if (mgr.getDevices().empty()) {
             return {{"ok", false}, {"status", 503}, {"error", "no SDR device available"}};
         }
-        mgr.setDirectSampling(0, mode);
+        std::string error;
+        if (!mgr.setDirectSampling(mgr.preferredListenDeviceIndex(), mode, &error))
+            return {{"ok", false}, {"status", 409}, {"error", QString::fromStdString(error)}};
         if (directSamplingCombo) {
             directSamplingCombo->blockSignals(true);
             const int idx = directSamplingCombo->findData(mode);
@@ -10766,12 +10785,13 @@ SstvWindow* MainWindow::ensureSstvWindow()
     window->setLiveSource([this](const std::shared_ptr<std::atomic<bool>>& finish) -> SstvWindow::Decode {
         std::shared_ptr<Receiver> receiver;
         { std::lock_guard lock(receiversMutex); if (!receivers.empty()) receiver = receivers.front(); }
-        if (!receiver) throw std::runtime_error("Start the main receiver in NFM first");
+        if (!receiver) throw std::runtime_error("Start the main receiver in NFM, USB or LSB first");
         return [receiver, finish](const QString&, const QString& output, const QString& mode, const auto& cancel, const auto& preview) {
             const auto validate = [receiver] {
                 std::lock_guard lock(receiver->stateMutex);
-                if (!receiver->active || receiver->mode != DemodMode::NFM || receiver->p25VoiceDecodeEnabled || receiver->p25ControlChannelMute)
-                    throw std::runtime_error("Live SSTV requires an active main NFM receiver, not P25");
+                const bool supported = receiver->mode == DemodMode::NFM || receiver->mode == DemodMode::USB || receiver->mode == DemodMode::LSB;
+                if (!receiver->active || !supported || receiver->p25VoiceDecodeEnabled || receiver->p25ControlChannelMute)
+                    throw std::runtime_error("Live SSTV requires an active main NFM, USB or LSB receiver, not P25");
             };
             return decodeSstvLive(receiver->sstvFeed, validate, output, mode, [finish] { return finish->load(); }, cancel, preview);
         };
@@ -11110,8 +11130,8 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
         }
         if (path == "/v1/sstv/live" && method == "POST") {
             QString mode = body.value("mode").toString("auto").trimmed().toLower();
-            if (!sstvModeIdOk(mode.toStdString())) {
-                return {{"ok", false}, {"status", 400}, {"error", "unsupported SSTV mode"}};
+            if (!sstvStreamingModeOk(mode.toStdString())) {
+                return {{"ok", false}, {"status", 400}, {"error", "unsupported live SSTV mode; digital STWN is file-only"}};
             }
             auto* window = ensureSstvWindow();
             if (!window) {
@@ -11132,7 +11152,7 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             if (!window->startLive(output, mode)) {
                 return {{"ok", false}, {"status", 400},
                         {"error", window->statusMessage().isEmpty()
-                                      ? QStringLiteral("Live SSTV did not start (need NFM, new output folder)")
+                                      ? QStringLiteral("Live SSTV did not start (need NFM/USB/LSB, new output folder)")
                                       : window->statusMessage()}};
             }
             return {{"ok", true}, {"state", sdrTownControlStatusSnapshot()}};

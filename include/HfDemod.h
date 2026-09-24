@@ -15,6 +15,8 @@ bool supports(DemodMode mode) noexcept;
 
 // Stateful HF receiver for AM, USB, LSB and CW. The owner is normally the
 // Demodulator instance; state is isolated per owner and removed by release().
+// Output length follows the persistent input/output clock; the legacy
+// targetAudioSamples hint is ignored rather than stretching individual blocks.
 std::vector<float> demodulate(
     const void* owner,
     const std::vector<std::complex<float>>& iq,

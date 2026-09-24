@@ -12,6 +12,7 @@
 #include <QLockFile>
 #include <cmath>
 #include <set>
+#include <mutex>
 #include <stdexcept>
 
 namespace {
@@ -148,6 +149,7 @@ QString resolveP25SiteAlias(const P25AliasLists& lists,bool known,unsigned wacn,
 }
 namespace {
 P25AliasLists g_aliasCache;
+std::mutex g_aliasCacheMutex;
 QByteArray g_aliasCacheBytes;
 QString g_aliasCachePath;
 qint64 g_aliasCacheCheckedMs=0;
@@ -186,6 +188,7 @@ const P25AliasLists& cachedAliasLists() {
 }
 QString formatP25TalkgroupStatusLabel(unsigned talkgroupId,bool systemKnown,unsigned wacn,
                                       unsigned systemId,const QString& manual) {
+    std::lock_guard lock(g_aliasCacheMutex);
     if(talkgroupId==0) return QStringLiteral("TG ?");
     const auto alias=resolveP25Alias(cachedAliasLists(),systemKnown,wacn,systemId,talkgroupId,manual);
     if(alias.isEmpty()) return QString("TG %1").arg(talkgroupId);
@@ -193,11 +196,17 @@ QString formatP25TalkgroupStatusLabel(unsigned talkgroupId,bool systemKnown,unsi
 }
 QString resolveCachedP25SiteAlias(bool systemKnown,unsigned wacn,unsigned systemId,
                                   unsigned rfss,unsigned siteId,const QString& manual) {
+    std::lock_guard lock(g_aliasCacheMutex);
     return resolveP25SiteAlias(cachedAliasLists(),systemKnown,wacn,systemId,rfss,siteId,manual);
 }
 void invalidateP25AliasCache() {
+    std::lock_guard lock(g_aliasCacheMutex);
     g_aliasCache={};g_aliasCacheBytes={};g_aliasCachePath={};
     g_aliasCacheCheckedMs=0;g_aliasCacheMtimeMs=0;g_aliasCacheSize=-1;
+}
+P25AliasLists snapshotP25AliasDatabase() {
+    std::lock_guard lock(g_aliasCacheMutex);
+    return cachedAliasLists();
 }
 QString p25AliasesPath() {return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)+"/p25_aliases.json";}
 QByteArray readP25AliasFile(const QString& path) {

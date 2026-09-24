@@ -5,6 +5,10 @@
 TEST_CASE("SSTV Dayton mode table matches VIS and dimensions", "[sstv]")
 {
     REQUIRE(sstvModeIdOk("auto"));
+    REQUIRE(sstvStreamingModeOk("auto"));
+    for (const auto& mode : kSstvModes)
+        REQUIRE(sstvStreamingModeOk(mode.id) == (std::string_view(mode.id) != "hamdrm"));
+    REQUIRE_FALSE(sstvStreamingModeOk("unknown"));
     REQUIRE(sstvModeById("robot36")->width == 320);
     REQUIRE(sstvModeById("robot36")->height == 240);
     REQUIRE(sstvModeById("martin1")->height == 256);

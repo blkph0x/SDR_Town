@@ -1,7 +1,16 @@
 # HF receive and clean-capture path
 
-This document describes the production HF receive path added in SDR Town 0.2.88.
+This document describes the HF receive path added in SDR Town 0.2.88.
 It is deliberately isolated from the P25 receive chain.
+
+2026-09-24 repair branch: cached/interpolated sinc coefficients retain the
+original anti-alias response; the oscillator uses normalized complex recurrence.
+Rejected impulses now update the amplitude estimator, allowing sustained strong
+signals to recover. Output resampling owns one persistent sample clock rather
+than stretching every callback. AM carrier priming is sample-count based.
+The GUI bounds HF reader lag to its existing 500 ms analog budget and resets
+HF state on observed discontinuity. No P25/WFM/NFM audio algorithm was changed.
+Regression/throughput results and remaining gates: [audit](AUDIT_20260924.md).
 
 ## Supported HF analogue modes
 

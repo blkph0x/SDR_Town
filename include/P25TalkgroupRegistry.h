@@ -15,6 +15,7 @@
 
 #include <array>
 #include <cstdint>
+#include <cmath>
 #include <limits>
 #include <map>
 #include <string>
@@ -57,6 +58,45 @@ struct P25KnownControlChannel {
     qint64 createdMs = 0;
     qint64 lastUsedMs = 0;
 };
+
+// DEC-0111/A07: enrichment is site/control-source scoped, never TGID-only.
+inline bool p25SameMetadataSource(const P25TalkgroupEntry& a, const P25TalkgroupEntry& b) {
+    if (!(a.controlFreqHz > 0) || !(b.controlFreqHz > 0) ||
+        !std::isfinite(a.controlFreqHz) || !std::isfinite(b.controlFreqHz) ||
+        std::abs(a.controlFreqHz - b.controlFreqHz) > 50.0) return false;
+    if (a.p25MaskParamsKnown && b.p25MaskParamsKnown &&
+        (a.wacn != b.wacn || a.systemId != b.systemId || a.nac != b.nac)) return false;
+    return !(a.rfssId && b.rfssId && a.rfssId != b.rfssId) &&
+           !(a.siteId && b.siteId && a.siteId != b.siteId);
+}
+
+inline QString p25TalkgroupKey(const P25TalkgroupEntry& tg) {
+    return QString("%1:%2:%3:%4:%5").arg(tg.controlFreqHz, 0, 'f', 0).arg(tg.talkgroupId)
+        .arg(tg.p25MaskParamsKnown ? 1 : 0).arg(tg.wacn).arg(tg.systemId);
+}
+
+inline int selectedP25TalkgroupIndex(const QTableWidget* table, const std::vector<P25TalkgroupEntry>& entries) {
+    const auto* item = table ? table->item(table->currentRow(), 0) : nullptr;
+    if (!item) return -1;
+    const auto key = item->data(Qt::UserRole).toString();
+    for (size_t i = 0; i < entries.size(); ++i)
+        if (!key.isEmpty() && p25TalkgroupKey(entries[i]) == key) return static_cast<int>(i);
+    return -1;
+}
+
+inline bool selectP25Talkgroup(QTableWidget* table, const P25TalkgroupEntry& entry) {
+    if (!table) return false;
+    const auto key = p25TalkgroupKey(entry);
+    for (int row = 0; row < table->rowCount(); ++row) {
+        const auto* item = table->item(row, 0);
+        if (item && item->data(Qt::UserRole).toString() == key) {
+            table->setCurrentCell(row, 0);
+            table->selectRow(row);
+            return true;
+        }
+    }
+    return false;
+}
 
 struct P25CachedChannelIdentifier {
     double controlFreqHz = 0.0;

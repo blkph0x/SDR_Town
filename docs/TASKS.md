@@ -1,5 +1,22 @@
 # Task list (canonical)
 
+T-0046 | done | 2026-09-24 source/branch reconciliation and receive-chain audit |
+DEC-0110; docs/AUDIT_20260924.md. Original folder fast-forwarded to exact 0.2.88
+tester source. Local work preserved; 15 exact-tree duplicate remote branches
+archived locally and removed. No product fixes/releases in this audit.
+
+T-0047 | in_progress | Audit repair sequence A01-A17 | ISS-0012. Start with measured
+HF blanker/throughput/alias tests and per-consumer input diagnostics; then
+hardware contracts, P25 metadata isolation (not DSP), satellite oracle and SSTV
+integration. Acceptance gates/order are in AUDIT_20260924.md. PR #32 not accepted.
+2026-09-24 checkpoint: HF/AM sample clock + blanker/throughput, SGP4 oracle,
+metadata isolation/selection, DS/tune error handling and SSTV transport repairs
+implemented and tested. A09/A17 and partial hardware/data qualifications remain
+open in the audit status table. Accepted P25 DSP unchanged.
+Release follow-up: DEC-0114 digital Doppler/short-IQ repair and DEC-0115 lock-order
+repair implemented; preparing 0.2.89 experimental with source provenance and
+explicit remaining acceptance gates. Do not mark the umbrella repair complete.
+
 T-0045 | done | SSTV extra modes + 0.2.78 | DEC-0107 QSSTV/handbook layouts;
 Auto VIS then sync period. Robot 24 luma not YC.
 

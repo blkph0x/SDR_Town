@@ -17,7 +17,12 @@ Visitors never connect to SDR Town. They use the FUBAR site; FUBAR uses the DLL.
 2. Copy next to `FUBAR.exe` **as** `SdrTownControl.dll`.
 3. Town portable ZIP also contains `SdrTownControl.dll` in the Town folder.
 
-## Published GitHub Latest
+## Previously Recorded Pairing
+
+This is historical evidence, not a live GitHub Latest query. Town 0.2.89 ships
+its versioned control DLL; the control API/ABI is unchanged in that repair pass,
+but FUBAR integration was not re-tested. Use the 0.2.89 DLL when testing against
+Town 0.2.89 and report both application versions.
 
 | App | Latest tag | Ships / expects |
 |-----|------------|-----------------|

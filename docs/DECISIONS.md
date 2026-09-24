@@ -2,6 +2,107 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0116 - Test the actual talkgroup table without radio globals (2026-09-24)
+
+The sorted-refresh regression initially failed to link: the workspace target
+does not own P25TalkgroupRegistry. Adding the whole registry pulled in control
+decoder functions and global speaker state. Move only table presentation and
+its existing pure label helpers to P25TalkgroupPresentation.cpp, linked by both
+the app and workspace tests. Preserve helper bodies exactly; no grant/audio
+semantics change. Test sorting, metadata edits, identity selection and deletion
+against the production table, not a replacement renderer.
+
+## DEC-0115 - IQ publication must not invert device locks (2026-09-24)
+
+Release review found that serializing read+publish with direct-sampling changes
+added a devicesMutex lookup inside the live-I/O lock. Enumeration takes
+devicesMutex then stateMutex; mode changes take stateMutex then live-I/O. This
+formed a three-thread lock cycle. RX already owns a stable StreamState reference;
+pass it to the private append helper instead of looking it up again. The helper
+may take ring/queue locks only, never device/lifecycle/state/driver locks. Keep
+read+publish atomic relative to a mode switch, without touching P25 decoding.
+
+## DEC-0114 - Satellite Doppler preserves the sample stream (2026-09-24)
+
+Evidence: audit A09; tickPassTrack physically retunes on 50 Hz changes and
+processLockedAudio uses that moving frequency as decoder identity. A retune
+creates an IQ gap, while HF target changes reset its filters/resamplers. The
+satellite consumer also discards already-consumed input below 1024 samples.
+Keep RF centered on the nominal downlink after arm; digitally translate each
+chronological block by exp(-j*integral(2*pi*(tracked-nominal)/sampleRate)). Carry
+oscillator phase across frequency updates and blocks. Demod target/identity
+stay nominal. Reject targets whose channel is outside the captured Nyquist
+interval rather than silently aliasing or retuning. Only an explicit IQ gap or
+receiver reset resets the oscillator. Consume all nonempty IQ and keep data
+decode independent of whether that block produced speaker samples. Prove signs,
+phase continuity, short/irregular blocks and stable decoder epochs synthetically;
+full live pass qualification remains open. This is satellite-only, not P25 DSP.
+
+Release the verified repair batch as 0.2.89 experimental after build/package
+gates. Keep hardware/protocol qualifications visible; do not claim they passed.
+
+## DEC-0113 - Decoder transport and AM startup contracts (2026-09-24)
+
+A11-A14: satellite data uses pre-speech discriminator blocks; SSTV live modes
+must match the helper's analog mode table. Digital STWN stays file-only and is
+not advertised as EasyPal-compatible. Enforce its existing size/time budgets
+before allocations/synthesis, require FAC CRC, and emit the same row protocol
+as analog images. These are transport/safety fixes, not interoperability proof.
+AM startup currently averages an arbitrary first callback. Replace that with
+sample-clock priming: discard one FIR length, average the next FIR length,
+then use the existing carrier tracker. Muting startup remains explicit. Test
+identical whole/irregularly partitioned AM, SSB and CW input at both output rates.
+The existing recorded Worker/GUI parity gate also exposed a file-only prefilter:
+the identical Robot36 fixture produced two file images versus one live image.
+Use the pinned helper's unmodified PCM input contract for both paths. Remove
+only the extra file-side two-pole filtering; keep finite checks, clipping and
+PCM conversion. Acceptance requires independent pixels plus file/live equality.
+
+## DEC-0111 - Receive-chain repair contracts (2026-09-24)
+
+Evidence: AUDIT_20260924.md reproductions A01-A17. Preserve P25 audio algorithms.
+HF optimization retains the existing windowed-sinc response: cache 1024
+fractional phases and interpolate coefficients, retain continuous sample-clock
+state, and replace per-sample oscillator transcendental work with a normalized
+complex recurrence. Verify folding-band rejection against the audit baseline.
+The impulse estimator must observe rejected input too, rather than freeze at
+the old carrier level. Its existing 50 ms averaging constant remains unchanged.
+Use a persistent output-rate converter; targetAudioSamples is not permission to
+stretch each HF block. Acceptance includes irregular partition equivalence,
+weak-to-strong recovery, alias rejection and measured real-time throughput.
+Once the blanker no longer hides sustained overload, the existing overload
+recovery test exposes two cascaded AGC release integrators. Keep the envelope's
+120 ms release and follow its desired gain on recovery; retain fast gain attack.
+Input loops drain pending work before idle waits. Hardware errors must not be
+reported as successful tunes. Metadata enrichment must stay within one system.
+Every satellite/SSTV change needs independent vectors or transport tests before
+being marked resolved; protocol features without independent fixtures stay open.
+
+## DEC-0112 - Complete SGP4 behind the existing satellite API (2026-09-24)
+
+A04 measured errors exceed 1,600 km at epoch. Adopt aholinch/sgp4 C++ core,
+commit 552cb1489a52c3023ae70cb6c7e239e84c5950fe, released under Unlicense.
+Vendor SGP4.c/SGP4.h and its license; compile the core as C++. Rename its custom
+fmod symbol to sgp4_mod (all calls) for MSVC compatibility, without changing math.
+Do not use its platform-dependent long-millisecond TLE wrapper. Our wrapper
+validates orbital elements, initializes WGS72 improved mode, and uses a fresh
+record per call so concurrent/non-monotonic queries share no mutable state.
+Keep TEME/ECEF/observer APIs. Gate against independent CelesTrak/Vallado vectors,
+including deep-space; finite output alone is not acceptance.
+
+## DEC-0110 - Canonical source and evidence-first repair queue (2026-09-24)
+
+Status: recorded audit/reconciliation decision; implementation deferred.
+Evidence: TEST build-info pins a2ac437/0.2.88; original source was 395c59b/0.2.80.
+Exact-tree comparison proves 15 recent work branches duplicate master history.
+User requested branch cleanup and return to the original development folder.
+Local pre-reconcile branch and proxy-change stash retained; master fast-forwarded.
+Remote duplicates removed only with local archives and expected-SHA checks.
+Unique branches, backups, release refs and PR #32 retained. No blind merges.
+Measured PR #32 alias regression blocks accepting its DSP patch unchanged.
+Follow AUDIT_20260924.md repair gates; do not alter accepted P25 audio DSP or
+publish a release as part of the audit. Future fixes require their own tests.
+
 ## DEC-0109 - Analogue spec audit + HamDRM digital SSTV (2026-09-20)
 
 Evidence: Dayton N7CXI paper (Scottie 138.240/88.064/345.6 ms, PD equal Y/RY/BY

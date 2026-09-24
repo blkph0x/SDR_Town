@@ -2,6 +2,43 @@
 
 Newest at the top.
 
+## 2026-09-24 - 0.2.89 tester release candidate
+
+User authorized code and asset publication. Continued the repair report with
+fixed-RF digital Doppler, no short satellite-IQ discard, identity-safe talkgroup
+button selection and the DEC-0115 lock-order repair. Presentation helpers moved
+unchanged into a testable module. Full CTest 4/4, actual GUI dry-run and sixteen
+recorded SSTV parity cases pass (BUILD_NOTES). Release pipeline now records the
+reviewed source commit and executable hash in build-info.json and verifies the
+SGP4 license payload. Version 0.2.89; signed experimental packaging/publishing
+is the next gate. T-0047/ISS-0012 remain open, with limitations in release notes.
+
+## 2026-09-24 - First receive-chain repair batch, not a release
+
+Implemented DEC-0111..0113 in original Desktop folder on
+codex/receive-chain-repairs-20260924. HF overload recovery, throughput, AM and
+output-clock partition defects have regression tests; SGP4 passes independent
+near/deep-space vectors. Device tune failure and DS reporting are hardened.
+Talkgroup metadata/selection cannot use TGID or row position alone. Satellite
+data taps and bounds, SSTV mode transport, USB/LSB source and digital integrity
+checks repaired. Recorded SSTV tests additionally found/fixed file-only filtering.
+Build/test evidence in BUILD_NOTES; exact closed/partial/open audit status in
+AUDIT_20260924. P25/WFM/NFM audio algorithms unchanged. No user capture deletion,
+no tag/push/release. T-0047 and ISS-0012 remain open for the substantive remaining
+ownership, Doppler, driver matrix and protocol-qualification work.
+
+## 2026-09-24 - Reconciled GitHub work and audited 0.2.88
+
+Original Desktop/maulaudio_pro source now matches TEST portable a2ac437. Preserved
+prior local source and HttpGet change. Removed 15 exact-tree duplicate remote
+work branches after local archival/expected-SHA validation; retained unique work,
+all backups/releases and PR #32. No executable replacement, hardware retuning,
+product algorithm edits or release. Added AUDIT_20260924.md with A01-A17 and
+ordered regression-gated next pass; ISS-0012/T-0047 remain open.
+Focused smoke/import/SSTV checks passed; new HF and SGP4 diagnostics reproduced
+defects, including a merge-blocking PR #32 alias regression. Full build, live
+device matrix, audible acceptance and protocol interoperability remain untested.
+
 ## 2026-09-20 - SSTV extra modes VIS+sync auto (DEC-0107)
 
 Vendored unexcellent/sstv; added Robot B&W 8/12, Robot 24 luma, SC2-30/60/120,

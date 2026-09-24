@@ -1,4 +1,5 @@
 #include "Sgp4.h"
+#include "SatcomSignalSelection.h"
 #include "SatObserverConfig.h"
 #include "SatPassPlanner.h"
 #include "TleStore.h"
@@ -11,9 +12,66 @@
 #include <cmath>
 #include <fstream>
 #include <memory>
+#include <map>
+#include <sstream>
 #include <string>
 #include <QCoreApplication>
 #include <QDir>
+
+TEST_CASE("Satellite scanner ignores stronger out-of-plan carriers and invalid bins", "[satcom][scan]") {
+    std::vector<float> power{-10, -80, -60, -90};
+    const auto peak = selectSatcomSignalPeak(power, 1000, 400, 950, 1100);
+    REQUIRE(peak.has_value());
+    REQUIRE(peak->frequencyHz == 1050);
+    REQUIRE(peak->powerDb == -60);
+    REQUIRE_FALSE(selectSatcomSignalPeak(power, 1000, 400, 2000, 2100));
+    power[2] = std::numeric_limits<float>::quiet_NaN();
+    REQUIRE(selectSatcomSignalPeak(power, 1000, 400, 950, 1100)->frequencyHz == 950);
+    REQUIRE_FALSE(selectSatcomSignalPeak(power, 1000, 0, 950, 1100));
+}
+
+TEST_CASE("SGP4 matches independent Vallado near-Earth and deep-space vectors", "[satcom][sgp4][oracle]") {
+    const std::string root = std::string(SDR_TOWN_SOURCE_DIR) + "/tests/fixtures/sgp4/";
+    std::ifstream tles(root + "SGP4-VER.TLE"), vectors(root + "reference.txt");
+    REQUIRE(tles.good());
+    REQUIRE(vectors.good());
+    std::map<int, Sgp4::Elements> elements;
+    std::string line, line1;
+    while (std::getline(tles, line)) {
+        if (line.rfind("1 ", 0) == 0) line1 = line;
+        if (line.rfind("2 ", 0) == 0) {
+            Sgp4::Elements e;
+            if (Sgp4::parseTle(line1, line, &e)) elements[e.satnum] = e;
+        }
+    }
+    int satnum = 0;
+    size_t compared = 0;
+    while (std::getline(vectors, line)) {
+        if (line.find("xx") != std::string::npos) {
+            satnum = std::stoi(line);
+            continue;
+        }
+        std::istringstream row(line);
+        double time, r[3], v[3];
+        if (!(row >> time >> r[0] >> r[1] >> r[2] >> v[0] >> v[1] >> v[2])) continue;
+        INFO("satellite=" << satnum << " minutes=" << time);
+        REQUIRE(elements.count(satnum) == 1);
+        const auto actual = Sgp4::propagate(elements.at(satnum), time);
+        // The published error-case TLE 33334 cannot initialize. FORTRAN's
+        // output retains the preceding 33333 position; it is not a valid orbit.
+        if (satnum == 33334) {
+            REQUIRE_FALSE(actual.ok);
+            continue;
+        }
+        REQUIRE(actual.ok);
+        for (int i = 0; i < 3; ++i) {
+            REQUIRE(actual.r[i] == Catch::Approx(r[i]).margin(0.001));
+            REQUIRE(actual.v[i] == Catch::Approx(v[i]).margin(0.000001));
+        }
+        ++compared;
+    }
+    REQUIRE(compared > 500);
+}
 
 TEST_CASE("Observer parses both hemispheres", "[satcom][pass]")
 {

@@ -9,6 +9,7 @@
 #include "SstvLiveSession.h"
 #include "SstvReceiverFeed.h"
 #include "SdrDeviceCandidate.h"
+#include "SatcomSignalSelection.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -1049,6 +1050,7 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
         }
         currentHz_ = plan.armed.freqHz;
         lockHz_ = plan.armed.freqHz;
+        passNominalHz_ = plan.armed.freqHz;
         lastTrackHz_ = 0.0;
         recordSatId_ = satId;
         recordDownlinkId_ = plan.armed.downlinkId;
@@ -1182,26 +1184,16 @@ void SatcomScannerEngine::tickPassTrack() {
         return;
     }
 
-    size_t deviceIndex = static_cast<size_t>(-1);
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!passTrackActive_) return;
-        if (std::abs(tunedHz - lastTrackHz_) < 50.0) return;
         lastTrackHz_ = tunedHz;
         currentHz_ = tunedHz;
         lockHz_ = tunedHz;
-        deviceIndex = activeDeviceIndex_;
-        lastStatus_ = "Auto-track";
+        lastStatus_ = "Auto-track (digital Doppler)";
     }
-    if (deviceIndex == static_cast<size_t>(-1)) return;
-
-    std::string tuneError;
-    if (!DeviceManager::instance().retuneWithLease(
-            deviceIndex, tunedHz, DeviceManager::DeviceLeaseOwner::Satcom,
-            true, &tuneError)) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        lastStatus_ = tuneError.empty() ? "auto-track retune blocked" : tuneError;
-    }
+    // DEC-0114: the IQ worker applies the offset without retuning the hardware
+    // or changing decoder identity, including when automatic tracking pauses.
 }
 
 bool SatcomScannerEngine::refreshSpectrum(size_t deviceIndex, double* peakHz,
@@ -1215,19 +1207,10 @@ bool SatcomScannerEngine::refreshSpectrum(size_t deviceIndex, double* peakHz,
         return false;
     }
 
-    size_t peakIndex = 0;
-    float peak = power.front();
-    for (size_t i = 1; i < power.size(); ++i) {
-        if (power[i] > peak) {
-            peak = power[i];
-            peakIndex = i;
-        }
-    }
-    if (peakDb) *peakDb = peak;
-    if (peakHz) {
-        const double binHz = rate / static_cast<double>(power.size());
-        *peakHz = center - rate * 0.5 + (static_cast<double>(peakIndex) + 0.5) * binHz;
-    }
+    const auto settings = config();
+    const auto peak = selectSatcomSignalPeak(power, center, rate, settings.lowHz, settings.highHz);
+    if (peakDb) *peakDb = peak ? peak->powerDb : -std::numeric_limits<double>::infinity();
+    if (peakHz) *peakHz = peak ? peak->frequencyHz : 0.0;
 
     std::vector<float> display = power;
     if (display.size() > 256) {
@@ -1274,6 +1257,8 @@ void SatcomScannerEngine::processLockedAudio() {
     bool decodeAx25 = true;
     bool decodeApt = true;
     double lockFrequencyHz = 0.0;
+    double nominalFrequencyHz = 0.0;
+    bool passTracking = false;
     double bandwidthHz = 12.5e3;
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -1283,6 +1268,8 @@ void SatcomScannerEngine::processLockedAudio() {
         decodeAx25 = config_.enableAx25;
         decodeApt = config_.enableApt;
         lockFrequencyHz = lockHz_;
+        passTracking = passTrackActive_;
+        nominalFrequencyHz = passTracking ? passNominalHz_ : lockFrequencyHz;
         bandwidthHz = std::min(config_.bandwidthHz, 50e3);
     }
     if (deviceIndex == static_cast<size_t>(-1)) return;
@@ -1295,6 +1282,7 @@ void SatcomScannerEngine::processLockedAudio() {
         sstvSourceEpoch_.fetch_add(1, std::memory_order_acq_rel);
         sstvAudioFirstSample_.store(0, std::memory_order_release);
         demod_->resetState();
+        doppler_.reset();
         ax25_->reset();
         apt_->reset();
         demodResetRequested_.store(false, std::memory_order_release);
@@ -1302,10 +1290,11 @@ void SatcomScannerEngine::processLockedAudio() {
                 "IQ discontinuity; decoder state reset");
     } else if (demodResetRequested_.exchange(false, std::memory_order_acq_rel)) {
         demod_->resetState();
+        doppler_.reset();
         ax25_->reset();
         apt_->reset();
     }
-    if (input.samples.size() < 1024) return;
+    if (input.samples.empty()) return;
 
     double sampleRate = manager.getCurrentSampleRate(deviceIndex);
     if (sampleRate <= 0.0) {
@@ -1317,6 +1306,14 @@ void SatcomScannerEngine::processLockedAudio() {
 
     const double reportedCenter = manager.getCurrentCenterFreq(deviceIndex);
     const double iqCenterHz = reportedCenter > 0.0 ? reportedCenter : lockFrequencyHz;
+    if (passTracking && !doppler_.translate(input.samples, sampleRate, iqCenterHz,
+                                           lockFrequencyHz, nominalFrequencyHz, bandwidthHz)) {
+        // Fail closed outside the captured channel; resumption is a real gap.
+        demodResetRequested_.store(true, std::memory_order_release);
+        std::lock_guard<std::mutex> lock(mutex_);
+        lastStatus_ = "Tracked channel outside captured bandwidth; re-arm with a wider sample rate";
+        return;
+    }
     const DemodMode demodMode = modeFromString(mode);
     const bool nfmSstv = role == "sstv" && demodMode == DemodMode::NFM;
     const bool ssbSstv = role == "sstv" &&
@@ -1326,14 +1323,16 @@ void SatcomScannerEngine::processLockedAudio() {
     // Request the demodulator's clean pre-squelch decoder block for
     // both FM and sideband SSTV. Reconstructing USB/LSB input from speaker
     // audio loses provenance and can include output gain/gating artifacts.
+    const bool aprsData = decodeAx25 && (mode == "NFM" || mode == "APRS");
+    const bool aptData = decodeApt && (role == "apt" || mode == "APT") && demodMode == DemodMode::NFM;
     FmMultiplexBlock* multiplexOutput =
-        (nfmSstv || ssbSstv) ? &multiplex : nullptr;
+        (nfmSstv || ssbSstv || aprsData || aptData) ? &multiplex : nullptr;
     auto audio = demod_->demodulateToAudio(
-        input.samples, sampleRate, iqCenterHz, lockFrequencyHz, demodMode,
+        input.samples, sampleRate, iqCenterHz, nominalFrequencyHz, demodMode,
         rmsDb, 3000.0, -120.0, 1.0, 75.0, 0.96, bandwidthHz,
         0, 48000.0,
         std::numeric_limits<double>::quiet_NaN(), true,
-        multiplexOutput, lockFrequencyHz);
+        multiplexOutput, nominalFrequencyHz);
     {
         std::lock_guard<std::mutex> lock(mutex_);
         audioRmsDb_ = rmsDb;
@@ -1344,12 +1343,10 @@ void SatcomScannerEngine::processLockedAudio() {
                            sstvSourceEpoch_.load(std::memory_order_acquire),
                            demodMode);
     }
-    if (audio.empty()) return;
+    if (!audio.empty()) pushMonitorAudio(audio.data(), audio.size());
 
-    pushMonitorAudio(audio.data(), audio.size());
-
-    if (decodeAx25 && (mode == "NFM" || mode == "APRS")) {
-        auto frames = ax25_->processAudio(audio.data(), audio.size(), 48000.0);
+    if (aprsData && !multiplex.samples.empty()) {
+        auto frames = ax25_->processAudio(multiplex.samples.data(), multiplex.samples.size(), multiplex.sampleRate);
         for (auto& frame : frames) {
             pushLog(SatcomLog::EventType::DecodeOk, lockFrequencyHz, frame.c_str());
             std::lock_guard<std::mutex> lock(mutex_);
@@ -1358,8 +1355,8 @@ void SatcomScannerEngine::processLockedAudio() {
         }
     }
 
-    if (decodeApt && (role == "apt" || mode == "APT" || mode == "AM")) {
-        if (apt_->processAudio(audio.data(), audio.size(), 48000.0)) {
+    if (aptData && !multiplex.samples.empty()) {
+        if (apt_->processAudio(multiplex.samples.data(), multiplex.samples.size(), multiplex.sampleRate)) {
             std::string path;
             {
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -1386,7 +1383,7 @@ void SatcomScannerEngine::processLockedAudio() {
         recording = recording_;
         path = recordPath_;
     }
-    if (recording && !path.empty()) {
+    if (recording && !path.empty() && !audio.empty()) {
         QDir().mkpath(QFileInfo(QString::fromStdString(path)).absolutePath());
         std::ofstream out(path, std::ios::binary | std::ios::app);
         if (out) {

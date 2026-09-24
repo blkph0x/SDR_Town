@@ -659,8 +659,8 @@ void InmarsatEngine::returnToControl() {
     }
 }
 
-void InmarsatEngine::processIq() {
-    if (!run_.load(std::memory_order_acquire)) return;
+bool InmarsatEngine::processIq() {
+    if (!run_.load(std::memory_order_acquire)) return false;
     size_t deviceIndex = std::numeric_limits<size_t>::max();
     double tuned = 0.0;
     {
@@ -668,7 +668,7 @@ void InmarsatEngine::processIq() {
         deviceIndex = activeDeviceIndex_;
         tuned = tunedHz_ > 0 ? tunedHz_ : config_.channelHz;
     }
-    if (deviceIndex == std::numeric_limits<size_t>::max()) return;
+    if (deviceIndex == std::numeric_limits<size_t>::max()) return false;
 
     auto& manager = DeviceManager::instance();
     std::vector<float> power;
@@ -704,13 +704,17 @@ void InmarsatEngine::processIq() {
     std::vector<std::complex<float>> iq;
     bool gap = false;
     if (iqRx_) {
+        const auto epoch = iqRx_->lastSeenStreamEpoch.load(std::memory_order_acquire);
+        const auto expected = iqRx_->lastConsumedAbsolute.load(std::memory_order_acquire);
         auto window = manager.getNewIQWindowForReceiver(deviceIndex, *iqRx_, 65536);
+        gap = window.cursorDiscontinuity || window.streamEpoch != epoch ||
+              (!window.samples.empty() && window.startAbsolute != expected);
         iq = std::move(window.samples);
-        gap = window.cursorDiscontinuity;
     } else {
-        iq = manager.getRecentIQWindow(deviceIndex, 65536);
+        // Without a chronological reader, reusing the latest window duplicates IQ.
+        return false;
     }
-    if (iq.size() < 256) return;
+    if (iq.empty()) return false;
 
     const double offset = centerFrequency > 0.0 ? tuned - centerFrequency : 0.0;
     InmarsatDemodMode mode;
@@ -747,10 +751,12 @@ void InmarsatEngine::processIq() {
         returnControl = followingVoice_ && unixNow() > voiceFollowUntilUnix_;
     }
     if (returnControl) returnToControl();
+    return true;
 }
 
 void InmarsatEngine::workerLoop() {
     bool lostHardware = false;
+    auto nextNotify = std::chrono::steady_clock::now();
     while (run_.load(std::memory_order_acquire)) {
         size_t deviceIndex = std::numeric_limits<size_t>::max();
         {
@@ -774,8 +780,9 @@ void InmarsatEngine::workerLoop() {
             break;
         }
 
+        bool consumed = false;
         try {
-            processIq();
+            consumed = processIq();
         } catch (const std::exception& exception) {
             spdlog::warn("InmarsatEngine: {}", exception.what());
             std::lock_guard<std::mutex> lock(mutex_);
@@ -784,8 +791,14 @@ void InmarsatEngine::workerLoop() {
             std::lock_guard<std::mutex> lock(mutex_);
             lastStatus_ = "IQ process error";
         }
-        notify();
-        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= nextNotify) {
+            notify();
+            nextNotify = now + std::chrono::milliseconds(40);
+        }
+        // DEC-0111: UI cadence must not cap input at 65536 / 40ms.
+        // Drain chronological IQ before waiting for more input.
+        if (!consumed) std::this_thread::sleep_for(std::chrono::milliseconds(40));
     }
 
     if (lostHardware) {
