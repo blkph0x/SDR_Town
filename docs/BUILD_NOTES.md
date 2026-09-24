@@ -2,6 +2,41 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-24 - 0.2.91 package, CI and publication (DEC-0120)
+
+MSVC2022/Qt6.11.1 Release: release.ps1 -Version 0.2.91 -Channel experimental
+with the public HTTPS diagnostics URL, -SkipPush -SkipAssets PASS. Negative
+release tests 15/15 PASS. Final local CTest 4/4 in 42.59 s: core 382 cases,
+205726 assertions (2 optional skips); workspace 33 cases, 406 assertions
+(5 optional skips); Rust 8/8 and SSTV Robot36 helper self-test PASS.
+
+Extracted portable ZIP build-info identifies source 698dcd832badfdf737bd05ca5e932cd3a1530a11.
+With developer Qt paths removed, the packaged GUI/CLI both consumed all 48000
+synthetic samples in paced and fast modes; malformed raw input exited 2.
+No actual Aero voice was decoded or claimed. Package configuration inspection:
+HTTPS endpoint https://gearsqueens.online/sdr-town-diag/ingest, enabled=false,
+65536-byte/minute budget, ingest token matching the tested client configuration.
+No admin token shipped. A fresh-profile runtime default-off check was NOT proven:
+APPDATA environment changes do not isolate Qt KnownFolder storage on Windows;
+the separate launch attempt was blocked. Per-session consent unit tests passed.
+
+Independent Windows CI 35993275475 (Qt6.7.3, RDS DSP off) PASS: core 379 cases,
+182665 assertions; workspace 33 cases, 406 assertions; new actual GUI/CLI replay
+parity test, Rust/SSTV and artifact packaging all pass. Optional fixture skips
+remain. Existing CI diff-baseline gap ISS-0015 remains open; manual diff review,
+not that guard, establishes no P25/analog DSP edits.
+
+Source pushed, tag v0.2.91 points to metadata commit dac8778. Release 395613170
+published after all eight uploaded asset SHA256 digests/sizes matched local.
+GitHub /releases/latest returns v0.2.91, draft=false. Experimental manifest,
+verified Ed25519 signature. Installer 26399006 bytes, SHA256
+a5c388f9152245757b4c4d65031b2848898d31e953c02fa6e447dcd847cf188d;
+portable 36456382 bytes, SHA256
+fabb2925ba2d89b0fcc8c6310b7daaaa255544fd34fd5b543df25368168aad2d.
+Evidence: build-audit-20260924/release-0291.txt, ci-0291.log,
+package-iq-0291 and inmarsat-0291. Four actual replay session remote summaries
+were matched to server JSONL; off-LAN reachability remains unqualified.
+
 ## 2026-09-24 - Inmarsat replay first verification (DEC-0120)
 
 Follow-up: focused tests 13/13, 270 assertions PASS. v0.2.91 actual GUI/CLI,

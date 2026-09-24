@@ -1,5 +1,19 @@
 # Development log
 
+## 2026-09-24 - Inmarsat diagnostic release 0.2.91 published
+
+DEC-0120 replay/diagnostics subtask complete: source 698dcd8, release metadata
+dac8778, public Latest v0.2.91 with installer, portable, control DLL, hashes and
+signed update manifest. All eight remote asset digests/sizes verified. Full local
+CTest, extracted-package GUI/CLI paced/fast/failure tests and independent Windows
+CI 35993275475 pass. Four replay summaries reached the actual HTTPS collector.
+Documented the unsupported formats, opt-in behavior and exact privacy boundary.
+P25 and analog demodulators unchanged; FUBAR and other proxy routes unchanged.
+ISS-0016 Aero framing/FEC/CRC/codec/assignment/map work is still open, as is
+ISS-0017 off-LAN diagnostics qualification. Dad's JAERO-verified IQ/reference
+settings remain necessary for RF and clear-voice acceptance. No synthetic test
+has been represented as a working Aero voice decoder.
+
 ## 2026-09-24 - Inmarsat replay and diagnostics (DEC-0120)
 
 Implemented bounded 14-format IQ reader + SigMF/WAV metadata, shared live/replay
