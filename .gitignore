@@ -95,6 +95,8 @@ SDR_Town-*-win64-portable.zip
 SDR_Town-*-win64-setup.exe.sha256
 SdrTownControl-*-win64.dll.sha256
 _codex_refs/redsea/
+_codex_refs/inmarscope/
+build-audit-20260925/
 _CPack_Packages/
 
 # OS / other

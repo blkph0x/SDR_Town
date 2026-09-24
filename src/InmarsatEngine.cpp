@@ -5,10 +5,14 @@
 #include "SdrDeviceCandidate.h"
 #include "InmarsatDiagnostics.h"
 #include "InmarsatAudio.h"
+#include "SatcomHostServices.h"
 
 #include <QDir>
 #include <QStandardPaths>
 #include <QDateTime>
+#include <QCoreApplication>
+#include <QMetaObject>
+#include <QSaveFile>
 
 #include <algorithm>
 #include <chrono>
@@ -28,6 +32,10 @@ std::string configPath() {
 
 double unixNow() {
     return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+double steadySeconds() {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
 bool containsInsensitive(std::string value, std::string token) {
@@ -61,6 +69,7 @@ nlohmann::json InmarsatEngineConfig::toJson() const {
         {"recordVoice", recordVoice},
         {"playAudio", playAudio},
         {"recordDir", recordDir},
+        {"watch",watch.toJson()},
     };
 }
 
@@ -77,6 +86,7 @@ InmarsatEngineConfig InmarsatEngineConfig::fromJson(const nlohmann::json& json) 
     config.recordVoice = json.value("recordVoice", false);
     config.playAudio = json.value("playAudio", true);
     config.recordDir = json.value("recordDir", config.recordDir);
+    if(json.contains("watch")) config.watch=InmarsatWatchConfig::fromJson(json.at("watch"));
     return config;
 }
 
@@ -96,11 +106,11 @@ void InmarsatEngineConfig::load() {
 }
 
 void InmarsatEngineConfig::save() const {
-    try {
-        std::ofstream out(configPath());
-        out << toJson().dump(2);
-    } catch (...) {
-    }
+    watch.validate();
+    QSaveFile file(QString::fromStdString(configPath()));
+    const auto data=toJson().dump(2);
+    if(!file.open(QIODevice::WriteOnly) || file.write(data.data(),qint64(data.size()))!=qint64(data.size()) || !file.commit())
+        throw std::runtime_error("Cannot save Inmarsat configuration: "+file.errorString().toStdString());
 }
 
 InmarsatEngine& InmarsatEngine::instance() {
@@ -144,11 +154,13 @@ void InmarsatEngine::notify() {
     }
 }
 
-void InmarsatEngine::setConfig(const InmarsatEngineConfig& config) {
+bool InmarsatEngine::setConfig(const InmarsatEngineConfig& config) {
     std::lock_guard<std::mutex> lock(mutex_);
+    try {config.watch.validate();config.save();}
+    catch(const std::exception& e) {lastStatus_=e.what();spdlog::warn("Inmarsat settings: {}",e.what());return false;}
     config_ = config;
     config_.voiceFollow = false;
-    config_.save();
+    return true;
 }
 
 InmarsatEngineConfig InmarsatEngine::config() const {
@@ -235,10 +247,13 @@ void InmarsatEngine::capturePreviousDeviceState(size_t deviceIndex) {
 
 void InmarsatEngine::restorePreviousDeviceState() {
     std::optional<PreviousDeviceState> saved;
+    bool restoreListen = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         saved = previousDeviceState_;
         previousDeviceState_.reset();
+        restoreListen = hostTakeoverActive_;
+        hostTakeoverActive_ = false;
         activeDeviceIndex_ = std::numeric_limits<size_t>::max();
         deviceConnected_ = false;
         streamState_ = "stopped";
@@ -247,6 +262,7 @@ void InmarsatEngine::restorePreviousDeviceState() {
     auto& manager = DeviceManager::instance();
     if (!saved.has_value() || saved->deviceIndex == std::numeric_limits<size_t>::max()) {
         manager.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Inmarsat);
+        if (restoreListen) SatcomHostServices::instance().endReceiverTakeover();
         return;
     }
 
@@ -265,6 +281,8 @@ void InmarsatEngine::restorePreviousDeviceState() {
         manager.setEnabled(deviceIndex, saved->wasEnabled);
     }
     manager.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Inmarsat);
+    // Restore RF first; otherwise ordinary Listen demodulates the satellite carrier.
+    if (restoreListen) SatcomHostServices::instance().endReceiverTakeover();
 }
 
 bool InmarsatEngine::waitForOperationalStream(size_t deviceIndex, int timeoutMs,
@@ -356,7 +374,8 @@ bool InmarsatEngine::selectBandPlan(const std::string& id) {
             tunedHz_ = pick->freqHz;
             controlHz_ = pick->freqHz;
         }
-        config_.save();
+        try {config_.save();}
+        catch(const std::exception& e){lastStatus_=e.what();return false;}
         lastStatus_ = "Band plan " + plan->name;
     }
     return !restart || start(true);
@@ -372,7 +391,8 @@ bool InmarsatEngine::selectChannel(double frequencyHz, const std::string& mode, 
         if (baud > 0) config_.baud = baud;
         tunedHz_ = frequencyHz;
         if (!followingVoice_) controlHz_ = frequencyHz;
-        config_.save();
+        try {config_.save();}
+        catch(const std::exception& e){lastStatus_=e.what();return false;}
         lastStatus_ = restart ? "Changing channel and restarting receiver" : "Channel selected";
     }
     return !restart || start(true);
@@ -380,7 +400,18 @@ bool InmarsatEngine::selectChannel(double frequencyHz, const std::string& mode, 
 
 bool InmarsatEngine::start(bool force) {
     if (run_.load(std::memory_order_acquire)) return true;
-    if (worker_.joinable()) worker_.join();
+    const auto requestedConfig=config();
+    if(requestedConfig.watch.enabled && std::none_of(requestedConfig.watch.channels.begin(),
+        requestedConfig.watch.channels.end(),[](const auto& c){return c.enabled;})) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        lastStatus_="Enable at least one saved Aero watch channel";
+        return false;
+    }
+    if (worker_.joinable()) {
+        worker_.join();
+        // Finish a failed session's pending GUI restore before a new takeover.
+        restorePreviousDeviceState();
+    }
 
     std::string error;
     const size_t deviceIndex = resolveDeviceIndex(&error);
@@ -420,6 +451,24 @@ bool InmarsatEngine::start(bool force) {
         return false;
     }
 
+    // DEC-0123: a tuner lease alone does not park the GUI's analog Listen DSP.
+    // This existing host bridge also refuses an active P25 receiver.
+    auto& host = SatcomHostServices::instance();
+    if (!host.beginReceiverTakeover(deviceIndex, &error)) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            previousDeviceState_.reset(); // No hardware state has changed yet.
+            lastStatus_ = error.empty() ? "Could not pause Listen audio for Inmarsat" : error;
+        }
+        manager.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Inmarsat);
+        notify();
+        return false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        hostTakeoverActive_ = host.installed();
+    }
+
     const bool reuseLive = manager.isStreaming(deviceIndex) &&
                            manager.getRuntimeStateLabel(deviceIndex) == "live hardware";
     {
@@ -452,7 +501,11 @@ bool InmarsatEngine::start(bool force) {
     }
 
     const InmarsatEngineConfig selected = config();
-    if (!tuneAndConfirm(deviceIndex, selected.channelHz, 4000, &error)) {
+    double firstCenter=selected.channelHz;
+    try {
+        if(selected.watch.enabled) firstCenter=planInmarsatWatch(selected.watch,manager.getCurrentSampleRate(deviceIndex)).front().centerHz;
+    } catch(const std::exception& e) {error=e.what();}
+    if (!error.empty() || !tuneAndConfirm(deviceIndex, firstCenter, 4000, &error)) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
             lastStatus_ = error;
@@ -470,7 +523,7 @@ bool InmarsatEngine::start(bool force) {
         deviceLabel_ = deviceIndex < devices.size() ? devices[deviceIndex].label : "receiver";
         deviceConnected_ = true;
         streamState_ = "live hardware";
-        tunedHz_ = config_.channelHz;
+        tunedHz_ = firstCenter;
         controlHz_ = config_.channelHz;
         followingVoice_ = false;
         carrierDetected_ = false;
@@ -491,7 +544,19 @@ bool InmarsatEngine::start(bool force) {
     }
     if (iqRx_) manager.setReceiverCursorToLiveEdge(deviceIndex, *iqRx_);
     run_.store(true, std::memory_order_release);
-    worker_ = std::thread(&InmarsatEngine::workerLoop, this);
+    try {
+        worker_ = std::thread(&InmarsatEngine::workerLoop, this);
+    } catch (const std::exception& e) {
+        run_.store(false, std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            state_ = InmarsatEngineState::Idle;
+            lastStatus_ = std::string("Could not start Inmarsat worker: ") + e.what();
+        }
+        restorePreviousDeviceState();
+        notify();
+        return false;
+    }
     notify();
     return true;
 }
@@ -671,8 +736,8 @@ bool InmarsatEngine::processIq(InmarsatAudio& audio) {
     if (manager.getLatestSpectrum(deviceIndex, power, centerFrequency, sampleRate) && !power.empty()) {
         std::lock_guard<std::mutex> lock(mutex_);
         spectrumDb_ = power;
-        if (spectrumDb_.size() > 256) {
-            std::vector<float> downsampled(256, -120.0f);
+        if (spectrumDb_.size() > 4096) {
+            std::vector<float> downsampled(4096, -120.0f);
             for (size_t i = 0; i < downsampled.size(); ++i) {
                 const size_t begin = i * power.size() / downsampled.size();
                 const size_t end = (i + 1) * power.size() / downsampled.size();
@@ -713,11 +778,22 @@ bool InmarsatEngine::processIq(InmarsatAudio& audio) {
     if (iq.empty()) return false;
     if(gap) audio.discardPlayback(); // Old-source PCM cannot survive an RF discontinuity.
 
-    if (centerFrequency <= 0.0) centerFrequency = manager.getCurrentCenterFreq(deviceIndex);
+    // Spectrum may still describe the previous tune. IQ metadata uses confirmed RF.
+    centerFrequency = manager.getCurrentCenterFreq(deviceIndex);
     InmarsatDemodMode mode;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         mode = demodModeLocked();
+    }
+    if(watch_) {
+        watch_->process(iq,startSample,sampleRate,centerFrequency,gap,steadySeconds());
+        const auto report=watch_->report(steadySeconds());
+        std::lock_guard<std::mutex> lock(mutex_);
+        pipelineReport_=report;
+        carrierDetected_=report.value("carrierDetected",false);locked_=report.value("protocolLock",false);
+        quality_=report.value("quality",0.0);rawBlocks_=report.value("rawBlocks",uint64_t{0});
+        validatedFrames_=report.value("validatedFrames",uint64_t{0});voiceFrames_=report.value("voiceFrames",uint64_t{0});
+        return true;
     }
     pipeline_.process(iq.data(), iq.size(), startSample, sampleRate, centerFrequency, tuned, mode, gap);
     const auto stats = pipeline_.stats();
@@ -756,6 +832,15 @@ void InmarsatEngine::workerLoop() {
         audio=std::make_unique<InmarsatAudio>(cfg.playAudio,wav);
         pipeline_.setPcmSink([&](std::span<const int16_t> pcm,uint32_t){audio->push(pcm);});
         pipeline_.setMessageSink([this](const InmarsatMessage& message){onMessage(message);});
+        if(cfg.watch.enabled) {
+            size_t device;
+            {std::lock_guard<std::mutex> lock(mutex_);device=activeDeviceIndex_;}
+            watch_=std::make_unique<InmarsatWatchSession>(cfg.watch,
+                DeviceManager::instance().getCurrentSampleRate(device),steadySeconds(),
+                [this](const InmarsatMessage& m){onMessage(m);},
+                [&](std::span<const int16_t> pcm,uint32_t){audio->push(pcm);},
+                [&]{audio->discardPlayback();});
+        }
     } catch(const std::exception& e) {
         std::lock_guard<std::mutex> lock(mutex_);
         lastStatus_=e.what();state_=InmarsatEngineState::Idle;
@@ -764,7 +849,10 @@ void InmarsatEngine::workerLoop() {
     try {
         // Transport still enforces the app's explicit opt-in/off configuration.
         diagnostics.open({}, "live",true);
-        diagnostics.write("open", {{"state", "running"}});
+        const auto cfg = config();
+        diagnostics.write("open", {{"state", processingFailed ? "error" : "running"},
+            {"channelHz", cfg.channelHz}, {"mode", cfg.mode}, {"baud", cfg.baud},
+            {"speakerRequested", cfg.playAudio}, {"recordRequested", cfg.recordVoice}});
         std::lock_guard<std::mutex> lock(mutex_);
         diagnosticLog_ = diagnostics.path().toStdString();
     } catch (const std::exception& e) {
@@ -798,6 +886,19 @@ void InmarsatEngine::workerLoop() {
 
         bool consumed = false;
         try {
+            if(watch_ && watch_->advance(steadySeconds())) {
+                const auto report=watch_->report(steadySeconds());
+                diagnostics.write("watch_transition",report);
+                std::string error;
+                if(!tuneAndConfirm(deviceIndex,watch_->centerHz(),4000,&error)) throw std::runtime_error(error);
+                DeviceManager::instance().setReceiverCursorToLiveEdge(deviceIndex,*iqRx_);
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    tunedHz_=watch_->centerHz();pipelineReport_=report;
+                    lastStatus_=report["watch"].value("reason",std::string{});
+                    spectrumDb_.clear();
+                }
+            }
             consumed = processIq(*audio);
             if(audio) {
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -827,7 +928,7 @@ void InmarsatEngine::workerLoop() {
             std::lock_guard<std::mutex> lock(mutex_);pipelineReport_["voiceActive"]=false;
         }
         if (now >= nextLog && !diagnostics.path().isEmpty()) {
-            auto report=pipeline_.report();
+            auto report=watch_?watch_->report(steadySeconds()):pipeline_.report();
             if(audio) report["audio"]=audio->report();
             diagnostics.write("progress", report);
             nextLog = now + std::chrono::seconds(1);
@@ -847,16 +948,30 @@ void InmarsatEngine::workerLoop() {
         std::lock_guard<std::mutex> lock(mutex_);lastStatus_=e.what();
     }
     if (!diagnostics.path().isEmpty()) {
-        auto report = pipeline_.report();
+        auto report = watch_?watch_->report(steadySeconds()):pipeline_.report();
         if(audio) report["audio"]=audio->report();
         report["state"] = processingFailed ? "error" : lostHardware ? "hardware_lost" : "stopped";
         report["errorCode"] = processingFailed ? "invalid_input" : lostHardware ? "hardware_lost" : "none";
         diagnostics.write("summary", report, true);
     }
     pipeline_={}; // Destroy modem QObjects on their owning worker thread.
+    watch_.reset();
+    audio.reset(); // Stop C-channel playback before restoring ordinary Listen.
 
     if (lostHardware || processingFailed) {
-        restorePreviousDeviceState();
+        bool hasGuiTakeover;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            hasGuiTakeover = hostTakeoverActive_;
+        }
+        if (hasGuiTakeover && QCoreApplication::instance()) {
+            // The host's off-thread end is queued. Restore on the GUI thread
+            // instead, so an old end cannot unpark Listen after a new Start.
+            // Never block this worker on a GUI thread that may be joining it.
+            QMetaObject::invokeMethod(QCoreApplication::instance(), [this] {
+                if (!run_.load(std::memory_order_acquire)) restorePreviousDeviceState();
+            }, Qt::QueuedConnection);
+        } else restorePreviousDeviceState();
         notify();
     }
 }

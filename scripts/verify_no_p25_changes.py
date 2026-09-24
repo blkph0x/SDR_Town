@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import os
 import subprocess
 import sys
@@ -51,6 +52,21 @@ SATCOM_MAINWINDOW_PATH = "src/MainWindow.cpp"
 SATCOM_MARKER_BEGIN = "// SATCOM_HOST_INTEGRATION_BEGIN"
 SATCOM_MARKER_END = "// SATCOM_HOST_INTEGRATION_END"
 SATCOM_HOST_INCLUDE = '#include "SatcomHostServices.h"'
+
+# DEC-0122: allow exactly the reviewed SDRplay loader-only patch, not a
+# DeviceManager/function allowlist. Any extra RF/audio/tune edit changes the
+# whole-file digest and fails. Text uses Git's LF-normalized UTF-8 content.
+SDRPLAY_DEVICE_PATH = "src/DeviceManager.cpp"
+SDRPLAY_DEVICE_BEFORE = "4e2ed89819473036ee1111825090fe41a013d7d20f97875396daabdeb2aca47a"
+SDRPLAY_DEVICE_AFTER = "7aeee235a8b28a4ce57976129caa658233c4a007b8d251160030af199b535da7"
+
+
+def device_manager_sdrplay_text_allowed(before: str, after: str) -> bool:
+    return (
+        hashlib.sha256(before.encode("utf-8")).hexdigest() == SDRPLAY_DEVICE_BEFORE
+        and hashlib.sha256(after.encode("utf-8")).hexdigest() == SDRPLAY_DEVICE_AFTER
+    )
+
 
 HF_DEMOD_PATH = "src/Demod.cpp"
 HF_INCLUDE = '#include "HfDemod.h"\n'
@@ -129,6 +145,7 @@ def git_file_text(ref: str, path: str) -> str:
             command,
             check=True,
             text=True,
+            encoding="utf-8",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -245,6 +262,17 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
+        if path == SDRPLAY_DEVICE_PATH and args.paths is None:
+            try:
+                allowed = device_manager_sdrplay_text_allowed(
+                    git_file_text(args.base, path), git_file_text(args.head, path)
+                )
+            except RuntimeError as exc:
+                print(f"P25 guard error: {exc}", file=sys.stderr)
+                return 2
+            if allowed:
+                print("P25 guard: accepted exact DEC-0122 SDRplay loader-only patch; no other DeviceManager changes.")
+                continue
         if path == HF_DEMOD_PATH and args.paths is None:
             try:
                 allowed, detail = demod_hf_change_allowed(

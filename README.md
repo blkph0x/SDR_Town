@@ -1,10 +1,20 @@
 # SDR Town
 
+**0.2.93 SDRplay repair:** discovery now verifies
+driver registration, retries failed runtime loading on Rescan, finds additional
+installed/portable layouts, and reports the API service state. See
+[SDRplay troubleshooting and acceptance checks](docs/SDRPLAY.md).
+
+**0.2.93 Inmarsat repair:** Start applies the
+displayed frequency/decoder, opening the panel preserves saved voice settings,
+and takeover pauses ordinary Listen audio. Decoded-PCM and default-speaker
+status are visible. See [tone/no-voice troubleshooting](docs/INMARSAT.md#tone-or-no-voice).
+
 **SDR Town** is a Windows desktop SDR receiver and analysis application for multi-device monitoring, analog demodulation, P25 Phase 1/2 trunking experiments, spectrum/waterfall work, classifier training capture, CLI automation, and GitHub-based self-updates for tester builds.
 
 | | |
 |---|---|
-| **Current version** | **0.2.92** (experimental channel) |
+| **Current version** | **0.2.93** (experimental channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
@@ -14,7 +24,23 @@
 
 Formerly *MaulAudio Pro*. Branding, binaries, installer, AppData paths, and release assets all use **SDR Town** / `SDR_Town`.
 
-### 0.2.92 Native Aero Voice And Aircraft Map
+### 0.2.93 Saved Aero Watch Channels
+
+**Tools > Inmarsat Aero > Watch channels** supports clicking real spectrum
+signals, saving rate-specific decoders, collecting validated aircraft positions,
+then cycling voice groups and returning for position refresh. Settings survive
+restarts; reception starts only on request. Two simultaneous decoders per group
+by default (adjustable 1-4), one speaker conversation, visible refresh/load status,
+bounded diagnostics and stale-position indication. This is saved-list scanning,
+not automatic C-assign following. Native voice/data reference parity is retained;
+live antenna and intelligible-conversation acceptance remain open.
+
+Includes SDRplay runtime/Rescan repairs, manual Inmarsat voice-setting/Listen
+ownership fixes, and a tested SSTV detach starvation repair. P25 is unchanged.
+See [watch setup and InmarScope comparison](docs/INMARSAT_WATCH.md) and
+[0.2.93 tester checklist](docs/RELEASE_0.2.93.md).
+
+### 0.2.92 Native Aero Voice And Aircraft Map (historical)
 
 **Tools > Inmarsat Aero** now has native Classic Aero continuous/burst decoding,
 C-channel mini-m voice to the default speaker or WAV, and CRC-validated ADS-C
@@ -80,7 +106,7 @@ gates](docs/AUDIT_20260924.md) and [release notes](docs/RELEASE_0.2.89.md).
 2. In SDR Town, start the receiver (and P25 Monitor CC / auto-follow if that is your station). Confirm the status bar shows local control on `127.0.0.1:8765` (loopback only).
 3. Route SDR Town audio to **VB-CABLE** (or another capture endpoint FUBAR can open).
 4. In FUBAR, select that cable as the input, enable **Public website**, and set **Now playing**.
-5. Place a **matching** `SdrTownControl.dll` next to `FUBAR.exe`. This Town **0.2.92** release ships `SdrTownControl-0.2.92-win64.dll` (rename to `SdrTownControl.dll`). FUBAR was not changed or re-qualified in this native Aero release. See [pairing versions and gaps](docs/FUBAR_PAIRING.md).
+5. Place a **matching** `SdrTownControl.dll` next to `FUBAR.exe`. This Town **0.2.93** release ships `SdrTownControl-0.2.93-win64.dll` (rename to `SdrTownControl.dll`). FUBAR was not changed or re-qualified in this Aero watch release. See [pairing versions and gaps](docs/FUBAR_PAIRING.md).
 6. **Tools → Settings** in FUBAR: enable SDR Town control and pick allowed actions. FUBAR **1.1.41** website has P25/RDS/tones/SSTV (Auto + HamDRM list, Receive/Finish/Cancel), Satcom, Inmarsat, Aircraft, and SDRplay. **Home lat/lon is Town-only** (not on the public site).
 
 ### Control API notes (for FUBAR and other local clients)
@@ -211,7 +237,7 @@ Shared STT defaults (also used by deep audit / live diag / GUI IQ replay): backe
 
 - **ONNX classifier backend** is a placeholder; the **deterministic** classifier is what runs.
 - **Smart Scan** button is present (PR6-era foundation)—not a full production scanner (no priority lists, lockout, hold, multi-TG routing product yet).
-- **Satcom / aircraft / Inmarsat / SSTV / HamDRM** ship as **experimental** tools (recorded SSTV and HamDRM selftest are verified; live RF pictures, live HamDRM on-air, Inmarsat unique-word/FEC/AMBE, and Meteor LRPT are not).
+- **Satcom / aircraft / Inmarsat / SSTV / HamDRM** ship as **experimental** tools. Inmarsat native framing/FEC/Aero codec and ADS-C are recording-tested, with saved-list watch automation; live antenna/clear-speech qualification, live SSTV/HamDRM and Meteor LRPT remain open.
 - **DMR / NXDN / POCSAG / broadcast DRM** are still not implemented as receive decoders.
 - **Updater** verifies Ed25519 manifest signatures (when configured) plus installer SHA-256; Authenticode not done yet.
 - **SDR open/stream** is in-process (no separate helper process yet)—wedged USB/Soapy can still affect the app process.
@@ -347,7 +373,7 @@ The replay path uses metadata-only SigMF inspection for the slider, then loads b
 | `observer show` / `observer set <lat> <lon>` | Home position for ISS/passes/Doppler (Town only; not FUBAR) |
 | `tle refresh` / `tle load` | CelesTrak or fixture TLE |
 | `satcom status\|start [force]\|stop\|arm\|…` | Satcom scanner / ISS SSTV arm |
-| `inmarsat status\|start [force]\|stop\|plan` | Inmarsat prototype (no voice follow) |
+| `inmarsat status\|start [force]\|stop\|plan` | Native experimental Aero; Start uses saved manual/watch settings (no assignment-driven follow) |
 | `aircraft` | Aircraft map status |
 | `help` | Command list |
 | `quit` / `exit` | Leave CLI |
@@ -552,8 +578,10 @@ Useful docs (may be denser than this README):
    Satcom scanner, TLE/SGP4 Doppler, ISS SSTV arm, NOAA APT grayscale, and
    aircraft map ship experimentally. Meteor LRPT / SatDump-class decode do not.
 
-3. **Inmarsat prototype gaps**
-   Band plan, start/stop, ACARS/ADS-C log. No unique-word, FEC, or Aero AMBE.
+3. **Inmarsat qualification gaps**
+   Native Aero framing/FEC/voice, ADS-C map and saved-list data/voice cycling are
+   implemented. Live clear speech, assignment-driven follow, dual-SDR monitoring,
+   aircraft photos and completed EGC protocol support remain open.
 
 4. **Analog and data polish**
    Known-tone CTCSS/DCS RF acceptance, SSB/CW filtering/AGC, then separately

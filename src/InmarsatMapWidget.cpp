@@ -61,7 +61,9 @@ void InmarsatMapWidget::setReport(const nlohmann::json& report,bool replay) {
             QString detail=QString("AES %1\nRegistration: %2\nCallsign: %3\n%4, %5\nAltitude: %6 ft\nReport: %7 s past hour\n%8 ADS-C (CRC valid)")
                 .arg(hex,reg,call).arg(lat,0,'f',5).arg(lon,0,'f',5).arg(p.value("altitudeFt",0.0),0,'f',0)
                 .arg(p.value("secondsPastHour",0.0),0,'f',3).arg(replay?"Replay":"Live");
-            tracks_.push_back({aes,{lon,-lat},reg.isEmpty()?hex:reg,detail,aes==active});
+            const bool stale=p.value("stale",false);
+            if(p.contains("ageSeconds")) detail+=QString("\nReceived %1 s ago%2").arg(p.value("ageSeconds",0.0),0,'f',0).arg(stale?" (position needs refresh)":"");
+            tracks_.push_back({aes,{lon,-lat},reg.isEmpty()?hex:reg,detail,aes==active,stale});
             if(tracks_.size()==256) break;
         }
     }
@@ -78,12 +80,12 @@ void InmarsatMapWidget::paintEvent(QPaintEvent*) {
     const QPolygonF aircraft{QPointF(0,-10),QPointF(3,-2),QPointF(9,2),QPointF(9,4),QPointF(2,2),QPointF(2,7),QPointF(4,9),QPointF(-4,9),QPointF(-2,7),QPointF(-2,2),QPointF(-9,4),QPointF(-9,2),QPointF(-3,-2)};
     for(const auto& t:tracks_) {
         const auto point=screen(t.point);p.save();p.translate(point);
-        p.setPen(QPen(Qt::black,1.5));p.setBrush(t.active?QColor("#52ef88"):QColor("#f5f7f8"));p.drawPolygon(aircraft);p.restore();
+        p.setPen(QPen(Qt::black,1.5));p.setBrush(t.active?QColor("#52ef88"):t.stale?QColor("#a0a7b0"):QColor("#f5f7f8"));p.drawPolygon(aircraft);p.restore();
         p.setPen(Qt::black);p.drawText(point+QPointF(14,5),t.label);
         p.setPen(Qt::white);p.drawText(point+QPointF(13,4),t.label);
     }
     p.setPen(Qt::white);p.drawText(12,23,replay_?"REPLAY | ADS-C":"LIVE | ADS-C");
-    p.drawText(12,height()-12,QString("%1 aircraft | Green: decoded voice | Natural Earth").arg(tracks_.size()));
+    p.drawText(12,height()-12,QString("%1 aircraft | Green: voice | Gray: stale position | Natural Earth").arg(tracks_.size()));
 }
 void InmarsatMapWidget::wheelEvent(QWheelEvent* e) {zoom_=std::clamp(zoom_*std::pow(1.5,e->angleDelta().y()/120.0),1.0,32.0);update();e->accept();}
 void InmarsatMapWidget::mousePressEvent(QMouseEvent* e) {

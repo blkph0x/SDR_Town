@@ -2,6 +2,134 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0125 - SSTV feed control must quiesce hot publication (2026-09-25)
+
+Release prerequisite ISS-0019: unchanged isolated 100-cycle attach/detach test
+previously exceeded 246 s, this pass took 13.797 s even though publication only
+uses try_lock. Feed detach waits on the same mutex the tight producer reacquires;
+attached_ becomes false only AFTER acquiring that mutex. There is no admission
+barrier allowing a waiting control operation to quiesce publication.
+
+Decision: announce pending control operations with an atomic counter before
+locking; producers check it before and after try_lock and report a contention
+gap when skipped. Existing detach identity, stop and mutex ownership remain.
+At most one already admitted publish can precede a pending control operation.
+No sleeps or weakened assertions in the producer test. The counter supports
+overlapping stats/control callers without a premature boolean clear. Scope is
+SstvReceiverFeed only, not P25/analog DSP or the receiver input ring itself.
+Repeat the unchanged stress case and full suite; do not infer field SSTV RF
+qualification from a lifecycle test.
+
+## DEC-0124 - Saved Classic Aero watch groups and position/voice cycle (2026-09-25)
+
+User requests click-to-place saved 10500/8400/etc decoders and automatic position
+collection, voice monitoring, then position refresh. Reference inspected:
+SarahRoseLives/InmarScope commit 26ae80af4bcfa4c86ed55f4383d1c95481d3450b,
+src/voice/voice_ops.cpp (per-channel decode, off-DC tuning, single monitored
+voice, acquisition grace distinct from decoded-voice idle), src/decode/decoder.cpp
+and src/voice/ambe_decoder.cpp (Aero AMBE4800x3600). No upstream source copied.
+Our existing JAERO/libaeroambe chain stays unchanged. Unlike upstream assignment
+follow, this is an explicit user watch-list cycle, not an invented assignment.
+
+Decision: bounded 32-channel saved list, one to four independent decoders per
+passband group, DEFAULT TWO. Local Release benchmark: four decoders at 2.048 MS/s
+consume 2.381 s for 2.048 s RF (1.163x), so default four would backlog live IQ.
+Expose the limit and processing/RF time ratio; do not hide overload with IQ drops.
+Chronological IQ is shared within each group. Existing
+6.5 kHz channelizer edge margin plus 10% RF edge reserve; prefer InmarScope's
+min(200 kHz, Fs/4) center offset, constrained to every channel's passband. If
+that overlaps a listed carrier, select the valid center furthest from carriers.
+One worker owns all modem state and retunes;
+lease/Listen takeover lasts the whole session. Confirm tune, discard old PCM and
+advance IQ cursor before decoding a new group. Never mix voice sources. Reset
+source state on gaps/retunes, not UI refresh. Keep single-channel/replay unchanged.
+
+Scheduling is a user policy, not a protocol timeout: defaults data dwell 30 s per
+group (minimum 10 s), target 10 distinct CRC-validated aircraft positions per
+data visit, voice acquisition 12 s and idle hold 6 s (reference above), refresh
+after 180 s, defer an active voice until idle but cap visit at 600 s. All are
+editable, bounded and persisted. Visit counts exclude stale/duplicate positions;
+a timeout explicitly says partial/no positions, never complete aircraft coverage.
+Visit every group at least once; busy voice can defer other groups, visibly.
+Persist atomically; malformed settings fail validation, not arbitrary RF tuning.
+No auto hardware start on application launch. Automatic collection never implies
+all aircraft transmit ADS-C or that everything in a saved list fits one SDR.
+
+Tests: deterministic scheduler clock/events, passband/disabled/invalid lists,
+duplicate/stale/no positions, idle vs active voice, forced refresh, speaker focus,
+GUI selection/persistence and startup refusal. Native replay reference hashes must
+remain unchanged. Remote diagnostics retain scalar-only opt-in allowlist; watch
+frequencies/aircraft identifiers remain local. Live antenna qualification stays
+open until an independent tester supplies matching IQ/logs.
+
+## DEC-0123 - Inmarsat live selection and Listen ownership (2026-09-25)
+
+User reports tone rather than speech. No matching live Inmarsat capture is on
+this PC. Confirmed code defects: InmarsatWidget reloadBandPlans calls
+selectBandPlan during construction, replacing a saved voice channel with data;
+START ignores edited frequency/decoder (only Tune applies them). InmarsatEngine
+acquires a tuner lease but never calls the existing SatcomHostServices receiver
+takeover, so GUI Listen demodulation can continue on satellite IQ. MainWindow's
+existing host callback parks matching Receiver::active flags and refuses P25.
+This is evidence of routing/selection defects, not proof of the tester's tone.
+
+Decision: preserve configuration on panel creation, share explicit Tune/Start
+selection, use the existing host takeover with paired restore after hardware
+restore. Fail before retuning if parking is refused. Display actual decoder,
+PCM production and speaker error/state, and record bounded scalar diagnostics.
+No raw modem audio, tone filtering, speculative DSP/codec changes or P25 edits.
+Pinned libaeroambe frame packing (LSB-first 96-bit input, AMBE4800x3600) matches
+our wrapper; public reference PCM parity must remain unchanged. Data channels
+do not carry C-channel voice, and automatic voice following remains unavailable.
+GUI tests must use isolated settings, no hardware and no remote reporting.
+
+Lifecycle detail: MainWindow's existing host end callback queues off-thread
+restoration. Calling it directly from a failed worker could leave a stale end
+behind a new Start. Inmarsat queues the inactive-session cleanup onto the app
+thread instead; Start joins/restores a failed predecessor before acquisition,
+and queued cleanup skips a currently running session. No worker waits on GUI
+while GUI may join it. MainWindow and P25 code remain byte-identical.
+
+## DEC-0122 - SDRplay runtime selection and registration proof (2026-09-25)
+
+User reports previously working SDRplay devices unavailable. Package inspection
+of 0.2.74/80/89/92 shows no SDRplay API/Soapy module was ever bundled there;
+the current code retains the device family. Actual local 0.2.92 CLI loads Pothos
+SoapySDRPlay 0.3.0 but stderr reports sdrplay_api_Open failure; this PC has no
+SDRplay service or RSP attached. That is local evidence, not the remote diagnosis.
+
+Confirmed code gaps: API preloading only before main (cannot retry after install);
+app-local nested modules and per-user conda/environment roots omitted; wrong
+architecture paths prepended globally; an empty Soapy loadModule result is treated
+as registration success even though Registry.cpp records ABI/duplicate errors
+separately in getLoaderResult; streaming then tries every module again.
+Reference: installed SoapySDR Modules.hpp/Registry.hpp and upstream
+https://github.com/pothosware/SoapySDR/blob/master/lib/Registry.cpp . Official
+API layout: https://www.sdrplay.com/docs/SDRplay_API_Specification_v3.15.pdf .
+
+Decision: explicit, serialized SDRplay-only runtime loader before discovery/open;
+UTF-8 paths converted to Windows wide APIs, matching architecture API dependency,
+factory plus loader-result verification, failed discovery retried on Rescan,
+one successful module per process (no unload of a live factory). Report API path,
+module path/version and Windows service state; never equate registration with
+connected hardware. Do not install/restart services or replace the user's SDK.
+No new third-party dependency or vendor redistribution. Tests use isolated fake
+DLLs to prove loader failures/recovery, not pretend to receive an RSP signal.
+
+DeviceManager changes are restricted to its SDRplay setup and SDRplay module-open
+block; shared receive/tune/audio and P25 remain byte-identical. Record this narrow
+exception in the path guard with negative coverage, not a broad shared-file bypass.
+
+Implementation note: upstream Modules.in.cpp disables automatic loading when
+any module is loaded explicitly, including our bundled RTL module. Enumerate
+SDRplay candidates explicitly on Windows and retain Soapy's platform search
+paths on POSIX. Windows Soapy 0.8 uses LoadLibraryA: encode losslessly with an
+available short-path fallback, otherwise report an actionable path error.
+Never silently substitute characters or preload a module outside Soapy's registry.
+Source: https://github.com/pothosware/SoapySDR/blob/master/lib/Modules.in.cpp .
+The shared-file exception pins both entire DeviceManager text hashes; any
+additional change, including inside the setup function, fails the guard.
+
 ## DEC-0121 - Native Aero receive, isolated codec and verified map positions (2026-09-24)
 
 User requests voice and decoded positions on a map, following DEC-0120. Integrate

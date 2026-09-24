@@ -5,6 +5,7 @@
 #include <array>
 #include <atomic>
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 struct InmarsatAudio::Impl {
@@ -13,6 +14,11 @@ struct InmarsatAudio::Impl {
     std::atomic<uint64_t> read{0},write{0},underflow{0},dropped{0};
     ma_device device{};
     bool play=false,open=false;
+    bool requested=false;
+    uint64_t pcmReceived=0,pcmNonzero=0;
+    double pcmSumSquares=0.0;
+    int pcmPeak=0;
+    std::atomic<uint64_t> speakerConsumed{0};
     QFile wav;
     uint32_t wavSamples=0;
     QString deviceError;
@@ -34,6 +40,7 @@ struct InmarsatAudio::Impl {
         for(size_t i=0;i<count;++i) pcm[i]=s.ring[(r+i)&(capacity-1)];
         std::fill(pcm+count,pcm+frames,0);
         s.read.store(r+count,std::memory_order_release);
+        s.speakerConsumed.fetch_add(count,std::memory_order_relaxed);
         s.underflow.fetch_add(frames-count,std::memory_order_relaxed);
     }
     void start() {
@@ -47,6 +54,7 @@ struct InmarsatAudio::Impl {
 };
 InmarsatAudio::InmarsatAudio(bool playback,const QString& path):impl_(std::make_unique<Impl>()) {
     impl_->play=playback;
+    impl_->requested=playback;
     if(!path.isEmpty()) {
         impl_->wav.setFileName(path);
         if(!impl_->wav.open(QIODevice::WriteOnly|QIODevice::NewOnly)) throw std::runtime_error("Cannot create new Aero WAV; choose a new output path");
@@ -65,6 +73,14 @@ InmarsatAudio::~InmarsatAudio() {
 void InmarsatAudio::finish() { impl_->finishWav(); }
 void InmarsatAudio::push(std::span<const int16_t> pcm) {
     auto& s=*impl_;
+    // DEC-0123: measure decoded PCM, not RF/IF. Zero samples is distinguishable
+    // from codec silence, speaker disabled, or an unavailable output device.
+    s.pcmReceived+=pcm.size();
+    for(const auto sample:pcm) {
+        s.pcmNonzero+=sample!=0;
+        s.pcmPeak=std::max(s.pcmPeak,std::abs(int(sample)));
+        s.pcmSumSquares+=double(sample)*sample;
+    }
     if(s.wav.isOpen()) {
         // A diagnostics run cannot silently fill the disk. Stop with a clear error.
         if(uint64_t(s.wavSamples)+pcm.size()>128*1024*1024) throw std::runtime_error("Aero WAV reached 256 MiB recording limit");
@@ -93,6 +109,11 @@ size_t InmarsatAudio::queued() const {
 nlohmann::json InmarsatAudio::report() const {
     const auto& s=*impl_;
     return {{"speakerQueued",queued()},{"speakerDropped",s.dropped.load()},
+        {"speakerRequested",s.requested},{"speakerRunning",s.open && ma_device_is_started(&s.device) != MA_FALSE},
+        {"speakerDevice",s.open ? std::string(s.device.playback.name) : std::string{}},
+        {"speakerConsumed",s.speakerConsumed.load()},{"speakerFailed",!s.deviceError.isEmpty()},
+        {"pcmReceived",s.pcmReceived},{"pcmNonzero",s.pcmNonzero},{"pcmPeak",s.pcmPeak},
+        {"pcmRms",s.pcmReceived?std::sqrt(s.pcmSumSquares/s.pcmReceived):0.0},
         {"speakerZeroFill",s.underflow.load()},{"speakerError",s.deviceError.toStdString()},
         {"wavPath",s.wav.fileName().toStdString()},{"wavSamples",s.wavSamples},{"recording",s.wav.isOpen()}};
 }

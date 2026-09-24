@@ -8,9 +8,12 @@ RTL-SDR and HackRF.
 ## Install (Windows)
 
 1. Install **SDRplay API 3.x** from [sdrplay.com](https://www.sdrplay.com/downloads/).
-2. Install **SoapySDRPlay3** via PothosSDR or radioconda (module typically
-   `sdrPlaySupport.dll` under `lib\SoapySDR\modules0.8`).
-3. Restart SDR Town.
+2. Install a **64-bit SoapySDRPlay3** build compatible with the app's Soapy
+   ABI and your model (module typically `sdrPlaySupport.dll` under
+   `lib\SoapySDR\modules0.8`). An existing PothosSDR/radioconda install may
+   provide it; not every distribution includes this module or supports newer RSPs.
+3. Use **Rescan Devices**. Restart SDR Town after replacing a DLL that was
+   already loaded; follow any reboot instruction from the vendor installer.
 
 Device Manager shows the current discovery status. CLI: `sdrplay status`.
 
@@ -22,17 +25,32 @@ the app.
 
 ### Troubleshooting “RSP not connected”
 
-The status is intentionally split into three stages:
+The September 25 local repair (DEC-0122, not yet a published release) reports:
 
-- **API and SoapySDRPlay module ready; RSP detected** means the USB device was
-  enumerated and is available to open.
-- **API and SoapySDRPlay module loaded, but no RSP detected** means the app can
-  load the software stack, but the API service did not enumerate a device.
-  Check the RSP USB cable/driver, close SDRconnect/SDRuno/other SDRplay clients,
-  and restart the SDRplay API service or reboot Windows.
-- **API found but SoapySDRPlay module missing**, or **install API 3.x...**,
-  means the vendor API/module prerequisites are not installed in a location the
-  app can use.
+- **Driver registered (not a hardware detection):** the module actually registered
+  SDRplay find/open functions. A DLL loading without a valid registration no longer
+  counts as success. The device table separately shows enumerated hardware;
+  enumeration alone does not prove that a stream can be opened.
+- **Service not installed / stopped:** install the official SDRplay API/service
+  or start its Windows service. SDR Town only reads this state; it never installs,
+  restarts, or changes services automatically.
+- **Driver unavailable:** the status/log identifies missing API exports, Windows
+  DLL loading errors, rejected Soapy ABI, or absent factory registration.
+  Install a compatible API/module and retry Rescan. A working loaded module is
+  retained until app exit, rather than replaced while a receiver uses it.
+
+If the driver is registered and the service running but no RSP appears, check
+USB connections/vendor drivers and close other applications using the RSP.
+Do not replace an SDRplay USB driver with the RTL-SDR Zadig/WinUSB setup.
+
+The repair adds application-local nested module layouts, both registry views
+and per-user API registration, active/per-user radioconda, `SDRPLAY_API_DIR`,
+`SDRPLAY_ROOT`, `SOAPY_SDR_ROOT`, `POTHOS_ROOT`, and `SOAPY_SDR_PLUGIN_PATH`.
+It no longer prepends every x86/ARM/conda directory to the global process PATH.
+Windows validates API DLL architecture. API paths use Unicode APIs; Soapy 0.8's
+ANSI module loader uses a lossless native/short path, or reports that an ASCII
+module installation path is required. Linux/macOS retain Soapy's platform search
+paths; those OS builds have not been validated by the Windows loader tests.
 
 From the PothosSDR installation directory, these commands are useful before
 reporting a problem:
@@ -43,9 +61,38 @@ SoapySDRUtil --find="driver=sdrplay"
 SoapySDRUtil --probe="driver=sdrplay"
 ```
 
-`sdrplay_api_Open() failed` or an empty `--find` result is an API-service or
-hardware-access problem, not a missing GUI setting. Only one SDRplay client can
-usually own an RSP at a time.
+Also run the app's own runtime diagnostic, since SoapySDRUtil may load a different
+Soapy installation:
+
+```powershell
+.\SDR_Town.exe --cli --no-remote-diagnostics --cmd "sdrplay status"
+```
+
+Report the exact RSP model, SDR Town version, status text and latest
+`%APPDATA%\SDR_Town\SDR Town\logs\sdr_town.log`. The read-only
+`scripts/sdrplay_preflight.ps1` source-tree helper can collect an independent
+API/service/Soapy installation report. Never include unrelated credentials.
+
+`sdrplay_api_Open() failed` points to the vendor runtime/service; an empty find
+can also mean no module registered or no accessible hardware. It is not evidence
+of a missing modulation setting. Only one client can usually own an RSP at a time.
+
+### Repair verification
+
+Windows Release app/core/GUI builds pass. Five process-isolated loader
+tests cover false DLL success with rejected ABI, missing API exports, retry and
+concurrent reuse, Unicode API paths, and real nested portable module discovery.
+All five pass. They use fake DLLs outside deployment, never fake received samples. Packaging
+checks reject those fixtures and unapproved vendor DLLs.
+
+The first full CTest run passed; a repeat exposed an intermittent, unchanged
+SSTV active-producer detach test stall (ISS-0019). All remaining core/GUI/backend
+checks pass. This local repair is not a claim of fully qualified release status.
+
+Local Pothos module 0.3.0-206b241 registers; its API open fails because this PC
+has no SDRplay service installed. No physical RSP is attached here. Acceptance
+on each affected model still requires a tester's successful Rescan, open/tune,
+stream, stop and reopen. The RF/gain/sample-rate and P25 pipelines are unchanged.
 
 ## Full feature coverage matrix
 

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.92 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.93 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -134,6 +134,7 @@ set(SDR_TOWN_SOURCES
     include/MainWindow.h
     src/DeviceManager.cpp
     src/SdrplayProfile.cpp
+    src/SdrplayRuntime.cpp
     include/SdrplayProfile.h
     src/SdrplayDiversity.cpp
     include/SdrplayDiversity.h
@@ -178,6 +179,10 @@ set(SDR_TOWN_SOURCES
     src/InmarsatEngine.cpp
     include/InmarsatEngine.h
     src/InmarsatWidget.cpp
+    src/InmarsatWatch.cpp
+    src/InmarsatWatchUi.cpp
+    src/InmarsatWatchSpectrum.cpp
+    include/InmarsatWatchSpectrum.h
     include/InmarsatWidget.h
     src/InmarsatIqFile.cpp
     src/InmarsatPipeline.cpp
@@ -439,6 +444,8 @@ if(BUILD_TESTS)
     tests/test_inmarsat.cpp
     tests/test_inmarsat_replay.cpp
     tests/test_inmarsat_native.cpp
+    tests/test_inmarsat_watch.cpp
+    src/InmarsatWatch.cpp
     src/InmarsatIqFile.cpp
     src/InmarsatPipeline.cpp
     src/InmarsatDiagnostics.cpp
@@ -462,6 +469,7 @@ if(BUILD_TESTS)
     src/InmarsatEngine.cpp
     src/DeviceManager.cpp
     src/SdrplayProfile.cpp
+    src/SdrplayRuntime.cpp
     src/SdrplayDiversity.cpp
     src/AudioEngine.cpp
     src/AudioCapture.cpp
@@ -521,6 +529,39 @@ if(BUILD_TESTS)
 
   add_test(NAME UnitTests COMMAND sdr_town_tests)
 
+  # DEC-0122: isolated DLL fixtures never enter bin/deploy staging or packages.
+  if(WIN32 AND TARGET SoapySDR)
+    add_library(sdrplay_api_fixture SHARED tests/sdrplay_api_fixture.cpp)
+    set_target_properties(sdrplay_api_fixture PROPERTIES
+        OUTPUT_NAME sdrplay_api
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test-fixtures/sdrplay/api")
+    foreach(kind good bad empty)
+      add_library(sdrplay_module_${kind} SHARED tests/sdrplay_module_fixture.cpp)
+      target_link_libraries(sdrplay_module_${kind} PRIVATE SoapySDR)
+      set_target_properties(sdrplay_module_${kind} PROPERTIES
+          RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test-fixtures/sdrplay/${kind}")
+    endforeach()
+    target_compile_definitions(sdrplay_module_bad PRIVATE SDRPLAY_BAD_ABI_FIXTURE)
+    target_compile_definitions(sdrplay_module_empty PRIVATE SDRPLAY_EMPTY_FIXTURE)
+    add_executable(sdrplay_runtime_probe tests/sdrplay_runtime_probe.cpp
+        src/SdrplayRuntime.cpp src/SdrplayProfile.cpp)
+    set_target_properties(sdrplay_runtime_probe PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test-fixtures/sdrplay/probe")
+    target_include_directories(sdrplay_runtime_probe PRIVATE include)
+    target_compile_definitions(sdrplay_runtime_probe PRIVATE HAVE_SOAPYSDR)
+    target_link_libraries(sdrplay_runtime_probe PRIVATE SoapySDR Qt6::Core Advapi32)
+    add_dependencies(sdrplay_runtime_probe sdrplay_api_fixture sdrplay_module_good
+        sdrplay_module_bad sdrplay_module_empty)
+    add_dependencies(sdr_town_tests sdrplay_runtime_probe)
+    foreach(scenario legacy-abi retry invalid-api unicode-api path-layout)
+      add_test(NAME SdrplayRuntime-${scenario} COMMAND sdrplay_runtime_probe
+          ${scenario} "$<TARGET_FILE:sdrplay_api_fixture>" "$<TARGET_FILE:sdrplay_module_good>"
+          "$<TARGET_FILE:sdrplay_module_bad>" "$<TARGET_FILE:sdrplay_module_empty>")
+      set_tests_properties(SdrplayRuntime-${scenario} PROPERTIES TIMEOUT 30
+          ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${PROJECT_NAME}>")
+    endforeach()
+  endif()
+
   add_executable(sdr_town_workspace_tests tests/test_workspace.cpp src/WorkspaceLayout.cpp
     tests/test_inmarsat_replay_gui.cpp src/InmarsatReplayDialog.cpp
     src/InmarsatReplay.cpp src/InmarsatIqFile.cpp src/InmarsatPipeline.cpp
@@ -537,6 +578,35 @@ if(BUILD_TESTS)
   target_include_directories(sdr_town_workspace_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/external/miniaudio)
   target_link_libraries(sdr_town_workspace_tests PRIVATE Catch2::Catch2 Qt6::Widgets nlohmann_json::nlohmann_json sdr_town_tones sdr_inmarsat_native sdr_inmarsat_audio sdr_inmarsat_map)
   add_test(NAME WorkspaceTests COMMAND sdr_town_workspace_tests)
+
+  # DEC-0123: real widget/engine with a hardware-free DeviceManager backend.
+  # Reuse core build inputs, not copies/stubs of the selection/receiver logic.
+  get_target_property(inmarsat_gui_sources sdr_town_tests SOURCES)
+  list(FILTER inmarsat_gui_sources EXCLUDE REGEX "(^|/)tests/")
+  get_target_property(inmarsat_gui_libs sdr_town_tests LINK_LIBRARIES)
+  list(REMOVE_ITEM inmarsat_gui_libs Catch2::Catch2WithMain)
+  add_executable(inmarsat_live_gui_tests tests/test_inmarsat_live_gui.cpp
+      ${inmarsat_gui_sources} src/InmarsatWidget.cpp include/InmarsatWidget.h
+      src/InmarsatWatchUi.cpp src/InmarsatWatchSpectrum.cpp include/InmarsatWatchSpectrum.h
+      src/InmarsatReplayDialog.cpp)
+  foreach(property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS)
+    get_target_property(value sdr_town_tests ${property})
+    if(property STREQUAL "COMPILE_DEFINITIONS")
+      list(REMOVE_ITEM value HAVE_SOAPYSDR)
+    endif()
+    if(value)
+      set_property(TARGET inmarsat_live_gui_tests PROPERTY ${property} "${value}")
+    endif()
+  endforeach()
+  target_link_libraries(inmarsat_live_gui_tests PRIVATE ${inmarsat_gui_libs}
+      Catch2::Catch2 Qt6::Widgets sdr_inmarsat_map)
+  set_target_properties(inmarsat_live_gui_tests PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test-fixtures/inmarsat-gui")
+  add_test(NAME InmarsatLiveGui COMMAND inmarsat_live_gui_tests "[inmarsat][gui]")
+  add_test(NAME InmarsatHostLifecycle COMMAND inmarsat_live_gui_tests "[.inmarsat-host]")
+  set_tests_properties(InmarsatLiveGui InmarsatHostLifecycle PROPERTIES TIMEOUT 60
+      ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QWindowsIntegrationPlugin>"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${PROJECT_NAME}>")
 
   # CLI black-box tests via PowerShell harness (run manually or in CI)
   message(STATUS "Tests enabled. Run 'ctest' for C++ units. Use tests/run_cli_tests.ps1 for end-to-end CLI tests.")

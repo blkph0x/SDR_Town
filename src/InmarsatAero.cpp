@@ -97,7 +97,7 @@ struct InmarsatAero::Impl {
                 ++stats.voiceWords;
             }
             stats.pcmSamples+=pcm.size();
-            if(hasSpeech) stats.lastVoiceSample=stats.input48k;
+            if(hasSpeech) {stats.lastVoiceSample=stats.input48k;++stats.speechFrames;}
             if(pcmSink) pcmSink(pcm,stats.aes);
         });
         auto soft=[this](const QVector<short>& bits) {

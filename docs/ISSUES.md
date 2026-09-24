@@ -2,6 +2,60 @@
 
 Never delete a row. Close with a commit hash and a sentence.
 
+## ISS-0020 - Inmarsat tone-only report (2026-09-25, OPEN)
+
+DEC-0123: confirmed live selection and ordinary Listen ownership bugs. A local
+old synthetic replay log has zero voice/PCM and cannot diagnose the remote
+report. Need tester frequency, live vs replay, selected decoder, fresh Inmarsat
+JSONL and preferably the same IQ producing voice in JAERO. Do not equate an
+8 kHz PCM stream or public reference silence/tone with intelligible speech.
+
+Local DEC-0123 repairs complete, not yet published: manual Tune/Start selection,
+panel-open persistence, paired host takeover, default-output visibility and
+bounded PCM diagnostics. GUI 33 assertions plus 20 hardware-free takeover
+assertions pass; 20 focused native/replay tests pass. Reference PCM unchanged
+in GUI/CLI fast/paced and staged execution. Await the actual tester IQ/log before
+closing the field report or claiming audible speech is fixed.
+
+## ISS-0019 - SSTV active-producer detach test can stall (2026-09-25, FIXED)
+
+DEC-0125 repair: pending control admission quiesces new publishers before waiting
+on the feed mutex; matching-session stop semantics remain unchanged. Ten unchanged
+isolated stress runs pass in 0.062-0.079 s and full CTest passes 11/11. Earlier
+evidence below remains the historical record; no physical RF claim is inferred.
+
+During DEC-0122 final regression repetition, UnitTests stalled and was stopped
+after 246.34 s (no assertion failure before termination). Non-invasive CDB
+snapshot shows the main thread waiting in Mtx_lock while one worker continues
+float processing. A fixed-seed duration run then stalls after the preceding
+case; test listing identifies "SSTV receiver detach quiesces an active producer".
+Running that case alone also exceeds a 20 s subprocess deadline and is killed.
+Its test launches an unthrottled producer and performs 100 attach/detach cycles.
+SstvReceiverFeed serializes lifecycle and publish using the same mutex; a
+starvation/lifecycle audit is needed. Do not claim an exact production cause
+from the Release stack, which lacks private function symbols.
+
+The SSTV feed/input/test sources are byte-identical to base 825dae2 and the
+isolated test does not call SDRplay. Initial full suite passed, so this is an
+intermittent qualification gap, not a silently waived pass. Remaining 389 core
+cases: 387 passed / 2 optional skips, 206298 assertions. All final SDRplay/GUI/
+Rust gates pass. No SSTV or P25 change made in the SDRplay-only repair.
+Evidence: build-audit-20260925/sdrplay-test-stack.log, sdrplay-ctest-final.log,
+sdrplay-core-durations.log, sstv-detach-isolated.log, sdrplay-core-remainder.log.
+
+## ISS-0018 - SDRplay runtime discovery/registration gaps (2026-09-25, OPEN)
+
+DEC-0122 / T-0049. Missing candidate layouts, startup-only API dependency load,
+false success on module registration errors and repeated alternate-module loads.
+The local CLI's API-open failure is confirmed alongside an absent service/RSP;
+the affected tester's failure is not yet confirmed without model/version/log.
+Add executable DLL-loader regression tests and explicit runtime/service diagnostics.
+Repair implemented locally: five loader tests plus full CTest pass, actual CLI
+registers installed Pothos module and identifies absent vendor service. API/module
+load and registration are separate stages; successful factory is retained,
+failed discovery retries. Open pending the affected PC's RSP discovery/RX
+acceptance; not claiming that the local missing service explains its failure.
+
 ## ISS-0016 - Inmarsat voice qualification and follow lifecycle (2026-09-24, OPEN)
 
 DEC-0121 update: real pinned continuous/burst modem/FEC/CRC and isolated mini-m

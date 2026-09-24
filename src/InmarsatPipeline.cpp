@@ -9,7 +9,7 @@ struct InmarsatPipeline::Native {
     std::unique_ptr<InmarsatChannelizer> channelizer;
     InmarsatAero::MessageSink messageSink;
     InmarsatAero::PcmSink pcmSink;
-    uint64_t validated=0, failed=0, voice=0, pcm=0, rejected=0, corrections=0, repeats=0, mutes=0;
+    uint64_t validated=0, failed=0, voice=0, pcm=0, rejected=0, corrections=0, repeats=0, mutes=0, speech=0;
     std::vector<InmarsatMessage> positions;
     void reset(int bitRate,double rate,double offset,double channel,bool burst) {
         aero.reset(); channelizer.reset(); positions.clear();
@@ -92,6 +92,7 @@ void InmarsatPipeline::process(const std::complex<float>* iq, size_t count,
         native_->validated+=after.crcOk-before.crcOk;
         native_->failed+=after.crcBad-before.crcBad;
         native_->voice+=after.voiceWords-before.voiceWords;
+        native_->speech+=after.speechFrames-before.speechFrames;
         native_->pcm+=after.pcmSamples-before.pcmSamples;
         native_->rejected+=after.rejectedCFrames-before.rejectedCFrames;
         native_->corrections+=after.codecErrors-before.codecErrors;
@@ -126,6 +127,7 @@ nlohmann::json InmarsatPipeline::report() const {
         {"processingMs", totalMs_}, {"maxBlockMs", maxMs_}, {"peakComponent", peak_},
         {"rms", samples_ ? std::sqrt(sumPower_ / samples_) : 0},
         {"protocolLock", s.locked}, {"validatedFrames", native_->validated}, {"voiceFrames", native_->voice},
+        {"speechFrames",native_->speech},
         {"crcFailed",native_->failed},{"rejectedCFrames",native_->rejected},
         {"codecCorrections",native_->corrections},{"codecRepeats",native_->repeats},{"codecMutes",native_->mutes},
         {"positions",positions},{"pcmSamples", native_->pcm},

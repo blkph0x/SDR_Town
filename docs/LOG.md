@@ -1,5 +1,56 @@
 # Development log
 
+## 2026-09-25 - Saved Aero watch implementation and release preparation
+
+DEC-0124 / T-0052: pinned InmarScope comparison; saved click-to-place channels,
+independent grouped decoding, configurable fresh-position/voice cycle and stable
+speaker focus. Same native Aero live/replay chain; no P25 edits. Atomic settings,
+local transition/load logs and opt-in scalar remote diagnostics; stale map age.
+Measured four-channel overload led to two-channel default, not hidden IQ drops.
+DEC-0125 closes SSTV feed starvation gate with control admission and ten unchanged
+stress repetitions. Full local suite green; Windows Actions/public assets still
+must pass before tester delivery is declared complete. Field Aero speech and
+physical RSP qualification remain open; no corresponding tester capture provided.
+
+## 2026-09-25 - Inmarsat tone-only report: confirmed selection/routing repairs
+
+DEC-0123 / T-0051 / ISS-0020. Found panel-open overwriting saved voice settings,
+Start ignoring visible frequency/decoder, and an Inmarsat tuner lease without
+parking the main Listen audio producer. Fixed these isolated paths, including
+failed-start restore and queued failure cleanup. Added actual PCM/output-device
+status and opt-in scalar diagnostics; no vocoder, P25 or analog DSP changes.
+
+Local Release and staging rebuilt. Focused 20-case suite, live GUI controls,
+host refusal/failure/restore tests and all other CTest targets pass. Remaining
+core suite passes with the one pre-existing ISS-0019 SSTV stall explicitly
+excluded. Public GUI/CLI fast/paced and clean-path staged replays preserve WAV
+bytes. Documentation and CI/release test coverage updated. SDRplay repair work
+already present in the tree was preserved. Nothing pushed to GitHub here.
+
+The actual tone report remains unqualified: requested frequency, live/replay
+mode, matching JSONL and short known-clear IQ/JAERO reference. Do not claim
+clear conversation from the mostly-silent public sample or these routing tests.
+
+## 2026-09-25 - SDRplay discovery/runtime repair
+
+DEC-0122 / T-0049 / ISS-0018. Support was not removed: inspected older/current
+portable ZIPs all rely on an installed SDRplay API + SoapySDRPlay3. Corrected
+missing candidate layouts, pre-main-only API loading, false registration success
+and repeated alternate-module loads before opening. Added precise API/module/
+service diagnostics and isolated failure/recovery tests. No P25, demodulator,
+gain, tuning or sample/audio-buffer changes.
+
+Four builds, full CTest 9/9, five loader scenarios, 16 package checks and exact
+protected-file comparison pass. Local actual CLI finds the module and reports
+the missing SDRplay service; no RSP is attached, so hardware acceptance is
+pending. Asked for affected model/version/status/log. Rebuilt local Release;
+source changes are not yet committed/published and no release asset was pushed.
+Clean staging CLI also passes without developer paths; test DLLs are excluded.
+Final repeated full gate stalled in the unchanged SSTV active-producer detach
+test (ISS-0019), reproduced alone under a 20 s deadline. All five SDRplay cases,
+GUI/backend gates and remaining core cases pass; the stalled case is explicitly
+reported, not counted as a pass. No unrelated SSTV fix or release publication.
+
 ## 2026-09-24 - Native Aero tester release 0.2.92 published
 
 Source 7e6eed7, signed release metadata/tag 08c59d0, GitHub release 395703721.

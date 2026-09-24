@@ -105,7 +105,7 @@ std::string rfNotchUiTooltip();
 std::string extRefUiLabel(const std::string& model);
 std::string extRefUiTooltip(const std::string& model);
 
-// Windows runtime discovery candidates.  The first existing candidate wins.
+// Ordered Windows candidates. Runtime validates load/architecture/registration.
 std::vector<std::string> windowsApiCandidates(const std::string& appDir);
 std::vector<std::string> windowsSoapyModuleCandidates(const std::string& appDir);
 

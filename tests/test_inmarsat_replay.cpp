@@ -182,6 +182,17 @@ TEST_CASE("Inmarsat remote summaries exclude recording and aircraft data", "[inm
         {"inputPath", "private"}, {"error", "private path"}, {"aesId", 123}, {"centerHz", 1542935000},
         {"position", {1, 2}}, {"iq", {1, 2}}, {"audio", {1, 2}}, {"state", "complete"}});
     CHECK(j.size() == 3); CHECK(j["processedSampleCount"] == 123); CHECK_FALSE(j.contains("inputPath"));
+    const auto audio = InmarsatDiagnostics::remotePayload({{"audio", {
+        {"pcmReceived", 160}, {"pcmNonzero", 12}, {"pcmPeak", 100}, {"pcmRms", 2.5},
+        {"speakerRequested", true}, {"speakerRunning", false}, {"speakerFailed", true},
+        {"speakerConsumed", 0}, {"speakerError", "private device"}, {"wavPath", "private"},
+        {"pcm", {1,2,3}}}}});
+    CHECK(audio.size() == 8);
+    CHECK(audio["pcmReceived"] == 160);
+    CHECK(audio["speakerFailed"] == true);
+    CHECK_FALSE(audio.contains("pcm"));
+    CHECK_FALSE(audio.contains("wavPath"));
+    CHECK_FALSE(audio.contains("speakerError"));
 }
 
 TEST_CASE("Inmarsat diagnostics enforce per-session consent and bounded remote cadence", "[inmarsat][replay]") {

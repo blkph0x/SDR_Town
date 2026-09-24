@@ -54,7 +54,7 @@ Invoke-Checked python @('scripts/test_verify_release.py')
 # 1. Ensure clean branded build
 Write-Host "`n[1/6] Running clean deploy + windeployqt + cpack..." -ForegroundColor Yellow
 Invoke-Checked cmake @('-S', '.', '-B', 'build', '-DSDR_TOWN_ENABLE_SSTV_IMAGES=ON')
-Invoke-Checked cmake @('--build', 'build', '--config', 'Release', '--target', 'deploy', 'sdr_town_tests', 'sdr_town_workspace_tests', '-j', '4')
+Invoke-Checked cmake @('--build', 'build', '--config', 'Release', '--target', 'deploy', 'sdr_town_tests', 'sdr_town_workspace_tests', 'inmarsat_live_gui_tests', '-j', '4')
 Invoke-Checked ctest @('--test-dir', 'build', '-C', 'Release', '--output-on-failure')
 
 $qtWindeploy = "C:\Qt\6.11.1\msvc2022_64\bin\windeployqt.exe"

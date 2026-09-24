@@ -166,6 +166,17 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Unsafe ZIP path'):
             self.run_verify()
 
+    def test_sdrplay_fixture_is_never_packaged(self):
+        for name in ('sdrplay_api.dll', 'sdrplay_module_good.dll', 'sdrplay_runtime_probe.exe',
+                     'test-fixtures/another.dll'):
+            with self.subTest(name=name):
+                self.write_portable()
+                with zipfile.ZipFile(self.portable, 'a') as archive:
+                    archive.writestr(name, b'loader test only')
+                self.write_sums()
+                with self.assertRaisesRegex(ValueError, 'SDRplay test fixture'):
+                    self.run_verify()
+
     def test_stale_rtl(self):
         (self.root / 'build/vcpkg_installed/x64-windows/bin/rtlsdr.dll').write_bytes(b'new runtime')
         with self.assertRaisesRegex(ValueError, 'RTL runtime differs'):

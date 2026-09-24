@@ -40,11 +40,23 @@ nlohmann::json InmarsatDiagnostics::remotePayload(const nlohmann::json& details)
          "aeroVocoderAvailable", "state", "errorCode", "positionSamples", "totalSamples", "realTime"}) {
         if (details.contains(key) && details[key].is_primitive()) result[key] = details[key];
     }
-    for(const char* key:{"crcFailed","rejectedCFrames","codecCorrections","codecRepeats","codecMutes","softBits"})
+    for(const char* key:{"crcFailed","rejectedCFrames","codecCorrections","codecRepeats","codecMutes","softBits","speechFrames"})
         if(details.contains(key) && details[key].is_number()) result[key]=details[key];
+    if(details.contains("watch") && details["watch"].is_object()) {
+        const auto& watch=details["watch"];
+        for(const char* key:{"group","groups","visitPositions","positionTarget","switches","iqGaps","groupSeconds",
+            "processingSeconds","inputSeconds","loadRatio","maxBlockMs"})
+            if(watch.contains(key) && watch[key].is_number())result[std::string("watch_")+key]=watch[key];
+        if(watch.contains("refreshDue") && watch["refreshDue"].is_boolean())result["watch_refreshDue"]=watch["refreshDue"];
+        // Never transmit watch frequencies, channel labels, AES IDs or decoded positions.
+    }
     if(details.contains("audio") && details["audio"].is_object())
-        for(const char* key:{"speakerQueued","speakerDropped","speakerZeroFill","wavSamples"})
+        for(const char* key:{"speakerQueued","speakerDropped","speakerZeroFill","speakerConsumed",
+                            "pcmReceived","pcmNonzero","pcmPeak","pcmRms","wavSamples"})
             if(details["audio"].contains(key) && details["audio"][key].is_number())result[key]=details["audio"][key];
+    if(details.contains("audio") && details["audio"].is_object())
+        for(const char* key:{"speakerRequested","speakerRunning","speakerFailed"})
+            if(details["audio"].contains(key) && details["audio"][key].is_boolean())result[key]=details["audio"][key];
     return result;
 }
 void InmarsatDiagnostics::write(const char* event, const nlohmann::json& details, bool final) {

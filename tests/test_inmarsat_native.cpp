@@ -94,3 +94,26 @@ TEST_CASE("Concurrent Aero streams have independent ECC and synthesis", "[inmars
     auto a=std::async(std::launch::async,decode),b=std::async(std::launch::async,decode);
     CHECK(a.get()==expected);CHECK(b.get()==expected);
 }
+
+TEST_CASE("Aero audio diagnostics distinguish no PCM from silence and muted output", "[inmarsat][native]") {
+    InmarsatAudio audio(false, {});
+    CHECK(audio.report()["pcmReceived"] == 0);
+    CHECK_FALSE(audio.report()["speakerRequested"].get<bool>());
+    std::array<int16_t,160> silence{};
+    audio.push(silence);
+    CHECK(audio.report()["pcmReceived"] == 160);
+    CHECK(audio.report()["pcmNonzero"] == 0);
+    CHECK(audio.report()["pcmRms"] == 0.0);
+    const std::array<int16_t,4> pcm{0,32767,-32768,-1};
+    audio.push(pcm);
+    audio.discardPlayback();
+    const auto report = audio.report();
+    CHECK(report["pcmReceived"] == 164);
+    CHECK(report["pcmNonzero"] == 3);
+    CHECK(report["pcmPeak"] == 32768);
+    CHECK(report["pcmRms"].get<double>() == Catch::Approx(std::sqrt((32767.0*32767+32768.0*32768+1)/164)));
+    CHECK(report["speakerConsumed"] == 0);
+    CHECK(report["speakerQueued"] == 0);
+    CHECK_FALSE(report["speakerRunning"].get<bool>());
+    CHECK_FALSE(report["speakerFailed"].get<bool>());
+}

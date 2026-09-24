@@ -55,78 +55,85 @@ void appendRoot(std::vector<std::string>& roots, const std::string& base,
                 const std::string& suffix = {}) {
     if (base.empty()) return;
     std::string value = base;
+    if (value.size() >= 2 && value.front() == '"' && value.back() == '"')
+        value = value.substr(1, value.size() - 2);
     while (!value.empty() && (value.back() == '\\' || value.back() == '/')) value.pop_back();
+    if (value.empty()) return;
     if (!suffix.empty()) value += suffix;
     appendUnique(roots, value);
 }
 
-std::vector<std::string> windowsSoapyRoots() {
-    std::vector<std::string> roots;
-
-    // Explicit overrides are first so portable and managed installations win.
-    if (const char* api = std::getenv("SDRPLAY_API_DIR"); api && *api)
-        appendRoot(roots, api);
-    if (const char* root = std::getenv("SOAPY_SDR_ROOT"); root && *root)
-        appendRoot(roots, root);
-
+std::string environmentPath(const char* name) {
 #ifdef _WIN32
-    // The official API installer records its real install directory here.
-    // Check both registry views so a 64-bit portable build also finds API
-    // installations written by a 32-bit installer helper.
-    const auto appendRegistryInstall = [&](REGSAM view) {
-        HKEY key = nullptr;
-        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
-                          "SOFTWARE\\SDRplay\\Service\\API",
-                          0, KEY_READ | view, &key) != ERROR_SUCCESS || !key) return;
-        char value[32768]{};
-        DWORD type = 0;
-        DWORD bytes = static_cast<DWORD>(sizeof(value));
-        const LSTATUS status = RegQueryValueExA(
-            key, "Install_Dir", nullptr, &type,
-            reinterpret_cast<LPBYTE>(value), &bytes);
-        RegCloseKey(key);
-        if (status != ERROR_SUCCESS || bytes <= 1 ||
-            (type != REG_SZ && type != REG_EXPAND_SZ)) return;
-        std::string installDir(value);
-        if (type == REG_EXPAND_SZ) {
-            char expanded[32768]{};
-            const DWORD n = ExpandEnvironmentStringsA(
-                installDir.c_str(), expanded, static_cast<DWORD>(sizeof(expanded)));
-            if (n > 0 && n <= sizeof(expanded)) installDir.assign(expanded);
-        }
-        appendRoot(roots, installDir);
-    };
-    appendRegistryInstall(KEY_WOW64_64KEY);
-    appendRegistryInstall(KEY_WOW64_32KEY);
+    const std::wstring wideName(name, name + std::char_traits<char>::length(name));
+    const wchar_t* value = _wgetenv(wideName.c_str());
+    if (!value) return {};
+    const int count = WideCharToMultiByte(CP_UTF8, 0, value, -1, nullptr, 0, nullptr, nullptr);
+    if (count <= 1) return {};
+    std::string out(size_t(count), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, value, -1, out.data(), count, nullptr, nullptr);
+    out.pop_back();
+    return out;
+#else
+    const char* value = std::getenv(name);
+    return value ? value : "";
 #endif
+}
 
-    const char* programFiles64 = std::getenv("ProgramW6432");
-    if (!programFiles64 || !*programFiles64) programFiles64 = std::getenv("ProgramFiles");
-    if (programFiles64 && *programFiles64) {
-        appendRoot(roots, programFiles64, "\\SDRplay");
-        appendRoot(roots, programFiles64, "\\SDRplay\\API");
-        appendRoot(roots, programFiles64, "\\PothosSDR");
+std::vector<std::string> windowsApiRoots() {
+    std::vector<std::string> roots;
+    appendRoot(roots, environmentPath("SDRPLAY_API_DIR"));
+    appendRoot(roots, environmentPath("SDRPLAY_ROOT"));
+#ifdef _WIN32
+    // DEC-0122: official Install_Dir in both views, including per-user installs.
+    for (HKEY hive : {HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER}) {
+        for (REGSAM view : {KEY_WOW64_64KEY, KEY_WOW64_32KEY}) {
+            HKEY key = nullptr;
+            if (RegOpenKeyExW(hive, L"SOFTWARE\\SDRplay\\Service\\API",
+                             0, KEY_READ | view, &key) != ERROR_SUCCESS) continue;
+            wchar_t value[32768]{};
+            DWORD type = 0, bytes = sizeof(value) - sizeof(wchar_t);
+            const auto result = RegQueryValueExW(key, L"Install_Dir", nullptr, &type,
+                                                reinterpret_cast<BYTE*>(value), &bytes);
+            RegCloseKey(key);
+            if (result != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ)) continue;
+            std::wstring path(value);
+            if (type == REG_EXPAND_SZ) {
+                wchar_t expanded[32768]{};
+                const DWORD n = ExpandEnvironmentStringsW(path.c_str(), expanded, 32768);
+                if (n == 0 || n > 32768) continue;
+                path = expanded;
+            }
+            const int n = WideCharToMultiByte(CP_UTF8, 0, path.c_str(), -1, nullptr, 0, nullptr, nullptr);
+            if (n <= 1) continue;
+            std::string utf8(size_t(n), '\0');
+            WideCharToMultiByte(CP_UTF8, 0, path.c_str(), -1, utf8.data(), n, nullptr, nullptr);
+            utf8.pop_back();
+            appendRoot(roots, utf8);
+        }
     }
+#endif
+    return roots;
+}
 
-    if (const char* programFiles = std::getenv("ProgramFiles"); programFiles && *programFiles) {
-        appendRoot(roots, programFiles, "\\SDRplay");
-        appendRoot(roots, programFiles, "\\SDRplay\\API");
-        appendRoot(roots, programFiles, "\\PothosSDR");
+std::vector<std::string> windowsSoapyRoots() {
+    auto roots = windowsApiRoots();
+    appendRoot(roots, environmentPath("SOAPY_SDR_ROOT"));
+    appendRoot(roots, environmentPath("POTHOS_ROOT"));
+    appendRoot(roots, environmentPath("CONDA_PREFIX"), "\\Library");
+    appendRoot(roots, environmentPath("USERPROFILE"), "\\radioconda\\Library");
+    appendRoot(roots, environmentPath("LOCALAPPDATA"), "\\radioconda\\Library");
+    for (const char* name : {"ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"}) {
+        const auto base = environmentPath(name);
+        appendRoot(roots, base, "\\SDRplay");
+        appendRoot(roots, base, "\\SDRplay\\API");
+        appendRoot(roots, base, "\\PothosSDR");
     }
-    if (const char* programFilesX86 = std::getenv("ProgramFiles(x86)");
-        programFilesX86 && *programFilesX86) {
-        appendRoot(roots, programFilesX86, "\\PothosSDR");
-    }
-    if (const char* programData = std::getenv("ProgramData"); programData && *programData)
-        appendRoot(roots, programData, "\\radioconda\\Library");
-
-    // Deterministic fallbacks retain compatibility with existing installations
-    // and make candidate generation testable on non-Windows CI hosts.
-    appendRoot(roots, "C:\\Program Files\\SDRplay");
-    appendRoot(roots, "C:\\Program Files\\SDRplay\\API");
-    appendRoot(roots, "C:\\Program Files\\PothosSDR");
-    appendRoot(roots, "C:\\Program Files (x86)\\PothosSDR");
-    appendRoot(roots, "C:\\ProgramData\\radioconda\\Library");
+    appendRoot(roots, environmentPath("ProgramData"), "\\radioconda\\Library");
+    for (const char* base : {"C:\\Program Files\\SDRplay", "C:\\Program Files\\SDRplay\\API",
+             "C:\\Program Files\\PothosSDR", "C:\\Program Files (x86)\\SDRplay\\API",
+             "C:\\Program Files (x86)\\PothosSDR", "C:\\ProgramData\\radioconda\\Library"})
+        appendRoot(roots, base);
     return roots;
 }
 
@@ -172,59 +179,7 @@ std::string formatFrequency(double hz) {
     return out.str();
 }
 
-#ifdef _WIN32
-std::string parentDirectory(const std::string& path) {
-    const auto split = path.find_last_of("\\/");
-    return split == std::string::npos ? std::string{} : path.substr(0, split);
-}
 
-std::string normalizedPath(std::string path) {
-    if (path.size() >= 2 && path.front() == '"' && path.back() == '"')
-        path = path.substr(1, path.size() - 2);
-    std::replace(path.begin(), path.end(), '/', '\\');
-    while (path.size() > 3 && path.back() == '\\') path.pop_back();
-    return toLower(path);
-}
-
-bool pathContainsDirectory(const std::string& pathList, const std::string& directory) {
-    const std::string wanted = normalizedPath(directory);
-    size_t begin = 0;
-    while (begin <= pathList.size()) {
-        const size_t end = pathList.find(';', begin);
-        const std::string entry = pathList.substr(
-            begin, end == std::string::npos ? std::string::npos : end - begin);
-        if (normalizedPath(entry) == wanted) return true;
-        if (end == std::string::npos) break;
-        begin = end + 1;
-    }
-    return false;
-}
-
-bool directoryExists(const std::string& path) {
-    if (path.empty()) return false;
-    const DWORD attrs = GetFileAttributesA(path.c_str());
-    return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
-}
-
-bool fileExists(const std::string& path) {
-    if (path.empty()) return false;
-    const DWORD attrs = GetFileAttributesA(path.c_str());
-    return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
-}
-
-void prependRuntimeDirectory(std::string& processPath, const std::string& directory) {
-    if (!directoryExists(directory) || pathContainsDirectory(processPath, directory)) return;
-    processPath = processPath.empty() ? directory : directory + ";" + processPath;
-}
-
-std::string executableDirectory() {
-    std::string path(32768, '\0');
-    const DWORD count = GetModuleFileNameA(nullptr, path.data(), static_cast<DWORD>(path.size()));
-    if (count == 0 || count >= path.size()) return {};
-    path.resize(count);
-    return parentDirectory(path);
-}
-#endif
 
 } // namespace
 
@@ -551,8 +506,8 @@ std::string extRefUiTooltip(const std::string& model) {
 
 std::vector<std::string> windowsApiCandidates(const std::string& appDir) {
     std::vector<std::string> paths;
-    appendUnique(paths, appDir + "\\sdrplay_api.dll");
-    for (const auto& root : windowsSoapyRoots()) {
+    const auto add = [&](const std::string& root) {
+        if (root.empty()) return;
         appendUnique(paths, root + "\\sdrplay_api.dll");
         appendUnique(paths, root + "\\bin\\sdrplay_api.dll");
         // The official API installer keeps the 64-bit DLL under API\\x64.
@@ -560,75 +515,41 @@ std::vector<std::string> windowsApiCandidates(const std::string& appDir) {
         appendUnique(paths, root + "\\x64\\sdrplay_api.dll");
         appendUnique(paths, root + "\\x86\\sdrplay_api.dll");
         appendUnique(paths, root + "\\arm64\\sdrplay_api.dll");
-    }
-    if (const char* systemRoot = std::getenv("SystemRoot"); systemRoot && *systemRoot)
-        appendUnique(paths, std::string(systemRoot) + "\\System32\\sdrplay_api.dll");
+    };
+    // Explicit/vendor installation wins over a stale DLL from another SDR bundle.
+    for (const auto& root : windowsApiRoots()) add(root);
+    add(appDir);
+    for (const auto& root : windowsSoapyRoots()) add(root);
+    const auto systemRoot = environmentPath("SystemRoot");
+    if (!systemRoot.empty()) appendUnique(paths, systemRoot + "\\System32\\sdrplay_api.dll");
     appendUnique(paths, "C:\\Windows\\System32\\sdrplay_api.dll");
     return paths;
 }
 
 std::vector<std::string> windowsSoapyModuleCandidates(const std::string& appDir) {
     std::vector<std::string> paths;
-    appendUnique(paths, appDir + "\\SoapySDRPlay3.dll");
-    appendUnique(paths, appDir + "\\sdrPlaySupport.dll");
-    for (const auto& root : windowsSoapyRoots()) {
-        appendUnique(paths, root + "\\sdrPlaySupport.dll");
-        appendUnique(paths, root + "\\bin\\sdrPlaySupport.dll");
-        appendUnique(paths, root + "\\lib\\SoapySDR\\modules0.8\\sdrPlaySupport.dll");
-        appendUnique(paths, root + "\\lib\\SoapySDR\\modules\\sdrPlaySupport.dll");
-        appendUnique(paths, root + "\\lib64\\SoapySDR\\modules0.8\\sdrPlaySupport.dll");
+    const auto addDirectory = [&](const std::string& directory) {
+        if (directory.empty()) return;
+        appendUnique(paths, directory + "\\SoapySDRPlay3.dll");
+        appendUnique(paths, directory + "\\sdrPlaySupport.dll");
+    };
+    std::istringstream pluginPaths(environmentPath("SOAPY_SDR_PLUGIN_PATH"));
+    for (std::string directory; std::getline(pluginPaths, directory, ';');) {
+        std::vector<std::string> normalized;
+        appendRoot(normalized, directory);
+        if (!normalized.empty()) addDirectory(normalized.front());
+    }
+    auto roots = windowsSoapyRoots();
+    roots.insert(roots.begin(), appDir);
+    for (const auto& root : roots) {
+        if (root.empty()) continue;
+        for (const char* suffix : {"", "\\bin", "\\lib\\SoapySDR\\modules0.8",
+                                  "\\lib\\SoapySDR\\modules", "\\lib64\\SoapySDR\\modules0.8"})
+            addDirectory(root + suffix);
     }
     return paths;
 }
 
-#ifdef _WIN32
-namespace {
 
-// DeviceManager asks Soapy to load sdrPlaySupport.dll during its first scan.
-// Preload the vendor API here so Windows can resolve that module's dependency
-// even when the official installer placed it in SDRplay\\API\\x64, which is not
-// normally on PATH. The handle intentionally lives for the process lifetime.
-HMODULE gSdrplayApiHandle = nullptr;
-
-struct WindowsSdrplayRuntimeBootstrap {
-    WindowsSdrplayRuntimeBootstrap() {
-        const std::string appDir = executableDirectory();
-        std::string processPath = std::getenv("PATH") ? std::getenv("PATH") : "";
-
-        prependRuntimeDirectory(processPath, appDir);
-        for (const auto& root : windowsSoapyRoots()) {
-            prependRuntimeDirectory(processPath, root);
-            prependRuntimeDirectory(processPath, root + "\\bin");
-            prependRuntimeDirectory(processPath, root + "\\x64");
-            prependRuntimeDirectory(processPath, root + "\\x86");
-            prependRuntimeDirectory(processPath, root + "\\arm64");
-        }
-        for (const auto& candidate : windowsApiCandidates(appDir)) {
-            if (fileExists(candidate))
-                prependRuntimeDirectory(processPath, parentDirectory(candidate));
-        }
-        _putenv_s("PATH", processPath.c_str());
-
-        gSdrplayApiHandle = GetModuleHandleA("sdrplay_api.dll");
-        if (gSdrplayApiHandle) return;
-
-        for (const auto& candidate : windowsApiCandidates(appDir)) {
-            if (!fileExists(candidate)) continue;
-            gSdrplayApiHandle = LoadLibraryExA(
-                candidate.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
-            if (gSdrplayApiHandle) return;
-
-            const std::string message =
-                "SDR Town: unable to preload " + candidate +
-                " (Win32 " + std::to_string(GetLastError()) + ")\n";
-            OutputDebugStringA(message.c_str());
-        }
-    }
-};
-
-const WindowsSdrplayRuntimeBootstrap gWindowsSdrplayRuntimeBootstrap;
-
-} // namespace
-#endif
 
 } // namespace SdrplayProfile

@@ -157,4 +157,10 @@ TEST_CASE("SdrplayProfile covers installed Windows runtime layouts", "[sdrplay]"
                     "C:\\Program Files (x86)\\PothosSDR\\lib\\SoapySDR\\modules0.8\\sdrPlaySupport.dll") != modules.end());
     CHECK(std::find(modules.begin(), modules.end(),
                     "C:\\ProgramData\\radioconda\\Library\\lib\\SoapySDR\\modules0.8\\sdrPlaySupport.dll") != modules.end());
+    CHECK(std::find(modules.begin(), modules.end(),
+                    "C:\\SDR Town\\lib\\SoapySDR\\modules0.8\\sdrPlaySupport.dll") != modules.end());
+    CHECK(std::find(modules.begin(), modules.end(),
+                    "C:\\SDR Town\\lib64\\SoapySDR\\modules0.8\\SoapySDRPlay3.dll") != modules.end());
+    CHECK(std::find(api.begin(), api.end(),
+                    "C:\\Program Files (x86)\\SDRplay\\API\\x64\\sdrplay_api.dll") != api.end());
 }

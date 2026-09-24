@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -138,6 +139,17 @@ void run() {
     ):
         transformed = transformed.replace(block, replacement, 1)
     assert transformed != base_demod
+
+    # Exercise the exact digest-pair gate independently of Git history; both
+    # sides must match. Arbitrary setup-function or RF changes remain blocked.
+    import hashlib
+    before, after = "reviewed old loader", "reviewed new loader"
+    with patch.object(MODULE, "SDRPLAY_DEVICE_BEFORE", hashlib.sha256(before.encode()).hexdigest()), \
+         patch.object(MODULE, "SDRPLAY_DEVICE_AFTER", hashlib.sha256(after.encode()).hexdigest()):
+        assert MODULE.device_manager_sdrplay_text_allowed(before, after)
+        assert not MODULE.device_manager_sdrplay_text_allowed(before, after + "\nRF change")
+        assert not MODULE.device_manager_sdrplay_text_allowed(before + "\n", after)
+        assert not MODULE.device_manager_sdrplay_text_allowed(after, before)
 
     print("P25 guard self-test passed")
     return 0

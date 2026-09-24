@@ -4,6 +4,7 @@
 #include "InmarsatDemod.h"
 #include "InmarsatPipeline.h"
 #include "InmarsatMessageStore.h"
+#include "InmarsatWatch.h"
 
 #include <nlohmann/json.hpp>
 #include <atomic>
@@ -37,6 +38,7 @@ struct InmarsatEngineConfig {
     bool recordVoice = false;
     bool playAudio = true;
     std::string recordDir;
+    InmarsatWatchConfig watch;
 
     static InmarsatEngineConfig defaults();
     nlohmann::json toJson() const;
@@ -79,7 +81,7 @@ class InmarsatEngine {
 public:
     static InmarsatEngine& instance();
 
-    void setConfig(const InmarsatEngineConfig& cfg);
+    bool setConfig(const InmarsatEngineConfig& cfg);
     InmarsatEngineConfig config() const;
 
     bool start(bool force = false);
@@ -139,6 +141,7 @@ private:
     bool deviceConnected_ = false;
     size_t activeDeviceIndex_ = std::numeric_limits<size_t>::max();
     std::optional<PreviousDeviceState> previousDeviceState_;
+    bool hostTakeoverActive_ = false;
     std::vector<float> spectrumDb_;
     double spectrumCenterHz_ = 0.0;
     double spectrumRateHz_ = 0.0;
@@ -150,6 +153,7 @@ private:
     std::function<void()> updateCb_;
 
     InmarsatPipeline pipeline_;
+    std::unique_ptr<InmarsatWatchSession> watch_; // Worker-owned, including destruction.
     nlohmann::json pipelineReport_ = nlohmann::json::object();
     std::string diagnosticLog_;
     std::unique_ptr<Receiver> iqRx_;

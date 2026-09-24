@@ -1,6 +1,41 @@
 # Task list (canonical)
 
-T-0048 | in_progress | Native Inmarsat Aero voice and decoded-position map |
+T-0052 | in_progress | Saved multi-channel Aero watch and automatic position/voice cycle |
+DEC-0124. Reference comparison, bounded scheduler, independent per-channel DSP,
+single speaker focus, click-to-place GUI, atomic saved settings, diagnostic events,
+deterministic and GUI regression tests, then full release gates and tester assets.
+Keep P25 frozen. Do not claim live antenna/clear-conversation acceptance from
+synthetic events or reference silence. Resolve ISS-0019 before full release gate.
+
+T-0051 | awaiting_capture | Inmarsat tone-only report: live tuning and audio ownership |
+DEC-0123 / ISS-0020. Preserve manual voice selection, apply visible tuning on
+Start, park ordinary Listen audio during Inmarsat takeover, expose decoded-PCM
+and speaker state. Regression-test GUI and lifecycle; preserve reference PCM.
+Actual tester tone/clear speech remains unverified without matching IQ/logs.
+Local repair/build complete: 20 focused tests, actual live GUI controls and
+hardware-free takeover failure/restore tests pass. Four GUI/CLI pacing variants
+and a clean-path staged replay retain the reference WAV hash. P25 unchanged.
+
+T-0049 | awaiting_hardware | Restore reliable SDRplay runtime discovery and diagnostics |
+DEC-0122. Reproduce loader failures, verify actual factory registration, retry
+failed API discovery on Rescan, cover installed/portable layouts and architecture.
+No P25 DSP, sample delivery, tune sequencing or audio edits. Physical RSP acceptance
+requires the affected tester's model/version/log; local PC has no RSP/service.
+Implementation complete locally: app/core/GUI builds, full CTest 9/9, five
+executable loader failure/recovery cases, package verifier negatives and exact
+protected-pipeline comparison pass. Existing Pothos module registers and actual
+CLI reports missing service accurately. No claim of physical RSP acceptance.
+Final repeat uncovered separate ISS-0019: existing SSTV detach test can stall;
+eight other CTest targets and all remaining core cases pass. Do not treat the
+first 9/9 run as proof that the final repeated gate was fully green.
+
+T-0050 | done | Diagnose SSTV active-producer lifecycle starvation |
+ISS-0019 / DEC-0125. Control admission now prevents hot publishers starving
+detach/stats/finish. The unchanged stress case passes ten times in 0.062-0.079 s
+per run (before: 13.797 s this pass; earlier >246 s). Full CTest 11/11 passes.
+No test sleep or weakened assertion. RF SSTV image acceptance remains separate.
+
+T-0048 | awaiting_reference | Native Inmarsat Aero voice and decoded-position map |
 DEC-0121 / ISS-0016. Integrate pinned receive/FEC/Aero codec, shared IQ chain,
 validated ADS-C positions and map, sample-clocked output/replay tests. P25 frozen.
 Do not close on synthetic PCM or a build alone; record independent sample result.

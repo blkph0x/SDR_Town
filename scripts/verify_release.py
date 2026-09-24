@@ -52,6 +52,10 @@ def verify(root, version, installer):
                     f'Unsafe ZIP path: {name}')
             require(path.suffix.lower() not in ('.pem', '.key', '.pdb', '.log', '.wav', '.iq', '.cf32'),
                     f'Private/debug/capture artifact in ZIP: {name}')
+            require(not any('test-fixtures' == part.lower() for part in path.parts)
+                    and not path.name.lower().startswith(('sdrplay_module_', 'sdrplay_runtime_probe'))
+                    and path.name.lower() != 'sdrplay_api.dll',
+                    f'SDRplay test fixture or unapproved vendor DLL in ZIP: {name}')
         required = ('SDR_Town.exe', 'build-info.json', 'SdrTownControl.dll', 'sdrtown_rds_dsp.dll', 'rtlsdr.dll',
                     'SoapySDR.dll', 'SoapyRTLSDR.dll', 'Qt6Core.dll', 'Qt6Widgets.dll',
                     'platforms/qwindows.dll', 'licenses/rtlsdr-COPYRIGHT.txt',

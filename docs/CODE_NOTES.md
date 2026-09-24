@@ -1,5 +1,58 @@
 # Code notes (tree map)
 
+## Saved Aero watch and SSTV lifecycle (DEC-0124 / DEC-0125)
+
+- `InmarsatWatch`: validated saved channels/policy, rate-aware grouping, steady
+  clock scheduler, current-visit distinct positions, per-channel native pipelines,
+  stable single speaker focus, timing/gap/load reports. Worker-thread owned.
+- `InmarsatEngine`: confirmed group tune without lease churn; atomic config save,
+  IQ cursor/PCM reset after tune, lifecycle-owned session.
+- `InmarsatWatchUi` / `InmarsatWatchSpectrum`: real-only spectrum/waterfall,
+  absolute-frequency click mapping, saved list and bounded policy UI. Manual live
+  mode allows editing; running automatic session freezes its configuration.
+- `InmarsatMapWidget`: received position age/staleness, no extrapolation.
+- `InmarsatAero` / `InmarsatPipeline`: additive speech counter only, no DSP/FEC/
+  codec/PCM changes. `InmarsatDiagnostics` extends only the scalar allowlist.
+- `SstvReceiverFeed`: control admission barrier; matching-session ownership and
+  contention discontinuities preserved. Unchanged producer stress test retained.
+- Tests: scheduler/grouping/focus/privacy, actual GUI persistence/lifecycle,
+  release/reference replay and full CTest gates.
+
+## Inmarsat live tone routing (DEC-0123)
+
+- InmarsatWidget owns frequency/decoder controls, initializes them from saved
+  config without selecting a plan, and shares applyTuningControls for Tune and
+  Start. Explicit plan/channel actions resync; timer refresh preserves edits.
+- InmarsatEngine pairs SatcomHostServices begin/end with its tuner lease. No RF
+  start/retune occurs when the host refuses parking. Error cleanup is dispatched
+  to the GUI without blocking a worker join, and Start drains a prior failed
+  session before acquisition; a delayed cleanup cannot unpark an active session.
+- InmarsatAudio exposes producer-side PCM statistics and callback consumption,
+  keeping RF/IF distinct from decoded audio. InmarsatDiagnostics allowlists only
+  bounded numeric/boolean fields remotely. No DSP/codec or P25 changes.
+- tests/test_inmarsat_live_gui.cpp links the real widget/engine with a stub-only
+  DeviceManager build and no network adapter. GUI cases start with no devices;
+  the separate host lifecycle case enumerates only that stub backend. Generated
+  test settings are isolated and removed. CMake keeps the executable outside
+  portable/deploy assets. CI/release run both test selections.
+
+2026-09-25 / DEC-0122 SDRplay runtime:
+- SdrplayRuntime owns serialized API dependency/module registration. Windows
+  wide API load checks required exports; read-only SCM query reports service
+  state. Soapy loader-result plus find/make registry checks distinguish loaded
+  DLLs from accepted drivers. Failure is retryable; success lives until exit.
+- SdrplayProfile generates explicit/vendor/portable/conda/plugin-path candidates,
+  including per-user registry and Unicode API roots. Removed global constructor
+  and broad PATH mutation; existing model/capability/gain math unchanged.
+- DeviceManager setup and SDRplay-only pre-open module load use the same loader.
+  Discovery of physical devices remains in the existing enumeration flow.
+  No changes to stream samples, tuning, P25, audio or analog demodulation.
+- sdrplay_runtime_probe and isolated fake API/modules exercise loader errors,
+  retry, concurrency and path layouts. Test DLLs/executable live under
+  build/test-fixtures, not deployment. Windows CI runs the five CTest scenarios.
+- verify_no_p25_changes accepts only the exact reviewed whole-file digest pair;
+  extra RF changes remain rejected. Release verifier blocks fixture leakage.
+
 2026-09-24 / DEC-0121 native Aero:
 - external/aero pins MIT JAERO/JFFT, BSD libcorrect, ISC/MIT mini-m codec.
   Qt6 adaptation, per-instance modem scratch, strict CRC and bounded unpacking.

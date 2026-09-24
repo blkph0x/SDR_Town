@@ -1,6 +1,7 @@
 #include "DeviceManager.h"
 #include "Receiver.h"   // for getNewSamplesForReceiver(..., Receiver& rx, ... ) cursor update
 #include "SdrplayProfile.h"
+#include "SdrplayRuntime.h"
 #include "SdrplayDiversity.h"
 
 #include <spdlog/spdlog.h>
@@ -1081,21 +1082,9 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                 try { SoapySDR::loadModule("C:\\Program Files\\PothosSDR\\lib\\SoapySDR\\modules0.8\\rtlsdrSupport.dll"); } catch (...) {}
             }
             if (d.isSdrplay || SdrplayProfile::isSdrplayDriver(d.driver)) {
-                std::string appDir = QCoreApplication::applicationDirPath().toStdString();
-#ifdef _WIN32
-                for (const auto& module : SdrplayProfile::windowsSoapyModuleCandidates(appDir)) {
-                    if (GetFileAttributesA(module.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
-                    try {
-                        SoapySDR::loadModule(module);
-                    } catch (const std::exception& ex) {
-                        spdlog::debug("SDRplay stream module load skipped for {}: {}", module, ex.what());
-                    } catch (...) {
-                        spdlog::debug("SDRplay stream module load skipped for {}: unknown error", module);
-                    }
-                }
-#else
-                try { SoapySDR::loadModule(appDir + "/lib/SoapySDR/modules/sdrPlaySupport.so"); } catch (...) {}
-#endif
+                // Use the same verified factory as discovery; never load alternate modules here.
+                const auto runtime = SdrplayRuntime::ensure(QCoreApplication::applicationDirPath().toStdString());
+                if (!runtime.registered) throw std::runtime_error(runtime.description());
             }
 
             DeviceInfo liveInfo = d;
@@ -2588,163 +2577,10 @@ void DeviceManager::setupSoapyForRTLSDR() {
 }
 
 void DeviceManager::setupSoapyForSDRplay() {
-#ifdef _WIN32
-    std::string appDir = QCoreApplication::applicationDirPath().toStdString();
-    const char* sdrplayRoots[] = {
-        "C:\\Program Files\\SDRplay",
-        "C:\\Program Files\\SDRplay\\API",
-        "C:\\Program Files\\PothosSDR",
-        "C:\\Program Files (x86)\\PothosSDR",
-        "C:\\ProgramData\\radioconda\\Library",
-        nullptr
-    };
-    std::string currentPath = getenv("PATH") ? getenv("PATH") : "";
-    static bool sdrplayPathDone = false;
-    if (!sdrplayPathDone) {
-        std::string newPath = currentPath;
-        bool changed = false;
-        for (int i = 0; sdrplayRoots[i]; ++i) {
-            std::string root = sdrplayRoots[i];
-            std::string bin = root + "\\bin";
-            if (GetFileAttributesA(bin.c_str()) != INVALID_FILE_ATTRIBUTES &&
-                newPath.find(bin) == std::string::npos) {
-                newPath = bin + ";" + newPath;
-                changed = true;
-            }
-            if (GetFileAttributesA(root.c_str()) != INVALID_FILE_ATTRIBUTES &&
-                newPath.find(root) == std::string::npos) {
-                newPath = root + ";" + newPath;
-                changed = true;
-            }
-        }
-        if (newPath.find(appDir) == std::string::npos) {
-            newPath = appDir + ";" + newPath;
-            changed = true;
-        }
-        if (changed) {
-            _putenv_s("PATH", newPath.c_str());
-            spdlog::debug("Updated process PATH for SDRplay API / SoapySDRPlay");
-        }
-        sdrplayPathDone = true;
-    }
-
-    // Prefer an existing SOAPY_SDR_ROOT; otherwise point at Pothos/radioconda if present.
-    if (!getenv("SOAPY_SDR_ROOT") || !*getenv("SOAPY_SDR_ROOT")) {
-        const char* soapyRoots[] = {
-            "C:\\Program Files\\PothosSDR",
-            "C:\\Program Files (x86)\\PothosSDR",
-            "C:\\ProgramData\\radioconda\\Library",
-            nullptr
-        };
-        for (int i = 0; soapyRoots[i]; ++i) {
-            std::string modPath = std::string(soapyRoots[i]) + "\\lib\\SoapySDR\\modules";
-            std::string modPath08 = std::string(soapyRoots[i]) + "\\lib\\SoapySDR\\modules0.8";
-            if (GetFileAttributesA(modPath.c_str()) != INVALID_FILE_ATTRIBUTES ||
-                GetFileAttributesA(modPath08.c_str()) != INVALID_FILE_ATTRIBUTES) {
-                _putenv_s("SOAPY_SDR_ROOT", soapyRoots[i]);
-                break;
-            }
-        }
-    }
-#endif
-
-    bool apiPresent = false;
-    bool moduleLoaded = false;
-    bool deviceEnumerated = false;
-    std::string modulePath;
-    std::string moduleError;
-#ifdef _WIN32
-    const auto apiCandidates = SdrplayProfile::windowsApiCandidates(appDir);
-    for (const auto& candidate : apiCandidates) {
-        if (GetFileAttributesA(candidate.c_str()) != INVALID_FILE_ATTRIBUTES) {
-            apiPresent = true;
-            spdlog::debug("SDRplay API candidate found: {}", candidate);
-            break;
-        }
-    }
-#endif
-
-#ifdef HAVE_SOAPYSDR
-    static bool sdrplayModuleLoaded = false;
-    static std::string sdrplayModulePath;
-    static std::string sdrplayModuleError;
-    if (!sdrplayModuleLoaded) {
-        std::string appDir = QCoreApplication::applicationDirPath().toStdString();
-        sdrplayModuleError.clear();
-#ifdef _WIN32
-        for (const auto& bundled : SdrplayProfile::windowsSoapyModuleCandidates(appDir)) {
-            if (GetFileAttributesA(bundled.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
-            try {
-                const std::string loadError = SoapySDR::loadModule(bundled);
-                if (loadError.empty()) {
-                    sdrplayModuleLoaded = true;
-                    sdrplayModulePath = bundled;
-                    sdrplayModuleError.clear();
-                    spdlog::info("Loaded SDRplay Soapy module: {}", bundled);
-                    break;
-                }
-                sdrplayModuleError = bundled + ": " + loadError;
-                spdlog::warn("SDRplay Soapy module rejected {}: {}", bundled, loadError);
-            } catch (const std::exception& ex) {
-                sdrplayModuleError = bundled + ": " + ex.what();
-                spdlog::warn("SDRplay Soapy module load failed for {}: {}", bundled, ex.what());
-            } catch (...) {
-                sdrplayModuleError = bundled + ": unknown loader error";
-                spdlog::warn("SDRplay Soapy module load failed for {}: unknown error", bundled);
-            }
-        }
-#else
-        (void)appDir;
-#endif
-    }
-    moduleLoaded = sdrplayModuleLoaded;
-    modulePath = sdrplayModulePath;
-    moduleError = sdrplayModuleError;
-
-    // Confirm driver registration if possible.
-    try {
-        auto results = SoapySDR::Device::enumerate({{"driver", "sdrplay"}});
-        deviceEnumerated = !results.empty();
-        if (deviceEnumerated) {
-            moduleLoaded = true;
-            sdrplayModuleLoaded = true;
-            if (sdrplayModulePath.empty())
-                sdrplayModulePath = "registered SoapySDRPlay driver";
-            modulePath = sdrplayModulePath;
-            moduleError.clear();
-        }
-        if (moduleLoaded && !deviceEnumerated) {
-            spdlog::warn("SDRplay Soapy module is loaded, but no RSP was enumerated; "
-                         "check the SDRplay API service, USB connection, and exclusive access");
-        }
-    } catch (const std::exception& ex) {
-        spdlog::warn("SDRplay enumeration failed after module load: {}", ex.what());
-    } catch (...) {
-        spdlog::warn("SDRplay enumeration failed after module load: unknown error");
-    }
-#endif
-
-#ifndef _WIN32
-    // Non-Windows hosts still report status from Soapy enumeration above.
-    if (!apiPresent) apiPresent = moduleLoaded;
-#endif
-
-    if (apiPresent && moduleLoaded && deviceEnumerated) {
-        sdrplaySetupStatus_ = "SDRplay: API and SoapySDRPlay module ready; RSP detected";
-        if (!modulePath.empty()) sdrplaySetupStatus_ += " (" + modulePath + ")";
-    } else if (apiPresent && moduleLoaded) {
-        sdrplaySetupStatus_ = "SDRplay: API and SoapySDRPlay module loaded, but no RSP detected "
-                               "— check the API service, USB connection, and other SDR software";
-    } else if (apiPresent && !moduleLoaded && !moduleError.empty()) {
-        sdrplaySetupStatus_ = "SDRplay: SoapySDRPlay module failed to load — " + moduleError +
-                               " — install a matching 64-bit module, then Rescan";
-    } else if (!apiPresent && !moduleLoaded) {
-        sdrplaySetupStatus_ = "SDRplay: install SDRplay API 3.x and SoapySDRPlay3 (e.g. PothosSDR), then restart";
-    } else if (!apiPresent) {
-        sdrplaySetupStatus_ = "SDRplay: Soapy module present but SDRplay API DLL not found — install API 3.x from sdrplay.com";
-    } else {
-        sdrplaySetupStatus_ = "SDRplay: API found but SoapySDRPlay module missing — install PothosSDR/radioconda SoapySDRPlay3";
-    }
+    // DEC-0122: registration is distinct from finding/opening a physical RSP.
+    const auto runtime = SdrplayRuntime::ensure(QCoreApplication::applicationDirPath().toStdString());
+    for (const auto& error : runtime.errors) spdlog::warn("SDRplay runtime: {}", error);
+    sdrplaySetupStatus_ = runtime.description();
     spdlog::info("{}", sdrplaySetupStatus_);
 }
 

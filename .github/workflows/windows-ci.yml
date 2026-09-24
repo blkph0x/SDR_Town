@@ -22,6 +22,7 @@ jobs:
 
     env:
       VCPKG_DEFAULT_TRIPLET: x64-windows
+      GITHUB_EVENT_BEFORE: ${{ github.event.before }}
 
     steps:
       - name: Checkout
@@ -111,7 +112,7 @@ jobs:
         shell: pwsh
         run: |
           cmake --build build --config Release `
-            --target SDR_Town sdr_town_tests sdr_town_workspace_tests -j 4
+            --target SDR_Town sdr_town_tests sdr_town_workspace_tests inmarsat_live_gui_tests -j 4
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run core unit tests
@@ -126,6 +127,12 @@ jobs:
           if (-not $exe) { throw "sdr_town_tests.exe not found" }
           Write-Host "Running $exe"
           & $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run SDRplay loader and Inmarsat lifecycle tests
+        shell: pwsh
+        run: |
+          ctest --test-dir build -C Release -R "SdrplayRuntime|InmarsatLiveGui|InmarsatHostLifecycle" --output-on-failure --no-tests=error
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run Qt workspace and live-decoder tests

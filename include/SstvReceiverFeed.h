@@ -15,4 +15,5 @@ private:
     mutable std::mutex mutex_;
     std::shared_ptr<SstvLiveInput> input_;
     std::atomic<bool> attached_{false},missed_{false};
+    mutable std::atomic<unsigned> controlPending_{0};
 };

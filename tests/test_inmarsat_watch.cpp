@@ -1,0 +1,148 @@
+#include <catch2/catch_test_macros.hpp>
+#include "InmarsatWatch.h"
+#include "InmarsatDiagnostics.h"
+#include <limits>
+#include <iostream>
+#include <array>
+
+namespace {
+InmarsatWatchConfig example() {
+    InmarsatWatchConfig c;c.enabled=true;
+    c.channels={{"data","Position",1542e6,10500,true},{"voice","Voice",1543e6,8400,true}};
+    return c;
+}
+}
+TEST_CASE("Aero watch settings are bounded and round trip", "[inmarsat][watch]") {
+    auto c=example();c.channels.push_back({"burst","Burst",1544e6,-1200,false});
+    REQUIRE(InmarsatWatchConfig::fromJson(c.toJson()).toJson()==c.toJson());
+    SECTION("duplicate ID") {c.channels[1].id=c.channels[0].id;REQUIRE_THROWS(c.validate());}
+    SECTION("duplicate frequency and rate") {c.channels[1].frequencyHz=c.channels[0].frequencyHz;c.channels[1].rate=10500;REQUIRE_THROWS(c.validate());}
+    SECTION("invalid rate") {c.channels[1].rate=4800;REQUIRE_THROWS(c.validate());}
+    SECTION("nonfinite") {c.channels[1].frequencyHz=std::numeric_limits<double>::quiet_NaN();REQUIRE_THROWS(c.validate());}
+    SECTION("invalid timing") {c.maxVoiceSeconds=10;REQUIRE_THROWS(c.validate());}
+    SECTION("invalid JSON") {REQUIRE_THROWS(InmarsatWatchConfig::fromJson({{"channels",false}}));}
+    SECTION("empty selection") {for(auto& ch:c.channels)ch.enabled=false;REQUIRE_THROWS(planInmarsatWatch(c,2e6));}
+}
+TEST_CASE("Aero watch grouping preserves full channels and separates roles", "[inmarsat][watch]") {
+    auto c=example();c.channels.clear();
+    for(int i=0;i<20;++i)c.channels.push_back({std::to_string(i),"",1542e6+i*12500,i<10?10500:8400,true});
+    c.channels.push_back({"disabled","",1580e6,8400,false});
+    for(double rate:{16000.,48000.,96000.,2.048e6,10e6}) {
+        const auto groups=planInmarsatWatch(c,rate);size_t n=0;
+        for(const auto& g:groups) {
+            REQUIRE(g.channels.size()<=size_t(c.maxConcurrentChannels));
+            for(const auto& ch:g.channels) {
+                ++n;REQUIRE(ch.voice()==g.voice);
+                REQUIRE(std::abs(ch.frequencyHz-g.centerHz)+6500<=rate*.45+0.01);
+            }
+        }
+        REQUIRE(n==20);
+    }
+}
+TEST_CASE("Aero watch target counts distinct current visit aircraft", "[inmarsat][watch]") {
+    auto c=example();c.positionTarget=2;
+    InmarsatWatchSchedule s(c,2e6,100);
+    s.position(1);s.position(1);s.position(0);
+    REQUIRE(s.report(110)["visitPositions"]==1);REQUIRE_FALSE(s.advance(110));
+    s.position(2);REQUIRE(s.advance(111));REQUIRE(s.group().voice);
+    REQUIRE(s.report(111)["collection"]=="target reached");
+    s.position(3);REQUIRE(s.report(111)["visitPositions"]==2);
+    REQUIRE_FALSE(s.advance(122));REQUIRE(s.advance(123));
+    REQUIRE_FALSE(s.group().voice);REQUIRE(s.report(123)["visitPositions"]==0);
+}
+TEST_CASE("Aero watch reports incomplete data and holds real voice with bounded refresh", "[inmarsat][watch]") {
+    auto c=example();InmarsatWatchSchedule s(c,2e6,0);
+    REQUIRE_FALSE(s.advance(29));REQUIRE(s.advance(30));
+    REQUIRE(s.report(30)["collection"]=="no positions decoded");
+    REQUIRE_FALSE(s.advance(41)); // Acquisition is not idle hold.
+    for(int i=41;i<630;++i) {s.speech(i);REQUIRE_FALSE(s.advance(i));}
+    REQUIRE(s.report(220)["refreshDue"]==true);
+    s.speech(630);REQUIRE(s.advance(630));REQUIRE_FALSE(s.group().voice);
+    REQUIRE(s.report(630)["reason"]=="Maximum voice visit; refreshing positions");
+}
+TEST_CASE("Aero watch visits multiple groups without cross visit stale counts", "[inmarsat][watch]") {
+    auto c=example();c.positionTarget=1;
+    c.channels.push_back({"data2","",1550e6,600,true});
+    c.channels.push_back({"voice2","",1551e6,8400,true});
+    InmarsatWatchSchedule s(c,96000,0);
+    s.position(1);REQUIRE(s.advance(10));REQUIRE_FALSE(s.group().voice);
+    REQUIRE_FALSE(s.advance(19));REQUIRE(s.advance(20));REQUIRE(s.group().voice);
+    REQUIRE(s.advance(32));REQUIRE(s.group().channels[0].id=="voice2");
+    REQUIRE(s.advance(44));REQUIRE_FALSE(s.group().voice);
+    REQUIRE(s.report(44)["visitPositions"]==0);
+}
+TEST_CASE("Aero watch single role does not retune one unchanged group", "[inmarsat][watch]") {
+    auto c=example();c.channels.erase(c.channels.begin());
+    InmarsatWatchSchedule s(c,96000,0);
+    REQUIRE_FALSE(s.advance(13));REQUIRE(s.group().voice);
+}
+TEST_CASE("Aero watch silence cannot select speaker or refresh activity", "[inmarsat][watch]") {
+    auto c=example();c.channels.erase(c.channels.begin());
+    c.channels.push_back({"voice2","",1543012500,8400,true});
+    int pcm=0,flush=0;
+    InmarsatWatchSession session(c,48000,0,{},[&](std::span<const int16_t>,uint32_t){++pcm;},[&]{++flush;});
+    std::vector<std::complex<float>> input(4096);
+    session.process(input,0,48000,session.centerHz(),false,0);
+    session.process(input,4096,48000,session.centerHz(),false,0.1);
+    REQUIRE(pcm==0);REQUIRE(session.report(0.1)["watch"]["speakerChannel"]=="");
+    session.process(input,20000,48000,session.centerHz(),true,0.2);
+    REQUIRE(flush==1);REQUIRE(session.report(0.2)["watch"]["iqGaps"]==1);
+}
+
+TEST_CASE("Aero watch telemetry excludes frequencies and aircraft identifiers", "[inmarsat][watch]") {
+    const auto payload=InmarsatDiagnostics::remotePayload({{"watch",{{"group",1},{"groups",2},
+        {"switches",10},{"iqGaps",0},{"refreshDue",true},{"centerHz",1542e6},
+        {"speakerChannel","private-label"},{"channels",{{"aesId",1234}}}}}});
+    REQUIRE(payload.size()==5);REQUIRE(payload["watch_switches"]==10);
+    REQUIRE(payload.dump().find("private")==std::string::npos);
+    REQUIRE(payload.dump().find("1542")==std::string::npos);
+}
+
+TEST_CASE("Aero watch multichannel throughput probe", "[.inmarsat-watch-benchmark]") {
+    auto c=example();c.channels.clear();
+    for(int i=0;i<4;++i)c.channels.push_back({std::to_string(i),"",1542e6+i*25000,8400,true});
+    for(int concurrent:{1,2,4}) {
+    c.maxConcurrentChannels=concurrent;
+    InmarsatWatchSession session(c,2048000,0,{},{},{});
+    std::vector<std::complex<float>> iq(65536,{0.01f,0.02f});
+    for(int i=0;i<64;++i)session.process(iq,uint64_t(i)*iq.size(),2048000,session.centerHz(),false,i*0.032);
+    auto r=session.report(2.048);
+    REQUIRE(r["watch"]["channels"].size()==size_t(concurrent));
+    r["watch"].erase("channels");r["watch"]["concurrent"]=concurrent;
+    std::cout<<"WATCH_BENCH "<<r["watch"].dump()<<std::endl;
+    }
+}
+
+TEST_CASE("Aero watch speaker stays on one conversation until idle", "[inmarsat][watch]") {
+    InmarsatWatchFocus focus;
+    const std::array<uint8_t,2> both{1,1}, first{1,0}, second{0,1}, quiet{0,0};
+    REQUIRE(focus.select(quiet,0,6)==-1);
+    REQUIRE(focus.select(both,1,6)==0);
+    REQUIRE(focus.select(second,2,6)==0);
+    REQUIRE(focus.select(both,3,6)==0);
+    REQUIRE(focus.select(second,8.99,6)==0);
+    REQUIRE(focus.select(second,9,6)==1);
+    REQUIRE(focus.select(both,10,6)==1);
+    REQUIRE(focus.select(first,15,6)==1);
+    REQUIRE(focus.select(first,16,6)==0);
+    focus.reset();REQUIRE(focus.select(second,17,6)==1);
+}
+
+TEST_CASE("Aero watch group changes destroy old decoder state before new IQ", "[inmarsat][watch]") {
+    auto c=example();c.dataMinSeconds=1;c.dataDwellSeconds=2;c.voiceAcquireSeconds=1;
+    int flushes=0;
+    InmarsatWatchSession session(c,48000,0,{},{},[&]{++flushes;});
+    std::vector<std::complex<float>> iq(4096);
+    const auto initial=session.centerHz();
+    session.process(iq,0,48000,initial,false,0);
+    REQUIRE(session.report(0)["watch"]["channels"][0]["id"]=="data");
+    REQUIRE(session.advance(2));REQUIRE(session.centerHz()!=initial);
+    REQUIRE(flushes==1);
+    session.process(iq,100000,48000,session.centerHz(),false,2);
+    const auto r=session.report(2);
+    REQUIRE(r["watch"]["channels"][0]["id"]=="voice");
+    REQUIRE(r["samples"]==4096);REQUIRE(r["resets"]==1);
+    REQUIRE(r["voiceActive"]==false);REQUIRE(r["watch"]["speakerChannel"]=="");
+    REQUIRE(session.advance(3));REQUIRE(session.centerHz()==initial);REQUIRE(flushes==2);
+    REQUIRE(session.report(3)["watch"]["channels"][0]["id"]=="data");
+}

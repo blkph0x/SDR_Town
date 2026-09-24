@@ -2,6 +2,120 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-25 - Aero watch / 0.2.93 local gates (DEC-0124 / DEC-0125)
+
+Host Windows 11, MSVC 2022, Qt6.11.1, original Desktop/maulaudio_pro tree.
+Full app/core/workspace/Inmarsat GUI/deploy build passed. First full CTest after
+SSTV repair: 11/11, 33.31 s. Scheduler/group/focus/privacy plus hidden performance
+probe: 10 cases, 919 assertions pass. Actual widget saved-list add/remove/enable,
+disk reload and no-auto-start checks pass; screenshot inspected at 1050x980.
+Native spectrum and waterfall click coordinates share the RF axis; empty input
+does not generate demonstration RF.
+
+Unchanged SSTV hot-producer test before fix: 13.797 s (previously >246 s).
+After control admission fix, 10 separate runs: 0.063, 0.078, 0.078, 0.063, 0.078,
+0.078, 0.062, 0.078, 0.079, 0.062 s, all PASS. No test sleeps or exclusions.
+
+Release watch throughput probe at 2.048 MS/s, 64 x 65536 sample blocks:
+one decoder 0.600 s, two 1.210 s, four 2.410 s for 2.048 s RF. Ratios 0.293,
+0.591, 1.177 respectively. Default changed to TWO; user limit 1-4 and UI/report
+load telemetry retained. This noise-input measurement is local headroom, not
+proof of performance on every PC or proof of decoded speech.
+
+InmarScope pinned 26ae80af4bcfa4c86ed55f4383d1c95481d3450b: both 96-entry
+Aero interleave vectors exactly match. Reference voice/data/filter/follow
+differences documented in INMARSAT_WATCH.md. Release verifier 16 negative tests
+and frozen-P25 guard self-test pass. Normal Git whitespace check passes.
+Final reference pacing variants, updated full suite and publication recorded below.
+
+## 2026-09-25 - Inmarsat tone routing/selection (DEC-0123)
+
+Windows/MSVC2022/Qt6.11.1. Initial Release build of SDR_Town, core, workspace
+and isolated live GUI tests PASS. First GUI CTest timed out at 60 s before
+QApplication construction completed: non-invasive CDB stack shows Qt platform
+integration error MessageBoxW. Test requested offscreen but package contains
+only platforms/qwindows.dll. Corrected test environment to the actual deployed
+Windows plugin. No production decoder assertion or live signal was involved.
+
+The isolated settings guard initially exited 3: Windows generic data is Local,
+while AppDataLocation is Roaming. The final harness verifies its unique test
+directory beneath SDR_Town_Tests and removes only that directory. CTest uses
+the imported Qt Windows plugin path so clean CI does not require prior deploy.
+
+Final Release app/core/workspace/live-GUI/deploy builds PASS. Focused native/
+replay suite: 20 cases, 858 assertions. Real live-widget controls: 3 cases,
+33 assertions (34 with saved screenshot). Dedicated stub-only hardware-backend
+test: 20 assertions proving host refusal, parking before startup, hardware
+failure restore, tuner-lease release and idempotent Stop. This is not RF proof.
+Final CTest excluding UnitTests: 10/10 PASS in 11.36 s. Core separately run with
+120 s process deadline and only known ISS-0019 SSTV detach case excluded:
+388 PASS / 2 optional skips, 206317 assertions. That SSTV issue remains open;
+no test was removed from CI and no complete all-tests pass is claimed.
+
+Four actual reference runs (GUI/CLI, fast/paced) PASS: 163 valid signalling
+units, 1375 voice words, 220000 PCM samples, all WAV hashes unchanged at
+295ee11a0edc4e341ab66455ce283f7a0201e2f35a880eb555e47a19af6e176f.
+The recording is mostly codec silence markers, not clear-conversation proof.
+Final staged EXE, with PATH restricted to Windows and Qt overrides removed,
+also produces the same WAV. Its metrics correctly report 220000 received,
+19403 nonzero samples, peak 3562, RMS 307.634, speakerRequested=false and
+speakerConsumed=0. This differentiates decoder output from actual playback.
+Staged and main Release EXE SHA256:
+3645d0bb28976e7317a25ab0d09789453cbc3f21c46c713e290808b67eb5744e.
+
+P25 guard self-test and protected-source comparison PASS; DeviceManager is
+exactly the preceding DEC-0122 loader repair. Other protected files and native
+Aero codec/DSP remain unchanged. git diff --check PASS. Evidence is under
+build-audit-20260925: inmarsat-*-build.log, inmarsat-core.log,
+inmarsat-core-remainder.log, inmarsat-gui-host-final.log, inmarsat-other-final.log,
+inmarsat-live.png, inmarsat-staged-smoke.log, inmarsat-tone-parity/.
+No GitHub publication or matched live-tone/speech qualification in this pass.
+
+## 2026-09-25 - SDRplay runtime repair (DEC-0122)
+
+Windows/MSVC2022/Qt6.11.1, base 825dae2, local unpublished 0.2.92 repair.
+Four Release builds PASS; final targets SDR_Town, sdr_town_tests,
+sdr_town_workspace_tests and deploy. No compiler errors/warnings in final build log.
+Full CTest 9/9 PASS in 42.14 s: core 388 passed / 2 optional skips,
+206299 assertions; workspace 34 passed / 6 optional skips, 411 assertions;
+five isolated SDRplay loader cases and both SSTV backend gates pass.
+Legacy ABI fixture proves loadModule returns empty even though the factory
+was rejected. New loader refuses it and recovers with a valid module. Tests
+also cover empty registration, non-API DLL, eight concurrent calls, Unicode
+API loading and explicit/conda/user/nested portable paths. Final loader test
+adds an invalid PE image: failure is reported without a modal Windows popup.
+
+Actual application CLI `sdrplay status` exits 0, registers installed Pothos
+sdrPlaySupport.dll 0.3.0-206b241 and identifies service=not installed. stderr
+still records sdrplay_api_Open failure, consistent with no service on this
+PC; no physical RSP attached. Existing RTL device still enumerates. This is
+loader evidence only, not reception or the affected tester's exact diagnosis.
+Package negatives 16/16 PASS; P25 guard self-tests and whole-file comparison
+against 825dae2 PASS; an added RF setFrequency mutation is rejected.
+Other protected files are unchanged. git diff --check PASS.
+
+Evidence: build-audit-20260925/sdrplay-build-{1,2,3}.log,
+sdrplay-ctest-all.log and sdrplay-status-after.log;
+build/Testing/Temporary/LastTest.log contains individual assertions/skips.
+No service installed/restarted, no vendor DLL redistribution, no P25/RF/audio
+algorithm edits, no GitHub release publication in this pass.
+
+Final clean staging smoke PASS with PATH reduced to Windows/System32 and Qt
+developer overrides removed. Actual app registers installed SDRplay module,
+reports missing service and still enumerates RTL. Staged EXE equals main Release
+and no test/vendor fixtures occur in staging. EXE SHA256:
+c0f2dcf7220dbc103a899745c4f8c7ccdd5fbf8a39826bf91d7f483610405f79.
+Evidence: sdrplay-build-final.log and sdrplay-staging-final.log in the audit folder.
+
+Final regression repeat is NOT a full pass: UnitTests stalled for 246.34 s
+and was explicitly stopped. Remaining eight CTest targets pass, including all
+five final loader cases (invalid PE test included). A duration/seed-123 rerun
+and a standalone 20 s deadline isolate the existing SSTV active-producer detach
+test; ISS-0019 records debugger evidence and unchanged source comparison.
+With only that named case excluded, remaining core 387 passed / 2 optional skips,
+206298 assertions PASS. This does not erase the initial full pass or the later
+stall. No full-release qualification claimed. All test/debug processes exited.
+
 ## 2026-09-24 - 0.2.92 release and extracted-package gates (DEC-0121)
 
 Release source 7e6eed7e532161ce6a0918d6ed6b616dbe320647. MSVC2022/Qt6.11.1
