@@ -1,5 +1,22 @@
 # Development log
 
+## 2026-09-25 - 0.2.93 Aero watch tester release published
+
+T-0052 implementation and delivery complete. Source ca6354e, tag/metadata
+9fef480; GitHub Latest v0.2.93 release 396165844 contains all eight verified
+assets. Full local CTest 11/11, four real-reference GUI/CLI pacing variants,
+extracted portable voice/data checks and independent Windows CI 36073284286
+PASS. Public asset downloads are byte-identical to the verified local build;
+signed updater/package validation and unauthenticated Latest lookup pass.
+
+Users can click and save rate-specific signals, collect current-visit aircraft
+positions, cycle voice groups and return on idle/refresh deadlines. Configuration
+persists without auto-starting RF. Documented InmarScope differences are explicit:
+saved-list cycling is not fresh-assignment follow, and tested Town filters/codec
+gating were not replaced without matched evidence. Reference PCM is unchanged,
+not proof of field speech. ISS-0016/ISS-0020 and physical RSP acceptance remain
+open. P25 and FUBAR are unchanged; no VM/proxy configuration was touched.
+
 ## 2026-09-25 - Saved Aero watch implementation and release preparation
 
 DEC-0124 / T-0052: pinned InmarScope comparison; saved click-to-place channels,

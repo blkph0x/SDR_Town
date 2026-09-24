@@ -1,33 +1,38 @@
 # Task list (canonical)
 
-T-0052 | in_progress | Saved multi-channel Aero watch and automatic position/voice cycle |
+T-0052 | done | Saved multi-channel Aero watch and automatic position/voice cycle |
 DEC-0124. Reference comparison, bounded scheduler, independent per-channel DSP,
 single speaker focus, click-to-place GUI, atomic saved settings, diagnostic events,
-deterministic and GUI regression tests, then full release gates and tester assets.
-Keep P25 frozen. Do not claim live antenna/clear-conversation acceptance from
-synthetic events or reference silence. Resolve ISS-0019 before full release gate.
+deterministic and GUI regression tests complete. Source ca6354e, tag 9fef480,
+v0.2.93 tester release published with eight downloaded/hash-verified assets.
+Full CTest 11/11, watch 10 cases/929 assertions, reference GUI/CLI parity,
+packaged reference voice/data and Windows CI 36073284286 PASS. ISS-0019 fixed.
+P25 stays frozen. Field antenna/clear-conversation acceptance remains ISS-0016 /
+ISS-0020, not inferred from synthetic events or reference silence. Assignment-
+directed follow and dual-SDR reception are separate from this saved-list cycle.
 
 T-0051 | awaiting_capture | Inmarsat tone-only report: live tuning and audio ownership |
 DEC-0123 / ISS-0020. Preserve manual voice selection, apply visible tuning on
 Start, park ordinary Listen audio during Inmarsat takeover, expose decoded-PCM
 and speaker state. Regression-test GUI and lifecycle; preserve reference PCM.
 Actual tester tone/clear speech remains unverified without matching IQ/logs.
-Local repair/build complete: 20 focused tests, actual live GUI controls and
+Repair published in v0.2.93: 20 focused tests, actual live GUI controls and
 hardware-free takeover failure/restore tests pass. Four GUI/CLI pacing variants
-and a clean-path staged replay retain the reference WAV hash. P25 unchanged.
+and a clean-path staged replay retain the reference WAV hash. Final full CTest
+and Windows CI pass; downloaded release assets verified. P25 unchanged.
 
 T-0049 | awaiting_hardware | Restore reliable SDRplay runtime discovery and diagnostics |
 DEC-0122. Reproduce loader failures, verify actual factory registration, retry
 failed API discovery on Rescan, cover installed/portable layouts and architecture.
 No P25 DSP, sample delivery, tune sequencing or audio edits. Physical RSP acceptance
 requires the affected tester's model/version/log; local PC has no RSP/service.
-Implementation complete locally: app/core/GUI builds, full CTest 9/9, five
+Implementation published in v0.2.93: app/core/GUI builds, five
 executable loader failure/recovery cases, package verifier negatives and exact
 protected-pipeline comparison pass. Existing Pothos module registers and actual
 CLI reports missing service accurately. No claim of physical RSP acceptance.
-Final repeat uncovered separate ISS-0019: existing SSTV detach test can stall;
-eight other CTest targets and all remaining core cases pass. Do not treat the
-first 9/9 run as proof that the final repeated gate was fully green.
+Separate ISS-0019 discovered during the initial repair is now fixed by DEC-0125;
+final full CTest 11/11 and independent Windows CI 36073284286 pass. Published
+installer/portable contents and all eight downloaded asset hashes verified.
 
 T-0050 | done | Diagnose SSTV active-producer lifecycle starvation |
 ISS-0019 / DEC-0125. Control admission now prevents hot publishers starving

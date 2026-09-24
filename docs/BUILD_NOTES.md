@@ -2,6 +2,47 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-25 - 0.2.93 final reference, CI and published asset gates
+
+Source ca6354e72fe5912305eb96cb3e0624c5944fb104; signed release metadata/tag
+9fef480. Final local MSVC/Qt6.11.1 release helper completed with all CTest
+11/11 PASS in 33.12 s, without exclusions. Final watch suite: 10 cases,
+929 assertions PASS. Frozen-P25 comparison 825dae2..ca6354e and guard self-tests
+PASS; only the exact reviewed SDRplay DeviceManager loader delta was accepted.
+
+`scripts/verify_aero_reference.py` completed all four real-reference GUI/CLI
+fast/paced runs: 163 validated units, 1375 voice words, 220000 PCM samples,
+11 CRC failures, 106 codec corrections, 8 repeats, 1244 codec mutes and 3 rejected
+C-frames. All WAV SHA256 values remain
+295ee11a0edc4e341ab66455ce283f7a0201e2f35a880eb555e47a19af6e176f.
+Mostly silence-marker content is not clear-conversation acceptance.
+
+Extracted final portable EXE SHA256:
+45ea99e82af1f2c02df47116a5ce032d3bf508ee3ce6baee91d381f55b024133.
+The packaged voice replay preserves the same WAV. Packaged 10500-burst replay
+completes with 8 valid units, 1 CRC failure, no PCM and the two expected ADS-C
+positions: D-AIHV (51.002140045, -30.045547485) and G-CIVG
+(62.997665405, -40.003108978). Both reports have empty error/logError fields.
+Evidence: build-audit-20260925/watch-reference/, package-voice.json/.wav,
+package-data.json, release-0.2.93.log and portable-0.2.93/.
+
+Independent Windows CI 36073284286 on source ca6354e PASS in 18m0s:
+MSVC/Qt6.7.3 build, core, loader/lifecycle, workspace, GUI/CLI replay, SSTV,
+portable staging/ZIP and artifact upload all pass. YAML validation 36073284259
+also passes. The release-branch-only publication step is intentionally skipped
+on master; the separately verified local release helper builds the signed
+installer/portable/DLL assets. No source code differs between this CI commit
+and tag 9fef480 (only the three signed-release metadata files).
+
+Published v0.2.93, release ID 396165844, at 2026-09-24T23:52:38Z. Downloaded all
+eight GitHub assets to build-audit-20260925/published-0.2.93/: every size and SHA256
+matches the verified local release, including manifest/signature/checksums.
+Release verifier re-run with the downloaded installer PASS (Ed25519 signature,
+runtime contents/provenance and standalone control DLL). Unauthenticated public
+Latest returns v0.2.93, not a draft, with exactly eight assets. Packaged remote
+URL remains https://gearsqueens.online/sdr-town-diag/ingest, explicit opt-in.
+No real RSP hardware or matched tester clear-speech capture was available.
+
 ## 2026-09-25 - Aero watch / 0.2.93 local gates (DEC-0124 / DEC-0125)
 
 Host Windows 11, MSVC 2022, Qt6.11.1, original Desktop/maulaudio_pro tree.
