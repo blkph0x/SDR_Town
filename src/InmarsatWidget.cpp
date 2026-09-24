@@ -4,6 +4,8 @@
 #include "InmarsatMessageStore.h"
 #include "DeviceManager.h"
 #include "SdrDeviceCandidate.h"
+#include "InmarsatReplayDialog.h"
+#include "InmarsatDiagnostics.h"
 
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -39,6 +41,7 @@ QString receiverDisplayText(size_t index, const DeviceInfo& device, bool streami
 InmarsatWidget::InmarsatWidget(QWidget* parent)
     : QWidget(parent)
 {
+    connectInmarsatRemoteDiagnostics();
     buildUi();
     applyNeonStyle();
     refreshDevices();
@@ -104,6 +107,15 @@ void InmarsatWidget::buildUi() {
         "receiver without reopening it, or starts the selected idle receiver. P25 is never interrupted.");
     receiverRow->addWidget(deviceCombo_, 1);
     root->addLayout(receiverRow);
+    auto* replayButton = new QPushButton("Open IQ replay...");
+    replayButton->setObjectName("inmarsatReplay");
+    connect(replayButton, &QPushButton::clicked, this, [this] {
+        auto* dialog = new InmarsatReplayDialog(this);
+        configureInmarsatReplaySharing(*dialog);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->show();
+    });
+    root->addWidget(replayButton);
 
     auto* top = new QHBoxLayout();
     top->addWidget(new QLabel("BAND PLAN"));

@@ -5,6 +5,7 @@
 #include "DeviceManager.h"
 #include "Receiver.h"
 #include "SdrDeviceCandidate.h"
+#include "InmarsatDiagnostics.h"
 
 #include <QDir>
 #include <QStandardPaths>
@@ -119,7 +120,6 @@ InmarsatEngine::InmarsatEngine() {
         }
     }
     acars_->setSink([this](const InmarsatMessage& message) { onMessage(message); });
-    demod_.setByteSink([this](const uint8_t* data, size_t count) { onDecodedBytes(data, count); });
     iqRx_ = std::make_unique<Receiver>();
     lastStatus_ = "Experimental physical-layer monitor — select a receiver and press START / TAKE OVER";
 }
@@ -148,6 +148,8 @@ void InmarsatEngine::notify() {
 void InmarsatEngine::setConfig(const InmarsatEngineConfig& config) {
     std::lock_guard<std::mutex> lock(mutex_);
     config_ = config;
+    config_.voiceFollow = false;
+    config_.recordVoice = false;
     config_.save();
     if (voice_) voice_->setRecording(config_.recordVoice, config_.recordDir, 0);
 }
@@ -463,7 +465,6 @@ bool InmarsatEngine::start(bool force) {
     }
 
     const auto devices = manager.getDevices();
-    const double sampleRate = std::max(1.0, manager.getCurrentSampleRate(deviceIndex));
     {
         std::lock_guard<std::mutex> lock(mutex_);
         state_ = InmarsatEngineState::Running;
@@ -483,7 +484,8 @@ bool InmarsatEngine::start(bool force) {
         lastStatus_ = "Running on live hardware (experimental physical-layer monitor)";
         QDir().mkpath(QString::fromStdString(config_.recordDir));
         if (voice_) voice_->setRecording(config_.recordVoice, config_.recordDir, 0);
-        demod_.reset(demodModeLocked(), sampleRate, 0.0);
+        pipeline_ = {};
+        pipelineReport_ = nlohmann::json::object();
         if (iqRx_) {
             iqRx_->deviceIndex = deviceIndex;
             iqRx_->lastConsumedAbsolute.store(0, std::memory_order_release);
@@ -550,6 +552,8 @@ InmarsatEngineSnapshot InmarsatEngine::snapshot() const {
     snapshot.spectrumCenterHz = spectrumCenterHz_;
     snapshot.spectrumRateHz = spectrumRateHz_;
     snapshot.recentLines = recentLines_;
+    snapshot.diagnostics = pipelineReport_;
+    snapshot.diagnosticLog = diagnosticLog_;
     return snapshot;
 }
 
@@ -585,6 +589,8 @@ nlohmann::json InmarsatEngine::statusJson() const {
     json["spectrumRateHz"] = snapshot.spectrumRateHz;
     json["spectrumDb"] = snapshot.spectrumDb;
     json["recentLines"] = snapshot.recentLines;
+    json["diagnostics"] = snapshot.diagnostics;
+    json["diagnosticLog"] = snapshot.diagnosticLog;
     json["voiceBackend"] = voice_ && voice_->backendAvailable();
     json["experimental"] = true;
     json["rfQualified"] = false;
@@ -648,7 +654,7 @@ void InmarsatEngine::returnToControl() {
         config_.baud = 10500;
         deviceIndex = activeDeviceIndex_;
         lastStatus_ = "Returned to control";
-        demod_.reset(demodModeLocked(), 2.048e6, 0.0);
+        pipeline_ = {};
     }
     if (deviceIndex == std::numeric_limits<size_t>::max()) return;
     try {
@@ -703,12 +709,14 @@ bool InmarsatEngine::processIq() {
 
     std::vector<std::complex<float>> iq;
     bool gap = false;
+    uint64_t startSample = 0;
     if (iqRx_) {
         const auto epoch = iqRx_->lastSeenStreamEpoch.load(std::memory_order_acquire);
         const auto expected = iqRx_->lastConsumedAbsolute.load(std::memory_order_acquire);
         auto window = manager.getNewIQWindowForReceiver(deviceIndex, *iqRx_, 65536);
         gap = window.cursorDiscontinuity || window.streamEpoch != epoch ||
               (!window.samples.empty() && window.startAbsolute != expected);
+        startSample = window.startAbsolute;
         iq = std::move(window.samples);
     } else {
         // Without a chronological reader, reusing the latest window duplicates IQ.
@@ -716,26 +724,14 @@ bool InmarsatEngine::processIq() {
     }
     if (iq.empty()) return false;
 
-    const double offset = centerFrequency > 0.0 ? tuned - centerFrequency : 0.0;
+    if (centerFrequency <= 0.0) centerFrequency = manager.getCurrentCenterFreq(deviceIndex);
     InmarsatDemodMode mode;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         mode = demodModeLocked();
     }
-    if (gap) demod_.reset(mode, sampleRate, offset);
-
-    static thread_local double lastSampleRate = 0.0;
-    static thread_local InmarsatDemodMode lastMode = InmarsatDemodMode::AeroOqpsk10500;
-    if (std::abs(sampleRate - lastSampleRate) > 1.0 || mode != lastMode) {
-        demod_.reset(mode, sampleRate, offset);
-        lastSampleRate = sampleRate;
-        lastMode = mode;
-    } else {
-        demod_.setChannelOffset(offset);
-    }
-    demod_.process(iq.data(), iq.size());
-
-    const auto stats = demod_.stats();
+    pipeline_.process(iq.data(), iq.size(), startSample, sampleRate, centerFrequency, tuned, mode, gap);
+    const auto stats = pipeline_.stats();
     bool returnControl = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -745,6 +741,7 @@ bool InmarsatEngine::processIq() {
         ebnoDb_ = stats.ebnoDb;
         rawBlocks_ = stats.rawBlocksOut;
         validatedFrames_ = stats.framesOut;
+        pipelineReport_ = pipeline_.report();
         streamState_ = manager.getRuntimeStateLabel(deviceIndex);
         deviceConnected_ = streamState_ == "live hardware";
         if (voice_) voiceFrames_ = voice_->framesDecoded();
@@ -756,6 +753,17 @@ bool InmarsatEngine::processIq() {
 
 void InmarsatEngine::workerLoop() {
     bool lostHardware = false;
+    bool processingFailed = false;
+    InmarsatDiagnostics diagnostics;
+    try {
+        diagnostics.open({}, "live");
+        diagnostics.write("open", {{"state", "running"}});
+        std::lock_guard<std::mutex> lock(mutex_);
+        diagnosticLog_ = diagnostics.path().toStdString();
+    } catch (const std::exception& e) {
+        spdlog::warn("Inmarsat diagnostic log: {}", e.what());
+    }
+    auto nextLog = std::chrono::steady_clock::now();
     auto nextNotify = std::chrono::steady_clock::now();
     while (run_.load(std::memory_order_acquire)) {
         size_t deviceIndex = std::numeric_limits<size_t>::max();
@@ -787,11 +795,24 @@ void InmarsatEngine::workerLoop() {
             spdlog::warn("InmarsatEngine: {}", exception.what());
             std::lock_guard<std::mutex> lock(mutex_);
             lastStatus_ = exception.what();
+            processingFailed = true;
         } catch (...) {
             std::lock_guard<std::mutex> lock(mutex_);
             lastStatus_ = "IQ process error";
+            processingFailed = true;
+        }
+        if (processingFailed) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            state_ = InmarsatEngineState::Idle;
+            deviceConnected_ = false;
+            run_.store(false, std::memory_order_release);
+            break;
         }
         const auto now = std::chrono::steady_clock::now();
+        if (now >= nextLog && !diagnostics.path().isEmpty()) {
+            diagnostics.write("progress", pipeline_.report());
+            nextLog = now + std::chrono::seconds(1);
+        }
         if (now >= nextNotify) {
             notify();
             nextNotify = now + std::chrono::milliseconds(40);
@@ -801,7 +822,14 @@ void InmarsatEngine::workerLoop() {
         if (!consumed) std::this_thread::sleep_for(std::chrono::milliseconds(40));
     }
 
-    if (lostHardware) {
+    if (!diagnostics.path().isEmpty()) {
+        auto report = pipeline_.report();
+        report["state"] = processingFailed ? "error" : lostHardware ? "hardware_lost" : "stopped";
+        report["errorCode"] = processingFailed ? "invalid_input" : lostHardware ? "hardware_lost" : "none";
+        diagnostics.write("summary", report, true);
+    }
+
+    if (lostHardware || processingFailed) {
         if (voice_) voice_->setRecording(false, {}, 0);
         restorePreviousDeviceState();
         notify();

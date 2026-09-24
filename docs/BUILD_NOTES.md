@@ -2,6 +2,34 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-24 - Inmarsat replay first verification (DEC-0120)
+
+Follow-up: focused tests 13/13, 270 assertions PASS. v0.2.91 actual GUI/CLI,
+paced/fast black-box PASS, four collector summaries verified by matching replay
+session UUIDs with server JSONL (processedSampleCount=48000, pcmSamples=0 in all).
+No redundant startup events or lost counters. Release negative tests 15/15 PASS.
+Manual diff audit: P25/analog DSP files unchanged; main/CliApp add only separate
+Inmarsat replay entry, AppBootstrap changes help text. CI guard gap ISS-0015 remains.
+
+MSVC2022/Qt6.11.1 Release app/core/workspace build PASS. Focused core 12 cases,
+264 assertions; GUI 1 case/17 assertions (including screenshot). Full CTest 4/4
+PASS in 76.66 s. Black-box actual SDR_Town.exe CLI/GUI paced/fast each consume
+48000 synthetic samples identically; malformed raw file exits 2 and writes error
+report. This is NOT RF/voice acceptance. Evidence: build-audit-20260924/inmarsat-blackbox.
+Offscreen screenshot lacked fonts; repeated with real Windows Qt plugin and
+inspected readable 820x650 screenshot. A subsequent remote end-to-end check found
+the shared sanitizer removes the key `samples` and the startup event can consume
+the 1500ms shutdown queue drain. Rename the remote counter and omit redundant
+remote open events; re-test actual collector receipt before publication.
+
+Proxy: original SHA256 5c773fe9c3ad89c95270794cba1ad798f550e849b3644d2d7fe49122db4a3fc0.
+Only two added vhost lines (Include + blank); separate exact-route config. Apache
+configtest PASS, graceful reload, HTTPS synthetic POST accepted and saved. /,
+/uow-map/, /ereader/ remain 200; /fubar/, /fubar-net/, /psk/ timed out both BEFORE
+and AFTER, unchanged. Public admin path 404; unauthenticated client-status 401.
+Backup retained on VM. Public DNS matches WAN; external web fetch unavailable,
+so an off-LAN tester still needs to confirm reachability from their network.
+
 ## 2026-09-24 - 0.2.90 packaged SSTV verification
 
 Windows/MSVC 2022 x64 / Qt 6.11.1. Committed source

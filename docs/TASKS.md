@@ -1,5 +1,12 @@
 # Task list (canonical)
 
+T-0047 subtask | implementation verified; packaging in_progress | Inmarsat IQ replay / diagnostic acceptance harness |
+DEC-0120. Bounded file input, shared live/replay processing, GUI and CLI controls,
+local diagnostic report and opt-in remote summaries; reject false codec support.
+13 focused core tests, GUI controls and actual GUI/CLI paced/fast parity pass.
+Four authenticated summaries saved by the real HTTPS collector. Real Aero voice/
+assignment/map qualification remains ISS-0016; off-LAN reachability remains ISS-0017.
+
 T-0047 release subtask | done | Publish SSTV 0.2.90 | DEC-0119.
 Source 401e2e3 and tag b8a27dd pushed; GitHub Latest v0.2.90 published with all
 eight matching assets and signed updater. Local CTest 4/4, recorded RF/GUI tests,

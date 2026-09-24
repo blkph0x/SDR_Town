@@ -2,6 +2,7 @@
 
 #include "InmarsatBandPlan.h"
 #include "InmarsatDemod.h"
+#include "InmarsatPipeline.h"
 #include "InmarsatMessageStore.h"
 
 #include <nlohmann/json.hpp>
@@ -70,6 +71,8 @@ struct InmarsatEngineSnapshot {
     double spectrumCenterHz = 0.0;
     double spectrumRateHz = 0.0;
     std::vector<std::string> recentLines;
+    nlohmann::json diagnostics = nlohmann::json::object();
+    std::string diagnosticLog;
 };
 
 class InmarsatEngine {
@@ -147,7 +150,9 @@ private:
     std::thread worker_;
     std::function<void()> updateCb_;
 
-    InmarsatDemod demod_;
+    InmarsatPipeline pipeline_;
+    nlohmann::json pipelineReport_ = nlohmann::json::object();
+    std::string diagnosticLog_;
     std::unique_ptr<Receiver> iqRx_;
     std::unique_ptr<InmarsatAcars> acars_;
     std::unique_ptr<InmarsatVoice> voice_;

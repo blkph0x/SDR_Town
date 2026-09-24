@@ -5,8 +5,8 @@
 #include <string>
 #include <vector>
 
-// Aero AMBE+2 (12-byte frame → 160 PCM @ 8 kHz) via mbelib when available.
-// PATENT NOTICE: AMBE may be patent-encumbered; same educational caveat as P25.
+// Aero voice interface, currently unavailable. DEC-0120: ordinary P25 mbelib
+// does not implement the mini-m AMBE4800x3600 path used by libaeroambe.
 class InmarsatVoice {
 public:
     using PcmSink = std::function<void(const int16_t* pcm, int nSamples)>;

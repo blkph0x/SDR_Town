@@ -4,26 +4,7 @@
 #include <cstring>
 #include <ctime>
 
-#ifdef HAVE_MBELIB
-extern "C" {
-#include <mbelib.h>
-}
-#endif
-
-struct InmarsatVoice::Impl {
-#ifdef HAVE_MBELIB
-    mbe_parms cur{};
-    mbe_parms prev{};
-    mbe_parms prevEnh{};
-    bool init = false;
-    void ensure() {
-        if (!init) {
-            mbe_initMbeParms(&cur, &prev, &prevEnh);
-            init = true;
-        }
-    }
-#endif
-};
+struct InmarsatVoice::Impl {};
 
 InmarsatVoice::InmarsatVoice() { impl_ = new Impl(); }
 InmarsatVoice::~InmarsatVoice() {
@@ -33,60 +14,25 @@ InmarsatVoice::~InmarsatVoice() {
 }
 
 bool InmarsatVoice::backendAvailable() const {
-#ifdef HAVE_MBELIB
-    return true;
-#else
+    // DEC-0120: P25/DMR mbelib is not Aero mini-m AMBE4800x3600.
     return false;
-#endif
 }
 
 void InmarsatVoice::reset() {
     acc_.clear();
     framesDecoded_ = 0;
-#ifdef HAVE_MBELIB
-    if (impl_) {
-        mbe_initMbeParms(&impl_->cur, &impl_->prev, &impl_->prevEnh);
-        impl_->init = true;
-    }
-#endif
 }
 
 int InmarsatVoice::decodeFrame(const uint8_t frame12[12], int16_t out160[160]) {
     if (!frame12 || !out160) return -1;
-#ifdef HAVE_MBELIB
-    if (!impl_) return -1;
-    impl_->ensure();
-    char ambeFr[4][24]{};
-    char ambeD[49]{};
-    // Pack 96 bits MSB-first into C0..C3 rows (clean-room layout for Aero AMBE+2).
-    for (int i = 0; i < 96; ++i) {
-        const int byte = i / 8;
-        const int bit = 7 - (i % 8);
-        const char b = static_cast<char>((frame12[byte] >> bit) & 1);
-        ambeFr[i / 24][i % 24] = b;
-    }
-    float audio[160]{};
-    int errs = 0, errs2 = 0;
-    char errStr[64]{};
-    mbe_processAmbe3600x2400Framef(audio, &errs, &errs2, errStr, ambeFr, ambeD,
-                                   &impl_->cur, &impl_->prev, &impl_->prevEnh, 1);
-    for (int i = 0; i < 160; ++i) {
-        float s = audio[i];
-        if (s > 1.f) s = 1.f;
-        if (s < -1.f) s = -1.f;
-        out160[i] = static_cast<int16_t>(s * 20000.f);
-    }
-    ++framesDecoded_;
-    return errs + errs2;
-#else
+    // Fail closed until the Aero-specific interleaver/FEC/vocoder is integrated.
     (void)frame12;
     std::memset(out160, 0, 160 * sizeof(int16_t));
     return -1;
-#endif
 }
 
 void InmarsatVoice::feedBytes(const uint8_t* data, size_t len) {
-    if (!data || len == 0) return;
+    if (!backendAvailable() || !data || len == 0) return;
     acc_.insert(acc_.end(), data, data + len);
     while (acc_.size() >= 12) {
         int16_t pcm[160];
@@ -101,7 +47,7 @@ void InmarsatVoice::feedBytes(const uint8_t* data, size_t len) {
 }
 
 void InmarsatVoice::setRecording(bool on, const std::string& dir, uint32_t aesId) {
-    if (!on) {
+    if (!on || !backendAvailable()) {
         closeWav();
         record_ = false;
         return;

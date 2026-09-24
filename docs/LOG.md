@@ -1,5 +1,20 @@
 # Development log
 
+## 2026-09-24 - Inmarsat replay and diagnostics (DEC-0120)
+
+Implemented bounded 14-format IQ reader + SigMF/WAV metadata, shared live/replay
+physical pipeline, pause/seek/clock GUI, isolated CLI/GUI automation, diagnostic
+logs and allowlisted remote summaries. Incorrect inactive Aero codec removed;
+no fabricated voice, assignments or aircraft activity. Protocol/codec/map work
+remains open and documented. P25 and analog DSP unchanged.
+
+Configured only an isolated HTTPS proxy include on the authorized VM after backup
+and configtest; no FUBAR/other app route edits. Confirmed server receipt for four
+actual replay sessions. Fixed remote-counter sanitizer collision and omitted
+redundant startup messages that delayed final summaries. Reporting remains opt-in.
+Native focused tests, full CTest and actual GUI/CLI parity passed. Preparing
+0.2.91 tester assets with an explicit diagnostic-only scope; no RF acceptance claim.
+
 ## 2026-09-24 - SSTV 0.2.90 published for GitHub testers
 
 All DEC-0117 source/tests/docs pushed as 401e2e3; signed metadata/tag b8a27dd.

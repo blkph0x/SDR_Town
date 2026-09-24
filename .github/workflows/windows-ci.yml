@@ -144,6 +144,14 @@ jobs:
           & $exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Inmarsat GUI and CLI replay parity
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python scripts/verify_inmarsat_replay.py --exe build/bin/Release/SDR_Town.exe --out build/inmarsat-replay-ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Run SSTV backend tests
         shell: pwsh
         run: |

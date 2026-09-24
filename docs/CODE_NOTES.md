@@ -1,5 +1,24 @@
 # Code notes (tree map)
 
+2026-09-24 / DEC-0120 Inmarsat replay:
+- InmarsatIqFile: bounded QFile reader; 14 complex formats, strict SigMF retune
+  boundaries and PCM16/float32 RIFF validation; explicit raw/WAV RF metadata.
+- InmarsatPipeline: common worker-owned live/file physical probe and sample-clock
+  continuity metrics. No unframed bytes or false voice output. InmarsatEngine
+  calls it for live IQ and writes matching local/remote session diagnostics.
+- InmarsatReplay: file/DSP owner thread with cancellation, pause and seek mailbox;
+  no hardware interaction. Real-time pacing never discards samples to catch up.
+- InmarsatReplayDialog/Command: GUI transport and CLI/GUI automation; bounded
+  snapshots, plain-text errors, scoped diagnostic consent. Early startup branches
+  avoid MainWindow/device/P25 initialization for isolated replay.
+- InmarsatDiagnostics: 8 MiB local session cap plus summary, UUID, allowlisted
+  remote counters at <=1 progress/5s. InmarsatRemoteDiagnostics is app-only adapter
+  to existing HTTPS/auth/budget transport; files/IQ/audio/aircraft data excluded.
+- InmarsatVoice: false HAVE_MBELIB capability and incorrect Aero decode disabled.
+  Actual mini-m codec/frame/FEC integration remains ISS-0016, not a placeholder win.
+- verify_inmarsat_replay.py: actual GUI/CLI fast/paced parity and error exits.
+- release.ps1: public HTTPS endpoint validation; packaged diagnostics default off.
+
 2026-09-24 / DEC-0118 CI fixture repair:
 - test_verify_release.py builds an independent valid portable fixture, including
   source/executable provenance and SGP4 notices. Repacking helpers preserve ZIP

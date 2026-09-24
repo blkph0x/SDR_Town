@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Current version** | **0.2.90** (experimental channel) |
+| **Current version** | **0.2.91** (experimental channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
@@ -13,6 +13,16 @@
 | **Pairs with** | [FUBAR](https://github.com/blkph0x/FUBAR) (VOX capture, public live website, optional remote tune) |
 
 Formerly *MaulAudio Pro*. Branding, binaries, installer, AppData paths, and release assets all use **SDR Town** / `SDR_Town`.
+
+### 0.2.91 Inmarsat IQ diagnostics
+
+**Tools > Inmarsat Aero > Open IQ replay** loads SigMF, stereo IQ WAV and 14 raw
+complex IQ datatypes. Replay has pause/seek/time controls and a shared live/replay
+physical probe. CLI and isolated GUI automation produce bounded local reports;
+optional HTTPS reporting sends counters, not IQ/audio. This is a diagnostic
+feature, **not working Inmarsat voice decoding**: framing/FEC, C-channel assignment
+and the Aero-specific codec remain unfinished. P25 is unchanged. See
+[tester instructions](docs/RELEASE_0.2.91.md) and [Inmarsat scope](docs/INMARSAT.md).
 
 ### 0.2.90 SSTV RF selection
 
@@ -57,7 +67,7 @@ gates](docs/AUDIT_20260924.md) and [release notes](docs/RELEASE_0.2.89.md).
 2. In SDR Town, start the receiver (and P25 Monitor CC / auto-follow if that is your station). Confirm the status bar shows local control on `127.0.0.1:8765` (loopback only).
 3. Route SDR Town audio to **VB-CABLE** (or another capture endpoint FUBAR can open).
 4. In FUBAR, select that cable as the input, enable **Public website**, and set **Now playing**.
-5. Place a **matching** `SdrTownControl.dll` next to `FUBAR.exe`. This Town **0.2.90** release ships `SdrTownControl-0.2.90-win64.dll` (rename to `SdrTownControl.dll`). FUBAR was not changed or re-qualified in this SSTV release. See [pairing versions and gaps](docs/FUBAR_PAIRING.md).
+5. Place a **matching** `SdrTownControl.dll` next to `FUBAR.exe`. This Town **0.2.91** release ships `SdrTownControl-0.2.91-win64.dll` (rename to `SdrTownControl.dll`). FUBAR was not changed or re-qualified in this Inmarsat diagnostic release. See [pairing versions and gaps](docs/FUBAR_PAIRING.md).
 6. **Tools → Settings** in FUBAR: enable SDR Town control and pick allowed actions. FUBAR **1.1.41** website has P25/RDS/tones/SSTV (Auto + HamDRM list, Receive/Finish/Cancel), Satcom, Inmarsat, Aircraft, and SDRplay. **Home lat/lon is Town-only** (not on the public site).
 
 ### Control API notes (for FUBAR and other local clients)

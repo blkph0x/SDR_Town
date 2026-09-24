@@ -2,6 +2,35 @@
 
 Never delete a row. Close with a commit hash and a sentence.
 
+## ISS-0016 - Inmarsat is not yet an Aero voice decoder (2026-09-24, OPEN)
+
+Live physical probe has no validated unique-word framing/deinterleave/FEC/CRC.
+Raw bytes are correctly blocked from ACARS, assignment and map ingestion. The
+unused InmarsatVoice wrapper incorrectly advertises HAVE_MBELIB as Aero support
+and applies row-major AMBE3600x2400 to 96 bits. JAERO/libaeroambe uses the separate
+mini-m AMBE4800x3600 codec and explicit 6x24 interleave. DEC-0120 disables the
+incorrect path. Need a reference recording plus JAERO output, licensed/pinned
+protocol and isolated Aero codec integration, CRC-valid assignments, explicit
+call direction and validated PCM-to-aircraft association before auto follow or
+green talking markers. Existing aircraft photoUrl points to JSON, not an image;
+photo retrieval/attribution and position freshness also need separate tests.
+
+## ISS-0017 - Tester diagnostics endpoint is not deployable (2026-09-24, OPEN)
+
+Repair: isolated Apache route at gearsqueens.online/sdr-town-diag added after
+backup/configtest, old app routes unchanged. Local opted-in config updated to
+HTTPS; four actual GUI/CLI replay summaries saved with correct session/counts.
+Package injects this endpoint disabled by default; tester consent control added.
+External web-fetch tool could not verify off-LAN connectivity; dad's network is
+the remaining reachability gate. Collector server-wide rate/retention hardening
+is separate from the existing bounded client budget and is not claimed here.
+
+AppData remote_diagnostics.json points at http://127.0.0.1:8787/ingest with a token.
+Remote clients would send to themselves; current client correctly disallows bearer
+tokens over HTTP. No packaged collector config in current release staging. Need
+confirmed public HTTPS endpoint, external reachability, authenticated receipt and
+preserved tester opt-in before packaging. User asked for endpoint; no token requested.
+
 ## ISS-0015 - Push CI P25 guard checks an empty diff (2026-09-24, OPEN)
 
 Observed in completed Windows run 35986929161: guard output compares origin/master

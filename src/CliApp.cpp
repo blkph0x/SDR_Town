@@ -42,6 +42,8 @@
 #include "SatPassPlanner.h"
 #include "TleStore.h"
 #include "InmarsatEngine.h"
+#include "InmarsatReplayCommand.h"
+#include "InmarsatDiagnostics.h"
 #include "InmarsatBandPlan.h"
 #include "AdsBTrackStore.h"
 #include "Sgp4.h"
@@ -673,6 +675,12 @@ int runCLI(int argc, char* argv[]) {
     cliApp.setOrganizationName("SDR_Town");
     cliApp.setApplicationVersion(SDR_TOWN_VERSION);
     remoteDiagnosticsConfigureFromProcess(argc, argv, &cliApp, "cli");
+    connectInmarsatRemoteDiagnostics();
+    if (cliApp.arguments().contains("--inmarsat-iq")) {
+        const int result = runInmarsatReplayAutomation(false);
+        remoteDiagnosticsShutdown();
+        return result;
+    }
 
     // DEC-0091: Qt preserves the Windows Unicode command line; CRT narrow argv
     // has already replaced non-code-page filename characters with question marks.

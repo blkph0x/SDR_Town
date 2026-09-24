@@ -2,6 +2,50 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0120 - Inmarsat IQ replay and honest protocol diagnostics (2026-09-24)
+
+Release decision: publish the completed replay/diagnostics feature as 0.2.91
+experimental, with framing/voice/maps explicitly incomplete. Package a disabled
+HTTPS collector config; tester opts in through replay checkbox (disclosure) or
+--diag-url. Preserve existing opt-in overrides and --no-remote-diagnostics.
+References inspected: JAERO 1d4e515921244aec1d85a03f5f38b4e7818fdbe6;
+libaeroambe df7eebf17ca6396cc545bff4869dbeccc1e7dfcd (no code vendored).
+
+Deployment follow-up: user authorized inspecting VM 10.1.1.111. Read-only Apache
+inspection confirms gearsqueens.online (not the mistyped domain), with existing
+FUBAR/UOW/ereader/PSK routes. Public DNS and external IP agree. Collector health
+works from the VM. Add only a vhost Include and a separate exact-path proxy for
+/sdr-town-diag/ingest, /client-status and /health; do not expose collector admin.
+Back up the original, validate apache2ctl configtest, graceful reload, compare
+unrelated routes before/after, verify authenticated synthetic receipt. No secrets
+in source, reports, stdout or release notes. TLS remains mandatory for token use.
+
+User confirmed commercial/Inmarsat voice, not the analog satcom scanner. Dad can
+provide reference IQ. Implement bounded SigMF (cf32_le/ci16_le/cu8), stereo IQ WAV
+(PCM16/float32), and explicitly configured raw replay, with pause/seek/time and
+CLI automation. SigMF v1.2.6 (https://sigmf.org/) defines I then Q, sample_start
+and capture frequency; reject unsupported layouts rather than guessing. Read at
+most 65536 samples per block (existing live consumer bound), reset on capture
+boundaries/seek/gaps, and use the same Inmarsat processing class as live input.
+One worker owns file/DSP state; GUI observes snapshots. No hardware retune on replay.
+
+Evidence: current InmarsatDemod is a physical probe, deliberately suppressing raw
+bytes. JAERO aerol.cpp requires sync, deinterleave, convolutional FEC and CRC before
+assignments. jontio/libaeroambe aeroambe.cpp uses a 96-bit LSB-first interleave into
+6x24 and mbe_processAmbe4800x3600Frame; our unused 4x24/3600x2400 wrapper is not Aero.
+Disable its false availability/decode path; do not reuse P25 codec logic or expose
+synthetic voice. Frame/FEC/C-channel/Aero codec integration and real-IQ acceptance
+remain explicit blockers (ISS-0016), not a finished decoder.
+
+Diagnostics: session UUID, sample-clock position, format/rate/offset, gap/reset,
+physical counters, processing time and clear capability flags. Local JSONL capped
+at 8 MiB/session; summary is always retained. Remote allowlist contains numerical
+counters and session IDs only, never IQ/audio/filenames/aircraft IDs/locations.
+Remote progress at most once per five wall seconds through existing consent,
+HTTPS/authentication and global budgets. Do not silently enable reporting.
+Existing loopback HTTP/token configuration is not a public deployment (ISS-0017).
+Do not invent a server address or publish credentials to Git. P25 stays unchanged.
+
 ## DEC-0119 - Publish SSTV source and matching tester assets (2026-09-24)
 
 The user explicitly requires the DEC-0117 SSTV work to reach GitHub download

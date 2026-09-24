@@ -80,6 +80,12 @@ $buildInfo = [ordered]@{
 $buildInfo | ConvertTo-Json | Set-Content 'build\deploy_staging\build-info.json' -Encoding utf8
 
 if (-not [string]::IsNullOrWhiteSpace($RemoteDiagnosticsUrl)) {
+    $collectorUri = $null
+    if (-not [Uri]::TryCreate($RemoteDiagnosticsUrl, [UriKind]::Absolute, [ref]$collectorUri) -or
+        $collectorUri.Scheme -ne 'https' -or $collectorUri.IsLoopback -or
+        $collectorUri.UserInfo -or $collectorUri.Query -or $collectorUri.Fragment) {
+        throw "Packaged diagnostics require a public HTTPS URL without embedded credentials, query or fragment."
+    }
     $portableStaging = "build\deploy_staging"
     if (-not (Test-Path $portableStaging)) {
         throw "Deploy staging was not created; cannot inject remote diagnostics config."
@@ -92,7 +98,7 @@ if (-not [string]::IsNullOrWhiteSpace($RemoteDiagnosticsUrl)) {
         throw "Remote diagnostics token file is empty: $RemoteDiagnosticsTokenFile"
     }
     $diagConfig = [ordered]@{
-        enabled = $true
+        enabled = $false # DEC-0120: tester opts in via replay checkbox or --diag-url.
         url = $RemoteDiagnosticsUrl
         token = $diagToken
         maxBytesPerMinute = 65536

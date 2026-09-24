@@ -9,6 +9,7 @@
 #include "MainWindow.h"
 #include "P25DebugStage.h"
 #include "RemoteDiagnostics.h"
+#include "InmarsatReplayCommand.h"
 
 #include <iostream>
 #include <string>
@@ -96,6 +97,13 @@ int main(int argc, char *argv[])
 
         setupLogging();
         applyDarkTheme(app);
+
+        // DEC-0120: isolated replay window, no MainWindow/device/P25 startup.
+        if (app.arguments().contains("--inmarsat-iq") || app.arguments().contains("--inmarsat-replay")) {
+            const int result = runInmarsatReplayAutomation(true);
+            remoteDiagnosticsShutdown();
+            return result;
+        }
 
         spdlog::info("Starting SDR Town v{}.", app.applicationVersion().toStdString());
         if (remoteDiagnosticsEnabled()) {
