@@ -2,7 +2,7 @@
 
 Never delete a row. Close with a commit hash and a sentence.
 
-## ISS-0016 - Inmarsat is not yet an Aero voice decoder (2026-09-24, OPEN)
+## ISS-0016 - Inmarsat voice qualification and follow lifecycle (2026-09-24, OPEN)
 
 DEC-0121 update: real pinned continuous/burst modem/FEC/CRC and isolated mini-m
 codec now integrated. Public recordings produce voice-codeword PCM and real
@@ -13,6 +13,7 @@ fixtures are no longer wired to the live engine. Remaining: clear-conversation
 RF acceptance using dad's same IQ/JAERO reference, security/call-end and auto
 follow, dual-device and photos. No claim of full Inmarsat service support.
 
+Original DEC-0120 finding, before the native DEC-0121 integration:
 Live physical probe has no validated unique-word framing/deinterleave/FEC/CRC.
 Raw bytes are correctly blocked from ACARS, assignment and map ingestion. The
 unused InmarsatVoice wrapper incorrectly advertises HAVE_MBELIB as Aero support
@@ -34,6 +35,7 @@ External web-fetch tool could not verify off-LAN connectivity; dad's network is
 the remaining reachability gate. Collector server-wide rate/retention hardening
 is separate from the existing bounded client budget and is not claimed here.
 
+Original finding, before the isolated HTTPS deployment:
 AppData remote_diagnostics.json points at http://127.0.0.1:8787/ingest with a token.
 Remote clients would send to themselves; current client correctly disallows bearer
 tokens over HTTP. No packaged collector config in current release staging. Need

@@ -22,7 +22,7 @@ positions on an offline aircraft map. IQ replay uses the same receive chain.
 Public JAERO recordings exercise real signalling, voice-codeword output and
 aircraft coordinates. Actual GUI/CLI paced/fast replay produces identical PCM.
 This is **experimental**, not a claim of qualified continuous clear speech:
-dad's matched IQ/JAERO reference is still needed. Automatic voice follow,
+a matched known-clear IQ/JAERO reference is still needed. Automatic voice follow,
 dual-device data/voice, aircraft photos and EGC protocol decoding remain pending.
 P25 is unchanged. See [0.2.92 testing](docs/RELEASE_0.2.92.md),
 [scope](docs/INMARSAT.md) and [IQ replay guide](docs/INMARSAT_IQ_TESTING.md).
@@ -80,7 +80,7 @@ gates](docs/AUDIT_20260924.md) and [release notes](docs/RELEASE_0.2.89.md).
 2. In SDR Town, start the receiver (and P25 Monitor CC / auto-follow if that is your station). Confirm the status bar shows local control on `127.0.0.1:8765` (loopback only).
 3. Route SDR Town audio to **VB-CABLE** (or another capture endpoint FUBAR can open).
 4. In FUBAR, select that cable as the input, enable **Public website**, and set **Now playing**.
-5. Place a **matching** `SdrTownControl.dll` next to `FUBAR.exe`. This Town **0.2.91** release ships `SdrTownControl-0.2.91-win64.dll` (rename to `SdrTownControl.dll`). FUBAR was not changed or re-qualified in this Inmarsat diagnostic release. See [pairing versions and gaps](docs/FUBAR_PAIRING.md).
+5. Place a **matching** `SdrTownControl.dll` next to `FUBAR.exe`. This Town **0.2.92** release ships `SdrTownControl-0.2.92-win64.dll` (rename to `SdrTownControl.dll`). FUBAR was not changed or re-qualified in this native Aero release. See [pairing versions and gaps](docs/FUBAR_PAIRING.md).
 6. **Tools → Settings** in FUBAR: enable SDR Town control and pick allowed actions. FUBAR **1.1.41** website has P25/RDS/tones/SSTV (Auto + HamDRM list, Receive/Finish/Cancel), Satcom, Inmarsat, Aircraft, and SDRplay. **Home lat/lon is Town-only** (not on the public site).
 
 ### Control API notes (for FUBAR and other local clients)

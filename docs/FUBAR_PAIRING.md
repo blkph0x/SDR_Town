@@ -25,7 +25,7 @@ accept optional rfMode (default Auto), and status exposes RF route identity.
 FUBAR integration was not re-tested and its website has no separate RF selector.
 Use the 0.2.90 DLL when testing against Town 0.2.90 and report both app versions.
 
-| App | Latest tag | Ships / expects |
+| App | Recorded tag | Ships / expects |
 |-----|------------|-----------------|
 | SDR Town | **v0.2.80** | `SdrTownControl-0.2.80-win64.dll` |
 | FUBAR | **v1.1.41** | Matching 0.2.80 DLL. Website SSTV list includes HamDRM digital. |
@@ -38,12 +38,20 @@ Use the 0.2.90 DLL when testing against Town 0.2.90 and report both app versions
 | TLE refresh / ISS SSTV arm / satcom scan | Yes | Yes (Take control; Start uses `force=true`) |
 | SDRplay IFGR/RFGR/notches | Device Manager + CLI | Radio tab when `status.sdrplay` present |
 | Aircraft tracks | Local map | OSM of tracks only (no home center) |
-| Inmarsat | Band plan, start/stop, log | Same; **no voice follow** (DEC-0105) |
+| Inmarsat | Native Aero, IQ replay, speaker/WAV, ADS-C map | Band plan, start/stop, log; **no voice follow** (DEC-0105) |
 
-## Remaining Inmarsat gaps (both apps)
+## Native Aero in Town 0.2.92
 
-Unique-word/FEC, verified C-assign, Aero AMBE, dual-SDR voice, live RF acceptance.
-See `docs/INMARSAT.md`.
+Town now has native continuous/burst framing/FEC/CRC, a separate Aero codec,
+speaker/WAV output and an offline validated ADS-C map. GUI/CLI replay reference
+tests pass. FUBAR was not changed or re-qualified with these additions; its
+website does not expose the new replay, decoder/audio or offline-map controls.
+The control DLL ABI is unchanged; this tester package includes the versioned
+0.2.92 DLL. Do not interpret that as a new end-to-end FUBAR qualification.
+
+Remaining: clear-conversation RF acceptance, call-end/security lifecycle and
+automatic follow, dual-SDR voice/data, photos and website control integration.
+See `docs/INMARSAT.md` and `docs/RELEASE_0.2.92.md`.
 
 ## Tester pairing for 0.2.80 / 1.1.41
 

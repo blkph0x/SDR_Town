@@ -2,6 +2,44 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-24 - 0.2.92 release and extracted-package gates (DEC-0121)
+
+Release source 7e6eed7e532161ce6a0918d6ed6b616dbe320647. MSVC2022/Qt6.11.1
+release helper with SkipPush/SkipAssets PASS; signed metadata commit 08c59d0.
+Final CTest 4/4 PASS in 115.99 s: core 388 passed / 2 optional skips,
+206295 assertions; workspace 34 passed / 6 optional skips, 411 assertions;
+Rust 8/8 and SSTV backend self-test PASS. The optional Aero recording was
+separately supplied to the focused GUI test recorded below; it was not silently
+counted as covered by the default suite. Packaging negative tests 15/15 PASS.
+
+Extracted portable tested with developer Qt paths removed and Windows-only PATH.
+Actual GUI/CLI fast/paced public voice replay: four equal WAV hashes, matching
+the source-build reference 295ee11a0edc4e341ab66455ce283f7a0201e2f35a880eb555e47a19af6e176f.
+Default speaker: zero drops/errors, queue drained; 443440 zero-fill samples
+across idle/missing intervals. Public burst IQ: both packaged GUI/CLI produce
+8 CRC-valid frames and the same two ADS-C aircraft positions. Synthetic transport
+four-way parity and malformed-input rejection PASS. These are not a claim of
+clear conversation or an antenna test.
+
+Installer: 26566683 bytes, SHA256
+f105662048555a84d02d4995eb5bd13052ced0215cefbb29c42c5df4e0e32c72.
+Portable: 35579217 bytes, SHA256
+1e2492f3c169878c3f4dadb1db35b60d66a54914df637ae63d319c593d3462bb.
+Required Aero codec DLL and all seven notices present; only four sdr_aero_*
+symbols exported, no P25 mbe_* exports. Packaged diagnostics HTTPS/default-off,
+64 KiB/minute, ingest token only. Explicit P25 guard from 485268b to HEAD:
+128 changed paths, zero protected. git diff --check PASS.
+Evidence: build-audit-20260924/release-0292.txt, aero-portable-parity.log,
+aero-portable-burst.log, inmarsat-portable-0292.log and corresponding directories.
+
+Independent Windows CI 36001921711 PASS (Qt6.7.3, RDS DSP off): core 385 passed /
+2 optional skips, 183234 assertions; workspace 34 passed / 6 optional skips,
+411 assertions; actual GUI/CLI synthetic parity/failure tests, Rust backend,
+clean portable staging and artifact upload pass. Public reference IQ was tested
+locally, not supplied to CI. CI guard baseline limitation ISS-0015 remains;
+the explicit local baseline comparison above is the P25-preservation evidence.
+Full remote log retained in build-audit-20260924/aero-ci-full.log.
+
 ## 2026-09-24 - Native Aero implementation and reference gates (DEC-0121)
 
 Windows/MSVC2022/Qt6.11.1. Initial vendor compile failed on Qt6 QString::sprintf,
