@@ -2,6 +2,44 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-24 - 0.2.90 packaged SSTV verification
+
+Windows/MSVC 2022 x64 / Qt 6.11.1. Committed source
+401e2e386b29b8d68dd3f0d557ac99a02cf45c5a; signed asset metadata b8a27dd.
+release.ps1 -Version 0.2.90 -Channel experimental -SkipPush -SkipAssets: PASS.
+Negative packaging tests 15/15; rebuilt app/core/workspace; CTest 4/4 in 76.93 s:
+373 core pass / 2 optional fixture skips (205479 assertions); 32 workspace pass /
+5 optional fixture/import skips (390 assertions); Rust 8/8; helper selftest PASS.
+NSIS installer, clean portable ZIP and control DLL verified with signed manifest,
+runtime/license payload, source provenance and hashes. Log: release-0290.txt.
+
+Extracted the actual ZIP to build-audit-20260924/package-smoke-0290. With developer
+Qt/plugin paths removed and PATH restricted to Windows directories, --version
+reports 0.2.90; bundled helper completes Robot36 selftest; GUI dry-run exits 0,
+report ok=true, no errors/warnings and no RF streaming. Inspected GUI screenshot.
+Packaged token-authenticated loopback API lists all five RF choices, rejects WFM
+with HTTP 400, normalizes manual lsb to LSB, then correctly rejects reception
+without an active non-P25 receiver. Own test process exits cleanly. Evidence:
+package-gui-0290.json/png, package-api-0290.json; no live radio test claimed.
+
+Repeated recorded RF test after rebuild: full Robot36 240 rows on USB/LSB/NFM/AM,
+same RGB errors as preflight. All eight assets uploaded to a draft v0.2.90 release;
+GitHub sizes and SHA-256 digests match every local file. Source/tag pushed.
+Windows CI run 35986929161 subsequently PASSED in 14m9s: native app/tests,
+370 core cases (182418 assertions, 2 optional skips; CI RDS DSP is disabled),
+32 Qt cases (390 assertions, 5 optional skips), Rust tests, packaging and upload.
+Artifact 10802883190 is 15442643 bytes. Workflow validation 35986928995 also PASS.
+The pre-existing P25 guard compared origin/master to HEAD with zero changed paths
+on this push (ISS-0015); this is not evidence of DSP non-regression. Local diff
+inspection against 2705a9e confirms no P25/receiver/device/demod/audio-engine core
+changes; shared MainWindow changes are limited to the SSTV includes, status,
+live-session wiring and request handling.
+
+Published at 2026-09-24T10:38:14Z. GitHub /releases/latest returns public v0.2.90,
+all eight asset digests/sizes match local files, and the public update.json
+download reports 0.2.90 experimental with the exact uploaded installer hash/size.
+https://github.com/blkph0x/SDR_Town/actions/runs/35986929161
+
 ## 2026-09-24 - DEC-0119 SSTV 0.2.90 release preflight
 
 Repeated scripts/test_sstv_rf.py in the isolated SSTV venv: all four complete

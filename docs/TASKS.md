@@ -1,9 +1,11 @@
 # Task list (canonical)
 
-T-0047 release subtask | in_progress | Publish SSTV 0.2.90 | DEC-0119.
-Include all DEC-0117 source/tests/docs and the CI repair in matching experimental
-installer/portable/control-DLL/updater assets. Repeat release and recorded-image
-gates, verify packaged startup, remote CI and uploaded hashes before closing.
+T-0047 release subtask | done | Publish SSTV 0.2.90 | DEC-0119.
+Source 401e2e3 and tag b8a27dd pushed; GitHub Latest v0.2.90 published with all
+eight matching assets and signed updater. Local CTest 4/4, recorded RF/GUI tests,
+extracted-package GUI/helper/API checks and remote Windows CI 35986929161 PASS.
+All public asset hashes/sizes and public updater metadata verified. RF field
+qualification remains open; a pre-existing CI guard baseline gap is ISS-0015.
 
 T-0047 subtask | done | CI release fixture repair | DEC-0118 /
 ISS-0014. Reproduce failed run 35979813492, repair packaging tests without
@@ -18,7 +20,7 @@ Release app/core/workspace builds pass; CTest 4/4, six synthetic RF cases,
 four recorded-image RF round trips and 16 worker/GUI recording cases pass.
 On-air hardware qualification and extended/headerless RF Auto remain open;
 manual routes handle those image formats. Existing noise-tail false partials
-are recorded in ISS-0013. No P25 changes or release publication in this subtask.
+are recorded in ISS-0013. No P25 changes. Published by DEC-0119 as v0.2.90.
 
 T-0046 | done | 2026-09-24 source/branch reconciliation and receive-chain audit |
 DEC-0110; docs/AUDIT_20260924.md. Original folder fast-forwarded to exact 0.2.88

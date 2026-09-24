@@ -1,5 +1,16 @@
 # Development log
 
+## 2026-09-24 - SSTV 0.2.90 published for GitHub testers
+
+All DEC-0117 source/tests/docs pushed as 401e2e3; signed metadata/tag b8a27dd.
+Local and independent Windows CI build/test/package gates passed. Actual portable
+GUI/helper/API checks passed without developer runtime paths. Eight assets are
+public in Latest v0.2.90; hashes, sizes and downloaded updater manifest verified.
+Release notes explain RF Auto/manual controls and live-radio qualification limits.
+No SSTV work remains only local. No P25 DSP or FUBAR changes; no captures deleted.
+Remote run's pre-existing empty-diff guard limitation is recorded as ISS-0015,
+not presented as evidence of P25 invariance. Original dev folder remains canonical.
+
 ## 2026-09-24 - SSTV 0.2.90 publication requested
 
 User requires the completed SSTV fixes in GitHub source and downloadable tester

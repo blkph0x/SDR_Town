@@ -39,6 +39,12 @@ ambiguous sidebands, stream gaps, irregular blocks, GUI controls and recorded
 image round trips. Existing full/partial Robot36 and Martin1 worker/GUI tests
 also pass. These are not on-air hardware or satellite-pass certification.
 
+Local Release CTest passed all four suites. The extracted portable app, bundled
+SSTV helper and RF-control API passed smoke checks without developer runtime
+paths. [Windows CI](https://github.com/blkph0x/SDR_Town/actions/runs/35986929161)
+also passed build, core/GUI/SSTV tests and packaging. All eight published asset
+sizes and SHA-256 digests match the verified local files.
+
 RF Auto requires a classic 7-bit VIS header and accurate tuning. Extended-VIS
 or headerless transmissions need a manual RF mode; image-format Auto still
 supports its existing VIS/line-sync paths. AM/DSB may be ambiguous in RF Auto.

@@ -2,6 +2,19 @@
 
 Never delete a row. Close with a commit hash and a sentence.
 
+## ISS-0015 - Push CI P25 guard checks an empty diff (2026-09-24, OPEN)
+
+Observed in completed Windows run 35986929161: guard output compares origin/master
+to HEAD and reports 0 changed paths, although the push contains SSTV changes.
+The workflow reads GITHUB_EVENT_BEFORE but does not populate it from the push
+event, then falls back to origin/master, already at the checked-out commit.
+Build/native/Qt/Rust/package gates ran and passed; this guard is not independent
+proof of P25 preservation. Local reviewed diff for 0.2.90 has no P25 or shared
+receiver/device/demod/audio-engine core changes; MainWindow has SSTV-only wiring.
+Follow-up: supply the real push base, test first-push/PR cases, and define narrowly
+reviewed non-P25 integration exceptions without weakening protected DSP checks.
+Do not silently add a broad MainWindow allowlist just to make the guard pass.
+
 ## ISS-0014 - Windows CI release fixture drift (2026-09-24, CLOSED)
 
 Run 35979813492: native Release build, core, workspace and SSTV tests passed;
