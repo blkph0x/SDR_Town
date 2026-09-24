@@ -1,5 +1,18 @@
 # Development log
 
+## 2026-09-24 - Native Aero tester release 0.2.92 published
+
+Source 7e6eed7, signed release metadata/tag 08c59d0, GitHub release 395703721.
+Public Latest v0.2.92 has installer, portable, control DLL, checksums and signed
+manifest; all eight GitHub asset SHA256 digests/sizes match tested local files.
+Unauthenticated public latest query and downloaded update manifest verified.
+Full local CTest 4/4, extracted-package public voice/position and synthetic
+GUI/CLI checks, independent Windows CI 36001921711 all pass. Reference audio
+bytes match across fast/paced GUI/CLI, not proof of clear conversation.
+Native implementation/reference subtask delivered; T-0048/ISS-0016 remain open
+for known-clear RF/speech acceptance and follow lifecycle. P25 untouched.
+README, pairing notes and test instructions reflect the exact current scope.
+
 ## 2026-09-24 - Native Classic Aero receive, voice and map (DEC-0121)
 
 Integrated actual JAERO receive/FEC and separate mini-m codec, not P25 mbelib.

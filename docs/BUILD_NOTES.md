@@ -40,6 +40,12 @@ locally, not supplied to CI. CI guard baseline limitation ISS-0015 remains;
 the explicit local baseline comparison above is the P25-preservation evidence.
 Full remote log retained in build-audit-20260924/aero-ci-full.log.
 
+Published https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.92, release
+395703721, tag at 08c59d0. All eight uploaded SHA256 digests and sizes match;
+public unauthenticated /releases/latest returns v0.2.92 (draft=false), and the
+downloaded update.json matches the signed local bytes. Documentation-only
+follow-ups do not change the packaged binary's recorded source commit.
+
 ## 2026-09-24 - Native Aero implementation and reference gates (DEC-0121)
 
 Windows/MSVC2022/Qt6.11.1. Initial vendor compile failed on Qt6 QString::sprintf,

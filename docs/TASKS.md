@@ -9,6 +9,9 @@ isolated codec, CRC-valid ADS-C, offline live/replay map and speaker/WAV paths.
 Public voice IQ produces identical PCM across four GUI/CLI pacing variants;
 public burst IQ yields two real aircraft positions in GUI. Clear-conversation
 and antenna acceptance remains open, as do automatic follow and aircraft photos.
+Tester delivery complete: v0.2.92 tag 08c59d0, source 7e6eed7, eight hash-verified
+assets and signed updater published. Local CTest, extracted portable reference
+tests and independent Windows CI 36001921711 pass. Qualification task stays open.
 
 T-0047 subtask | done | Inmarsat IQ replay / diagnostic acceptance harness |
 DEC-0120. Bounded file input, shared live/replay processing, GUI and CLI controls,
