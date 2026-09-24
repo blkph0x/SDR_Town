@@ -2,6 +2,16 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-24 - DEC-0119 SSTV 0.2.90 release preflight
+
+Repeated scripts/test_sstv_rf.py in the isolated SSTV venv: all four complete
+Robot36 images PASS, 240 rows; RGB errors USB 4.142, LSB 4.144, NFM 2.622,
+AM 1.614 out of 255, unchanged from DEC-0117. Noise-tail partials remain visible.
+Repeated scripts/test_sstv_worker.py: all 16 recording/worker/GUI combinations
+PASS (build-audit-20260924/sstv-worker-0290.txt). No new DSP edits since those
+tests. Version/docs are prepared for 0.2.90; rebuild, package and publication
+verification follow from the committed source. Git diff whitespace check PASS.
+
 ## 2026-09-24 - DEC-0118 Windows CI fixture repair
 
 Failed run 35979813492 / source 3aa5ce4 reproduced locally: release-verifier suite
@@ -28,6 +38,47 @@ Workflow YAML validation run 35984373768 also passed. CI artifact 10802101137
 is unexpired, 15429138 bytes, digest
 `sha256:a40a4ff10a0747db529f67dec212d952750d2ec11926bf6b9c78abad64208bbd`.
 Release publication was correctly skipped on master; no release asset replaced.
+
+## 2026-09-24 - DEC-0117 SSTV RF route verification
+
+Host/toolchain: existing Windows MSVC 2022 x64 Release / Qt 6.11.1.
+`cmake --build build --config Release --target SDR_Town sdr_town_tests
+sdr_town_workspace_tests -j 4` (targets also built in separate invocations): PASS.
+Initial new test compile failed C3861 CHECK_THROWS_WITH; fixed missing Catch
+matcher include. Initial USB/AM VIS tests failed: traced to the HfDemod 0.5*BW
+cutoff, not detector thresholds. SSTV BW correction made the same tests pass.
+
+- `[sstv-rf]`: 6 cases / 36 assertions PASS. USB, LSB, NFM auto; manual AM;
+  full retained VIS; corrupt parity rejection; ambiguous AM sidebands; rate,
+  out-of-capture and IQ epoch/position/gap rejection; 3 s acquisition wait and
+  irregular partitions. At 2.048 MS/s with a +12 kHz channel offset, processing
+  2.21 s IQ took 0.553 s USB / 0.549 s LSB / 0.556 s NFM on this host.
+- `ctest --test-dir build -C Release --output-on-failure`: 4/4 PASS, 59.14 s.
+  Core 373 pass / 2 optional recording skips, 205479 assertions; workspace
+  32 pass / 5 optional fixture/import skips, 390 assertions; Rust 8 pass;
+  Robot36 helper selftest pass. Optional skips are not RF reception proof.
+- `[sstv-live-gui]`: 2 cases / 25 assertions PASS, actual window rendered and
+  inspected at build-audit-20260924/sstv-rf-ui.png. Route/image selections stay
+  separate; selection disabled during decode; queued route status reaches GUI.
+- `scripts/test_sstv_worker.py`: all 16 full/partial Robot36/Martin1 worker/GUI
+  cases PASS, including forced and Auto image format. Evidence log:
+  build-audit-20260924/sstv-worker-rf-regression.txt.
+- `scripts/test_sstv_rf.py`: independent real_recording.wav.gz remodulated to
+  96 kHz CF32, production RF router, then production helper. Full Robot36 240
+  rows recovered on Auto USB/LSB/NFM and manual AM. Mean RGB absolute difference
+  vs direct audio (out of 255): 4.142 / 4.144 / 2.622 / 1.614. All below the
+  declared 5% image budget. The recording's noise tail can create different
+  provisional partials (ISS-0013); complete-picture success does not close that.
+  Initial harness used WAV instead of helper's documented PCM+rate interface;
+  corrected the harness. Main radioconda SciPy has a NumPy ABI mismatch; used
+  an isolated build-audit-20260924/sstv-venv (numpy 2.5.3, scipy 1.18.1,
+  soundfile 0.14.0), without changing existing Python environments.
+- Actual SDR_Town.exe `--gui-dry-run --no-control-server --no-remote-diagnostics
+  --gui-self-test build-audit-20260924/sstv-rf-app-smoke.json
+  --gui-exit-after-ms 3000`: exit 0; no hardware RX opened.
+
+No real on-air SSTV signal or satellite pass was available for qualification.
+No P25 algorithm changes. No release assets or GitHub push in this pass.
 
 ## 2026-09-24 - 0.2.89 published package verification
 

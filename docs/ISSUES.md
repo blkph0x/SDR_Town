@@ -10,6 +10,23 @@ build-info.json (also SGP4 licence files). Reproduced locally. DEC-0118 updates
 the fixture and adds provenance failure coverage. Fixed in 2b615ba; run
 35984373766 passed build, all test gates, staging, packaging and artifact upload.
 
+## ISS-0013 - SSTV RF Auto was image-format Auto only (2026-09-24)
+
+Confirmed by MainWindow::ensureSstvWindow routing to only the selected demod tap.
+DEC-0117 adds worker-isolated RF acquisition with manual fallback and explicit
+UI/API identity. Synthetic IQ also exposed the SSTV SSB bandwidth mismatch:
+3 kHz is halved by HfDemod, attenuating the 1900 Hz VIS leader and image tones.
+SSTV-specific routes now request 6 kHz (3 kHz one-sided). No general analog
+bandwidth semantics or P25 DSP changed. Hardware RF qualification, extended-VIS
+RF auto and headerless RF auto remain open; manual RF still supports the image
+helper's extended VIS/line-sync formats. See BUILD_NOTES for executable evidence.
+
+Recorded RF round trips also reproduced existing image-helper line-sync false
+partials after a valid Robot36 in trailing noise (USB: pd290 12 rows; NFM: sc148
+74 rows; direct audio also reports a false partial). These are not complete
+images or RF route confirmations. Further line-sync qualification is open; no
+decoder confidence thresholds changed in this RF-routing patch.
+
 ## ISS-0012 - 0.2.88 receive-chain audit findings (2026-09-24, OPEN)
 
 See [AUDIT_20260924.md](AUDIT_20260924.md) A01-A17 for exact locations, evidence,

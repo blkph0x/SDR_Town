@@ -38,7 +38,7 @@ TEST_CASE("Live SSTV GUI finish saves and cancel releases its receiver","[sstv-l
         QTemporaryDir directory; REQUIRE(directory.isValid());
         auto feed=std::make_shared<SstvReceiverFeed>();
         SstvWindow window(decodeSstvImageFile);
-        window.setLiveSource([feed](const auto& finish)->SstvWindow::Decode {
+        window.setLiveSource([feed](const auto& finish,const auto&,const auto&)->SstvWindow::Decode {
             return [feed,finish](const auto&,const auto& output,const auto& mode,const auto& cancel,const auto& preview) {
                 return decodeSstvLive(feed,[]{},output,mode,[finish]{return finish->load();},cancel,preview);
             };
@@ -54,6 +54,29 @@ TEST_CASE("Live SSTV GUI finish saves and cancel releases its receiver","[sstv-l
         auto next=feed->attach(); feed->detach(next);
         window.close();
     }
+}
+
+TEST_CASE("SSTV GUI separates RF route from image format", "[sstv-live-gui]") {
+    SstvWindow window(decodeSstvImageFile);
+    QString requested;
+    window.setLiveSource([&](const auto&,const QString& rfMode,const auto& status)->SstvWindow::Decode {
+        requested=rfMode;
+        return [status](const auto&,const auto& output,const auto&,const auto&,const auto&)->nlohmann::json {
+            status("LSB");
+            return {{"outputDirectory",output.toStdString()},{"images",nlohmann::json::array()}};
+        };
+    });
+    window.show();
+    CHECK_FALSE(window.findChild<QComboBox*>("sstvRfMode")->isEnabled());
+    CHECK_FALSE(window.startLive("unused","auto","bogus"));
+    REQUIRE(window.startLive("unused","robot36","LSB"));
+    CHECK(requested=="LSB"); CHECK(window.selectedMode()=="robot36");
+    CHECK_FALSE(window.findChild<QComboBox*>("sstvRfMode")->isEnabled());
+    REQUIRE(wait(window));
+    CHECK(window.detectedRfMode()=="LSB");
+    CHECK(window.findChild<QComboBox*>("sstvRfMode")->isEnabled());
+    const auto screenshot=qEnvironmentVariable("SDR_TOWN_SSTV_RF_SCREENSHOT");
+    if(!screenshot.isEmpty()) CHECK(window.grab().save(screenshot));
 }
 
 TEST_CASE("Live SSTV window saves independently verified streamed images","[sstv-live-gui-recording]") {
@@ -74,7 +97,7 @@ TEST_CASE("Live SSTV window saves independently verified streamed images","[sstv
     REQUIRE((status==MA_SUCCESS || status==MA_AT_END)); REQUIRE(read==length);
     auto feed=std::make_shared<SstvReceiverFeed>();
     SstvWindow window(decodeSstvImageFile);
-    window.setLiveSource([&](const auto& finish)->SstvWindow::Decode {
+    window.setLiveSource([&](const auto& finish,const auto&,const auto&)->SstvWindow::Decode {
         return [&,finish](const auto&,const auto& output,const auto& mode,const auto& cancel,const auto& preview) {
             size_t offset=0; bool beforeAttach=true;
             // Deterministic source advances one block per worker poll, through the

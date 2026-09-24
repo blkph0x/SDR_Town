@@ -47,10 +47,17 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
     row(output_,destination_,"New output folder",QStyle::SP_DirIcon);
     input_->setObjectName("sstvInput"); output_->setObjectName("sstvOutput");
     mode_=new QComboBox(this);
-    mode_->addItem("Automatic (VIS header)","auto");
+    mode_->addItem("Automatic (VIS / line sync)","auto");
     for (const auto& spec : kSstvModes)
         mode_->addItem(QString::fromUtf8(spec.label), QString::fromUtf8(spec.id));
-    form->addRow("Mode",mode_);
+    form->addRow("Image format",mode_);
+    rfMode_=new QComboBox(this); rfMode_->setObjectName("sstvRfMode");
+    rfMode_->addItem("Auto (USB / LSB / NFM)","auto");
+    for(const auto* mode:{"USB","LSB","NFM","AM"}) rfMode_->addItem(mode,mode);
+    rfMode_->setToolTip("Auto requires a classic VIS header. Select a manual RF mode for headerless or extended-VIS transmissions. Does not change speaker mode.");
+    form->addRow("RF demodulation",rfMode_);
+    rfStatus_=new QLabel("Not receiving",this); rfStatus_->setObjectName("sstvRfStatus");
+    form->addRow("Detected RF route",rfStatus_);
     hint_=new QLabel("Digital STWN is experimental and file-only. Not EasyPal compatible.",this);
     hint_->setWordWrap(true);
     form->addRow(hint_);
@@ -108,11 +115,13 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
 void SstvWindow::setLiveSource(LiveOpen open) {
     if(busy()) return;
     liveOpen_=std::move(open);
-    if(liveOpen_ && source_->findData("live")<0) source_->addItem("Live NFM / USB / LSB - main receiver","live");
+    if(liveOpen_ && source_->findData("live")<0) source_->addItem("Live RF - main receiver frequency","live");
     setWindowTitle(liveOpen_?"SSTV Images":"SSTV Recorded Images");
 }
-bool SstvWindow::startLive(const QString& output,const QString& mode) {
+bool SstvWindow::startLive(const QString& output,const QString& mode,const QString& rfMode) {
     if(busy() || !liveOpen_) return false;
+    if(rfMode_->findData(rfMode)<0) {status_->setText("Unsupported SSTV RF mode"); return false;}
+    rfMode_->setCurrentIndex(rfMode_->findData(rfMode));
     source_->setCurrentIndex(source_->findData("live"));
     return startDecode(QString(),output,mode);
 }
@@ -137,12 +146,18 @@ bool SstvWindow::startDecode(const QString& input,const QString& output,const QS
         if(!sstvStreamingModeOk(mode.toStdString())) {
             status_->setText("Digital STWN is an experimental file-only format, not a live HamDRM decoder."); return false;
         }
-        try {finish_=std::make_shared<std::atomic<bool>>(false); decode=liveOpen_(finish_);}
+        try {
+            finish_=std::make_shared<std::atomic<bool>>(false);
+            decode=liveOpen_(finish_,selectedRfMode(),[this](const QString& route) {
+                QMetaObject::invokeMethod(this,[this,route]{rfStatus_->setText(route);},Qt::QueuedConnection);
+            });
+        }
         catch(const std::exception& error) {status_->setText(QString::fromUtf8(error.what())); finish_.reset();return false;}
     }
     if(!live) input_->setText(input);
     output_->setText(output); mode_->setCurrentIndex(mode_->findData(mode));
     images_->clear(); original_=QImage(); resultDirectory_.clear(); updatePreview();
+    rfStatus_->setText(live?"searching":"Audio recording (no RF)");
     status_->setText(live?"Listening for SSTV...":"Decoding..."); setBusy(true);
     struct Result {
         nlohmann::json report; QString error;
@@ -200,6 +215,7 @@ bool SstvWindow::startDecode(const QString& input,const QString& output,const QS
 void SstvWindow::setBusy(bool value) {
     for(auto* widget:std::array<QWidget*,6>{input_,output_,mode_,open_,destination_,decodeButton_}) widget->setEnabled(!value);
     const bool live=source_->currentData()=="live";
+    rfMode_->setEnabled(!value && live); rfStatus_->setEnabled(live);
     source_->setEnabled(!value); input_->setEnabled(!value && !live); open_->setEnabled(!value && !live);
     decodeButton_->setText(live?"Receive":"Decode");
     finishButton_->setVisible(live); finishButton_->setEnabled(value && live);
@@ -247,6 +263,8 @@ QString SstvWindow::statusMessage() const {
 QString SstvWindow::selectedMode() const {
     return mode_ ? mode_->currentData().toString() : QStringLiteral("auto");
 }
+QString SstvWindow::selectedRfMode() const {return rfMode_->currentData().toString();}
+QString SstvWindow::detectedRfMode() const {return rfStatus_->text();}
 bool SstvWindow::liveSelected() const {
     return source_ && source_->currentData().toString() == QStringLiteral("live");
 }

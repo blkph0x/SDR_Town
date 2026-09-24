@@ -1,10 +1,24 @@
 # Task list (canonical)
 
+T-0047 release subtask | in_progress | Publish SSTV 0.2.90 | DEC-0119.
+Include all DEC-0117 source/tests/docs and the CI repair in matching experimental
+installer/portable/control-DLL/updater assets. Repeat release and recorded-image
+gates, verify packaged startup, remote CI and uploaded hashes before closing.
+
 T-0047 subtask | done | CI release fixture repair | DEC-0118 /
 ISS-0014. Reproduce failed run 35979813492, repair packaging tests without
 weakening verification, run locally and confirm the remote build/package gate.
 Fixed in 2b615ba: run 35984373766 passed all Windows build/test/package/upload
 steps in 10m56s. Workflow validation also passed. Runtime/SSTV work unchanged.
+
+T-0047 subtask | implemented / RF qualification open | SSTV RF route audit and auto acquisition |
+DEC-0117. Separate image-format Auto from USB/LSB/NFM detection, retain header
+pre-roll, preserve manual routes and satellite Doppler, test failure cases.
+Release app/core/workspace builds pass; CTest 4/4, six synthetic RF cases,
+four recorded-image RF round trips and 16 worker/GUI recording cases pass.
+On-air hardware qualification and extended/headerless RF Auto remain open;
+manual routes handle those image formats. Existing noise-tail false partials
+are recorded in ISS-0013. No P25 changes or release publication in this subtask.
 
 T-0046 | done | 2026-09-24 source/branch reconciliation and receive-chain audit |
 DEC-0110; docs/AUDIT_20260924.md. Original folder fast-forwarded to exact 0.2.88

@@ -589,8 +589,9 @@ std::vector<float> demodulate(
 
     const std::vector<float> decoderSource = audio;
 
+    // DEC-0117: explicit AM SSTV uses the same pre-squelch data tap as SSB.
     if (decoderAudio && (mode == DemodMode::USB ||
-                         mode == DemodMode::LSB)) {
+                         mode == DemodMode::LSB || mode == DemodMode::AM)) {
         const double identity = std::isfinite(dataIdentityHz)
             ? dataIdentityHz : targetHz;
         const bool discontinuity =

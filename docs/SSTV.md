@@ -1,22 +1,35 @@
 # SSTV receive development
 
-Version **0.2.80** ships analogue SSTV (Dayton + handbook/QSSTV leftovers) and
-**HamDRM** digital (HB9TLK Mode B 2.5 kHz), plus experimental live NFM input
-and classic VIS inspection. Known-transmission RF acceptance remains open.
+Version 0.2.90 includes analogue SSTV (Dayton + handbook/QSSTV formats), an
+experimental private digital STWN file decoder, live audio input and classic
+VIS inspection. This release adds independent RF acquisition
+(DEC-0117). Known-transmission hardware acceptance remains open.
 
-## Live NFM / USB / LSB (current repair branch)
+## Live RF reception
 
-1. Start and tune the main receiver to an SSTV transmission in NFM, USB or LSB. P25 monitor
-   or voice-follow mode must be off. SSTV does not tune or reconfigure the radio.
-2. Open **Tools > SSTV Images**, choose **Live NFM / USB / LSB - main receiver**, Automatic
-   (or a forced analogue mode), and a new output directory whose parent exists.
+1. Start and tune the main receiver to the SSTV carrier/dial frequency. P25 monitor
+   and voice-follow must be off. SSTV never tunes or reconfigures the radio.
+2. Open **Tools > SSTV Images**, choose **Live RF - main receiver frequency**,
+   **RF demodulation: Auto**, **Image format: Automatic**, and a new output folder.
 3. Press **Receive**. Scanlines appear progressively. **Finish and save** stops
    accepting new input, drains queued samples, and saves validated PNGs/report.
    **Cancel** or closing the window discards provisional output.
 
-NFM uses raw discriminator audio before speaker LPF/EQ/squelch/volume; USB/LSB
-uses the HF decoder tap before speaker squelch and output volume.
-A retune, stream gap, overrun or mode/device loss aborts the session rather than
+RF Auto tests USB, LSB and NFM independently for a known classic 7-bit VIS with
+valid framing/parity. It retains the header audio, checks for competing routes
+for another 910 ms, then pins the selected route for this session. **Detected RF
+route** shows the result. Multiple valid routes require explicit manual selection;
+AM/DSB can contain valid audio on both sidebands. Auto is not a general modulation
+classifier and does not change the main speaker's mode. It needs the start of
+the transmission and accurate tuning. Manual USB, LSB, NFM and AM also work with
+image-format Auto, including extended VIS and supported line-sync acquisition.
+WFM/CW/digital voice are not SSTV RF routes in this implementation.
+
+The independent IQ reader/demods run on the SSTV worker, not the GUI/RF audio
+thread. NFM uses raw discriminator audio; USB/LSB/AM use the HF decoder tap.
+Speaker LPF/EQ/squelch/volume do not affect these taps. The SSB decoder requests
+a 3 kHz one-sided passband (6 kHz in the existing HF demodulator's BW convention).
+A retune, stream gap, overrun or device loss aborts the session rather than
 joining incompatible samples; restart explicitly. Sessions are bounded to six
 minutes and four images. No automated repeated acquisition yet. Partial images
 are labelled and retain black missing rows. Finishing after an image begins can save a partial image;
@@ -30,6 +43,17 @@ satellite Doppler acceptance remain open; see AUDIT_20260924.md.
 
 Independent recordings exercise the real live GUI/feed/converter/helper path,
 but are not a substitute for an off-air image from a known transmission.
+
+Satellite SSTV keeps the downlink catalogue's explicit USB/LSB/NFM selection and
+continuous digital Doppler correction. It does not use uncorrected main-radio RF
+Auto. The catalogue's `sstv` default is NFM. File/CLI WAV decoding already receives
+demodulated audio, so it cannot determine which RF sideband produced that audio.
+
+Automation: `POST /v1/sstv/live` accepts `mode` (image format), `rfMode`
+(`auto`, `USB`, `LSB`, `NFM`, `AM`) and `outputDirectory`. Status includes `rfModes`,
+`rfMode`, `detectedRfMode`, and `rfAutoPath`; the saved report records requested
+and selected routes. Omitted `rfMode` defaults to Auto. FUBAR's existing button
+uses this default; adding its own RF dropdown is separate companion-app work.
 
 ## Image decoding
 

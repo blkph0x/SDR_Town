@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Current version** | **0.2.89** (experimental channel) |
+| **Current version** | **0.2.90** (experimental channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
@@ -13,6 +13,15 @@
 | **Pairs with** | [FUBAR](https://github.com/blkph0x/FUBAR) (VOX capture, public live website, optional remote tune) |
 
 Formerly *MaulAudio Pro*. Branding, binaries, installer, AppData paths, and release assets all use **SDR Town** / `SDR_Town`.
+
+### 0.2.90 SSTV RF selection
+
+SSTV Images now separates **RF demodulation** from **Image format**. RF Auto
+detects USB/LSB/NFM using a validated classic VIS header; manual USB/LSB/NFM/AM
+routes remain available. The SSTV sideband passband now preserves image tones,
+including satellite sideband reception. No P25 audio changes. See the
+[tester steps and limitations](docs/RELEASE_0.2.90.md) and [SSTV guide](docs/SSTV.md).
+Installer and portable packages include the image decoder; no separate install.
 
 ### 0.2.89 receive-chain repairs
 
@@ -48,11 +57,12 @@ gates](docs/AUDIT_20260924.md) and [release notes](docs/RELEASE_0.2.89.md).
 2. In SDR Town, start the receiver (and P25 Monitor CC / auto-follow if that is your station). Confirm the status bar shows local control on `127.0.0.1:8765` (loopback only).
 3. Route SDR Town audio to **VB-CABLE** (or another capture endpoint FUBAR can open).
 4. In FUBAR, select that cable as the input, enable **Public website**, and set **Now playing**.
-5. Place a **matching** `SdrTownControl.dll` next to `FUBAR.exe`. This Town **0.2.89** release ships `SdrTownControl-0.2.89-win64.dll` (rename to `SdrTownControl.dll`). FUBAR was not changed or re-qualified in this receive-chain repair pass. See [pairing versions and gaps](docs/FUBAR_PAIRING.md).
+5. Place a **matching** `SdrTownControl.dll` next to `FUBAR.exe`. This Town **0.2.90** release ships `SdrTownControl-0.2.90-win64.dll` (rename to `SdrTownControl.dll`). FUBAR was not changed or re-qualified in this SSTV release. See [pairing versions and gaps](docs/FUBAR_PAIRING.md).
 6. **Tools → Settings** in FUBAR: enable SDR Town control and pick allowed actions. FUBAR **1.1.41** website has P25/RDS/tones/SSTV (Auto + HamDRM list, Receive/Finish/Cancel), Satcom, Inmarsat, Aircraft, and SDRplay. **Home lat/lon is Town-only** (not on the public site).
 
 ### Control API notes (for FUBAR and other local clients)
 
+- From **0.2.90**, `POST /v1/sstv/live` accepts `rfMode` (`auto`, `USB`, `LSB`, `NFM`, `AM`), independent of image `mode`. Omitted `rfMode` defaults to Auto. Status includes available/requested/detected RF routes. The FUBAR website does not yet expose a separate RF selector; the Town GUI does.
 - HTTP JSON on **localhost only** (default port **8765**). Not exposed to the LAN.
 - `GET /v1/status` includes monitor state and a `p25` object. From **0.2.63**, `p25.talkgroupStatusLabel` is the clean `TG <id> <alpha>` string (no voice diagnostic suffix). FUBAR uses that for the website subtitle, with an alias-file fallback on older SDR Town builds.
 - From **0.2.64**, status also exposes read-only `rds`, `tones` (CTCSS/DCS), and `sstv` blocks for the FUBAR website panels. `POST /v1/direct-sampling` sets RTL-SDR `direct_samp` (0=off, 1=I-ADC, 2=Q-ADC) for HF down to ~500 kHz. `POST /v1/mode` changes demod at the current frequency.
@@ -116,8 +126,11 @@ SSTV (**Tools > SSTV Images**, CLI `sstv decode` / `sstv inspect`):
 - **Digital:** **HamDRM** (HB9TLK Mode B 2.5 kHz). File Auto retries HamDRM if
   analogue finds no picture. This is a private STWN prototype, file-only,
   not an interoperable EasyPal/HamDRM implementation.
-- **Live NFM / USB / LSB:** main receiver decoder audio, Receive / Finish and save /
-  Cancel. Does not retune the radio. Known-transmission RF acceptance is still open.
+- **Live RF (development):** independent USB/LSB/NFM Auto acquisition using a
+  validated classic VIS header, with manual USB/LSB/NFM/AM and separate image-format
+  selection. Receive / Finish and save / Cancel. Does not retune the radio or alter
+  speaker/P25 processing. Ambiguous or missing headers require manual RF selection.
+  Known-transmission hardware acceptance is still open.
   Analog live modes share the helper capability list; digital STWN is file-only.
 
 `sstv decode "file.wav" "new-output-directory" auto`  

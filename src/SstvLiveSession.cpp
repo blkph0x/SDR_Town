@@ -38,6 +38,10 @@ nlohmann::json decodeSstvLive(const std::shared_ptr<SstvReceiverFeed>& feed,
     },mode,cancel,preview);
     feed->detach(queue);
     require(!cancel || !cancel(),"SSTV live session cancelled");
+    return saveSstvLiveResult(result,output);
+}
+
+nlohmann::json saveSstvLiveResult(const SstvStreamResult& result,const QString& output,nlohmann::json extra) {
     auto images=result.metadata;
     for(size_t i=0;i<images.size();++i)
         images[i]["file"]="image-"+std::to_string(i)+(images[i].at("complete").get<bool>()?".png":".partial.png");
@@ -45,6 +49,7 @@ nlohmann::json decodeSstvLive(const std::shared_ptr<SstvReceiverFeed>& feed,
         {"outputDirectory",QFileInfo(output).absoluteFilePath().toStdString()},
         {"inputRate",result.inputRate},{"inputSamples",result.inputSamples},{"outputSamples",result.outputSamples},
         {"targetHz",result.targetHz},{"sourceId",result.sourceId},{"epoch",result.epoch},{"generation",result.generation}};
+    report.update(extra);
     require(QDir(QFileInfo(output).absolutePath()).mkdir(QFileInfo(output).fileName()),"Cannot create new SSTV output folder");
     for(size_t i=0;i<result.images.size();++i) {
         QSaveFile image(QDir(output).filePath(QString::fromStdString(images[i].at("file").get<std::string>())));

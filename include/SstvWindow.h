@@ -22,12 +22,13 @@ class SstvWindow final : public QDialog {
 public:
     using Decode = std::function<nlohmann::json(const QString&, const QString&, const QString&,
                                                const std::function<bool()>&, const SstvPreview&)>;
-    using LiveOpen = std::function<Decode(const std::shared_ptr<std::atomic<bool>>&)>;
+    using LiveOpen = std::function<Decode(const std::shared_ptr<std::atomic<bool>>&,
+        const QString&,const std::function<void(const QString&)>&)>;
     explicit SstvWindow(Decode decode, QWidget* parent = nullptr);
     ~SstvWindow() override;
     bool startDecode(const QString& input, const QString& output, const QString& mode);
     void setLiveSource(LiveOpen open);
-    bool startLive(const QString& output,const QString& mode);
+    bool startLive(const QString& output,const QString& mode,const QString& rfMode = QStringLiteral("auto"));
     void finishLive();
     bool busy() const { return worker_ != nullptr; }
     void cancel();
@@ -37,6 +38,8 @@ public:
     QStringList imageLabels() const;
     bool liveSelected() const;
     QString selectedMode() const;
+    QString selectedRfMode() const;
+    QString detectedRfMode() const;
 signals:
     void decodeFinished(bool success);
 protected:
@@ -53,7 +56,8 @@ private:
     QThread* worker_ = nullptr;
     bool closePending_ = false;
     QLineEdit *input_, *output_;
-    QComboBox *mode_, *source_;
+    QComboBox *mode_, *source_, *rfMode_;
+    QLabel* rfStatus_;
     QPushButton *open_, *destination_, *decodeButton_, *cancelButton_, *folder_;
     QPushButton* finishButton_;
     QLabel *status_ = nullptr;

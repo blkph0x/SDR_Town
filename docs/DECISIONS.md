@@ -2,6 +2,17 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0119 - Publish SSTV source and matching tester assets (2026-09-24)
+
+The user explicitly requires the DEC-0117 SSTV work to reach GitHub download
+users, not remain a local build behind the separate CI repair. Release 0.2.90
+experimental with all SSTV source, tests, documentation, installer, portable ZIP,
+matching control DLL and signed updater metadata. Run the existing release gates,
+repeat recorded RF/image regressions, and smoke-test the extracted package.
+Confirm remote CI and uploaded asset hashes. Preserve P25 and existing updater
+trust. On-air RF qualification and ISS-0013 noise-tail partials remain open;
+release notes must give testers exact steps and limitations, not claim certification.
+
 ## DEC-0118 - Release verifier fixtures must satisfy the current contract (2026-09-24)
 
 Windows CI run 35979813492 built the app and passed native/SSTV tests, then failed
@@ -15,6 +26,39 @@ the expensive CI build and as a local release preflight so the paths agree.
 Keep CI artifact provenance's source/hash fields consistent with release.ps1;
 retain its existing commit field for consumers. This repair is isolated from
 unpublished SSTV application changes and does not modify runtime DSP or assets.
+
+## DEC-0117 - SSTV RF routing is separate from picture-format detection (2026-09-24)
+
+Inspection: SstvWindow Auto only selects the image helper's format. MainWindow
+attaches the already-selected NFM/USB/LSB audio tap; it does not identify RF mode.
+QSSTV configuration documents LSB/USB/FM data modes
+(https://www.qsl.net/o/on4qz/qsstv/manual/config.html). Reuse the independently
+tested classic 910 ms VIS detector (DEC-0091), not a frequency-band guess.
+An isolated SSTV worker reads chronological IQ without tuning the device or
+changing the main receiver. Separate USB/LSB/NFM demodulator states search for
+a known, parity-valid VIS. Retain two complete headers plus one bounded input
+block of audio; after the first detection allow one header duration for competing
+routes to validate. Multiple valid routes are ambiguous: require manual selection,
+never silently choose a sideband. Pin the selected route for the session and
+replay retained audio into the existing image helper, including its VIS header.
+Manual USB/LSB/NFM/AM bypass RF acquisition, not image-format detection. Use existing
+demods with SSTV-specific unsquelched/unfiltered decoder taps. No P25 or speaker
+processing changes. File decoding already receives audio and has no RF mode to
+identify. Satellite pass routing stays explicit from the downlink catalogue with
+its continuous Doppler correction; do not start a second, uncorrected RF reader.
+Classic VIS auto has no claim to extended-VIS/headerless RF acquisition, arbitrary
+carrier-offset correction, or universal modulation identification. Those use a
+manual RF route. Prove routes/ambiguity/parity/continuity with synthetic IQ and
+run the existing image-worker tests before calling this implemented.
+
+Measured follow-up: synthetic USB initially failed VIS because the existing
+HfDemod halves its BW argument. Request 6 kHz for a 3 kHz SSB passband on SSTV
+routes (including the satellite route), leaving general HF semantics unchanged.
+Retained storage includes one additional bounded block for the tail of the IQ
+block in which selection completes. Recorded RF round-trip image test budget:
+full row count/completion and <5% full-scale average RGB error. It measures image
+fidelity, not RF classifier confidence. The standalone test uses NumPy/SciPy/
+soundfile in an isolated development venv; no product dependency was added.
 
 ## DEC-0116 - Test the actual talkgroup table without radio globals (2026-09-24)
 

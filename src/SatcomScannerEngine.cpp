@@ -1042,7 +1042,8 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
             config_.mode = "APT";
             config_.bandwidthHz = 40e3;
         } else if (plan.armed.role == "sstv") {
-            config_.bandwidthHz = isSstvSidebandMode(config_.mode) ? 3e3 : 15e3;
+            // HfDemod's BW is twice the SSB audio cutoff (DEC-0117).
+            config_.bandwidthHz = isSstvSidebandMode(config_.mode) ? 6e3 : 15e3;
         } else if (plan.armed.role == "aprs" || plan.armed.role == "voice") {
             config_.bandwidthHz = 15e3;
         } else {

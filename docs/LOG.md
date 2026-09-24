@@ -1,5 +1,14 @@
 # Development log
 
+## 2026-09-24 - SSTV 0.2.90 publication requested
+
+User requires the completed SSTV fixes in GitHub source and downloadable tester
+builds. DEC-0119 prepares the version, release notes and pairing documentation;
+all DEC-0117 changes are included, not held back behind the CI-only repair.
+Recorded RF and full/partial GUI image regressions were repeated successfully.
+Release build/package/remote verification is the remaining publication gate.
+No P25 DSP changes; on-air SSTV qualification remains open for testers.
+
 Newest at the top.
 
 ## 2026-09-24 - GitHub Windows CI failure isolated and repaired
@@ -14,6 +23,19 @@ workflow validation is green. Fix 2b615ba is pushed to master. The original
 development folder has the fix; all 16 SSTV application/test/doc file blob
 hashes checked before/after integration are unchanged. Unpublished SSTV work
 is preserved separately, not silently included in this CI repair.
+
+## 2026-09-24 - SSTV RF Auto separated from image-format Auto
+
+Traced file, GUI, API and satellite routes. Existing Auto identified image format,
+not USB/LSB/FM. Added independent worker-owned RF auto acquisition and manual
+USB/LSB/NFM/AM, validated classic VIS, bounded header retention, explicit ambiguity
+and continuity failures, GUI route status and API/report RF identity. Fixed the
+SSTV SSB passband mismatch on both main and satellite routes. Main speaker and
+P25 processing unchanged; satellite catalogue selection/Doppler remains explicit.
+DEC-0117 / ISS-0013 / BUILD_NOTES record builds, tests and remaining limitations.
+Off-air RF qualification is still needed. Extended/headerless signals require
+manual RF selection; image-format Auto remains available. Changes are local,
+built in the original development folder; no new release was requested here.
 
 ## 2026-09-24 - 0.2.89 published for remote testing
 

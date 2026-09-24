@@ -9,6 +9,20 @@
 - release.ps1 uses the identical negative-test gate before configure/build.
   Production verify_release.py, signing keys, updater and DSP remain unchanged.
 
+2026-09-24 / DEC-0117 SSTV RF acquisition:
+- SstvRfRouter: independent Demodulator states, pre-speaker data taps, 48 kHz
+  conversion, strict known classic VIS selection, bounded header pre-roll and
+  pinned route. Rejects ambiguous routes and IQ continuity failures.
+- SstvRfLiveSession: worker-only chronological DeviceManager cursor; observes
+  main receiver frequency but never changes its settings. Checks device identity,
+  tune sequences/rate/center around every read; saves RF identity in the report.
+- SstvWindow: separate image format and RF route selectors plus detected-route
+  status. MainWindow control API exposes the same route choices.
+- SatcomScannerEngine retains catalogue/Doppler routing; SSB SSTV bandwidth now
+  matches HfDemod's two-sided BW argument. HfDemod exposes AM pre-squelch tap too.
+- test_sstv_rf.cpp and scripts/test_sstv_rf.py exercise modulation, header
+  preservation, ambiguous/parity/gap failures and recorded-image RF round trips.
+
 2026-09-24 / DEC-0114..0115 release follow-up:
 - SatcomDoppler is a worker-owned, phase-continuous IQ translator. Pass tracking
   retains the arm-time RF center and nominal decoder identity; the planner only

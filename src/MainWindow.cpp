@@ -2,6 +2,8 @@
 #include "SstvWindow.h"
 #include "SstvImageFile.h"
 #include "SstvLiveSession.h"
+#include "SstvRfLiveSession.h"
+#include "SstvRfRouter.h"
 #include "SstvModes.h"
 #include "P25AliasDialog.h"
 #include "BandPlanDialog.h"
@@ -10230,6 +10232,8 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
         sstv.insert("modeHint",
                     QStringLiteral("Auto = 7-bit VIS, then QSSTV 16-bit VIS (MP/MR/ML), then 1200 Hz line-sync. FAX480 has no VIS. AVT has no line sync. Narrow 2172 Hz modes are not supported."));
         sstv.insert("autoPath", QStringLiteral("vis-7bit,vis-16bit,line-sync"));
+        sstv.insert("rfModes",QJsonArray{"auto","USB","LSB","NFM","AM"});
+        sstv.insert("rfAutoPath",QStringLiteral("classic-VIS USB/LSB/NFM; manual RF for extended VIS or missing headers"));
         QJsonArray modeList;
         QJsonObject autoMode;
         autoMode.insert("id", "auto");
@@ -10254,6 +10258,8 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
             sstv.insert("busy", window->busy());
             sstv.insert("live", window->liveSelected());
             sstv.insert("mode", window->selectedMode());
+            sstv.insert("rfMode",window->selectedRfMode());
+            sstv.insert("detectedRfMode",window->detectedRfMode());
             sstv.insert("status", window->statusMessage());
             sstv.insert("outputDirectory", window->resultDirectory());
             QJsonArray images;
@@ -10782,18 +10788,13 @@ SstvWindow* MainWindow::ensureSstvWindow()
     if (window) return window;
     window = new SstvWindow(decodeSstvImageFile, this);
     window->setObjectName(QStringLiteral("sstvWindow"));
-    window->setLiveSource([this](const std::shared_ptr<std::atomic<bool>>& finish) -> SstvWindow::Decode {
+    window->setLiveSource([this](const std::shared_ptr<std::atomic<bool>>& finish,const QString& rfMode,
+                                const std::function<void(const QString&)>& routeStatus) -> SstvWindow::Decode {
         std::shared_ptr<Receiver> receiver;
         { std::lock_guard lock(receiversMutex); if (!receivers.empty()) receiver = receivers.front(); }
-        if (!receiver) throw std::runtime_error("Start the main receiver in NFM, USB or LSB first");
-        return [receiver, finish](const QString&, const QString& output, const QString& mode, const auto& cancel, const auto& preview) {
-            const auto validate = [receiver] {
-                std::lock_guard lock(receiver->stateMutex);
-                const bool supported = receiver->mode == DemodMode::NFM || receiver->mode == DemodMode::USB || receiver->mode == DemodMode::LSB;
-                if (!receiver->active || !supported || receiver->p25VoiceDecodeEnabled || receiver->p25ControlChannelMute)
-                    throw std::runtime_error("Live SSTV requires an active main NFM, USB or LSB receiver, not P25");
-            };
-            return decodeSstvLive(receiver->sstvFeed, validate, output, mode, [finish] { return finish->load(); }, cancel, preview);
+        if (!receiver) throw std::runtime_error("Start the main receiver before receiving SSTV");
+        return [receiver,finish,rfMode,routeStatus](const QString&, const QString& output, const QString& mode, const auto& cancel, const auto& preview) {
+            return decodeSstvRfLive(receiver,output,mode,rfMode,[finish]{return finish->load();},cancel,preview,routeStatus);
         };
     });
     return window;
@@ -11130,6 +11131,10 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
         }
         if (path == "/v1/sstv/live" && method == "POST") {
             QString mode = body.value("mode").toString("auto").trimmed().toLower();
+            QString rfMode=body.value("rfMode").toString("auto").trimmed().toUpper();
+            if(rfMode=="AUTO") rfMode="auto";
+            if(!SstvRfRouter::supports(rfMode.toStdString()))
+                return {{"ok",false},{"status",400},{"error","unsupported SSTV RF mode"}};
             if (!sstvStreamingModeOk(mode.toStdString())) {
                 return {{"ok", false}, {"status", 400}, {"error", "unsupported live SSTV mode; digital STWN is file-only"}};
             }
@@ -11149,7 +11154,7 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             QDir().mkpath(QFileInfo(output).absolutePath());
             window->show();
             window->raise();
-            if (!window->startLive(output, mode)) {
+            if (!window->startLive(output, mode, rfMode)) {
                 return {{"ok", false}, {"status", 400},
                         {"error", window->statusMessage().isEmpty()
                                       ? QStringLiteral("Live SSTV did not start (need NFM/USB/LSB, new output folder)")

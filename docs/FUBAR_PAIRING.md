@@ -19,10 +19,11 @@ Visitors never connect to SDR Town. They use the FUBAR site; FUBAR uses the DLL.
 
 ## Previously Recorded Pairing
 
-This is historical evidence, not a live GitHub Latest query. Town 0.2.89 ships
-its versioned control DLL; the control API/ABI is unchanged in that repair pass,
-but FUBAR integration was not re-tested. Use the 0.2.89 DLL when testing against
-Town 0.2.89 and report both application versions.
+This is historical evidence, not a live GitHub Latest query. Town 0.2.90 ships
+its versioned control DLL; the DLL ABI is unchanged. SSTV live requests now
+accept optional rfMode (default Auto), and status exposes RF route identity.
+FUBAR integration was not re-tested and its website has no separate RF selector.
+Use the 0.2.90 DLL when testing against Town 0.2.90 and report both app versions.
 
 | App | Latest tag | Ships / expects |
 |-----|------------|-----------------|
