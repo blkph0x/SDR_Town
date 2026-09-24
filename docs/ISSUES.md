@@ -2,12 +2,13 @@
 
 Never delete a row. Close with a commit hash and a sentence.
 
-## ISS-0014 - Windows CI release fixture drift (2026-09-24, OPEN)
+## ISS-0014 - Windows CI release fixture drift (2026-09-24, CLOSED)
 
 Run 35979813492: native Release build, core, workspace and SSTV tests passed;
 `scripts/test_verify_release.py` then failed 4/11 cases because its ZIP lacked
 build-info.json (also SGP4 licence files). Reproduced locally. DEC-0118 updates
-the fixture and adds provenance failure coverage; remote confirmation pending.
+the fixture and adds provenance failure coverage. Fixed in 2b615ba; run
+35984373766 passed build, all test gates, staging, packaging and artifact upload.
 
 ## ISS-0012 - 0.2.88 receive-chain audit findings (2026-09-24, OPEN)
 

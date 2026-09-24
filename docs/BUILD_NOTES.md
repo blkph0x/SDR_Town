@@ -17,7 +17,17 @@ reach mocked signature verification exactly once; invalid provenance never does.
 files PASS. `python scripts/test_no_p25_guard.py`: PASS.
 `scripts/test_release_commands.ps1`: PASS native failure propagation, real
 temporary-manifest signing, unchanged trust anchor and wrong-key rejection.
-No runtime/C++/DSP changes; remote full-build confirmation follows this commit.
+No runtime/C++/DSP changes. Existing real 0.2.89 assets also passed the unchanged
+production verifier with OpenSSL signature verification.
+
+Remote confirmation: commit 2b615bab75d694bf7df9568deed78aaeab4c2fc1,
+https://github.com/blkph0x/SDR_Town/actions/runs/35984373766, SUCCESS in 10m56s.
+All required stages passed: negative release tests, P25 guard, MSVC Release
+app/native builds, core/Qt/SSTV tests, clean staging, ZIP/checksum and upload.
+Workflow YAML validation run 35984373768 also passed. CI artifact 10802101137
+is unexpired, 15429138 bytes, digest
+`sha256:a40a4ff10a0747db529f67dec212d952750d2ec11926bf6b9c78abad64208bbd`.
+Release publication was correctly skipped on master; no release asset replaced.
 
 ## 2026-09-24 - 0.2.89 published package verification
 

@@ -9,7 +9,11 @@ app/core/Qt/SSTV build gates. Added the missing provenance and SGP4 notices to
 the fixture, targeted negative cases and early CI/local-release preflight.
 Production verification was not weakened. Local tests pass (BUILD_NOTES).
 Repair isolated from uncommitted SSTV RF work; no release version/tag/asset is
-changed. Full remote run will confirm staging and artifact upload too.
+changed. Remote run 35984373766 passed all build/test/package/upload stages;
+workflow validation is green. Fix 2b615ba is pushed to master. The original
+development folder has the fix; all 16 SSTV application/test/doc file blob
+hashes checked before/after integration are unchanged. Unpublished SSTV work
+is preserved separately, not silently included in this CI repair.
 
 ## 2026-09-24 - 0.2.89 published for remote testing
 
