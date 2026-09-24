@@ -1,51 +1,58 @@
-# Inmarsat (honest scope)
+# Inmarsat Classic Aero
 
-Experimental prototype in SDR Town. Not RF-qualified. Not a replacement for
-InmarScope / professional Aero decoders.
+Native experimental receive implementation, not yet RF-qualified on a tester's
+antenna/SDR. P25 is unchanged. This is not a decoder for every Inmarsat service.
 
-## What this release does
+## Implemented
 
-- Public band-plan JSON (`data/inmarsat/*.json`) for channel pick lists.
-- Tune the current device to a listed L-band channel (tuner lease).
-- Chronological IQ cursor into a clean-room slicer (MSK/OQPSK/BPSK energy).
-- ASCII ACARS/ADS-C fixture parsers exist but raw live slicer bytes are blocked
-  from these parsers and the aircraft map. They are not over-the-air decoders.
-- IQ file replay with sample-clock pause/seek/time and shared live/replay probe.
-- Bounded local logs and optional authenticated HTTPS numerical diagnostics.
-- GUI / CLI / FUBAR: start/stop, band plan, channel, message log.
+- Shared live/IQ-replay channelizer and JAERO-derived modem: continuous MSK
+  600/1200, OQPSK 10500, C-channel 8400; R/T burst 1200/10500 data.
+- Actual unique-word framing, deinterleaving, convolutional FEC, descrambling
+  and signalling CRC. No ASCII-regex path to live assignments or map positions.
+- Binary P-channel C-assign messages expose AES/GES and receive/transmit frequency.
+- C-channel mini-m AMBE4800x3600 codec, isolated from P25 in sdr_aero_codec.dll.
+  One persistent codec state per receive stream; 25 words / 500 ms C frame;
+  160 samples at 8 kHz per 20 ms word. Requires current-frame valid signalling.
+- Default speaker playback and optional bounded, non-overwriting WAV output.
+- ACARS reassembly and binary ARINC622 ADS-C basic reports with application CRC,
+  signed coordinates, altitude and time. Unknown/truncated groups fail closed.
+- Offline Natural Earth map in live and replay windows. Identity-matched voice
+  green; other decoded aircraft white; AES, registration, callsign (when sent),
+  last report time and altitude on hover. No invented heading or location.
+- Bounded local logs and opt-in HTTPS numerical diagnostics. No aircraft IDs,
+  positions, text, IQ or audio are automatically uploaded.
 
-## What it does **not** do (remaining gaps)
+Tools > Inmarsat Aero: select receiver, listed or manual channel and explicit
+decoder, speaker/record options, then Start. Stop restores the previous receiver.
+Replay never tunes hardware. See [IQ testing guide](INMARSAT_IQ_TESTING.md).
 
-| Gap | Why it is still open |
-|-----|----------------------|
-| Unique-word / frame sync | No published UW searcher with a named air-interface vector. |
-| FEC | Aero OQPSK / STD-C FEC not implemented; slicer bits are not coded frames. |
-| C-assign / P-channel | Fixture regex only; must not retune RF. |
-| Aero AMBE 8400 | Old incorrect wrapper disabled; mini-m AMBE4800x3600 is a separate codec, not P25 mbelib. |
-| Dual-SDR voice radio | Not built. |
-| Live RF acceptance | No independent off-air decode compared to a known decoder. |
+## Important Limits
 
-`locked` in status is always false. `experimental: true`, `rfQualified: false`.
+Automatic voice follow remains disabled pending validated end-of-call/security
+and tuner-ownership tests. Manual C-channel receive uses the native chain.
+Dual-device simultaneous data/voice reception is not implemented.
+No encrypted service decryption is supplied. Do not interpret a vocoder frame
+or green marker as proof of authorization, clear speech, or who is speaking.
 
-Voice follow and record-voice checkboxes are disabled. Do not invent FEC or
-AMBE mapping to close these rows.
+Position reports and voice need not be on the same channel or link direction.
+Aircraft-originated ADS-C generally requires appropriate C-band/return-link
+reception or relayed data. A good L-band voice recording may contain no positions.
+Map reports are last-known decoded positions, not navigation-grade live tracks.
+Aircraft photos, extrapolation and external identity lookup are not implemented.
+EGC/STD-C still has only physical diagnostics, not a completed protocol decoder.
 
-See [IQ formats, GUI/CLI testing and diagnostics](INMARSAT_IQ_TESTING.md).
+## Evidence And Qualification
 
-## Next Acceptance Gates
+Independent JAERO 8400 reference: 163 valid signalling units, 1375 voice words,
+220000 PCM samples. Actual GUI/CLI paced/fast runs produce identical WAV bytes.
+Most sample words are codec silence markers; this does NOT qualify continuous
+intelligible conversation. Independent JAERO ADS-C report gives -24.073448,
+-165.084171 at 32000 ft; every tested corruption/truncation is rejected.
+Public 10500 burst reference also produces real decoded positions for two
+aircraft through the complete IQ path. GUI map rendering, PCM file format,
+state isolation and silence rejection are tested.
 
-1. Reference JAERO MSK/OQPSK timing, bit rate vs symbol rate, unique-word framing,
-   differential decoding, deinterleave, convolutional FEC and CRC on the SAME IQ.
-2. Parse binary CRC-valid P-channel assignments with AES/GES identity and derived
-   frequencies; never retune from ASCII regexes or guessed frequency tables.
-3. Add validated C-channel framing and the Aero mini-m AMBE4800x3600 interleave,
-   keeping codec symbols/state isolated from P25. References:
-   [JAERO AeroL](https://github.com/jontio/JAERO/blob/master/JAERO/aerol.cpp) and
-   [libaeroambe](https://github.com/jontio/libaeroambe/blob/master/libaeroambe/aeroambe.cpp).
-4. Prove real clear PCM against JAERO; then wire sample-clocked audio and automatic
-   call follow with explicit security, tuner ownership and call-boundary handling.
-5. Bind call activity to validated aircraft identity and a fresh verified position.
-   Green must mean verified active call, not just local ADS-B reception. Aircraft
-   call association is not proof the pilot is speaking: link direction matters.
-   Fetch real photo metadata/images with credits, limits and caching; the current
-   map's API JSON URL is not an image. These map enhancements are not implemented.
+Remaining acceptance: dad's IQ plus matching JAERO settings, transcript/audio
+and known position events; establish clear speech and link-direction/identity
+association on that SAME input before enabling automatic follow. Track ISS-0016.
+Protocol/codec provenance: [vendored notes](../external/aero/README.sdr-town.md).

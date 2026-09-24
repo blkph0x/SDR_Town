@@ -2,6 +2,45 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-24 - Native Aero implementation and reference gates (DEC-0121)
+
+Windows/MSVC2022/Qt6.11.1. Initial vendor compile failed on Qt6 QString::sprintf,
+QByteArray/QString mixing and missing FFT wrapper; mechanical compatibility
+fixes applied. Native target configuration initially preceded nlohmann find;
+moved after dependency discovery. Full app/core/workspace then compiled.
+New map findChild test exposed missing Q_OBJECT; added explicit AUTOMOC header.
+Final focused core: 19 cases / 839 assertions PASS. GUI: 3 cases / 28 assertions
+PASS including independent burst IQ mapped to two aircraft; screenshots inspected.
+One offscreen GUI attempt stopped at Qt's missing-platform dialog (only windows
+plugin deployed); stopped that own process and repeated with Windows plugin PASS.
+
+Public JAERO 8400bps_ambe_sample.ogg at pinned commit: valid 87.0735 s prefix,
+SHA256 0ce7bd72c89e5d5dae9128093b9d4c960a7bc53e6b5b600ef87760c93a76df24.
+Upstream Ogg tail is invalid; preparation records that error and excludes it.
+Native IQ: 163 valid SUs, 11 failed CRCs, 3 rejected C frames, 1375 voice words,
+220000 PCM samples, 106 codec corrections, 8 repeats, 1244 silence/mute/tone flags.
+GUI/CLI fast/paced four-pass equality PASS including WAV SHA256
+295ee11a0edc4e341ab66455ce283f7a0201e2f35a880eb555e47a19af6e176f.
+Paced GUI default speaker: zero drops, no device error, 443360 zero-fill samples
+across idle/missing intervals. STT of earlier direct-IF output: only repeated
+"No"; NOT clear continuous speech acceptance. Dad's matching reference remains open.
+
+Public 10.5k_burst_sample.mp3: 33.623 s, direct IF 9 CRC-valid packets/9 messages/
+4 position reports; filtered IQ 8 packets and two unique aircraft on GUI map:
+D-AIHV / DLH424, 51.002140/-30.045547, 36000 ft; G-CIVG,
+62.997665/-40.003109, 34004 ft. These are historical reference reports, not live.
+Public 1200bps_burst_sample1.wav: measured IF spectral centroid 1816.55354 Hz,
+translated explicitly to synthetic-centered IQ; two CRC-valid packets, no PCM.
+Public 10.5k_sample.ogg valid 240.775 s prefix: 12350 valid SUs, 117 messages;
+decoder argument error at damaged tail recorded, not hidden.
+
+Earlier full CTest 4/4 PASS in 192.53 s (before final burst/map test additions).
+Package-negative tests 15/15 PASS with required Aero DLL/license checks added.
+Independent examples, noise/zero input, separate codec state, codec concurrency,
+channelizer chunk parity and exact WAV tests are separate from RF acceptance.
+Evidence: build-audit-20260924/aero-*.log, aero-reference, aero-parity-1,
+aero-burst-reference, aero-msk-reference and aero-data-reference.
+
 ## 2026-09-24 - 0.2.91 package, CI and publication (DEC-0120)
 
 MSVC2022/Qt6.11.1 Release: release.ps1 -Version 0.2.91 -Channel experimental

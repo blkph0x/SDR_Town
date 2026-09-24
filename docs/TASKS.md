@@ -1,5 +1,15 @@
 # Task list (canonical)
 
+T-0048 | in_progress | Native Inmarsat Aero voice and decoded-position map |
+DEC-0121 / ISS-0016. Integrate pinned receive/FEC/Aero codec, shared IQ chain,
+validated ADS-C positions and map, sample-clocked output/replay tests. P25 frozen.
+Do not close on synthetic PCM or a build alone; record independent sample result.
+Implementation/reference subtask complete: shared native continuous/burst Aero,
+isolated codec, CRC-valid ADS-C, offline live/replay map and speaker/WAV paths.
+Public voice IQ produces identical PCM across four GUI/CLI pacing variants;
+public burst IQ yields two real aircraft positions in GUI. Clear-conversation
+and antenna acceptance remains open, as do automatic follow and aircraft photos.
+
 T-0047 subtask | done | Inmarsat IQ replay / diagnostic acceptance harness |
 DEC-0120. Bounded file input, shared live/replay processing, GUI and CLI controls,
 local diagnostic report and opt-in remote summaries; reject false codec support.

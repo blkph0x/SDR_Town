@@ -2,6 +2,54 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0121 - Native Aero receive, isolated codec and verified map positions (2026-09-24)
+
+User requests voice and decoded positions on a map, following DEC-0120. Integrate
+the MIT JAERO receive subset at 1d4e515921244aec1d85a03f5f38b4e7818fdbe6,
+MIT JFFT, BSD libcorrect convolutional decoder, and ISC/MIT libaeroambe mini-m
+codec at df7eebf17ca6396cc545bff4869dbeccc1e7dfcd, retaining licenses/provenance.
+These implement the actual Aero modem/framing/FEC and AMBE4800x3600, not the P25
+vocoder. Keep codec symbols in a separate DLL/shared library; never change P25.
+Remove upstream GUI/database coupling, replace mutable function statics with
+instance state, and drive decoder liveness by processed samples, not wall time.
+Use fixed-size 48 kHz real-IF blocks for the upstream modem, generated from
+filtered/resampled complex IQ; live and replay call the identical chain.
+Upstream samples/8400bps_ambe_sample.ogg is an independent off-air regression
+input, not a fabricated voice fixture. Record results before any acceptance claim.
+
+Reference protocol chain: JAERO oqpskdemodulator.cpp, mskdemodulator.cpp,
+aerol.cpp/.h, jconvolutionalcodec.cpp; libaeroambe aeroambe.cpp/.h. Preserve
+8400 bit/s vs 4200 symbol/s, 4096 coded bits, 52-bit dual UW, puncturing,
+interleave, scrambler and 25 x 96-bit vocoder words per 500 ms C frame.
+Only CRC-valid SUs create assignments/call identity. Current-frame valid C
+signalling is required for releasing a voice block; do not rely on RF energy.
+Keep unsupported encrypted/protocol modes fail-closed. No voice identity from
+text regexes. No retuning outside recorded passband during file replay.
+
+ADS-C: implement bounded ARINC622 .ADS application CRC and binary basic-report
+coordinates/altitude/time (21-bit signed, 90/2^19 degrees; 16-bit signed x4 ft;
+15-bit time x0.125 s), checked against JAERO arincparse.cpp and libacars adsc.c/
+arinc.c. Raw printable bytes, waypoints, invalid CRC, out-of-range coordinates
+must not become aircraft locations. Retain provenance/age; replay positions are
+separate from live state. Use a dedicated offline Natural Earth 1:110m map:
+the existing Aircraft Map automatically polls OpenSky and its single callback
+would mix replay/live state. Resource pin ca96624a56bd078437bca8184e78163e5039ad19,
+public domain per naturalearthdata.com/about/terms-of-use/. Keep identity marker
+heading neutral; no extrapolation or invented coordinates.
+Map activity means validated received call frames, not proof the pilot is the
+speaker: L-band and C-band link directions carry different information.
+
+Include JAERO burst MSK/OQPSK and real FFT wrapper from the same pinned commit
+for aircraft-originated R/T data. Explicit burst-mode selection, not guessed
+from frequency. Test its public burst samples independently; continuous mode
+alone cannot qualify the C-band ADS-C path. Keep codec synthesis PRNG per stream
+to make interleaved decoders/replay deterministic; no P25 synthesis changes.
+
+Acceptance: build/failure tests; native replay of upstream reference audio/IQ;
+bit/framing/PCM counters and saved WAV for listening; malformed/noise rejection;
+chunk-size/paced-fast equality; ADS-C independent example and CRC mutation;
+GUI map display. Dad's setup remains required for his RF qualification.
+
 ## DEC-0120 - Inmarsat IQ replay and honest protocol diagnostics (2026-09-24)
 
 Release decision: publish the completed replay/diagnostics feature as 0.2.91

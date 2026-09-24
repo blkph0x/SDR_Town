@@ -17,9 +17,8 @@
 #include <thread>
 #include <vector>
 
-class InmarsatAcars;
-class InmarsatVoice;
 struct Receiver;
+class InmarsatAudio;
 
 enum class InmarsatEngineState {
     Idle = 0,
@@ -36,6 +35,7 @@ struct InmarsatEngineConfig {
     int baud = 10500;
     bool voiceFollow = false; // disabled until validated assignment frames exist
     bool recordVoice = false;
+    bool playAudio = true;
     std::string recordDir;
 
     static InmarsatEngineConfig defaults();
@@ -105,8 +105,7 @@ private:
     };
 
     void workerLoop();
-    bool processIq();
-    void onDecodedBytes(const uint8_t* data, size_t len);
+    bool processIq(InmarsatAudio& audio);
     void onMessage(const InmarsatMessage& msg);
     void applyVoiceFollow(const InmarsatMessage& msg);
     void returnToControl();
@@ -154,6 +153,4 @@ private:
     nlohmann::json pipelineReport_ = nlohmann::json::object();
     std::string diagnosticLog_;
     std::unique_ptr<Receiver> iqRx_;
-    std::unique_ptr<InmarsatAcars> acars_;
-    std::unique_ptr<InmarsatVoice> voice_;
 };

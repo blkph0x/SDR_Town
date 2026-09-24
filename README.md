@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Current version** | **0.2.91** (experimental channel) |
+| **Current version** | **0.2.92** (experimental channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
@@ -14,7 +14,20 @@
 
 Formerly *MaulAudio Pro*. Branding, binaries, installer, AppData paths, and release assets all use **SDR Town** / `SDR_Town`.
 
-### 0.2.91 Inmarsat IQ diagnostics
+### 0.2.92 Native Aero Voice And Aircraft Map
+
+**Tools > Inmarsat Aero** now has native Classic Aero continuous/burst decoding,
+C-channel mini-m voice to the default speaker or WAV, and CRC-validated ADS-C
+positions on an offline aircraft map. IQ replay uses the same receive chain.
+Public JAERO recordings exercise real signalling, voice-codeword output and
+aircraft coordinates. Actual GUI/CLI paced/fast replay produces identical PCM.
+This is **experimental**, not a claim of qualified continuous clear speech:
+dad's matched IQ/JAERO reference is still needed. Automatic voice follow,
+dual-device data/voice, aircraft photos and EGC protocol decoding remain pending.
+P25 is unchanged. See [0.2.92 testing](docs/RELEASE_0.2.92.md),
+[scope](docs/INMARSAT.md) and [IQ replay guide](docs/INMARSAT_IQ_TESTING.md).
+
+### 0.2.91 Inmarsat IQ diagnostics (historical)
 
 **Tools > Inmarsat Aero > Open IQ replay** loads SigMF, stereo IQ WAV and 14 raw
 complex IQ datatypes. Replay has pause/seek/time controls and a shared live/replay

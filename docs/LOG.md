@@ -1,5 +1,17 @@
 # Development log
 
+## 2026-09-24 - Native Classic Aero receive, voice and map (DEC-0121)
+
+Integrated actual JAERO receive/FEC and separate mini-m codec, not P25 mbelib.
+Live and replay share worker-owned pipeline; added default speaker/WAV, burst
+data and offline ADS-C map. Public waveform gives framed PCM; exact GUI/CLI
+fast/paced agreement and default speaker no-drop run. Public burst waveform
+gives real positions and inspected map. Independent ADS-C corruption tests and
+concurrent vocoder tests pass. P25, analog DSP, FUBAR/proxy config untouched.
+Not claiming speech quality from silence-heavy reference or a brief STT phrase.
+Dad's known clear IQ/settings requested; auto-follow remains disabled until its
+call/security lifecycle is qualified. Preparing 0.2.92 experimental tester build.
+
 ## 2026-09-24 - Inmarsat diagnostic release 0.2.91 published
 
 DEC-0120 replay/diagnostics subtask complete: source 698dcd8, release metadata

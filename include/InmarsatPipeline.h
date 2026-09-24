@@ -1,16 +1,25 @@
 #pragma once
 #include "InmarsatDemod.h"
+#include "InmarsatAero.h"
 #include <nlohmann/json.hpp>
 
 // One instance per source, owned by its worker. Live and replay use this entry.
 class InmarsatPipeline {
 public:
+    InmarsatPipeline();
+    ~InmarsatPipeline();
+    InmarsatPipeline(InmarsatPipeline&&) noexcept;
+    InmarsatPipeline& operator=(InmarsatPipeline&&) noexcept;
+    void setMessageSink(InmarsatAero::MessageSink sink);
+    void setPcmSink(InmarsatAero::PcmSink sink);
     void process(const std::complex<float>* iq, size_t count, uint64_t startSample,
                  double rate, double centerHz, double channelHz,
                  InmarsatDemodMode mode, bool discontinuity);
-    InmarsatDemodStats stats() const { return demod_.stats(); }
+    InmarsatDemodStats stats() const;
     nlohmann::json report() const;
 private:
+    struct Native;
+    std::unique_ptr<Native> native_;
     InmarsatDemod demod_;
     bool started_ = false;
     double rate_ = 0, center_ = 0, channel_ = 0;

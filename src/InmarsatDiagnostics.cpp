@@ -40,6 +40,11 @@ nlohmann::json InmarsatDiagnostics::remotePayload(const nlohmann::json& details)
          "aeroVocoderAvailable", "state", "errorCode", "positionSamples", "totalSamples", "realTime"}) {
         if (details.contains(key) && details[key].is_primitive()) result[key] = details[key];
     }
+    for(const char* key:{"crcFailed","rejectedCFrames","codecCorrections","codecRepeats","codecMutes","softBits"})
+        if(details.contains(key) && details[key].is_number()) result[key]=details[key];
+    if(details.contains("audio") && details["audio"].is_object())
+        for(const char* key:{"speakerQueued","speakerDropped","speakerZeroFill","wavSamples"})
+            if(details["audio"].contains(key) && details["audio"][key].is_number())result[key]=details["audio"][key];
     return result;
 }
 void InmarsatDiagnostics::write(const char* event, const nlohmann::json& details, bool final) {

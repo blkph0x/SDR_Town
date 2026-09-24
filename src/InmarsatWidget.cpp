@@ -6,6 +6,9 @@
 #include "SdrDeviceCandidate.h"
 #include "InmarsatReplayDialog.h"
 #include "InmarsatDiagnostics.h"
+#include "InmarsatMapWidget.h"
+#include <QTabWidget>
+#include <QDoubleSpinBox>
 
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -48,9 +51,8 @@ InmarsatWidget::InmarsatWidget(QWidget* parent)
     reloadBandPlans();
     refreshTimer_ = new QTimer(this);
     connect(refreshTimer_, &QTimer::timeout, this, &InmarsatWidget::refreshUi);
-    InmarsatEngine::instance().setUpdateCallback([this]() {
-        QMetaObject::invokeMethod(this, "refreshUi", Qt::QueuedConnection);
-    });
+    // UI owns the refresh timer. A worker-copied callback must not retain this
+    // widget while a dock is being destroyed.
 }
 
 void InmarsatWidget::showEvent(QShowEvent* event) {
@@ -97,7 +99,7 @@ void InmarsatWidget::buildUi() {
     title->setStyleSheet("font-size: 22px; font-weight: 900; letter-spacing: 2px;");
     root->addWidget(title);
     root->addWidget(new QLabel(
-        "Experimental physical-layer monitor: receiver/tuning are real; validated unique-word/FEC and voice follow are not implemented."));
+        "Classic Aero experimental | ADS-C | C-channel voice | EGC probe only"));
 
     auto* receiverRow = new QHBoxLayout();
     receiverRow->addWidget(new QLabel("INMARSAT RX DEVICE"));
@@ -125,8 +127,11 @@ void InmarsatWidget::buildUi() {
     voiceFollowCheck_->setChecked(false);
     voiceFollowCheck_->setEnabled(false);
     voiceFollowCheck_->setToolTip("Needs unique-word sync and verified C-assign. Not in this release.");
-    recordCheck_ = new QCheckBox("Record voice (not implemented)");
-    recordCheck_->setEnabled(false);
+    recordCheck_ = new QCheckBox("Record WAV");
+    speakerCheck_=new QCheckBox("Speaker audio");
+    speakerCheck_->setChecked(InmarsatEngine::instance().config().playAudio);
+    top->addWidget(speakerCheck_);
+    connect(speakerCheck_,&QCheckBox::toggled,this,[](bool on){auto cfg=InmarsatEngine::instance().config();cfg.playAudio=on;InmarsatEngine::instance().setConfig(cfg);});
     top->addWidget(voiceFollowCheck_);
     top->addWidget(recordCheck_);
     startBtn_ = new QPushButton("START / TAKE OVER");
@@ -145,6 +150,21 @@ void InmarsatWidget::buildUi() {
     channelTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     channelTable_->setMaximumHeight(220);
     root->addWidget(channelTable_);
+    auto* tuneRow=new QHBoxLayout;
+    auto* frequency=new QDoubleSpinBox;frequency->setRange(1,100000);frequency->setDecimals(6);
+    frequency->setSuffix(" MHz");frequency->setKeyboardTracking(false);
+    frequency->setValue(InmarsatEngine::instance().config().channelHz/1e6);
+    auto* decoder=new QComboBox;
+    decoder->addItem("Aero data 10500",10500);decoder->addItem("Aero voice 8400",8400);
+    decoder->addItem("Aero data 1200",1200);decoder->addItem("Aero data 600",600);
+    decoder->addItem("Aero burst 1200",-1200);decoder->addItem("Aero burst 10500",-10500);
+    auto* tune=new QPushButton("Tune");
+    tuneRow->addWidget(frequency);tuneRow->addWidget(decoder);tuneRow->addWidget(tune);root->addLayout(tuneRow);
+    connect(tune,&QPushButton::clicked,this,[this,frequency,decoder]{
+        const int rate=decoder->currentData().toInt();
+        if(!InmarsatEngine::instance().selectChannel(frequency->value()*1e6,rate<0?"aero_burst":rate==8400?"aero_voice":rate<8400?"aero_msk":"aero_oqpsk",std::abs(rate)))
+            QMessageBox::warning(this,"Inmarsat","Could not tune the selected channel");
+    });
 
     lockLabel_ = new QLabel("Receiver: —");
     statusLabel_ = new QLabel("Idle");
@@ -154,7 +174,8 @@ void InmarsatWidget::buildUi() {
 
     msgView_ = new QPlainTextEdit();
     msgView_->setReadOnly(true);
-    root->addWidget(msgView_, 1);
+    auto* tabs=new QTabWidget;map_=new InmarsatMapWidget;
+    tabs->addTab(map_,"Aircraft map");tabs->addTab(msgView_,"Messages");root->addWidget(tabs,1);
 
     connect(startBtn_, &QPushButton::clicked, this, &InmarsatWidget::onStart);
     connect(stopBtn_, &QPushButton::clicked, this, &InmarsatWidget::onStop);
@@ -317,6 +338,22 @@ void InmarsatWidget::refreshUi() {
             .arg(snapshot.validatedFrames));
 
     const bool running = snapshot.state != InmarsatEngineState::Idle;
+    auto report=snapshot.diagnostics;if(!running)report["voiceActive"]=false;
+    // Live aircraft survive a manual data-to-voice retune. Only native, validated
+    // ADS-C messages enter this view; replay owns an entirely separate map.
+    report["positions"]=nlohmann::json::array();
+    std::vector<uint32_t> seen;
+    const auto mapMessages=InmarsatMessageStore::instance().recent(500);
+    for(auto it=mapMessages.rbegin();it!=mapMessages.rend();++it) {
+        const auto& m=*it;
+        if(!m.validated || !m.hasPosition || !m.aesId || std::find(seen.begin(),seen.end(),m.aesId)!=seen.end())continue;
+        seen.push_back(m.aesId);
+        report["positions"].push_back({{"aesId",m.aesId},{"latDeg",m.latDeg},{"lonDeg",m.lonDeg},
+            {"altitudeFt",m.altitudeFt},{"registration",m.registration},{"callsign",m.callsign},
+            {"secondsPastHour",m.positionSecondsPastHour}});
+    }
+    map_->setReport(report,false);
+    speakerCheck_->setEnabled(!running);recordCheck_->setEnabled(!running);
     startBtn_->setEnabled(!running);
     stopBtn_->setEnabled(running);
     deviceCombo_->setEnabled(!running && deviceCombo_->count() > 0);

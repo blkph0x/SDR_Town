@@ -1,5 +1,27 @@
 # Code notes (tree map)
 
+2026-09-24 / DEC-0121 native Aero:
+- external/aero pins MIT JAERO/JFFT, BSD libcorrect, ISC/MIT mini-m codec.
+  Qt6 adaptation, per-instance modem scratch, strict CRC and bounded unpacking.
+- AeroCodec C ABI isolates AMBE4800x3600 in its own DLL. Exact upstream 6x24
+  word mapping; per-stream parameters/PRNG; ECC scratch per call. P25 untouched.
+- InmarsatAero owns modem/framer/vocoder on one worker, paced by samples. It
+  emits CRC-validated assignments/messages and framed 8 kHz PCM.
+- InmarsatAdsc checks complete ARINC .ADS CRC, bounded tags and signed position
+  fields; rejects unknown/truncated groups and never promotes route waypoints.
+- InmarsatPipeline shares channelizer/native chain between live and replay.
+- InmarsatAudio has isolated default miniaudio playback, power-of-two SPSC queue,
+  bounded WAV writer and explicit queue/drop/zero-fill reporting.
+- InmarsatMapWidget uses bundled public-domain Natural Earth geometry, no network;
+  separate replay state, identity-linked green activity and white last positions.
+- InmarsatReplayDialog/Command adds native mode, speaker, WAV and map controls.
+  Runtime owns decoder worker; EOF drain bounded, pause/seek discard queued audio.
+- prepare_aero_reference/verify_aero_reference tools compare independent input
+  across actual GUI/CLI and pacing variants. Native tests cover independent
+  ADS-C, noise rejection, chunk parity, concurrent codec state and PCM layout.
+
+The following DEC-0120 entries describe the earlier physical-only release:
+
 2026-09-24 / DEC-0120 Inmarsat replay:
 - InmarsatIqFile: bounded QFile reader; 14 complex formats, strict SigMF retune
   boundaries and PCM16/float32 RIFF validation; explicit raw/WAV RF metadata.

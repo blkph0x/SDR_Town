@@ -28,6 +28,11 @@ struct InmarsatMessage {
     double latDeg = 0.0;
     double lonDeg = 0.0;
     bool hasPosition = false;
+    bool validated = false;
+    double altitudeFt = 0.0;
+    double positionSecondsPastHour = 0.0;
+    std::string registration;
+    std::string callsign;
     double voiceRxHz = 0.0;
     double voiceTxHz = 0.0;
 

@@ -10,6 +10,7 @@ class QSlider;
 class QLabel;
 class QToolButton;
 class QPlainTextEdit;
+class InmarsatMapWidget;
 
 class InmarsatReplayDialog : public QDialog {
 public:
@@ -27,6 +28,9 @@ private:
     QComboBox *format_, *mode_;
     QDoubleSpinBox *rate_, *center_, *channel_;
     QCheckBox* realTime_;
+    QCheckBox* playAudio_;
+    QLineEdit* wav_;
+    InmarsatMapWidget* map_;
     QCheckBox* share_;
     std::function<bool()> enableSharing_;
     QSlider* position_;

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.91 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.92 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -31,6 +31,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(unofficial-sodium CONFIG REQUIRED)
+add_subdirectory(external/aero)
 
 # SoapySDR for device support (PR 2+). vcpkg "soapy" port or system install.
 # After vcpkg install, it should be discoverable when using the vcpkg toolchain.
@@ -276,6 +277,7 @@ install(TARGETS sdrtown_control_client
 # Deployed Qt DLLs, plugins, and other runtime files from the build dir will be picked up if you run windeployqt before packaging, or manually copy them into the install prefix.
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
+    sdr_inmarsat_native sdr_inmarsat_audio sdr_inmarsat_map
     sdr_town_decoders
     Qt6::Core
     Qt6::Gui
@@ -436,6 +438,7 @@ if(BUILD_TESTS)
     tests/test_adsb.cpp
     tests/test_inmarsat.cpp
     tests/test_inmarsat_replay.cpp
+    tests/test_inmarsat_native.cpp
     src/InmarsatIqFile.cpp
     src/InmarsatPipeline.cpp
     src/InmarsatDiagnostics.cpp
@@ -478,6 +481,7 @@ if(BUILD_TESTS)
   )
   # Real Demodulator (full body, member state) is now always linked.
   target_link_libraries(sdr_town_tests PRIVATE
+    sdr_inmarsat_native sdr_inmarsat_audio
     sdr_town_decoders
     Catch2::Catch2WithMain
     Qt6::Core
@@ -531,7 +535,7 @@ if(BUILD_TESTS)
     src/BandPlan.cpp src/BandPlanDialog.cpp src/SpectrumWidget.cpp include/SpectrumWidget.h src/RdsStatusWidget.cpp)
   target_include_directories(sdr_town_workspace_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_include_directories(sdr_town_workspace_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/external/miniaudio)
-  target_link_libraries(sdr_town_workspace_tests PRIVATE Catch2::Catch2 Qt6::Widgets nlohmann_json::nlohmann_json sdr_town_tones)
+  target_link_libraries(sdr_town_workspace_tests PRIVATE Catch2::Catch2 Qt6::Widgets nlohmann_json::nlohmann_json sdr_town_tones sdr_inmarsat_native sdr_inmarsat_audio sdr_inmarsat_map)
   add_test(NAME WorkspaceTests COMMAND sdr_town_workspace_tests)
 
   # CLI black-box tests via PowerShell harness (run manually or in CI)
@@ -588,6 +592,14 @@ add_custom_target(deploy
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/licenses/sgp4"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/external/sgp4/LICENSE"
             "${CMAKE_SOURCE_DIR}/external/sgp4/README.sdr-town.md" "${DEPLOY_STAGING}/licenses/sgp4"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/licenses/aero"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/external/aero/README.sdr-town.md" "${DEPLOY_STAGING}/licenses/aero"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/external/aero/jaero/LICENSE" "${DEPLOY_STAGING}/licenses/aero/JAERO-MIT.txt"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/external/aero/jfft/LICENSE" "${DEPLOY_STAGING}/licenses/aero/JFFT-MIT.txt"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/external/aero/correct/LICENSE" "${DEPLOY_STAGING}/licenses/aero/libcorrect-BSD.txt"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/external/aero/codec/COPYRIGHT" "${DEPLOY_STAGING}/licenses/aero/codec-COPYRIGHT.txt"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/external/aero/codec/LICENSE-wrapper" "${DEPLOY_STAGING}/licenses/aero/libaeroambe-MIT.txt"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/resources/maps/README.md" "${DEPLOY_STAGING}/licenses/aero/NaturalEarth.txt"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}/external/redsea-block"
             "${DEPLOY_STAGING}/licenses/redsea-block"

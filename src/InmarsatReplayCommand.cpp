@@ -37,6 +37,8 @@ int runInmarsatReplayAutomation(bool gui) {
             else if (key == "--inmarsat-center") options.input.centerHz = number();
             else if (key == "--inmarsat-channel") options.channelHz = number();
             else if (key == "--inmarsat-fast") options.realTime = false;
+            else if (key == "--inmarsat-play-audio") options.playAudio = true;
+            else if (key == "--inmarsat-wav") options.wavPath = value();
             else if (key == "--inmarsat-exit-complete") exitComplete = true;
             else if (key == "--inmarsat-result") resultPath = value();
             else if (key == "--inmarsat-log-dir") options.logDirectory = value();
@@ -46,8 +48,10 @@ int runInmarsatReplayAutomation(bool gui) {
                 else if (mode == "1200") options.mode = InmarsatDemodMode::AeroMsk1200;
                 else if (mode == "8400") options.mode = InmarsatDemodMode::AeroVoice8400;
                 else if (mode == "10500") options.mode = InmarsatDemodMode::AeroOqpsk10500;
+                else if (mode == "1200-burst") options.mode = InmarsatDemodMode::AeroBurstMsk1200;
+                else if (mode == "10500-burst") options.mode = InmarsatDemodMode::AeroBurstOqpsk10500;
                 else if (mode == "egc") options.mode = InmarsatDemodMode::EgcBpsk1200;
-                else throw std::runtime_error("Inmarsat mode must be 600, 1200, 8400, 10500 or egc");
+                else throw std::runtime_error("Inmarsat mode must be 600, 1200, 8400, 10500, 1200-burst, 10500-burst or egc");
             } else if (key.startsWith("--inmarsat-") && key != "--inmarsat-replay") {
                 throw std::runtime_error("Unknown Inmarsat replay argument");
             }

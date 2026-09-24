@@ -1,4 +1,6 @@
 #include "InmarsatReplayDialog.h"
+#include "InmarsatMapWidget.h"
+#include <QTabWidget>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDesktopServices>
@@ -28,7 +30,7 @@ QString clockText(double seconds) {
 }
 InmarsatReplayDialog::InmarsatReplayDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle("Inmarsat IQ replay");
-    resize(820, 650);
+    resize(940, 850);
     auto* root = new QVBoxLayout(this);
     auto* fileRow = new QHBoxLayout;
     file_ = new QLineEdit;
@@ -73,11 +75,19 @@ InmarsatReplayDialog::InmarsatReplayDialog(QWidget* parent) : QDialog(parent) {
     mode_->addItem("Aero C-channel 8400", static_cast<int>(InmarsatDemodMode::AeroVoice8400));
     mode_->addItem("Aero MSK 1200", static_cast<int>(InmarsatDemodMode::AeroMsk1200));
     mode_->addItem("Aero MSK 600", static_cast<int>(InmarsatDemodMode::AeroMsk600));
+    mode_->addItem("Aero R/T burst MSK 1200", static_cast<int>(InmarsatDemodMode::AeroBurstMsk1200));
+    mode_->addItem("Aero R/T burst OQPSK 10500", static_cast<int>(InmarsatDemodMode::AeroBurstOqpsk10500));
     mode_->addItem("EGC BPSK 1200", static_cast<int>(InmarsatDemodMode::EgcBpsk1200));
-    form->addRow("Physical probe", mode_);
+    form->addRow("Decoder", mode_);
     realTime_ = new QCheckBox("Real-time pacing");
     realTime_->setChecked(true); realTime_->setObjectName("iqRealTime");
     form->addRow({}, realTime_);
+    playAudio_=new QCheckBox("Speaker audio"); playAudio_->setObjectName("iqSpeaker");
+    playAudio_->setChecked(true);form->addRow({},playAudio_);
+    connect(playAudio_,&QCheckBox::toggled,this,[this](bool on){if(on)realTime_->setChecked(true);});
+    connect(realTime_,&QCheckBox::toggled,this,[this](bool on){if(!on)playAudio_->setChecked(false);});
+    wav_=new QLineEdit;wav_->setObjectName("iqWav");wav_->setPlaceholderText("Optional new WAV output path");
+    form->addRow("Decoded WAV",wav_);
     share_ = new QCheckBox("Share diagnostic counters (no IQ or audio)");
     share_->setObjectName("iqShareDiagnostics");
     share_->setEnabled(false);
@@ -98,12 +108,13 @@ InmarsatReplayDialog::InmarsatReplayDialog(QWidget* parent) : QDialog(parent) {
     root->addLayout(transport);
     time_ = new QLabel("00:00:00.000 / 00:00:00.000"); root->addWidget(time_);
     status_ = new QLabel("Idle"); status_->setTextFormat(Qt::PlainText); status_->setWordWrap(true); root->addWidget(status_);
-    auto* capability = new QLabel("Protocol decoder unavailable | Aero voice unavailable | No hardware retune");
+    auto* capability = new QLabel("Classic Aero experimental | ADS-C | C-channel voice | EGC probe only");
     capability->setWordWrap(true); root->addWidget(capability);
     details_ = new QPlainTextEdit;
     details_->setObjectName("iqDiagnostics"); details_->setReadOnly(true);
     details_->setMaximumBlockCount(150);
-    root->addWidget(details_, 1);
+    auto* tabs=new QTabWidget;map_=new InmarsatMapWidget;
+    tabs->addTab(map_,"Aircraft map");tabs->addTab(details_,"Diagnostics");root->addWidget(tabs,1);
     auto* logRow = new QHBoxLayout;
     log_ = new QLabel; log_->setTextFormat(Qt::PlainText); log_->setWordWrap(true);
     log_->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -145,6 +156,7 @@ void InmarsatReplayDialog::startReplay(const InmarsatReplayOptions& options) {
     channel_->setValue(options.channelHz / 1e6);
     mode_->setCurrentIndex(mode_->findData(static_cast<int>(options.mode)));
     realTime_->setChecked(options.realTime);
+    playAudio_->setChecked(options.playAudio);wav_->setText(options.wavPath);
     share_->setChecked(options.shareDiagnostics);
     replay_.start(options);
     refresh();
@@ -158,6 +170,7 @@ void InmarsatReplayDialog::play() {
     options.channelHz = channel_->value() * 1e6;
     options.mode = static_cast<InmarsatDemodMode>(mode_->currentData().toInt());
     options.realTime = realTime_->isChecked();
+    options.playAudio=playAudio_->isChecked(); options.wavPath=wav_->text();
     options.shareDiagnostics = share_->isChecked();
     replay_.start(options);
     refresh();
@@ -167,7 +180,7 @@ void InmarsatReplayDialog::refresh() {
     const bool active = s.running;
     for (auto* w : {static_cast<QWidget*>(file_), static_cast<QWidget*>(open_), static_cast<QWidget*>(format_),
          static_cast<QWidget*>(rate_), static_cast<QWidget*>(center_), static_cast<QWidget*>(channel_),
-         static_cast<QWidget*>(mode_), static_cast<QWidget*>(realTime_)}) w->setEnabled(!active);
+         static_cast<QWidget*>(mode_), static_cast<QWidget*>(realTime_),static_cast<QWidget*>(playAudio_),static_cast<QWidget*>(wav_)}) w->setEnabled(!active);
     play_->setEnabled(!active || s.state == "paused");
     pause_->setEnabled(active && s.state == "playing"); stop_->setEnabled(active);
     share_->setEnabled(!active && static_cast<bool>(enableSharing_));
@@ -178,7 +191,10 @@ void InmarsatReplayDialog::refresh() {
         clockText(s.info.sampleRateHz ? s.info.sampleCount / s.info.sampleRateHz : 0));
     status_->setText(s.state + (s.error.isEmpty() ? "" : ": " + s.error));
     log_->setText(s.logError.isEmpty() ? s.logPath : s.logPath + "\n" + s.logError);
-    const auto text = QString::fromStdString(s.pipeline.dump(2));
+    auto report=s.pipeline;
+    if(!active || s.state=="paused") report["voiceActive"]=false;
+    map_->setReport(report,true);
+    const auto text = QString::fromStdString(s.toJson().dump(2));
     if (details_->toPlainText() != text) {
         const int scroll = details_->verticalScrollBar()->value();
         details_->setPlainText(text);

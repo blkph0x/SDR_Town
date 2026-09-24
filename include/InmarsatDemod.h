@@ -12,7 +12,9 @@ enum class InmarsatDemodMode {
     AeroMsk1200 = 1,
     AeroOqpsk10500 = 2,
     AeroVoice8400 = 3,
-    EgcBpsk1200 = 4
+    EgcBpsk1200 = 4,
+    AeroBurstMsk1200 = 5,
+    AeroBurstOqpsk10500 = 6
 };
 
 struct InmarsatDemodStats {

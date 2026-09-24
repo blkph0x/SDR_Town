@@ -1,11 +1,13 @@
 #include "InmarsatReplay.h"
 #include "InmarsatPipeline.h"
 #include "InmarsatDiagnostics.h"
+#include "InmarsatAudio.h"
 #include <cmath>
 #include <stdexcept>
 
 nlohmann::json InmarsatReplaySnapshot::toJson() const {
     auto result = pipeline;
+    result["audio"] = audio;
     result["state"] = state.toStdString();
     result["running"] = running;
     result["error"] = error.toStdString();
@@ -66,6 +68,7 @@ void InmarsatReplay::worker(InmarsatReplayOptions options) {
     InmarsatDiagnostics diagnostics;
     InmarsatPipeline pipeline;
     InmarsatIqFile reader;
+    std::unique_ptr<InmarsatAudio> audio;
     QString finalState = "complete", error;
     auto lastLog = std::chrono::steady_clock::now();
     try {
@@ -73,6 +76,9 @@ void InmarsatReplay::worker(InmarsatReplayOptions options) {
         diagnostics.write("open", {{"format", options.input.format.toStdString()},
             {"inputPath", options.path.toStdString()}, {"realTime", options.realTime}, {"state", "opening"}});
         reader.open(options.path, options.input);
+        if(options.playAudio && !options.realTime) throw std::runtime_error("Speaker playback requires real-time pacing; use WAV output for fast replay");
+        audio=std::make_unique<InmarsatAudio>(options.playAudio,options.wavPath);
+        pipeline.setPcmSink([&](std::span<const int16_t> pcm,uint32_t){audio->push(pcm);});
         if (!std::isfinite(options.channelHz) || options.channelHz < 0)
             throw std::runtime_error("Invalid replay channel frequency");
         {
@@ -90,12 +96,14 @@ void InmarsatReplay::worker(InmarsatReplayOptions options) {
                 std::unique_lock<std::mutex> guard(mutex_);
                 if (stop_) { finalState = "stopped"; break; }
                 if (seek_) {
+                    audio->discardPlayback();
                     reader.seek(*seek_);
                     snapshot_.position = *seek_;
                     seek_.reset();
                     resetPacing = true;
                 }
                 if (paused_) {
+                    audio->discardPlayback();
                     snapshot_.state = "paused";
                     resetPacing = true;
                     changed_.wait(guard, [this] { return stop_ || !paused_ || seek_.has_value(); });
@@ -123,6 +131,7 @@ void InmarsatReplay::worker(InmarsatReplayOptions options) {
                 std::lock_guard<std::mutex> guard(mutex_);
                 snapshot_.position = reader.position();
                 snapshot_.pipeline = pipeline.report();
+                snapshot_.audio = audio->report();
                 snapshot_.logError = diagnostics.error();
             }
             const auto now = std::chrono::steady_clock::now();
@@ -131,6 +140,14 @@ void InmarsatReplay::worker(InmarsatReplayOptions options) {
                 lastLog = now;
             }
         }
+        // Let the last framed block finish; stop remains interruptible.
+        // Queue capacity is 4.096 seconds; bound drain even if an audio driver stalls.
+        const auto drainDeadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+        while(audio->queued() && std::chrono::steady_clock::now()<drainDeadline) {
+            std::unique_lock<std::mutex> guard(mutex_);
+            if(stop_ || changed_.wait_for(guard,std::chrono::milliseconds(20),[this]{return stop_;})) break;
+        }
+        audio->finish();
     } catch (const std::exception& e) {
         finalState = "error";
         error = QString::fromUtf8(e.what());
@@ -145,7 +162,9 @@ void InmarsatReplay::worker(InmarsatReplayOptions options) {
         snapshot_.logPath = diagnostics.path();
         snapshot_.session = diagnostics.session();
         snapshot_.pipeline = pipeline.report();
+        if(audio) snapshot_.audio=audio->report();
     }
+    audio.reset(); // Finalize WAV header before exposing completion.
     if (!diagnostics.path().isEmpty()) {
         auto summary = snapshot().toJson();
         summary["errorCode"] = error.isEmpty() ? "none" : "replay_failed";

@@ -28,7 +28,11 @@ class ReleaseTests(unittest.TestCase):
                  'platforms/qwindows.dll', 'licenses/rtlsdr-COPYRIGHT.txt',
                  'sdrtown_sstv.exe', 'licenses/sstv/sstv-MIT.txt',
                  'licenses/sstv/libm-LICENSE.txt', 'licenses/sstv/rust-COPYRIGHT-library.html',
-                 'licenses/sgp4/LICENSE', 'licenses/sgp4/README.sdr-town.md')
+                 'licenses/sgp4/LICENSE', 'licenses/sgp4/README.sdr-town.md',
+                 'sdr_aero_codec.dll', 'licenses/aero/README.sdr-town.md',
+                 'licenses/aero/JAERO-MIT.txt', 'licenses/aero/JFFT-MIT.txt',
+                 'licenses/aero/libcorrect-BSD.txt', 'licenses/aero/codec-COPYRIGHT.txt',
+                 'licenses/aero/libaeroambe-MIT.txt', 'licenses/aero/NaturalEarth.txt')
         for name in names:
             path = self.staging / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -99,7 +103,9 @@ class ReleaseTests(unittest.TestCase):
 
     @patch('verify_release.subprocess.run')
     def test_missing_sgp4_notices(self, run):
-        for name in ('licenses/sgp4/LICENSE', 'licenses/sgp4/README.sdr-town.md'):
+        for name in ('licenses/sgp4/LICENSE', 'licenses/sgp4/README.sdr-town.md',
+                     'sdr_aero_codec.dll', 'licenses/aero/JAERO-MIT.txt',
+                     'licenses/aero/codec-COPYRIGHT.txt', 'licenses/aero/NaturalEarth.txt'):
             with self.subTest(name=name):
                 path = self.staging / name
                 original = path.read_bytes()

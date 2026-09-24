@@ -4,6 +4,49 @@
 #include <cmath>
 #include <stdexcept>
 
+struct InmarsatPipeline::Native {
+    std::unique_ptr<InmarsatAero> aero;
+    std::unique_ptr<InmarsatChannelizer> channelizer;
+    InmarsatAero::MessageSink messageSink;
+    InmarsatAero::PcmSink pcmSink;
+    uint64_t validated=0, failed=0, voice=0, pcm=0, rejected=0, corrections=0, repeats=0, mutes=0;
+    std::vector<InmarsatMessage> positions;
+    void reset(int bitRate,double rate,double offset,double channel,bool burst) {
+        aero.reset(); channelizer.reset(); positions.clear();
+        if(bitRate==0) return;
+        channelizer=std::make_unique<InmarsatChannelizer>(rate,offset);
+        aero=std::make_unique<InmarsatAero>(bitRate,burst);
+        aero->setMessageSink([this,channel](const InmarsatMessage& incoming) {
+            auto m=incoming; m.freqHz=channel;
+            if(m.hasPosition) {
+                auto it=std::find_if(positions.begin(),positions.end(),[&](const auto& p){return p.aesId==m.aesId;});
+                if(it!=positions.end()) *it=m;
+                else {if(positions.size()==256) positions.erase(positions.begin()); positions.push_back(m);}
+            }
+            if(messageSink) messageSink(m);
+        });
+        aero->setPcmSink([this](std::span<const int16_t> samples,uint32_t aes) {
+            if(pcmSink) pcmSink(samples,aes);
+        });
+    }
+};
+InmarsatPipeline::InmarsatPipeline():native_(std::make_unique<Native>()) {}
+InmarsatPipeline::~InmarsatPipeline()=default;
+InmarsatPipeline::InmarsatPipeline(InmarsatPipeline&&) noexcept=default;
+InmarsatPipeline& InmarsatPipeline::operator=(InmarsatPipeline&&) noexcept=default;
+void InmarsatPipeline::setMessageSink(InmarsatAero::MessageSink sink) {native_->messageSink=std::move(sink);}
+void InmarsatPipeline::setPcmSink(InmarsatAero::PcmSink sink) {native_->pcmSink=std::move(sink);}
+InmarsatDemodStats InmarsatPipeline::stats() const {
+    auto result=demod_.stats();
+    if(native_->aero) {
+        const auto a=native_->aero->stats();
+        result.locked=a.locked;result.carrierDetected=result.carrierDetected || a.locked;
+        result.ebnoDb=a.ebno;
+    }
+    result.framesOut=native_->validated;
+    return result;
+}
+
 void InmarsatPipeline::process(const std::complex<float>* iq, size_t count,
     uint64_t start, double rate, double center, double channel,
     InmarsatDemodMode mode, bool discontinuity) {
@@ -24,7 +67,16 @@ void InmarsatPipeline::process(const std::complex<float>* iq, size_t count,
     }
     const bool gap = started_ && (discontinuity || start != nextSample_);
     if (!started_ || gap || rate_ != rate || center_ != center || channel_ != channel || mode_ != mode) {
-        demod_.reset(mode, rate, channel - center);
+        const bool burst=mode==InmarsatDemodMode::AeroBurstMsk1200 || mode==InmarsatDemodMode::AeroBurstOqpsk10500;
+        const auto probe=mode==InmarsatDemodMode::AeroBurstMsk1200?InmarsatDemodMode::AeroMsk1200:
+            mode==InmarsatDemodMode::AeroBurstOqpsk10500?InmarsatDemodMode::AeroOqpsk10500:mode;
+        demod_.reset(probe, rate, channel - center);
+        const int bps=mode==InmarsatDemodMode::AeroMsk600?600:
+            probe==InmarsatDemodMode::AeroMsk1200?1200:mode==InmarsatDemodMode::AeroVoice8400?8400:
+            probe==InmarsatDemodMode::AeroOqpsk10500?10500:0;
+        if(bps && (rate<16000 || std::abs(channel-center)+6500>rate/2))
+            throw std::runtime_error("Aero channel filter must fit entirely inside the IQ passband (minimum 16 kHz IQ)");
+        native_->reset(bps,rate,channel-center,channel,burst);
         ++resets_;
         if (gap) ++gaps_;
     }
@@ -32,6 +84,20 @@ void InmarsatPipeline::process(const std::complex<float>* iq, size_t count,
     rate_ = rate; center_ = center; channel_ = channel; mode_ = mode;
     const auto before = demod_.stats();
     demod_.process(iq, count);
+    if(native_->aero) {
+        const auto before=native_->aero->stats();
+        const auto intermediate=native_->channelizer->process({iq,count});
+        native_->aero->processIf(intermediate);
+        const auto after=native_->aero->stats();
+        native_->validated+=after.crcOk-before.crcOk;
+        native_->failed+=after.crcBad-before.crcBad;
+        native_->voice+=after.voiceWords-before.voiceWords;
+        native_->pcm+=after.pcmSamples-before.pcmSamples;
+        native_->rejected+=after.rejectedCFrames-before.rejectedCFrames;
+        native_->corrections+=after.codecErrors-before.codecErrors;
+        native_->repeats+=after.codecRepeats-before.codecRepeats;
+        native_->mutes+=after.codecMutes-before.codecMutes;
+    }
     const auto after = demod_.stats();
     symbols_ += after.symbolsOut - before.symbolsOut;
     rawBlocks_ += after.rawBlocksOut - before.rawBlocksOut;
@@ -46,7 +112,12 @@ void InmarsatPipeline::process(const std::complex<float>* iq, size_t count,
 }
 
 nlohmann::json InmarsatPipeline::report() const {
-    const auto s = demod_.stats();
+    const auto s = stats();
+    const auto a=native_->aero?native_->aero->stats():InmarsatAeroStats{};
+    nlohmann::json positions=nlohmann::json::array();
+    for(const auto& p:native_->positions) positions.push_back({{"aesId",p.aesId},
+        {"latDeg",p.latDeg},{"lonDeg",p.lonDeg},{"altitudeFt",p.altitudeFt},
+        {"callsign",p.callsign},{"registration",p.registration},{"secondsPastHour",p.positionSecondsPastHour}});
     return {{"samples", samples_}, {"blocks", blocks_}, {"nextSample", nextSample_},
         {"resets", resets_}, {"discontinuities", gaps_}, {"rateHz", rate_},
         {"centerHz", center_}, {"channelHz", channel_}, {"offsetHz", channel_ - center_},
@@ -54,7 +125,12 @@ nlohmann::json InmarsatPipeline::report() const {
         {"carrierDetected", s.carrierDetected}, {"quality", s.quality}, {"carrierOffsetHz", s.freqOffsetHz},
         {"processingMs", totalMs_}, {"maxBlockMs", maxMs_}, {"peakComponent", peak_},
         {"rms", samples_ ? std::sqrt(sumPower_ / samples_) : 0},
-        {"protocolLock", false}, {"validatedFrames", 0}, {"voiceFrames", 0},
-        {"pcmSamples", 0}, {"protocolDecoderAvailable", false}, {"aeroVocoderAvailable", false},
-        {"capability", "physical_probe_only"}};
+        {"protocolLock", s.locked}, {"validatedFrames", native_->validated}, {"voiceFrames", native_->voice},
+        {"crcFailed",native_->failed},{"rejectedCFrames",native_->rejected},
+        {"codecCorrections",native_->corrections},{"codecRepeats",native_->repeats},{"codecMutes",native_->mutes},
+        {"positions",positions},{"pcmSamples", native_->pcm},
+        {"softBits",a.softBits},{"voiceAesId",a.aes},
+        {"voiceActive",a.lastVoiceSample>0 && a.input48k-a.lastVoiceSample<=24000},
+        {"protocolDecoderAvailable",bool(native_->aero)}, {"aeroVocoderAvailable", true},
+        {"capability", native_->aero?"classic_aero_experimental":"physical_probe_only"}};
 }

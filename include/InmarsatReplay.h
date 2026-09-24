@@ -14,6 +14,8 @@ struct InmarsatReplayOptions {
     double channelHz = 0; // zero follows capture center; no guessed RF frequency
     bool realTime = true;
     bool shareDiagnostics = false;
+    bool playAudio = false;
+    QString wavPath;
     QString logDirectory;
 };
 struct InmarsatReplaySnapshot {
@@ -21,6 +23,7 @@ struct InmarsatReplaySnapshot {
     InmarsatIqInfo info;
     uint64_t position = 0;
     nlohmann::json pipeline = nlohmann::json::object();
+    nlohmann::json audio = nlohmann::json::object();
     bool running = false;
     nlohmann::json toJson() const;
 };

@@ -4,6 +4,15 @@ Never delete a row. Close with a commit hash and a sentence.
 
 ## ISS-0016 - Inmarsat is not yet an Aero voice decoder (2026-09-24, OPEN)
 
+DEC-0121 update: real pinned continuous/burst modem/FEC/CRC and isolated mini-m
+codec now integrated. Public recordings produce voice-codeword PCM and real
+ADS-C positions through IQ to GUI map. GUI/CLI fast/paced WAV bytes agree.
+Found/fixed upstream shared ECC scratch and modem statics, strict-zero-fill
+CRC rejection and convolutional unpack bounds. Existing regex/incorrect codec
+fixtures are no longer wired to the live engine. Remaining: clear-conversation
+RF acceptance using dad's same IQ/JAERO reference, security/call-end and auto
+follow, dual-device and photos. No claim of full Inmarsat service support.
+
 Live physical probe has no validated unique-word framing/deinterleave/FEC/CRC.
 Raw bytes are correctly blocked from ACARS, assignment and map ingestion. The
 unused InmarsatVoice wrapper incorrectly advertises HAVE_MBELIB as Aero support

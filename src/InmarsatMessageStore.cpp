@@ -35,9 +35,14 @@ nlohmann::json InmarsatMessage::toJson() const {
     j["label"] = label;
     j["text"] = text;
     j["hasPosition"] = hasPosition;
+    j["validated"] = validated;
+    j["registration"] = registration;
+    j["callsign"] = callsign;
     if (hasPosition) {
         j["latDeg"] = latDeg;
         j["lonDeg"] = lonDeg;
+        j["altitudeFt"] = altitudeFt;
+        j["secondsPastHour"] = positionSecondsPastHour;
     }
     if (voiceRxHz > 0) j["voiceRxHz"] = voiceRxHz;
     if (voiceTxHz > 0) j["voiceTxHz"] = voiceTxHz;

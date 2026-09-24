@@ -150,7 +150,7 @@ TEST_CASE("Inmarsat replay paced and fast results agree with bounded reports", "
     REQUIRE(fast.state == "complete");
     for (const char* key : {"samples", "symbols", "rawBlocks", "quality", "pcmSamples"}) CHECK(paced.pipeline[key] == fast.pipeline[key]);
     QFile log(fast.logPath); REQUIRE(log.open(QIODevice::ReadOnly));
-    const auto lines = log.readAll(); CHECK(lines.contains("summary")); CHECK(lines.contains("physical_probe_only"));
+    const auto lines = log.readAll(); CHECK(lines.contains("summary")); CHECK(lines.contains("classic_aero_experimental"));
     CHECK(lines.size() < 8192);
     InmarsatVoice voice; CHECK_FALSE(voice.backendAvailable());
     int emits = 0; voice.setPcmSink([&](const int16_t*, int) { ++emits; });

@@ -11,6 +11,7 @@ class QTimer;
 class QTableWidget;
 class QShowEvent;
 class QHideEvent;
+class InmarsatMapWidget;
 
 class InmarsatWidget : public QWidget {
     Q_OBJECT
@@ -44,6 +45,8 @@ private:
     QPushButton* stopBtn_ = nullptr;
     QCheckBox* voiceFollowCheck_ = nullptr;
     QCheckBox* recordCheck_ = nullptr;
+    QCheckBox* speakerCheck_ = nullptr;
+    InmarsatMapWidget* map_ = nullptr;
     QLabel* statusLabel_ = nullptr;
     QLabel* lockLabel_ = nullptr;
     QPlainTextEdit* msgView_ = nullptr;
