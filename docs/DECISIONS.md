@@ -17,6 +17,13 @@ the actual compiler target and matching tools, require decoder DLLs in staging,
 and run recorded-MPX RDS tests on staged and publicly downloaded executables.
 GitHub runner-images Windows2022 documentation lists GCC as preinstalled;
 actual tool discovery/target verification remains the gate, not a path guess.
+The first complete RDS-enabled run passed build/tests but correctly failed
+the new package gate: SoapyRTLSDR.dll was absent. Build the already-used module
+from audited upstream commit 6ca357c, linked to this build's Soapy/RTL libraries,
+require its bias-T feature test, and include its license/provenance. The runner
+also reported VCINSTALLDIR missing. Resolve MSVC with vswhere and stage its
+x64 redistributable CRT DLLs so portable operation does not depend on the
+runner's preinstalled runtime. Local module configure/build PASS.
 
 ## DEC-0129 - Explicit, capability-gated RTL bias-T (2026-09-25)
 

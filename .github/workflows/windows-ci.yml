@@ -125,6 +125,28 @@ jobs:
             "-DSDR_TOWN_RDS_CC=$cc" "-DSDR_TOWN_RDS_CXX=$cxx" "-DSDR_TOWN_RDS_MAKE=$make"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Checkout pinned RTL-SDR driver module
+        uses: actions/checkout@v7
+        with:
+          repository: pothosware/SoapyRTLSDR
+          ref: 6ca357c15cbf676ff30eb8eb445d1e1eac17c136
+          path: build/rtl-driver-source
+          persist-credentials: false
+
+      - name: Build RTL-SDR driver with bias-T support
+        shell: pwsh
+        run: |
+          cmake -S build/rtl-driver-source -B build/rtl-driver-build -G "Visual Studio 17 2022" -A x64 `
+            "-DCMAKE_PREFIX_PATH=$env:GITHUB_WORKSPACE/build/vcpkg_installed/x64-windows"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Select-String build/rtl-driver-build/CMakeCache.txt -Pattern '^HAS_RTLSDR_SET_BIAS_TEE:INTERNAL=1$')) {
+            throw "RTL-SDR module must compile with bias-T API support"
+          }
+          cmake --build build/rtl-driver-build --config Release --target rtlsdrSupport -j 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Path build/bin/Release -Force | Out-Null
+          Copy-Item build/rtl-driver-build/Release/rtlsdrSupport.dll build/bin/Release/SoapyRTLSDR.dll
+
       - name: Build SDR_Town and native tests
         shell: pwsh
         run: |
@@ -203,6 +225,10 @@ jobs:
 
           $windeployqt = Join-Path $env:QT_ROOT_DIR "bin/windeployqt.exe"
           if (-not (Test-Path $windeployqt)) { throw "windeployqt.exe not found" }
+          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or -not $vs) { throw "MSVC redistributable location unavailable" }
+          $env:VCINSTALLDIR = Join-Path $vs 'VC/'
           & $windeployqt `
             --release `
             --dir $stage `
@@ -215,7 +241,14 @@ jobs:
           if (-not (Test-Path (Join-Path $stage "Qt6Core.dll"))) {
             throw "portable staging is missing Qt6Core.dll"
           }
-          foreach ($required in @('sdrtown_rds_dsp.dll', 'sdr_aero_codec.dll', 'SdrTownControl.dll', 'SoapyRTLSDR.dll', 'rtlsdr.dll')) {
+          $redist = Get-ChildItem (Join-Path $vs 'VC/Redist/MSVC') -Directory |
+            Where-Object { $_.Name -match '^\d+\.' } | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+          if (-not $redist) { throw "MSVC runtime redistributables unavailable" }
+          $crt = Get-ChildItem (Join-Path $redist.FullName 'x64') -Directory -Filter 'Microsoft.VC*.CRT' | Select-Object -First 1
+          if (-not $crt) { throw "x64 MSVC CRT directory unavailable" }
+          Copy-Item (Join-Path $crt.FullName '*.dll') $stage
+          Copy-Item build/rtl-driver-source/LICENSE.txt (Join-Path $stage 'licenses/SoapyRTLSDR-LICENSE.txt')
+          foreach ($required in @('sdrtown_rds_dsp.dll', 'sdr_aero_codec.dll', 'SdrTownControl.dll', 'SoapyRTLSDR.dll', 'rtlsdr.dll', 'vcruntime140.dll', 'msvcp140.dll')) {
             if (-not (Test-Path (Join-Path $stage $required))) { throw "portable staging is missing $required" }
           }
           python scripts/test_rds_cli.py --exe $exe
@@ -254,6 +287,7 @@ jobs:
             generatedUtc = (Get-Date).ToUniversalTime().ToString("o")
             sstvBackend = "required"
             p25PipelineGuard = "passed"
+            rtlModuleCommit = "6ca357c15cbf676ff30eb8eb445d1e1eac17c136"
           }
           $buildInfo | ConvertTo-Json | Set-Content `
             (Join-Path $stage "build-info.json") -Encoding utf8

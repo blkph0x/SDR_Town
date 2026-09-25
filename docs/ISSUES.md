@@ -1,5 +1,14 @@
 # Issues (canonical)
 
+## ISS-0026 - CI portable missing RTL module (2026-09-25, FIX IN CI VALIDATION)
+
+Run 36108455138 passed build/tests but the added package gate failed on
+SoapyRTLSDR.dll. Local builds had relied on a pre-existing binary; clean CI
+never built it. Compile audited upstream 6ca357c against the configured
+Soapy/RTL libraries and require bias-T feature detection, license and provenance.
+Stage MSVC CRT DLLs explicitly too: windeployqt warned VCINSTALLDIR was unset.
+Local source module build PASS. No release was published by the failed run.
+
 ## ISS-0025 - CI portable configuration omitted RDS (2026-09-25, FIX IN CI VALIDATION)
 
 Windows CI configured SDR_TOWN_BUILD_RDS_DSP=OFF, unlike normal local releases.

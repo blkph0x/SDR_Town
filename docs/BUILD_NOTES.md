@@ -2,6 +2,16 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-25 - CI package gate prevented incomplete RTL release
+
+Run 36108455138 at source 4714570: build/core/lifecycle/GUI/replay/SSTV PASS;
+staging FAILED on missing SoapyRTLSDR.dll before any public release. Fix adds
+a pinned source module build against the same vcpkg Soapy/RTL libraries.
+Local module configure/build PASS, HAS_RTLSDR_SET_BIAS_TEE=1, version
+0.3.3-6ca357c. Existing upstream narrowing/nonfloating-complex warnings remain,
+not treated as proof of RF correctness. Also stage the compiler CRT explicitly
+because CI windeployqt could not find VCINSTALLDIR. Replacement run required.
+
 ## 2026-09-25 - Mandatory publication workflow preparation (DEC-0130)
 
 Workflow YAML validator/self-tests PASS; P25 guard negative self-tests PASS.
