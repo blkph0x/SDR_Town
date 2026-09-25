@@ -1,5 +1,13 @@
 # Issues (canonical)
 
+## ISS-0025 - CI portable configuration omitted RDS (2026-09-25, FIX IN CI VALIDATION)
+
+Windows CI configured SDR_TOWN_BUILD_RDS_DSP=OFF, unlike normal local releases.
+Publishing it as the new default would omit the existing RDS backend/tests.
+Initial 0.2.97 runs cancelled before publication. DEC-0130 enables the existing
+backend and gates staging/public downloads on required DLLs and recorded-MPX
+CLI tests. Await successful clean CI build and published-package verification.
+
 ## ISS-0024 - RTL-SDR bias-T missing (2026-09-25, SOFTWARE FIXED; ELECTRICAL ACCEPTANCE OPEN)
 
 Source search confirms only SDRplay biasT_ctrl is implemented. SoapyRTLSDR uses

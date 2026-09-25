@@ -11,6 +11,10 @@ Release branch checks version match and versioned notes, refuses asset
 replacement, recognizes experimental tags as prereleases, and anonymously
 downloads/verifies public hashes, run/source provenance and CLI execution.
 CI execution/publication remains pending; no success claimed by this entry.
+Initial runs 36107415468/36107415463 cancelled before publication after source
+audit found CI disabled RDS DSP. Existing backend enabled with target-checked
+MinGW tools and packaged MPX replay gates. Local versioned 0.2.97 build PASS,
+CTest 13/13 PASS in 35.84 s. Replacement clean CI runs are required.
 
 ## 2026-09-25 - RTL bias-T local qualification (DEC-0129 / T-0056)
 

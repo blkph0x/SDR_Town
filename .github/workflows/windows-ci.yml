@@ -98,6 +98,22 @@ jobs:
       - name: Configure CMake (VS 2022 + vcpkg manifest)
         shell: pwsh
         run: |
+          # DEC-0130: publish the RDS backend too, not a reduced CI-only build.
+          $candidates = @('C:\mingw64\bin\gcc.exe', 'C:\msys64\mingw64\bin\gcc.exe')
+          $candidates += @(Get-Command x86_64-w64-mingw32-gcc,gcc -ErrorAction SilentlyContinue | ForEach-Object { $_.Source })
+          $cc = $null
+          foreach ($candidate in $candidates) {
+            if (-not (Test-Path -LiteralPath $candidate)) { continue }
+            $bin = Split-Path $candidate
+            $cxx = Join-Path $bin 'g++.exe'
+            $make = Join-Path $bin 'mingw32-make.exe'
+            if ((Test-Path $cxx) -and (Test-Path $make) -and ((& $candidate -dumpmachine) -eq 'x86_64-w64-mingw32')) {
+              $cc = $candidate
+              break
+            }
+          }
+          if (-not $cc) { throw "Matching x64 MinGW GCC/G++/make required for published RDS support" }
+          Write-Host "RDS toolchain: $cc"
           cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
             -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
@@ -105,7 +121,8 @@ jobs:
             -DBUILD_TESTS=ON `
             -DSDR_TOWN_ENABLE_MBELIB=ON `
             -DSDR_TOWN_ENABLE_SSTV_IMAGES=ON `
-            -DSDR_TOWN_BUILD_RDS_DSP=OFF
+            -DSDR_TOWN_BUILD_RDS_DSP=ON `
+            "-DSDR_TOWN_RDS_CC=$cc" "-DSDR_TOWN_RDS_CXX=$cxx" "-DSDR_TOWN_RDS_MAKE=$make"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build SDR_Town and native tests
@@ -198,6 +215,11 @@ jobs:
           if (-not (Test-Path (Join-Path $stage "Qt6Core.dll"))) {
             throw "portable staging is missing Qt6Core.dll"
           }
+          foreach ($required in @('sdrtown_rds_dsp.dll', 'sdr_aero_codec.dll', 'SdrTownControl.dll', 'SoapyRTLSDR.dll', 'rtlsdr.dll')) {
+            if (-not (Test-Path (Join-Path $stage $required))) { throw "portable staging is missing $required" }
+          }
+          python scripts/test_rds_cli.py --exe $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Create portable ZIP and checksum
         shell: pwsh
@@ -345,4 +367,6 @@ jobs:
           if (-not (Select-String -Path (Join-Path $out "smoke.out") -Pattern 'biastee <device>' -SimpleMatch)) {
             throw "published executable lacks expected RTL bias-T command"
           }
+          python scripts/test_rds_cli.py --exe $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Add-Content $env:GITHUB_STEP_SUMMARY "Public download, checksum, provenance and CLI smoke test: PASS"

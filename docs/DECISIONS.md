@@ -11,6 +11,12 @@ last signed installer update intact; this release is a portable prerelease.
 Load version-specific release notes, reject mismatched branch/project versions,
 and verify public downloaded assets inside the release job as well as locally.
 Private signing keys stay local; no driver, DSP or P25 changes in this task.
+Pre-publication audit found Windows CI explicitly disabled RDS DSP. Cancelled
+the initial runs before publication. Enable the existing MinGW backend, check
+the actual compiler target and matching tools, require decoder DLLs in staging,
+and run recorded-MPX RDS tests on staged and publicly downloaded executables.
+GitHub runner-images Windows2022 documentation lists GCC as preinstalled;
+actual tool discovery/target verification remains the gate, not a path guess.
 
 ## DEC-0129 - Explicit, capability-gated RTL bias-T (2026-09-25)
 

@@ -287,7 +287,7 @@ Tester builds: https://github.com/Blkph0x/SDR_Town/releases
 **How shipping works (code path):**
 
 1. Bump `project(SDR_Town VERSION â€¦)` in `CMakeLists.txt`.
-2. Commit reviewed source first. `scripts/release.ps1 -Version X.Y.Z -Channel experimental` checks the clean attached branch, builds/tests, deploys Qt, packages NSIS/ZIP/control DLL, signs and verifies the manifest/assets, commits release metadata, tags and pushes the current branch, then uploads assets. Native command failures stop the process. See [release gates and manual publication](docs/RELEASING.md).
+2. Commit and push reviewed source, then use the `release/vX.Y.Z-experimental` branch workflow. Actions builds/tests/publishes the portable prerelease and checks its public download. Verify the shipped asset locally too. The signed installer remains a separate channel; see [mandatory release gates](docs/RELEASING.md).
 3. App `UpdateManager` fetches  
    `https://github.com/Blkph0x/SDR_Town/releases/latest/download/update.json`  
    then downloads only HTTPS GitHub release installer URLs, verifies `update.json.sig` (Ed25519) when a release public key is configured, and verifies installer SHA-256 before launch.
@@ -562,11 +562,13 @@ C:\Qt\6.11.1\msvc2022_64\bin\windeployqt.exe SDR_Town.exe --no-compiler-runtime 
 ## Release pipeline
 
 ```powershell
-# After bumping CMakeLists.txt project VERSION to X.Y.Z and a clean build/test:
-.\scripts\release.ps1 -Version X.Y.Z -Channel experimental
+# After review, version bump, release notes, tests and commit:
+git push origin master HEAD:refs/heads/release/vX.Y.Z-experimental
+gh run list --branch release/vX.Y.Z-experimental
+gh run watch RUN_ID --exit-status
 ```
 
-Produces and uploads: NSIS setup, portable ZIP, `update.json`, `update.json.sig`, SHA files. Generate signing keys once with `scripts/sign_update_manifest.ps1 -GenerateKeyPair` (private key stays local). Optional: `-RemoteDiagnosticsUrl https://â€¦` injects packaged diag config without committing tokens.
+Actions publishes a portable prerelease and checksum, then verifies the public download and executable. Follow [RELEASING.md](docs/RELEASING.md) before claiming completion. This does not replace the existing signed installer/in-app updater release; private signing keys remain local.
 
 ---
 
