@@ -46,6 +46,13 @@ each project's code retains its own licence.
 
 ---
 
+**0.2.98 experimental: RSPdx + Inmarsat stability** discovers compatible
+SoapySDRPlay3 modules installed with Afreet SkyRoof, while retaining API/ABI
+and driver-registration validation. An attached RSPdx completed five live
+Inmarsat open/tune/status/stop cycles without a crash; the same ownership loop
+is now covered by a fake-driver regression test. This proves lifecycle stability,
+not successful satellite decoding. See [tester release notes](docs/RELEASE_0.2.98.md).
+
 **0.2.97 experimental: RTL-SDR Bias-T** now has a capability-gated control in
 Device Manager and `biastee <device> status|on|off` in the CLI. Default OFF;
 explicit DC-power confirmation, saved per-device intent, checked live writes

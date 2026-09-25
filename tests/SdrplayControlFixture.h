@@ -1,7 +1,9 @@
 #pragma once
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Errors.hpp>
+#include <algorithm>
 #include <atomic>
+#include <complex>
 #include <map>
 #include <stdexcept>
 #include <thread>
@@ -10,6 +12,7 @@
 // Contract fixture, not RF emulation. Matches pinned SoapySDRPlay3 Settings.cpp.
 class SdrplayControlFixture : public SoapySDR::Device {
 public:
+    static inline std::atomic<bool> produceSamples{false};
     std::vector<std::string> calls;
     std::string antenna = "Antenna A";
     std::string fail;
@@ -69,7 +72,14 @@ public:
     }
     int deactivateStream(SoapySDR::Stream*, int, long long) override { return 0; }
     void closeStream(SoapySDR::Stream*) override {}
-    int readStream(SoapySDR::Stream*, void* const*, size_t, int&, long long&, long) override {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5)); return SOAPY_SDR_TIMEOUT;
+    int readStream(SoapySDR::Stream*, void* const* buffers, size_t elements, int&, long long&, long) override {
+        if (!produceSamples.load(std::memory_order_acquire)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            return SOAPY_SDR_TIMEOUT;
+        }
+        auto* samples = static_cast<std::complex<float>*>(buffers[0]);
+        std::fill_n(samples, elements, std::complex<float>{});
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        return static_cast<int>(elements);
     }
 };

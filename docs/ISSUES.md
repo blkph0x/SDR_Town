@@ -1,5 +1,16 @@
 # Issues (canonical)
 
+## ISS-0027 - Installed SkyRoof SDRplay module is not discovered (2026-09-26, OPEN)
+
+The supplied 0.2.96 build loads the official x64 API 3.15 but reports the
+SDRplay driver unavailable because candidate roots omit
+`C:\Program Files\Afreet\SkyRoof`. With only a process-local
+`SOAPY_SDR_PLUGIN_PATH` pointing at SkyRoof's `modules0.8`, the existing loader
+registers module 0.5.2-8ef31b2 and enumerates the attached RSPdx. Five physical
+Inmarsat start/status/stop cycles at 1542.935 MHz complete without a crash.
+Make that installed layout discoverable by default and retain a fixture lifecycle
+stress test. This proves open/tune/stop stability, not satellite decode quality.
+
 ## ISS-0026 - CI portable missing RTL module (2026-09-25, FIXED)
 
 Run 36108455138 passed build/tests but the added package gate failed on

@@ -1,5 +1,21 @@
 # Decisions
 
+## DEC-0132 - Discover installed SkyRoof SoapySDRPlay3 and stress Inmarsat ownership (2026-09-26)
+
+The attached RSPdx is visible through SkyRoof's x64 ABI-0.8 module at
+`C:\Program Files\Afreet\SkyRoof\lib\SoapySDR\modules0.8\sdrPlaySupport.dll`.
+Released 0.2.96 already validates API exports, module ABI/registration and real
+RSPdx capabilities, but its candidate roots omit SkyRoof. An environment-only
+probe loads module 0.5.2-8ef31b2, enumerates the receiver and completes five
+Inmarsat live-hardware open/tune/status/stop cycles without a crash.
+
+Add both Program Files SkyRoof roots; retain the existing loader validation and
+never copy or redistribute vendor/third-party DLLs. Align the read-only preflight
+search and add candidate assertions. Extend the fake RSPdx lifecycle with active
+IQ and five Inmarsat start/stop cycles to cover lease, worker and stream restore.
+Do not change Aero DSP, P25, tuning math, power controls or driver teardown.
+Physical testing proves lifecycle stability on this host only, not RF decode.
+
 ## DEC-0131 - README support appeal with verifiable claims (2026-09-25)
 
 User requested a prominent donation appeal for SDR Town/FUBAR. Root commit

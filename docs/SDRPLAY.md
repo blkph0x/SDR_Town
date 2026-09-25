@@ -18,8 +18,8 @@ RTL-SDR and HackRF.
 Device Manager shows the current discovery status. CLI: `sdrplay status`.
 
 The standalone release does not redistribute the proprietary SDRplay API or
-third-party SoapySDRPlay3 binaries. It discovers the normal SDRplay, PothosSDR
-(both Program Files layouts), radioconda, and application-local locations at
+third-party SoapySDRPlay3 binaries. It discovers the normal SDRplay, PothosSDR,
+Afreet SkyRoof (both Program Files layouts), radioconda, and application-local locations at
 runtime. The API DLL and Soapy module must be installed on the same machine as
 the app.
 

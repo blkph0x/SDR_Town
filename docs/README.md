@@ -47,5 +47,5 @@ These stay as capture archaeology. New work is ISSUES + DECISIONS + TASKS.
 
 See [RELEASING.md](RELEASING.md) for current packaging, signature, runtime and
 publication gates, and [SATELLITE_AND_SSTV.md](SATELLITE_AND_SSTV.md) for next work.
-Current portable tester release: [0.2.97 notes](RELEASE_0.2.97.md). Last signed installer: [0.2.96 notes](RELEASE_0.2.96.md). Pairing: [FUBAR_PAIRING.md](FUBAR_PAIRING.md); FUBAR is not changed or re-qualified by this RTL control update.
+Current portable tester release: [0.2.98 notes](RELEASE_0.2.98.md). Last signed installer: [0.2.96 notes](RELEASE_0.2.96.md). Pairing: [FUBAR_PAIRING.md](FUBAR_PAIRING.md); FUBAR is not changed or re-qualified by this SDRplay discovery update.
 SSTV: [analogue families, HamDRM, live NFM, tests and limits](SSTV.md). Inmarsat: [INMARSAT.md](INMARSAT.md).

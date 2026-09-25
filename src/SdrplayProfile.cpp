@@ -128,11 +128,16 @@ std::vector<std::string> windowsSoapyRoots() {
         appendRoot(roots, base, "\\SDRplay");
         appendRoot(roots, base, "\\SDRplay\\API");
         appendRoot(roots, base, "\\PothosSDR");
+        // DEC-0132: SkyRoof ships an ABI-0.8 SoapySDRPlay3 module in this
+        // standard per-machine layout. The module is still validated by the
+        // Soapy loader and factory-registration checks before it can be used.
+        appendRoot(roots, base, "\\Afreet\\SkyRoof");
     }
     appendRoot(roots, environmentPath("ProgramData"), "\\radioconda\\Library");
     for (const char* base : {"C:\\Program Files\\SDRplay", "C:\\Program Files\\SDRplay\\API",
-             "C:\\Program Files\\PothosSDR", "C:\\Program Files (x86)\\SDRplay\\API",
-             "C:\\Program Files (x86)\\PothosSDR", "C:\\ProgramData\\radioconda\\Library"})
+             "C:\\Program Files\\PothosSDR", "C:\\Program Files\\Afreet\\SkyRoof",
+             "C:\\Program Files (x86)\\SDRplay\\API", "C:\\Program Files (x86)\\PothosSDR",
+             "C:\\Program Files (x86)\\Afreet\\SkyRoof", "C:\\ProgramData\\radioconda\\Library"})
         appendRoot(roots, base);
     return roots;
 }

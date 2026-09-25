@@ -1,5 +1,15 @@
 # Development log
 
+## 2026-09-26 - RSPdx SkyRoof discovery and Inmarsat crash regression
+
+Traced the apparent missing RSPdx support to an omitted installed-module root,
+not the existing model/control implementation. The released loader immediately
+found the attached RSPdx through SkyRoof when given that path. Five real
+Inmarsat open/tune/status/stop cycles completed without a crash. Added permanent
+SkyRoof discovery, matching diagnostics and a five-cycle active-IQ fixture test.
+Focused tests pass; full clean MSVC CI, packaging, publication and downloaded
+portable verification remain required. No Bias-T, modem, P25 or audio changes.
+
 ## 2026-09-25 - Mandatory delivery rule and verified release (T-0057)
 
 Persisted automatic push/CI release/public verification requirements. Fixed

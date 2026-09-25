@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "DeviceManager.h"
+#include "InmarsatEngine.h"
 #include "SdrplayControl.h"
 #ifdef HAVE_SOAPYSDR
 #include "SdrplayControlFixture.h"
@@ -153,6 +154,36 @@ TEST_CASE("SDRplay light discovery to real open controls restart and persistence
     CHECK(mgr.getDevices()[index].agcEnabled);
     CHECK(mgr.setLiveAntenna(index, "Antenna A", &error));
     CHECK(mgr.getDevices()[index].soapySettings.at("biasT_ctrl") == "false");
+
+    // DEC-0132: reproduce the real RSPdx/Inmarsat ownership path with active
+    // IQ, not only control calls. Rapid worker stop/restart must restore the
+    // already-live receiver without double-close, stale lease, or a crash.
+    SdrplayControlFixture::produceSamples.store(true, std::memory_order_release);
+    struct InmarsatCleanup {
+        DeviceManager& manager;
+        size_t index;
+        ~InmarsatCleanup() {
+            InmarsatEngine::instance().stop();
+            manager.stopStreaming(index);
+            SdrplayControlFixture::produceSamples.store(false, std::memory_order_release);
+        }
+    } cleanup{mgr, index};
+    auto& inmarsat = InmarsatEngine::instance();
+    auto config = InmarsatEngineConfig::defaults();
+    config.deviceIndex = index;
+    config.deviceStableKey = mgr.getDevices()[index].stableKey;
+    config.playAudio = false;
+    config.recordVoice = false;
+    REQUIRE(inmarsat.setConfig(config));
+    for (int cycle = 0; cycle < 5; ++cycle) {
+        REQUIRE(inmarsat.start(true));
+        CHECK(inmarsat.snapshot().deviceConnected);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        inmarsat.stop();
+        CHECK(inmarsat.snapshot().state == InmarsatEngineState::Idle);
+        CHECK(mgr.isStreaming(index));
+        CHECK(mgr.getRuntimeStateLabel(index) == "live hardware");
+    }
     mgr.stopStreaming(index);
 }
 #endif

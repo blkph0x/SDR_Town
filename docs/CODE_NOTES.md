@@ -1,5 +1,15 @@
 # Code notes (tree map)
 
+## SkyRoof RSPdx discovery and Inmarsat lifecycle (DEC-0132)
+
+SdrplayProfile includes installed Afreet SkyRoof roots alongside existing
+Pothos/radioconda/app-local candidates; SdrplayRuntime still requires API 3.x
+exports, matching Soapy ABI and a registered SDRplay factory. The preflight
+script mirrors default and `SOAPY_SDR_PLUGIN_PATH` discovery. The RSPdx fixture
+can optionally publish zero IQ so the existing real-handle lifecycle test also
+stresses five Inmarsat lease/worker/stream restore cycles. No modem, tuning,
+P25, audio, Bias-T or native teardown behavior changes.
+
 ## CI publication verification (DEC-0130)
 
 windows-ci.yml release/* builds publish immutable portable versions with

@@ -1,6 +1,13 @@
 # Task list (canonical)
 
-T-0058 | in_progress | README community support appeal |
+T-0059 | in_progress | RSPdx SkyRoof discovery and Inmarsat crash regression |
+DEC-0132 / ISS-0027. The attached RSPdx is usable through the installed SkyRoof
+SoapySDRPlay3 0.5.2 module, but automatic discovery omits that standard layout.
+Add the validated path, align preflight diagnostics and stress real/fixture
+Inmarsat start-stop ownership. Physical live loop is clean so far; publish only
+after local/CI/package gates and downloaded-release smoke testing pass.
+
+T-0058 | awaiting_clarification | README community support appeal |
 DEC-0131. Add donation link, verified first commit, sourced AUD estimate and
 community acknowledgements. Exact subscription tiers and MIT formalisation
 await maintainer clarification; publish only accurately qualified statements.

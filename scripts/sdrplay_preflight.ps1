@@ -125,11 +125,16 @@ Add-UniquePath $roots $env:SDRPLAY_API_DIR
 Add-UniquePath $roots $env:SDRPLAY_ROOT
 Add-UniquePath $roots $env:SOAPY_SDR_ROOT
 Add-UniquePath $roots $env:POTHOS_ROOT
+foreach ($pluginPath in ([string]$env:SOAPY_SDR_PLUGIN_PATH -split ';')) {
+    Add-UniquePath $roots $pluginPath
+}
 foreach ($registryPath in Get-RegistryStrings) { Add-UniquePath $roots $registryPath }
 Add-UniquePath $roots (Join-Path $env:ProgramFiles 'SDRplay\API')
 if (${env:ProgramFiles(x86)}) { Add-UniquePath $roots (Join-Path ${env:ProgramFiles(x86)} 'SDRplay\API') }
 Add-UniquePath $roots (Join-Path $env:ProgramFiles 'PothosSDR')
+Add-UniquePath $roots (Join-Path $env:ProgramFiles 'Afreet\SkyRoof')
 if (${env:ProgramFiles(x86)}) { Add-UniquePath $roots (Join-Path ${env:ProgramFiles(x86)} 'PothosSDR') }
+if (${env:ProgramFiles(x86)}) { Add-UniquePath $roots (Join-Path ${env:ProgramFiles(x86)} 'Afreet\SkyRoof') }
 if ($env:ProgramData) { Add-UniquePath $roots (Join-Path $env:ProgramData 'radioconda\Library') }
 
 $apiCandidates = New-Object 'System.Collections.Generic.List[string]'
@@ -163,9 +168,11 @@ $processArchitecture = if ([Environment]::Is64BitProcess) {
     if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
 } else { 'x86' }
 $architectureWarnings = New-Object 'System.Collections.Generic.List[string]'
-foreach ($fact in @($apiFiles + $moduleFiles + $utilFiles)) {
-    if ($fact.architecture -in @('x86','x64','arm64') -and $fact.architecture -ne $processArchitecture) {
-        $architectureWarnings.Add("Architecture mismatch: $($fact.path) is $($fact.architecture), process is $processArchitecture")
+foreach ($component in @($apiFiles,$moduleFiles,$utilFiles)) {
+    if ($component.Count -gt 0 -and -not ($component | Where-Object { $_.architecture -eq $processArchitecture })) {
+        foreach ($fact in $component) {
+            $architectureWarnings.Add("Architecture mismatch: $($fact.path) is $($fact.architecture), process is $processArchitecture")
+        }
     }
 }
 
@@ -188,11 +195,28 @@ $soapyInfo = $null
 $soapyFind = $null
 $soapyProbe = $null
 if ($utilFiles.Count -gt 0) {
-    $util = $utilFiles[0].path
-    $soapyInfo = Invoke-BoundedProcess -FilePath $util -Arguments @('--info') -Timeout $TimeoutSeconds
-    $soapyFind = Invoke-BoundedProcess -FilePath $util -Arguments @('--find=driver=sdrplay') -Timeout $TimeoutSeconds
-    if ($ProbeDevice) {
-        $soapyProbe = Invoke-BoundedProcess -FilePath $util -Arguments @('--probe=driver=sdrplay') -Timeout $TimeoutSeconds
+    $util = @($utilFiles | Where-Object { $_.architecture -eq $processArchitecture } | Select-Object -First 1).path
+    if (-not $util) { $util = $utilFiles[0].path }
+    $originalPluginPath = $env:SOAPY_SDR_PLUGIN_PATH
+    $originalPath = $env:PATH
+    try {
+        $module = $moduleFiles | Where-Object { $_.architecture -eq $processArchitecture } | Select-Object -First 1
+        if ($module) {
+            $moduleDirectory = Split-Path -Parent $module.path
+            $env:SOAPY_SDR_PLUGIN_PATH = if ([string]::IsNullOrWhiteSpace($originalPluginPath)) {
+                $moduleDirectory
+            } else { "$moduleDirectory;$originalPluginPath" }
+        }
+        $api = $apiFiles | Where-Object { $_.architecture -eq $processArchitecture } | Select-Object -First 1
+        if ($api) { $env:PATH = "$(Split-Path -Parent $api.path);$originalPath" }
+        $soapyInfo = Invoke-BoundedProcess -FilePath $util -Arguments @('--info') -Timeout $TimeoutSeconds
+        $soapyFind = Invoke-BoundedProcess -FilePath $util -Arguments @('--find=driver=sdrplay') -Timeout $TimeoutSeconds
+        if ($ProbeDevice) {
+            $soapyProbe = Invoke-BoundedProcess -FilePath $util -Arguments @('--probe=driver=sdrplay') -Timeout $TimeoutSeconds
+        }
+    } finally {
+        $env:SOAPY_SDR_PLUGIN_PATH = $originalPluginPath
+        $env:PATH = $originalPath
     }
 }
 

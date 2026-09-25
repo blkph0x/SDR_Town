@@ -2,6 +2,26 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - RSPdx SkyRoof discovery and Inmarsat lifecycle (DEC-0132)
+
+Supplied 0.2.96 initially reports the official x64 API 3.15 and running service
+but no SDRplay driver. Its candidate roots omit the installed SkyRoof module.
+With a process-local plugin path to that exact ABI-0.8 directory, the unchanged
+released loader registers 0.5.2-8ef31b2 and enumerates attached RSPdx serial
+ending 0048. Five physical `inmarsat start force` / status / stop cycles tune
+1542.935 MHz, report live hardware and exit 0 without crash; Bias-T untouched.
+
+Source change adds SkyRoof candidates and the same five-cycle fixture lifecycle.
+UCRT Release target builds after an unrelated GCC 16 P25-test initializer was
+temporarily clarified for local compilation and then restored unchanged.
+Focused `[sdrplay]`: 179 assertions / 19 cases PASS. Hidden real-handle fixture:
+52 assertions / 1 case PASS. Full UCRT run: 404 cases pass, 2 optional skips,
+4 pre-existing/toolchain failures (three RDS runtime DLL loads and one synthetic
+P25 IMBE assertion); no requested-path failure. Clean MSVC CI/release remains
+the authoritative full gate. Preflight finds the installed x64 SkyRoof module,
+official API and service; the independent MSYS SoapySDRUtil remains incompatible
+with the MSVC-built module, while SDR Town's packaged MSVC loader succeeds.
+
 ## 2026-09-25 - Verified CI-built 0.2.97 experimental publication
 
 Source bf83d97c6029b866227eaa11ea4fc8fb3ad2f0e3. Windows release run
