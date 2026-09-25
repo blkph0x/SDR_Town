@@ -34,3 +34,14 @@ not a new claim of field-qualified satellite speech. Matching known-clear IQ
 is still needed to qualify the reported tone/no-voice issue.
 
 Diagnostics remain opt-in at https://gearsqueens.online/sdr-town-diag/ingest.
+
+## Verification
+
+- Full local suite: 11/11 test groups pass; confirmation, cancellation and
+  startup-failure cases included.
+- Actual RTL/GUI handover passes for live P25, configured-only P25 and armed
+  auto-follow; the extracted portable package passes too.
+- GUI/CLI fast/paced Aero reference PCM is byte-identical to v0.2.93.
+- [Independent Windows CI](https://github.com/blkph0x/SDR_Town/actions/runs/36079172152)
+  passes build, tests and packaging. All eight public assets and updater
+  signature were downloaded and verified.

@@ -1,5 +1,17 @@
 # Development log
 
+## 2026-09-25 - 0.2.94 Inmarsat handover fix published
+
+T-0053 / ISS-0021 complete: source 2952535, signed metadata/tag 5fc5fc4.
+Independent Windows CI 36079172152 PASS; release helper full CTest 11/11 PASS.
+The extracted portable also passes the real RTL GUI/API handover test and all
+four unchanged Aero reference PCM variants. Public Latest v0.2.94 has eight
+downloaded/hash-verified assets and a verified Ed25519 updater manifest.
+Use Inmarsat Start and confirm Yes to stop the configured P25 session; Monitor
+CC is required to restart P25 later. P25 DSP/FEC/vocoder/audio unchanged.
+Separate satellite speech and physical RSP qualification remain open. No
+FUBAR or network/proxy changes and no user captures deleted.
+
 ## 2026-09-25 - Confirmed P25-to-Inmarsat handover (DEC-0126)
 
 T-0053 / ISS-0021: diagnosed the unconditional P25 host refusal and missing

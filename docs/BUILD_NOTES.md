@@ -2,6 +2,40 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-25 - 0.2.94 handover release qualification and publication
+
+Source 295253558e4201a86bf2d189e6231a86cda8cf80; signed metadata/tag 5fc5fc4.
+Release helper completes with full CTest 11/11 PASS in 35.80 s and signed
+manifest/runtime/standalone DLL verifier PASS. Frozen-P25 comparison against
+9ea475b, guard self-test and host integration contract pass without guard edits.
+Only three release metadata files differ between CI source and release tag.
+
+Extracted portable EXE SHA256:
+70c5e82cdc70125ad13f664c00719c7da101110ce8f5836afdff66d3150a2db8.
+The packaged real GUI/RTL handover test PASS, including armed auto-follow,
+unconfirmed refusal, forced confirmation, growing IQ, no P25 restart and clean
+process exit. Four packaged reference replays (GUI/CLI fast/paced) retain the
+0.2.93 metrics: 163 valid units, 1375 voice words, 220000 samples, 11 CRC
+failures, 106 corrections, 8 repeats, 1244 codec mutes, 3 rejected C-frames.
+Every WAV SHA256 remains
+295ee11a0edc4e341ab66455ce283f7a0201e2f35a880eb555e47a19af6e176f.
+Reference silence markers are not clear-speech acceptance.
+
+Windows CI 36079172152 PASS in 15m35s: MSVC/Qt6.7.3 clean build, core, loader/
+lifecycle, Qt workspace, GUI/CLI replay, SSTV, clean staging/ZIP and uploaded
+artifact. YAML validation 36079172173 PASS. Master intentionally skips CI's
+release-branch-only publishing step; tested signed local assets are published
+separately. No production code differs from the independently tested source.
+
+Published Latest v0.2.94 (experimental), release ID 396196715, at
+2026-09-25T01:05:05Z. All eight downloaded assets match local SHA256 and sizes.
+Downloaded installer passes the signed-manifest/package verifier. Anonymous
+public Latest returns v0.2.94, not draft, exactly eight assets. Diagnostics
+remain explicit opt-in at https://gearsqueens.online/sdr-town-diag/ingest.
+Evidence: build-audit-20260925/release-0.2.94.log, ci-0.2.94-watch.log,
+handover-packaged/, handover-reference/, portable-0.2.94/, published-0.2.94/.
+No matched live Aero speech, second physical SDR or RSP test is claimed.
+
 ## 2026-09-25 - Inmarsat P25 handover regression work (DEC-0126)
 
 Windows 11/MSVC2022/Qt6.11.1, base 9ea475b. Initial app build passed; core test

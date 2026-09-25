@@ -2,7 +2,7 @@
 
 Never delete a row. Close with a commit hash and a sentence.
 
-## ISS-0021 - Inmarsat cannot take over a P25-configured receiver (2026-09-25, OPEN)
+## ISS-0021 - Inmarsat cannot take over a P25-configured receiver (2026-09-25, FIXED)
 
 User reports the P25-active/another-SDR warning in 0.2.93. Confirmed source:
 MainWindow's Satcom host rejects active receivers with P25 flags, while Inmarsat
@@ -12,7 +12,9 @@ startup sequence is not yet supplied; do not claim a specific RF failure.
 DEC-0126 adds an explicit handover instead of bypassing the guard.
 Local repair verified: full CTest 11/11; native confirmation/cancel/failure tests;
 real RTL GUI host live, configured-only and auto-follow handovers PASS, including
-fresh IQ and no P25 restart on Stop. CI/release delivery pending for v0.2.94.
+fresh IQ and no P25 restart on Stop. Repair source 2952535 published as
+v0.2.94 (tag 5fc5fc4). Independent Windows CI 36079172152, packaged real RTL
+GUI handover and downloaded asset/signature verification PASS. P25 DSP intact.
 
 ## ISS-0020 - Inmarsat tone-only report (2026-09-25, OPEN)
 
