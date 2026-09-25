@@ -1,5 +1,10 @@
 # Task list (canonical)
 
+T-0059 | open | SDRplay packaged-driver parity and field regression evidence |
+Initial comparison recorded in SDRPLAY_RELEASE_AUDIT_20260926.md. Confirmed
+missing bundled SDRplay plugin versus InmarScope; remote failure, missing RTL
+checkbox and P25 early-end reports require exact tester build/session evidence.
+
 T-0058 | in_progress | README community support appeal |
 DEC-0131. Add donation link, verified first commit, sourced AUD estimate and
 community acknowledgements. Exact subscription tiers and MIT formalisation

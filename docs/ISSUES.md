@@ -1,5 +1,12 @@
 # Issues (canonical)
 
+## ISS-0027 - SDRplay release prerequisite mismatch (2026-09-26, OPEN)
+
+InmarScope bundles a matched SoapySDRPlay3 plugin; SDR Town 0.2.97 does not.
+The vendor API alone is insufficient for the latter. See
+SDRPLAY_RELEASE_AUDIT_20260926.md for confirmed package/log evidence and the
+separate unresolved RTL-visibility and P25 field reports. No RF repair claimed.
+
 ## ISS-0026 - CI portable missing RTL module (2026-09-25, FIXED)
 
 Run 36108455138 passed build/tests but the added package gate failed on
