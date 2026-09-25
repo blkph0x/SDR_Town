@@ -25,6 +25,14 @@ ignored writes, saved profile restoration, PPM and sample-rate restart.
 Full Windows build/test and packaging results are recorded in BUILD_NOTES.md.
 These tests do not claim physical RSP reception or electrical measurements.
 
+Local release gates: full CTest 12/12; focused control adapter 59 assertions;
+native control panel 50 assertions; exact reviewed P25 freeze guard; release
+asset hashes and signed updater manifest verification. Packaged GUI/CLI fast/paced Aero
+reference decoding remains byte-identical to 0.2.95. Source: `bb91aa6`.
+Independent [Windows CI 36102563157](https://github.com/blkph0x/SDR_Town/actions/runs/36102563157)
+passed the clean build, core/loader/control-lifecycle/GUI tests, Aero replay,
+SSTV and portable packaging. Physical RSPdx acceptance remains the checklist below.
+
 ## RSPdx Hardware Acceptance
 
 1. Close other applications using the RSP. Install the SDRplay API/service and

@@ -9,8 +9,13 @@ startup AGC loss, stale RF alias overwrite, missing automatic-bandwidth write,
 wrong-device main/remote RF routing and swallowed control errors. Documentation
 distinguishes driver readback from electrical/RF proof. Repeated full CTest
 12/12 PASS, real-handle lifecycle fixture PASS, no physical RSP on this host.
-Final versioned build/packaging/publication remains in progress. P25 DSP,
-audio and shared sample/tune loops unchanged; reviewed exact-file guard only.
+Final versioned build and release helper PASS (12/12 CTest); native GUI 50
+assertions, adapter 59 assertions, packaged Aero parity in all four modes PASS.
+Windows CI 36102563157 PASS. Published Latest v0.2.96: source bb91aa6,
+signed metadata/tag ade17a7; eight assets downloaded/hash-checked and updater
+signature verified. P25 DSP/audio and shared sample/tune loops unchanged;
+reviewed exact-file guard only. Hardware acceptance remains with the RSPdx
+owner using docs/RELEASE_0.2.96.md, not claimed from simulated driver tests.
 
 ## 2026-09-25 - 0.2.95 Aero watch update published
 

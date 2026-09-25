@@ -16,6 +16,9 @@ Contract, native-widget and DeviceManager lifecycle tests PASS; full CTest
 12/12 repeated PASS. Hardware checklist is docs/RELEASE_0.2.96.md. Cached Soapy
 readback is not a physical RF/voltage measurement. RSPduo second-channel
 unchannelled settings and physical dual-tuner operation remain unqualified.
+Published v0.2.96, source bb91aa6/tag ade17a7; Windows CI 36102563157 PASS,
+eight downloaded release assets verified. Software repair is available for
+the reporting RSPdx owner to complete the physical checklist.
 
 ## ISS-0022 - Aero display stalls and serial multi-channel overload (2026-09-25, FIXED)
 

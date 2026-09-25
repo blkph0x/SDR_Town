@@ -2,6 +2,37 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-25 - 0.2.96 local release qualification
+
+Source bb91aa6abd0b5a43b95a15bb43976e547695ef9b; signed asset metadata ade17a7.
+Final versioned build-4.log PASS. Release helper rebuild/deploy/CTest PASS:
+12/12 in 35.38 s, no exclusions. Installer/portable/control DLL, hashes, build
+provenance and Ed25519 manifest verification PASS. P25 guard against ccaf6ae
+PASS with exact DEC-0128 shared-file hashes; no P25/Receiver/Demod/AudioEngine
+or vocoder differences. Focused final tests: 59 core assertions/4 cases and
+50 GUI assertions/1 case PASS. Rendered controls-final.png inspected.
+
+Extracted portable executable SHA256:
+e71303265199c05e69d2422c6b431def571df29a959c28aac0b2132629259640.
+Packaged CLI sdrplay status exits 0 and correctly reports registered module
+0.3.0-206b241, absent service and no RSP. Expected vendor-open errors here are
+not a successful hardware test. No services or drivers were installed/changed.
+Packaged Aero GUI/CLI fast/paced replays PASS, byte-identical to 0.2.95:
+4179528 samples, 163 valid units, 1375 voice frames, 220000 PCM samples;
+WAV SHA256 295ee11a0edc4e341ab66455ce283f7a0201e2f35a880eb555e47a19af6e176f.
+This reference has many muted frames and is a parity check, not speech proof.
+Evidence: build-audit-20260925/release-0.2.96.log, sdrplay-controls/,
+portable-0.2.96/ and sdrplay-package-reference/.
+Independent Windows CI 36102563157 PASS in 18m59s, including new control
+lifecycle, core, workspace, loader, Inmarsat, SSTV and packaging gates. YAML
+validation 36102563203 PASS. CI master does not publish releases by design;
+verified signed local packages are published separately.
+Published Latest v0.2.96 at 2026-09-25T06:42:50Z, release ID 396370935.
+All eight downloaded assets match local size/SHA256; downloaded installer
+passes signed manifest/package verification. Anonymous public Latest confirms
+v0.2.96, not draft, eight assets. Diagnostics remain opt-in with the unchanged
+HTTPS collector. Evidence: published-0.2.96/ and sdrplay-controls/windows-ci.log.
+
 ## 2026-09-25 - RSPdx complete control and lifecycle regression (DEC-0128)
 
 Windows/MSVC2022/Qt6.11.1, base ccaf6ae. build-2.log and build-3.log PASS for

@@ -1,10 +1,14 @@
 # Task list (canonical)
 
-T-0055 | in_progress | SDRplay capability and control-chain repair |
+T-0055 | done | SDRplay capability and control-chain repair |
 User RSPdx report: disabled Bias-T and missing antenna selection. Trace light
 enumeration, async open, capability refresh, GUI/CLI/API controls, persistence
 and hardware readback. Test actual driver calls with a hardware-free Soapy
 fixture; physical RSPdx verification remains required. P25 DSP unchanged.
+Source bb91aa6, signed metadata/tag ade17a7, Latest v0.2.96 published.
+Final CTest 12/12; core controls 59 assertions; native GUI 50 assertions;
+Windows CI 36102563157 PASS. Eight downloaded assets/hash/signature checks
+PASS. RSPdx hardware checklist remains ISS-0023 acceptance, not simulated proof.
 
 T-0054 | done | Fluid Aero watch display and independent channel workers |
 DEC-0127. Separate visual/status refresh, circular waterfall, multi-click saved
