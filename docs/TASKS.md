@@ -1,5 +1,10 @@
 # Task list (canonical)
 
+T-0058 | in_progress | README community support appeal |
+DEC-0131. Add donation link, verified first commit, sourced AUD estimate and
+community acknowledgements. Exact subscription tiers and MIT formalisation
+await maintainer clarification; publish only accurately qualified statements.
+
 T-0057 | done | Mandatory CI publication and RTL bias-T tester release |
 DEC-0130. Persist the user's always-publish rule, push the pending control
 repair, follow Actions to completion, verify a public CI-built portable

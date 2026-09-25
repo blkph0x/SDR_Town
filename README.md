@@ -1,5 +1,51 @@
 # SDR Town
 
+## Help build SDR Town and FUBAR
+
+**All support is welcome. [Donate through GoFundMe](https://gofund.me/56ead97a0)**.
+Every donation, however small, helps, and all donations go towards developing
+SDR Town and the [FUBAR companion app](https://github.com/blkph0x/FUBAR).
+Testing, useful bug reports, documentation and contributions are just as welcome.
+You never need to donate to use the software.
+
+This is a community-minded experiment in pushing the limits of what AI-assisted
+development can achieve: bringing radio tools together into something genuinely
+useful, accessible and exciting. Intensive coding, debugging and testing burn
+through AI credits quickly. Development uses Grok, ChatGPT Pro and Cursor Pro.
+For a transparent **illustrative subscription budget**, SuperGrok at US$30,
+ChatGPT Pro at US$200 and Cursor Pro at US$20 total **US$250, approximately
+A$356 per month**. This assumes those specific tiers, not a verified invoice;
+taxes, payment-provider exchange fees and additional credits can change the bill.
+Prices checked 25 September 2026: [Grok](https://x.ai/pricing),
+[ChatGPT Pro tiers](https://help.openai.com/en/articles/9793128-about-chatgpt-pro-tiers),
+[Cursor](https://cursor.com/pricing). Conversion uses the
+[RBA's 25 September 2026 rate](https://www.rba.gov.au/statistics/frequency/exchange-rates.html)
+of US$0.7019 per A$1. The US$100 ChatGPT Pro tier would instead put that
+same three-plan estimate at approximately A$214 per month.
+
+Development has been active since the
+[first repository commit on 5 June 2026](https://github.com/blkph0x/SDR_Town/commit/01daa06308abed7af3d63bce6077223e43ac9c1b):
+112 days, or nearly four months, as of 25 September 2026.
+
+**Our commitment is to keep SDR Town free and open source.** The maintainer's
+intended licence for original project code is MIT; formalisation of that licence
+is pending, and the current [licence file](LICENSE.txt) must not be mistaken for
+an MIT grant. Personal shout-outs are not the goal: use the work, learn from it
+and build something better. MIT's copyright/licence notices and all applicable
+third-party licence requirements must still be respected; this is not a waiver
+of other contributors' rights.
+
+We are not claiming to have invented the underlying radio ideas or protocols.
+They are documented and implemented throughout the community. Respect and thanks
+to **SDRTrunk, OP25, JAERO, InmarScope and QSSTV**, whose implementations and
+documentation inform our work, and to **WebSDR, KiwiSDR and GQRX** for helping
+shape the wider radio-software landscape. Thanks also to the **mbelib, SoapySDR,
+liquid-dsp, Qt and miniaudio** communities and the other projects behind our
+dependencies. Acknowledgement does not imply affiliation or endorsement, and
+each project's code retains its own licence.
+
+---
+
 **0.2.97 experimental: RTL-SDR Bias-T** now has a capability-gated control in
 Device Manager and `biastee <device> status|on|off` in the CLI. Default OFF;
 explicit DC-power confirmation, saved per-device intent, checked live writes

@@ -1,5 +1,15 @@
 # Decisions
 
+## DEC-0131 - README support appeal with verifiable claims (2026-09-25)
+
+User requested a prominent donation appeal for SDR Town/FUBAR. Root commit
+01daa063 dates to 2026-06-05; full local history is not shallow (112 days).
+Publisher prices and RBA 2026-09-25 USD/AUD 0.7019 support a labelled budget,
+not a claim to have inspected invoices. Ask which Grok/ChatGPT tiers apply.
+LICENSE.txt contains a reception notice, not MIT: do not advertise an existing
+MIT grant or waive third-party notices. State maintainer intent pending explicit
+licence formalisation. Documentation-only change; no binary version/release.
+
 ## DEC-0130 - Mandatory CI-built public tester releases (2026-09-25)
 
 User requires pushing working changes and verifying successful Actions and
