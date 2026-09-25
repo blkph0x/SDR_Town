@@ -1,5 +1,15 @@
 # Development log
 
+## 2026-09-25 - Mandatory delivery rule and verified release (T-0057)
+
+Persisted automatic push/CI release/public verification requirements. Fixed
+clean-CI omissions of RDS DSP, RTL driver module and explicit MSVC runtime
+staging without changing P25. Published v0.2.97-experimental from bf83d97,
+release run 36110284353 and master 36110284332 PASS. Public downloaded ZIP
+and executable hashes/provenance, launch, RDS tests and read-only RTL probe
+PASS. BUILD_NOTES contains hashes and evidence. Signed latest v0.2.96 stays;
+physical bias-T voltage acceptance remains open.
+
 ## 2026-09-25 - RTL-SDR Bias-T (DEC-0129 / T-0056)
 
 Confirmed the released app only implemented SDRplay biasT_ctrl. Added the

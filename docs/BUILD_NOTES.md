@@ -2,6 +2,27 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-25 - Verified CI-built 0.2.97 experimental publication
+
+Source bf83d97c6029b866227eaa11ea4fc8fb3ad2f0e3. Windows release run
+36110284353 and master run 36110284332 PASS; workflow validation runs
+36110284422/36110284382 PASS. Release job verified its anonymous public
+download, checksum, source/run provenance, CLI launch and recorded-MPX RDS.
+Public release: https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.97-experimental
+Portable ZIP (42,359,949 bytes) and SHA256 sidecar published, not draft.
+ZIP SHA256: 92e3221658de1a1a75a0d241c531401231ed1378474ce3d3dd76efd8dbac1a3c
+Executable SHA256: f6f46ee305f19c50b18ef312f7f4628b75ad178344caaf5266308d3cc7bba487
+
+Independent local anonymous download/hash/extraction/provenance verification
+PASS; downloaded executable CLI help exposes biastee and exits 0. RDS CLI
+recorded-MPX/reference/parity/confirmation/malformed/missing-file tests PASS.
+Actual attached generic RTL/R820T serial 00000001: probe exit 0, driverSupport=1,
+saved=OFF, driverReported=OFF, voltage=not-measured. No hardware ON test.
+Evidence: build-audit-20260925/rtl-bias/published-0.2.97/.
+This is a portable prerelease, not a signed installer/in-app updater release.
+GitHub latest remains v0.2.96. Mandatory rule persisted in AGENTS.md,
+DEVELOPMENT_RULES section 11 and SOURCE_OF_TRUTH.md. P25 DSP unchanged.
+
 ## 2026-09-25 - CI package gate prevented incomplete RTL release
 
 Run 36108455138 at source 4714570: build/core/lifecycle/GUI/replay/SSTV PASS;

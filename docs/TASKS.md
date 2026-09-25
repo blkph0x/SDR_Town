@@ -1,10 +1,13 @@
 # Task list (canonical)
 
-T-0057 | in_progress | Mandatory CI publication and RTL bias-T tester release |
+T-0057 | done | Mandatory CI publication and RTL bias-T tester release |
 DEC-0130. Persist the user's always-publish rule, push the pending control
 repair, follow Actions to completion, verify a public CI-built portable
 prerelease by download/hash/provenance and executable smoke test. Do not claim
 an installer/updater publication or physical DC verification from this gate.
+Published v0.2.97-experimental from bf83d97; release Actions 36110284353 and
+master Actions 36110284332 PASS. Public download/hash/provenance, CLI smoke,
+RDS recorded-MPX tests and attached RTL read-only probe PASS. See BUILD_NOTES.
 
 T-0056 | done (software; electrical acceptance open) | RTL-SDR bias-T control chain |
 DEC-0129. No RTL bias-T UI, persistence or driver write exists in 0.2.96.

@@ -1,6 +1,6 @@
 # Issues (canonical)
 
-## ISS-0026 - CI portable missing RTL module (2026-09-25, FIX IN CI VALIDATION)
+## ISS-0026 - CI portable missing RTL module (2026-09-25, FIXED)
 
 Run 36108455138 passed build/tests but the added package gate failed on
 SoapyRTLSDR.dll. Local builds had relied on a pre-existing binary; clean CI
@@ -8,14 +8,17 @@ never built it. Compile audited upstream 6ca357c against the configured
 Soapy/RTL libraries and require bias-T feature detection, license and provenance.
 Stage MSVC CRT DLLs explicitly too: windeployqt warned VCINSTALLDIR was unset.
 Local source module build PASS. No release was published by the failed run.
+Fixed in bf83d97: Actions 36110284353 PASS; public portable's bundled module
+successfully probed the attached RTL. CRT files included in verified package.
 
-## ISS-0025 - CI portable configuration omitted RDS (2026-09-25, FIX IN CI VALIDATION)
+## ISS-0025 - CI portable configuration omitted RDS (2026-09-25, FIXED)
 
 Windows CI configured SDR_TOWN_BUILD_RDS_DSP=OFF, unlike normal local releases.
 Publishing it as the new default would omit the existing RDS backend/tests.
 Initial 0.2.97 runs cancelled before publication. DEC-0130 enables the existing
 backend and gates staging/public downloads on required DLLs and recorded-MPX
-CLI tests. Await successful clean CI build and published-package verification.
+CLI tests. Fixed by 4714570/bf83d97: Actions 36110284353 PASS; recorded-MPX
+tests on the public downloaded executable PASS in CI and locally.
 
 ## ISS-0024 - RTL-SDR bias-T missing (2026-09-25, SOFTWARE FIXED; ELECTRICAL ACCEPTANCE OPEN)
 
@@ -29,7 +32,8 @@ writes and cleanup OFF. Unit/widget/lifecycle tests PASS, including ignored
 writes, failed ON rollback, failed stream setup, RX exception and unsupported
 driver restart. Full CTest 13/13 PASS. Actual local RTL read-only probe reports
 driver support and OFF. Physical model/circuit/voltage remain unverified; the
-driver's cached state cannot certify them. Local build only, not yet published.
+driver's cached state cannot certify them. Published in v0.2.97-experimental;
+public executable read-only probe PASS, physical acceptance still open.
 
 Never delete a row. Close with a commit hash and a sentence.
 
