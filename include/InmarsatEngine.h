@@ -5,6 +5,7 @@
 #include "InmarsatPipeline.h"
 #include "InmarsatMessageStore.h"
 #include "InmarsatWatch.h"
+#include "SatcomHostServices.h"
 
 #include <nlohmann/json.hpp>
 #include <atomic>
@@ -85,6 +86,7 @@ public:
     InmarsatEngineConfig config() const;
 
     bool start(bool force = false);
+    InmarsatTakeoverResult prepareTakeover(bool stopP25 = false);
     void stop();
     bool selectChannel(double freqHz, const std::string& mode, int baud);
     bool selectBandPlan(const std::string& id);

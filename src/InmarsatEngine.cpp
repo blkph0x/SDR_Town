@@ -398,6 +398,24 @@ bool InmarsatEngine::selectChannel(double frequencyHz, const std::string& mode, 
     return !restart || start(true);
 }
 
+InmarsatTakeoverResult InmarsatEngine::prepareTakeover(bool stopP25) {
+    std::string error;
+    const auto requested = config();
+    if (requested.watch.enabled && std::none_of(requested.watch.channels.begin(),
+            requested.watch.channels.end(), [](const auto& channel) { return channel.enabled; }))
+        return {false, false, "Enable at least one saved Aero watch channel"};
+    const auto deviceIndex = resolveDeviceIndex(&error);
+    if (deviceIndex == std::numeric_limits<size_t>::max()) return {false, false, error};
+    if (run_.load(std::memory_order_acquire)) return {true, false, {}};
+    const auto owner = DeviceManager::instance().deviceLeaseOwner();
+    if (owner == DeviceManager::DeviceLeaseOwner::Satcom ||
+        owner == DeviceManager::DeviceLeaseOwner::Aircraft) {
+        return {false, false, std::string(DeviceManager::leaseOwnerName(owner)) +
+            " owns the receiver; stop that mode before starting Inmarsat"};
+    }
+    return SatcomHostServices::instance().prepareInmarsatTakeover(deviceIndex, stopP25);
+}
+
 bool InmarsatEngine::start(bool force) {
     if (run_.load(std::memory_order_acquire)) return true;
     const auto requestedConfig=config();

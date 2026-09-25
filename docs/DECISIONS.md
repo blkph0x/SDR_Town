@@ -2,6 +2,28 @@
 
 Format: ID, date, status, evidence, decision, consequences.
 
+## DEC-0126 - Explicit Inmarsat handover from P25 (2026-09-25)
+
+Evidence: ISS-0021; MainWindow SATCOM_HOST_INTEGRATION rejects any active
+P25-marked Receiver; InmarsatWidget::onStart has no exit-P25 route. The existing
+applySdrTownControlTune(force=true) already clears CC monitoring, follow, warm
+standby and pending grants when a user leaves P25. Reuse that operation, not a
+second protocol state machine or a relaxed audio/security gate.
+
+Add a typed, GUI-host preflight, shared with local-control automation. A read-only
+API prepare reports requiresP25Stop; Start must supply both force and stopP25
+before stopping P25. Force alone retains the refusal. Probe the selected device (including a
+configured/stopped CC, since starting RF could otherwise re-arm its monitor).
+Ordinary receivers and P25 on an unrelated device need no P25 change. Ask before
+stopping a matching P25 session; cancellation is read-only. On confirmation,
+recheck ownership, acquire receiver/voice-queue locks with try_lock, quiesce P25
+receivers, invalidate pending speaker output, then invoke the existing explicit
+leave-P25 operation. Do not resume stopped P25 automatically on Inmarsat Stop or
+hardware failure. The existing host guard remains the final check, including for
+CLI/API callers that have not confirmed a GUI handover. No P25 decoder, RF math,
+FEC, vocoder or speaker policy changes. Additive host wiring remains inside the
+existing guarded Satcom integration markers; do not weaken the freeze verifier.
+
 ## DEC-0125 - SSTV feed control must quiesce hot publication (2026-09-25)
 
 Release prerequisite ISS-0019: unchanged isolated 100-cycle attach/detach test

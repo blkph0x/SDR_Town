@@ -4933,6 +4933,97 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             auto satcomHostState = std::make_shared<SatcomMainWindowSessionState>();
 
             SatcomHostCallbacks satcomCallbacks;
+            // SATCOM_HOST_INTEGRATION_BEGIN
+            // DEC-0126: explicit mode handover, not a relaxed P25 ownership gate.
+            satcomCallbacks.prepareInmarsatTakeover =
+                [this, satcomHostState, p25TgFollowBtn, p25ScanBtn](size_t deviceIndex, bool stopP25) {
+                    auto prepareOnGui = [this, satcomHostState, p25TgFollowBtn, p25ScanBtn,
+                                         deviceIndex, stopP25]() -> InmarsatTakeoverResult {
+                        if (shutdownStarted.load(std::memory_order_acquire))
+                            return {false, false, "SDR Town is shutting down"};
+                        std::unique_lock sessionLock(satcomHostState->mutex, std::try_to_lock);
+                        if (!sessionLock.owns_lock() || satcomHostState->active)
+                            return {false, false, "Another receiver takeover is active; stop it first"};
+                        std::unique_lock listLock(receiversMutex, std::try_to_lock);
+                        if (!listLock.owns_lock())
+                            return {false, false, "Receiver is busy; try Inmarsat Start again"};
+                        const auto currentReceivers = receivers; // Keep mutex owners alive through teardown.
+                        std::vector<std::unique_lock<std::mutex>> locks;
+                        for (const auto& rx : currentReceivers) {
+                            if (!rx) continue;
+                            locks.emplace_back(rx->stateMutex, std::try_to_lock);
+                            if (!locks.back().owns_lock())
+                                return {false, false, "Receiver state is busy; try Inmarsat Start again"};
+                        }
+                        const bool controllerConfigured = p25MonitoredControlFreqHz > 0.0 ||
+                            p25FollowEnabled || p25FollowAutoActive || p25IndependentTrafficActive ||
+                            p25AutoFollowVoiceFreqHz > 0.0 || p25AutoFollowWarmStandbyUntilMs > 0;
+                        auto belongsToP25 = [&](const std::shared_ptr<Receiver>& rx) {
+                            return rx && (rx->p25VoiceDecodeEnabled || rx->p25ControlChannelMute ||
+                                rx->p25IndependentTrafficSource ||
+                                (controllerConfigured && rx == currentReceivers.front()));
+                        };
+                        const bool selectedHasP25 = std::any_of(currentReceivers.begin(), currentReceivers.end(),
+                            [&](const auto& rx) { return belongsToP25(rx) && rx->deviceIndex == deviceIndex; });
+                        if (!selectedHasP25) return {true, false, {}};
+                        if (!stopP25) return {false, true, "P25 is configured on the selected SDR"};
+
+                        // Obtain every potentially contended lock before changing anything.
+                        // A busy decoder causes a retry, never a blocked UI or partial retune.
+                        std::unique_lock voiceLock(p25VoiceWorkerMutex, std::try_to_lock);
+                        std::unique_lock monitorLock(monitorParamsMutex, std::try_to_lock);
+                        if (!voiceLock.owns_lock() || !monitorLock.owns_lock())
+                            return {false, false, "P25 decoder is busy; try Inmarsat Start again"};
+                        const double oldMonitorHz = currentMonitorFreq;
+                        const double nextMonitorHz = InmarsatEngine::instance().config().channelHz;
+                        if (!std::isfinite(oldMonitorHz) || oldMonitorHz < 1000.0 || oldMonitorHz > 6e9)
+                            return {false, false, "Current receiver frequency is invalid; tune it before switching"};
+                        for (const auto& rx : currentReceivers) {
+                            if (!belongsToP25(rx)) continue;
+                            rx->active = false;
+                            rx->p25VoiceDecodeEnabled = false;
+                            rx->p25TrafficGeneration = 0;
+                        }
+                        p25PendingAudioFlushSeq.fetch_add(1, std::memory_order_release);
+                        p25VoicePendingJobs.clear();
+                        p25VoiceCompletedResults.clear();
+                        monitorLock.unlock();
+                        voiceLock.unlock();
+                        locks.clear();
+                        listLock.unlock();
+                        sessionLock.unlock();
+
+                        // Existing explicit leave-P25 path owns CC, grants, standby and
+                        // receiver cleanup. Keep its normal tuning/API behavior unchanged.
+                        const auto stopped = applySdrTownControlTune({
+                            {"frequencyHz", oldMonitorHz}, {"force", true}, {"startDevice", false}});
+                        if (!stopped.value("ok").toBool())
+                            return {false, false, stopped.value("error").toString().toStdString()};
+                        {
+                            std::lock_guard lock(monitorParamsMutex);
+                            // Queued old CC-retune callbacks reject a changed monitor target.
+                            // Hardware is tuned/confirmed later by InmarsatEngine, not here.
+                            currentMonitorFreq = nextMonitorHz;
+                        }
+                        if (monitorFreqSpin) {
+                            const QSignalBlocker blocker(monitorFreqSpin);
+                            monitorFreqSpin->setValue(nextMonitorHz / 1e6);
+                        }
+                        if (p25TgFollowBtn) { const QSignalBlocker b(p25TgFollowBtn); p25TgFollowBtn->setChecked(false); }
+                        if (p25ScanBtn) { const QSignalBlocker b(p25ScanBtn); p25ScanBtn->setChecked(false); }
+                        if (engineForAudio) engineForAudio->clearBuffers();
+                        DeviceManager::instance().releaseDeviceLease(DeviceManager::DeviceLeaseOwner::P25);
+                        if (p25StatusLabel) p25StatusLabel->setText("P25 stopped for Inmarsat");
+                        appendP25LogLine("Inmarsat handover confirmed: P25 monitoring/follows stopped; queued voice discarded. Monitor CC is required to restart P25.");
+                        return {true, false, {}};
+                    };
+                    InmarsatTakeoverResult result;
+                    if (QThread::currentThread() == thread()) result = prepareOnGui();
+                    else if (!QMetaObject::invokeMethod(this, [&] { result = prepareOnGui(); }, Qt::BlockingQueuedConnection))
+                        result = {false, false, "Main SDR Town window is unavailable"};
+                    return result;
+                };
+            // SATCOM_HOST_INTEGRATION_END
             satcomCallbacks.beginReceiverTakeover =
                 [this, satcomHostState](size_t deviceIndex, std::string* error) -> bool {
                     auto beginOnGui = [this, satcomHostState, deviceIndex]()
@@ -11112,6 +11203,24 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
                 if (body.contains("deviceIndex")) cfg.deviceIndex = static_cast<size_t>(body.value("deviceIndex").toInt(0));
                 InmarsatEngine::instance().setConfig(cfg);
             }
+            // SATCOM_HOST_INTEGRATION_BEGIN
+            // DEC-0126: automation uses the same preflight as the Start dialog.
+            // force alone never stops P25; stopP25 is separate explicit consent.
+            if (action == "prepare" || action == "start") {
+                const bool stopP25 = action == "start" && body.value("stopP25").toBool(false);
+                if (stopP25 && !body.value("force").toBool(false))
+                    return {{"ok", false}, {"status", 400}, {"error", "stopP25 requires force=true"}};
+                const auto handover = InmarsatEngine::instance().prepareTakeover(stopP25);
+                if (action == "prepare")
+                    return {{"ok", true}, {"ready", handover.ready},
+                        {"requiresP25Stop", handover.needsP25Confirmation},
+                        {"error", QString::fromStdString(handover.error)}};
+                if (!handover.ready)
+                    return {{"ok", false}, {"status", 409},
+                        {"requiresP25Stop", handover.needsP25Confirmation},
+                        {"error", QString::fromStdString(handover.error)}};
+            }
+            // SATCOM_HOST_INTEGRATION_END
             if (action == "start") {
                 if (!InmarsatEngine::instance().start(body.value("force").toBool(false))) {
                     return {{"ok", false}, {"status", 409},

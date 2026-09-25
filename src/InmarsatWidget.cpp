@@ -346,11 +346,29 @@ void InmarsatWidget::onRecordToggled(bool enabled) {
 
 void InmarsatWidget::onStart() {
     refreshDevices();
+    auto& engine = InmarsatEngine::instance();
     // START and Tune use exactly the same visible frequency/decoder selection.
-    if ((!InmarsatEngine::instance().config().watch.enabled && !applyTuningControls()) || !InmarsatEngine::instance().start(true)) {
+    if (!engine.config().watch.enabled && !applyTuningControls()) {
+        QMessageBox::warning(this, "Inmarsat", QString::fromStdString(engine.snapshot().lastStatus));
+        return;
+    }
+    auto takeover = engine.prepareTakeover();
+    if (takeover.needsP25Confirmation) {
+        const auto answer = QMessageBox::question(this, "Switch from P25 to Inmarsat",
+            "P25 is configured on this SDR. Stop P25 monitoring and talkgroup follows "
+            "and use it for Inmarsat?\n\nP25 will stay stopped until you select Monitor CC again.",
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes) return;
+        takeover = engine.prepareTakeover(true); // Recheck after the modal dialog.
+    }
+    if (!takeover.ready) {
+        QMessageBox::warning(this, "Inmarsat", QString::fromStdString(takeover.error));
+        return;
+    }
+    if (!engine.start(true)) {
         QMessageBox::warning(
             this, "Inmarsat",
-            QString::fromStdString(InmarsatEngine::instance().snapshot().lastStatus));
+            QString::fromStdString(engine.snapshot().lastStatus));
     }
 }
 

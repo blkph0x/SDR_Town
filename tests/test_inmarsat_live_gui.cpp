@@ -213,6 +213,79 @@ TEST_CASE("Inmarsat watch signal selection saves channels and timing across reop
     }
 }
 
+TEST_CASE("Inmarsat asks before leaving P25 and rechecks after confirmation", "[.inmarsat-host]") {
+    auto& manager = DeviceManager::instance();
+    REQUIRE_FALSE(manager.enumerateDevices(false, false).empty());
+    manager.getDevice(0)->label = "Inmarsat confirmation test receiver";
+    auto& engine = InmarsatEngine::instance();
+    auto cfg = InmarsatEngineConfig::defaults();
+    cfg.deviceIndex = 0;
+    cfg.deviceStableKey = manager.getDevice(0)->stableKey;
+    REQUIRE(engine.setConfig(cfg));
+    auto& host = SatcomHostServices::instance();
+    struct Cleanup {
+        ~Cleanup() { InmarsatEngine::instance().stop(); SatcomHostServices::instance().clear(); }
+    } cleanup;
+    bool p25Configured = true;
+    bool refuseConfirmed = false;
+    int probes = 0, confirmations = 0, starts = 0, restores = 0;
+    SatcomHostCallbacks callbacks;
+    callbacks.prepareInmarsatTakeover = [&](size_t index, bool confirmed) -> InmarsatTakeoverResult {
+        CHECK(index == 0);
+        if (!confirmed) { ++probes; return {!p25Configured, p25Configured, {}}; }
+        ++confirmations;
+        if (refuseConfirmed) return {false, false, "Test decoder is busy"};
+        p25Configured = false;
+        return {true, false, {}};
+    };
+    callbacks.beginReceiverTakeover = [&](size_t index, std::string*) {
+        CHECK(index == 0);
+        ++starts;
+        CHECK_FALSE(p25Configured);
+        return true;
+    };
+    callbacks.endReceiverTakeover = [&] { ++restores; CHECK_FALSE(p25Configured); };
+    host.install(callbacks);
+    InmarsatWidget widget;
+    bool answerYes = false;
+    int questions = 0, warnings = 0;
+    QTimer responder;
+    QObject::connect(&responder, &QTimer::timeout, [&] {
+        auto* message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+        if (!message) return;
+        if (message->icon() == QMessageBox::Question) {
+            ++questions;
+            CHECK(message->text().contains("P25 will stay stopped"));
+            CHECK(message->defaultButton() == message->button(QMessageBox::No));
+            message->button(answerYes ? QMessageBox::Yes : QMessageBox::No)->click();
+        } else { ++warnings; message->accept(); }
+    });
+    responder.start(10);
+    auto* start = widget.findChild<QPushButton*>("inmarsatStart"); REQUIRE(start);
+    start->click(); // Cancel leaves P25 and hardware untouched.
+    CHECK(probes == 1); CHECK(questions == 1); CHECK(confirmations == 0);
+    CHECK(p25Configured); CHECK(starts == 0); CHECK(restores == 0); CHECK(warnings == 0);
+    CHECK_FALSE(manager.isStreaming(0));
+
+    answerYes = true; refuseConfirmed = true;
+    start->click(); // State may change while the modal is open.
+    CHECK(probes == 2); CHECK(questions == 2); CHECK(confirmations == 1);
+    CHECK(p25Configured); CHECK(starts == 0); CHECK(warnings == 1);
+
+    refuseConfirmed = false;
+    start->click(); // Stub hardware fails after handover; never resurrect P25.
+    CHECK(probes == 3); CHECK(questions == 3); CHECK(confirmations == 2);
+    CHECK_FALSE(p25Configured); CHECK(starts == 1); CHECK(restores == 1);
+    CHECK(warnings == 2); CHECK_FALSE(manager.isStreaming(0));
+    CHECK(manager.deviceLeaseOwner() == DeviceManager::DeviceLeaseOwner::None);
+    CHECK(engine.snapshot().state == InmarsatEngineState::Idle);
+
+    cfg.watch.enabled = true;
+    REQUIRE(engine.setConfig(cfg));
+    CHECK_FALSE(engine.prepareTakeover(true).ready); // Invalid list cannot stop P25.
+    CHECK(confirmations == 2);
+}
+
 TEST_CASE("Inmarsat watch spectrum maps clicks to actual RF coordinates", "[inmarsat][gui]") {
     InmarsatWatchSpectrum spectrum;spectrum.resize(800,200);
     double selected=0;

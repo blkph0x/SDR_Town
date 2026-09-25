@@ -10,6 +10,12 @@
 
 class AudioEngine;
 
+struct InmarsatTakeoverResult {
+    bool ready = false;
+    bool needsP25Confirmation = false;
+    std::string error;
+};
+
 struct SatcomHostCallbacks {
     std::function<bool(size_t deviceIndex, std::string* error)> beginReceiverTakeover;
     std::function<void()> endReceiverTakeover;
@@ -18,6 +24,7 @@ struct SatcomHostCallbacks {
                        double centerHz,
                        double sampleRateHz)> publishSpectrum;
     std::function<void(const std::string& status)> publishStatus;
+    std::function<InmarsatTakeoverResult(size_t deviceIndex, bool stopP25)> prepareInmarsatTakeover;
 };
 
 // Small process-local bridge between the standalone-capable Satcom engine and
@@ -47,7 +54,8 @@ public:
                static_cast<bool>(callbacks_.endReceiverTakeover) ||
                static_cast<bool>(callbacks_.acquireAudioEngine) ||
                static_cast<bool>(callbacks_.publishSpectrum) ||
-               static_cast<bool>(callbacks_.publishStatus);
+               static_cast<bool>(callbacks_.publishStatus) ||
+               static_cast<bool>(callbacks_.prepareInmarsatTakeover);
     }
 
     bool beginReceiverTakeover(size_t deviceIndex, std::string* error = nullptr) {
@@ -68,6 +76,24 @@ public:
             if (error) *error = "Satcom host takeover failed";
         }
         return false;
+    }
+
+    // DEC-0126: probing never stops P25. Only an explicit UI confirmation may
+    // request that transition; beginReceiverTakeover still checks ownership.
+    InmarsatTakeoverResult prepareInmarsatTakeover(size_t deviceIndex, bool stopP25 = false) {
+        std::function<InmarsatTakeoverResult(size_t, bool)> callback;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            callback = callbacks_.prepareInmarsatTakeover;
+        }
+        if (!callback) return {true, false, {}};
+        try {
+            return callback(deviceIndex, stopP25);
+        } catch (const std::exception& ex) {
+            return {false, false, std::string("Inmarsat handover: ") + ex.what()};
+        } catch (...) {
+            return {false, false, "Inmarsat handover failed"};
+        }
     }
 
     void endReceiverTakeover() noexcept {

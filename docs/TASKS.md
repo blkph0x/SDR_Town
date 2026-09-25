@@ -1,5 +1,13 @@
 # Task list (canonical)
 
+T-0053 | in_progress | Confirmed P25-to-Inmarsat receiver handover |
+DEC-0126 / ISS-0021. Reproduce the unconditional host refusal, add explicit
+confirmation and quiescence before the existing mode-switch operation, preserve
+other-device reception and cancellation, test GUI/host failure cases, release.
+Implementation and local checks complete: CTest 11/11, native dialog/failure
+tests and three actual RTL GUI-host handovers pass. P25 DSP unchanged. Await
+independent CI, signed packages and published/downloaded asset verification.
+
 T-0052 | done | Saved multi-channel Aero watch and automatic position/voice cycle |
 DEC-0124. Reference comparison, bounded scheduler, independent per-channel DSP,
 single speaker focus, click-to-place GUI, atomic saved settings, diagnostic events,

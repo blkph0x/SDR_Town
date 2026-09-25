@@ -2,6 +2,41 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-25 - Inmarsat P25 handover regression work (DEC-0126)
+
+Windows 11/MSVC2022/Qt6.11.1, base 9ea475b. Initial app build passed; core test
+compile failed C4430 in tests/test_satcom.cpp because the new TEST_CASE preceded
+the Catch header. Corrected include ordering; no assertion or production failure
+was hidden. Rebuilding all affected targets as 0.2.94. The unmodified P25 guard
+self-test, additive host-diff gate and Satcom integration contracts pass.
+Evidence: build-audit-20260925/handover-build.log, handover-build-2.log.
+Final app/core/workspace/GUI builds PASS. First dialog harness run failed because
+QMessageBox::done(Yes) did not click the standard button; corrected the harness
+to click the actual Yes/No button. Native dialog/lifecycle groups pass, including
+default No, cancellation, busy recheck, failed hardware start and empty watch.
+Final full CTest 11/11 PASS in 36.84 s, no exclusions (handover-ctest-release.log).
+
+Real compiled GUI/API with attached RTL R820T: three passing runs cover live
+P25 CC 420.350 MHz, configured-only P25 and auto-follow armed. Probe and
+unconfirmed Start preserve P25; stopP25 without force is rejected. Confirmed
+Start reaches Inmarsat live hardware at 1542.935 MHz with fresh IQ samples.
+Live run samples grow 2097152 -> 3080192; configured-only 2031616 -> 3145728.
+P25 CC/follow/traffic/standby are cleared and remain off after Inmarsat Stop.
+All test-owned GUI processes exit normally. Automated script:
+scripts/test_inmarsat_handover_gui.py --allow-hardware --output <evidence-dir>;
+--dry-p25 covers configured-only. It uses an ephemeral authenticated loopback
+API, disables remote diagnostics and requires explicit RF permission.
+
+An earlier live test incorrectly asserted rawBlocks > 0. That is decoded
+protocol output, not IQ; local JSONL proved 2097152 incoming samples and no
+satellite lock. Corrected the test to require increasing diagnostics.samples.
+No receiver code was changed to satisfy that assertion. Evidence:
+build-audit-20260925/handover-real-live[-2], handover-real-dry, handover-real-auto.
+Desktop menu automation hit a geometry timeout; actual dialog behavior is covered
+by native Qt tests and real host/hardware by the API, not a claimed full visual
+click-through. No satellite speech or physical RSP acceptance is inferred.
+CI, packaging and publication gates remain pending below.
+
 ## 2026-09-25 - 0.2.93 final reference, CI and published asset gates
 
 Source ca6354e72fe5912305eb96cb3e0624c5944fb104; signed release metadata/tag

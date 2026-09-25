@@ -1,5 +1,21 @@
 # Development log
 
+## 2026-09-25 - Confirmed P25-to-Inmarsat handover (DEC-0126)
+
+T-0053 / ISS-0021: diagnosed the unconditional P25 host refusal and missing
+confirmed transition. Added a read-only preflight plus explicit stop/start
+handover, clearing queued voice before the existing leave-P25 path. Default
+No preserves P25; Stop or failed Inmarsat startup does not resume P25. The
+original host guard and P25 DSP/audio algorithms remain unchanged. Local API
+requires separate stopP25 and force consent; same host operation as the GUI.
+
+Builds and full CTest 11/11 PASS. Native Qt tests cover dialog and failure cases;
+actual compiled GUI tests with RTL prove live IQ after switching, both with
+P25 hardware active and with only configured P25 state, plus auto-follow armed.
+No synthetic protocol output was counted as reception. Reusable RF-explicit
+automation and evidence are in BUILD_NOTES. Preparing v0.2.94 for independent
+CI and signed asset publication; no satellite voice acceptance claimed.
+
 ## 2026-09-25 - 0.2.93 Aero watch tester release published
 
 T-0052 implementation and delivery complete. Source ca6354e, tag/metadata

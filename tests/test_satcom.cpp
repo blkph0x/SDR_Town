@@ -18,9 +18,40 @@
 #include <fstream>
 #include <limits>
 #include <numbers>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
+TEST_CASE("Inmarsat host preflight is explicit and fails closed", "[inmarsat][handover]") {
+    auto& host = SatcomHostServices::instance();
+    host.clear();
+    struct Cleanup { ~Cleanup() { SatcomHostServices::instance().clear(); } } cleanup;
+    REQUIRE(host.prepareInmarsatTakeover(1).ready); // Standalone callers still use the lease guard.
+    int stops = 0;
+    SatcomHostCallbacks callbacks;
+    callbacks.prepareInmarsatTakeover = [&](size_t device, bool stop) -> InmarsatTakeoverResult {
+        if (device == 1) return {true, false, {}}; // P25 is on a different receiver.
+        if (!stop) return {false, true, "P25 configured"};
+        ++stops;
+        return {true, false, {}};
+    };
+    host.install(callbacks);
+    REQUIRE(host.installed());
+    CHECK(host.prepareInmarsatTakeover(1, true).ready);
+    CHECK(stops == 0);
+    auto result = host.prepareInmarsatTakeover(0);
+    CHECK_FALSE(result.ready); CHECK(result.needsP25Confirmation); CHECK(stops == 0);
+    CHECK(host.prepareInmarsatTakeover(0, true).ready); CHECK(stops == 1);
+    callbacks.prepareInmarsatTakeover = [](size_t, bool) -> InmarsatTakeoverResult {
+        throw std::runtime_error("host unavailable");
+    };
+    host.install(callbacks);
+    result = host.prepareInmarsatTakeover(0, true);
+    CHECK_FALSE(result.ready); CHECK_FALSE(result.needsP25Confirmation);
+    CHECK(result.error.find("host unavailable") != std::string::npos);
+    host.clear();
+    CHECK_FALSE(host.installed());
+}
 namespace {
 
 void appendCallsign(std::vector<uint8_t>& out, const char* call, int ssid, bool last)

@@ -16,8 +16,20 @@ second**, not MHz ranges. Enter the actual RF frequency separately.
 4. Stop, set timing and **Save timing**, enable **Automatic data / voice watch**,
    select speaker/record options and Start. Configuration is saved atomically in
    AppData's `inmarsat_engine.json`; reopening restores it without starting RF.
-5. Stop restores the previous receiver and ordinary Listen audio. Explicit Tune
-   or a band-plan channel switches back to manual operation. P25 is not retuned.
+5. If P25 is configured on the selected SDR, Start asks whether to stop P25 and
+   switch. No/Cancel leaves P25 unchanged. Yes stops its CC/follow session and
+   discards queued P25 audio before Inmarsat starts. P25 is not resumed on Stop
+   or a failed hardware start: select Monitor CC explicitly to restart it.
+   P25 on a different, unrelated receiver is not stopped by this prompt.
+6. Stop restores the previous receiver and ordinary Listen audio, but not a P25
+   session you explicitly stopped. Explicit Tune or a band-plan channel switches
+   back to manual operation. CLI start retains the existing P25 refusal.
+
+Local control automation: POST `/v1/inmarsat/control` with `action:"prepare"`
+probes readiness without stopping P25. `requiresP25Stop:true` requires explicit
+operator consent. Only `action:"start", force:true, stopP25:true` requests that
+handover; `force` alone is insufficient. The GUI button and this API call use the
+same host preflight. Existing loopback authentication still applies.
 
 The CLI's `inmarsat start` uses the same saved watch configuration and worker.
 IQ replay stays source-local and never attempts RF hopping outside its file.

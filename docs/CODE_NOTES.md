@@ -1,5 +1,19 @@
 # Code notes (tree map)
 
+## Inmarsat P25 handover (DEC-0126)
+
+- SatcomHostServices adds a typed, read-only-by-default preflight; exceptions
+  fail closed. The existing begin/end receiver ownership checks remain intact.
+- InmarsatEngine resolves the selected stable device and validates empty watch
+  lists before preflight. GUI Start asks, rechecks on Yes, then starts normally.
+- MainWindow's additive Satcom host callback checks selected-device P25 state,
+  including configured/stopped CCs. Confirmation quiesces P25 receivers and
+  pending audio before the existing force-leave-P25 control-tune operation.
+  A changed monitor target rejects delayed old CC retune callbacks. Busy locks
+  return a retry message before mutation; other-device probes do not stop P25.
+- No P25 algorithm or existing MainWindow handler was edited. The original
+  additive-only host guard accepts this patch without an allowlist expansion.
+
 ## Saved Aero watch and SSTV lifecycle (DEC-0124 / DEC-0125)
 
 - `InmarsatWatch`: validated saved channels/policy, rate-aware grouping, steady
