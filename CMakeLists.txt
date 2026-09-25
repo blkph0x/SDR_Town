@@ -129,12 +129,14 @@ set(SDR_TOWN_SOURCES
     include/AppBootstrap.h
     src/MainWindow.cpp
     src/SdrplayControlsWidget.cpp
+    src/RtlBiasTWidget.cpp
     src/WorkspaceLayout.cpp
     src/MainWindowP25Voice.cpp
     src/MainWindowP25Orchestration.cpp
     include/MainWindow.h
     src/DeviceManager.cpp
     src/SdrplayControl.cpp
+    src/RtlBiasT.cpp
     src/SdrplayProfile.cpp
     src/SdrplayRuntime.cpp
     include/SdrplayProfile.h
@@ -423,6 +425,7 @@ if(BUILD_TESTS)
     tests/test_devicemanager.cpp
     tests/test_sdrplay_profile.cpp
     tests/test_sdrplay_controls.cpp
+    tests/test_rtl_bias_t.cpp
     tests/test_sdrplay_diversity.cpp
     tests/test_audioengine.cpp
     tests/test_p25_audio_resampler.cpp
@@ -472,6 +475,7 @@ if(BUILD_TESTS)
     src/InmarsatEngine.cpp
     src/DeviceManager.cpp
     src/SdrplayControl.cpp
+    src/RtlBiasT.cpp
     src/SdrplayProfile.cpp
     src/SdrplayRuntime.cpp
     src/SdrplayDiversity.cpp
@@ -583,13 +587,16 @@ if(BUILD_TESTS)
   target_link_libraries(sdr_town_workspace_tests PRIVATE Catch2::Catch2 Qt6::Widgets nlohmann_json::nlohmann_json sdr_town_tones sdr_inmarsat_native sdr_inmarsat_audio sdr_inmarsat_map)
   add_test(NAME WorkspaceTests COMMAND sdr_town_workspace_tests)
   target_sources(sdr_town_workspace_tests PRIVATE tests/test_sdrplay_controls_gui.cpp
-      src/SdrplayControlsWidget.cpp src/SdrplayControl.cpp src/SdrplayProfile.cpp)
+      src/SdrplayControlsWidget.cpp src/SdrplayControl.cpp src/SdrplayProfile.cpp
+      tests/test_rtl_bias_t_gui.cpp src/RtlBiasTWidget.cpp)
   if(WIN32)
     target_link_libraries(sdr_town_workspace_tests PRIVATE Advapi32)
   endif()
   if(TARGET SoapySDR)
     add_test(NAME SdrplayControlLifecycle COMMAND sdr_town_tests "[.sdrplay-controls-live]")
     set_tests_properties(SdrplayControlLifecycle PROPERTIES TIMEOUT 60)
+    add_test(NAME RtlBiasTLifecycle COMMAND sdr_town_tests "[.rtl-bias-live]")
+    set_tests_properties(RtlBiasTLifecycle PROPERTIES TIMEOUT 60)
   endif()
 
   # DEC-0123: real widget/engine with a hardware-free DeviceManager backend.

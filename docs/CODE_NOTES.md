@@ -1,5 +1,18 @@
 # Code notes (tree map)
 
+## RTL-SDR Bias-T control chain (DEC-0129)
+
+RtlBiasT.h/cpp isolates the Soapy `biastee` boolean capability, strict cached
+readback and best-effort OFF. RtlBiasTWidget handles capability visibility,
+explicit DC-safety confirmation and rejected-write rollback. DeviceInfo keeps
+driver observations separate from saved intent. DeviceManager probes the actual
+handle, applies intent at start, serializes checked live writes with existing
+native I/O locking, and powers down at clean/fault cleanup. Opening/stub sessions
+reject live requests. CLI biastee and selected-RTL Device Manager use the same
+setter. P25 algorithms, IQ rings, tuning and sample-loop cadence are unchanged;
+RX-function edit is fault-cleanup-only. Tests cover adapter, widget and isolated
+Soapy factory lifecycle. No fake-driver operation can reach a real receiver.
+
 ## SDRplay controls and capability lifecycle (DEC-0128)
 
 SdrplayControl is the isolated driver adapter: probe actual antennas/settings/

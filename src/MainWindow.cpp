@@ -12,6 +12,7 @@
 #include "DcsDecoder.h"
 #include "SdrplayProfile.h"
 #include "SdrplayControlsWidget.h"
+#include "RtlBiasTWidget.h"
 #include <QScrollArea>
 #include "SdrplayDiversity.h"
 #include "SatcomScannerWidget.h"
@@ -8068,6 +8069,9 @@ void MainWindow::showDevicesDialog()
 
         mainLay->addWidget(table);
 
+        auto* rtlBiasBox = new RtlBiasTWidget(&dlg);
+        mainLay->addWidget(rtlBiasBox);
+
         // DEC-0128: one tested control panel uses the same acknowledged setters as CLI/API.
         auto* sdrplayBox = new SdrplayControlsWidget(&dlg);
         auto* sdrplayLay = sdrplayBox->form();
@@ -8098,6 +8102,11 @@ void MainWindow::showDevicesDialog()
 
         auto refreshSdrplayPanel = [&](int row) {
             const auto current = mgr.getDevices();
+            const bool rtl = row >= 0 && row < static_cast<int>(current.size()) &&
+                current[static_cast<size_t>(row)].driver == "rtlsdr";
+            rtlBiasBox->setVisible(rtl);
+            if (rtl) rtlBiasBox->setState(current[static_cast<size_t>(row)].rtlBiasT);
+            controlsScroll->setVisible(!rtl);
             if (row < 0 || row >= static_cast<int>(current.size()) || !current[static_cast<size_t>(row)].isSdrplay) {
                 sdrplayBox->setDevice(nullptr);
                 return;
@@ -8170,6 +8179,11 @@ void MainWindow::showDevicesDialog()
         connect(controlRefresh, &QTimer::timeout, &dlg, [&]() {
             refreshSdrplayPanel(table->currentRow());
         });
+        rtlBiasBox->apply = [&](bool on, std::string& error) {
+            const int row = table->currentRow();
+            if (row < 0) { error = "Select an RTL-SDR receiver"; return false; }
+            return mgr.setRtlBiasT(static_cast<size_t>(row), on, &error);
+        };
         controlRefresh->start(250); // UI-only async-open capability/status refresh.
         auto applyDiversityFromUi = [&]() {
             const int row = table->currentRow();

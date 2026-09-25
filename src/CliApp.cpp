@@ -1574,6 +1574,7 @@ int runCLI(int argc, char* argv[]) {
                       << "  gain <i> <db>           - set live device RF gain\n"
                       << "  ppm <i> <ppm> | ppm cal/apply <i> <known_mhz> [search_khz]\n"
                       << "  sdrplay status|show|gains|set|agc|ifgr|rfgr|bw|antenna|diversity ...\n"
+                      << "  biastee <device> [status|on|off] (on requests antenna DC power)\n"
                       << "  devices rescan         - probe hardware (stops live streams)\n"
                       << "  observer show|set <lat> <lon> [alt_m] [min_el]\n"
                       << "  tle status|refresh|load <path>|show [norad]\n"
@@ -1883,6 +1884,27 @@ int runCLI(int argc, char* argv[]) {
                     std::cout << "bad device index\n";
                 }
             }
+        } else if (cmd == "biastee") {
+            int di = -1;
+            std::string action = "status", extra;
+            if (!(iss >> di)) { std::cout << "Usage: biastee <device> [status|on|off]\n"; continue; }
+            if (iss >> action) {}
+            const auto devices = mgr.getDevices();
+            if ((iss >> extra) || di < 0 || static_cast<size_t>(di) >= devices.size() ||
+                devices[di].driver != "rtlsdr" || (action != "status" && action != "on" && action != "off")) {
+                std::cout << "Select an RTL-SDR index and status, on or off\n"; continue;
+            }
+            if (action != "status") {
+                std::string error;
+                if (!mgr.setRtlBiasT(static_cast<size_t>(di), action == "on", &error)) {
+                    std::cout << "Bias-T failed: " << error << "\n"; continue;
+                }
+            }
+            const auto state = mgr.getDevices()[di].rtlBiasT;
+            std::cout << "RTL bias-T: probed=" << state.probed << " driverSupport=" << state.supported
+                      << " saved=" << (state.enabled ? "ON" : "OFF") << " driverReported="
+                      << (state.reported ? (*state.reported ? "ON" : "OFF") : "unknown")
+                      << " voltage=not-measured " << state.status << "\n";
         } else if (cmd == "sdrplay" || cmd == "rsp") {
             std::string sub;
             if (!(iss >> sub)) { printSdrplayUsage(); continue; }

@@ -1,5 +1,18 @@
 # Development log
 
+## 2026-09-25 - RTL-SDR Bias-T (DEC-0129 / T-0056)
+
+Confirmed the released app only implemented SDRplay biasT_ctrl. Added the
+distinct RTL biastee route with advertised capability, default OFF, GUI power
+confirmation, checked live writes, per-device saved intent and cleanup OFF.
+Failed ON confirmation attempts OFF; ordinary cached readback is explicitly
+not presented as voltage proof. Tests cover adapter, widget, complete manager
+lifecycle and fault cleanup; full CTest 13/13 PASS. Read-only probe of attached
+RTL confirms driver support and reported OFF without energizing the antenna.
+P25 signal/audio pipeline untouched; exact shared-control/fault-cleanup guard
+review only. Local executable rebuilt; no release uploaded for this scoped
+check. Hardware model and safe DC-load/voltage verification remain tester work.
+
 ## 2026-09-25 - RSPdx control-chain repair (DEC-0128 / T-0055)
 
 Traced missing antennas/disabled Bias-T to unprobed light-discovery state

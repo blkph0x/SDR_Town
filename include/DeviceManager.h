@@ -14,6 +14,7 @@
 #include "SdrplayProfile.h"
 #include "SdrplayDiversity.h"
 #include "SdrplayControl.h"
+#include "RtlBiasT.h"
 
 struct Receiver;  // forward for per-rx cursor methods (full def in Receiver.h, included in .cpp)
 
@@ -47,6 +48,7 @@ struct DeviceInfo {
     // RTL-SDR HF: SoapyRTLSDR direct_samp — 0=off (tuner), 1=I-ADC, 2=Q-ADC (usual HF pick).
     // Enables ~500 kHz–~28 MHz when the R820T tuner is bypassed.
     int directSampling = 0;
+    RtlBiasT::State rtlBiasT; // RTL driver capability/readback and explicit saved DC-power intent
     // TX capability (Sprint 0 probe). RTL-class RX-only sticks stay false.
     bool canTx = false;
     std::vector<std::string> txAntennas;
@@ -206,6 +208,7 @@ public:
     // Persisted and applied live via Soapy writeSetting("direct_samp", ...).
     bool setDirectSampling(size_t index, int mode, std::string* error = nullptr);
     int getDirectSampling(size_t index) const;
+    bool setRtlBiasT(size_t index, bool enabled, std::string* error = nullptr);
 
     // SDRplay live controls (SoapySDRPlay3). False and error on unsupported or failed writes.
     bool setLiveAgc(size_t index, bool enabled, std::string* error = nullptr);
@@ -259,6 +262,7 @@ public:
 private:
     bool changeSdrplay(size_t index, const std::optional<SdrplayControl::Change>& change, std::string* error);
     std::mutex sdrplayControlMutex_;
+    std::mutex rtlBiasTControlMutex_;
     DeviceManager();
     ~DeviceManager();
     DeviceManager(const DeviceManager&) = delete;

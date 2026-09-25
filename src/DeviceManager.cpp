@@ -318,6 +318,10 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware, bool
                     if (dev) {
                         for (size_t ch = 0; ch < channelCount; ++ch) {
                             DeviceInfo di = base;
+                            if (di.driver == "rtlsdr") {
+                                try { RtlBiasT::probe(*dev, di.rtlBiasT); }
+                                catch (const std::exception& ex) { di.rtlBiasT.status = ex.what(); }
+                            }
                             if (dualTuner) {
                                 di.label = base.label + " (ch" + std::to_string(ch) + ")";
                                 di.rxChannel = ch;
@@ -715,6 +719,7 @@ nlohmann::json DeviceManager::toJson() const {
         j["frequencyCorrectionPpm"] = d.frequencyCorrectionPpm;
         j["antenna"] = d.antenna;
         j["directSampling"] = d.directSampling;
+        if (d.driver == "rtlsdr") j["rtlBiasT"] = d.rtlBiasT.enabled;
         if (d.isSdrplay) {
             j["isSdrplay"] = true;
             j["sdrplayModel"] = d.sdrplayModel;
@@ -750,6 +755,10 @@ void DeviceManager::fromJson(const nlohmann::json& j) {
                 if (saved.contains("frequencyCorrectionPpm")) d.frequencyCorrectionPpm = clampFrequencyCorrectionPpm(saved["frequencyCorrectionPpm"].get<double>());
                 else if (saved.contains("ppm")) d.frequencyCorrectionPpm = clampFrequencyCorrectionPpm(saved["ppm"].get<double>());
                 const auto probed = d;
+                // DC power has no legacy setting: require exact identity, not
+                // the older serial-only fallback used for ordinary RX options.
+                if (d.driver == "rtlsdr" && stableMatch && saved.contains("rtlBiasT") && saved["rtlBiasT"].is_boolean())
+                    d.rtlBiasT.enabled = saved["rtlBiasT"].get<bool>();
                 if (saved.contains("antenna")) d.antenna = saved["antenna"];
                 if (saved.contains("directSampling")) {
                     d.directSampling = clampDirectSamplingMode(saved["directSampling"].get<int>());
@@ -986,6 +995,10 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
         std::string shareKey;
         size_t rxCh = 0;
         auto cleanupLocal = [&]() {
+            if (localDev && d.driver == "rtlsdr") {
+                std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+                RtlBiasT::powerOff(*localDev);
+            }
             try {
                 if (localStream && localDev) localDev->closeStream(localStream);
             } catch (...) {}
@@ -1070,6 +1083,30 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                 spdlog::info("SDRplay capabilities device={} model={} antennas={} settings={} AGC={}",
                     index, liveInfo.sdrplayModel, liveInfo.antennas.size(),
                     liveInfo.sdrplaySettingKeys.size(), liveInfo.sdrplayHasAgc);
+            }
+            if (liveInfo.driver == "rtlsdr") {
+                // DEC-0129: probe the actual RX handle and restore explicit intent,
+                // never infer physical power from the driver's initial cached false.
+                std::lock_guard<std::mutex> controlLock(rtlBiasTControlMutex_);
+                {
+                    std::lock_guard<std::mutex> lk(devicesMutex);
+                    if (st.stopFlag || st.sessionGen.load() != myGen || index >= devices.size())
+                        throw std::runtime_error("RTL open superseded before bias-T setup");
+                    liveInfo.rtlBiasT = devices[index].rtlBiasT;
+                }
+                {
+                    std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+                    RtlBiasT::probe(*localDev, liveInfo.rtlBiasT);
+                    if (liveInfo.rtlBiasT.supported)
+                        RtlBiasT::apply(*localDev, liveInfo.rtlBiasT, liveInfo.rtlBiasT.enabled);
+                    else if (liveInfo.rtlBiasT.enabled)
+                        throw std::runtime_error("Saved RTL bias-T ON cannot be applied by this driver");
+                }
+                std::lock_guard<std::mutex> lk(devicesMutex);
+                if (st.stopFlag || st.sessionGen.load() != myGen || index >= devices.size())
+                    throw std::runtime_error("RTL open superseded after bias-T setup");
+                devices[index].rtlBiasT = liveInfo.rtlBiasT;
+                spdlog::info("RTL bias-T device={}: {}", index, liveInfo.rtlBiasT.status);
             }
             {
                 std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
@@ -1275,6 +1312,13 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
             spdlog::warn("Background real init failed for device {} ({}). Keeping safe stub.", index, ex.what());
             cleanupLocal();
             if (!st.stopFlag && st.sessionGen.load(std::memory_order_acquire) == myGen) {
+                if (d.driver == "rtlsdr") {
+                    std::lock_guard<std::mutex> lk(devicesMutex);
+                    if (index < devices.size() && devices[index].stableKey == d.stableKey) {
+                        devices[index].rtlBiasT.reported.reset();
+                        devices[index].rtlBiasT.status = std::string("Receiver open failed: ") + ex.what();
+                    }
+                }
                 std::lock_guard<std::mutex> lk(st.stateMutex);
                 st.runtimeState = "hardware failed, using stub";
             }
@@ -1310,6 +1354,11 @@ void DeviceManager::stopStreaming(size_t index) {
     if (!stPtr) return;
     auto& st = *stPtr;
     std::unique_lock<std::mutex> lifecycleLock(st.lifecycleMutex);
+    bool rtl = false;
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        rtl = index < devices.size() && devices[index].driver == "rtlsdr";
+    }
     bool activeNow = false;
     bool soapyIdle =
 #ifdef HAVE_SOAPYSDR
@@ -1382,6 +1431,7 @@ void DeviceManager::stopStreaming(size_t index) {
             spdlog::warn("Leaving Soapy device {} open because its rxThread was detached while stuck in native code.", index);
         } else if (streamToClose && devToClose) {
             std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+            if (rtl) RtlBiasT::powerOff(*devToClose);
             try { devToClose->deactivateStream(streamToClose); } catch (...) {}
             try { devToClose->closeStream(streamToClose); } catch (...) {}
             if (sharedClose) {
@@ -1399,6 +1449,7 @@ void DeviceManager::stopStreaming(size_t index) {
             }
         } else if (devToClose) {
             std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+            if (rtl) RtlBiasT::powerOff(*devToClose);
             if (sharedClose) {
                 std::lock_guard<std::mutex> shareLock(gSharedSdrplayMutex);
                 auto it = gSharedSdrplayDevices.find(sharedKey);
@@ -1429,6 +1480,15 @@ void DeviceManager::stopStreaming(size_t index) {
     }
     resetStreamBuffers(st);
     spdlog::info("Stopped streaming for device {}", index);
+    if (rtl) {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (index < devices.size()) {
+            auto& bias = devices[index].rtlBiasT;
+            bias.reported.reset();
+            bias.status = "Stopped; power-off requested. Saved setting applies on next start";
+            if (rxDetached) bias.status = "Driver stuck; disconnect USB to guarantee bias-T power off";
+        }
+    }
 }
 
 bool DeviceManager::isStreaming(size_t index) const {
@@ -1879,6 +1939,65 @@ size_t DeviceManager::preferredListenDeviceIndex() const {
 void DeviceManager::setPreferredListenDeviceIndex(size_t index) {
     std::lock_guard<std::mutex> lk(devicesMutex);
     preferredListenDeviceIndex_ = index;
+}
+
+bool DeviceManager::setRtlBiasT(size_t index, bool enabled, std::string* error) {
+    std::lock_guard<std::mutex> controlLock(rtlBiasTControlMutex_);
+    std::string identity;
+    try {
+        RtlBiasT::State desired;
+        {
+            std::lock_guard<std::mutex> lk(devicesMutex);
+            if (index >= devices.size() || devices[index].driver != "rtlsdr")
+                throw std::runtime_error("Select an RTL-SDR receiver");
+            identity = devices[index].stableKey;
+            desired = devices[index].rtlBiasT;
+        }
+        if (enabled && (!desired.probed || !desired.supported))
+            throw std::runtime_error("RTL bias-T support is not confirmed; open/probe the receiver first");
+        bool live = false;
+        if (auto* st = streamState(index)) {
+            std::lock_guard<std::mutex> lk(st->stateMutex);
+#ifdef HAVE_SOAPYSDR
+            if (st->isReal && st->soapyDev) {
+                std::lock_guard<std::mutex> io(gSoapyLiveIoMutex);
+                if (desired.probed && desired.supported) RtlBiasT::apply(*st->soapyDev, desired, enabled);
+                else {
+                    RtlBiasT::powerOff(*st->soapyDev);
+                    desired.enabled = false;
+                    desired.reported.reset();
+                    desired.status = "OFF requested; driver confirmation unavailable. Disconnect USB to guarantee OFF";
+                }
+                live = true;
+            } else
+#endif
+            if (st->active) throw std::runtime_error("Receiver is opening or not using real hardware; retry after it is live");
+        }
+        if (!live) {
+            desired.enabled = enabled;
+            desired.reported.reset();
+            desired.status = enabled ? "Saved ON for next receiver start" : "Saved OFF for next receiver start";
+        }
+        {
+            std::lock_guard<std::mutex> lk(devicesMutex);
+            if (index >= devices.size() || devices[index].stableKey != identity)
+                throw std::runtime_error("Device selection changed during bias-T update");
+            devices[index].rtlBiasT = desired;
+            saveSettings();
+        }
+        spdlog::info("RTL bias-T device={}: {}", index, desired.status);
+        if (error) error->clear();
+        return true;
+    } catch (const std::exception& ex) {
+        if (error) *error = ex.what();
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (index < devices.size() && devices[index].driver == "rtlsdr" && devices[index].stableKey == identity) {
+            devices[index].rtlBiasT.reported.reset();
+            devices[index].rtlBiasT.status = std::string("Failed: ") + ex.what();
+        }
+        spdlog::warn("RTL bias-T device={} request rejected: {}", index, ex.what());
+        return false;
+    }
 }
 
 bool DeviceManager::changeSdrplay(size_t index, const std::optional<SdrplayControl::Change>& change, std::string* error) {
@@ -3023,6 +3142,15 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
         }
 
         spdlog::warn("Real RX thread for device {} faulted; falling back to safe stub streaming for this session.", index);
+        bool rtl = false;
+        {
+            std::lock_guard<std::mutex> lk(devicesMutex);
+            rtl = index < devices.size() && devices[index].driver == "rtlsdr";
+            if (rtl) {
+                devices[index].rtlBiasT.reported.reset();
+                devices[index].rtlBiasT.status = "Receiver fault; power-off requested. Check driver log";
+            }
+        }
         {
             std::lock_guard<std::mutex> lk(st.stateMutex);
             if (st.soapyDev == dev) st.soapyDev = nullptr;
@@ -3033,6 +3161,7 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
         }
         try {
             std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+            if (rtl && dev) RtlBiasT::powerOff(*dev);
             if (stream && dev) {
                 dev->deactivateStream(stream);
                 dev->closeStream(stream);

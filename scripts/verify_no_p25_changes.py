@@ -75,6 +75,29 @@ SDRPLAY_CONTROL_DIGESTS = {
 }
 
 
+# DEC-0129: reviewed RTL-only bias-T probe/control/open/cleanup and GUI wiring.
+# Includes RX fault cleanup only, not the RX sample/tune loop or P25 algorithms.
+RTL_BIAS_DIGESTS = {
+    "src/DeviceManager.cpp": (
+        "505d49ca040385d0037ef66db76b529b3e45d0fe72e5dc720c2ac0d9b2c46b32",
+        "568056eeb297ff32786255c78c51723c553ba11d1dd4940104d05a4bd3a77fd3"),
+    "include/DeviceManager.h": (
+        "4384d7f156fbdc99442289befa2d40be9cd24e630dd68b625ae79027b17f324d",
+        "e581e7d2f1103c5fc456576fc73d8df5d306889295013abecf8430f03c64e302"),
+    "src/MainWindow.cpp": (
+        "2c7d04447656899ecb907b0205a64d1e4723437e2a4ce3fd575df49af3992e12",
+        "3ed596dedafc1052675755a944015e7cf3d9a01581fffe9a793b884ea6f026d1"),
+}
+
+
+def rtl_bias_text_allowed(path: str, before: str, after: str) -> bool:
+    pair = RTL_BIAS_DIGESTS.get(path)
+    return pair is not None and pair == (
+        hashlib.sha256(before.encode("utf-8")).hexdigest(),
+        hashlib.sha256(after.encode("utf-8")).hexdigest(),
+    )
+
+
 def sdrplay_control_text_allowed(path: str, before: str, after: str) -> bool:
     pair = SDRPLAY_CONTROL_DIGESTS.get(path)
     return pair is not None and pair == (
@@ -284,6 +307,17 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
+        if path in RTL_BIAS_DIGESTS and args.paths is None:
+            try:
+                allowed = rtl_bias_text_allowed(
+                    path, git_file_text(args.base, path), git_file_text(args.head, path)
+                )
+            except RuntimeError as exc:
+                print(f"P25 guard error: {exc}", file=sys.stderr)
+                return 2
+            if allowed:
+                print(f"P25 guard: accepted exact DEC-0129 RTL bias-T patch: {path}")
+                continue
         if path in SDRPLAY_CONTROL_DIGESTS and args.paths is None:
             try:
                 allowed = sdrplay_control_text_allowed(

@@ -1,5 +1,19 @@
 # Issues (canonical)
 
+## ISS-0024 - RTL-SDR bias-T missing (2026-09-25, SOFTWARE FIXED; ELECTRICAL ACCEPTANCE OPEN)
+
+Source search confirms only SDRplay biasT_ctrl is implemented. SoapyRTLSDR uses
+the distinct biastee boolean, conditionally advertised when its library supports
+rtlsdr_set_bias_tee. Its cached readback cannot detect a missing physical bias-T
+circuit and upstream ignores the C library return value. Add the missing app
+route without claiming electrical confirmation or writing arbitrary GPIOs.
+DEC-0129 implements GUI/CLI/persistence, actual-handle startup, checked live
+writes and cleanup OFF. Unit/widget/lifecycle tests PASS, including ignored
+writes, failed ON rollback, failed stream setup, RX exception and unsupported
+driver restart. Full CTest 13/13 PASS. Actual local RTL read-only probe reports
+driver support and OFF. Physical model/circuit/voltage remain unverified; the
+driver's cached state cannot certify them. Local build only, not yet published.
+
 Never delete a row. Close with a commit hash and a sentence.
 
 ## ISS-0023 - RSPdx controls retain unprobed defaults (2026-09-25, SOFTWARE FIXED; RF ACCEPTANCE OPEN)

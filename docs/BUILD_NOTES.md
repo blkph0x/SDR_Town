@@ -2,6 +2,28 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-25 - RTL bias-T local qualification (DEC-0129 / T-0056)
+
+Windows/MSVC2022/Qt6.11.1, base 7d6d9ed. Release app, core, workspace and
+Inmarsat GUI build-1/build-2 PASS; final lifecycle-test build-3 PASS.
+CTest 13/13 PASS in 37.32 s. Focused adapter 32 assertions/3 cases, native GUI
+20 assertions/1 case, manager lifecycle 51 assertions/1 case PASS. Lifecycle
+covers saved intent, real-handle writes, stop OFF, restart ON, setup failure
+after ON, RX exception after ON, unavailable driver capability and wrong saved
+identity. Fake factory pointer is asserted before any stream opens.
+
+Actual rebuilt executable: --cli --no-remote-diagnostics --cmd="devices probe"
+--cmd="biastee 0 status" exits 0. Local generic RTL/R820T, serial 00000001:
+probed=1 driverSupport=1 saved=OFF driverReported=OFF voltage=not-measured.
+No ON issued to real hardware. Expected SDRplay enumeration reports missing
+vendor service; no service or driver installation/change was attempted.
+controls-final.png visually checked; P25 guard negative self-tests PASS.
+No P25 algorithms, Receiver, Demod, AudioEngine, vocoder or RF sample/tune-loop
+changes. The three shared-file patches are exact-digest reviewed under DEC-0129.
+Evidence: build-audit-20260925/rtl-bias/. README/safety/CLI guide updated.
+This is local development-build qualification, not electrical verification or
+a new published release. Hardware acceptance remains ISS-0024.
+
 ## 2026-09-25 - 0.2.96 local release qualification
 
 Source bb91aa6abd0b5a43b95a15bb43976e547695ef9b; signed asset metadata ade17a7.

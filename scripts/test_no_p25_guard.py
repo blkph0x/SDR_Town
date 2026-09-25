@@ -162,6 +162,14 @@ void run() {
         assert not MODULE.sdrplay_control_text_allowed("src/P25LiveDecoder.cpp", before, after)
         assert not MODULE.sdrplay_control_text_allowed("include/DeviceManager.h", before, after)
 
+    with patch.object(MODULE, "RTL_BIAS_DIGESTS", reviewed):
+        assert MODULE.rtl_bias_text_allowed("src/MainWindow.cpp", before, after)
+        assert not MODULE.rtl_bias_text_allowed("src/MainWindow.cpp", before, after + "\nRF change")
+        assert not MODULE.rtl_bias_text_allowed("src/MainWindow.cpp", before + "\n", after)
+        assert not MODULE.rtl_bias_text_allowed("src/MainWindow.cpp", after, before)
+        assert not MODULE.rtl_bias_text_allowed("src/P25LiveDecoder.cpp", before, after)
+        assert not MODULE.rtl_bias_text_allowed("include/DeviceManager.h", before, after)
+
     print("P25 guard self-test passed")
     return 0
 

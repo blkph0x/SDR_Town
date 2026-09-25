@@ -132,7 +132,7 @@ jobs:
       - name: Run SDRplay loader and Inmarsat lifecycle tests
         shell: pwsh
         run: |
-          ctest --test-dir build -C Release -R "SdrplayRuntime|SdrplayControlLifecycle|InmarsatLiveGui|InmarsatHostLifecycle" --output-on-failure --no-tests=error
+          ctest --test-dir build -C Release -R "SdrplayRuntime|SdrplayControlLifecycle|RtlBiasTLifecycle|InmarsatLiveGui|InmarsatHostLifecycle" --output-on-failure --no-tests=error
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run Qt workspace and live-decoder tests

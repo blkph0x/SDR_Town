@@ -1,5 +1,15 @@
 # Task list (canonical)
 
+T-0056 | done (software; electrical acceptance open) | RTL-SDR bias-T control chain |
+DEC-0129. No RTL bias-T UI, persistence or driver write exists in 0.2.96.
+Add a capability-gated, default-off RTL-only path, explicit DC confirmation,
+saved desired state, startup/teardown safety and GUI/CLI tests. Do not energize
+attached hardware during automated checks; driver readback is not voltage proof.
+Implemented in the local development build: adapter 32 assertions, native GUI
+20 assertions and DeviceManager lifecycle 51 assertions PASS. Full CTest 13/13
+PASS. Connected generic RTL driver advertises biastee and reports OFF; probe
+only, no physical ON test. docs/RTL_BIAS_T.md contains the hardware checklist.
+
 T-0055 | done | SDRplay capability and control-chain repair |
 User RSPdx report: disabled Bias-T and missing antenna selection. Trace light
 enumeration, async open, capability refresh, GUI/CLI/API controls, persistence

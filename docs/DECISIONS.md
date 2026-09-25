@@ -1,5 +1,32 @@
 # Decisions
 
+## DEC-0129 - Explicit, capability-gated RTL bias-T (2026-09-25)
+
+ISS-0024 / T-0056. Reference SoapyRTLSDR Settings.cpp at
+https://github.com/pothosware/SoapyRTLSDR/blob/6ca357c15cbf676ff30eb8eb445d1e1eac17c136/Settings.cpp
+advertises biastee only under HAS_RTLSDR_SET_BIAS_TEE, writes true/false and
+returns cached state. It does not expose a physical-circuit probe or voltage
+sensor and ignores rtlsdr_set_bias_tee's result. Vendor safety guidance:
+https://www.rtl-sdr.com/V4/ and the Blog V3 datasheet prohibit powering a
+DC-shorted antenna. Do not substitute offset_tune or a model-name guess.
+
+Keep an RTL-only bias state/adapter, discover on full probe and actual open,
+default off, persist only explicit user intent by existing stable device key.
+Enable requires GUI DC-safety confirmation; CLI on is an explicit power request.
+Apply saved intent to the actual handle, report rejected/mismatched writes,
+and attempt off before clean close/fault cleanup. Stuck native handles remain
+untouched to avoid concurrent USB calls; unplug is required to guarantee power
+off after a crash/hang. Do not persist driver observations as user intent.
+No sample, tune, demod, P25 or audio algorithm changes. Exact shared-file guard
+review covers only the RTL control/probe/start/close integration and GUI wiring.
+Use fake-driver on/off tests; local real-device test is read-only discovery.
+DC intent requires the exact saved stable key, not the legacy serial-only
+fallback. Failed ON confirmation triggers best-effort OFF even if the previous
+readback is broken. Stopped devices can clear saved intent if support disappears.
+The test fixture registers before module loading, verifies its make function
+remains selected, and only then opens fake streams; Soapy 0.8.1 Registry.cpp
+rejects duplicate driver registrations. No test ON can reach attached USB.
+
 ## DEC-0128 - SDRplay controls use live capabilities and acknowledged writes (2026-09-25)
 
 ISS-0023 / T-0055. Evidence: DeviceManager light discovery uses generic RX;
