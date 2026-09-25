@@ -2,6 +2,39 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-25 - 0.2.95 Aero watch release qualification and publication
+
+Source e46f43719180e17cbf6547e88b11338af17d93ba; signed metadata/tag d7979ee.
+Release helper completes with full CTest 11/11 PASS in 34.05 s and signed
+manifest/runtime/standalone DLL verification PASS. Only update.json,
+update.json.sig and SHA256SUMS.txt differ from the independently tested source.
+Original P25 freeze guard and additive Satcom host integration checks PASS.
+
+Extracted portable EXE SHA256:
+485f4966abeba964b61cd96c72551a8630113f443ee04a487c713d5f183ade7d.
+Packaged real GUI/RTL hot-watch test PASS: four workers, invalid-empty rejection,
+edit to two, return to manual, settings restore and clean exit. Four packaged
+reference GUI/CLI fast/paced replays all retain 4179528 IQ samples, 163 valid
+units, 1375 voice frames, 220000 PCM samples, 11 CRC failures, 106 corrections,
+8 repeats, 1244 codec mutes and 3 rejected C-frames. Every WAV SHA256 remains
+295ee11a0edc4e341ab66455ce283f7a0201e2f35a880eb555e47a19af6e176f.
+These mostly-silence reference frames are not field speech acceptance.
+
+Windows CI 36095455129 PASS in 16m52s: clean MSVC/Qt6.7.3 build, release
+verifier negatives, frozen-P25 gate, core, loader/lifecycle, Qt workspace,
+GUI/CLI replay, SSTV, staging/ZIP and uploaded artifact. YAML 36095455147 PASS.
+Master intentionally skips CI's release-branch-only publishing step; tested
+signed local assets are published separately with no production source delta.
+
+Published Latest v0.2.95 (experimental), release ID 396316236, at
+2026-09-25T05:02:50Z. All eight downloaded assets match local sizes and SHA256.
+Downloaded installer passes the signed manifest/package verifier. Anonymous
+public Latest returns v0.2.95, not draft, exactly eight assets. Diagnostics
+remain opt-in at https://gearsqueens.online/sdr-town-diag/ingest; constellation
+point arrays remain local. No physical RSP or clear Aero conversation claim.
+Evidence: build-audit-20260925/release-0.2.95.log, ci-0.2.95-watch.log,
+portable-0.2.95/, watch-package-hot/, watch-package-reference/, published-0.2.95/.
+
 ## 2026-09-25 - Aero display and parallel-worker qualification (DEC-0127)
 
 Windows 11/MSVC2022/Qt6.11.1, base 58530ae. Initial app/core/native GUI builds

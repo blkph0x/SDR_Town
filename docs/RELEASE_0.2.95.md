@@ -31,3 +31,13 @@ of live satellite speech. Reference GUI/CLI PCM remains byte-identical; physical
 antenna and intelligible-conversation qualification still require tester IQ.
 
 Diagnostics remain opt-in. Constellation arrays are not uploaded.
+
+## Verification
+
+- Full local and packaging test suites: 11/11 passed.
+- Clean Windows GitHub CI passed: run 36095455129; YAML validation also passed.
+- Extracted portable passed live RTL watch edits and four GUI/CLI reference
+  replays with byte-identical PCM. This is not live Aero speech acceptance.
+- All eight published assets were downloaded and matched local SHA256/size;
+  signed updater and installer/package validation passed.
+- Source e46f437; release tag d7979ee. P25 DSP/audio unchanged.

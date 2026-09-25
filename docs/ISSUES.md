@@ -2,12 +2,16 @@
 
 Never delete a row. Close with a commit hash and a sentence.
 
-## ISS-0022 - Aero display stalls and serial multi-channel overload (2026-09-25, OPEN)
+## ISS-0022 - Aero display stalls and serial multi-channel overload (2026-09-25, FIXED)
 
 Confirmed 500 ms widget timer limits visuals to 2 Hz. Four serial watch channels
 take 2.463 s per 2.048 s IQ (load 1.203). DEC-0127 separates visuals, adds bounded
-workers and constellation monitoring; local tests and release qualification in
-progress. Shared DeviceManager FFT remains unchanged at >80 ms update spacing.
+workers and constellation monitoring. Source e46f437, tag d7979ee, published
+v0.2.95: local full CTest 11/11 and Windows CI 36095455129 PASS. Four-channel
+processing now .639 s per 2.048 s IQ on this PC; reference PCM unchanged.
+Packaged real RTL hot-watch edits and eight downloaded asset checks PASS.
+Shared DeviceManager FFT remains unchanged at >80 ms update spacing; the new
+50 ms visual polling timer does not claim 20 Hz of independent RF frames.
 
 ## ISS-0021 - Inmarsat cannot take over a P25-configured receiver (2026-09-25, FIXED)
 

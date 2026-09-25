@@ -1,5 +1,18 @@
 # Development log
 
+## 2026-09-25 - 0.2.95 Aero watch update published
+
+T-0054 / ISS-0022 complete: source e46f437, signed metadata/tag d7979ee.
+Independent Windows CI 36095455129 and packaging CTest 11/11 PASS. Extracted
+portable passes real RTL GUI hot reconfiguration and four reference replays;
+PCM remains byte-identical. Public Latest v0.2.95 has eight downloaded/hash-
+verified assets and a valid signed updater. README and watch instructions updated.
+Users can add several rate-specific signals and select a real constellation
+view while independent bounded workers decode the active group. Default two,
+maximum four active channels; out-of-passband groups still require retuning.
+No P25 DSP/audio, FUBAR, proxy or user-capture changes. Physical satellite
+speech and RSP qualification remain separate open items.
+
 ## 2026-09-25 - Aero watch responsiveness and constellation work
 
 DEC-0127 / T-0054 / ISS-0022: measured the 2 Hz display limit and four-channel
