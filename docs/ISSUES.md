@@ -2,6 +2,21 @@
 
 Never delete a row. Close with a commit hash and a sentence.
 
+## ISS-0023 - RSPdx controls retain unprobed defaults (2026-09-25, SOFTWARE FIXED; RF ACCEPTANCE OPEN)
+
+Confirmed: light enumeration assigns RX to every RSP; async open never enriches
+capabilities. Device Manager skips probing while any receiver is live, leaving
+RSPdx without A/B/C and disabling Bias-T for unknown RX. Panel also starts on
+row zero regardless of selected receiver, and live setters persist before
+checking hardware success. Static port table incorrectly permits RSPdx A and
+RSPduo tuner 1 Bias-T. User identifies RSPdx; no physical local RSP available.
+DEC-0128 discovers capabilities on the actual opened handle, checks driver
+readback, restores AGC/antenna/bandwidth after activation and exposes errors.
+Contract, native-widget and DeviceManager lifecycle tests PASS; full CTest
+12/12 repeated PASS. Hardware checklist is docs/RELEASE_0.2.96.md. Cached Soapy
+readback is not a physical RF/voltage measurement. RSPduo second-channel
+unchannelled settings and physical dual-tuner operation remain unqualified.
+
 ## ISS-0022 - Aero display stalls and serial multi-channel overload (2026-09-25, FIXED)
 
 Confirmed 500 ms widget timer limits visuals to 2 Hz. Four serial watch channels

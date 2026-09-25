@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.95 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.96 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -128,11 +128,13 @@ set(SDR_TOWN_SOURCES
     src/AppBootstrap.cpp
     include/AppBootstrap.h
     src/MainWindow.cpp
+    src/SdrplayControlsWidget.cpp
     src/WorkspaceLayout.cpp
     src/MainWindowP25Voice.cpp
     src/MainWindowP25Orchestration.cpp
     include/MainWindow.h
     src/DeviceManager.cpp
+    src/SdrplayControl.cpp
     src/SdrplayProfile.cpp
     src/SdrplayRuntime.cpp
     include/SdrplayProfile.h
@@ -420,6 +422,7 @@ if(BUILD_TESTS)
     tests/test_sstv_rate_converter.cpp
     tests/test_devicemanager.cpp
     tests/test_sdrplay_profile.cpp
+    tests/test_sdrplay_controls.cpp
     tests/test_sdrplay_diversity.cpp
     tests/test_audioengine.cpp
     tests/test_p25_audio_resampler.cpp
@@ -468,6 +471,7 @@ if(BUILD_TESTS)
     src/InmarsatVoice.cpp
     src/InmarsatEngine.cpp
     src/DeviceManager.cpp
+    src/SdrplayControl.cpp
     src/SdrplayProfile.cpp
     src/SdrplayRuntime.cpp
     src/SdrplayDiversity.cpp
@@ -578,6 +582,15 @@ if(BUILD_TESTS)
   target_include_directories(sdr_town_workspace_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/external/miniaudio)
   target_link_libraries(sdr_town_workspace_tests PRIVATE Catch2::Catch2 Qt6::Widgets nlohmann_json::nlohmann_json sdr_town_tones sdr_inmarsat_native sdr_inmarsat_audio sdr_inmarsat_map)
   add_test(NAME WorkspaceTests COMMAND sdr_town_workspace_tests)
+  target_sources(sdr_town_workspace_tests PRIVATE tests/test_sdrplay_controls_gui.cpp
+      src/SdrplayControlsWidget.cpp src/SdrplayControl.cpp src/SdrplayProfile.cpp)
+  if(WIN32)
+    target_link_libraries(sdr_town_workspace_tests PRIVATE Advapi32)
+  endif()
+  if(TARGET SoapySDR)
+    add_test(NAME SdrplayControlLifecycle COMMAND sdr_town_tests "[.sdrplay-controls-live]")
+    set_tests_properties(SdrplayControlLifecycle PROPERTIES TIMEOUT 60)
+  endif()
 
   # DEC-0123: real widget/engine with a hardware-free DeviceManager backend.
   # Reuse core build inputs, not copies/stubs of the selection/receiver logic.

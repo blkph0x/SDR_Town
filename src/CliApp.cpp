@@ -1432,7 +1432,7 @@ int runCLI(int argc, char* argv[]) {
                   << "  sdrplay set <device> <key> <value>\n"
                   << "  sdrplay agc <device> on|off\n"
                   << "  sdrplay ifgr <device> <dB>\n"
-                  << "  sdrplay rfgr <device> <dB>\n"
+                  << "  sdrplay rfgr <device> <integer-LNA-state>\n"
                   << "  sdrplay bw <device> <Hz|0>\n"
                   << "  sdrplay antenna <device> <name>\n"
                   << "  sdrplay diversity <device> off|sum|null [phase_deg] [amp_b]\n"
@@ -1899,7 +1899,8 @@ int runCLI(int argc, char* argv[]) {
                     std::cout << "bad device index\n";
                     continue;
                 }
-                auto* d = mgr.getDevice(static_cast<size_t>(di));
+                const auto snapshot = mgr.getDevices();
+                const auto* d = static_cast<size_t>(di) < snapshot.size() ? &snapshot[static_cast<size_t>(di)] : nullptr;
                 if (!d || !d->isSdrplay) {
                     std::cout << "device " << di << " is not SDRplay\n";
                     continue;
@@ -1912,6 +1913,9 @@ int runCLI(int argc, char* argv[]) {
                           << " IFGR=" << d->ifgrDb
                           << " RFGR=" << d->rfgrDb
                           << " bw=" << d->bandwidthHz
+                          << " antenna=" << d->antenna
+                          << " probed=" << d->sdrplayProbed
+                          << " control=" << d->sdrplayControlStatus
                           << "\n";
                 if (sub == "gains") {
                     std::cout << "gain elements:";
@@ -1931,7 +1935,10 @@ int runCLI(int argc, char* argv[]) {
                     std::cout << "bad device index\n";
                     continue;
                 }
-                mgr.setLiveSdrplaySetting(static_cast<size_t>(di), key, value);
+                std::string error;
+                if (!mgr.setLiveSdrplaySetting(static_cast<size_t>(di), key, value, &error)) {
+                    std::cout << "SDRplay control failed: " << error << "\n"; continue;
+                }
                 std::cout << "sdrplay " << di << " " << key << "=" << value << "\n";
             } else if (sub == "agc") {
                 int di = 0;
@@ -1939,19 +1946,29 @@ int runCLI(int argc, char* argv[]) {
                 if (!(iss >> di >> onoff)) { printSdrplayUsage(); continue; }
                 for (auto& c : onoff) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
                 const bool on = (onoff == "on" || onoff == "1" || onoff == "true");
-                mgr.setLiveAgc(static_cast<size_t>(di), on);
+                if (!on && onoff != "off" && onoff != "0" && onoff != "false") { printSdrplayUsage(); continue; }
+                std::string error;
+                if (!mgr.setLiveAgc(static_cast<size_t>(di), on, &error)) {
+                    std::cout << "SDRplay control failed: " << error << "\n"; continue;
+                }
                 std::cout << "sdrplay " << di << " agc=" << (on ? "on" : "off") << "\n";
             } else if (sub == "ifgr" || sub == "rfgr") {
                 int di = 0;
                 double db = 0.0;
                 if (!(iss >> di >> db)) { printSdrplayUsage(); continue; }
-                mgr.setLiveGainElement(static_cast<size_t>(di), sub == "ifgr" ? "IFGR" : "RFGR", db);
+                std::string error;
+                if (!mgr.setLiveGainElement(static_cast<size_t>(di), sub == "ifgr" ? "IFGR" : "RFGR", db, &error)) {
+                    std::cout << "SDRplay control failed: " << error << "\n"; continue;
+                }
                 std::cout << "sdrplay " << di << " " << sub << "=" << db << "\n";
             } else if (sub == "bw" || sub == "bandwidth") {
                 int di = 0;
                 double hz = 0.0;
                 if (!(iss >> di >> hz)) { printSdrplayUsage(); continue; }
-                mgr.setLiveBandwidth(static_cast<size_t>(di), hz);
+                std::string error;
+                if (!mgr.setLiveBandwidth(static_cast<size_t>(di), hz, &error)) {
+                    std::cout << "SDRplay control failed: " << error << "\n"; continue;
+                }
                 std::cout << "sdrplay " << di << " bw=" << hz << "\n";
             } else if (sub == "antenna" || sub == "ant") {
                 int di = 0;
@@ -1960,7 +1977,10 @@ int runCLI(int argc, char* argv[]) {
                 std::getline(iss, name);
                 name = trimCopy(name);
                 if (name.empty()) { printSdrplayUsage(); continue; }
-                mgr.setLiveAntenna(static_cast<size_t>(di), name);
+                std::string error;
+                if (!mgr.setLiveAntenna(static_cast<size_t>(di), name, &error)) {
+                    std::cout << "SDRplay control failed: " << error << "\n"; continue;
+                }
                 std::cout << "sdrplay " << di << " antenna=" << name << "\n";
             } else if (sub == "diversity" || sub == "div") {
                 int di = 0;

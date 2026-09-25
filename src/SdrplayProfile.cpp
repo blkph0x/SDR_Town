@@ -328,7 +328,8 @@ SdrplayModelCapabilities modelCapabilities(const std::string& model) {
     }
     if (normalized == "RSPdx" || normalized == "RSPdx-R2") {
         caps.ports = {
-            port("Antenna A", "Port A", "SMA", {"A", "Port A", "ANT A"}, 1.0e3, 2.0e9, true),
+            // DEC-0128 / RSPdx datasheet: only B supplies Bias-T power.
+            port("Antenna A", "Port A", "SMA", {"A", "Port A", "ANT A"}, 1.0e3, 2.0e9, false),
             port("Antenna B", "Port B", "SMA", {"B", "Port B", "ANT B"}, 1.0e3, 2.0e9, true),
             port("Antenna C", "Port C", "BNC", {"C", "Port C", "ANT C"}, 1.0e3, 200.0e6, false),
         };
@@ -339,7 +340,7 @@ SdrplayModelCapabilities modelCapabilities(const std::string& model) {
         caps.ports = {
             port("Tuner 1 50 ohm", "Tuner 1", "SMA 50 ohm",
                  {"Tuner 1 Port A", "Tuner 1 50", "RX1", "Antenna A"},
-                 1.0e3, 2.0e9, true),
+                 1.0e3, 2.0e9, false),
             port("Tuner 2 50 ohm", "Tuner 2", "SMA 50 ohm",
                  {"Tuner 2 Port B", "Tuner 2 50", "RX2", "Antenna B"},
                  1.0e3, 2.0e9, true),

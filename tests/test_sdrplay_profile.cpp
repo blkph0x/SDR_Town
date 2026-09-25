@@ -108,11 +108,12 @@ TEST_CASE("SdrplayProfile enforces connector-specific tuning ranges", "[sdrplay]
 }
 
 TEST_CASE("SdrplayProfile antenna ports Bias-T and dual rate limits", "[sdrplay]") {
-    CHECK(SdrplayProfile::biasTAllowedForAntenna("RSPdx", "Antenna A"));
+    CHECK_FALSE(SdrplayProfile::biasTAllowedForAntenna("RSPdx", "Antenna A"));
     CHECK(SdrplayProfile::biasTAllowedForAntenna("RSPdx", "Antenna B"));
     CHECK_FALSE(SdrplayProfile::biasTAllowedForAntenna("RSPdx", "Antenna C"));
     CHECK_FALSE(SdrplayProfile::biasTAllowedForAntenna("RSPduo", "Tuner 1 Hi-Z"));
-    CHECK(SdrplayProfile::biasTAllowedForAntenna("RSPduo", "Tuner 1 50 ohm"));
+    CHECK_FALSE(SdrplayProfile::biasTAllowedForAntenna("RSPduo", "Tuner 1 50 ohm"));
+    CHECK(SdrplayProfile::biasTAllowedForAntenna("RSPduo", "Tuner 2 50 ohm"));
     CHECK_FALSE(SdrplayProfile::biasTAllowedForAntenna("RSP2", "Antenna A"));
     CHECK(SdrplayProfile::biasTAllowedForAntenna("RSP2", "Antenna B"));
     CHECK_FALSE(SdrplayProfile::biasTAllowedForAntenna("unknown", "mystery"));

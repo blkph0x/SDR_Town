@@ -1,5 +1,24 @@
 # Code notes (tree map)
 
+## SDRplay controls and capability lifecycle (DEC-0128)
+
+SdrplayControl is the isolated driver adapter: probe actual antennas/settings/
+gain ranges; prepare validates requests without I/O; applyChange writes and
+checks driver readback; apply restores a complete profile after activation.
+RFGR is an LNA state and its optional rfgain_sel alias cannot overwrite it.
+RSPdx Bias-T is B-only. Automatic bandwidth calls setBandwidth(0), not a no-op.
+Readback confirms driver state, not physical voltage or RF sensitivity.
+
+DeviceManager publishes capabilities from the already-open handle. Control
+commands serialize, keep the device alive during I/O and commit only after
+success; saved/stopped and driver-confirmed states are distinct. Startup catch-
+up restores the whole SDRplay profile without disabling IF AGC. Non-SDRplay
+sample delivery, tune loop and P25 decoder/audio policy are unchanged.
+SdrplayControlsWidget is shared-testable physical-control UI, including antenna,
+error feedback and capability-aware enablement. Device Manager refreshes model
+snapshots at 250 ms without reprobe/stop. CLI/API propagate failure. Contract
+fixtures test open/restart/readback and every RSPdx widget; no field claim.
+
 ## Aero parallel watch and local visuals (DEC-0127)
 
 InmarsatWatch::Channel owns one thread and constructs/destroys its complete

@@ -1,5 +1,13 @@
 # SDR Town
 
+**0.2.96 RSPdx controls:** live opening now discovers the real antenna ports and
+driver controls. Device Manager shows A/B/C selection and control results;
+Bias-T is enabled only on B. RF/LNA state preserves IF AGC, automatic hardware
+bandwidth is restored correctly, and failed writes are reported rather than
+saved as successes. See [SDRplay setup](docs/SDRPLAY.md) and the
+[hardware acceptance checklist](docs/RELEASE_0.2.96.md). Physical RSPdx testing
+is still required; automated driver and GUI tests are not RF/voltage proof.
+
 **0.2.95 Aero watch display:** faster independent visual updates, circular
 waterfall, repeated click-to-add channels and a selected-channel constellation.
 Each active channel has its own bounded worker and decoder state. Live watch
@@ -25,7 +33,7 @@ status are visible. See [tone/no-voice troubleshooting](docs/INMARSAT.md#tone-or
 
 | | |
 |---|---|
-| **Current version** | **0.2.95** (experimental channel) |
+| **Current version** | **0.2.96** (experimental channel) |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |
@@ -117,7 +125,7 @@ gates](docs/AUDIT_20260924.md) and [release notes](docs/RELEASE_0.2.89.md).
 2. In SDR Town, start the receiver (and P25 Monitor CC / auto-follow if that is your station). Confirm the status bar shows local control on `127.0.0.1:8765` (loopback only).
 3. Route SDR Town audio to **VB-CABLE** (or another capture endpoint FUBAR can open).
 4. In FUBAR, select that cable as the input, enable **Public website**, and set **Now playing**.
-5. Place a **matching** `SdrTownControl.dll` next to `FUBAR.exe`. This Town **0.2.95** release ships `SdrTownControl-0.2.95-win64.dll` (rename to `SdrTownControl.dll`). FUBAR was not changed or re-qualified in this watch display release. See [pairing versions and gaps](docs/FUBAR_PAIRING.md).
+5. Place a **matching** `SdrTownControl.dll` next to `FUBAR.exe`. This Town **0.2.96** release ships `SdrTownControl-0.2.96-win64.dll` (rename to `SdrTownControl.dll`). FUBAR was not changed or re-qualified in this SDRplay repair release. See [pairing versions and gaps](docs/FUBAR_PAIRING.md).
 6. **Tools → Settings** in FUBAR: enable SDR Town control and pick allowed actions. FUBAR **1.1.41** website has P25/RDS/tones/SSTV (Auto + HamDRM list, Receive/Finish/Cancel), Satcom, Inmarsat, Aircraft, and SDRplay. **Home lat/lon is Town-only** (not on the public site).
 
 ### Control API notes (for FUBAR and other local clients)

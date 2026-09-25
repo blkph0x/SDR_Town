@@ -25,7 +25,7 @@ the app.
 
 ### Troubleshooting “RSP not connected”
 
-The September 25 local repair (DEC-0122, not yet a published release) reports:
+The loader repair published in 0.2.93 (DEC-0122) reports:
 
 - **Driver registered (not a hardware detection):** the module actually registered
   SDRplay find/open functions. A DLL loading without a valid registration no longer
@@ -85,14 +85,52 @@ concurrent reuse, Unicode API paths, and real nested portable module discovery.
 All five pass. They use fake DLLs outside deployment, never fake received samples. Packaging
 checks reject those fixtures and unapproved vendor DLLs.
 
-The first full CTest run passed; a repeat exposed an intermittent, unchanged
-SSTV active-producer detach test stall (ISS-0019). All remaining core/GUI/backend
-checks pass. This local repair is not a claim of fully qualified release status.
+The initial audit exposed an SSTV active-producer detach stall (ISS-0019),
+subsequently repaired and tested in 0.2.93. The 0.2.96 control repair has a
+separate simulated-driver lifecycle test and native Qt interaction tests.
 
 Local Pothos module 0.3.0-206b241 registers; its API open fails because this PC
 has no SDRplay service installed. No physical RSP is attached here. Acceptance
 on each affected model still requires a tester's successful Rescan, open/tune,
-stream, stop and reopen. The RF/gain/sample-rate and P25 pipelines are unchanged.
+stream, stop and reopen. The 0.2.96 repair changes SDRplay control application,
+not P25 DSP/audio or shared sample/tune-loop processing.
+
+## RSPdx controls (0.2.96)
+
+Select the RSPdx row in Device Manager. A full stopped-device probe or the
+normal live open discovers its actual controls. Light discovery alone is not
+a capability probe: controls remain disabled until discovery succeeds. The
+panel updates while it is open and reports discovery/startup/control errors.
+
+| Control | Behavior and limit |
+|---|---|
+| Antenna A/B/C | Uses the driver's exact names; C is limited to 200 MHz. Tune within that range before switching to C. |
+| Bias-T | **Antenna B only** on RSPdx. Off by default; requires an explicit user setting. Switching away from B disables bias before changing ports. Only enable for equipment designed to accept DC. |
+| RF/LNA state | Integer RFGR state, **not dB**. RSPdx driver reports 0-27. Higher states mean more gain reduction; RF changes no longer disable IF AGC. |
+| IF gain reduction | Driver range (normally 20-59 dB); manual editing disables IF AGC. GUI disables this field while AGC is enabled. |
+| AGC / setpoint | Hardware IF AGC and -60 to 0 dBFS target; AGC survives receiver and sample-rate restarts. |
+| Hardware bandwidth | Advertised widths or Auto (driver `setBandwidth(0)`). Separate from demodulator bandwidth. |
+| Broadcast / DAB notches | Enabled only when the driver advertises the setting. |
+| HDR / IQ correction | Advertised settings only; HDR remains subject to vendor frequency/sample-rate constraints. |
+| Reference clock OUT | Not advertised by the reference RSPdx driver, so disabled. RSPdx has a reference clock **input**, not the RSPduo output control. |
+| Sample rate / PPM | Existing Device Manager controls; sample-rate restart now reapplies the confirmed SDRplay profile. |
+
+Driver readback is checked before the requested state is persisted. A failure
+is visible in the panel, CLI and local API. Readback can be cached inside the
+vendor/Soapy layer: it is **not** measurement of physical RF gain or bias voltage.
+Multi-setting API requests validate all values first, but hardware writes are
+sequential, not atomic. On an I/O failure, inspect the error and current settings
+before retrying; earlier writes may already have succeeded.
+
+The GUI, CLI and local control API use the same checked control adapter.
+`POST /v1/sdrplay` retains legacy `rfgrDb`/`rfGainDb` compatibility names; values
+are RF states on SDRplay. `GET /v1/status` includes `probed`, `controlStatus`,
+`rfGainUnit`, and actual advertised features. A Tune request while the first
+async probe is still opening can report that RF controls are not ready: wait
+for discovery and retry the gain request rather than treating it as applied.
+
+Evidence: [RSPdx datasheet](https://www.sdrplay.com/resources/RSPdxDatasheet.pdf)
+and [pinned SoapySDRPlay3 Settings.cpp](https://github.com/pothosware/SoapySDRPlay3/blob/48bd8b41072534018de1d74deb3dea5874d9e0e0/Settings.cpp).
 
 ## Full feature coverage matrix
 
@@ -110,7 +148,7 @@ stream, stop and reopen. The RF/gain/sample-rate and P25 pipelines are unchanged
 | Hi-Z long-wire input | — | — | Tuner 1 Hi-Z (not Dual) | Yes — Single/Master modes |
 | Broadcast MW/FM notch | Yes | Yes | Yes | Yes — Soapy **`rfnotch_ctrl`** (combined; API has one `rfNotchEnable`) |
 | DAB notch | Yes | Yes | Yes | Yes — `dabnotch_ctrl` |
-| Bias-T ~4.7 V | Yes (SMA) | A/B SMA | 50 Ω SMA | Yes — blocked on **Hi-Z / Antenna C** |
+| Bias-T ~4.7 V | Yes (SMA) | **B only** | **Tuner 2 only** | Enabled only on supported ports and when advertised |
 | IFGR + RFGR (two-tier gain) | Yes | Yes | Yes | Yes — manual + main RF Gain → RFGR |
 | Hardware IF AGC + setpoint | Yes | Yes | Yes | Yes — AGC toggle + `agc_setpoint` |
 | IQ correction | Yes | Yes | Yes | Yes — `iqcorr_ctrl` |
@@ -123,9 +161,8 @@ stream, stop and reopen. The RF/gain/sample-rate and P25 pipelines are unchanged
 
 SoapySDRPlay3 exposes a single boolean **`extref_ctrl`**. On RSPduo / RSP2 this maps to
 API **`extRefOutputEn`** (reference **clock output** for daisy-chain). There is **no**
-separate Soapy key for external clock **input** / GPSDO lock. RSPdx MCX behaviour
-depends on the installed SoapySDRPlay3 build — the UI labels the control from the
-model and documents this limit in the tooltip.
+separate Soapy key for external clock **input** / GPSDO lock. RSPdx MCX is an
+input; the reference driver does not advertise `extref_ctrl` on that model.
 
 ### MW / FM notch honesty
 
@@ -179,7 +216,7 @@ sdrplay show <device>
 sdrplay gains <device>
 sdrplay agc <device> on|off
 sdrplay ifgr <device> <dB>
-sdrplay rfgr <device> <dB>
+sdrplay rfgr <device> <integer-LNA-state>
 sdrplay bw <device> <Hz|0>
 sdrplay antenna <device> Antenna A
 sdrplay set <device> <key> <value>
@@ -193,3 +230,9 @@ sdrplay diversity <device> off|sum|null [phase_deg] [amp_b]
 - **Multi-RSP coherent array orchestration:** beyond clock-OUT enable.
 - **TX:** not supported (RSP is RX-only).
 - Physical acceptance depends on API + Soapy module versions on the host.
+- RSPduo dual-tuner controls need separate physical qualification. The upstream
+  unchannelled settings API does not identify tuner B: the app refuses these
+  writes on the second DT row instead of claiming success on the wrong tuner.
+  The existing diversity/dual-stream implementation is not re-qualified by
+  RSPdx fixtures. The feature matrix describes implemented routes, not proof
+  that every API/module/model combination works.

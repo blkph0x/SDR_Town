@@ -13,6 +13,7 @@
 
 #include "SdrplayProfile.h"
 #include "SdrplayDiversity.h"
+#include "SdrplayControl.h"
 
 struct Receiver;  // forward for per-rx cursor methods (full def in Receiver.h, included in .cpp)
 
@@ -64,6 +65,11 @@ struct DeviceInfo {
     std::vector<std::string> sdrplaySettingKeys;
     std::map<std::string, std::vector<std::string>> sdrplaySettingOptions;
     std::map<std::string, std::string> soapySettings;
+    bool sdrplayProbed = false;
+    bool sdrplayHasAgc = false;
+    double ifgrMin = 20.0;
+    double ifgrMax = 59.0;
+    std::string sdrplayControlStatus;
 
     // Host-side RSPduo Dual Tuner diversity composite (not a Soapy device).
     bool isDiversityComposite = false;
@@ -201,12 +207,12 @@ public:
     bool setDirectSampling(size_t index, int mode, std::string* error = nullptr);
     int getDirectSampling(size_t index) const;
 
-    // SDRplay live controls (SoapySDRPlay3). No-ops for non-SDRplay devices.
-    void setLiveAgc(size_t index, bool enabled);
-    void setLiveGainElement(size_t index, const std::string& element, double valueDb);
-    void setLiveBandwidth(size_t index, double bandwidthHz);
-    void setLiveSdrplaySetting(size_t index, const std::string& key, const std::string& value);
-    void setLiveAntenna(size_t index, const std::string& antenna);
+    // SDRplay live controls (SoapySDRPlay3). False and error on unsupported or failed writes.
+    bool setLiveAgc(size_t index, bool enabled, std::string* error = nullptr);
+    bool setLiveGainElement(size_t index, const std::string& element, double valueDb, std::string* error = nullptr);
+    bool setLiveBandwidth(size_t index, double bandwidthHz, std::string* error = nullptr);
+    bool setLiveSdrplaySetting(size_t index, const std::string& key, const std::string& value, std::string* error = nullptr);
+    bool setLiveAntenna(size_t index, const std::string& antenna, std::string* error = nullptr);
     SdrplayCapabilities getSdrplayCapabilities(size_t index) const;
     std::string getSdrplaySetupStatus() const;
 
@@ -251,6 +257,8 @@ public:
     bool isHardwareTxActive(size_t index) const;
 
 private:
+    bool changeSdrplay(size_t index, const std::optional<SdrplayControl::Change>& change, std::string* error);
+    std::mutex sdrplayControlMutex_;
     DeviceManager();
     ~DeviceManager();
     DeviceManager(const DeviceManager&) = delete;

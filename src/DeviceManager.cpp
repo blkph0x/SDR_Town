@@ -19,6 +19,7 @@
 #include <array>
 #include <set>
 #include <map>
+#include <memory>
 #include <QCoreApplication>
 #include <cstdlib>
 #ifdef _WIN32
@@ -194,31 +195,10 @@ static std::string makeDeviceStableKey(const DeviceInfo& d) {
 #ifdef HAVE_SOAPYSDR
 static void applySdrplayProfileToDevice(SoapySDR::Device* dev, const DeviceInfo& d, size_t indexForLog) {
     if (!dev || !d.isSdrplay) return;
-    const size_t ch = d.rxChannel;
-    try {
-        if (d.bandwidthHz > 0.0) {
-            try { dev->setBandwidth(SOAPY_SDR_RX, ch, d.bandwidthHz); } catch (...) {}
-        }
-        try { dev->setGainMode(SOAPY_SDR_RX, ch, d.agcEnabled); } catch (...) {}
-        if (!d.agcEnabled) {
-            try { dev->setGain(SOAPY_SDR_RX, ch, "IFGR", d.ifgrDb); } catch (...) {}
-            try { dev->setGain(SOAPY_SDR_RX, ch, "RFGR", d.rfgrDb); } catch (...) {}
-            if (!d.gainName.empty()) {
-                try { dev->setGain(SOAPY_SDR_RX, ch, d.gainName, d.gain); } catch (...) {}
-            }
-        }
-        for (const auto& kv : d.soapySettings) {
-            try {
-                dev->writeSetting(kv.first, kv.second);
-            } catch (const std::exception& ex) {
-                spdlog::debug("SDRplay setting {}={} failed on device {}: {}", kv.first, kv.second, indexForLog, ex.what());
-            } catch (...) {}
-        }
-        spdlog::info("Applied SDRplay profile on device {} ch{} AGC={} IFGR={} RFGR={} settings={}",
-                     indexForLog, ch, d.agcEnabled, d.ifgrDb, d.rfgrDb, d.soapySettings.size());
-    } catch (const std::exception& ex) {
-        spdlog::warn("SDRplay profile apply failed on device {}: {}", indexForLog, ex.what());
-    }
+    DeviceInfo desired = d;
+    SdrplayControl::apply(*dev, desired);
+    spdlog::info("SDRplay profile confirmed by driver on device {} ch{} antenna={} AGC={} IFGR={} RF-state={}",
+        indexForLog, d.rxChannel, d.antenna, d.agcEnabled, d.ifgrDb, d.rfgrDb);
 }
 
 static void enrichSdrplayDeviceInfo(SoapySDR::Device* dev, DeviceInfo& di, size_t channel) {
@@ -226,61 +206,7 @@ static void enrichSdrplayDeviceInfo(SoapySDR::Device* dev, DeviceInfo& di, size_
     di.isSdrplay = true;
     di.rxChannel = channel;
     di.canTx = false;
-    di.sdrplayModel = SdrplayProfile::normalizeModel(di.hardware, di.label);
-
-    try {
-        auto gains = dev->listGains(SOAPY_SDR_RX, channel);
-        di.gainElements.assign(gains.begin(), gains.end());
-    } catch (...) {}
-    try {
-        auto ants = dev->listAntennas(SOAPY_SDR_RX, channel);
-        di.antennas.assign(ants.begin(), ants.end());
-        if (!di.antennas.empty() && di.antenna.empty()) di.antenna = di.antennas[0];
-    } catch (...) {}
-    try {
-        auto bws = dev->listBandwidths(SOAPY_SDR_RX, channel);
-        di.bandwidthsHz.assign(bws.begin(), bws.end());
-    } catch (...) {}
-    try {
-        auto info = dev->getSettingInfo();
-        di.sdrplaySettingKeys.clear();
-        di.sdrplaySettingOptions.clear();
-        for (const auto& arg : info) {
-            di.sdrplaySettingKeys.push_back(arg.key);
-            if (!arg.options.empty()) {
-                di.sdrplaySettingOptions[arg.key] = arg.options;
-            }
-        }
-    } catch (...) {}
-
-    // Prefer RFGR as the "main" gain knob (LNA / RF gain reduction).
-    di.gainName = "RFGR";
-    try {
-        auto gr = dev->getGainRange(SOAPY_SDR_RX, channel, "RFGR");
-        di.gainMin = gr.minimum();
-        di.gainMax = gr.maximum();
-        di.rfgrDb = std::clamp(di.rfgrDb, di.gainMin, di.gainMax);
-        di.gain = di.rfgrDb;
-    } catch (...) {
-        di.gainMin = 0.0;
-        di.gainMax = 27.0;
-    }
-    try {
-        auto igr = dev->getGainRange(SOAPY_SDR_RX, channel, "IFGR");
-        di.ifgrDb = std::clamp(di.ifgrDb, igr.minimum(), igr.maximum());
-    } catch (...) {}
-
-    auto caps = SdrplayProfile::capabilitiesFromProbe(
-        di.driver, di.hardware, di.label, di.gainElements, di.antennas,
-        di.bandwidthsHz, di.sdrplaySettingKeys, di.sdrplaySettingOptions);
-    if (di.soapySettings.empty()) {
-        auto defaults = SdrplayProfile::defaultSettings(caps);
-        di.soapySettings = defaults.soapySettings;
-        di.agcEnabled = defaults.agcEnabled;
-        di.ifgrDb = defaults.ifgrDb;
-        di.rfgrDb = defaults.rfgrDb;
-        di.gain = di.rfgrDb;
-    }
+    SdrplayControl::probe(*dev, di);
 }
 #endif
 
@@ -384,6 +310,11 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware, bool
             if (probeHardware) {
                 try {
                     auto dev = SoapySDR::Device::make(result);
+                    const auto releaseProbe = [](SoapySDR::Device* device) {
+                        try { if (device) SoapySDR::Device::unmake(device); }
+                        catch (...) { spdlog::warn("Driver cleanup failed after capability probe"); }
+                    };
+                    std::unique_ptr<SoapySDR::Device, decltype(releaseProbe)> probeOwner(dev, releaseProbe);
                     if (dev) {
                         for (size_t ch = 0; ch < channelCount; ++ch) {
                             DeviceInfo di = base;
@@ -494,7 +425,6 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware, bool
                             finishOne(std::move(di));
                             if (!dualTuner) break;
                         }
-                        SoapySDR::Device::unmake(dev);
                     }
                 } catch (const std::exception& ex) {
                     spdlog::warn("Could not fully probe device {}: {}", base.label, ex.what());
@@ -819,6 +749,7 @@ void DeviceManager::fromJson(const nlohmann::json& j) {
                 if (saved.contains("gain")) d.gain = clampGainForDevice(d, saved["gain"].get<double>());
                 if (saved.contains("frequencyCorrectionPpm")) d.frequencyCorrectionPpm = clampFrequencyCorrectionPpm(saved["frequencyCorrectionPpm"].get<double>());
                 else if (saved.contains("ppm")) d.frequencyCorrectionPpm = clampFrequencyCorrectionPpm(saved["ppm"].get<double>());
+                const auto probed = d;
                 if (saved.contains("antenna")) d.antenna = saved["antenna"];
                 if (saved.contains("directSampling")) {
                     d.directSampling = clampDirectSamplingMode(saved["directSampling"].get<int>());
@@ -841,6 +772,7 @@ void DeviceManager::fromJson(const nlohmann::json& j) {
                             else d.soapySettings[it.key()] = it.value().dump();
                         }
                     }
+                    if (d.sdrplayProbed) SdrplayControl::mergeCapabilities(probed, d);
                 }
                 break;
             }
@@ -1124,7 +1056,29 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
 
             {
                 std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+                if (liveInfo.isSdrplay) enrichSdrplayDeviceInfo(localDev, liveInfo, rxCh);
+            }
+            if (liveInfo.isSdrplay) {
+                std::lock_guard<std::mutex> controlLock(sdrplayControlMutex_);
+                std::lock_guard<std::mutex> lk(devicesMutex);
+                if (st.stopFlag || st.sessionGen.load() != myGen || index >= devices.size()) {
+                    throw std::runtime_error("SDRplay open superseded before capability publication");
+                }
+                SdrplayControl::mergeCapabilities(liveInfo, devices[index]);
+                devices[index].sdrplayControlStatus = "Capabilities read; starting receiver";
+                liveInfo = devices[index];
+                spdlog::info("SDRplay capabilities device={} model={} antennas={} settings={} AGC={}",
+                    index, liveInfo.sdrplayModel, liveInfo.antennas.size(),
+                    liveInfo.sdrplaySettingKeys.size(), liveInfo.sdrplayHasAgc);
+            }
+            {
+                std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
                 localDev->setSampleRate(SOAPY_SDR_RX, rxCh, useRate);
+                if (liveInfo.isSdrplay) {
+                    const double actualRate = localDev->getSampleRate(SOAPY_SDR_RX, rxCh);
+                    if (!std::isfinite(actualRate) || std::abs(actualRate - useRate) > 1.0)
+                        throw std::runtime_error("SDRplay did not accept the requested sample rate");
+                }
                 if (!liveInfo.antenna.empty()) try { localDev->setAntenna(SOAPY_SDR_RX, rxCh, liveInfo.antenna); } catch (...) {}
             }
 
@@ -1199,7 +1153,9 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                 std::vector<size_t> channels = {rxCh};
                 localStream = localDev->setupStream(SOAPY_SDR_RX, "CF32", channels);
                 if (!localStream) throw std::runtime_error("setupStream null");
-                localDev->activateStream(localStream);
+                const int activation = localDev->activateStream(localStream);
+                if (applyInfo.isSdrplay && activation < 0)
+                    throw std::runtime_error("SDRplay stream activation failed: " + std::to_string(activation));
             }
 
             if (st.stopFlag || st.sessionGen.load() != myGen) {
@@ -1300,7 +1256,15 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                 }
             }
             // Now safe to call (no devicesMutex held).
-            setLiveGain(index, latestGain);
+            if (d.isSdrplay) {
+                // Some Soapy builds reselect/reset the antenna during activation.
+                // Reapply all current controls, preserving IF AGC and startup edits.
+                std::string controlError;
+                if (!changeSdrplay(index, std::nullopt, &controlError))
+                    spdlog::error("SDRplay startup control confirmation failed: {}", controlError);
+            } else {
+                setLiveGain(index, latestGain);
+            }
             double latestPpm = usePpm;
             {
                 std::lock_guard<std::mutex> lk(devicesMutex);
@@ -1570,6 +1534,14 @@ double DeviceManager::getCurrentGain(size_t index) const {
 }
 
 void DeviceManager::setLiveGain(size_t index, double gainDb) {
+    {
+        const auto snapshot = getDevices();
+        if (index < snapshot.size() && snapshot[index].isSdrplay) {
+            // RFGR is a discrete LNA state, not dB; it does not disable IF AGC.
+            setLiveGainElement(index, "RFGR", std::round(clampGainForDevice(snapshot[index], gainDb)));
+            return;
+        }
+    }
     DeviceInfo d;
     double useGain = gainDb;
 
@@ -1759,9 +1731,14 @@ SdrplayCapabilities DeviceManager::getSdrplayCapabilities(size_t index) const {
     std::lock_guard<std::mutex> lk(devicesMutex);
     if (index >= devices.size()) return {};
     const auto& d = devices[index];
-    return SdrplayProfile::capabilitiesFromProbe(
+    auto caps = SdrplayProfile::capabilitiesFromProbe(
         d.driver, d.hardware, d.label, d.gainElements, d.antennas,
         d.bandwidthsHz, d.sdrplaySettingKeys, d.sdrplaySettingOptions);
+    caps.probeVerified = d.sdrplayProbed;
+    caps.hasAgc = d.sdrplayProbed && d.sdrplayHasAgc;
+    caps.hasIfgr = caps.hasIfgr && d.sdrplayProbed;
+    caps.hasRfgr = caps.hasRfgr && d.sdrplayProbed;
+    return caps;
 }
 
 std::string DeviceManager::getSdrplaySetupStatus() const {
@@ -1904,161 +1881,122 @@ void DeviceManager::setPreferredListenDeviceIndex(size_t index) {
     preferredListenDeviceIndex_ = index;
 }
 
-void DeviceManager::setLiveAgc(size_t index, bool enabled) {
-    DeviceInfo d;
+bool DeviceManager::changeSdrplay(size_t index, const std::optional<SdrplayControl::Change>& change, std::string* error) {
+    // DEC-0128: serialize setters and startup catch-up without holding the model
+    // lock across USB I/O. stateMutex keeps the handle alive until readback ends.
+    std::lock_guard<std::mutex> controlLock(sdrplayControlMutex_);
+    DeviceInfo desired;
     {
         std::lock_guard<std::mutex> lk(devicesMutex);
-        if (index >= devices.size() || !devices[index].isSdrplay) return;
-        devices[index].agcEnabled = enabled;
-        d = devices[index];
-        saveSettings();
+        if (index >= devices.size() || !devices[index].isSdrplay) {
+            if (error) *error = "Not an SDRplay device";
+            return false;
+        }
+        desired = devices[index];
     }
-#ifdef HAVE_SOAPYSDR
-    if (auto* stPtr = streamState(index)) {
-        auto& st = *stPtr;
-        std::lock_guard<std::mutex> stateLock(st.stateMutex);
-        if (st.soapyDev && !st.stopFlag) {
-            try {
-                std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
-                st.soapyDev->setGainMode(SOAPY_SDR_RX, d.rxChannel, enabled);
-                if (!enabled) {
-                    try { st.soapyDev->setGain(SOAPY_SDR_RX, d.rxChannel, "IFGR", d.ifgrDb); } catch (...) {}
-                    try { st.soapyDev->setGain(SOAPY_SDR_RX, d.rxChannel, "RFGR", d.rfgrDb); } catch (...) {}
-                }
-            } catch (const std::exception& ex) {
-                spdlog::warn("Live AGC failed on device {}: {}", index, ex.what());
+    try {
+        if (change) SdrplayControl::prepare(desired, *change);
+        if (change && change->kind == SdrplayControl::Kind::Antenna && isStreaming(index)) {
+            const double center = getCurrentCenterFreq(index);
+            if (center > 0) {
+                const auto reason = SdrplayProfile::antennaFrequencyError(desired.sdrplayModel, desired.antenna, center);
+                if (!reason.empty()) throw std::runtime_error(reason + " Tune into this port's range before switching.");
             }
         }
-    }
-#endif
-}
-
-void DeviceManager::setLiveGainElement(size_t index, const std::string& element, double valueDb) {
-    DeviceInfo d;
-    {
-        std::lock_guard<std::mutex> lk(devicesMutex);
-        if (index >= devices.size() || !devices[index].isSdrplay) return;
-        if (element == "IFGR") devices[index].ifgrDb = valueDb;
-        else if (element == "RFGR") {
-            devices[index].rfgrDb = valueDb;
-            devices[index].gain = clampGainForDevice(devices[index], valueDb);
-        }
-        devices[index].agcEnabled = false;
-        d = devices[index];
-        saveSettings();
-    }
+        bool live = false;
 #ifdef HAVE_SOAPYSDR
-    if (auto* stPtr = streamState(index)) {
-        auto& st = *stPtr;
-        std::lock_guard<std::mutex> stateLock(st.stateMutex);
-        if (st.soapyDev && !st.stopFlag) {
-            try {
-                std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
-                try { st.soapyDev->setGainMode(SOAPY_SDR_RX, d.rxChannel, false); } catch (...) {}
-                st.soapyDev->setGain(SOAPY_SDR_RX, d.rxChannel, element, valueDb);
-            } catch (const std::exception& ex) {
-                spdlog::warn("Live gain element {} failed on device {}: {}", element, index, ex.what());
+        if (auto* st = streamState(index)) {
+            std::lock_guard<std::mutex> stateLock(st->stateMutex);
+            if (st->soapyDev && !st->stopFlag) {
+                std::lock_guard<std::mutex> ioLock(gSoapyLiveIoMutex);
+                if (change) SdrplayControl::applyChange(*st->soapyDev, desired, *change);
+                else SdrplayControl::apply(*st->soapyDev, desired);
+                live = true;
             }
         }
-    }
 #endif
-}
-
-void DeviceManager::setLiveBandwidth(size_t index, double bandwidthHz) {
-    DeviceInfo d;
-    {
-        std::lock_guard<std::mutex> lk(devicesMutex);
-        if (index >= devices.size() || !devices[index].isSdrplay) return;
-        devices[index].bandwidthHz = bandwidthHz;
-        d = devices[index];
-        saveSettings();
-    }
-#ifdef HAVE_SOAPYSDR
-    if (bandwidthHz <= 0.0) return;
-    if (auto* stPtr = streamState(index)) {
-        auto& st = *stPtr;
-        std::lock_guard<std::mutex> stateLock(st.stateMutex);
-        if (st.soapyDev && !st.stopFlag) {
-            try {
-                std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
-                st.soapyDev->setBandwidth(SOAPY_SDR_RX, d.rxChannel, bandwidthHz);
-            } catch (const std::exception& ex) {
-                spdlog::warn("Live bandwidth failed on device {}: {}", index, ex.what());
-            }
-        }
-    }
-#endif
-}
-
-void DeviceManager::setLiveSdrplaySetting(size_t index, const std::string& key, const std::string& value) {
-    DeviceInfo d;
-    {
-        std::lock_guard<std::mutex> lk(devicesMutex);
-        if (index >= devices.size() || !devices[index].isSdrplay) return;
-        // Refuse Bias-T on Hi-Z / Antenna C (BNC) — forces off and skips hardware write.
-        if (key == SdrplaySettings::kBiasT &&
-            SdrplayProfile::parseBoolSetting(value, false) &&
-            !SdrplayProfile::biasTAllowedForAntenna(devices[index].sdrplayModel, devices[index].antenna)) {
-            devices[index].soapySettings[key] = "false";
+        {
+            std::lock_guard<std::mutex> lk(devicesMutex);
+            if (index >= devices.size() || devices[index].stableKey != desired.stableKey)
+                throw std::runtime_error("Device changed while applying SDRplay controls");
+            auto& target = devices[index];
+            target.antenna = desired.antenna;
+            target.agcEnabled = desired.agcEnabled;
+            target.ifgrDb = desired.ifgrDb;
+            target.rfgrDb = target.gain = desired.rfgrDb;
+            target.bandwidthHz = desired.bandwidthHz;
+            target.soapySettings = desired.soapySettings;
+            target.sdrplayControlStatus = live ? "Driver readback confirmed" : "Saved for next receiver start";
             saveSettings();
-            spdlog::warn("Bias-T blocked on device {} antenna '{}' (incompatible port)",
-                         index, devices[index].antenna);
-            return;
         }
-        devices[index].soapySettings[key] = value;
-        d = devices[index];
-        saveSettings();
-    }
-#ifdef HAVE_SOAPYSDR
-    if (auto* stPtr = streamState(index)) {
-        auto& st = *stPtr;
-        std::lock_guard<std::mutex> stateLock(st.stateMutex);
-        if (st.soapyDev && !st.stopFlag) {
-            try {
-                std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
-                st.soapyDev->writeSetting(key, value);
-            } catch (const std::exception& ex) {
-                spdlog::warn("Live SDRplay setting {}={} failed on device {}: {}", key, value, index, ex.what());
-            }
+        if (error) error->clear();
+        spdlog::info("SDRplay control device={} key={} value={} number={} result={}",
+            index, change ? change->key : "profile", change ? change->value : "",
+            change ? change->number : 0, live ? "driver-confirmed" : "saved");
+        return true;
+    } catch (const std::exception& ex) {
+        if (error) *error = ex.what();
+        {
+            std::lock_guard<std::mutex> lk(devicesMutex);
+            if (index < devices.size()) devices[index].sdrplayControlStatus = std::string("Control failed: ") + ex.what();
         }
+        spdlog::warn("SDRplay control device={} failed: {}", index, ex.what());
+        return false;
     }
-#endif
 }
 
-void DeviceManager::setLiveAntenna(size_t index, const std::string& antenna) {
+bool DeviceManager::setLiveAgc(size_t index, bool enabled, std::string* error) {
+    return changeSdrplay(index, SdrplayControl::Change{SdrplayControl::Kind::Agc, "AGC", "", enabled ? 1.0 : 0.0}, error);
+}
+
+bool DeviceManager::setLiveGainElement(size_t index, const std::string& element, double valueDb, std::string* error) {
+    return changeSdrplay(index, SdrplayControl::Change{SdrplayControl::Kind::Gain, element, "", valueDb}, error);
+}
+
+bool DeviceManager::setLiveBandwidth(size_t index, double bandwidthHz, std::string* error) {
+    return changeSdrplay(index, SdrplayControl::Change{SdrplayControl::Kind::Bandwidth, "bandwidth", "", bandwidthHz}, error);
+}
+
+bool DeviceManager::setLiveSdrplaySetting(size_t index, const std::string& key, const std::string& value, std::string* error) {
+    return changeSdrplay(index, SdrplayControl::Change{SdrplayControl::Kind::Setting, key, value}, error);
+}
+
+bool DeviceManager::setLiveAntenna(size_t index, const std::string& antenna, std::string* error) {
+    const auto snapshot = getDevices();
+    if (index >= snapshot.size()) {
+        if (error) *error = "Invalid device index";
+        return false;
+    }
+    if (snapshot[index].isSdrplay)
+        return changeSdrplay(index, SdrplayControl::Change{SdrplayControl::Kind::Antenna, "antenna", antenna}, error);
+    // Preserve the non-SDRplay path.
     DeviceInfo d;
     {
         std::lock_guard<std::mutex> lk(devicesMutex);
-        if (index >= devices.size()) return;
+        if (index >= devices.size()) return false;
         devices[index].antenna = antenna;
-        if (devices[index].isSdrplay &&
-            !SdrplayProfile::biasTAllowedForAntenna(devices[index].sdrplayModel, antenna)) {
-            devices[index].soapySettings[SdrplaySettings::kBiasT] = "false";
-        }
         d = devices[index];
         saveSettings();
     }
 #ifdef HAVE_SOAPYSDR
-    if (d.isDiversityComposite) return;
+    if (d.isDiversityComposite) return true;
     if (auto* stPtr = streamState(index)) {
         auto& st = *stPtr;
         std::lock_guard<std::mutex> stateLock(st.stateMutex);
         if (st.soapyDev && !st.stopFlag) {
             try {
                 std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
-                const size_t ch = d.isSdrplay ? d.rxChannel : 0;
-                st.soapyDev->setAntenna(SOAPY_SDR_RX, ch, antenna);
-                if (d.isSdrplay &&
-                    !SdrplayProfile::biasTAllowedForAntenna(d.sdrplayModel, antenna)) {
-                    try { st.soapyDev->writeSetting(SdrplaySettings::kBiasT, "false"); } catch (...) {}
-                }
+                st.soapyDev->setAntenna(SOAPY_SDR_RX, 0, antenna);
                 spdlog::info("Live antenna applied to device {}: {}", index, antenna);
             } catch (const std::exception& ex) {
+                if (error) *error = ex.what();
                 spdlog::warn("Live antenna failed on device {}: {}", index, ex.what());
+                return false;
             }
         }
     }
 #endif
+    return true;
 }
 
 SdrplayDiversity::Config DeviceManager::getDiversityConfig() const {

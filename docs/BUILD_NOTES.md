@@ -2,6 +2,28 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-25 - RSPdx complete control and lifecycle regression (DEC-0128)
+
+Windows/MSVC2022/Qt6.11.1, base ccaf6ae. build-2.log and build-3.log PASS for
+app/core/workspace/Inmarsat GUI targets. Full CTest runs PASS 12/12 in 36.84 s
+and 35.16 s respectively. Added focused numeric-edit rejection rollback and
+PPM/sample-rate/AGC restart coverage to the initial contract/widget cases.
+P25 guard negative self-tests PASS; release-verifier negative tests 16/16 PASS.
+No build/test failure in these three iterations. Final versioned build and
+public packaging/CI remain the next gate. No physical RSP is present locally.
+
+## 2026-09-25 - SDRplay controls initial regression checks (DEC-0128)
+
+Base ccaf6ae, Windows/MSVC2022/Qt6.11.1. Initial app/core/workspace build PASS.
+Core driver-contract tests 59 assertions/4 cases PASS; native widget clicks
+49 assertions/1 case PASS; actual DeviceManager light discovery/open/control/
+restart/persistence against registered Soapy fixture PASS (1.08 s). Fixture
+returns no RF samples and deliberately resets antenna at activation; no real
+RSP or electrical test claimed. Screenshot controls.png inspected: antenna and
+capability-gated controls fit. CLI/API error propagation and final regression
+qualification are still in progress. Evidence build-audit-20260925/sdrplay-controls/
+build-1.log, core-1.log, gui-1.log, lifecycle-1.log. No compile/assertion failure.
+
 ## 2026-09-25 - 0.2.95 Aero watch release qualification and publication
 
 Source e46f43719180e17cbf6547e88b11338af17d93ba; signed metadata/tag d7979ee.

@@ -11,6 +11,8 @@
 #include "RdsMpxDecoder.h"
 #include "DcsDecoder.h"
 #include "SdrplayProfile.h"
+#include "SdrplayControlsWidget.h"
+#include <QScrollArea>
 #include "SdrplayDiversity.h"
 #include "SatcomScannerWidget.h"
 #include "AircraftMapWidget.h"
@@ -4543,6 +4545,22 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
 
         // Wire the new controls to per-receiver state and backend (gain goes to device, others to demod/display).
         connect(gainSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double v) {
+            auto& manager = DeviceManager::instance();
+            const auto snapshot = manager.getDevices();
+            const size_t selected = sdrTownControlActiveDeviceIndex();
+            if (selected < snapshot.size() && snapshot[selected].isSdrplay) {
+                const double state = std::round(std::clamp(v, snapshot[selected].gainMin, snapshot[selected].gainMax));
+                std::string error;
+                if (!manager.setLiveGainElement(selected, "RFGR", state, &error)) {
+                    statusBar()->showMessage(QString::fromStdString(error), 6000);
+                    if (rfGainSpin) { const QSignalBlocker block(rfGainSpin); rfGainSpin->setValue(snapshot[selected].rfgrDb); }
+                    return;
+                }
+                { std::lock_guard<std::mutex> lock(monitorParamsMutex); monitorRfGainDb = state; }
+                syncMonitorVarsToReceiver(0);
+                if (rfGainSpin) { const QSignalBlocker block(rfGainSpin); rfGainSpin->setValue(state); }
+                return;
+            }
             std::lock_guard<std::mutex> lk(monitorParamsMutex);
             monitorRfGainDb = v;
             syncMonitorVarsToReceiver(0);
@@ -7874,7 +7892,7 @@ void MainWindow::showDevicesDialog()
 {
         QDialog dlg(this);
         dlg.setWindowTitle("Device Manager — SDR Town");
-        dlg.resize(900, 520);
+        dlg.resize(1000, 740);
 
         auto& mgr = DeviceManager::instance();
         std::vector<DeviceInfo> devs = mgr.getDevices();
@@ -7957,14 +7975,22 @@ void MainWindow::showDevicesDialog()
                 else ant->setCurrentText(QString::fromStdString(d.antenna));
             }
             if (d.isSdrplay) {
-                ant->setToolTip("RSPdx: A/B SMA (Bias-T), C BNC HF. RSPduo: Tuner1 50Ω/Hi-Z, Tuner2 50Ω. Live-applied.");
+                ant->setToolTip("RSPdx: A/B SMA, C BNC (up to 200 MHz). Bias-T only on B. Driver-confirmed live controls.");
+                ant->setEnabled(d.sdrplayProbed);
             }
             table->setCellWidget(row, 4, ant);
             antCombos.push_back(ant);
-            connect(ant, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [i, ant](int) {
+            connect(ant, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, i, ant](int) {
                 const QString data = ant->currentData().toString();
                 const std::string name = data.isEmpty() ? ant->currentText().toStdString() : data.toStdString();
-                DeviceManager::instance().setLiveAntenna(i, name);
+                std::string error;
+                auto& manager = DeviceManager::instance();
+                if (!manager.setLiveAntenna(i, name, &error)) {
+                    const auto snapshot = manager.getDevices();
+                    const QSignalBlocker block(ant);
+                    if (i < snapshot.size()) ant->setCurrentIndex(ant->findData(QString::fromStdString(snapshot[i].antenna)));
+                    statusBar()->showMessage(QString::fromStdString(error), 6000);
+                }
             });
 
             // Sample rate
@@ -8042,30 +8068,9 @@ void MainWindow::showDevicesDialog()
 
         mainLay->addWidget(table);
 
-        // SDRplay model-specific panel (shown for selected SDRplay row).
-        QGroupBox* sdrplayBox = new QGroupBox("SDRplay controls", &dlg);
-        auto* sdrplayLay = new QFormLayout(sdrplayBox);
-        QLabel* sdrplayInfo = new QLabel("Select an SDRplay row above.");
-        sdrplayInfo->setWordWrap(true);
-        sdrplayLay->addRow(sdrplayInfo);
-        QCheckBox* sdrAgc = new QCheckBox("AGC");
-        QDoubleSpinBox* sdrIfgr = new QDoubleSpinBox();
-        sdrIfgr->setRange(20.0, 59.0); sdrIfgr->setDecimals(0); sdrIfgr->setSuffix(" dB"); sdrIfgr->setToolTip("IFGR — IF gain reduction (higher = less IF gain)");
-        QDoubleSpinBox* sdrRfgr = new QDoubleSpinBox();
-        sdrRfgr->setRange(0.0, 27.0); sdrRfgr->setDecimals(0); sdrRfgr->setSuffix(" dB"); sdrRfgr->setToolTip("RFGR — RF/LNA gain reduction (higher = less RF gain)");
-        QComboBox* sdrBw = new QComboBox();
-        QCheckBox* sdrBiasT = new QCheckBox("Bias-T (4.7 V on SMA)");
-        QCheckBox* sdrRfNotch = new QCheckBox(QString::fromStdString(SdrplayProfile::rfNotchUiLabel()));
-        QCheckBox* sdrDabNotch = new QCheckBox("DAB notch");
-        QCheckBox* sdrExtRef = new QCheckBox("Reference clock OUT");
-        QCheckBox* sdrHdr = new QCheckBox("HDR mode (RSPdx < ~2 MHz)");
-        QCheckBox* sdrIqCorr = new QCheckBox("IQ correction");
-        QSpinBox* sdrAgcSet = new QSpinBox();
-        sdrAgcSet->setRange(-60, 0); sdrAgcSet->setSuffix(" dBfs"); sdrAgcSet->setToolTip("AGC setpoint");
-        QComboBox* sdrRfGainSel = new QComboBox();
-        QLabel* sdrPortHint = new QLabel();
-        sdrPortHint->setWordWrap(true);
-        sdrPortHint->setStyleSheet("color: #aaa; font-size: 11px;");
+        // DEC-0128: one tested control panel uses the same acknowledged setters as CLI/API.
+        auto* sdrplayBox = new SdrplayControlsWidget(&dlg);
+        auto* sdrplayLay = sdrplayBox->form();
         // RSPduo Dual Tuner host diversity / null-steer
         QComboBox* sdrDivMode = new QComboBox();
         sdrDivMode->addItem("Off", static_cast<int>(SdrplayDiversity::Mode::Off));
@@ -8080,108 +8085,46 @@ void MainWindow::showDevicesDialog()
         QLabel* sdrDivHint = new QLabel();
         sdrDivHint->setWordWrap(true);
         sdrDivHint->setStyleSheet("color: #aaa; font-size: 11px;");
-        sdrplayLay->addRow("AGC", sdrAgc);
-        sdrplayLay->addRow("IFGR", sdrIfgr);
-        sdrplayLay->addRow("RFGR", sdrRfgr);
-        sdrplayLay->addRow("Bandwidth", sdrBw);
-        sdrplayLay->addRow("AGC setpoint", sdrAgcSet);
-        sdrplayLay->addRow("RF gain select", sdrRfGainSel);
-        sdrplayLay->addRow(sdrBiasT);
-        sdrplayLay->addRow(sdrRfNotch);
-        sdrplayLay->addRow(sdrDabNotch);
-        sdrplayLay->addRow(sdrExtRef);
-        sdrplayLay->addRow(sdrHdr);
-        sdrplayLay->addRow(sdrIqCorr);
-        sdrplayLay->addRow(sdrPortHint);
         sdrplayLay->addRow("Diversity / null", sdrDivMode);
         sdrplayLay->addRow("B phase", sdrDivPhase);
         sdrplayLay->addRow("B amplitude", sdrDivAmp);
         sdrplayLay->addRow(sdrDivHint);
         sdrplayBox->setEnabled(false);
-        mainLay->addWidget(sdrplayBox);
+        auto* controlsScroll = new QScrollArea(&dlg);
+        controlsScroll->setWidgetResizable(true);
+        controlsScroll->setWidget(sdrplayBox);
+        controlsScroll->setMinimumHeight(180);
+        mainLay->addWidget(controlsScroll, 1);
 
         auto refreshSdrplayPanel = [&](int row) {
-            if (row < 0 || row >= static_cast<int>(devs.size()) || !devs[static_cast<size_t>(row)].isSdrplay) {
-                sdrplayBox->setEnabled(false);
-                sdrplayInfo->setText("Select an SDRplay row above.");
+            const auto current = mgr.getDevices();
+            if (row < 0 || row >= static_cast<int>(current.size()) || !current[static_cast<size_t>(row)].isSdrplay) {
+                sdrplayBox->setDevice(nullptr);
                 return;
             }
             const size_t i = static_cast<size_t>(row);
-            auto* live = mgr.getDevice(i);
-            DeviceInfo d = live ? *live : devs[i];
-            sdrplayBox->setEnabled(true);
-            QString duo = d.sdrplayDuoMode.empty() ? QString() :
-                QString(" — %1").arg(QString::fromStdString(SdrplayProfile::duoModeDisplayName(d.sdrplayDuoMode)));
-            sdrplayInfo->setText(QString("%1%2  channel %3. Duo mode changes require Rescan + stream restart.")
-                .arg(QString::fromStdString(d.sdrplayModel.empty() ? d.label : d.sdrplayModel))
-                .arg(duo)
-                .arg(d.rxChannel));
-            sdrPortHint->setText(QString::fromStdString(
-                SdrplayProfile::antennaPortDescription(d.sdrplayModel, d.antenna)));
-            const bool biasOk = SdrplayProfile::biasTAllowedForAntenna(d.sdrplayModel, d.antenna);
-            sdrAgc->blockSignals(true); sdrAgc->setChecked(d.agcEnabled); sdrAgc->blockSignals(false);
-            sdrIfgr->blockSignals(true); sdrIfgr->setValue(d.ifgrDb); sdrIfgr->blockSignals(false);
-            sdrRfgr->blockSignals(true);
-            sdrRfgr->setRange(d.gainMin, d.gainMax > d.gainMin ? d.gainMax : 27.0);
-            sdrRfgr->setValue(d.rfgrDb);
-            sdrRfgr->blockSignals(false);
-            sdrBw->blockSignals(true); sdrBw->clear();
-            sdrBw->addItem("Driver default", 0.0);
-            for (double bw : d.bandwidthsHz) {
-                sdrBw->addItem(QString("%1 kHz").arg(bw / 1e3, 0, 'f', 0), bw);
+            const DeviceInfo& d = current[i];
+            sdrplayBox->setDevice(&d, QString::fromStdString(mgr.getRuntimeStateLabel(i)));
+            if (i < antCombos.size()) {
+                const QSignalBlocker block(antCombos[i]);
+                auto* ant = antCombos[i];
+                bool same = ant->count() == static_cast<int>(d.antennas.size());
+                for (int n = 0; same && n < ant->count(); ++n)
+                    same = ant->itemData(n).toString().toStdString() == d.antennas[static_cast<size_t>(n)];
+                if (!same) {
+                    ant->clear();
+                    for (const auto& name : d.antennas)
+                        ant->addItem(QString::fromStdString(name), QString::fromStdString(name));
+                }
+                ant->setCurrentIndex(ant->findData(QString::fromStdString(d.antenna)));
+                ant->setEnabled(d.sdrplayProbed);
+                const QSignalBlocker gainBlock(gainSpins[i]);
+                gainSpins[i]->setRange(d.gainMin, d.gainMax);
+                if (!gainSpins[i]->hasFocus()) gainSpins[i]->setValue(d.rfgrDb);
+                gainSpins[i]->setDecimals(0);
+                gainSpins[i]->setSuffix(" state");
+                gainSpins[i]->setEnabled(d.sdrplayProbed);
             }
-            int bwIdx = 0;
-            for (int b = 0; b < sdrBw->count(); ++b) {
-                if (std::abs(sdrBw->itemData(b).toDouble() - d.bandwidthHz) < 1.0) { bwIdx = b; break; }
-            }
-            sdrBw->setCurrentIndex(bwIdx); sdrBw->blockSignals(false);
-
-            auto hasKey = [&](const char* key) {
-                return std::find(d.sdrplaySettingKeys.begin(), d.sdrplaySettingKeys.end(), key) != d.sdrplaySettingKeys.end()
-                    || d.sdrplaySettingKeys.empty(); // allow before probe
-            };
-            auto settingBool = [&](const char* key, bool fallback) {
-                auto it = d.soapySettings.find(key);
-                if (it == d.soapySettings.end()) return fallback;
-                return SdrplayProfile::parseBoolSetting(it->second, fallback);
-            };
-            sdrBiasT->setEnabled(hasKey(SdrplaySettings::kBiasT) && biasOk);
-            if (!biasOk) sdrBiasT->setToolTip("Bias-T disabled on this port (Hi-Z / Antenna C BNC).");
-            else sdrBiasT->setToolTip("Injects ~4.7 V DC on compatible SMA ports for active antennas/LNAs.");
-            sdrRfNotch->setEnabled(hasKey(SdrplaySettings::kRfNotch));
-            sdrRfNotch->setToolTip(QString::fromStdString(SdrplayProfile::rfNotchUiTooltip()));
-            sdrDabNotch->setEnabled(hasKey(SdrplaySettings::kDabNotch));
-            sdrExtRef->setText(QString::fromStdString(SdrplayProfile::extRefUiLabel(d.sdrplayModel)));
-            sdrExtRef->setEnabled(hasKey(SdrplaySettings::kExtRef));
-            sdrExtRef->setToolTip(QString::fromStdString(SdrplayProfile::extRefUiTooltip(d.sdrplayModel)));
-            sdrHdr->setEnabled(hasKey(SdrplaySettings::kHdr));
-            sdrIqCorr->setEnabled(hasKey(SdrplaySettings::kIqCorr));
-            sdrAgcSet->setEnabled(hasKey(SdrplaySettings::kAgcSetpoint));
-            sdrRfGainSel->setEnabled(hasKey(SdrplaySettings::kRfGainSel));
-            sdrBiasT->blockSignals(true); sdrBiasT->setChecked(biasOk && settingBool(SdrplaySettings::kBiasT, false)); sdrBiasT->blockSignals(false);
-            sdrRfNotch->blockSignals(true); sdrRfNotch->setChecked(settingBool(SdrplaySettings::kRfNotch, false)); sdrRfNotch->blockSignals(false);
-            sdrDabNotch->blockSignals(true); sdrDabNotch->setChecked(settingBool(SdrplaySettings::kDabNotch, false)); sdrDabNotch->blockSignals(false);
-            sdrExtRef->blockSignals(true); sdrExtRef->setChecked(settingBool(SdrplaySettings::kExtRef, false)); sdrExtRef->blockSignals(false);
-            sdrHdr->blockSignals(true); sdrHdr->setChecked(settingBool(SdrplaySettings::kHdr, false)); sdrHdr->blockSignals(false);
-            sdrIqCorr->blockSignals(true); sdrIqCorr->setChecked(settingBool(SdrplaySettings::kIqCorr, true)); sdrIqCorr->blockSignals(false);
-            int setpoint = -30;
-            if (auto it = d.soapySettings.find(SdrplaySettings::kAgcSetpoint); it != d.soapySettings.end()) {
-                try { setpoint = std::stoi(it->second); } catch (...) {}
-            }
-            sdrAgcSet->blockSignals(true); sdrAgcSet->setValue(setpoint); sdrAgcSet->blockSignals(false);
-            sdrRfGainSel->blockSignals(true); sdrRfGainSel->clear();
-            auto optIt = d.sdrplaySettingOptions.find(SdrplaySettings::kRfGainSel);
-            if (optIt != d.sdrplaySettingOptions.end()) {
-                for (const auto& o : optIt->second) sdrRfGainSel->addItem(QString::fromStdString(o));
-            } else {
-                for (int n = 0; n <= 27; ++n) sdrRfGainSel->addItem(QString::number(n));
-            }
-            QString curSel = "4";
-            if (auto it = d.soapySettings.find(SdrplaySettings::kRfGainSel); it != d.soapySettings.end())
-                curSel = QString::fromStdString(it->second);
-            int selIdx = sdrRfGainSel->findText(curSel);
-            sdrRfGainSel->setCurrentIndex(selIdx >= 0 ? selIdx : 0);
-            sdrRfGainSel->blockSignals(false);
 
             const bool duoDt = (d.sdrplayDuoMode == "DT") || d.isDiversityComposite;
             sdrDivMode->setEnabled(duoDt);
@@ -8209,55 +8152,25 @@ void MainWindow::showDevicesDialog()
             connect(antCombos[i], QOverload<int>::of(&QComboBox::currentIndexChanged), &dlg,
                     [&, i](int) { if (table->currentRow() == static_cast<int>(i)) refreshSdrplayPanel(static_cast<int>(i)); });
         }
-        connect(sdrAgc, &QCheckBox::toggled, &dlg, [&](bool on) {
+        sdrplayBox->apply = [&](const SdrplayControl::Change& c, std::string& error) {
             const int row = table->currentRow();
-            if (row < 0) return;
-            mgr.setLiveAgc(static_cast<size_t>(row), on);
-        });
-        connect(sdrIfgr, QOverload<double>::of(&QDoubleSpinBox::valueChanged), &dlg, [&](double v) {
-            const int row = table->currentRow();
-            if (row < 0) return;
-            mgr.setLiveGainElement(static_cast<size_t>(row), "IFGR", v);
-        });
-        connect(sdrRfgr, QOverload<double>::of(&QDoubleSpinBox::valueChanged), &dlg, [&](double v) {
-            const int row = table->currentRow();
-            if (row < 0) return;
-            mgr.setLiveGainElement(static_cast<size_t>(row), "RFGR", v);
-            if (row < static_cast<int>(gainSpins.size())) {
-                gainSpins[static_cast<size_t>(row)]->blockSignals(true);
-                gainSpins[static_cast<size_t>(row)]->setValue(v);
-                gainSpins[static_cast<size_t>(row)]->blockSignals(false);
+            if (row < 0) { error = "Select a receiver"; return false; }
+            const auto i = static_cast<size_t>(row);
+            switch (c.kind) {
+            case SdrplayControl::Kind::Agc: return mgr.setLiveAgc(i, c.number != 0, &error);
+            case SdrplayControl::Kind::Gain: return mgr.setLiveGainElement(i, c.key, c.number, &error);
+            case SdrplayControl::Kind::Bandwidth: return mgr.setLiveBandwidth(i, c.number, &error);
+            case SdrplayControl::Kind::Setting: return mgr.setLiveSdrplaySetting(i, c.key, c.value, &error);
+            case SdrplayControl::Kind::Antenna: return mgr.setLiveAntenna(i, c.value, &error);
             }
-        });
-        connect(sdrBw, QOverload<int>::of(&QComboBox::currentIndexChanged), &dlg, [&](int) {
-            const int row = table->currentRow();
-            if (row < 0) return;
-            mgr.setLiveBandwidth(static_cast<size_t>(row), sdrBw->currentData().toDouble());
-        });
-        auto wireBoolSetting = [&](QCheckBox* box, const char* key) {
-            connect(box, &QCheckBox::toggled, &dlg, [&, key](bool on) {
-                const int row = table->currentRow();
-                if (row < 0) return;
-                mgr.setLiveSdrplaySetting(static_cast<size_t>(row), key, SdrplayProfile::boolSetting(on));
-            });
+            return false;
         };
-        wireBoolSetting(sdrBiasT, SdrplaySettings::kBiasT);
-        wireBoolSetting(sdrRfNotch, SdrplaySettings::kRfNotch);
-        wireBoolSetting(sdrDabNotch, SdrplaySettings::kDabNotch);
-        wireBoolSetting(sdrExtRef, SdrplaySettings::kExtRef);
-        wireBoolSetting(sdrHdr, SdrplaySettings::kHdr);
-        wireBoolSetting(sdrIqCorr, SdrplaySettings::kIqCorr);
-        connect(sdrAgcSet, QOverload<int>::of(&QSpinBox::valueChanged), &dlg, [&](int v) {
-            const int row = table->currentRow();
-            if (row < 0) return;
-            mgr.setLiveSdrplaySetting(static_cast<size_t>(row), SdrplaySettings::kAgcSetpoint, std::to_string(v));
+        sdrplayBox->changed = [&]() { refreshSdrplayPanel(table->currentRow()); };
+        auto* controlRefresh = new QTimer(&dlg);
+        connect(controlRefresh, &QTimer::timeout, &dlg, [&]() {
+            refreshSdrplayPanel(table->currentRow());
         });
-        connect(sdrRfGainSel, QOverload<int>::of(&QComboBox::currentIndexChanged), &dlg, [&](int) {
-            const int row = table->currentRow();
-            if (row < 0) return;
-            mgr.setLiveSdrplaySetting(static_cast<size_t>(row), SdrplaySettings::kRfGainSel,
-                                      sdrRfGainSel->currentText().toStdString());
-        });
+        controlRefresh->start(250); // UI-only async-open capability/status refresh.
         auto applyDiversityFromUi = [&]() {
             const int row = table->currentRow();
             if (row < 0) return;
@@ -8287,8 +8200,13 @@ void MainWindow::showDevicesDialog()
         connect(sdrDivPhase, QOverload<double>::of(&QDoubleSpinBox::valueChanged), &dlg, [&](double) { applyDiversityFromUi(); });
         connect(sdrDivAmp, QOverload<double>::of(&QDoubleSpinBox::valueChanged), &dlg, [&](double) { applyDiversityFromUi(); });
         if (!devs.empty()) {
-            table->selectRow(0);
-            refreshSdrplayPanel(0);
+            size_t selected = mgr.preferredListenDeviceIndex();
+            if (selected >= devs.size() || !devs[selected].isSdrplay) {
+                auto it = std::find_if(devs.begin(), devs.end(), [](const auto& d) { return d.isSdrplay; });
+                selected = it == devs.end() ? 0 : static_cast<size_t>(it - devs.begin());
+            }
+            table->selectRow(static_cast<int>(selected));
+            refreshSdrplayPanel(static_cast<int>(selected));
         }
 
         QHBoxLayout* btnLay = new QHBoxLayout();
@@ -10070,16 +9988,18 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
                 SdrplayProfile::extRefUiTooltip(active->sdrplayModel)));
 
             auto hasKey = [&](const char* key) {
-                return std::find(active->sdrplaySettingKeys.begin(), active->sdrplaySettingKeys.end(), key)
-                           != active->sdrplaySettingKeys.end()
-                       || active->sdrplaySettingKeys.empty();
+                return active->sdrplayProbed && std::find(active->sdrplaySettingKeys.begin(), active->sdrplaySettingKeys.end(), key)
+                           != active->sdrplaySettingKeys.end();
             };
+            sp.insert("probed", active->sdrplayProbed);
+            sp.insert("controlStatus", QString::fromStdString(active->sdrplayControlStatus));
+            sp.insert("rfGainUnit", "LNA state (not dB)");
             QJsonObject features;
-            features.insert("agc", true);
-            features.insert("ifgr", true);
-            features.insert("rfgr", true);
-            features.insert("antenna", !active->antennas.empty());
-            features.insert("bandwidth", true);
+            features.insert("agc", active->sdrplayProbed && active->sdrplayHasAgc);
+            features.insert("ifgr", active->sdrplayProbed && std::find(active->gainElements.begin(), active->gainElements.end(), "IFGR") != active->gainElements.end());
+            features.insert("rfgr", active->sdrplayProbed && std::find(active->gainElements.begin(), active->gainElements.end(), "RFGR") != active->gainElements.end());
+            features.insert("antenna", active->sdrplayProbed && !active->antennas.empty());
+            features.insert("bandwidth", active->sdrplayProbed && !active->bandwidthsHz.empty());
             features.insert("biasT", hasKey(SdrplaySettings::kBiasT) && biasOk);
             features.insert("rfNotch", hasKey(SdrplaySettings::kRfNotch));
             features.insert("dabNotch", hasKey(SdrplaySettings::kDabNotch));
@@ -10423,64 +10343,74 @@ QJsonObject MainWindow::applySdrTownControlSdrplay(const QJsonObject& body)
                     {"error", "active device is not SDRplay — SDRplay controls unavailable"}};
         }
 
-        if (body.contains("antenna")) {
-            const std::string ant = body.value("antenna").toString().toStdString();
-            if (!ant.empty()) mgr.setLiveAntenna(idx, ant);
-        }
-        if (body.contains("agc") || body.contains("agcEnabled")) {
-            const bool on = body.contains("agc") ? body.value("agc").toBool(false)
-                                                 : body.value("agcEnabled").toBool(false);
-            mgr.setLiveAgc(idx, on);
-        }
-        if (body.contains("ifgrDb")) {
-            const double v = body.value("ifgrDb").toDouble(std::numeric_limits<double>::quiet_NaN());
-            if (std::isfinite(v)) mgr.setLiveGainElement(idx, "IFGR", v);
-        }
-        if (body.contains("rfgrDb")) {
-            const double v = body.value("rfgrDb").toDouble(std::numeric_limits<double>::quiet_NaN());
-            if (std::isfinite(v)) {
-                mgr.setLiveGainElement(idx, "RFGR", v);
-                {
-                    std::lock_guard<std::mutex> lk(monitorParamsMutex);
-                    monitorRfGainDb = v;
+        using SdrplayControl::Kind;
+        std::vector<SdrplayControl::Change> changes;
+        try {
+            const auto stringField = [&](const char* key) {
+                if (!body.value(key).isString()) throw std::runtime_error(std::string(key) + " must be a string");
+                return body.value(key).toString().toStdString();
+            };
+            const auto numericField = [&](const char* key) {
+                if (!body.value(key).isDouble()) throw std::runtime_error(std::string(key) + " must be numeric");
+                const double value = body.value(key).toDouble();
+                if (!std::isfinite(value)) throw std::runtime_error("Non-finite control value");
+                return value;
+            };
+            const auto boolField = [&](const char* key) {
+                if (!body.value(key).isBool()) throw std::runtime_error(std::string(key) + " must be true or false");
+                return body.value(key).toBool();
+            };
+            if (body.contains("antenna")) changes.push_back({Kind::Antenna, "antenna", stringField("antenna")});
+            if (body.contains("agc") || body.contains("agcEnabled"))
+                changes.push_back({Kind::Agc, "AGC", "", boolField(body.contains("agc") ? "agc" : "agcEnabled") ? 1.0 : 0.0});
+            for (const auto& entry : {std::pair{"ifgrDb", "IFGR"}, std::pair{"rfgrDb", "RFGR"}})
+                if (body.contains(entry.first)) changes.push_back({Kind::Gain, entry.second, "", numericField(entry.first)});
+            if (body.contains("bandwidthHz")) changes.push_back({Kind::Bandwidth, "bandwidth", "", numericField("bandwidthHz")});
+            if (body.contains("settings")) {
+                if (!body.value("settings").isObject()) throw std::runtime_error("settings must be an object");
+                const auto settings = body.value("settings").toObject();
+                for (auto it = settings.begin(); it != settings.end(); ++it) {
+                    if (!it.value().isString() && !it.value().isBool()) throw std::runtime_error("Setting values must be strings or booleans");
+                    changes.push_back({Kind::Setting, it.key().toStdString(), it.value().isBool()
+                        ? SdrplayProfile::boolSetting(it.value().toBool()) : it.value().toString().toStdString()});
                 }
+            }
+            for (const auto& entry : {std::pair{"biasT", SdrplaySettings::kBiasT},
+                std::pair{"rfNotch", SdrplaySettings::kRfNotch}, std::pair{"dabNotch", SdrplaySettings::kDabNotch},
+                std::pair{"extRef", SdrplaySettings::kExtRef}, std::pair{"hdr", SdrplaySettings::kHdr},
+                std::pair{"iqCorr", SdrplaySettings::kIqCorr}})
+                if (body.contains(entry.first)) changes.push_back({Kind::Setting, entry.second, SdrplayProfile::boolSetting(boolField(entry.first))});
+            if (body.contains("agcSetpoint")) {
+                const double value = numericField("agcSetpoint");
+                if (value < -60 || value > 0 || std::floor(value) != value) throw std::runtime_error("Invalid AGC setpoint");
+                changes.push_back({Kind::Setting, SdrplaySettings::kAgcSetpoint, std::to_string(static_cast<int>(value))});
+            }
+            if (body.contains("rfGainSel")) changes.push_back({Kind::Setting, SdrplaySettings::kRfGainSel, stringField("rfGainSel")});
+            // Validate the complete requested sequence before any hardware write.
+            DeviceInfo planned = devs[idx];
+            for (const auto& change : changes) SdrplayControl::prepare(planned, change);
+            for (const auto& change : changes) {
+                std::string error; bool ok = false;
+                switch (change.kind) {
+                case Kind::Antenna: ok = mgr.setLiveAntenna(idx, change.value, &error); break;
+                case Kind::Agc: ok = mgr.setLiveAgc(idx, change.number != 0, &error); break;
+                case Kind::Gain: ok = mgr.setLiveGainElement(idx, change.key, change.number, &error); break;
+                case Kind::Bandwidth: ok = mgr.setLiveBandwidth(idx, change.number, &error); break;
+                case Kind::Setting: ok = mgr.setLiveSdrplaySetting(idx, change.key, change.value, &error); break;
+                }
+                if (!ok) throw std::runtime_error(error);
+            }
+            if (body.contains("rfgrDb") && idx == sdrTownControlActiveDeviceIndex()) {
+                { std::lock_guard<std::mutex> lk(monitorParamsMutex); monitorRfGainDb = planned.rfgrDb; }
                 syncMonitorVarsToReceiver(0);
                 if (rfGainSpin) {
-                    rfGainSpin->blockSignals(true);
-                    rfGainSpin->setValue(std::clamp(v, rfGainSpin->minimum(), rfGainSpin->maximum()));
-                    rfGainSpin->blockSignals(false);
+                    const QSignalBlocker block(rfGainSpin);
+                    rfGainSpin->setValue(planned.rfgrDb);
                 }
             }
-        }
-        if (body.contains("bandwidthHz")) {
-            const double v = body.value("bandwidthHz").toDouble(std::numeric_limits<double>::quiet_NaN());
-            if (std::isfinite(v)) mgr.setLiveBandwidth(idx, v);
-        }
-        if (body.contains("settings") && body.value("settings").isObject()) {
-            const QJsonObject settings = body.value("settings").toObject();
-            for (auto it = settings.begin(); it != settings.end(); ++it) {
-                mgr.setLiveSdrplaySetting(idx, it.key().toStdString(), it.value().toString().toStdString());
-            }
-        }
-        // Convenience booleans → soapy settings
-        auto setBoolKey = [&](const char* jsonKey, const char* soapyKey) {
-            if (!body.contains(jsonKey)) return;
-            const bool on = body.value(jsonKey).toBool(false);
-            mgr.setLiveSdrplaySetting(idx, soapyKey, SdrplayProfile::boolSetting(on));
-        };
-        setBoolKey("biasT", SdrplaySettings::kBiasT);
-        setBoolKey("rfNotch", SdrplaySettings::kRfNotch);
-        setBoolKey("dabNotch", SdrplaySettings::kDabNotch);
-        setBoolKey("extRef", SdrplaySettings::kExtRef);
-        setBoolKey("hdr", SdrplaySettings::kHdr);
-        setBoolKey("iqCorr", SdrplaySettings::kIqCorr);
-        if (body.contains("agcSetpoint")) {
-            mgr.setLiveSdrplaySetting(idx, SdrplaySettings::kAgcSetpoint,
-                                      std::to_string(body.value("agcSetpoint").toInt(-30)));
-        }
-        if (body.contains("rfGainSel")) {
-            mgr.setLiveSdrplaySetting(idx, SdrplaySettings::kRfGainSel,
-                                      body.value("rfGainSel").toString().toStdString());
+        } catch (const std::exception& ex) {
+            return {{"ok", false}, {"status", 400}, {"error", QString::fromUtf8(ex.what())},
+                {"state", sdrTownControlStatusSnapshot()}};
         }
         if (body.contains("diversity") && body.value("diversity").isObject()) {
             const QJsonObject d = body.value("diversity").toObject();
@@ -10859,7 +10789,15 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
 
         if (std::isfinite(rfGain) && rfGain >= 0.0) {
             auto& mgr = DeviceManager::instance();
-            if (!mgr.getDevices().empty()) mgr.setLiveGain(0, rfGain);
+            const auto devices = mgr.getDevices();
+            const size_t selected = sdrTownControlActiveDeviceIndex();
+            if (selected < devices.size() && devices[selected].isSdrplay) {
+                const auto result = applySdrTownControlSdrplay({
+                    {"deviceIndex", static_cast<int>(selected)}, {"rfgrDb", rfGain}});
+                if (!result.value("ok").toBool()) return result;
+            } else if (!devices.empty()) {
+                mgr.setLiveGain(0, rfGain);
+            }
         }
 
         if (!ok) {
@@ -10917,6 +10855,10 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             return applySdrTownControlTune(tune);
         }
         if (path == "/v1/rf-gain" && method == "POST") {
+            const auto devices = DeviceManager::instance().getDevices();
+            const size_t selected = sdrTownControlActiveDeviceIndex();
+            if (selected < devices.size() && devices[selected].isSdrplay)
+                return applySdrTownControlSdrplay({{"deviceIndex", static_cast<int>(selected)}, {"rfgrDb", body.value("rfGainDb")}});
             const double gain = body.value("rfGainDb").toDouble(std::numeric_limits<double>::quiet_NaN());
             if (!std::isfinite(gain) || gain < 0.0 || gain > 120.0) {
                 return {{"ok", false}, {"status", 400}, {"error", "rfGainDb is invalid"}};

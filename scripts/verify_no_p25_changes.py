@@ -60,6 +60,28 @@ SDRPLAY_DEVICE_PATH = "src/DeviceManager.cpp"
 SDRPLAY_DEVICE_BEFORE = "4e2ed89819473036ee1111825090fe41a013d7d20f97875396daabdeb2aca47a"
 SDRPLAY_DEVICE_AFTER = "7aeee235a8b28a4ce57976129caa658233c4a007b8d251160030af199b535da7"
 
+# DEC-0128: exact reviewed control-only changes from ccaf6ae. This is not a
+# path/function exemption; changing one further byte requires fresh review.
+SDRPLAY_CONTROL_DIGESTS = {
+    "src/DeviceManager.cpp": (
+        "7aeee235a8b28a4ce57976129caa658233c4a007b8d251160030af199b535da7",
+        "505d49ca040385d0037ef66db76b529b3e45d0fe72e5dc720c2ac0d9b2c46b32"),
+    "include/DeviceManager.h": (
+        "ba90de292fe999ade828b6cabb19d714f6342e3bd6f716afa24e45eafe8aa0d3",
+        "4384d7f156fbdc99442289befa2d40be9cd24e630dd68b625ae79027b17f324d"),
+    "src/MainWindow.cpp": (
+        "9b82e8f8c5740bc5abd2877eba3764419f6c5e8cd2c15b990c25c8c27294e510",
+        "2c7d04447656899ecb907b0205a64d1e4723437e2a4ce3fd575df49af3992e12"),
+}
+
+
+def sdrplay_control_text_allowed(path: str, before: str, after: str) -> bool:
+    pair = SDRPLAY_CONTROL_DIGESTS.get(path)
+    return pair is not None and pair == (
+        hashlib.sha256(before.encode("utf-8")).hexdigest(),
+        hashlib.sha256(after.encode("utf-8")).hexdigest(),
+    )
+
 
 def device_manager_sdrplay_text_allowed(before: str, after: str) -> bool:
     return (
@@ -262,6 +284,17 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
+        if path in SDRPLAY_CONTROL_DIGESTS and args.paths is None:
+            try:
+                allowed = sdrplay_control_text_allowed(
+                    path, git_file_text(args.base, path), git_file_text(args.head, path)
+                )
+            except RuntimeError as exc:
+                print(f"P25 guard error: {exc}", file=sys.stderr)
+                return 2
+            if allowed:
+                print(f"P25 guard: accepted exact DEC-0128 SDRplay controls patch: {path}")
+                continue
         if path == SDRPLAY_DEVICE_PATH and args.paths is None:
             try:
                 allowed = device_manager_sdrplay_text_allowed(

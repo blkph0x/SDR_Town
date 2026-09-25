@@ -1,5 +1,17 @@
 # Development log
 
+## 2026-09-25 - RSPdx control-chain repair (DEC-0128 / T-0055)
+
+Traced missing antennas/disabled Bias-T to unprobed light-discovery state
+surviving async receiver open. Isolated capability/write adapter and native
+widget now share checked GUI/CLI/API operations. Fixed B-only bias policy,
+startup AGC loss, stale RF alias overwrite, missing automatic-bandwidth write,
+wrong-device main/remote RF routing and swallowed control errors. Documentation
+distinguishes driver readback from electrical/RF proof. Repeated full CTest
+12/12 PASS, real-handle lifecycle fixture PASS, no physical RSP on this host.
+Final versioned build/packaging/publication remains in progress. P25 DSP,
+audio and shared sample/tune loops unchanged; reviewed exact-file guard only.
+
 ## 2026-09-25 - 0.2.95 Aero watch update published
 
 T-0054 / ISS-0022 complete: source e46f437, signed metadata/tag d7979ee.

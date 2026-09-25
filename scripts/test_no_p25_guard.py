@@ -151,6 +151,17 @@ void run() {
         assert not MODULE.device_manager_sdrplay_text_allowed(before + "\n", after)
         assert not MODULE.device_manager_sdrplay_text_allowed(after, before)
 
+    reviewed = {"src/MainWindow.cpp": (
+        hashlib.sha256(before.encode()).hexdigest(),
+        hashlib.sha256(after.encode()).hexdigest())}
+    with patch.object(MODULE, "SDRPLAY_CONTROL_DIGESTS", reviewed):
+        assert MODULE.sdrplay_control_text_allowed("src/MainWindow.cpp", before, after)
+        assert not MODULE.sdrplay_control_text_allowed("src/MainWindow.cpp", before, after + "\nRF change")
+        assert not MODULE.sdrplay_control_text_allowed("src/MainWindow.cpp", before + "\n", after)
+        assert not MODULE.sdrplay_control_text_allowed("src/MainWindow.cpp", after, before)
+        assert not MODULE.sdrplay_control_text_allowed("src/P25LiveDecoder.cpp", before, after)
+        assert not MODULE.sdrplay_control_text_allowed("include/DeviceManager.h", before, after)
+
     print("P25 guard self-test passed")
     return 0
 

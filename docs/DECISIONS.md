@@ -1,5 +1,35 @@
 # Decisions
 
+## DEC-0128 - SDRplay controls use live capabilities and acknowledged writes (2026-09-25)
+
+ISS-0023 / T-0055. Evidence: DeviceManager light discovery uses generic RX;
+startStreaming never calls enrichSdrplayDeviceInfo, and live setters swallow
+errors after committing requested values. GUI has no successful-driver feedback.
+RSPdx datasheet https://www.sdrplay.com/resources/RSPdxDatasheet.pdf specifies
+A/B 1 kHz-2 GHz, C 1 kHz-200 MHz and Bias-T on B only. Reference driver:
+https://github.com/pothosware/SoapySDRPlay3/blob/48bd8b41072534018de1d74deb3dea5874d9e0e0/Settings.cpp.
+
+Probe the already-open SDRplay handle, publish verified capabilities without
+inventing support, migrate generic/invalid saved ports to driver readback,
+and refresh the visible panel when the async probe completes. Show antenna
+selection in the SDRplay panel as well as the table. Control failures must be
+reported and must not be silently persisted as successes. Bias power is never
+enabled automatically; port transitions disable it before changing the port.
+Keep raw driver identifiers separate from display names. Test calls/order,
+failure recovery and UI enablement through a fake Soapy device, not only tables.
+No new library, no P25 DSP/audio or shared sample/tune-loop changes. Necessary
+SDRplay-only edits in shared files receive exact reviewed-diff guard evidence,
+not a general exemption. Physical reception/voltage remains a tester gate.
+
+Reviewed shared-file scope: DeviceInfo capability/result fields; probe RAII;
+SDRplay-only live-open capability publication, sample-rate/activation checks,
+startup profile catch-up, and serialized acknowledged SDRplay setters.
+MainWindow changes are limited to Device Manager controls, SDRplay status/API
+validation and selected-RSP gain routing. Existing non-SDRplay paths are retained.
+No edits to rxThreadFunc, setCenterFreq, IQ rings, P25 methods, Receiver, Demod,
+AudioEngine or vocoder. An exact LF-normalized before/after digest pair per
+shared file binds the guard exception to this reviewed patch only.
+
 ## DEC-0127 - Aero visual cadence and bounded channel ownership (2026-09-25)
 
 Evidence: InmarsatWidget::showEvent starts its sole display/status timer at
