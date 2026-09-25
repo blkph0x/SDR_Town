@@ -23,6 +23,9 @@ changes. The three shared-file patches are exact-digest reviewed under DEC-0129.
 Evidence: build-audit-20260925/rtl-bias/. README/safety/CLI guide updated.
 This is local development-build qualification, not electrical verification or
 a new published release. Hardware acceptance remains ISS-0024.
+Source commit b2d4de8; final repeated CTest 13/13 PASS in 36.51 s. Actual
+committed P25 guard from 7d6d9ed to b2d4de8 PASS: only the three exact reviewed
+shared-file digest pairs accepted; no other protected-path modifications.
 
 ## 2026-09-25 - 0.2.96 local release qualification
 
