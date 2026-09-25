@@ -2,6 +2,16 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-25 - Mandatory publication workflow preparation (DEC-0130)
+
+Workflow YAML validator/self-tests PASS; P25 guard negative self-tests PASS.
+Application source is the locally tested b2d4de8 RTL repair (13/13 suites),
+with version bump to 0.2.97. CI will rebuild/test the exact new version.
+Release branch checks version match and versioned notes, refuses asset
+replacement, recognizes experimental tags as prereleases, and anonymously
+downloads/verifies public hashes, run/source provenance and CLI execution.
+CI execution/publication remains pending; no success claimed by this entry.
+
 ## 2026-09-25 - RTL bias-T local qualification (DEC-0129 / T-0056)
 
 Windows/MSVC2022/Qt6.11.1, base 7d6d9ed. Release app, core, workspace and

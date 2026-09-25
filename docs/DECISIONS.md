@@ -1,5 +1,17 @@
 # Decisions
 
+## DEC-0130 - Mandatory CI-built public tester releases (2026-09-25)
+
+User requires pushing working changes and verifying successful Actions and
+public release assets on every completed application update. Persist this in
+DEVELOPMENT_RULES section 11 and SoT. Existing Windows CI builds/tests/stages a
+portable ZIP and publishes release/* branches. Use that actual path for
+v0.2.97-experimental rather than calling a local package a CI build. Keep the
+last signed installer update intact; this release is a portable prerelease.
+Load version-specific release notes, reject mismatched branch/project versions,
+and verify public downloaded assets inside the release job as well as locally.
+Private signing keys stay local; no driver, DSP or P25 changes in this task.
+
 ## DEC-0129 - Explicit, capability-gated RTL bias-T (2026-09-25)
 
 ISS-0024 / T-0056. Reference SoapyRTLSDR Settings.cpp at

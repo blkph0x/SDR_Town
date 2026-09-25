@@ -3,7 +3,7 @@ SDR TOWN — SOURCE OF TRUTH (SoT)
 ================================================================================
 VERSION: 1.0.0
 PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
-CURRENT VERSION IN TREE: 0.2.96
+CURRENT VERSION IN TREE: 0.2.97
 ACTIVE PHASE: Receive decoder expansion; P25 acceptance remains open, work deferred by user
 METHOD: Athanor / SovereignFoundry process (never guess, evidence, trackers).
          This tree is NOT Athanor. Qt, SoapySDR, mbelib, miniaudio stay.
@@ -18,6 +18,9 @@ Companion files:
   DEVELOPMENT_RULES.md     binding day-to-day rules
   CAUSE_EFFECT_MAP.md      why / how / effect / gate per REQ
   docs/                    living trackers (see docs/README.md)
+  Publication: completed working changes must be pushed, with application
+  releases built/published by Actions and their public assets verified.
+  DEVELOPMENT_RULES.md section 11 is mandatory; failures block completion.
 
 
 --------------------------------------------------------------------------------

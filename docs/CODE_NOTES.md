@@ -1,5 +1,14 @@
 # Code notes (tree map)
 
+## CI publication verification (DEC-0130)
+
+windows-ci.yml release/* builds publish immutable portable versions with
+version-specific notes. Post-publication anonymous download verifies the ZIP
+against its public checksum and built bytes, then checks source/run/executable
+provenance and smoke-runs the shipped CLI. Experimental tags remain prereleases,
+preserving the prior signed installer updater. Permanent delivery rule lives
+in DEVELOPMENT_RULES section 11 and is linked from SOURCE_OF_TRUTH.
+
 ## RTL-SDR Bias-T control chain (DEC-0129)
 
 RtlBiasT.h/cpp isolates the Soapy `biastee` boolean capability, strict cached

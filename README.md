@@ -1,10 +1,12 @@
 # SDR Town
 
-**Development build: RTL-SDR Bias-T** now has a capability-gated control in
+**0.2.97 experimental: RTL-SDR Bias-T** now has a capability-gated control in
 Device Manager and `biastee <device> status|on|off` in the CLI. Default OFF;
 explicit DC-power confirmation, saved per-device intent, checked live writes
 and best-effort OFF on stop. Driver readback is not physical voltage proof.
-See [RTL bias-T safety and testing](docs/RTL_BIAS_T.md). Not yet a published release.
+See [RTL bias-T safety and testing](docs/RTL_BIAS_T.md) and
+[portable tester release notes](docs/RELEASE_0.2.97.md). This CI-built portable
+prerelease is separate from the last signed installer/in-app update below.
 
 **0.2.96 RSPdx controls:** live opening now discovers the real antenna ports and
 driver controls. Device Manager shows A/B/C selection and control results;

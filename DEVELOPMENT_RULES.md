@@ -145,12 +145,44 @@ A REQ is done only when all are true:
 3. The verification gate in `CAUSE_EFFECT_MAP.md` is green.
 4. `docs/BUILD_NOTES.md` has a passing run.
 5. `docs/TASKS.md` and the SoT checkbox are updated: evidence first, checkbox second.
+6. Follow the mandatory GitHub publication and verification rule below.
 
 For Phase 2 voice, the gate includes `PASS_CONTINUOUS_AUDIO` (duty ≥ 0.65 plus
 cadence/sequencer/AMBE/concealment checks in `src/P25VoiceTest.cpp`) on a real clear
 capture — not a string-presence script.
 
 ---
+
+## 11. Mandatory GitHub publication and release verification
+
+Standing user instruction (2026-09-25): completed working changes must be
+committed and pushed to GitHub without waiting for a separate publish request.
+For application changes, publish a new versioned release asset built and
+published by GitHub Actions. A local build or an Actions artifact alone is not
+a public release. Documentation-only updates still must be pushed and checked;
+do not manufacture a new binary version for documentation-only changes.
+
+- Run the relevant local gates, push the reviewed source, then track every
+  applicable Actions run for that exact commit through completion.
+- If any build, test, packaging or publication check fails, inspect its logs,
+  fix the cause, push the repair and repeat. Never bypass checks, weaken tests
+  or overwrite a published version to make a release appear successful.
+- Use the repository's release workflow (currently release/* branches).
+  Verify the release is public, not a draft, and its expected assets exist.
+- Download the published asset and checksum, verify their hashes and embedded
+  source/version provenance, extract it, and smoke-test the shipped executable.
+  Report the actual release URL and successful Actions run, not an intention.
+- Preserve release channel and updater safety: experimental builds are labelled
+  experimental. A portable-only prerelease must not replace the last signed
+  installer update or be described as an in-app updater release. Never upload
+  private signing keys, administrator credentials or captures to CI/releases.
+- Record source commit, Actions run, release URL, asset verification and any
+  remaining hardware acceptance limits in BUILD_NOTES/LOG and update TASKS.
+- If something is broken, publication is blocked until repaired. Keep working
+  where possible; if an external blocker cannot be resolved, report precisely
+  what failed and what remains unpublished. Never claim an unverified release.
+
+A later explicit user instruction to pause or not publish takes precedence.
 
 ## Quick checklist before you type code
 
