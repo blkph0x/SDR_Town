@@ -10,6 +10,7 @@ public:
     explicit InmarsatWatchSpectrum(QWidget* parent=nullptr);
     void setSpectrum(const std::vector<float>&,double center,double rate,
                      const std::vector<InmarsatWatchChannel>&);
+    uint64_t waterfallRows() const {return rows_;}
 signals:
     void frequencySelected(double hz);
 protected:
@@ -21,4 +22,21 @@ private:
     std::vector<InmarsatWatchChannel> channels_;
     double center_=0,rate_=0;
     QImage waterfall_;
+    int head_=0;
+    uint64_t rows_=0;
+};
+
+class InmarsatConstellationWidget : public QWidget {
+    Q_OBJECT
+public:
+    explicit InmarsatConstellationWidget(QWidget* parent=nullptr);
+    void setChannel(const InmarsatChannelDisplay* channel);
+    size_t pointCount() const {return points_.size();}
+protected:
+    void paintEvent(QPaintEvent*) override;
+private:
+    std::vector<std::complex<float>> points_;
+    bool locked_=false;
+    double ebno_=0;
+    QString status_="No active decoder";
 };

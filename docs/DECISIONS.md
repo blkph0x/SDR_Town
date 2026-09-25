@@ -1,5 +1,33 @@
 # Decisions
 
+## DEC-0127 - Aero visual cadence and bounded channel ownership (2026-09-25)
+
+Evidence: InmarsatWidget::showEvent starts its sole display/status timer at
+500 ms. WatchSession runs each full pipeline serially. Pre-change Release
+benchmark on this host: 1/2/4 decoders take 0.613/1.230/2.463 s per 2.048 s IQ.
+Four-channel loadRatio=1.203, so increasing the count alone cannot keep up.
+
+Use a 50 ms UI visual timer (20 Hz display budget, not a radio constant), keep
+expensive map/messages at 500 ms. Consume actual latest FFT, not interpolated
+RF or repeated waterfall rows; keep a circular image. Global DeviceManager
+FFT cadence (currently >80 ms hardware) and P25 remain unchanged.
+
+Each active watch channel owns a persistent worker and complete pipeline.
+One immutable IQ block is offered to all workers; drain all completions before
+reusing it, publishing ordered messages or selecting one speaker. No unbounded
+queue, detached task or cross-thread QObject destruction. Keep the configurable
+1-4 active limit and grouped single-tuner scheduling, not a promise that every
+saved frequency can be received simultaneously outside the captured bandwidth.
+Live watch edits apply at block boundaries, flush old audio and reacquire the
+new group; invalid empty enabled watches are rejected without stopping RX.
+
+Use bundled JAERO ScatterPoints after modem timing/carrier recovery (oqpsk,
+msk and burst variants), not raw wideband IQ and not fabricated quadrant points.
+Keep at most 300 finite points per channel locally, expose one selected plot;
+dot appearance never proves lock: AeroL's CRC-backed DCD remains authoritative.
+No sample arrays enter diagnostic JSON/remote telemetry. Clear stale/no-input
+plots. Enabling this passive feedback must preserve reference PCM bit-for-bit.
+
 Format: ID, date, status, evidence, decision, consequences.
 
 ## DEC-0126 - Explicit Inmarsat handover from P25 (2026-09-25)

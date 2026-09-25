@@ -18,6 +18,7 @@ def main():
     parser.add_argument("--cc-mhz", type=float, default=420.350)
     parser.add_argument("--port", type=int, default=18765)
     parser.add_argument("--dry-p25", action="store_true", help="P25 configured without starting hardware")
+    parser.add_argument("--watch-test", action="store_true", help="Test live watch edits; restores saved watch settings")
     parser.add_argument("--allow-hardware", action="store_true", help="Permit RF start/retune using saved Inmarsat settings")
     args = parser.parse_args()
     if not args.allow_hardware:
@@ -42,13 +43,14 @@ def main():
                "--control-port", str(args.port), "--control-token", token,
                "--gui-device", str(args.device), "--p25-cc", str(args.cc_mhz),
                "--gui-auto-follow",
-               "--gui-exit-after-ms", "20000"]
+               "--gui-exit-after-ms", "45000" if args.watch_test else "20000"]
     if args.dry_p25:
         command.append("--gui-dry-run")
     startup = subprocess.STARTUPINFO()
     startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     startup.wShowWindow = 0
     evidence = {"ok": False, "dryP25": args.dry_p25}
+    saved_watch = None
     with (args.output / "gui.log").open("w", encoding="utf-8") as log:
         proc = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, startupinfo=startup)
         try:
@@ -93,6 +95,43 @@ def main():
             later = request("/v1/inmarsat/status")["inmarsat"]
             evidence["iqSamples"] = [first_samples, later["diagnostics"]["samples"]]
             assert 0 < first_samples < later["diagnostics"]["samples"], evidence["iqSamples"]
+            if args.watch_test:
+                saved_watch = live["config"]["watch"]
+                watch = dict(saved_watch, enabled=True, maxConcurrentChannels=4, channels=[
+                    {"id": f"gui-test-{i}", "label": "Test", "frequencyHz": live["tunedHz"] + i * 25000,
+                     "rate": 10500, "enabled": True} for i in range(4)])
+
+                def wait_channels(count):
+                    deadline = time.monotonic() + 8
+                    while time.monotonic() < deadline:
+                        state = request("/v1/inmarsat/status")["inmarsat"]
+                        current = state["diagnostics"].get("watch", {})
+                        channels = current.get("channels", [])
+                        if len(channels) == count and all(c["decoder"].get("samples", 0) > 0 for c in channels):
+                            return current
+                        time.sleep(0.1)
+                    raise TimeoutError(f"Watch did not apply {count} channels")
+
+                assert request("/v1/inmarsat/control", {"action": "watch", "watch": watch}).get("ok")
+                four = wait_channels(4)
+                evidence["fourWorkers"] = {k: four[k] for k in ("workerCount", "maxPendingBlocksPerChannel", "loadRatio")}
+                assert four["workerCount"] == 4 and four["maxPendingBlocksPerChannel"] == 1
+                invalid = dict(watch, channels=[])
+                assert not request("/v1/inmarsat/control", {"action": "watch", "watch": invalid}).get("ok")
+                wait_channels(4)
+                watch["channels"] = watch["channels"][:2]
+                assert request("/v1/inmarsat/control", {"action": "watch", "watch": watch}).get("ok")
+                evidence["editedWorkers"] = wait_channels(2)["workerCount"]
+                disabled = dict(watch, enabled=False)
+                assert request("/v1/inmarsat/control", {"action": "watch", "watch": disabled}).get("ok")
+                deadline = time.monotonic() + 8
+                while True:
+                    current = request("/v1/inmarsat/status")["inmarsat"]
+                    if "watch" not in current["diagnostics"] and current["diagnostics"].get("samples", 0) > 0:
+                        break
+                    assert time.monotonic() < deadline, "Manual decoder did not resume"
+                    time.sleep(0.1)
+                evidence["manualResumed"] = True
             after = request("/v1/status")["state"]["p25"]
             evidence["after"] = after
             assert after["controlFrequencyHz"] == 0 and not after["autoFollow"], after
@@ -103,7 +142,10 @@ def main():
             evidence["stopped"] = stopped
             assert stopped["controlFrequencyHz"] == 0 and not stopped["followEnabled"], stopped
             assert request("/v1/inmarsat/control", {"action": "prepare"}).get("ready")
-            proc.wait(timeout=25)
+            if saved_watch is not None:
+                assert request("/v1/inmarsat/control", {"action": "watch", "watch": saved_watch}).get("ok")
+                saved_watch = None
+            proc.wait(timeout=50)
             assert proc.returncode == 0, proc.returncode
             evidence["ok"] = True
             print("PASS real GUI host: probe/refusal, confirmed handover, live IQ, no P25 restart")
@@ -111,7 +153,10 @@ def main():
             if proc.poll() is None:
                 try:
                     request("/v1/inmarsat/control", {"action": "stop"})
-                    proc.wait(timeout=25)
+                    if saved_watch is not None:
+                        restored = request("/v1/inmarsat/control", {"action": "watch", "watch": saved_watch})
+                        evidence["watchRestored"] = bool(restored.get("ok"))
+                    proc.wait(timeout=50)
                 except (OSError, subprocess.TimeoutExpired):
                     proc.kill()
                     proc.wait(timeout=10)

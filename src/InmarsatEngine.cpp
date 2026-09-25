@@ -156,10 +156,17 @@ void InmarsatEngine::notify() {
 
 bool InmarsatEngine::setConfig(const InmarsatEngineConfig& config) {
     std::lock_guard<std::mutex> lock(mutex_);
+    if(run_.load() && config.watch.enabled &&
+        std::none_of(config.watch.channels.begin(),config.watch.channels.end(),[](const auto& c){return c.enabled;})) {
+        lastStatus_="Enable at least one watch channel before starting automatic watch";
+        return false;
+    }
     try {config.watch.validate();config.save();}
     catch(const std::exception& e) {lastStatus_=e.what();spdlog::warn("Inmarsat settings: {}",e.what());return false;}
+    const bool watchChanged=config_.watch.toJson()!=config.watch.toJson();
     config_ = config;
     config_.voiceFollow = false;
+    if(watchChanged)watchRevision_.fetch_add(1,std::memory_order_release);
     return true;
 }
 
@@ -555,6 +562,7 @@ bool InmarsatEngine::start(bool force) {
         QDir().mkpath(QString::fromStdString(config_.recordDir));
         pipeline_ = {};
         pipelineReport_ = nlohmann::json::object();
+        displays_.clear();lastDisplayIqSeconds_=0;
         if (iqRx_) {
             iqRx_->deviceIndex = deviceIndex;
             iqRx_->lastConsumedAbsolute.store(0, std::memory_order_release);
@@ -636,6 +644,31 @@ InmarsatEngineSnapshot InmarsatEngine::snapshot() const {
     snapshot.diagnostics = pipelineReport_;
     snapshot.diagnosticLog = diagnosticLog_;
     return snapshot;
+}
+
+InmarsatDisplaySnapshot InmarsatEngine::displaySnapshot() const {
+    InmarsatDisplaySnapshot result;
+    size_t device;
+    {
+        std::lock_guard lock(mutex_);
+        result.running=run_.load(std::memory_order_acquire);
+        device=activeDeviceIndex_;
+        result.channels=config_.watch.channels;
+        if(result.running && steadySeconds()-lastDisplayIqSeconds_<=1.0)result.decoders=displays_;
+    }
+    // DEC-0127: latest-only visual path is independent of decoder backlog and
+    // copies no map/messages/JSON. DeviceManager publishes FFT under a short lock.
+    if(result.running && device!=std::numeric_limits<size_t>::max()) {
+        DeviceManager::instance().getLatestSpectrum(device,result.spectrumDb,result.centerHz,result.rateHz);
+        if(result.spectrumDb.size()>4096) {
+            std::vector<float> peaks(4096,-200);
+            for(size_t i=0;i<peaks.size();++i)
+                for(size_t k=i*result.spectrumDb.size()/peaks.size();k<(i+1)*result.spectrumDb.size()/peaks.size();++k)
+                    peaks[i]=std::max(peaks[i],result.spectrumDb[k]);
+            result.spectrumDb=std::move(peaks);
+        }
+    }
+    return result;
 }
 
 nlohmann::json InmarsatEngine::statusJson() const {
@@ -808,6 +841,7 @@ bool InmarsatEngine::processIq(InmarsatAudio& audio) {
         const auto report=watch_->report(steadySeconds());
         std::lock_guard<std::mutex> lock(mutex_);
         pipelineReport_=report;
+        displays_=watch_->displays();lastDisplayIqSeconds_=steadySeconds();
         carrierDetected_=report.value("carrierDetected",false);locked_=report.value("protocolLock",false);
         quality_=report.value("quality",0.0);rawBlocks_=report.value("rawBlocks",uint64_t{0});
         validatedFrames_=report.value("validatedFrames",uint64_t{0});voiceFrames_=report.value("voiceFrames",uint64_t{0});
@@ -825,6 +859,9 @@ bool InmarsatEngine::processIq(InmarsatAudio& audio) {
         rawBlocks_ = stats.rawBlocksOut;
         validatedFrames_ = stats.framesOut;
         pipelineReport_ = pipeline_.report();
+        displays_={{"",tuned,config_.mode=="aero_burst"?-config_.baud:config_.baud,
+            stats.locked,stats.ebnoDb,pipeline_.constellation()}};
+        lastDisplayIqSeconds_=steadySeconds();
         streamState_ = manager.getRuntimeStateLabel(deviceIndex);
         deviceConnected_ = streamState_ == "live hardware";
         voiceFrames_ = pipelineReport_.value("voiceFrames",uint64_t{0});
@@ -839,8 +876,11 @@ void InmarsatEngine::workerLoop() {
     bool processingFailed = false;
     InmarsatDiagnostics diagnostics;
     std::unique_ptr<InmarsatAudio> audio;
+    uint64_t appliedWatchRevision=0;
+    InmarsatEngineConfig initialConfig;
+    {std::lock_guard lock(mutex_);initialConfig=config_;appliedWatchRevision=watchRevision_.load();}
     try {
-        const auto cfg=config();
+        const auto& cfg=initialConfig;
         QString wav;
         if(cfg.recordVoice) {
             QDir dir(QString::fromStdString(cfg.recordDir));
@@ -904,9 +944,32 @@ void InmarsatEngine::workerLoop() {
 
         bool consumed = false;
         try {
+            if(appliedWatchRevision!=watchRevision_.load(std::memory_order_acquire)) {
+                InmarsatEngineConfig cfg;
+                {std::lock_guard lock(mutex_);cfg=config_;appliedWatchRevision=watchRevision_.load();}
+                // No jobs survive process()'s barrier. Reconfigure only here,
+                // never from a GUI callback and never reuse old-channel PCM.
+                audio->discardPlayback();watch_.reset();pipeline_={};
+                {std::lock_guard lock(mutex_);displays_.clear();lastDisplayIqSeconds_=0;}
+                pipeline_.setPcmSink([&](std::span<const int16_t> pcm,uint32_t){audio->push(pcm);});
+                pipeline_.setMessageSink([this](const InmarsatMessage& m){onMessage(m);});
+                if(cfg.watch.enabled)watch_=std::make_unique<InmarsatWatchSession>(cfg.watch,
+                    DeviceManager::instance().getCurrentSampleRate(deviceIndex),steadySeconds(),
+                    [this](const InmarsatMessage& m){onMessage(m);},
+                    [&](std::span<const int16_t> pcm,uint32_t){audio->push(pcm);},[&]{audio->discardPlayback();});
+                const double target=watch_?watch_->centerHz():cfg.channelHz;
+                std::string error;
+                if(!tuneAndConfirm(deviceIndex,target,4000,&error))throw std::runtime_error(error);
+                DeviceManager::instance().setReceiverCursorToLiveEdge(deviceIndex,*iqRx_);
+                {std::lock_guard lock(mutex_);tunedHz_=target;pipelineReport_=nlohmann::json::object();
+                    displays_.clear();spectrumDb_.clear();lastStatus_="Watch configuration applied; acquiring";}
+                diagnostics.write("watch_reconfigured",{{"revision",appliedWatchRevision},{"enabled",cfg.watch.enabled},
+                    {"savedChannels",cfg.watch.channels.size()}});
+            }
             if(watch_ && watch_->advance(steadySeconds())) {
                 const auto report=watch_->report(steadySeconds());
                 diagnostics.write("watch_transition",report);
+                {std::lock_guard lock(mutex_);displays_.clear();lastDisplayIqSeconds_=0;}
                 std::string error;
                 if(!tuneAndConfirm(deviceIndex,watch_->centerHz(),4000,&error)) throw std::runtime_error(error);
                 DeviceManager::instance().setReceiverCursorToLiveEdge(deviceIndex,*iqRx_);
@@ -915,6 +978,7 @@ void InmarsatEngine::workerLoop() {
                     tunedHz_=watch_->centerHz();pipelineReport_=report;
                     lastStatus_=report["watch"].value("reason",std::string{});
                     spectrumDb_.clear();
+                    displays_.clear();
                 }
             }
             consumed = processIq(*audio);

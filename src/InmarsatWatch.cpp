@@ -3,6 +3,10 @@
 #include <cmath>
 #include <stdexcept>
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+#include <exception>
 
 InmarsatDemodMode InmarsatWatchChannel::mode() const {
     if(rate == -1200) return InmarsatDemodMode::AeroBurstMsk1200;
@@ -150,12 +154,69 @@ nlohmann::json InmarsatWatchSchedule::report(double now) const {
 
 struct InmarsatWatchSession::Channel {
     InmarsatWatchChannel config;
-    InmarsatPipeline pipeline;
     nlohmann::json report=nlohmann::json::object();
+    InmarsatChannelDisplay display;
+    std::vector<InmarsatMessage> messages;
     std::vector<int16_t> pcm;
     uint32_t aes=0;
     uint64_t speechFrames=0;
     bool speech=false;
+    struct Input {
+        std::span<const std::complex<float>> iq;
+        uint64_t start=0;
+        double rate=0,center=0;
+        bool gap=false;
+    } input;
+    std::mutex mutex;
+    std::condition_variable ready,finished;
+    bool pending=false,stopping=false;
+    std::exception_ptr error;
+    std::thread worker;
+
+    explicit Channel(InmarsatWatchChannel cfg):config(std::move(cfg)),worker([this]{run();}) {}
+    ~Channel() {
+        {std::lock_guard lock(mutex);stopping=true;}
+        ready.notify_one();
+        if(worker.joinable())worker.join();
+    }
+    void submit(Input job) {
+        std::lock_guard lock(mutex);
+        if(pending)throw std::logic_error("Aero worker already has an IQ block");
+        input=job;error=nullptr;pending=true;ready.notify_one();
+    }
+    std::exception_ptr wait() {
+        std::unique_lock lock(mutex);
+        finished.wait(lock,[&]{return !pending;});
+        return error;
+    }
+    void run() {
+        // Construct AND destroy modem QObjects here. No QObject crosses owners.
+        std::unique_ptr<InmarsatPipeline> pipeline;
+        for(;;) {
+            Input job;
+            {std::unique_lock lock(mutex);ready.wait(lock,[&]{return pending||stopping;});
+                if(stopping&&!pending)break;
+                job=input;}
+            try {
+                if(!pipeline) {
+                    pipeline=std::make_unique<InmarsatPipeline>();
+                    pipeline->setMessageSink([this](const InmarsatMessage& m){messages.push_back(m);});
+                    pipeline->setPcmSink([this](std::span<const int16_t> block,uint32_t source){
+                        if(aes!=source)pcm.clear();
+                        aes=source;pcm.insert(pcm.end(),block.begin(),block.end());
+                    });
+                }
+                pcm.clear();messages.clear();
+                pipeline->process(job.iq.data(),job.iq.size(),job.start,job.rate,job.center,
+                                  config.frequencyHz,config.mode(),job.gap);
+                report=pipeline->report();
+                const auto stats=pipeline->stats();
+                display={config.id,config.frequencyHz,config.rate,stats.locked,stats.ebnoDb,pipeline->constellation()};
+            } catch(...) {error=std::current_exception();}
+            {std::lock_guard lock(mutex);pending=false;}
+            finished.notify_one();
+        }
+    }
 };
 
 int InmarsatWatchFocus::select(std::span<const uint8_t> speech,double now,int idleSeconds) {
@@ -176,16 +237,7 @@ double InmarsatWatchSession::centerHz() const {return schedule_.group().centerHz
 void InmarsatWatchSession::createChannels() {
     channels_.clear();focus_.reset();focusAes_=0;
     for(const auto& config:schedule_.group().channels) {
-        auto c=std::make_unique<Channel>();c->config=config;
-        c->pipeline.setMessageSink([this](const InmarsatMessage& m){
-            if(m.validated && m.hasPosition) schedule_.position(m.aesId);
-            if(messageSink_) messageSink_(m);
-        });
-        c->pipeline.setPcmSink([ptr=c.get()](std::span<const int16_t> pcm,uint32_t aes){
-            if(ptr->aes!=aes) ptr->pcm.clear(); // A block may span a source transition.
-            ptr->aes=aes;ptr->pcm.insert(ptr->pcm.end(),pcm.begin(),pcm.end());
-        });
-        channels_.push_back(std::move(c));
+        channels_.push_back(std::make_unique<Channel>(config));
     }
 }
 bool InmarsatWatchSession::advance(double now) {
@@ -197,10 +249,17 @@ void InmarsatWatchSession::process(std::span<const std::complex<float>> iq,uint6
     const auto begin=std::chrono::steady_clock::now();
     if(gap) {++gaps_;focus_.reset();focusAes_=0;if(flush_)flush_();}
     std::vector<uint8_t> activity;activity.reserve(channels_.size());
+    for(auto& c:channels_) c->submit({iq,start,rate,center,gap});
+    // Drain even failed peers before propagating an error: IQ is borrowed until
+    // this barrier. Results/callbacks keep configured order, not completion order.
+    std::exception_ptr failure;
+    for(auto& c:channels_) {auto error=c->wait();if(error&&!failure)failure=error;}
+    if(failure)std::rethrow_exception(failure);
     for(auto& c:channels_) {
-        c->pcm.clear();
-        c->pipeline.process(iq.data(),iq.size(),start,rate,center,c->config.frequencyHz,c->config.mode(),gap);
-        c->report=c->pipeline.report();
+        for(const auto& m:c->messages) {
+            if(m.validated && m.hasPosition)schedule_.position(m.aesId);
+            if(messageSink_)messageSink_(m);
+        }
         const auto speech=c->report.value("speechFrames",uint64_t{0});
         c->speech=speech>c->speechFrames;c->speechFrames=speech;
         activity.push_back(c->speech);
@@ -231,6 +290,14 @@ nlohmann::json InmarsatWatchSession::report(double now) const {
     r["watch"]["processingSeconds"]=processingSeconds_;r["watch"]["inputSeconds"]=inputSeconds_;
     r["watch"]["loadRatio"]=inputSeconds_>0?processingSeconds_/inputSeconds_:0;
     r["watch"]["maxBlockMs"]=maxBlockMs_;
+    r["watch"]["workerCount"]=channels_.size();
+    r["watch"]["maxPendingBlocksPerChannel"]=1;
     r["voiceActive"]=focus>=0 && now-focus_.lastSpeech()<0.5 && r.value("voiceActive",false);
     return r;
+}
+
+std::vector<InmarsatChannelDisplay> InmarsatWatchSession::displays() const {
+    std::vector<InmarsatChannelDisplay> result;
+    for(const auto& c:channels_)result.push_back(c->display);
+    return result;
 }

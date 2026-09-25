@@ -78,6 +78,14 @@ struct InmarsatEngineSnapshot {
     std::string diagnosticLog;
 };
 
+struct InmarsatDisplaySnapshot {
+    bool running=false;
+    std::vector<float> spectrumDb;
+    double centerHz=0,rateHz=0;
+    std::vector<InmarsatWatchChannel> channels;
+    std::vector<InmarsatChannelDisplay> decoders;
+};
+
 class InmarsatEngine {
 public:
     static InmarsatEngine& instance();
@@ -92,6 +100,7 @@ public:
     bool selectBandPlan(const std::string& id);
 
     InmarsatEngineSnapshot snapshot() const;
+    InmarsatDisplaySnapshot displaySnapshot() const;
     std::string stateName() const;
     nlohmann::json statusJson() const;
 
@@ -158,5 +167,8 @@ private:
     std::unique_ptr<InmarsatWatchSession> watch_; // Worker-owned, including destruction.
     nlohmann::json pipelineReport_ = nlohmann::json::object();
     std::string diagnosticLog_;
+    std::vector<InmarsatChannelDisplay> displays_;
+    double lastDisplayIqSeconds_=0;
+    std::atomic<uint64_t> watchRevision_{0};
     std::unique_ptr<Receiver> iqRx_;
 };

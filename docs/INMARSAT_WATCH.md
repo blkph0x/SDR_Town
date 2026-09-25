@@ -10,11 +10,15 @@ second**, not MHz ranges. Enter the actual RF frequency separately.
 2. Click a signal in the spectrum/waterfall. Choose **Aero data 10500**, data
    600/1200, burst data 1200/10500, or **Aero voice 8400** as appropriate. The
    frequency field remains editable. Add an optional name and **Add channel**.
+   Or choose the rate first, enable **Click to add**, and click several signals.
+   Repeating the same frequency/rate selects its saved row instead of duplicating.
    Saved channels have enabled checkboxes; select a row and Remove to delete it.
 3. Add your known position-data and voice channels. EGC is deliberately not a
    watch decoder: its protocol/position/voice path is not implemented.
-4. Stop, set timing and **Save timing**, enable **Automatic data / voice watch**,
-   select speaker/record options and Start. Configuration is saved atomically in
+4. Set timing and **Save timing**, enable **Automatic data / voice watch**.
+   Channels/timing/watch enable can be changed while receiving: they apply at the
+   next IQ block boundary, flush old PCM and reacquire the new group. Stop first
+   to change speaker/record options. Configuration is saved atomically in
    AppData's `inmarsat_engine.json`; reopening restores it without starting RF.
 5. If P25 is configured on the selected SDR, Start asks whether to stop P25 and
    switch. No/Cancel leaves P25 unchanged. Yes stops its CC/follow session and
@@ -30,6 +34,10 @@ probes readiness without stopping P25. `requiresP25Stop:true` requires explicit
 operator consent. Only `action:"start", force:true, stopP25:true` requests that
 handover; `force` alone is insufficient. The GUI button and this API call use the
 same host preflight. Existing loopback authentication still applies.
+`action:"watch", watch:{...}` validates/saves the full watch object and applies
+live edits through the same block-boundary path. Empty enabled lists are rejected
+while receiving. Success acknowledges saved settings; inspect diagnostics for
+the new active group rather than assuming asynchronous reacquisition is complete.
 
 The CLI's `inmarsat start` uses the same saved watch configuration and worker.
 IQ replay stays source-local and never attempts RF hopping outside its file.
@@ -41,6 +49,10 @@ IQ replay stays source-local and never attempts RF hopping outside its file.
   Each decoder gets the same chronological IQ within its group and owns separate
   carrier, framing and vocoder state. Frequency groups outside the passband need
   retuning; they cannot be watched simultaneously on one receiver.
+  Each active decoder now owns a persistent thread. There is one shared immutable
+  IQ block in flight, no growing per-channel backlog. All results are joined in
+  channel order before messages and single-speaker selection. Default remains two;
+  increase Concurrent decoders to four when processing load stays below 1.
 - Each data group gets the minimum dwell. Continue up to the per-group maximum
   until the visit's distinct validated aircraft count reaches the target. Every
   group is visited at least once. Duplicate aircraft and earlier visits do not
@@ -66,7 +78,19 @@ IQ replay stays source-local and never attempts RF hopping outside its file.
 
 ## Diagnostics
 
-Local `inmarsat_diagnostics/*.jsonl` includes `watch_transition` and one-second
+The four-quadrant display is a **constellation diagram**. Its selector changes
+only which channel is inspected, not speaker focus. Each worker supplies its own
+bounded, recovered modem symbols. **Protocol lock** uses validated frame/DCD
+state, not the appearance of four clusters. Inactive groups/no fresh symbols
+clear the plot. MSK and burst modes need not look identical to continuous OQPSK.
+Points stay local and never enter remote diagnostics.
+
+Visual polling is 20 Hz; status/map/messages remain 2 Hz. Only fresh FFT values
+advance waterfall history. Actual spectrum frame rate is limited by the radio's
+existing FFT producer (currently about 12 Hz for hardware), not fabricated extra
+RF frames. P25/global spectrum processing is unchanged.
+
+Local `inmarsat_diagnostics/*.jsonl` includes `watch_transition`, `watch_reconfigured` and one-second
 progress: phase, reason, current group/center/channels, visit count, single speaker
 focus, each decoder's CRC/voice/codec results, IQ gaps and processing load. A load
 ratio over 1 means processing exceeds incoming RF time: reduce concurrent decoders

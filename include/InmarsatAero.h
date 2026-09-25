@@ -4,6 +4,14 @@
 #include <functional>
 #include <memory>
 #include <span>
+#include <vector>
+
+// Local visual feedback only. Never serialize symbol arrays into remote logs.
+struct InmarsatConstellation {
+    std::vector<std::complex<float>> points;
+    uint64_t sequence = 0;
+    uint64_t ageSamples = 0; // 48 kHz modem input, not wall-clock/replay speed.
+};
 
 struct InmarsatAeroStats {
     uint64_t input48k=0, softBits=0, crcOk=0, crcBad=0, cFrames=0, rejectedCFrames=0;
@@ -26,6 +34,7 @@ public:
     void setMessageSink(MessageSink sink);
     void setPcmSink(PcmSink sink);
     InmarsatAeroStats stats() const;
+    InmarsatConstellation constellation() const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

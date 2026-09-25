@@ -23,6 +23,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QShowEvent>
+#include <QSignalBlocker>
 #include <QTableWidget>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -54,6 +55,9 @@ InmarsatWidget::InmarsatWidget(QWidget* parent)
     syncTuningControls();
     refreshTimer_ = new QTimer(this);
     connect(refreshTimer_, &QTimer::timeout, this, &InmarsatWidget::refreshUi);
+    visualTimer_=new QTimer(this);visualTimer_->setObjectName("inmarsatVisualTimer");
+    visualTimer_->setTimerType(Qt::PreciseTimer);
+    connect(visualTimer_,&QTimer::timeout,this,&InmarsatWidget::refreshVisuals);
     // UI owns the refresh timer. A worker-copied callback must not retain this
     // widget while a dock is being destroyed.
 }
@@ -62,12 +66,15 @@ void InmarsatWidget::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);
     refreshDevices();
     if (refreshTimer_ && !refreshTimer_->isActive()) refreshTimer_->start(500);
+    if (visualTimer_) visualTimer_->start(50); // DEC-0127: 20 Hz presentation budget.
     refreshUi();
+    refreshVisuals();
 }
 
 void InmarsatWidget::hideEvent(QHideEvent* event) {
     QWidget::hideEvent(event);
     if (refreshTimer_) refreshTimer_->stop();
+    if (visualTimer_) visualTimer_->stop();
 }
 
 InmarsatWidget::~InmarsatWidget() {
@@ -109,7 +116,7 @@ void InmarsatWidget::buildUi() {
     deviceCombo_ = new QComboBox();
     deviceCombo_->setToolTip(
         "Choose the SDR used by Inmarsat. START / TAKE OVER reuses an already-live Listen "
-        "receiver without reopening it, or starts the selected idle receiver. P25 is never interrupted.");
+                  "receiver without reopening it, or starts the selected idle receiver. Switching from P25 requires confirmation.");
     receiverRow->addWidget(deviceCombo_, 1);
     root->addLayout(receiverRow);
     auto* replayButton = new QPushButton("Open IQ replay...");
@@ -335,7 +342,10 @@ bool InmarsatWidget::applyTuningControls() {
 void InmarsatWidget::onVoiceFollowToggled(bool enabled) {
     auto config = InmarsatEngine::instance().config();
     config.watch.enabled = enabled;
-    InmarsatEngine::instance().setConfig(config);
+    if(!InmarsatEngine::instance().setConfig(config)) {
+        QSignalBlocker blocker(voiceFollowCheck_);voiceFollowCheck_->setChecked(!enabled);
+        QMessageBox::warning(this,"Watch list",QString::fromStdString(InmarsatEngine::instance().snapshot().lastStatus));
+    }
 }
 
 void InmarsatWidget::onRecordToggled(bool enabled) {
@@ -443,8 +453,6 @@ void InmarsatWidget::refreshUi() {
     stopBtn_->setEnabled(running);
     deviceCombo_->setEnabled(!running && deviceCombo_->count() > 0);
     updateWatchUi(running,snapshot.diagnostics);
-    watchSpectrum_->setSpectrum(running?snapshot.spectrumDb:std::vector<float>{},snapshot.spectrumCenterHz,
-        snapshot.spectrumRateHz,snapshot.config.watch.channels);
     recordCheck_->blockSignals(true);
     recordCheck_->setChecked(snapshot.config.recordVoice);
     recordCheck_->blockSignals(false);

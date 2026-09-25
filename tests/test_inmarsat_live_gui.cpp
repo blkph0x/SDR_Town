@@ -22,6 +22,8 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QElapsedTimer>
+#include <iostream>
 #include <stdexcept>
 
 #ifdef HAVE_SOAPYSDR
@@ -300,4 +302,42 @@ TEST_CASE("Inmarsat watch spectrum maps clicks to actual RF coordinates", "[inma
     click(204,150);REQUIRE(selected==1541750000); // Same axis in waterfall.
     spectrum.setSpectrum(std::vector<float>(1024,-110),1543e6,1e6,{});
     click(400,80);REQUIRE(selected==1543e6); // Retune invalidates the old axis.
+}
+
+TEST_CASE("Inmarsat multi click adds independent saved channels without duplicates", "[inmarsat][gui]") {
+    auto& engine=InmarsatEngine::instance();REQUIRE(engine.setConfig(InmarsatEngineConfig::defaults()));
+    InmarsatWidget widget;
+    auto* add=widget.findChild<QCheckBox*>("inmarsatWatchClickAdd");REQUIRE(add);
+    add->setChecked(true);
+    auto* spectrum=widget.findChild<InmarsatWatchSpectrum*>();
+    spectrum->frequencySelected(1542125000);spectrum->frequencySelected(1542137500);
+    spectrum->frequencySelected(1542125000);
+    REQUIRE(engine.config().watch.channels.size()==2);
+    auto* selection=widget.findChild<QComboBox*>("inmarsatConstellationChannel");
+    REQUIRE(selection->currentData().toString().toStdString()==engine.config().watch.channels[0].id);
+    add->setChecked(false);spectrum->frequencySelected(1542150000);
+    REQUIRE(engine.config().watch.channels.size()==2);
+    REQUIRE(widget.findChild<QTimer*>("inmarsatVisualTimer"));
+    widget.resize(1100,980);widget.show();QApplication::processEvents();
+    REQUIRE(widget.findChild<QTimer*>("inmarsatVisualTimer")->interval()==50);
+    widget.hide();REQUIRE_FALSE(widget.findChild<QTimer*>("inmarsatVisualTimer")->isActive());
+}
+
+TEST_CASE("Inmarsat visual history advances only for fresh RF and clears on retune", "[inmarsat][gui]") {
+    InmarsatWatchSpectrum spectrum;spectrum.resize(1000,280);
+    std::vector<float> bins(4096,-110);
+    spectrum.setSpectrum(bins,1542e6,2e6,{});REQUIRE(spectrum.waterfallRows()==1);
+    for(int i=0;i<20;++i)spectrum.setSpectrum(bins,1542e6,2e6,{});
+    REQUIRE(spectrum.waterfallRows()==1);
+    QElapsedTimer timer;timer.start();
+    for(int i=0;i<200;++i){bins[i]=float(-100+i%70);spectrum.setSpectrum(bins,1542e6,2e6,{});spectrum.grab();}
+    std::cout<<"AERO_VISUAL 200 updates/renders ms="<<timer.elapsed()<<std::endl;
+    REQUIRE(spectrum.waterfallRows()==201);
+    spectrum.setSpectrum(bins,1543e6,2e6,{});REQUIRE(spectrum.waterfallRows()==1);
+    spectrum.setSpectrum({},0,0,{});REQUIRE(spectrum.waterfallRows()==0);
+    InmarsatConstellationWidget scatter;scatter.resize(240,250);
+    InmarsatChannelDisplay channel;channel.constellation.points={{.7f,.7f},{-.7f,.7f},{-.7f,-.7f},{.7f,-.7f}};
+    scatter.setChannel(&channel);REQUIRE(scatter.pointCount()==4);
+    REQUIRE_FALSE(scatter.grab().isNull());
+    scatter.setChannel(nullptr);REQUIRE(scatter.pointCount()==0);
 }

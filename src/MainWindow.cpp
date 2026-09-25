@@ -11184,6 +11184,21 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
         }
         if (path == "/v1/inmarsat/control" && method == "POST") {
             const QString action = body.value("action").toString().toLower();
+            // SATCOM_HOST_INTEGRATION_BEGIN
+            // DEC-0127: same validated, block-boundary watch edit as the GUI.
+            if(action=="watch") {
+                if(!body.value("watch").isObject())
+                    return {{"ok",false},{"status",400},{"error","watch object required"}};
+                try {
+                    auto config=InmarsatEngine::instance().config();
+                    config.watch=InmarsatWatchConfig::fromJson(nlohmann::json::parse(
+                        QJsonDocument(body.value("watch").toObject()).toJson(QJsonDocument::Compact).toStdString()));
+                    if(!InmarsatEngine::instance().setConfig(config))
+                        return {{"ok",false},{"status",400},{"error",QString::fromStdString(InmarsatEngine::instance().snapshot().lastStatus)}};
+                    return {{"ok",true}};
+                }catch(const std::exception& e){return {{"ok",false},{"status",400},{"error",e.what()}};}
+            }
+            // SATCOM_HOST_INTEGRATION_END
             auto cfg = InmarsatEngine::instance().config();
             if (body.contains("bandPlanId"))
                 InmarsatEngine::instance().selectBandPlan(body.value("bandPlanId").toString().toStdString());

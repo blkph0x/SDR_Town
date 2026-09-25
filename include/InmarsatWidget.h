@@ -15,6 +15,7 @@ class QShowEvent;
 class QHideEvent;
 class InmarsatMapWidget;
 class InmarsatWatchSpectrum;
+class InmarsatConstellationWidget;
 class QSpinBox;
 class QLineEdit;
 
@@ -32,6 +33,7 @@ private slots:
     void onStart();
     void onStop();
     void refreshUi();
+    void refreshVisuals();
     void onBandPlanChanged(int index);
     void onChannelActivated(int row, int column);
     void onVoiceFollowToggled(bool on);
@@ -49,6 +51,7 @@ private:
     void reloadWatchUi();
     void saveWatchPolicy();
     void updateWatchUi(bool running, const nlohmann::json& report);
+    void addWatchChannel();
 
     QComboBox* deviceCombo_ = nullptr;
     QComboBox* planCombo_ = nullptr;
@@ -66,6 +69,10 @@ private:
     QLabel* audioLabel_ = nullptr;
     QPlainTextEdit* msgView_ = nullptr;
     QTimer* refreshTimer_ = nullptr;
+    QTimer* visualTimer_ = nullptr;
+    QCheckBox* clickAdd_ = nullptr;
+    QComboBox* constellationChannel_ = nullptr;
+    InmarsatConstellationWidget* constellation_ = nullptr;
     InmarsatWatchSpectrum* watchSpectrum_ = nullptr;
     QTableWidget* watchTable_ = nullptr;
     QLineEdit* watchName_ = nullptr;

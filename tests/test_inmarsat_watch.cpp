@@ -4,6 +4,8 @@
 #include <limits>
 #include <iostream>
 #include <array>
+#include "InmarsatIqFile.h"
+#include <QProcessEnvironment>
 
 namespace {
 InmarsatWatchConfig example() {
@@ -145,4 +147,57 @@ TEST_CASE("Aero watch group changes destroy old decoder state before new IQ", "[
     REQUIRE(r["voiceActive"]==false);REQUIRE(r["watch"]["speakerChannel"]=="");
     REQUIRE(session.advance(3));REQUIRE(session.centerHz()==initial);REQUIRE(flushes==2);
     REQUIRE(session.report(3)["watch"]["channels"][0]["id"]=="data");
+}
+
+TEST_CASE("Aero workers drain failures and retain independent ordered timelines", "[inmarsat][watch]") {
+    auto cfg=example();cfg.channels={{"one","",1545e6,10500,true},{"two","",1545012500,1200,true}};
+    InmarsatWatchSession session(cfg,96000,0,{},{},{});
+    std::array<InmarsatPipeline,2> serial;
+    std::vector<std::complex<float>> iq(4096,{0.02f,0.03f});
+    for(int block=0;block<12;++block) {
+        const uint64_t start=uint64_t(block)*iq.size();
+        if(block==6) {
+            iq[20]={std::numeric_limits<float>::quiet_NaN(),0};
+            REQUIRE_THROWS(session.process(iq,start,96000,session.centerHz(),false,block*.04));
+            iq[20]={0.02f,0.03f};
+        }
+        session.process(iq,start,96000,session.centerHz(),false,block*.04);
+        const auto report=session.report(block*.04);
+        REQUIRE(report["watch"]["workerCount"]==2);
+        REQUIRE(report["watch"]["maxPendingBlocksPerChannel"]==1);
+        for(size_t i=0;i<2;++i) {
+            const auto& c=cfg.channels[i];
+            serial[i].process(iq.data(),iq.size(),start,96000,session.centerHz(),c.frequencyHz,c.mode(),false);
+            auto expected=serial[i].report();auto actual=report["watch"]["channels"][i]["decoder"];
+            expected.erase("processingMs");expected.erase("maxBlockMs");
+            actual.erase("processingMs");actual.erase("maxBlockMs");
+            REQUIRE(actual==expected);
+            REQUIRE(session.displays()[i].id==c.id);
+        }
+    }
+}
+
+TEST_CASE("Aero channel workers match serial decode of a supplied real IQ reference", "[.inmarsat-watch-reference]") {
+    const auto path=qEnvironmentVariable("SDR_TOWN_AERO_REFERENCE");
+    REQUIRE_FALSE(path.isEmpty());
+    InmarsatIqFile file;file.open(path);
+    const double rate=file.info().sampleRateHz, center=file.info().captures.front().centerHz;
+    auto cfg=example();cfg.channels={{"a","",center,8400,true},{"b","",center+1000,8400,true}};
+    InmarsatWatchSession session(cfg,rate,0,{},{},{});
+    std::array<InmarsatPipeline,2> serial;
+    while(true) {
+        const auto block=file.read();if(block.samples.empty())break;
+        session.process(block.samples,block.startSample,rate,block.centerHz,block.discontinuity,double(block.startSample)/rate);
+        const auto report=session.report(double(block.startSample)/rate);
+        for(size_t i=0;i<2;++i) {
+            serial[i].process(block.samples.data(),block.samples.size(),block.startSample,rate,block.centerHz,
+                cfg.channels[i].frequencyHz,cfg.channels[i].mode(),block.discontinuity);
+            auto expected=serial[i].report(),actual=report["watch"]["channels"][i]["decoder"];
+            expected.erase("processingMs");expected.erase("maxBlockMs");
+            actual.erase("processingMs");actual.erase("maxBlockMs");
+            REQUIRE(actual==expected);
+        }
+    }
+    REQUIRE(serial[0].report()["validatedFrames"].get<uint64_t>()>0);
+    REQUIRE(serial[0].report()["voiceFrames"].get<uint64_t>()>0);
 }

@@ -36,6 +36,9 @@ InmarsatPipeline::InmarsatPipeline(InmarsatPipeline&&) noexcept=default;
 InmarsatPipeline& InmarsatPipeline::operator=(InmarsatPipeline&&) noexcept=default;
 void InmarsatPipeline::setMessageSink(InmarsatAero::MessageSink sink) {native_->messageSink=std::move(sink);}
 void InmarsatPipeline::setPcmSink(InmarsatAero::PcmSink sink) {native_->pcmSink=std::move(sink);}
+InmarsatConstellation InmarsatPipeline::constellation() const {
+    return native_->aero?native_->aero->constellation():InmarsatConstellation{};
+}
 InmarsatDemodStats InmarsatPipeline::stats() const {
     auto result=demod_.stats();
     if(native_->aero) {

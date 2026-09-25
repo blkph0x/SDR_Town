@@ -1,5 +1,19 @@
 # Development log
 
+## 2026-09-25 - Aero watch responsiveness and constellation work
+
+DEC-0127 / T-0054 / ISS-0022: measured the 2 Hz display limit and four-channel
+serial overload. Added independent fast visuals, circular/duplicate-suppressed
+waterfall, saved multi-click selection, persistent bounded channel workers and
+selected real modem constellation. Watch edits are applied at an IQ boundary,
+with old audio discarded and tuning/cursor confirmed. Original P25 paths frozen.
+Tests prove ordered serial/parallel equivalence and unchanged reference PCM;
+four-channel local processing time drops from 2.463 to .639 s per 2.048 s IQ.
+Final full CTest 11/11 and real GUI/RTL four-to-two-to-manual hot reconfiguration
+PASS, including invalid-list rejection and saved-settings restore. Preparing
+0.2.95 independent CI and release assets. No physical satellite voice acceptance
+is inferred from noise-input hardware tests or the reference silence markers.
+
 ## 2026-09-25 - 0.2.94 Inmarsat handover fix published
 
 T-0053 / ISS-0021 complete: source 2952535, signed metadata/tag 5fc5fc4.

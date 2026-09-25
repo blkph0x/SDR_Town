@@ -1,5 +1,14 @@
 # Task list (canonical)
 
+T-0054 | in_progress | Fluid Aero watch display and independent channel workers |
+DEC-0127. Separate visual/status refresh, circular waterfall, multi-click saved
+channels, bounded per-channel workers, selected-channel real constellation.
+Test ordering/isolation, live reconfiguration, reference PCM and throughput;
+leave P25 and global RF/spectrum processing unchanged.
+Local implementation complete: full CTest 11/11, serial/parallel real-IQ parity,
+four GUI/CLI replay variants, renderer/click tests, actual RTL hot watch edits
+and settings restore PASS. 0.2.95 CI/public assets remain to qualify.
+
 T-0053 | done | Confirmed P25-to-Inmarsat receiver handover |
 DEC-0126 / ISS-0021. Reproduce the unconditional host refusal, add explicit
 confirmation and quiescence before the existing mode-switch operation, preserve

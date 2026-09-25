@@ -17,6 +17,7 @@ public:
                  InmarsatDemodMode mode, bool discontinuity);
     InmarsatDemodStats stats() const;
     nlohmann::json report() const;
+    InmarsatConstellation constellation() const;
 private:
     struct Native;
     std::unique_ptr<Native> native_;

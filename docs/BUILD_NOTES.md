@@ -2,6 +2,39 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-25 - Aero display and parallel-worker qualification (DEC-0127)
+
+Windows 11/MSVC2022/Qt6.11.1, base 58530ae. Initial app/core/native GUI builds
+PASS. Watch tests: 1002 assertions/11 cases PASS, including per-block serial vs
+parallel report equality, NaN error drain/retry and source identity. Hidden real
+reference test: 131 assertions PASS for two separate workers vs two serial
+pipelines across the entire JAERO-derived recording. No codec/math change.
+Four reference CLI/GUI fast/paced runs PASS with the unchanged WAV hash
+295ee11a0edc4e341ab66455ce283f7a0201e2f35a880eb555e47a19af6e176f.
+
+Same fixed Release benchmark, 2.048 s of 2.048 MS/s input in 64 blocks:
+before 1/2/4 serial decoders = 0.613/1.230/2.463 s (load .299/.601/1.203).
+After persistent parallel workers = .620/.629/.639 s (.303/.307/.312).
+Max block with four channels 28.80 ms, before 104.13 ms. Local measurement,
+not universal CPU headroom or satellite speech proof; default remains two.
+
+Native Qt display tests PASS: 66 assertions/7 cases; host lifecycle 64/2 PASS.
+Two hundred 4096-bin updates/renders at 1000x280 take 171 ms. Duplicate frames
+do not advance history; wrap/retune/empty clearing and multi-click dedup pass.
+1050x980 saved-window screenshot inspected: no overlaps; new plot/selector
+remain beside the spectrum. This layout fixture is not a live RF-lock screenshot.
+Final 0.2.95 app/core/workspace/native-GUI build PASS (watch-visual-build-4.log).
+Full CTest 11/11 PASS in 34.70 s, no exclusions. Real GUI/RTL live hot-watch test
+PASS: authenticated P25 handover, four live workers with one pending block each,
+empty-list rejection without losing the active group, edit to two workers,
+return to manual with increasing IQ, Stop/no P25 restart and saved-watch restore.
+First measured live four-worker block load=.878 (includes startup; not a steady
+throughput number). Test-owned application exits normally. Existing guards and
+whitespace check PASS. Independent CI and public release gates still pending.
+Evidence: build-audit-20260925/watch-visual-build-1/2/3.log,
+watch-visual-gui-tests.log, watch-visual-layout.png, watch-parallel-reference/,
+watch-visual-ctest.log, watch-live-hot/result.json and gui.log.
+
 ## 2026-09-25 - 0.2.94 handover release qualification and publication
 
 Source 295253558e4201a86bf2d189e6231a86cda8cf80; signed metadata/tag 5fc5fc4.

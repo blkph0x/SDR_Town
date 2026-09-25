@@ -2,6 +2,13 @@
 
 Never delete a row. Close with a commit hash and a sentence.
 
+## ISS-0022 - Aero display stalls and serial multi-channel overload (2026-09-25, OPEN)
+
+Confirmed 500 ms widget timer limits visuals to 2 Hz. Four serial watch channels
+take 2.463 s per 2.048 s IQ (load 1.203). DEC-0127 separates visuals, adds bounded
+workers and constellation monitoring; local tests and release qualification in
+progress. Shared DeviceManager FFT remains unchanged at >80 ms update spacing.
+
 ## ISS-0021 - Inmarsat cannot take over a P25-configured receiver (2026-09-25, FIXED)
 
 User reports the P25-active/another-SDR warning in 0.2.93. Confirmed source:

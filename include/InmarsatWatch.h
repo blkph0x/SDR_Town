@@ -69,8 +69,17 @@ private:
     double lastSpeech_=0;
 };
 
-// Hardware-independent session: one owning thread, one pipeline per channel.
-// The caller handles tune confirmation and chronological IQ at each transition.
+struct InmarsatChannelDisplay {
+    std::string id;
+    double frequencyHz=0;
+    int rate=0;
+    bool locked=false;
+    double ebnoDb=0;
+    InmarsatConstellation constellation;
+};
+
+// One persistent worker/pipeline per active channel, one input block in flight.
+// Session owner waits for all workers before callbacks, retunes or destruction.
 class InmarsatWatchSession {
 public:
     using MessageSink = InmarsatAero::MessageSink;
@@ -83,6 +92,7 @@ public:
     void process(std::span<const std::complex<float>>, uint64_t start, double rate,
                  double center, bool gap, double now);
     nlohmann::json report(double now) const;
+    std::vector<InmarsatChannelDisplay> displays() const;
 private:
     struct Channel;
     void createChannels();

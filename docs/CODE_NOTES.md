@@ -1,5 +1,22 @@
 # Code notes (tree map)
 
+## Aero parallel watch and local visuals (DEC-0127)
+
+InmarsatWatch::Channel owns one thread and constructs/destroys its complete
+pipeline there. submit/wait admits one immutable borrowed block; wait-all drains
+exceptions before input reuse. Only the session owner publishes messages and
+arbitrates speaker PCM. InmarsatEngine applies watch revisions at that barrier,
+not on the GUI thread. Existing tune confirmation/cursor reset guards remain.
+
+InmarsatAero subscribes to bundled JAERO ScatterPoints after recovered symbols,
+copying at most 300 finite points. Pipeline/Watch expose typed local displays,
+separate from JSON diagnostics. Engine's lightweight displaySnapshot takes latest
+FFT directly without map/message/report copies. Widget has a 50 ms visual timer
+and a separate 500 ms status timer, both stopped when hidden. Spectrum keeps a
+circular image and rejects repeated FFT values; selected-channel constellation
+has fixed axes and does not infer lock from dot shape. Click-to-add saves stable
+channel IDs; hot edits are worker-applied, one tuner still schedules groups.
+
 ## Inmarsat P25 handover (DEC-0126)
 
 - SatcomHostServices adds a typed, read-only-by-default preflight; exceptions

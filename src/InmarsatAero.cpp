@@ -24,6 +24,8 @@ struct InmarsatAero::Impl {
     size_t pendingCount=0;
     int rate;
     InmarsatAeroStats stats;
+    InmarsatConstellation scatter;
+    uint64_t scatterSample = 0;
     MessageSink messageSink;
     PcmSink pcmSink;
     explicit Impl(int bps,bool burst):rate(bps) {
@@ -103,19 +105,33 @@ struct InmarsatAero::Impl {
         auto soft=[this](const QVector<short>& bits) {
             stats.softBits+=bits.size(); frames.processDemodulatedSoftBits(bits);
         };
+        // DEC-0127: passive modem feedback, after symbol recovery. Direct local
+        // callbacks stay on this modem's owner; the UI sees only a bounded copy.
+        auto points=[this](const QVector<cpx_type>& input) {
+            scatter.points.clear();
+            for(const auto& p:input) {
+                // Upstream scatter buffers start zero-filled; omit that padding.
+                if(std::isfinite(p.real()) && std::isfinite(p.imag()) && p!=cpx_type{})
+                    scatter.points.emplace_back(float(p.real()),float(p.imag()));
+                if(scatter.points.size()==300) break;
+            }
+            ++scatter.sequence;scatterSample=stats.input48k;
+        };
         if(burst && bps==10500) {
             burstOqpsk=std::make_unique<BurstOqpskDemodulator>(nullptr);
             BurstOqpskDemodulator::Settings settings;
             settings.fb=bps;settings.Fs=48000;settings.freq_center=8000;settings.lockingbw=10500;
             burstOqpsk->setSettings(settings);burstOqpsk->setSQL(false);burstOqpsk->setAFC(true);burstOqpsk->setCPUReduce(false);
-            burstOqpsk->setScatterPointType(BurstOqpskDemodulator::SPT_None);
+            burstOqpsk->setScatterPointType(BurstOqpskDemodulator::SPT_constellation);
+            QObject::connect(burstOqpsk.get(),&BurstOqpskDemodulator::ScatterPoints,&frames,points);
             QObject::connect(burstOqpsk.get(),&BurstOqpskDemodulator::processDemodulatedSoftBits,&frames,soft);
         } else if(burst) {
             burstMsk=std::make_unique<BurstMskDemodulator>(nullptr);
             BurstMskDemodulator::Settings settings;
             settings.fb=bps;settings.Fs=48000;settings.freq_center=8000;settings.lockingbw=1800;
             burstMsk->setSettings(settings);burstMsk->setSQL(false);burstMsk->setAFC(true);burstMsk->setCPUReduce(false);
-            burstMsk->setScatterPointType(BurstMskDemodulator::SPT_None);
+            burstMsk->setScatterPointType(BurstMskDemodulator::SPT_constellation);
+            QObject::connect(burstMsk.get(),&BurstMskDemodulator::ScatterPoints,&frames,points);
             QObject::connect(burstMsk.get(),&BurstMskDemodulator::processDemodulatedSoftBits,&frames,soft);
         } else if(bps>=8400) {
             oqpsk=std::make_unique<OqpskDemodulator>(nullptr);
@@ -123,7 +139,8 @@ struct InmarsatAero::Impl {
             settings.fb=bps; settings.Fs=48000; settings.freq_center=8000;
             settings.lockingbw=bps; settings.signalthreshold=0.65;
             oqpsk->setSettings(settings); oqpsk->setSQL(false); oqpsk->setAFC(true);
-            oqpsk->setCPUReduce(false); oqpsk->setScatterPointType(OqpskDemodulator::SPT_None);
+            oqpsk->setCPUReduce(false); oqpsk->setScatterPointType(OqpskDemodulator::SPT_constellation);
+            QObject::connect(oqpsk.get(),&OqpskDemodulator::ScatterPoints,&frames,points);
             QObject::connect(oqpsk.get(),&OqpskDemodulator::processDemodulatedSoftBits,&frames,soft);
             QObject::connect(oqpsk.get(),&OqpskDemodulator::MSESignal,&frames,[this](double v){stats.mse=v;});
             QObject::connect(oqpsk.get(),&OqpskDemodulator::EbNoMeasurmentSignal,&frames,[this](double v){stats.ebno=v;});
@@ -132,7 +149,8 @@ struct InmarsatAero::Impl {
             MskDemodulator::Settings settings;
             settings.fb=bps; settings.Fs=48000; settings.freq_center=8000; settings.lockingbw=bps*1.5;
             msk->setSettings(settings); msk->setSQL(false); msk->setAFC(true); msk->setCPUReduce(false);
-            msk->setScatterPointType(MskDemodulator::SPT_None);
+            msk->setScatterPointType(MskDemodulator::SPT_constellation);
+            QObject::connect(msk.get(),&MskDemodulator::ScatterPoints,&frames,points);
             QObject::connect(msk.get(),&MskDemodulator::processDemodulatedSoftBits,&frames,soft);
         }
     }
@@ -152,6 +170,14 @@ InmarsatAero::~InmarsatAero()=default;
 void InmarsatAero::setMessageSink(MessageSink sink) {impl_->messageSink=std::move(sink);}
 void InmarsatAero::setPcmSink(PcmSink sink) {impl_->pcmSink=std::move(sink);}
 InmarsatAeroStats InmarsatAero::stats() const {return impl_->stats;}
+InmarsatConstellation InmarsatAero::constellation() const {
+    auto result=impl_->scatter;
+    result.ageSamples=impl_->stats.input48k-impl_->scatterSample;
+    // DEC-0127: one second without fresh symbols is stale visualization, not
+    // permission to modify decoder lock or audio. Burst pauses may be longer.
+    if(result.ageSamples>48000) result.points.clear();
+    return result;
+}
 void InmarsatAero::processIf(std::span<const int16_t> input) {
     for(auto sample:input) {
         impl_->pending[impl_->pendingCount++]=sample;
