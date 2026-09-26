@@ -1,5 +1,10 @@
 # Task list (canonical)
 
+T-0077 | done | Verify supplied 0.2.110 follow-up audit |
+DEC-0149. Source trace and fresh measurements correct AUTO, WFM rate-plan and
+short CTCSS proposals. docs/AUDIT_0.2.110_FOLLOWUP.md records scope, gates and
+revised sequence. 36 benchmark cases and 9104 focused assertions PASS. No DSP edit.
+
 T-0076 | done | NFM first-stage alias rejection |
 DEC-0148. Compare old moving average, cascaded response and decimating FIR.
 Gate passband, image rejection, timing, tones and CPU before production adoption.

@@ -1,5 +1,14 @@
 # Decisions
 
+## DEC-0149 - Verify audit premises before DSP changes (2026-09-27)
+
+AUTO already uses chooseSmartModeAndBandwidth in GUI/CLI; WFM is filtered before
+decimation and selects bandwidth-dependent rates. Fresh benchmark has no failure
+in its tested WFM cases. Shortening the CTCSS window fails existing neighbour
+criteria even on a clean 67 Hz fixture. Record corrections and qualification
+plan in AUDIT_0.2.110_FOLLOWUP.md; do not alter accepted DSP or P25 defaults from
+these unsupported premises. Wider sweeps and phase-aware fixtures come first.
+
 ## DEC-0148 - NFM first-stage decimating FIR candidate (2026-09-27)
 
 T-0074 actual IQ fixture proves +40dB image blocker corrupts speech. Compare

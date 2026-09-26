@@ -1,5 +1,13 @@
 # Build notes
 
+## 2026-09-27 - T-0077 audit checks
+
+Clean 787488e (runtime 1f7740e), existing Release tests. Fresh
+build/fm-audit-110.json validates 36 measurements. Focused WFM/CTCSS/HF/classifier
+run passes 9104 assertions in 41 cases. Independent 80 ms Hann tone projection
+gives 67/71.9 Hz power ratio 1.22045, below current lock threshold 4. No runtime
+edits or rebuild; published 0.2.110 unchanged.
+
 ## 2026-09-27 - T-0076 public release verified
 
 Source 1f7740ee161d988d95917c666c05714123be5383, experimental v0.2.110.

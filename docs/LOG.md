@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-09-27 - T-0077 audit reconciliation
+
+Checked the supplied audit against clean source and new measurements. Corrected
+AUTO-unwired and fixed-192k WFM assumptions; demonstrated short CTCSS neighbour
+ambiguity. Published a bounded follow-up plan without changing accepted DSP.
+
 ## 2026-09-27 - T-0076 published
 
 NFM anti-alias repair released as experimental 0.2.110, source 1f7740e.
