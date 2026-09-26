@@ -2,6 +2,9 @@
 
 ## 2026-09-27 - T-0074 benchmark and next targets
 
+Published source0dfe8cf; Windows and YAML CI successful. Task closes measurement
+coverage only, not the identified rejection/cost limitations. Runtime unchanged.
+
 User accepts WFM0.2.108. Added reproducible two-signal benchmark with bounded
 local JSON output, validated measurement math and report checks. Three matrices
 reproduce NFM image-blocker weakness and WFM high-rate channelizer cost. Preserve

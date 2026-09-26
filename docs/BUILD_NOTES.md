@@ -7,7 +7,8 @@ Release test build PASS, measurement math5 assertions PASS. Explicit benchmark
 build/fm-benchmark-108.json. Parser four tests including negative cases PASS.
 Default full CTest15/15 in47.84sec PASS. Results/provenance/limitations recorded
 in FM_INTERFERENCE_BASELINE.md. Tests/docs only; app version remains0.2.108.
-CI qualification pending; no new binary release needed for unchanged runtime.
+Source0dfe8cf pushed; Windows CI36247770217 SUCCESS, YAML36247770228 SUCCESS.
+No new binary release needed for unchanged runtime; current asset remains0.2.108.
 
 ## 2026-09-26 - T-0073 public release verified
 

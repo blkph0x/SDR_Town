@@ -1,8 +1,11 @@
 # Task list (canonical)
 
-T-0074 | in progress | FM interference and throughput baseline |
+T-0074 | done | FM interference and throughput baseline |
 DEC-0146. User confirms WFM sounds good. Preserve production DSP; build actual
 two-signal IQ benchmark and structured report before selecting filter changes.
+Source0dfe8cf pushed; three36-case runs, measurement/parser tests and full15/15
+local suites PASS. Windows36247770217 and YAML36247770228 SUCCESS. Test-only
+tooling; runtime release0.2.108 unchanged. Follow-up repairs remain ISS-0037.
 
 T-0073 | done | WFM speech stream continuity |
 DEC-0145 / ISS-0037. Repair reproduced WFM FIR/decimator/PCM boundaries,
