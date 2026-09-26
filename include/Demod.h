@@ -139,6 +139,13 @@ private:
     double nfmStreamRate = 0, nfmStreamCenter = 0;
     NfmPcmClock nfmPcmClock;
     bool nfmPostAudioReset = true;
+    // DEC-0145: separate speech state; never share RDS or NFM histories.
+    std::vector<std::complex<float>> wfmSpeechFirDelay;
+    size_t wfmFirWrite = 0, wfmDecimationPhase = 0;
+    int wfmDecimationFactor = 0;
+    double wfmStreamRate = 0, wfmStreamCenter = 0;
+    NfmPcmClock wfmPcmClock;
+    bool wfmPostAudioReset = true;
     double nfmSpeechLastBw = -1.0;
     double nfmSpeechLastRate = -1.0;
     float clickFadeGain = 1.0f;

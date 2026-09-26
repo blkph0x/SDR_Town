@@ -1,5 +1,17 @@
 # Build notes
 
+## 2026-09-26 - T-0073 WFM repair qualification
+
+Baseline0.2.107 has measured PCM partition failures in DEC-0144/ISS-0037.
+Independent WFM causal FIR/decimator/PCM state repairs count and waveform
+invariance. First run32 assertions/two cases PASS (12 partition configurations
+and four reset/source transitions). NFM1626 assertions/five cases PASS;
+RDS23235 assertions/ten cases PASS. Added zero-lookahead/zero-phase-repair and
+nonzero latency-counter assertions before final full build. Final Release build
+PASS; WFM80 assertions/two cases PASS, full CTest15/15 in45.62sec PASS. RDS CLI,
+GUI startup (exit0, ok=true, no warnings/errors) and guard mutation tests PASS.
+Public CI/download verification pending. No hardware listening claim.
+
 ## 2026-09-26 - T-0072 public release verified
 
 Source2133b44, v0.2.107. Windows release36242577020/master36242576898 SUCCESS;

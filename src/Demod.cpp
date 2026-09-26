@@ -504,6 +504,20 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
     }
 
     // DDC
+    if (mode == DemodMode::WFM) {
+        if (wfmStreamRate != sr || wfmStreamCenter != cf) {
+            dspStateNeedsReset = true;
+            ph = 0;
+        }
+        wfmStreamRate = sr;
+        wfmStreamCenter = cf;
+        if (dspStateNeedsReset) {
+            ph = 0;
+            wfmSpeechFirDelay.clear();
+            wfmFirWrite = wfmDecimationPhase = 0;
+            prev = {1, 0};
+        }
+    }
     const double twoPi = 2.0 * 3.14159265358979323846;
     double phaseInc = twoPi * (target - cf) / sr;
     std::vector<std::complex<float>> baseband(iq.size());
@@ -710,6 +724,11 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
                 (chanTaps.size()-1)*0.5e6/workRate);
         }
         internalRate = workRate;
+    } else if (mode == DemodMode::WFM) {
+        // DEC-0145: same causal FIR operation as NFM, separate history.
+        filterNfm(baseband, chanTaps, wfmSpeechFirDelay, wfmFirWrite);
+        diagnostic.values[fmDiagnostics::MaxFirDelayUs] = static_cast<uint64_t>(
+            (chanTaps.size()-1)*0.5e6/sr);
     } else if (!chanTaps.empty() && channelBwHz > 0) {
         size_t M = chanTaps.size();
         size_t D = (M > 0 ? M-1 : 0);
@@ -767,7 +786,14 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
             if (M > 1) {
                 std::vector<std::complex<float>> dec;
                 dec.reserve(baseband.size() / M + 1);
-                for (size_t i = 0; i < baseband.size(); i += M) {
+                if (mode == DemodMode::WFM) {
+                    if (wfmDecimationFactor != M) wfmDecimationPhase = 0;
+                    wfmDecimationFactor = M;
+                    for (const auto& sample : baseband) {
+                        if (wfmDecimationPhase == 0) dec.push_back(sample);
+                        if (++wfmDecimationPhase == static_cast<size_t>(M)) wfmDecimationPhase = 0;
+                    }
+                } else for (size_t i = 0; i < baseband.size(); i += M) {
                     dec.push_back(baseband[i]);
                 }
                 baseband = std::move(dec);
@@ -920,6 +946,20 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
             squelchHangLeft = 0;
             clickFadeGain = 0;
             nfmPostAudioReset = false;
+        }
+    } else if (mode == DemodMode::WFM) {
+        // DEC-0145: use real stream time, not rounded callback output hints.
+        if (wfmPcmClock.configure(demodRate, outputRate, dspStateNeedsReset))
+            wfmPostAudioReset = true;
+        aud = wfmPcmClock.process(base);
+        diagnostic.values[fmDiagnostics::MaxPcmDelayUs] = static_cast<uint64_t>(std::ceil(2e6/demodRate));
+        diagnostic.values[fmDiagnostics::HintMismatchBlocks] = aud.size() != exactAudioNeeded;
+        if (wfmPostAudioReset && !aud.empty()) {
+            des = flp1 = flp2 = squelchGateGain = 0;
+            nx1 = nx2 = ny1 = ny2 = 0;
+            squelchHangLeft = 0;
+            clickFadeGain = 0;
+            wfmPostAudioReset = false;
         }
     } else if (exactAudioNeeded > 0 && !base.empty()) {
         if (dspStateNeedsReset ||
@@ -1090,6 +1130,14 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         // Fade in after retune / DSP reset so block edges don't click.
         if (mode == DemodMode::NFM) {
             // DEC-0143: fade completion is a sample event, not a callback event.
+            const float fadeAttack = 1.0f - std::exp(-1.0f / (0.006f * (float)outputRate));
+            for (auto& s : aud) {
+                if (clickFadeGain < 0.999f) clickFadeGain += (1.0f-clickFadeGain)*fadeAttack;
+                else clickFadeGain = 1.0f;
+                s *= clickFadeGain;
+            }
+        } else if (mode == DemodMode::WFM) {
+            // DEC-0145: identical 6ms fade, completion evaluated per sample.
             const float fadeAttack = 1.0f - std::exp(-1.0f / (0.006f * (float)outputRate));
             for (auto& s : aud) {
                 if (clickFadeGain < 0.999f) clickFadeGain += (1.0f-clickFadeGain)*fadeAttack;

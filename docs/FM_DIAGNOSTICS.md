@@ -74,3 +74,9 @@ HF, FM, RDS, CTCSS/DCS, SSTV, Inmarsat and device tests.
 Next: actual PCM partition characterization, isolated resampler repair, NFM
 blocker rejection measurements and separately qualified WFM changes. No claim
 that this synthetic pass establishes better speech on every physical receiver.
+# WFM continuity extension (0.2.108)
+
+WFM now reports causal maxFirDelayUs and maxPcmDelayUs using the existing bounded
+FM counters. hintMismatchBlocks compares clock-derived PCM to caller hints, not
+lost samples. resamplerLookaheadReads/resamplerPhaseRepairs should not increase
+for WFM after this repair. RDS and NFM processing are unchanged.

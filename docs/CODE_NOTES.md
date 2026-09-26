@@ -1,5 +1,15 @@
 # Code notes (tree map)
 
+## WFM speech timing (DEC-0145)
+
+Separate WFM FIR ring/decimator phase and cubic clock now preserve stream time.
+Uses existing causal FIR helper and NfmPcmClock polynomial with independent state;
+the helper name reflects its original owner, not a shared audio history. RDS
+retains its independent branch. Source rate/center/reset clears speech history;
+deferred PCM reset clears de-emphasis/notch/final filters even after empty output.
+Bounded FM maxFirDelayUs/maxPcmDelayUs/hintMismatchBlocks expose causal latency
+and count differences; LookaheadReads/PhaseRepairs must stay zero on this path.
+
 ## Auto bandwidth policy (DEC-0144)
 
 AutoBandwidthCheck owns persisted monitor/autoBandwidth (default true) and

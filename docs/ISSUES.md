@@ -2,6 +2,11 @@
 
 ## ISS-0037 - FM chunk boundaries and sample lattice (2026-09-26, OPEN)
 
+T-0073 / DEC-0145 repairs WFM speech FIR, decimator and PCM boundaries while
+keeping RDS/NFM independent. Former hidden WFM fixture is promoted to mandatory
+[wfm][pcm-stream], now passes first32 assertions. Final qualification pending.
+RF blocker rejection, cost profiling and physical listening remain open.
+
 DEC-0144 characterization: actual WFM PCM at2.048MS/s whole/split counts4800/4800
 but max absolute error0.0494488; at2.4MS/s counts4800/4805 and error0.209476.
 Input100ms,1100Hz tone,50kHz deviation,8192-sample chunks,48kHz PCM. Reproduce

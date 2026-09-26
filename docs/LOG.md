@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-09-26 - T-0073 WFM software repair
+
+Repaired reproduced WFM callback-boundary defects with separate causal FIR,
+decimator and PCM histories. No NFM/HF/P25 or independent RDS branch edits.
+Promoted hidden characterization to mandatory80-assertion WFM gate; PASS.
+Existing NFM1626/RDS23235 assertions, RDS CLI and GUI startup PASS. Release
+0.2.108 publication gates pending; hardware listening remains user acceptance.
+
 ## 2026-09-26 - T-0072 published
 
 Auto BW switch delivered as v0.2.107 experimental, source2133b44. Full local and

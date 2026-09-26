@@ -1,5 +1,18 @@
 # Decisions
 
+## DEC-0145 - WFM speech clocks and causal history (2026-09-26)
+
+DEC-0144 fixture reproduced WFM4800/4805 PCM and0.209476 waveform error.
+Source confirms centered FIR reads past available block, decimator restarts at
+zero, requested-count cubic repeats last sample, fade completion is blockwise.
+Use existing causal FIR routine with independent WFM history and persistent
+decimator phase. Reuse tested cubic clock with independent WFM instance and
+two-input delay; preserve coefficients, de-emphasis, notch and squelch policy.
+Reset on source rate/center changes and explicit reset; defer output-state
+reset until first actual PCM, including notch history. Sample-wise fade uses
+unchanged6ms coefficient. RDS data branch and NFM algorithms stay byte-identical.
+Promote failing fixture and test tiny/regular blocks, rates and reset behavior.
+
 ## DEC-0144 - Persistent receiver Auto BW switch (2026-09-26)
 
 User requests one switch covering all modes. Gate automatic channel-width

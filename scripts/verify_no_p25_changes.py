@@ -49,6 +49,25 @@ PROTECTED_PATTERNS: tuple[str, ...] = (
 )
 
 SATCOM_MAINWINDOW_PATH = "src/MainWindow.cpp"
+# DEC-0145: exact WFM speech-only continuity repair; RDS/NFM/P25 unchanged.
+WFM_PCM_DIGESTS = {
+    "src/Demod.cpp": (
+        "ccb8a8770eb591736bcb8b7601748c56f46b323fc777c77e46f296b002b13fd0",
+        "7610e29cbe34ac0f4d03ff896622fbb24f957e89882a28c3b5e8ab9a2bd53f9a"),
+    "include/Demod.h": (
+        "d01abee5dbf7fe5b1bc628ce889a947af73144951ec5e3e66eea69dafff6d19c",
+        "1d110e0fa0ea2d682fa0c5c02ed5e9ffb8f58da39949c8984da8db01ec5937a9"),
+}
+
+
+def wfm_pcm_text_allowed(path: str, before: str, after: str) -> bool:
+    pair = WFM_PCM_DIGESTS.get(path)
+    return pair is not None and pair == (
+        hashlib.sha256(before.encode("utf-8")).hexdigest(),
+        hashlib.sha256(after.encode("utf-8")).hexdigest(),
+    )
+
+
 # DEC-0144: exact monitor UI/policy patch; no P25 setup or DSP changes.
 AUTO_BW_DIGESTS = {
     "src/MainWindow.cpp": (
@@ -365,6 +384,17 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
+        if path in WFM_PCM_DIGESTS and args.paths is None:
+            try:
+                allowed = wfm_pcm_text_allowed(
+                    path, git_file_text(args.base, path), git_file_text(args.head, path)
+                )
+            except RuntimeError as exc:
+                print(f"P25 guard error: {exc}", file=sys.stderr)
+                return 2
+            if allowed:
+                print(f"P25 guard: accepted exact DEC-0145 WFM speech patch: {path}")
+                continue
         if path in AUTO_BW_DIGESTS and args.paths is None:
             try:
                 allowed = auto_bw_text_allowed(
