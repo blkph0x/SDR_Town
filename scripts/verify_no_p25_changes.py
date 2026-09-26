@@ -49,6 +49,25 @@ PROTECTED_PATTERNS: tuple[str, ...] = (
 )
 
 SATCOM_MAINWINDOW_PATH = "src/MainWindow.cpp"
+# DEC-0144: exact monitor UI/policy patch; no P25 setup or DSP changes.
+AUTO_BW_DIGESTS = {
+    "src/MainWindow.cpp": (
+        "3ed596dedafc1052675755a944015e7cf3d9a01581fffe9a793b884ea6f026d1",
+        "7e309ca8c17c89c5dd181a7f40b4a594f4e952ea963a69d0dbea8a97ea640c91"),
+    "include/MainWindow.h": (
+        "4cc2ca3b7ef25a89a90adb12c662f63257c1343d2210c26c8d090bba9439d8fb",
+        "5d8a753ed52b64ec793a51e0eca949158f3ce029a24fb14b6f1788b4d1c7439b"),
+}
+
+
+def auto_bw_text_allowed(path: str, before: str, after: str) -> bool:
+    pair = AUTO_BW_DIGESTS.get(path)
+    return pair is not None and pair == (
+        hashlib.sha256(before.encode("utf-8")).hexdigest(),
+        hashlib.sha256(after.encode("utf-8")).hexdigest(),
+    )
+
+
 # DEC-0143: exact NFM PCM clock and sample-wise startup fade repair.
 NFM_PCM_DIGESTS = {
     "src/Demod.cpp": (
@@ -346,6 +365,17 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
+        if path in AUTO_BW_DIGESTS and args.paths is None:
+            try:
+                allowed = auto_bw_text_allowed(
+                    path, git_file_text(args.base, path), git_file_text(args.head, path)
+                )
+            except RuntimeError as exc:
+                print(f"P25 guard error: {exc}", file=sys.stderr)
+                return 2
+            if allowed:
+                print(f"P25 guard: accepted exact DEC-0144 Auto BW policy patch: {path}")
+                continue
         if path in NFM_PCM_DIGESTS and args.paths is None:
             try:
                 allowed = nfm_pcm_text_allowed(

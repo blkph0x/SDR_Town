@@ -1,4 +1,5 @@
 #include "WorkspaceLayout.h"
+#include "AutoBandwidthCheck.h"
 #include "BandPlan.h"
 #include "BandPlanDialog.h"
 #include "SpectrumWidget.h"
@@ -25,6 +26,27 @@ int main(int argc, char** argv) {
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsRoot.path());
     return Catch::Session().run(argc, argv);
+}
+
+TEST_CASE("Auto bandwidth checkbox persists and gates every suggested width", "[bandwidth][gui]") {
+    QSettings().remove("monitor/autoBandwidth");
+    {
+        AutoBandwidthCheck check;
+        REQUIRE(check.isChecked());
+        for (double suggested : {500.0, 2400.0, 6000.0, 12500.0, 25000.0, 180000.0})
+            REQUIRE(check.resolve(15000.0, suggested) == suggested);
+        check.click();
+        REQUIRE_FALSE(check.isChecked());
+        for (double suggested : {500.0, 2400.0, 6000.0, 12500.0, 25000.0, 180000.0})
+            REQUIRE(check.resolve(15000.0, suggested) == 15000.0);
+        REQUIRE(check.resolve(22000.0, 180000.0) == 22000.0);
+    }
+    AutoBandwidthCheck restored;
+    REQUIRE_FALSE(restored.isChecked());
+    restored.click();
+    REQUIRE(restored.resolve(22000.0, 180000.0) == 180000.0);
+    REQUIRE(QSettings().value("monitor/autoBandwidth").toBool());
+    QSettings().remove("monitor/autoBandwidth");
 }
 
 TEST_CASE("Waterfall drag previews without repeated hardware tune requests", "[waterfall][gui]") {

@@ -1,5 +1,15 @@
 # Decisions
 
+## DEC-0144 - Persistent receiver Auto BW switch (2026-09-26)
+
+User requests one switch covering all modes. Gate automatic channel-width
+suggestions from mode changes, classifier, band plan and remote mode defaults.
+Keep explicit user widths/saved presets and protocol-required P25 setup intact.
+Default enabled preserves existing behavior. Persist switch, expose state in
+diagnostics/control snapshots, log transitions only. No DSP algorithm changes.
+After this isolated feature, characterize remaining WFM boundaries with tests
+before considering a repair; preserve user-confirmed NFM/P25.
+
 ## DEC-0143 - NFM PCM clock follows samples, not callback size (2026-09-26)
 
 User reports 0.2.105 NFM crystal clear, including improved auto bandwidth.

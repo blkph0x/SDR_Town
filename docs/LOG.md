@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-09-26 - T-0072 Auto BW and next WFM evidence
+
+Added persistent global monitor Auto BW policy across automatic mode, band-plan,
+classifier and remote defaults. Explicit commands/presets and P25 setup retained.
+Qt policy/persistence, GUI startup and RDS tests PASS. No decoder DSP changes.
+Continued improvement work by measuring actual WFM PCM partition defects in an
+opt-in characterization test; results recorded in ISS-0037 before any repair.
+
 ## 2026-09-26 - T-0071 shipped as experimental 0.2.106
 
 ff98664 published via successful master/release Windows and YAML workflows.

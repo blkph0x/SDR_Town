@@ -188,6 +188,13 @@ void run() {
         assert not MODULE.nfm_pcm_text_allowed("src/Demod.cpp", after, before)
         assert not MODULE.nfm_pcm_text_allowed("src/P25LiveDecoder.cpp", before, after)
     print("NFM PCM exact-patch negative mutation tests passed")
+    with patch.object(MODULE, "AUTO_BW_DIGESTS", reviewed):
+        assert MODULE.auto_bw_text_allowed("src/MainWindow.cpp", before, after)
+        assert not MODULE.auto_bw_text_allowed("src/MainWindow.cpp", before, after + "\nchange")
+        assert not MODULE.auto_bw_text_allowed("src/MainWindow.cpp", before + "\n", after)
+        assert not MODULE.auto_bw_text_allowed("src/MainWindow.cpp", after, before)
+        assert not MODULE.auto_bw_text_allowed("src/P25LiveDecoder.cpp", before, after)
+    print("Auto BW exact-patch negative mutation tests passed")
     return 0
 
 

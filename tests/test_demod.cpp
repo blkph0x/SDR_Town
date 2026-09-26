@@ -636,6 +636,32 @@ TEST_CASE("NFM PCM is invariant to callback partitions and output hints", "[nfm]
     REQUIRE(error<1e-5);
 }
 
+// DEC-0144 / ISS-0037: explicit characterization, not a claimed passing gate.
+// Run [ .wfm-characterization ] without spaces to measure the unfixed WFM path.
+TEST_CASE("WFM PCM partition characterization", "[.wfm-characterization]") {
+    const double rate=GENERATE(2048000.0,2400000.0);
+    const auto iq=genNfmVoice(rate,.10,1100,50000);
+    const auto run=[&](bool split) {
+        Demodulator d;std::vector<float> result;
+        for(size_t at=0;at<iq.size();) {
+            const size_t n=std::min(iq.size()-at,split?size_t(8192):iq.size());
+            std::vector<std::complex<float>> block(iq.begin()+at,iq.begin()+at+n);
+            double rms=-100;
+            const auto audio=d.demodulateToAudio(block,rate,100e6,100e6,
+                DemodMode::WFM,rms,15000,-120,1,75,.96,180000,0,48000);
+            result.insert(result.end(),audio.begin(),audio.end());at+=n;
+        }
+        return result;
+    };
+    const auto whole=run(false),split=run(true);
+    double error=0;
+    for(size_t i=0;i<std::min(whole.size(),split.size());++i)
+        error=std::max(error,double(std::abs(whole[i]-split[i])));
+    WARN("WFM rate=" << rate << " whole=" << whole.size() << " split=" << split.size() << " maxError=" << error);
+    CHECK(whole.size()==split.size());
+    CHECK(error<1e-5);
+}
+
 TEST_CASE("NFM PCM reset and output rate changes match a fresh audio chain", "[nfm][pcm-stream]") {
     Demodulator used,fresh;
     const bool rateChange=GENERATE(false,true);

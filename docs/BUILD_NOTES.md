@@ -1,5 +1,16 @@
 # Build notes
 
+## 2026-09-26 - T-0072 local Auto BW gates
+
+Release app/native/workspace build PASS. Checkbox Qt fixture18 assertions PASS:
+default-enabled, varied proposed widths, disabled preservation, changed manual
+value, reload and re-enable. RDS CLI reference fixture PASS. GUI dry-run exit0,
+ok=true, errors/warnings empty. Exact shared-file guard negative tests PASS.
+WFM explicit characterization (not default suite) reproduces ISS-0037: at
+2.048MS/s PCM4800/4800 maxError0.0494488; at2.4MS/s4800/4805 error0.209476.
+No WFM fix or RF listening claim. Default full suite15/15 PASS in44.75sec.
+Public CI/asset verification pending.
+
 ## 2026-09-26 - T-0071 public release verified
 
 Source ff986642df8e32a5135df11ed7621b54506f5fa5. Windows release36240404038

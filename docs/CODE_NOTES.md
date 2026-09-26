@@ -1,5 +1,13 @@
 # Code notes (tree map)
 
+## Auto bandwidth policy (DEC-0144)
+
+AutoBandwidthCheck owns persisted monitor/autoBandwidth (default true) and
+resolves automatic GUI monitor width proposals: mode, band-plan, classifier and
+remote mode defaults. Explicit widths and P25 setup bypass it intentionally.
+Snapshot field autoBandwidth and transition log monitor.auto_bandwidth expose
+state without per-sample overhead. Qt tests exercise click, defaults and reload.
+
 ## NFM PCM clock (DEC-0143 / T-0071)
 
 NfmPcmClock.h retains the existing cubic polynomial with four real/history

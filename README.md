@@ -1,5 +1,9 @@
 # SDR Town
 
+0.2.107 adds a persistent **Auto BW** checkbox beside channel bandwidth for all
+monitor modes. Uncheck to hold manual bandwidth across automatic decisions.
+See [release notes](docs/RELEASE_0.2.107.md). NFM/P25 DSP is unchanged.
+
 0.2.106 completes NFM's callback-independent PCM clock, retaining the existing
 interpolation curve and adding delay/count telemetry. Auto bandwidth is unchanged.
 See [release notes](docs/RELEASE_0.2.106.md).
@@ -17,7 +21,7 @@ antenna control, saved limits/park and hardware-only SWR readback. See the
 [setup and ten-controller compatibility targets](docs/ANTENNA_CONTROL.md).
 Physical controller acceptance and automatic satellite tracking remain open.
 
-**[Download 0.2.106 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.106)**
+**[Download 0.2.107 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.107)**
 includes a matched SDRplay plugin and corrected, dated Inmarsat frequency/rate
 presets. Install the official SDRplay API 3.15+ and service separately. Extract
 the entire ZIP into a fresh folder. RTL bias-T is in Device Manager after

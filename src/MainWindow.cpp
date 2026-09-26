@@ -139,13 +139,13 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 currentMonitorFreq = f;
                 if (plan) {
                     currentMonitorMode = plan->mode;
-                    monitorChannelBwHz = plan->bandwidthHz;
+                    monitorChannelBwHz = autoBandwidthCheck->resolve(monitorChannelBwHz, plan->bandwidthHz);
                     monitorLpfHz = plan->lpfHz;
                 }
             }
             if (plan && bwSpin) {
                 bwSpin->blockSignals(true);
-                bwSpin->setValue(plan->bandwidthHz / 1000.0);
+                bwSpin->setValue(monitorChannelBwHz / 1000.0);
                 bwSpin->blockSignals(false);
             }
             if (plan && lpfSpin) {
@@ -343,7 +343,10 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         bwSpin = new QDoubleSpinBox();
         bwSpin->setRange(0.5, 500); bwSpin->setValue(180.0); bwSpin->setSuffix(" kHz"); bwSpin->setDecimals(1); bwSpin->setSingleStep(0.5);
         bwSpin->setToolTip("Receiver/channel bandwidth. NFM CB/PMR often uses 12.5 kHz; WFM broadcast uses ~180 kHz.");
-        QPushButton* autoBwBtn = new QPushButton("Auto BW");
+        autoBandwidthCheck = new AutoBandwidthCheck(this);
+        QPushButton* autoBwBtn = new QPushButton("Detect BW");
+        autoBwBtn->setEnabled(autoBandwidthCheck->isChecked());
+        connect(autoBandwidthCheck, &QCheckBox::toggled, autoBwBtn, &QPushButton::setEnabled);
         autoBwBtn->setToolTip("Detect occupied bandwidth around the tuned frequency and snap to a sensible channel width.");
         lpfEnableCheck = new QCheckBox("LPF");
         lpfEnableCheck->setChecked(true);
@@ -360,6 +363,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         auto* filterLay = new QHBoxLayout;
         filterLay->addWidget(new QLabel("Channel BW:"));
         filterLay->addWidget(bwSpin);
+        filterLay->addWidget(autoBandwidthCheck);
         filterLay->addWidget(autoBwBtn);
         filterLay->addWidget(lpfEnableCheck);
         filterLay->addWidget(lpfSpin);
@@ -4731,6 +4735,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         });
 
         connect(autoBwBtn, &QPushButton::clicked, this, [this]() {
+            if (!autoBandwidthCheck->isChecked()) return;
             auto& mgr = DeviceManager::instance();
             std::vector<float> pwr;
             double cf = 0.0, sr = 0.0;
@@ -4814,9 +4819,10 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 tunedHz = currentMonitorFreq;
             }
             const auto plan = findBandPlanForFrequency(tunedHz);
-            const double newBwHz = (plan && (newMode == DemodMode::AUTO || newMode == plan->mode))
+            const double proposedBwHz = (plan && (newMode == DemodMode::AUTO || newMode == plan->mode))
                 ? plan->bandwidthHz
                 : defaultBandwidthForMode(newMode);
+            const double newBwHz = autoBandwidthCheck->resolve(monitorChannelBwHz, proposedBwHz);
             const double newBwK = newBwHz / 1000.0;
             const double newLpfHz = (plan && (newMode == DemodMode::AUTO || newMode == plan->mode))
                 ? plan->lpfHz
@@ -4861,13 +4867,13 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 currentMonitorFreq = tunedHz;
                 if (plan) {
                     currentMonitorMode = plan->mode;
-                    monitorChannelBwHz = plan->bandwidthHz;
+                    monitorChannelBwHz = autoBandwidthCheck->resolve(monitorChannelBwHz, plan->bandwidthHz);
                     monitorLpfHz = plan->lpfHz;
                 }
             }
             if (plan && bwSpin) {
                 bwSpin->blockSignals(true);
-                bwSpin->setValue(plan->bandwidthHz / 1000.0);
+                bwSpin->setValue(monitorChannelBwHz / 1000.0);
                 bwSpin->blockSignals(false);
             }
             if (plan && lpfSpin) {
@@ -5473,7 +5479,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                     double monFreq = monFreqForClassifier;
                                     auto smart = chooseSmartModeAndBandwidth(pwr, sr, cf, monFreq, DemodMode::AUTO, &liveRec);
                                     DemodMode newM = smart.mode;
-                                    double useBwHz = smart.bandwidthHz;
+                                    double useBwHz = autoBandwidthCheck->resolve(monitorChannelBwHz, smart.bandwidthHz);
                                     double useBwK = useBwHz / 1000.0;
                                     double useLpfHz = smart.lpfHz;
                                     {
@@ -7387,6 +7393,7 @@ QJsonObject MainWindow::diagnosticsRuntimeSnapshot(const QString& reason)
         monitor["frequencyHz"] = monitorHz;
         monitor["mode"] = modeToQString(mode);
         monitor["channelBwHz"] = monitorBw;
+        monitor["autoBandwidth"] = autoBandwidthCheck->isChecked();
         monitor["audioLpfHz"] = lpfHz;
         monitor["audioLpfEnabled"] = lpfEnabled;
         monitor["squelchDb"] = squelch;
@@ -9909,6 +9916,7 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
             state.insert("frequencyMHz", currentMonitorFreq / 1e6);
             state.insert("mode", modeToQString(currentMonitorMode));
             state.insert("autoMode", autoDetectMode);
+            state.insert("autoBandwidth", autoBandwidthCheck->isChecked());
             state.insert("bandwidthHz", monitorChannelBwHz);
             state.insert("lpfHz", monitorLpfHz);
             state.insert("audioLpfEnabled", monitorAudioLpfEnabled);
@@ -10689,7 +10697,7 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
             currentMonitorMode = newMode;
             autoDetectMode = newAuto;
             if (bwHz > 0.0 && bwHz <= 10000000.0) monitorChannelBwHz = bwHz;
-            else if (!requestedMode.isEmpty()) monitorChannelBwHz = defaultBandwidthForMode(newMode);
+            else if (!requestedMode.isEmpty()) monitorChannelBwHz = autoBandwidthCheck->resolve(monitorChannelBwHz, defaultBandwidthForMode(newMode));
             if (lpfHz > 0.0 && lpfHz <= 200000.0) monitorLpfHz = lpfHz;
             else if (!requestedMode.isEmpty()) monitorLpfHz = lpfForModeAndBandwidth(newMode, monitorChannelBwHz);
             monitorAudioLpfEnabled = audioLpfEnabled;

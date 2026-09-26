@@ -2,6 +2,14 @@
 
 ## ISS-0037 - FM chunk boundaries and sample lattice (2026-09-26, OPEN)
 
+DEC-0144 characterization: actual WFM PCM at2.048MS/s whole/split counts4800/4800
+but max absolute error0.0494488; at2.4MS/s counts4800/4805 and error0.209476.
+Input100ms,1100Hz tone,50kHz deviation,8192-sample chunks,48kHz PCM. Reproduce
+with sdr_town_tests.exe "[.wfm-characterization]". This opt-in diagnostic fails
+three of four assertions on the unchanged baseline; excluded from ordinary
+suite intentionally, not a passing release gate. Repair must separate WFM
+speech decimation/FIR/PCM from the already-independent RDS tap and preserve it.
+
 T-0071 / DEC-0143: NFM PCM count and waveform partition failures reproduced
 and repaired using a persistent cubic sample clock and sample-wise fade.
 51 assertions cover eight rate pairs, resets, rate transitions and zero missing

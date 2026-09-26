@@ -77,6 +77,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSettings>
+#include "AutoBandwidthCheck.h"
 #include <QSlider>
 #include <QSpinBox>
 #include <QStandardPaths>
@@ -378,6 +379,7 @@ private:
     double currentMonitorFreq = 100e6;
     DemodMode currentMonitorMode = DemodMode::AUTO;
     bool autoDetectMode = true;
+    AutoBandwidthCheck* autoBandwidthCheck = nullptr;
     double monitorLpfHz = 15000;
     bool monitorAudioLpfEnabled = true;
     double monitorSquelchDb = -105;
