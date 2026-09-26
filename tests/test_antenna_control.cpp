@@ -11,6 +11,12 @@
 #include <QStandardPaths>
 #include <QLabel>
 #include <QPushButton>
+#include <QSpinBox>
+#include <QDoubleSpinBox>
+#include <QCheckBox>
+#include <QMessageBox>
+#include <QAbstractButton>
+#include <QPlainTextEdit>
 #include <QDir>
 #include <limits>
 
@@ -88,4 +94,24 @@ TEST_CASE("Antenna window initial state is disarmed and responsive"){
     if(!qEnvironmentVariable("SDR_TOWN_ANTENNA_SCREENSHOT").isEmpty())
         REQUIRE(window.grab().save(qEnvironmentVariable("SDR_TOWN_ANTENNA_SCREENSHOT")));
     window.close();
+}
+TEST_CASE("Antenna GUI connect arm move and close follow the real controller path"){
+    FakeController fake;AntennaControlWindow window;window.show();
+    auto* port=window.findChild<QSpinBox*>("rotorPort");REQUIRE(port);port->setValue(fake.server.serverPort());
+    QPushButton* connectButton=nullptr;
+    for(auto* button:window.findChildren<QPushButton*>())if(button->text()=="Connect")connectButton=button;
+    REQUIRE(connectButton);connectButton->click();
+    auto* position=window.findChild<QLabel*>("rotorPosition");REQUIRE(position);
+    const bool positioned=waitFor([&]{return position->text().contains("180.0");});
+    INFO(fake.commands.join(" | ").toStdString());
+    INFO(window.findChild<QPlainTextEdit*>()->toPlainText().toStdString());
+    REQUIRE(positioned);
+    auto* arm=window.findChild<QCheckBox*>("rotorArm");REQUIRE(arm);
+    QTimer::singleShot(0,[]{if(auto* dialog=qobject_cast<QMessageBox*>(QApplication::activeModalWidget()))dialog->button(QMessageBox::Yes)->click();});
+    arm->click();REQUIRE(arm->isChecked());
+    window.findChild<QDoubleSpinBox*>("targetAz")->setValue(210);
+    window.findChild<QDoubleSpinBox*>("targetEl")->setValue(30);
+    auto* move=window.findChild<QPushButton*>("rotorMove");REQUIRE(waitFor([&]{return move->isEnabled();}));move->click();
+    REQUIRE(waitFor([&]{return fake.commands.contains("+P 210.000 30.000");}));
+    window.close();REQUIRE(waitFor([&]{return fake.commands.contains("+S");}));CHECK_FALSE(arm->isChecked());
 }

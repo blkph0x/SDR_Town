@@ -57,6 +57,7 @@ AntennaControlWindow::AntennaControlWindow(QWidget* parent):QDialog(parent){
     auto* form=new QFormLayout;layout->addLayout(form);
     host_=new QLineEdit(QSettings().value("antenna/host","127.0.0.1").toString());host_->setObjectName("rotorHost");
     port_=new QSpinBox;port_->setRange(1,65535);port_->setValue(QSettings().value("antenna/port",4533).toInt());
+    port_->setObjectName("rotorPort");
     form->addRow("rotctld host",host_);form->addRow("Port",port_);
     auto* connection=new QHBoxLayout;layout->addLayout(connection);
     auto* connectButton=new QPushButton("Connect");auto* disconnectButton=new QPushButton("Disconnect");
@@ -81,6 +82,7 @@ AntennaControlWindow::AntennaControlWindow(QWidget* parent):QDialog(parent){
     auto* meter=new QWidget;auto* meterLayout=new QFormLayout(meter);
     meterHost_=new QLineEdit(QSettings().value("antenna/meterHost","127.0.0.1").toString());
     meterPort_=new QSpinBox;meterPort_->setRange(1,65535);meterPort_->setValue(QSettings().value("antenna/meterPort",4532).toInt());
+    meterPort_->setObjectName("swrPort");
     meterLayout->addRow("rigctld host",meterHost_);meterLayout->addRow("Port",meterPort_);
     auto* meterConnect=new QPushButton("Connect Meter");auto* meterDisconnect=new QPushButton("Disconnect Meter");
     meterLayout->addRow(meterConnect,meterDisconnect);swr_=new QLabel("SWR unavailable");swr_->setObjectName("swrReading");swr_->setWordWrap(true);meterLayout->addRow(swr_);

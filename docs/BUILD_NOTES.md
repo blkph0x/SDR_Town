@@ -2,6 +2,15 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - Rotor GUI full-path repetition
+
+Added actual widget Connect/Arm-confirmation/Move/Close-to-Stop loop against
+loopback ERP fixture. Initial harness selected the meter port by QObject
+traversal order, and QMessageBox::done did not simulate clicking Yes. Named
+port controls and actual button clicks correct the harness, not motion policy.
+Final eight-case antenna suite repeated five times PASS (28.51 s). Existing
+GUI/receive paths unchanged; latest app rebuilt. CI rerun includes these tests.
+
 ## 2026-09-26 - CI collector handle lifetime repair
 
 Initial source da1cf44 Windows runs 36234693736 (release) and 36234692520
