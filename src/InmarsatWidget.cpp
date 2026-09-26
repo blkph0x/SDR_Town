@@ -29,6 +29,7 @@
 #include <QVBoxLayout>
 
 #include <limits>
+#include <cmath>
 
 namespace {
 
@@ -176,6 +177,38 @@ void InmarsatWidget::buildUi() {
     auto* tune=new QPushButton("Tune");
     tune->setObjectName("inmarsatTune");
     tuneRow->addWidget(frequency_);tuneRow->addWidget(decoderCombo_);tuneRow->addWidget(tune);root->addLayout(tuneRow);
+    presetHint_ = new QLabel;
+    presetHint_->setObjectName("inmarsatRatePresetStatus");
+    presetHint_->setWordWrap(true);
+    root->addWidget(presetHint_);
+    connect(frequency_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            presetHint_, &QLabel::clear);
+    // DEC-0133: activated is user intent; currentIndexChanged also fires on restore.
+    connect(decoderCombo_, QOverload<int>::of(&QComboBox::activated), this, [this](int) {
+        const auto* plan = InmarsatBandPlanStore::instance().findById(
+            planCombo_->currentData().toString().toStdString());
+        const int rate = decoderCombo_->currentData().toInt();
+        const std::string mode = rate == 8400 ? "aero_voice" :
+            rate == 10500 ? "aero_oqpsk" : "aero_msk";
+        const InmarsatChannel* selected = nullptr;
+        if (plan && rate > 0) {
+            frequency_->interpretText();
+            for (const auto& channel : plan->channels) {
+                if (channel.baud != rate || channel.mode != mode) continue;
+                if (!selected) selected = &channel;
+                if (std::abs(channel.freqHz - frequency_->value() * 1e6) < 0.5) {
+                    selected = &channel;
+                    break;
+                }
+            }
+        }
+        if (!selected) {
+            presetHint_->setText("No surveyed preset for this rate/mode; frequency unchanged.");
+            return;
+        }
+        frequency_->setValue(selected->freqHz / 1e6);
+        presetHint_->setText("Survey preset (not yet tuned): " + QString::fromStdString(selected->label));
+    });
     connect(tune,&QPushButton::clicked,this,[this]{
         if(voiceFollowCheck_->isChecked())voiceFollowCheck_->setChecked(false);
         if(!applyTuningControls())
@@ -325,6 +358,7 @@ void InmarsatWidget::onChannelActivated(int row, int) {
 }
 
 void InmarsatWidget::syncTuningControls() {
+    presetHint_->clear();
     const auto cfg = InmarsatEngine::instance().config();
     frequency_->setValue(cfg.channelHz / 1e6);
     const int selection = cfg.mode == "egc" ? 0 : cfg.mode == "aero_burst" ? -cfg.baud : cfg.baud;
@@ -337,8 +371,10 @@ bool InmarsatWidget::applyTuningControls() {
     const int rate = decoderCombo_->currentData().toInt();
     const std::string mode = rate == 0 ? "egc" : rate < 0 ? "aero_burst" :
         rate == 8400 ? "aero_voice" : rate < 8400 ? "aero_msk" : "aero_oqpsk";
-    return InmarsatEngine::instance().selectChannel(frequency_->value() * 1e6,
+    const bool ok = InmarsatEngine::instance().selectChannel(frequency_->value() * 1e6,
                                                     mode, rate == 0 ? 1200 : std::abs(rate));
+    if (ok) presetHint_->clear();
+    return ok;
 }
 
 void InmarsatWidget::onVoiceFollowToggled(bool enabled) {

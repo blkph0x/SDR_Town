@@ -15,6 +15,14 @@ verified source have been removed; manual tuning remains available.
 
 ## Setup
 
+From 0.2.99, explicitly choosing a decoder rate previews a matching preset
+frequency from the selected satellite survey. Tune/Start commits that selection.
+An already matching frequency is kept. No surveyed match (including burst/EGC)
+leaves the frequency unchanged with a visible status; manually select the known
+signal. Choose the rate before clicking a custom waterfall frequency. Restoring
+saved controls does not select presets or retune. There is no fixed worldwide
+frequency range determined solely by 600/1200/8400/10500 bit/s.
+
 1. Open **Tools > Inmarsat Aero**. Choose the SDR, a manual frequency and decoder,
    then **START / TAKE OVER** to see real signals in **Watch channels**.
 2. Click a signal in the spectrum/waterfall. Choose **Aero data 10500**, data

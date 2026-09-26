@@ -76,6 +76,50 @@ TEST_CASE("Aero presets retain exact surveyed frequency and rate", "[inmarsat][g
     CHECK(found);
 }
 
+TEST_CASE("User rate selection previews a satellite preset without retuning", "[inmarsat][gui]") {
+    auto& engine = InmarsatEngine::instance();
+    REQUIRE(engine.setConfig(InmarsatEngineConfig::defaults()));
+    InmarsatWidget widget;
+    auto* plans = widget.findChild<QComboBox*>("inmarsatBandPlan");
+    auto* decoder = widget.findChild<QComboBox*>("inmarsatDecoder");
+    auto* frequency = widget.findChild<QDoubleSpinBox*>("inmarsatFrequencyMHz");
+    auto* hint = widget.findChild<QLabel*>("inmarsatRatePresetStatus");
+    REQUIRE(plans); REQUIRE(decoder); REQUIRE(frequency); REQUIRE(hint);
+    for (const auto& plan : InmarsatBandPlanStore::instance().plans()) {
+        plans->setCurrentIndex(plans->findData(QString::fromStdString(plan.id)));
+        for (int rate : {600, 1200, 8400, 10500, -1200, -10500, 0}) {
+            CAPTURE(plan.id, rate);
+            frequency->setValue(1555.123456);
+            const auto before = engine.config().toJson();
+            const int row = decoder->findData(rate);
+            REQUIRE(row >= 0);
+            decoder->setCurrentIndex(row);
+            CHECK(frequency->value() == 1555.123456); // Programmatic restore never selects a preset.
+            REQUIRE(QMetaObject::invokeMethod(decoder, "activated", Qt::DirectConnection, Q_ARG(int, row)));
+            CHECK(engine.config().toJson() == before); // Preview does not retune RF.
+            const InmarsatChannel* match = nullptr;
+            for (const auto& ch : plan.channels) if (ch.baud == rate) { match = &ch; break; }
+            if (match) {
+                CHECK(frequency->value() == match->freqHz / 1e6);
+                CHECK(hint->text().contains("not yet tuned"));
+                widget.findChild<QPushButton*>("inmarsatTune")->click();
+                CHECK(engine.config().channelHz == match->freqHz);
+                CHECK(engine.config().baud == rate);
+                CHECK(engine.config().mode == match->mode);
+            } else {
+                CHECK(frequency->value() == 1555.123456);
+                CHECK(hint->text().contains("No surveyed preset"));
+            }
+        }
+    }
+    plans->setCurrentIndex(plans->findData("4f2"));
+    decoder->setCurrentIndex(decoder->findData(8400));
+    frequency->setValue(1542.995); // Keep an existing matching voice center, not always the first.
+    REQUIRE(QMetaObject::invokeMethod(decoder, "activated", Qt::DirectConnection,
+        Q_ARG(int, decoder->currentIndex())));
+    CHECK(frequency->value() == 1542.995);
+}
+
 TEST_CASE("Opening Inmarsat preserves saved voice and burst selection", "[inmarsat][gui]") {
     auto& engine = InmarsatEngine::instance();
     REQUIRE(DeviceManager::instance().getDevices().empty()); // Never enumerate hardware.

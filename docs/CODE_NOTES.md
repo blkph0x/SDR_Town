@@ -552,3 +552,10 @@ SdrplayProfile adds the full-DLL override used by InmarScope. InmarsatBandPlan
 no longer invents fallback frequencies. Five survey JSONs retain exact Hz/rates;
 test_inmarsat_bandplans.py gates source and staged copies. The GUI regression
 checks 1546.0625 MHz display, 10500 bit/s and the activated engine settings.
+# 0.2.99 rate preview (DEC-0133)
+
+InmarsatWidget connects only QComboBox::activated to survey-frequency preview.
+No engine call occurs until existing Tune/Start actions; restoration remains
+side-effect-free. No-match modes preserve frequency and expose a status label.
+test_inmarsat_live_gui iterates all five plans and seven mode/rate choices,
+checks preview/commit separation and preservation of an existing matching center.

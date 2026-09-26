@@ -1,5 +1,16 @@
 # Decisions
 
+## DEC-0133 - Explicit rate-to-survey preset selection (2026-09-26)
+
+T-0060. Rate dropdown previously had no frequency-selection handler. Only user
+activation now picks a matching continuous mode/rate from the current satellite
+survey (preserving an already matching center); programmatic UI restoration must
+not retune or overwrite a saved/manual frequency. Tune/Start still commits RX
+changes. Burst and EGC or a plan without that rate keep the frequency and show
+that no surveyed preset exists. A rate does not define a universal RF band.
+No guessed continuous allocation or obsolete 6F1 voice presets. Regression tests
+cover every plan/rate, unsupported choices, GUI reopen and exact Tune settings.
+
 ## DEC-0132 - Matched SDRplay package and sourced Aero channels (2026-09-26)
 
 T-0059 / ISS-0027. Build SoapySDRPlay3 48bd8b41072534018de1d74deb3dea5874d9e0e0

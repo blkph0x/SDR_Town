@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-09-26 - Rate selection now previews a surveyed center
+
+DEC-0133 / T-0060: wired explicit decoder selection to the selected satellite's
+rate/mode channel list. No match retains frequency and reports why; Tune/Start
+still commits RX settings. Saved state and manual tuning remain intact.
+Local Release build and all 13 test suites PASS; preparing CI 0.2.99 delivery.
+
 ## 2026-09-26 - 0.2.98 publication verified
 
 Released 6f0e3f3 through Actions 36204228544; master 36204228658 also PASS.

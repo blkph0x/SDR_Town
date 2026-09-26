@@ -2,6 +2,17 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - 0.2.99 rate-selector qualification (DEC-0133)
+
+Initial MSVC Release link failed LNK1104: running SDR_Town.exe locked the
+output. Closed that instance gracefully; unchanged source rebuilt successfully.
+App, Inmarsat GUI, unit and workspace targets PASS. CTest 13/13 PASS in
+36.54 seconds. GUI regression covers all five plans and seven decoder choices,
+explicit preview versus Tune, preserving matching/manual/restored frequencies
+and no-preset status. Offline Inmarsat survey and workflow self-tests PASS.
+Evidence: build/repair-099-build-retry.log and repair-099-ctest.log.
+No P25 processing changes; no live satellite reception claim. Publication pending.
+
 ## 2026-09-26 - Verified public 0.2.98 release
 
 Source 6f0e3f3d72b34f8ddbbabc0e68073c5f42339d92. Windows release run

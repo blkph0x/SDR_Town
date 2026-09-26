@@ -67,6 +67,7 @@ private:
     QLabel* statusLabel_ = nullptr;
     QLabel* lockLabel_ = nullptr;
     QLabel* audioLabel_ = nullptr;
+    QLabel* presetHint_ = nullptr;
     QPlainTextEdit* msgView_ = nullptr;
     QTimer* refreshTimer_ = nullptr;
     QTimer* visualTimer_ = nullptr;
