@@ -2,6 +2,22 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - Public 0.2.100 constellation release verified
+
+Source c313f065c9f308958653397b7a9176c12430868b. Windows release 36208705124
+and master 36208705250 PASS; YAML 36208705172/36208705179 PASS.
+https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.100 is public, regular,
+not draft. ZIP 42,415,627 bytes and checksum independently downloaded.
+Hash/provenance/executable/module validation, five survey checks, CLI help,
+SDRplay plugin registration and recorded-MPX RDS smoke tests PASS.
+ZIP: fd10a58fc69e547dc2f722f97ef7a36cc56fd722ee158c39d2900057f3d9d8d3
+EXE: 16918cb4340d54311a2f3c84079b95f82e2f8d1bde7e60db8fb861f8009eb979
+SDRplay: d5c510cd3305be2417800a0b4ca1cd40930b5e7c119425427b42d7593e81de3e
+Evidence: build/public-0.2.100-local/, repair-100-public-check.log and CI logs.
+No local SDRplay service or satellite reference: physical reception unverified.
+P25 guard a7685c0..c313f06 PASS: 19 changed paths, zero protected. Portable
+testing release does not replace signed updater v0.2.96.
+
 ## 2026-09-26 - 0.2.100 constellation qualification (DEC-0134)
 
 Local MSVC2022 Release app/GUI/unit/workspace build PASS. Final incremental

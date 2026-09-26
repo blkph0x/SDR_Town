@@ -1,11 +1,14 @@
 # Issues (canonical)
 
-## ISS-0030 - Saved constellation selection hides manual decoder (2026-09-26, OPEN)
+## ISS-0030 - Saved constellation selection hides manual decoder (2026-09-26, FIXED)
 
 refreshVisuals matches a selected watch UUID, but manual snapshots use empty ID.
 Manual Tune/Start and preset activation did not clear that UUID. Fix tracked in
 DEC-0134. Inactive watch groups legitimately have no current symbols; do not
 display another channel or fabricate clusters to conceal this distinction.
+Fixed in c313f06 / v0.2.100. Native continuous-mode and concurrent-worker
+scatter, GUI retune/identity/render tests PASS; public CI-built asset verified.
+Live satellite reception and burst RF acceptance are not claimed by these tests.
 
 ## ISS-0029 - Rate dropdown did not select a frequency (2026-09-26, FIXED)
 

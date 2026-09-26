@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-09-26 - Constellation repair published
+
+T-0061 complete: c313f06 passed local and both CI build/test pipelines.
+Regular public v0.2.100 ZIP independently downloaded, checked and smoke-tested.
+See BUILD_NOTES for exact run IDs/hashes. No claim of live satellite or burst
+RF acceptance; no P25, modem DSP, scheduling or audio implementation changes.
+
 ## 2026-09-26 - Constellation retune identity repair
 
 DEC-0134 / T-0061: confirmed manual decoder empty ID could never match pinned
