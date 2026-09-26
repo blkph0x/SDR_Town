@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-09-26 - 0.2.98 publication verified
+
+Released 6f0e3f3 through Actions 36204228544; master 36204228658 also PASS.
+Public regular release ZIP/hash/provenance and downloaded CLI, SDRplay plugin
+registration, Aero preset and RDS tests PASS. See BUILD_NOTES for hashes.
+Hardware/service acceptance and the unrelated P25 field report remain open.
+
 ## 2026-09-26 - SDRplay delivery and Aero presets (DEC-0132)
 
 Build/package matched SDRplay plugin; retain vendor service requirement and

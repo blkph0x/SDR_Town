@@ -1,10 +1,13 @@
 # Task list (canonical)
 
-T-0059 | in_progress | SDRplay packaged-driver parity and field regression evidence |
+T-0059 | done (delivery; hardware/field acceptance open) | SDRplay packaged-driver parity and field regression evidence |
 Initial comparison recorded in SDRPLAY_RELEASE_AUDIT_20260926.md. Confirmed
 missing bundled SDRplay plugin versus InmarScope; remote failure, missing RTL
 checkbox and P25 early-end reports require exact tester build/session evidence.
 DEC-0132 extends this pass to correct sourced Aero presets and CI 0.2.98 release.
+Source 6f0e3f3; CI release 36204228544/master 36204228658 PASS. Regular public
+v0.2.98 downloaded/hash/provenance/presets/RDS/driver-registration checks PASS.
+No claim of P25 field-regression repair or physical RSP reception; see audit.
 
 T-0058 | in_progress | README community support appeal |
 DEC-0131. Add donation link, verified first commit, sourced AUD estimate and

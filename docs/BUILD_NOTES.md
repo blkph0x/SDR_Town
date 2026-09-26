@@ -2,6 +2,26 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - Verified public 0.2.98 release
+
+Source 6f0e3f3d72b34f8ddbbabc0e68073c5f42339d92. Windows release run
+36204228544 and master 36204228658 PASS; YAML 36204228453/36204228537 PASS.
+https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.98 is public, not draft,
+not prerelease. ZIP 42,414,064 bytes plus SHA256 sidecar. Latest intentionally
+remains signed v0.2.96; this is a portable testing release, not in-app update.
+
+Independent anonymous download/extraction verification PASS:
+ZIP: 84cf4c7d11486a6da37a93f223a02ce462ede52073f743ec25c151e36a6e3524
+EXE: 1c1c086a8e77023e867bfc806074a11ac8e51f4d28712b89b756f3bbad1df0dc
+SDRplay DLL: 4f89ebcd49c3c7563358bba8b172ecea4c7cf9ee7f40c9ab03e64e77bbc8e895
+Embedded commit/workflow/module provenance matches. Public CLI exit 0, help
+includes biastee; status selects downloaded folder's sdrPlaySupport.dll
+0.5.2-48bd8b4 and registers its driver. Service unavailable here, no RSP RF proof.
+All five downloaded Aero survey datasets PASS; downloaded RDS recorded-MPX,
+reference/parity/confirmation/malformed/missing-file tests PASS.
+Evidence: build/public-098-local/. Committed P25 guard PASS: 28 changed paths,
+zero protected. No P25 decoder or audio changes in this release.
+
 ## 2026-09-26 - 0.2.98 local qualification (DEC-0132)
 
 MSVC2022/Qt6.11.1 app/core/workspace/Inmarsat GUI builds PASS, final repeated
