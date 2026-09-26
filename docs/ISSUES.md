@@ -12,6 +12,11 @@ termination or lost connectivity cannot guarantee a physical stop.
 
 ## ISS-0035 - Diagnostics delivery/configuration/security (2026-09-26, OPEN)
 
+CI additionally exposed non-deterministic SQLite connection lifetime on
+Python3.12 (WinError32 on cleanup). Transaction contexts did not close DB
+handles. Explicit contextmanager/finally closure repairs it; rerun recorded
+in BUILD_NOTES. Production deployment gate remains separate.
+
 Recent CI ZIPs omitted the diagnostics defaults supplied by release.ps1;
 later enabled:false configuration could not override enabled:true. Client had
 unbounded network waits and accepted non-error replies without JSON receipt.

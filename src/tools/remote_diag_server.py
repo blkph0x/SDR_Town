@@ -10,6 +10,7 @@ back to the affected installation on the next app start.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import hashlib
 import hmac
 import html
@@ -22,7 +23,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 
@@ -162,10 +163,17 @@ class DiagnosticsState:
             self.rate_bytes += size
             return True
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         con = sqlite3.connect(self.db_path)
         con.row_factory = sqlite3.Row
-        return con
+        try:
+            # SQLite's context manager commits/rolls back, but does not close.
+            # Explicit closure avoids retained handles across Python versions.
+            with con:
+                yield con
+        finally:
+            con.close()
 
     def _init_db(self) -> None:
         with self.lock, self._connect() as con:

@@ -2,6 +2,15 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - CI collector handle lifetime repair
+
+Initial source da1cf44 Windows runs 36234693736 (release) and 36234692520
+(master) failed collector Python tests before compile. Python3.12 retained
+SQLite handles after transaction contexts, preventing temporary DB removal
+(WinError32). _connect now scopes transaction AND finally closes the connection;
+no GC timing reliance or ignored cleanup errors. This is a real collector
+lifetime fix, not a test waiver. Both YAML checks passed. Rerun required.
+
 ## 2026-09-26 - Antenna control local gate
 
 DEC-0140 / T-0068. MSVC2022/Qt6.11.1 SDR_Town and antenna_control_tests
