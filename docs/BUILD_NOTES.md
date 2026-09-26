@@ -1,5 +1,28 @@
 # Build notes
 
+## 2026-09-26 - T-0070 public release verified
+
+Source 80155ac0d87122b067c3f26112e651cb1cb2a54c, v0.2.105. Windows master
+36237622015 and release 36237621821 SUCCESS. YAML master 36237621931 and
+release 36237621742 SUCCESS. Public experimental prerelease, not a draft:
+https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.105
+Workflow initially created a non-latest ordinary release from the numeric tag;
+metadata was corrected to prerelease without replacing assets. Latest signed
+updater release remains v0.2.96.
+
+Downloaded ZIP 42,482,296 bytes; checksum and embedded source/version/run and
+EXE/SDRplay hashes verified by build/verify-public-099.ps1 with explicit version,
+commit and run arguments. ZIP SHA256:
+092a8e5a94921f9c2ea57a6d86c498c19387aed20dc37f827e18ba8fe6bb8193
+EXE SHA256:
+3d0c9464f068bf7bc59b276a409758937edbfecdeda586984aa9c565e1a0234e
+Public help/SDRplay-status/recorded RDS and Aero survey tests PASS. Public GUI
+dry-run startup/self-test/shutdown PASS (exit 0, ok=true); no live RX claimed.
+SDRplay enumeration reports vendor API service unavailable on this host, so no
+physical SDRplay acceptance was performed. Root remote_diagnostics.defaults.json
+verified: consent disabled, HTTPS collector URL correct, token present (not
+logged), budget 65536 bytes/minute. Server receipt/deployment remains ISS-0035.
+
 ## 2026-09-26 - T-0070 reproduce then repair NFM
 
 Windows/MSVC Release baseline f61ad0a. New actual Demodulator [nfm][stream]

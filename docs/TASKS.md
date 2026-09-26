@@ -1,10 +1,12 @@
 # Task list (canonical)
 
-T-0070 | in progress | NFM stream-boundary repair and bounded FM diagnostics |
+T-0070 | done | NFM stream-boundary repair and bounded FM diagnostics |
 DEC-0142 / ISS-0037. Reproduce actual NFM tap count/waveform failures, repair
 decimator phase and causal filter history without changing filter coefficients.
 Instrument FM counts, resets, processing cost and resampler shortfalls. Preserve
-WFM/HF/P25 processing. Full local/CI/release gates required.
+WFM/HF/P25 processing. Source 80155ac / v0.2.105 published and downloaded;
+master/release Windows CI and YAML PASS, public hashes/provenance/CLI/RDS/GUI
+checks PASS. PCM/WFM follow-up and physical acceptance remain ISS-0037.
 
 T-0069 | done | Evidence review of proposed DSP improvements |
 DEC-0141. Audit the supplied write-up against current source and baseline tests;

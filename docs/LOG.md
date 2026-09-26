@@ -1,5 +1,14 @@
 # Development log
 
+## 2026-09-26 - T-0070 shipped as experimental 0.2.105
+
+Application source 80155ac; master/release Windows CI and YAML successful.
+Downloaded public ZIP and embedded provenance/hashes verified, shipped CLI/RDS/
+survey and GUI dry-run checks PASS. Release explicitly marked experimental;
+v0.2.96 signed update channel unchanged. T-0070 software scope complete; NFM
+PCM conversion, WFM boundary repairs and live hardware qualification stay open.
+No further DSP edits were made during publication. See BUILD_NOTES evidence.
+
 ## 2026-09-26 - T-0070 NFM repair locally qualified
 
 Reproduced seven actual NFM producer partition failures, then repaired causal FIR
