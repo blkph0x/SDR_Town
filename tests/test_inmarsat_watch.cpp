@@ -6,6 +6,8 @@
 #include <array>
 #include "InmarsatIqFile.h"
 #include <QProcessEnvironment>
+#include <thread>
+#include <chrono>
 
 namespace {
 InmarsatWatchConfig example() {
@@ -174,6 +176,33 @@ TEST_CASE("Aero workers drain failures and retain independent ordered timelines"
             REQUIRE(actual==expected);
             REQUIRE(session.displays()[i].id==c.id);
         }
+    }
+}
+
+TEST_CASE("Every active Aero watch worker supplies its own constellation", "[inmarsat][watch]") {
+    auto cfg=example();
+    cfg.channels={{"low","",1545000000,600,true},{"medium","",1545012500,1200,true},
+                  {"high","",1545025000,10500,true}};
+    cfg.maxConcurrentChannels=3;
+    InmarsatWatchSession session(cfg,96000,0,{},{},{});
+    std::vector<std::complex<float>> iq(19200);
+    uint32_t seed=12345;
+    auto sample=[&] {seed=1664525u*seed+1013904223u;return float(int(seed>>16)-32768)/65536;};
+    for(auto& x:iq) {const auto re=sample();x={re,sample()};}
+    session.process(iq,0,96000,session.centerHz(),false,0);
+    // Each worker has its own wall-clock-limited JAERO scatter producer.
+    std::this_thread::sleep_for(std::chrono::milliseconds(180));
+    session.process(iq,iq.size(),96000,session.centerHz(),false,.2);
+    const auto displays=session.displays();
+    REQUIRE(displays.size()==3);
+    for(size_t i=0;i<displays.size();++i) {
+        CAPTURE(i);
+        CHECK(displays[i].id==cfg.channels[i].id);
+        CHECK(displays[i].frequencyHz==cfg.channels[i].frequencyHz);
+        CHECK(displays[i].rate==cfg.channels[i].rate);
+        CHECK(displays[i].constellation.sequence>0);
+        CHECK_FALSE(displays[i].constellation.points.empty());
+        CHECK_FALSE(displays[i].locked);
     }
 }
 

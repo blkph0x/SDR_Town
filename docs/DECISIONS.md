@@ -1,5 +1,16 @@
 # Decisions
 
+## DEC-0134 - Constellation identity follows explicit manual tuning (2026-09-26)
+
+T-0061 / ISS-0030. Manual engine snapshots publish an empty decoder ID, while
+watch selection pins a saved UUID. Confirmed refreshVisuals exact-ID matching
+therefore hides manual symbols after selecting a watch entry. Successful manual
+Tune/Start/preset tuning selects current decoder; rate preview alone does not.
+Watch selection remains exact-ID: never substitute another channel when inactive.
+Show actual decoder frequency/rate and explicit absence status. Validate widget
+selection and native continuous-mode scatter callbacks separately; visible dots
+do not prove protocol lock or real satellite reception. P25 remains untouched.
+
 ## DEC-0133 - Explicit rate-to-survey preset selection (2026-09-26)
 
 T-0060. Rate dropdown previously had no frequency-selection handler. Only user

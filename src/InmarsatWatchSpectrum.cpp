@@ -74,16 +74,36 @@ InmarsatConstellationWidget::InmarsatConstellationWidget(QWidget* parent):QWidge
     setToolTip("Recovered symbols for the selected channel. Protocol lock requires validated frames, not four visible clusters.");
 }
 void InmarsatConstellationWidget::setChannel(const InmarsatChannelDisplay* channel) {
-    points_.clear();locked_=false;ebno_=0;status_="Not in active group";
+    points_.clear();locked_=false;ebno_=0;channel_.clear();status_="Not in active group";
     if(channel) {
         points_=channel->constellation.points;locked_=channel->locked;ebno_=channel->ebnoDb;
         status_=points_.empty()?"No fresh symbols":locked_?"Protocol lock":"Acquiring";
+        channel_=QString("%1 MHz | %2 bit/s%3").arg(channel->frequencyHz/1e6,0,'f',6)
+            .arg(std::abs(channel->rate)).arg(channel->rate<0?" burst":"");
+        if(channel->rate==0) {
+            points_.clear();locked_=false;
+            status_="No native EGC constellation";
+            channel_=QString("%1 MHz | EGC").arg(channel->frequencyHz/1e6,0,'f',6);
+        }
     }
+    setToolTip(channel_.isEmpty()?status_:channel_+"\n"+status_);
     update();
+}
+void InmarsatConstellationWidget::setChannels(const std::vector<InmarsatChannelDisplay>& channels,
+                                             const std::string& selectedId) {
+    // DEC-0134: an inactive selected watch channel must not borrow a peer's dots.
+    const auto found=std::find_if(channels.begin(),channels.end(),[&](const auto& c){
+        return selectedId.empty() || c.id==selectedId;
+    });
+    setChannel(found==channels.end()?nullptr:&*found);
+    if(found==channels.end() && selectedId.empty()) {
+        status_="No active decoder";
+        setToolTip(status_);
+    }
 }
 void InmarsatConstellationWidget::paintEvent(QPaintEvent*) {
     QPainter p(this);p.fillRect(rect(),QColor(16,20,22));
-    const double size=std::max(1,std::min(width()-20,height()-46));
+    const double size=std::max(1,std::min(width()-20,height()-68));
     const QRectF box((width()-size)/2,8,size,size);
     p.setPen(QColor(71,84,89));p.drawRect(box);
     p.drawLine(QPointF(box.center().x(),box.top()),QPointF(box.center().x(),box.bottom()));
@@ -96,4 +116,6 @@ void InmarsatConstellationWidget::paintEvent(QPaintEvent*) {
         p.drawPoint(QPointF(box.center().x()+v.real()*size/4,box.center().y()-v.imag()*size/4));
     p.restore();p.setPen(Qt::lightGray);
     p.drawText(QRectF(0,box.bottom()+5,width(),18),Qt::AlignCenter,status_);
+    p.drawText(QRectF(4,box.bottom()+25,width()-8,18),Qt::AlignCenter,
+        p.fontMetrics().elidedText(channel_,Qt::ElideRight,std::max(1,width()-8)));
 }

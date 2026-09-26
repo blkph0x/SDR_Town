@@ -859,7 +859,7 @@ bool InmarsatEngine::processIq(InmarsatAudio& audio) {
         rawBlocks_ = stats.rawBlocksOut;
         validatedFrames_ = stats.framesOut;
         pipelineReport_ = pipeline_.report();
-        displays_={{"",tuned,config_.mode=="aero_burst"?-config_.baud:config_.baud,
+        displays_={{"",tuned,config_.mode=="egc"?0:config_.mode=="aero_burst"?-config_.baud:config_.baud,
             stats.locked,stats.ebnoDb,pipeline_.constellation()}};
         lastDisplayIqSeconds_=steadySeconds();
         streamState_ = manager.getRuntimeStateLabel(deviceIndex);

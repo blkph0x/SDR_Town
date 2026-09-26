@@ -1,5 +1,9 @@
 # Task list (canonical)
 
+T-0061 | in_progress | Constellation selection and retune regression |
+DEC-0134: reproduce saved-ID/manual-decoder mismatch, repair manual retune
+selection, label actual channel, test every continuous Aero rate and isolation.
+
 T-0060 | done | Inmarsat rate selector frequency presets |
 DEC-0133. Apply satellite-specific surveyed centers on explicit decoder dropdown
 activation; preserve restoration/manual tuning and report missing presets.

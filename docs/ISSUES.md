@@ -1,5 +1,12 @@
 # Issues (canonical)
 
+## ISS-0030 - Saved constellation selection hides manual decoder (2026-09-26, OPEN)
+
+refreshVisuals matches a selected watch UUID, but manual snapshots use empty ID.
+Manual Tune/Start and preset activation did not clear that UUID. Fix tracked in
+DEC-0134. Inactive watch groups legitimately have no current symbols; do not
+display another channel or fabricate clusters to conceal this distinction.
+
 ## ISS-0029 - Rate dropdown did not select a frequency (2026-09-26, FIXED)
 
 Changing Aero rate altered only the decoder combo; no signal handler selected

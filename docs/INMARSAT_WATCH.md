@@ -103,6 +103,15 @@ state, not the appearance of four clusters. Inactive groups/no fresh symbols
 clear the plot. MSK and burst modes need not look identical to continuous OQPSK.
 Points stay local and never enter remote diagnostics.
 
+Successful manual Tune/Start or band-plan preset tuning selects **Current / first
+active channel**, releasing any saved watch-channel selection. Rate/frequency
+previews alone do not change the inspected decoder. The diagram labels its
+actual decoder frequency/rate. Selecting a saved channel outside the active
+group shows **Not in active group**, never the first channel's dots. **No fresh
+symbols** means the active modem has no recent scatter update; **No active
+decoder** means no current decoder snapshot is available. Quiet burst channels
+may have no points between transmissions. EGC has no native constellation path.
+
 Visual polling is 20 Hz; status/map/messages remain 2 Hz. Only fresh FFT values
 advance waterfall history. Actual spectrum frame rate is limited by the radio's
 existing FFT producer (currently about 12 Hz for hardware), not fabricated extra

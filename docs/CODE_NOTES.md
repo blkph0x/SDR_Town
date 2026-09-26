@@ -1,5 +1,15 @@
 # Code notes (tree map)
 
+## Constellation identity (DEC-0134, 0.2.100)
+
+InmarsatWidget successful manual tuning releases pinned watch UUID selection.
+InmarsatWatchSpectrum::setChannels resolves only the requested active decoder
+(or first active for automatic selection); setChannel clears old points and
+labels actual RF/rate. Missing peers remain absent. GUI tests cover manual and
+preset retunes, exact identity, lock/absence states. Native tests exercise actual
+MSK/OQPSK scatter callbacks for all four continuous rates and reconstruction.
+No modem DSP, scheduler, speaker selection or P25 changes.
+
 ## CI publication verification (DEC-0130)
 
 windows-ci.yml release/* builds publish immutable portable versions with

@@ -31,7 +31,10 @@ class InmarsatConstellationWidget : public QWidget {
 public:
     explicit InmarsatConstellationWidget(QWidget* parent=nullptr);
     void setChannel(const InmarsatChannelDisplay* channel);
+    void setChannels(const std::vector<InmarsatChannelDisplay>& channels, const std::string& selectedId);
     size_t pointCount() const {return points_.size();}
+    QString statusText() const {return status_;}
+    QString channelText() const {return channel_;}
 protected:
     void paintEvent(QPaintEvent*) override;
 private:
@@ -39,4 +42,5 @@ private:
     bool locked_=false;
     double ebno_=0;
     QString status_="No active decoder";
+    QString channel_;
 };

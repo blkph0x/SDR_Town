@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-09-26 - Constellation retune identity repair
+
+DEC-0134 / T-0061: confirmed manual decoder empty ID could never match pinned
+watch UUID. Successful manual tuning now selects current decoder. Exact watch
+selection remains isolated; actual frequency/rate and absence/EGC states visible.
+Added native scatter and concurrent worker tests plus GUI identity/retune tests.
+Final local 13/13 PASS and normal/compact renders inspected; prepare CI 0.2.100.
+
 ## 2026-09-26 - 0.2.99 delivered and checked
 
 T-0060 / ISS-0029 closed after source 9834492 passed both Windows CI runs

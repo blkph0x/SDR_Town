@@ -107,7 +107,7 @@ void InmarsatWidget::reloadWatchUi() {
     const auto c=InmarsatEngine::instance().config().watch;
     const auto selected=constellationChannel_->currentData();
     QSignalBlocker constellationBlock(constellationChannel_);
-    constellationChannel_->clear();constellationChannel_->addItem("First active channel",QString{});
+    constellationChannel_->clear();constellationChannel_->addItem("Current / first active channel",QString{});
     QSignalBlocker block(watchTable_);watchTable_->setRowCount(int(c.channels.size()));
     for(size_t i=0;i<c.channels.size();++i) {
         const auto& channel=c.channels[i];auto* on=new QTableWidgetItem;
@@ -181,6 +181,5 @@ void InmarsatWidget::refreshVisuals() {
     const auto display=InmarsatEngine::instance().displaySnapshot();
     watchSpectrum_->setSpectrum(display.spectrumDb,display.centerHz,display.rateHz,display.channels);
     const auto id=constellationChannel_->currentData().toString().toStdString();
-    const auto found=std::find_if(display.decoders.begin(),display.decoders.end(),[&](const auto& c){return id.empty() || c.id==id;});
-    constellation_->setChannel(found!=display.decoders.end()?&*found:nullptr);
+    constellation_->setChannels(display.decoders,id);
 }

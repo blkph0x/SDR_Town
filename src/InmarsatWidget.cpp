@@ -353,6 +353,8 @@ void InmarsatWidget::onChannelActivated(int row, int) {
     const auto& channel = plan->channels[static_cast<size_t>(row)];
     if (!InmarsatEngine::instance().selectChannel(channel.freqHz, channel.mode, channel.baud)) {
         QMessageBox::warning(this, "Inmarsat", "Could not tune/restart the selected channel.");
+    } else {
+        constellationChannel_->setCurrentIndex(0);
     }
     syncTuningControls();
 }
@@ -373,7 +375,11 @@ bool InmarsatWidget::applyTuningControls() {
         rate == 8400 ? "aero_voice" : rate < 8400 ? "aero_msk" : "aero_oqpsk";
     const bool ok = InmarsatEngine::instance().selectChannel(frequency_->value() * 1e6,
                                                     mode, rate == 0 ? 1200 : std::abs(rate));
-    if (ok) presetHint_->clear();
+    if (ok) {
+        presetHint_->clear();
+        // DEC-0134: manual decoder snapshots have no saved watch-channel UUID.
+        constellationChannel_->setCurrentIndex(0);
+    }
     return ok;
 }
 

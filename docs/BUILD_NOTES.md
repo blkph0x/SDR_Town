@@ -2,6 +2,20 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - 0.2.100 constellation qualification (DEC-0134)
+
+Local MSVC2022 Release app/GUI/unit/workspace build PASS. Final incremental
+build includes all edits; CTest 13/13 PASS in 38.13 seconds. Actual MSK/OQPSK
+scatter callbacks tested for 600/1200/8400/10500 and reconstruction. Three native
+channel workers concurrently produce independent ID/frequency/rate snapshots.
+GUI tests cover pinned watch selection then Tune/preset activation, preview
+non-retune, exact peer selection, stale clearing and EGC unsupported status.
+Synthetic IF and widget fixtures are not RF lock/reception acceptance.
+Inspected normal 270x250 and compact 170x180 PNG renders: axes, point, status and
+frequency/rate legible without overlap. Evidence: build/inmarsat-constellation-*.png,
+repair-100-final-build.log and repair-100-final-ctest.log. Survey checks PASS.
+Native demod/scheduler/audio/P25 implementation unchanged. Publication pending.
+
 ## 2026-09-26 - Public 0.2.99 verification
 
 Source 9834492c7d5f222b48471a2b504812693d5381ea; Windows release run

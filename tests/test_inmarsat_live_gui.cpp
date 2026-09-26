@@ -404,8 +404,64 @@ TEST_CASE("Inmarsat visual history advances only for fresh RF and clears on retu
     spectrum.setSpectrum(bins,1543e6,2e6,{});REQUIRE(spectrum.waterfallRows()==1);
     spectrum.setSpectrum({},0,0,{});REQUIRE(spectrum.waterfallRows()==0);
     InmarsatConstellationWidget scatter;scatter.resize(240,250);
-    InmarsatChannelDisplay channel;channel.constellation.points={{.7f,.7f},{-.7f,.7f},{-.7f,-.7f},{.7f,-.7f}};
+    InmarsatChannelDisplay channel;channel.rate=10500;channel.frequencyHz=1546005000;
+    channel.constellation.points={{.7f,.7f},{-.7f,.7f},{-.7f,-.7f},{.7f,-.7f}};
     scatter.setChannel(&channel);REQUIRE(scatter.pointCount()==4);
     REQUIRE_FALSE(scatter.grab().isNull());
     scatter.setChannel(nullptr);REQUIRE(scatter.pointCount()==0);
+}
+
+TEST_CASE("Manual Aero tuning releases a pinned watch constellation", "[inmarsat][gui]") {
+    auto& engine=InmarsatEngine::instance();
+    auto cfg=InmarsatEngineConfig::defaults();
+    cfg.watch.channels={{"first","data",1546005000,10500,true},{"second","voice",1542935000,8400,true}};
+    REQUIRE(engine.setConfig(cfg));
+    InmarsatWidget widget;
+    auto* selection=widget.findChild<QComboBox*>("inmarsatConstellationChannel");
+    auto* decoder=widget.findChild<QComboBox*>("inmarsatDecoder");
+    REQUIRE(selection); REQUIRE(decoder);
+    for(int rate:{600,1200,8400,10500,-1200,-10500}) {
+        selection->setCurrentIndex(selection->findData("second"));
+        decoder->setCurrentIndex(decoder->findData(rate));
+        REQUIRE(QMetaObject::invokeMethod(decoder,"activated",Qt::DirectConnection,Q_ARG(int,decoder->currentIndex())));
+        CHECK(selection->currentData().toString()=="second"); // Preview is not a retune.
+        widget.findChild<QPushButton*>("inmarsatTune")->click();
+        CHECK(selection->currentData().toString().isEmpty());
+    }
+    selection->setCurrentIndex(selection->findData("first"));
+    auto* table=widget.findChild<QTableWidget*>("inmarsatPresetChannels");
+    REQUIRE(table); REQUIRE(table->rowCount()>0);
+    REQUIRE(QMetaObject::invokeMethod(table,"cellDoubleClicked",Qt::DirectConnection,Q_ARG(int,0),Q_ARG(int,0)));
+    CHECK(selection->currentData().toString().isEmpty());
+}
+
+TEST_CASE("Constellation switching never reuses another channel's symbols", "[inmarsat][gui]") {
+    InmarsatConstellationWidget widget; widget.resize(270,250);
+    InmarsatChannelDisplay a{"a",1546005000,10500,false,0,{}}, b{"b",1542935000,8400,true,0,{}};
+    a.constellation.points={{.7f,.7f},{-.7f,.7f}};
+    b.constellation.points={{-.7f,-.7f}};
+    widget.setChannels({a,b},"a");
+    CHECK(widget.pointCount()==2); CHECK(widget.channelText().contains("1546.005000"));
+    CHECK(widget.statusText()=="Acquiring");
+    widget.setChannels({a,b},"b");
+    CHECK(widget.pointCount()==1); CHECK(widget.channelText().contains("1542.935000"));
+    CHECK(widget.statusText()=="Protocol lock");
+    const auto visualDir=qEnvironmentVariable("SDR_TOWN_TEST_VISUAL_DIR");
+    if(!visualDir.isEmpty()) {
+        CHECK(widget.grab().save(visualDir+"/inmarsat-constellation-active.png"));
+        widget.resize(170,180);
+        CHECK(widget.grab().save(visualDir+"/inmarsat-constellation-compact.png"));
+    }
+    widget.setChannels({a},"b");
+    CHECK(widget.pointCount()==0); CHECK(widget.channelText().isEmpty());
+    CHECK(widget.statusText()=="Not in active group");
+    b.id.clear(); widget.setChannels({b},"");
+    CHECK(widget.pointCount()==1); CHECK(widget.channelText().contains("8400"));
+    b.constellation.points.clear();widget.setChannels({b},"");
+    CHECK(widget.pointCount()==0);CHECK(widget.statusText()=="No fresh symbols");
+    b.rate=0;widget.setChannels({b},"");
+    CHECK(widget.pointCount()==0);CHECK(widget.statusText()=="No native EGC constellation");
+    CHECK(widget.channelText().contains("EGC"));
+    widget.setChannels({},"");
+    CHECK(widget.pointCount()==0);CHECK(widget.statusText()=="No active decoder");
 }
