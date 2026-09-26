@@ -2,6 +2,22 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - Verified 0.2.102 public release
+
+Source 89a0067be09ec555ab7d00250e0a9167e9b3ba19. Windows release 36222945435
+and master 36222945379 PASS. YAML 36222945521/36222945396 PASS.
+Public regular release: https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.102
+ZIP 42,420,596 bytes plus checksum, independently downloaded/extracted.
+Checksum/source/run/executable/module provenance, CLI smoke, Aero survey and
+recorded-MPX RDS tests PASS (build/repair-102-public-check.log).
+ZIP: 3e9f9aafcb46c0e7f0f3061c784c286879aff27848313b11f619d56a45e9dfc5
+EXE: c9e7d7431903decd54c53d684155f62d5c9eff7f0c7d86618cf9592a19b78e2d
+SDRplay: 333a04a1b291f3137fbce50f4b54edef34cea974ad0f693c9b0cce9723486b74
+GitHub latest still v0.2.96: portable release did not replace the signed updater.
+Whole watch GUI screenshot inspected: build/inmarsat-102-watch.png; no overlap.
+P25 guard 6fc02fd..89a0067 PASS (23 paths, zero protected). Hardware/multi-SDR
+acceptance and 10 MS/s realtime are not claimed by these gates.
+
 ## 2026-09-26 - DEC-0136 local qualification, 0.2.102
 
 Windows / MSVC 2022 Release app, native GUI, core and workspace build PASS.

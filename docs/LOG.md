@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-09-26 - 0.2.102 delivered and publicly verified
+
+T-0064 complete: 89a0067, both Windows CI runs PASS, regular public release
+asset independently downloaded/hash/provenance/smoke checked. Saved mixed-role
+watch, mouse zoom/pan and exact-equivalent FIR history optimization shipped.
+T-0062 multi-SDR/cross-mode speaker focus and ISS-0032 high-rate headroom remain
+open. No P25 source changes or physical RSPdx/satellite qualification claim.
+
 ## 2026-09-26 - Continuous Aero group and navigation qualification
 
 DEC-0136 combines all-fitting mixed watch roles without timer resets, adds

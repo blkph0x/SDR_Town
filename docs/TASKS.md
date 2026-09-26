@@ -1,8 +1,11 @@
 # Task list (canonical)
 
-T-0064 | in_progress | Continuous in-band Aero and spectrum navigation |
+T-0064 | done | Continuous in-band Aero and spectrum navigation |
 DEC-0136. Combine data/voice when the whole watch fits RF and CPU budgets;
 retain scheduled fallback. Add aligned mouse zoom/pan and regression tests.
+Source 89a0067 / public v0.2.102. Local 13/13 PASS; release 36222945435 and
+master 36222945379 PASS. Independent public asset verified. 10 MS/s realtime
+remains ISS-0032; multiple radios/audio focus remain T-0062.
 
 T-0062 | planned | Per-device multi-mode sessions |
 User authorized shared ownership redesign. DEC-0135 / MULTI_SDR_SESSIONS.md.

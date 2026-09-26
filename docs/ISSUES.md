@@ -12,12 +12,14 @@ Do not promise reliable 10 MS/s or increase buffering to hide sustained overload
 Next: profile NCO and shared coarse channelization/PFB, preserve frequency/phase
 and channel isolation against reference IQ; qualify on RSPdx and slower PCs.
 
-## ISS-0033 - In-band data/voice unnecessarily retuned (2026-09-26, FIXED locally)
+## ISS-0033 - In-band data/voice unnecessarily retuned (2026-09-26, FIXED)
 
 Planner separated roles even when the entire list fit one passband/budget.
 DEC-0136 combines only the all-fitting case, retaining independent workers and
 one speaker focus; no dwell/refresh transition resets a combined group. Unit
-and real-widget tests pass. Public release verification pending T-0064.
+and real-widget tests pass. Source 89a0067 / public v0.2.102: local and CI
+gates plus independent public ZIP verification PASS. Live RF acceptance remains
+separate; this repair does not claim multiple physical device support.
 
 ## ISS-0031 - Global receiver ownership blocks independent modes (2026-09-26, OPEN)
 
