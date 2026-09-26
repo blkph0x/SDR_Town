@@ -32,7 +32,8 @@ QJsonObject FmDiagnosticsLog::sample() {
     static constexpr const char* names[]{"blocks","inputSamples","discriminatorSamples","audioSamples",
         "resets","emptyAudioBlocks","resamplerLookaheadReads","resamplerPhaseRepairs",
         "processingUs","inputUs","overBudgetBlocks","channelizerUs","discriminatorAndLpfUs",
-        "resamplerUs","postAudioUs","requestedAudioSamples","maxBlockUs","maxFirDelayUs"};
+        "resamplerUs","postAudioUs","requestedAudioSamples","hintMismatchBlocks",
+        "maxBlockUs","maxFirDelayUs","maxPcmDelayUs"};
     static_assert(std::size(names)==fmDiagnostics::Count);
     QJsonObject modes;
     for(int mode=0;mode<2;++mode) {

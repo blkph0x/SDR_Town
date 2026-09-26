@@ -1,5 +1,13 @@
 # Code notes (tree map)
 
+## NFM PCM clock (DEC-0143 / T-0071)
+
+NfmPcmClock.h retains the existing cubic polynomial with four real/history
+samples and two-input-sample delay. Absolute input/output counters make output
+independent of callback partitions. Only NFM uses it; Demod.cpp resets deferred
+audio state safely and completes NFM startup fade per sample. FmDiagnostics
+reports delay and hint mismatches. No WFM/HF/P25 algorithm changes.
+
 ## NFM continuity / FM telemetry (DEC-0142 / T-0070)
 
 Demod.cpp NFM branch uses persistent causal FIR history and decimation phase;

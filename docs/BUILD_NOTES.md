@@ -1,5 +1,18 @@
 # Build notes
 
+## 2026-09-26 - T-0071 PCM reproduction and isolated repair
+
+Base b5cd608 / accepted app 80155ac (0.2.105). Actual PCM partition fixture
+initially FAILED all eight rate pairs: at 2.4 MS/s ->48 kHz, 4800 whole versus
+4667 split; at 10 MS/s, 4800 versus3918. At 48 kHz ->44.1 kHz,4410 versus4401.
+Causal cubic clock repaired counts; remaining maximum error <=0.000101 matched
+the block-based fade completion. Same fade threshold applied per sample removes
+that difference. Initial three-case PCM rerun PASS33 assertions, before adding
+explicit zero-lookahead/zero-phase-repair assertions. Final local run PASS:
+51 assertions / three PCM cases; full CTest 15/15 in 46.55 seconds, Release
+application build, RDS CLI fixture and GUI dry-run (ok=true, no warnings, exit0).
+Exact shared-file guard mutation tests PASS. Public CI/assets pending.
+
 ## 2026-09-26 - T-0070 public release verified
 
 Source 80155ac0d87122b067c3f26112e651cb1cb2a54c, v0.2.105. Windows master

@@ -2,6 +2,12 @@
 
 ## ISS-0037 - FM chunk boundaries and sample lattice (2026-09-26, OPEN)
 
+T-0071 / DEC-0143: NFM PCM count and waveform partition failures reproduced
+and repaired using a persistent cubic sample clock and sample-wise fade.
+51 assertions cover eight rate pairs, resets, rate transitions and zero missing
+lookahead/phase repair. Local full suite 15/15 PASS. WFM boundary behavior,
+blocker rejection and physical listening qualification remain open.
+
 T-0070 / DEC-0142: actual NFM tests reproduced seven failures. Causal FIR and
 persistent decimator phase now satisfy discriminator partition equivalence at
 four rates, with explicit reset/rate-transition tests. This closes those NFM

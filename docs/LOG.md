@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-09-26 - T-0071 NFM PCM repair locally qualified
+
+Preserved user-confirmed 0.2.105 baseline and auto-bandwidth behavior. Reproduced
+callback-dependent PCM counts, removed NFM-only output clock/fade dependence,
+added bounded numerical diagnostics and reset/partition fixtures. Full local
+Release build and 15/15 suites PASS; PCM51, RDS CLI and GUI startup PASS.
+Preparing experimental 0.2.106; no physical-RF acceptance claim.
+
 ## 2026-09-26 - T-0070 shipped as experimental 0.2.105
 
 Application source 80155ac; master/release Windows CI and YAML successful.

@@ -909,7 +909,19 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
     // Resample (streaming cubic with fractional phase carried between chunks)
     diagnosticCheckpoint(fmDiagnostics::DiscriminatorUs);
     std::vector<float> aud;
-    if (exactAudioNeeded > 0 && !base.empty()) {
+    if (mode == DemodMode::NFM) {
+        if (nfmPcmClock.configure(demodRate, outputRate, dspStateNeedsReset))
+            nfmPostAudioReset = true;
+        aud = nfmPcmClock.process(base);
+        diagnostic.values[fmDiagnostics::MaxPcmDelayUs] = static_cast<uint64_t>(std::ceil(2e6/demodRate));
+        diagnostic.values[fmDiagnostics::HintMismatchBlocks] = aud.size() != exactAudioNeeded;
+        if (nfmPostAudioReset && !aud.empty()) {
+            des = flp1 = flp2 = squelchGateGain = 0;
+            squelchHangLeft = 0;
+            clickFadeGain = 0;
+            nfmPostAudioReset = false;
+        }
+    } else if (exactAudioNeeded > 0 && !base.empty()) {
         if (dspStateNeedsReset ||
             std::abs(lastResampInputRate - demodRate) > 1.0 ||
             std::abs(lastResampOutputRate - outputRate) > 1.0) {
@@ -1076,7 +1088,15 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
             }
         }
         // Fade in after retune / DSP reset so block edges don't click.
-        if (clickFadeGain < 0.999f) {
+        if (mode == DemodMode::NFM) {
+            // DEC-0143: fade completion is a sample event, not a callback event.
+            const float fadeAttack = 1.0f - std::exp(-1.0f / (0.006f * (float)outputRate));
+            for (auto& s : aud) {
+                if (clickFadeGain < 0.999f) clickFadeGain += (1.0f-clickFadeGain)*fadeAttack;
+                else clickFadeGain = 1.0f;
+                s *= clickFadeGain;
+            }
+        } else if (clickFadeGain < 0.999f) {
             const float fadeAttack = 1.0f - std::exp(-1.0f / (0.006f * (float)outputRate));
             for (auto &s : aud) {
                 clickFadeGain += (1.0f - clickFadeGain) * fadeAttack;

@@ -604,3 +604,69 @@ TEST_CASE("NFM explicit reset and rate transition cannot inherit FIR or decimato
     REQUIRE(after[fmDiagnostics::InputSamples]>before[fmDiagnostics::InputSamples]);
     REQUIRE(after[fmDiagnostics::MaxFirDelayUs]>0);
 }
+
+TEST_CASE("NFM PCM is invariant to callback partitions and output hints", "[nfm][pcm-stream]") {
+    const double rate=GENERATE(48000.0,2048000.0,2400000.0,10000000.0);
+    const double outputRate=GENERATE(44100.0,48000.0);
+    const auto iq=genNfmVoice(rate,.10,1100,1800);
+    const auto run=[&](bool split) {
+        Demodulator d;std::vector<float> result;
+        for(size_t at=0;at<iq.size();) {
+            const size_t sizes[]{1,7,19,257,8192};
+            const size_t n=std::min(iq.size()-at,split?sizes[at%5]:iq.size());
+            std::vector<std::complex<float>> block(iq.begin()+at,iq.begin()+at+n);
+            double rms=-100;
+            const auto audio=d.demodulateToAudio(block,rate,100e6,100e6,
+                DemodMode::NFM,rms,3000,-120,1,75,.96,12500,
+                split?size_t(std::llround(n*outputRate/rate)):0,outputRate);
+            result.insert(result.end(),audio.begin(),audio.end());at+=n;
+        }
+        return result;
+    };
+    const auto before=fmDiagnostics::snapshot(false);
+    const auto whole=run(false),split=run(true);
+    const auto after=fmDiagnostics::snapshot(false);
+    REQUIRE(after[fmDiagnostics::LookaheadReads]==before[fmDiagnostics::LookaheadReads]);
+    REQUIRE(after[fmDiagnostics::PhaseRepairs]==before[fmDiagnostics::PhaseRepairs]);
+    INFO("rate=" << rate << " output=" << outputRate << " whole=" << whole.size() << " split=" << split.size());
+    REQUIRE(whole.size()==split.size());
+    REQUIRE(whole.size()>outputRate*.09);
+    double error=0;
+    for(size_t i=0;i<whole.size();++i)error=std::max(error,double(std::abs(whole[i]-split[i])));
+    REQUIRE(error<1e-5);
+}
+
+TEST_CASE("NFM PCM reset and output rate changes match a fresh audio chain", "[nfm][pcm-stream]") {
+    Demodulator used,fresh;
+    const bool rateChange=GENERATE(false,true);
+    const auto run=[](Demodulator& d,double rate,double out,double tone) {
+        const auto iq=genNfmVoice(rate,.05,tone,1800);
+        double rms=-100;
+        return d.demodulateToAudio(iq,rate,100e6,100e6,DemodMode::NFM,
+            rms,3000,-120,1,75,.96,12500,123,out);
+    };
+    run(used,2400000,48000,600);
+    used.resetState();
+    const auto a=run(used,2400000,rateChange?44100:48000,1400);
+    const auto b=run(fresh,2400000,rateChange?44100:48000,1400);
+    REQUIRE(a==b);
+}
+
+TEST_CASE("NFM cubic clock has exact two-input delay and real sample history", "[nfm][pcm-stream]") {
+    NfmPcmClock clock;
+    clock.configure(48000,48000,true);
+    const std::vector<float> input{1,2,3,4,5};
+    REQUIRE(clock.process(input)==std::vector<float>{0,0,1,2,3});
+    REQUIRE(clock.process(std::vector<float>{6})==std::vector<float>{4});
+    clock.configure(48000,96000,true);
+    const auto result=clock.process(input);
+    REQUIRE(result.size()==10);
+    REQUIRE(result[8]==3);
+    REQUIRE(result[9]==3.5f);
+    REQUIRE(clock.process({}).empty());
+    REQUIRE(clock.configure(48000,44100,false));
+    NfmPcmClock fresh;fresh.configure(48000,44100,true);
+    REQUIRE(clock.process(input)==fresh.process(input));
+    clock.configure(48000,0,true);
+    REQUIRE(clock.process(input).empty());
+}

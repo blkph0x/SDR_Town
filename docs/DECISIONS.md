@@ -1,5 +1,28 @@
 # Decisions
 
+## DEC-0143 - NFM PCM clock follows samples, not callback size (2026-09-26)
+
+User reports 0.2.105 NFM crystal clear, including improved auto bandwidth.
+No classifier/bandwidth change was made or is authorized by this causal claim.
+Preserve that baseline. First reproduce output count/waveform partition errors.
+For NFM only, retain the existing cubic interpolation polynomial but wait for its
+two real future samples, retaining bounded history across calls. Output counts
+follow cumulative discriminator samples; caller counts are hints as for HF.
+GUI/CLI use actual vector sizes when pushing audio. No tail repetition or phase
+repair to fill a requested count. Document the two-input-sample lookahead latency.
+Preserve filtering/de-emphasis/squelch policies; investigate any sample-dependent
+postprocessing failure exposed by the stronger tests before altering it.
+Keep WFM/HF/P25 processing unchanged. Shared-file acceptance remains exact reviewed
+digest pairs, never a path-wide guard bypass. Log source/output count and delayed
+history evidence; existing bounded telemetry and opt-in transport remain.
+
+First PCM test run failed all eight rate pairs (e.g. 4800 versus 4667 samples).
+After clock repair counts match, leaving <=0.000101 waveform differences. Source
+inspection identifies the existing fade-complete threshold applied per block.
+Apply that same NFM threshold per sample (same 6 ms time constant) and verify the
+remaining error disappears; leave WFM's fade branch unchanged. Causal cubic uses
+zero initial history and a fixed two-input-sample delay, not end-of-block padding.
+
 ## DEC-0142 - Isolated NFM continuity repair and bounded telemetry (2026-09-26)
 
 User approved implementation of DEC-0141 and instrumentation. First reproduce

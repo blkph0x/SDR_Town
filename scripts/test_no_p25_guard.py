@@ -181,6 +181,13 @@ void run() {
         assert not MODULE.nfm_continuity_text_allowed("src/Demod.cpp", after, before)
         assert not MODULE.nfm_continuity_text_allowed("src/P25LiveDecoder.cpp", before, after)
     print("NFM exact-patch negative mutation tests passed")
+    with patch.object(MODULE, "NFM_PCM_DIGESTS", reviewed_nfm):
+        assert MODULE.nfm_pcm_text_allowed("src/Demod.cpp", before, after)
+        assert not MODULE.nfm_pcm_text_allowed("src/Demod.cpp", before, after + "\nchange")
+        assert not MODULE.nfm_pcm_text_allowed("src/Demod.cpp", before + "\n", after)
+        assert not MODULE.nfm_pcm_text_allowed("src/Demod.cpp", after, before)
+        assert not MODULE.nfm_pcm_text_allowed("src/P25LiveDecoder.cpp", before, after)
+    print("NFM PCM exact-patch negative mutation tests passed")
     return 0
 
 

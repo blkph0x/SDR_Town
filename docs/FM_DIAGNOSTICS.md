@@ -1,5 +1,16 @@
 # FM continuity diagnostics (0.2.105)
 
+## 0.2.106 extension
+
+NFM PCM now uses a persistent four-sample cubic clock, delayed by two input
+samples (about 42-44 microseconds at typical discriminator rates). No callback
+tail is repeated to fill the output hint. maxPcmDelayUs reports this delay;
+hintMismatchBlocks counts requested-size differences, not sample loss. The
+cumulative clock can legitimately yield one more or fewer samples in a callback.
+NFM lookahead-read/phase-repair counters should no longer increase. WFM still
+uses the earlier converter; its counters and open issues retain their meaning.
+The original milestone description below is historical for 0.2.105.
+
 This milestone repairs NFM's discriminator input continuity, not all analogue
 audio issues. Existing FIR coefficients and bandwidth/deviation/de-emphasis
 settings are retained. FIR application is causal, adding its true group delay

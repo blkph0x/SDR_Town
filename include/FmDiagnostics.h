@@ -11,7 +11,7 @@ namespace fmDiagnostics {
 enum Field : size_t { Blocks, InputSamples, DiscSamples, AudioSamples, Resets,
     EmptyAudio, LookaheadReads, PhaseRepairs, ProcessingUs, InputUs,
     OverBudgetBlocks, ChannelizerUs, DiscriminatorUs, ResamplerUs, PostAudioUs,
-    RequestedAudioSamples, MaxBlockUs, MaxFirDelayUs, Count };
+    RequestedAudioSamples, HintMismatchBlocks, MaxBlockUs, MaxFirDelayUs, MaxPcmDelayUs, Count };
 using Snapshot = std::array<uint64_t, Count>;
 inline std::array<std::array<std::atomic<uint64_t>, Count>, 2> counters{};
 static_assert(std::atomic<uint64_t>::is_always_lock_free);
@@ -40,6 +40,7 @@ struct Block {
         for(size_t i=0;i<MaxBlockUs;++i)counters[wfm][i].fetch_add(values[i],std::memory_order_relaxed);
         maximum(counters[wfm][MaxBlockUs],values[ProcessingUs]);
         maximum(counters[wfm][MaxFirDelayUs],values[MaxFirDelayUs]);
+        maximum(counters[wfm][MaxPcmDelayUs],values[MaxPcmDelayUs]);
     }
 };
 }
