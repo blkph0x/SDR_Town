@@ -1,5 +1,16 @@
 # Build notes
 
+## 2026-09-27 - T-0075 public release verified
+
+Source5c205cbfb9e7d6712a933d9c22b34e5a46eadb3e, experimentalv0.2.109.
+Windows release36273965450/master36273965357 SUCCESS; YAML36273965509 and
+36273965437 SUCCESS. Downloaded public ZIP SHA256:
+1397b55689a7ad0c8a3fe3fcfa967bab7b98d7519be4a62252c3eb94bbd23505.
+Embedded source/version/run and EXE/SDRplay hashes verified. CLI help/status,
+Inmarsat survey, RDS references and GUI startup PASS; GUI exit0, ok=true, empty
+warnings/errors. Public prerelease not draft; latest signed release still0.2.96.
+Physical listening/other CPU architectures remain separate acceptance.
+
 ## 2026-09-27 - T-0075 WFM FIR prototype evidence
 
 Reference ring/impulse/reset/tap-length fixture419 assertions PASS. Three36-case

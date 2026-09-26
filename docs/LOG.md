@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-09-27 - T-0075 published
+
+WFM FIR optimization released as experimental0.2.109, source5c205cb. All local
+and CI gates successful; public asset hash/provenance and shipped smoke checks
+passed. Measured approximately4x speedup on this host without changed benchmark
+signal metrics. No NFM/P25/HF/RDS policy or Auto BW changes.
+
 ## 2026-09-27 - T-0075 WFM computation repair
 
 Contiguous FIR history and SSE2 across outputs preserve ordered sums and every

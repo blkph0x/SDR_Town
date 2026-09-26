@@ -1,9 +1,12 @@
 # Task list (canonical)
 
-T-0075 | in progress | WFM FIR computation optimization |
+T-0075 | done | WFM FIR computation optimization |
 DEC-0147 / ISS-0037. Preserve full-rate filtered IQ and coefficient accumulation
 order while removing per-tap ring wrap and vectorizing independent output samples.
 Require reference equality, whole-chain regression gates and repeat benchmarks.
+Source5c205cb / experimental0.2.109 published. Local15/15 and25360 focused
+assertions PASS; Windows/YAML master/release CI successful. Downloaded asset
+hashes/provenance/CLI/RDS/GUI PASS. NFM rejection remains separate ISS-0037 work.
 
 T-0074 | done | FM interference and throughput baseline |
 DEC-0146. User confirms WFM sounds good. Preserve production DSP; build actual
