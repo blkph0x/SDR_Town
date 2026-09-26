@@ -1,5 +1,14 @@
 # Decisions
 
+## DEC-0150 - Broaden WFM image characterization (2026-09-27)
+
+T-0078: measure actual demodulated IQ, not a replacement filter model. Sweep
+2.048/2.4/10 MS/s, 150/180/220 kHz channels, 50/75 kHz deviation and first
+image offsets on both signs with +/-30 kHz folded offsets. +40 dB blocker,
+peak IQ <=0.5, 200 ms and final 100 ms comparison against identical clean IQ.
+Record signal error and cost; report finite cases without imposing an unproven
+universal RF threshold. Preserve existing benchmark and all production DSP.
+
 ## DEC-0149 - Verify audit premises before DSP changes (2026-09-27)
 
 AUTO already uses chooseSmartModeAndBandwidth in GUI/CLI; WFM is filtered before

@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-09-27 - T-0078 broader WFM reproduction
+
+Added reproducible bandwidth/deviation/image sweeps and validated JSON reports.
+Found closer-blocker corruption absent from the earlier limited benchmark.
+Production DSP unchanged; isolate skirt leakage/aliasing/overlap before repair.
+
 ## 2026-09-27 - T-0077 audit reconciliation
 
 Checked the supplied audit against clean source and new measurements. Corrected

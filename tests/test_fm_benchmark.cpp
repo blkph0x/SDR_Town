@@ -30,7 +30,7 @@ struct Result {
     double elapsedUs=0;
     fmDiagnostics::Snapshot counts{};
 };
-Result demod(const std::vector<std::complex<float>>& iq,double rate,bool wide) {
+Result demod(const std::vector<std::complex<float>>& iq,double rate,bool wide,double bandwidth=0) {
     Demodulator d;Result result;std::vector<float> all;
     const auto before=fmDiagnostics::snapshot(wide);
     for(size_t at=0;at<iq.size();) {
@@ -40,7 +40,7 @@ Result demod(const std::vector<std::complex<float>>& iq,double rate,bool wide) {
         const auto start=std::chrono::steady_clock::now();
         auto audio=d.demodulateToAudio(block,rate,100e6,100e6,
             wide?DemodMode::WFM:DemodMode::NFM,level,wide?15000:3000,
-            -200,1,75,.96,wide?180000:12500,0,48000,-30);
+            -200,1,75,.96,bandwidth>0?bandwidth:(wide?180000:12500),0,48000,-30);
         result.elapsedUs+=std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-start).count();
         all.insert(all.end(),audio.begin(),audio.end());at+=n;
     }
@@ -202,4 +202,39 @@ TEST_CASE("FM two-signal interference and cost report", "[.fm-benchmark]") {
         {"resamplerUs",test.counts[fmDiagnostics::ResamplerUs]},
         {"postAudioUs",test.counts[fmDiagnostics::PostAudioUs]}};
     std::cout << "FM_BENCH " << row.dump() << '\n';
+}
+
+TEST_CASE("WFM bandwidth and high-deviation image characterization", "[.wfm-image-sweep]") {
+    const double rate=GENERATE(2048000.0,2400000.0,10000000.0);
+    const double bandwidth=GENERATE(150000.0,180000.0,220000.0);
+    const double deviation=GENERATE(50000.0,75000.0);
+    const int side=GENERATE(-1,1);
+    const double fold=GENERATE(-30000.0,30000.0);
+    const double target=std::max(192000.0,bandwidth*1.1);
+    const double actualRate=rate/std::llround(rate/target);
+    const double offset=side*actualRate+fold;
+    std::vector<std::complex<float>> clean(size_t(rate*.2)),mixed(clean.size());
+    double p=0,q=0;
+    for(size_t i=0;i<clean.size();++i) {
+        p=std::remainder(p+2*M_PI*deviation*std::sin(2*M_PI*900*i/rate)/rate,2*M_PI);
+        q=std::remainder(q+2*M_PI*(offset+deviation*std::sin(2*M_PI*1700*i/rate))/rate,2*M_PI);
+        clean[i]=std::polar(float(.5/101),float(p));
+        mixed[i]=clean[i]+std::polar(float(50./101),float(q));
+    }
+    const auto reference=demod(clean,rate,true,bandwidth),test=demod(mixed,rate,true,bandwidth);
+    std::vector<float> difference(test.tail.size());
+    for(size_t i=0;i<difference.size();++i)difference[i]=test.tail[i]-reference.tail[i];
+    const double wanted=toneAmplitude(reference.tail,900);
+    REQUIRE(wanted>1e-6);
+    REQUIRE(test.counts[fmDiagnostics::LookaheadReads]==0);
+    REQUIRE(test.counts[fmDiagnostics::PhaseRepairs]==0);
+    const double error=db(rms(difference)/rms(reference.tail));
+    REQUIRE(std::isfinite(error));
+    nlohmann::json row{{"sampleRate",rate},{"bandwidthHz",bandwidth},
+        {"deviationHz",deviation},{"side",side},{"foldHz",fold},
+        {"actualIqRate",actualRate},{"offsetHz",offset},{"blockerExcessDb",40},
+        {"wantedGainDb",db(toneAmplitude(test.tail,900)/wanted)},
+        {"differenceRelativeDb",error},{"realtimeRatio",test.elapsedUs/200000},
+        {"audioSamples",test.counts[fmDiagnostics::AudioSamples]}};
+    std::cout << "WFM_SWEEP " << row.dump() << '\n';
 }

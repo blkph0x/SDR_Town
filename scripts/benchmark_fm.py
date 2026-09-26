@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import math
+import itertools
 from pathlib import Path
 import platform
 import subprocess
@@ -35,6 +36,8 @@ def main():
     parser.add_argument("--exe", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--repeat", type=int, choices=range(1, 11), default=3)
+    parser.add_argument("--wfm-sweep", action="store_true",
+                        help="DEC-0150 bandwidth/deviation/image characterization")
     args = parser.parse_args()
     exe = args.exe.resolve(strict=True)
     repo = Path(__file__).resolve().parent.parent
@@ -46,15 +49,36 @@ def main():
               "scope": "synthetic IQ; no ADC overload model; demod-call time only; not SINAD or BER",
               "runs": []}
     for index in range(args.repeat):
-        result = subprocess.run([str(exe), "[.fm-benchmark]"], cwd=repo,
+        result = subprocess.run([str(exe), "[.wfm-image-sweep]" if args.wfm_sweep else "[.fm-benchmark]"], cwd=repo,
                                 capture_output=True, text=True, timeout=300)
         if result.returncode:
             raise RuntimeError(f"Benchmark failed: {result.stdout[-4000:]}\n{result.stderr[-1000:]}")
-        report["runs"].append(parse_rows(result.stdout))
-        print(f"Validated run {index + 1}/{args.repeat}: 36 measurements", flush=True)
+        rows = parse_sweep(result.stdout) if args.wfm_sweep else parse_rows(result.stdout)
+        report["runs"].append(rows)
+        report["schema"] = "sdr-town-wfm-sweep-v1" if args.wfm_sweep else report["schema"]
+        print(f"Validated run {index + 1}/{args.repeat}: {len(rows)} measurements", flush=True)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     print(f"Report: {args.output.resolve()}")
+
+
+def parse_sweep(output):
+    rows = [json.loads(line[len("WFM_SWEEP "):]) for line in output.splitlines()
+            if line.startswith("WFM_SWEEP ")]
+    fields = ("sampleRate", "bandwidthHz", "deviationHz", "side", "foldHz")
+    expected = set(itertools.product((2048000, 2400000, 10000000),
+                   (150000, 180000, 220000), (50000, 75000), (-1, 1), (-30000, 30000)))
+    keys = [tuple(row[f] for f in fields) for row in rows]
+    if len(keys) != len(expected) or set(keys) != expected:
+        raise ValueError("Incomplete or duplicate WFM sweep")
+    for row in rows:
+        for field in (*fields, "actualIqRate", "offsetHz", "blockerExcessDb",
+                      "wantedGainDb", "differenceRelativeDb", "realtimeRatio", "audioSamples"):
+            if not isinstance(row[field], (int, float)) or not math.isfinite(row[field]):
+                raise ValueError(f"Invalid sweep measurement: {field}")
+        if row["audioSamples"] < 4800 or row["realtimeRatio"] <= 0 or row["blockerExcessDb"] != 40:
+            raise ValueError("Invalid sweep output")
+    return rows
 
 
 if __name__ == "__main__":

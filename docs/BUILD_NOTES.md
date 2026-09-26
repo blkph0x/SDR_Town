@@ -1,5 +1,12 @@
 # Build notes
 
+## 2026-09-27 - T-0078 WFM sweep
+
+Release test build PASS. Two 72-case WFM sweeps validate and repeat all signal
+metrics exactly (build/wfm-sweep-110.json). Seven Python parser tests PASS;
+all 15 CTest suites PASS (50.60 s). Test-only changes on ecfe239; measured
+quality failures recorded in WFM_IMAGE_SWEEP.md, not hidden by pass status.
+
 ## 2026-09-27 - T-0077 audit checks
 
 Clean 787488e (runtime 1f7740e), existing Release tests. Fresh

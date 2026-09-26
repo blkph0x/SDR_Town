@@ -1,5 +1,10 @@
 # Task list (canonical)
 
+T-0078 | done | WFM bandwidth/deviation/image sweep |
+DEC-0150. Two 72-case sweeps reproduce closer-blocker corruption with identical
+signal metrics. Seven parser tests and 15/15 CTest suites PASS. Runtime unchanged;
+follow-up must separate filter skirt leakage from aliases and spectral overlap.
+
 T-0077 | done | Verify supplied 0.2.110 follow-up audit |
 DEC-0149. Source trace and fresh measurements correct AUTO, WFM rate-plan and
 short CTCSS proposals. docs/AUDIT_0.2.110_FOLLOWUP.md records scope, gates and

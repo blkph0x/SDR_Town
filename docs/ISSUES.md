@@ -2,6 +2,12 @@
 
 ## ISS-0037 - FM chunk boundaries and sample lattice (2026-09-26, OPEN)
 
+T-0078: closer first-image offsets reproduce WFM corruption, unlike the prior
+limited matrix. Two identical 72-case signal runs. At 10 MS/s / 180 kHz /
+50 kHz deviation / -166078.43 Hz blocker: wanted loss 3.38 dB and PCM difference
+-1.38 dB. WFM_IMAGE_SWEEP.md records overlap caveats and next isolation gate.
+Production unchanged; do not infer all WFM is bad.
+
 T-0076 fixes the reproduced NFM image-blocker failure: first-stage
 Kaiser FIR, actual2.4MS/s difference-72.49dB versus+3.23dB. First/second-image
 cases at both folded-offset signs pass. Cost increases (10MS/s~0.27 input

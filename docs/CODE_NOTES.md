@@ -1,5 +1,12 @@
 # Code notes (tree map)
 
+## WFM image characterization (DEC-0150)
+
+tests/test_fm_benchmark.cpp adds opt-in [.wfm-image-sweep] through the real
+Demodulator. scripts/benchmark_fm.py --wfm-sweep validates a 72-case JSON matrix;
+scripts/test_benchmark_fm.py covers missing/duplicate/nonfinite/invalid reports.
+No production filter, default or P25 path changes.
+
 ## NFM input anti-aliasing (DEC-0148)
 
 NfmInputDecimator designs16*M+1 normalized Kaiser taps at cutoff0.25/M using
