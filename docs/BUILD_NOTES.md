@@ -1,5 +1,17 @@
 # Build notes
 
+## 2026-09-27 - T-0076 public release verified
+
+Source 1f7740ee161d988d95917c666c05714123be5383, experimental v0.2.110.
+Windows release 36277352426 / master 36277352558 SUCCESS; YAML 36277352359 /
+36277352401 SUCCESS. Public ZIP SHA256:
+0a9c5fa4b58fce03525a583ebb90c76b140fb97c777114973c8d572a602a8416.
+Embedded source/version/run and EXE/SDRplay module hashes verified. CLI help,
+SDRplay status, Inmarsat surveys, RDS references and GUI startup PASS; GUI exit 0,
+ok=true, empty errors/warnings. Public prerelease, not draft; latest remains
+signed v0.2.96. No hardware overload, physical listening or all-CPU guarantee.
+Release: https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.110
+
 ## 2026-09-27 - T-0076 NFM anti-alias measurements
 
 Candidate response/direct-convolution tests26 assertions PASS at2.048/2.4/10MS/s.
@@ -11,7 +23,7 @@ gain approximately0dB vs-5.55dB.10MS/s cost ratio0.261-0.276, mean0.27012.
 Additional 320/384 kS/s response cases PASS (30 assertions total). Release app
 and tests build PASS; all 15 CTest suites PASS (50.87 s). RDS CLI reference
 fixtures PASS. GUI dry-run startup exits 0 with ok=true and no warnings/errors.
-Public CI release qualification pending.
+Public CI release qualification subsequently passed as recorded above.
 
 ## 2026-09-27 - T-0075 public release verified
 

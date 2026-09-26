@@ -1,8 +1,11 @@
 # Task list (canonical)
 
-T-0076 | in progress | NFM first-stage alias rejection |
+T-0076 | done | NFM first-stage alias rejection |
 DEC-0148. Compare old moving average, cascaded response and decimating FIR.
 Gate passband, image rejection, timing, tones and CPU before production adoption.
+Source 1f7740e / experimental 0.2.110 published. Local 15/15 suites, response,
+convolution, image sweeps and three benchmark runs PASS. Master/release CI PASS;
+public download hashes/provenance and CLI/RDS/GUI smoke PASS. RF acceptance remains.
 
 T-0075 | done | WFM FIR computation optimization |
 DEC-0147 / ISS-0037. Preserve full-rate filtered IQ and coefficient accumulation

@@ -2,10 +2,11 @@
 
 ## ISS-0037 - FM chunk boundaries and sample lattice (2026-09-26, OPEN)
 
-T-0076 candidate fixes the reproduced NFM image-blocker failure: first-stage
+T-0076 fixes the reproduced NFM image-blocker failure: first-stage
 Kaiser FIR, actual2.4MS/s difference-72.49dB versus+3.23dB. First/second-image
 cases at both folded-offset signs pass. Cost increases (10MS/s~0.27 input
-duration) but remains below real time on this host. Final qualification pending;
+duration) but remains below real time on this host. Local/CI gates and public
+experimental 0.2.110 package verification PASS; physical acceptance remains;
 no front-end overload or all-receiver certification claim.
 
 T-0075 prototype targets WFM cost without changing output math. SSE2 across

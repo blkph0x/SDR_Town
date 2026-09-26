@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-09-27 - T-0076 published
+
+NFM anti-alias repair released as experimental 0.2.110, source 1f7740e.
+All local and master/release CI gates PASS. Downloaded public package checksum,
+provenance, CLI/RDS/GUI smoke PASS. WFM benchmark metrics unchanged; P25/HF paths
+not modified. Real-radio listening remains tester acceptance, not a synthetic claim.
+
 ## 2026-09-27 - T-0076 anti-alias candidate
 
 Measured single/double moving averages versus Kaiser FIR. FIR meets sampled
