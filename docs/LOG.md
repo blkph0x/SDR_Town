@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-09-26 - Inmarsat monitor shipped
+
+cb2ee37 published as portable v0.2.103. Both Windows and both YAML workflows
+passed; independent public ZIP provenance/hashes and extracted CLI, SDRplay
+status, RDS and survey smoke tests passed. T-0066 and ISS-0034 closed with
+evidence. No P25 changes or hardware acceptance claims. Signed updater Latest
+retained at v0.2.96. Full hashes/run IDs in BUILD_NOTES.
+
 ## 2026-09-26 - Inmarsat decoder/aircraft visibility and gap reconciliation
 
 T-0066 / DEC-0138 implements passive monitoring, bounded aircraft retention,

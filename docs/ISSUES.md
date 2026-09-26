@@ -1,12 +1,15 @@
 # Issues (canonical)
 
-## ISS-0034 - Inmarsat aircraft/status visibility gaps (2026-09-26, IN PROGRESS)
+## ISS-0034 - Inmarsat aircraft/status visibility gaps (2026-09-26, FIXED)
 
 Non-position identities/counters were not retained outside the 500-message log.
 There was no per-channel status/history table. Combined data+voice watch was
 incorrectly described as data-only in speaker status. DEC-0138 / T-0066 adds
 passive monitoring and bounded aircraft storage; no DSP/gating changes.
 Full satellite field acceptance and unreceived identity enrichment stay open.
+Fixed cb2ee37 / public v0.2.103, local 13/13 and both Windows CI runs PASS;
+public ZIP independently verified and executable smoke-tested. Screenshot
+review also caught/repaired default delegate MHz rounding. See BUILD_NOTES.
 
 ## ISS-0032 - Aero 10 MS/s realtime headroom remains insufficient (2026-09-26, OPEN)
 
@@ -260,6 +263,9 @@ github.event.before. Normal pushes now use the actual prior commit; the next
 release pass will record that guard's concrete comparison. First-branch pushes
 still fall back to origin/master, so explicit first-push/PR base-selection
 coverage remains an open follow-up, not an unfixed missing-environment claim.
+Master CI 36231028781 concretely compared 47d414ac7b097abe387d6a71510e6bcc7011a52f
+against cb2ee37 and reported 23 changed paths / 0 protected, confirming the
+normal-push repair. No broad P25-path exception was introduced.
 
 Observed in completed Windows run 35986929161: guard output compares origin/master
 to HEAD and reports 0 changed paths, although the push contains SSTV changes.

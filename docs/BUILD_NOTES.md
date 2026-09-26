@@ -2,6 +2,31 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - 0.2.103 public release verified
+
+Source cb2ee37dcb6566b95c360e1725884f6b41a2e32d. Local full CTest 13/13
+PASS (40.27 s), plus InmarsatLiveGui/InmarsatHostLifecycle each repeated ten
+times, all 20 PASS (24.32 s). Final native screenshots reviewed. P25 frozen
+guard: 23 paths / 0 protected locally and on real prior-commit master CI diff.
+
+Release Windows CI 36231029153, master 36231028781, release YAML 36231029152
+and master YAML 36231028806 all SUCCESS. Public non-draft portable release:
+https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.103
+
+Independent download to build/public-0.2.103-local: 42,441,933-byte ZIP,
+checksum, build-info source/version/workflow, EXE and SDRplay hashes PASS.
+Extracted executable CLI help, SDRplay status, RDS recorded-MPX checks and
+all five packaged Aero survey tests PASS. No physical RF/bias-T activation.
+Evidence: build/monitor-103-public-check.log and monitor-103-repeat.log.
+
+- ZIP: 0e02a5be51e85ef5de8899ad8063c490d333198eeb80ce932aee408506e6169e
+- EXE: ef1f9a30477ff925ca4caf0dfa000da5f0a5dddcc8798196e8b0fbd3d2ce0c44
+- SDRplay: 5f3f6a2d4741bcd667d05d7bbd293ab5f32a32d112392e72593221e8bbcd6206
+
+GitHub /releases/latest remains v0.2.96 intentionally: portable v0.2.103 must
+not replace the signed installer updater. T-0066/ISS-0034 delivered; physical
+satellite/hardware acceptance and GAPS_20260926.md remain explicit open work.
+
 ## 2026-09-26 - Inmarsat monitor qualification in progress
 
 Final local Release targets SDR_Town, inmarsat_live_gui_tests, sdr_town_tests,
