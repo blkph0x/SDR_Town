@@ -58,6 +58,19 @@ image case (>99%). The RF/DDC/FIR stage therefore dominates this measurement.
 
 ## Next isolated work
 
+### NFM image rejection follow-up (DEC-0148 / 0.2.110)
+
+The16*M+1 first-stage FIR yields sampled stop rejection>93dB at common rates,
+while double moving-average rejection at image+6250Hz is only59-60dB.
+Three matrices with the new FIR give NFM2.4MS/s +40dB image wanted gain~0dB and
+audio difference-72.49dB (old-5.55/+3.23 respectively). At10MS/s, difference
+-72.81dB and processing/input-duration ratio0.261-0.276. WFM signal metrics
+match the prior build in every repeated case. Twenty additional first/second
+image cases at2.4/10MS/s, offsets-6250,-1500,0,1500,6250Hz all meet<0.1dB
+wanted gain error and<-40dB audio difference under the tested +40dB blockers.
+These are finite synthetic cases, not an RF certification. Downstream speech
+filters remain the same. Total reported FIR delay includes the new8*M stage.
+
 ### WFM computation follow-up (DEC-0147 / 0.2.109)
 
 Contiguous history and SIMD across independent FIR outputs preserve all full-rate

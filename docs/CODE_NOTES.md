@@ -1,5 +1,15 @@
 # Code notes (tree map)
 
+## NFM input anti-aliasing (DEC-0148)
+
+NfmInputDecimator designs16*M+1 normalized Kaiser taps at cutoff0.25/M using
+the existing windowed-sinc design pattern. Persistent ring input history and
+phase emit at M-1,2M-1,...; dot products are computed only for retained samples.
+Reset clears history/phase; factor changes rebuild coefficients. Applied only
+above300kS/s, preserving the existing rate plan and downstream NFM FIR/tone tap.
+maxFirDelayUs now includes both first-stage and speech-filter causal delay.
+Reference convolution/partition and response/blocker fixtures are release gates.
+
 ## WFM FIR computation (DEC-0147)
 
 WfmSpeechFir retains raw causal history and contiguous scratch input. SSE2

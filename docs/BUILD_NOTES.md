@@ -1,5 +1,18 @@
 # Build notes
 
+## 2026-09-27 - T-0076 NFM anti-alias measurements
+
+Candidate response/direct-convolution tests26 assertions PASS at2.048/2.4/10MS/s.
+Sampled stop rejection>93dB, pass ripple~0.0024dB. NFM/CTCSS/DCS84369 assertions
+PASS before adding20 first/second-image cases; those80 assertions also PASS.
+Three36-case benchmark runs in build/fm-benchmark-110.json; WFM metrics unchanged
+in all runs. NFM2.4MS/s +40dB image difference-72.49dB vs+3.23dB before; wanted
+gain approximately0dB vs-5.55dB.10MS/s cost ratio0.261-0.276, mean0.27012.
+Additional 320/384 kS/s response cases PASS (30 assertions total). Release app
+and tests build PASS; all 15 CTest suites PASS (50.87 s). RDS CLI reference
+fixtures PASS. GUI dry-run startup exits 0 with ok=true and no warnings/errors.
+Public CI release qualification pending.
+
 ## 2026-09-27 - T-0075 public release verified
 
 Source5c205cbfb9e7d6712a933d9c22b34e5a46eadb3e, experimentalv0.2.109.

@@ -421,9 +421,7 @@ void Demodulator::resetState() {
     // HF_RECEIVE_RESET_END
     resetMultiplexState(); // Explicit retune/reset, unlike speech-only AFC resets.
     dspStateNeedsReset = true;
-    nfmCicSum = {0.f, 0.f};
-    nfmCicCount = 0;
-    nfmCicFactor = 0;
+    nfmInputDecimator.reset();
     nfmSpeechFirDelay.clear();
     clickFadeGain = 0.0f;
 }
@@ -496,8 +494,6 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
             firDelay.assign(firDelay.size(), std::complex<float>(0,0));
             dspStateNeedsReset = true;
             clickFadeGain = 0.0f;
-            nfmCicSum = {0.f, 0.f};
-            nfmCicCount = 0;
             lastResetTarget = target;
             lastResetMode = mode;
         }
@@ -626,7 +622,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
     }
     if (mode == DemodMode::NFM) {
         // Two-stage NFM front-end:
-        // 1) CIC/boxcar to ~192 kHz (cheap anti-alias)
+        // 1) DEC-0148 anti-alias FIR to ~192 kHz, evaluated only at retained samples
         // 2) Sharp channel FIR at that rate (the old full-rate FIR was capped at
         //    321 taps — far too weak at 2.4 Msps → aliasing = static/robotic)
         // 3) Decimate to ~48 kHz for the discriminator
@@ -638,8 +634,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         nfmStreamRate = sr;
         nfmStreamCenter = cf;
         if (dspStateNeedsReset) {
-            nfmCicSum = {0.f, 0.f};
-            nfmCicCount = 0;
+            nfmInputDecimator.reset();
             nfmSpeechFirDelay.clear();
             nfmFirWrite = nfmDecimationPhase = 0;
             prev = {1, 0};
@@ -649,22 +644,8 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         double workRate = sr;
         if (sr > 300e3) {
             const int M1 = std::max(1, static_cast<int>(std::llround(sr / 192000.0)));
-            if (M1 != nfmCicFactor) {
-                nfmCicFactor = M1;
-                nfmCicSum = {0.f, 0.f};
-                nfmCicCount = 0;
-            }
-            std::vector<std::complex<float>> stage1;
-            stage1.reserve(baseband.size() / static_cast<size_t>(M1) + 2);
-            for (const auto& s : baseband) {
-                nfmCicSum += s;
-                if (++nfmCicCount >= M1) {
-                    stage1.push_back(nfmCicSum * (1.0f / static_cast<float>(M1)));
-                    nfmCicSum = {0.f, 0.f};
-                    nfmCicCount = 0;
-                }
-            }
-            baseband = std::move(stage1);
+            nfmInputDecimator.configure(static_cast<size_t>(M1));
+            baseband = nfmInputDecimator.process(baseband);
             workRate = sr / static_cast<double>(M1);
 
             if (std::abs(channelBwHz - nfmSpeechLastBw) > 50.0 || std::abs(workRate - nfmSpeechLastRate) > 100.0) {
@@ -699,7 +680,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
                 filterNfm(baseband, nfmSpeechTaps, nfmSpeechFirDelay, nfmFirWrite);
             }
             diagnostic.values[fmDiagnostics::MaxFirDelayUs] = static_cast<uint64_t>(
-                (nfmSpeechTaps.size()-1)*0.5e6/workRate);
+                (nfmSpeechTaps.size()-1)*0.5e6/workRate + nfmInputDecimator.delaySamples()*1e6/sr);
 
             // Bring discriminator rate near 48 kHz.
             const double discTarget = 48000.0;

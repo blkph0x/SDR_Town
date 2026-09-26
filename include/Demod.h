@@ -6,6 +6,7 @@
 #include <limits>
 #include "NfmPcmClock.h"
 #include "WfmSpeechFir.h"
+#include "NfmInputDecimator.h"
 
 enum class DemodMode { NFM, WFM, AM, USB, LSB, CW, AUTO };
 
@@ -130,10 +131,8 @@ private:
     double lastResampInputRate = -1.0;
     double lastResampOutputRate = -1.0;
 
-    // NFM stage-1 CIC (full-rate → ~192 kHz) so the channel FIR can be sharp enough.
-    std::complex<float> nfmCicSum{0.f, 0.f};
-    int nfmCicCount = 0;
-    int nfmCicFactor = 0;
+    // DEC-0148: anti-alias before the first downsample, with persistent timing.
+    NfmInputDecimator nfmInputDecimator;
     std::vector<float> nfmSpeechTaps;
     std::vector<std::complex<float>> nfmSpeechFirDelay;
     size_t nfmFirWrite = 0, nfmDecimationPhase = 0;

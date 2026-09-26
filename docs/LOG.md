@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-09-27 - T-0076 anti-alias candidate
+
+Measured single/double moving averages versus Kaiser FIR. FIR meets sampled
+response targets and removes reproduced strong image-blocker corruption while
+retaining sample clock and passing NFM/tone gates. WFM benchmark metrics remain
+unchanged. Added first/second image sweeps and delay accounting; qualification
+and publication pending. Low-rate NFM and other demodulators unchanged.
+
 ## 2026-09-27 - T-0075 published
 
 WFM FIR optimization released as experimental0.2.109, source5c205cb. All local

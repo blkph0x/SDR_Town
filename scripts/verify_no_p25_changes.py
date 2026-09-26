@@ -49,6 +49,25 @@ PROTECTED_PATTERNS: tuple[str, ...] = (
 )
 
 SATCOM_MAINWINDOW_PATH = "src/MainWindow.cpp"
+# DEC-0148: exact NFM first-stage anti-alias change; other demods unchanged.
+NFM_INPUT_DIGESTS = {
+    "src/Demod.cpp": (
+        "0737fc0ab93edc0f93fb99f89069b3718efe009458e938c11bf4777ac15762ba",
+        "5459b7b840d1cdca572438f58143d3d3dfc88b1d6e58a76770dab2e8473126b8"),
+    "include/Demod.h": (
+        "090773e1eaa3b410361a6c52207587118cecc2d4e705544f78e6b91004c6a766",
+        "ed678b546ef8c06c092b7f2c3d9795c0d447e455d11c3863af84e4094f604eb3"),
+}
+
+
+def nfm_input_text_allowed(path: str, before: str, after: str) -> bool:
+    pair = NFM_INPUT_DIGESTS.get(path)
+    return pair is not None and pair == (
+        hashlib.sha256(before.encode("utf-8")).hexdigest(),
+        hashlib.sha256(after.encode("utf-8")).hexdigest(),
+    )
+
+
 # DEC-0147: WFM FIR computation only; same full-rate outputs and power semantics.
 WFM_FIR_DIGESTS = {
     "src/Demod.cpp": (
@@ -403,6 +422,17 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
+        if path in NFM_INPUT_DIGESTS and args.paths is None:
+            try:
+                allowed = nfm_input_text_allowed(
+                    path, git_file_text(args.base, path), git_file_text(args.head, path)
+                )
+            except RuntimeError as exc:
+                print(f"P25 guard error: {exc}", file=sys.stderr)
+                return 2
+            if allowed:
+                print(f"P25 guard: accepted exact DEC-0148 NFM input filter: {path}")
+                continue
         if path in WFM_FIR_DIGESTS and args.paths is None:
             try:
                 allowed = wfm_fir_text_allowed(

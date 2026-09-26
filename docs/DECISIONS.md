@@ -1,5 +1,29 @@
 # Decisions
 
+## DEC-0148 - NFM first-stage decimating FIR candidate (2026-09-27)
+
+T-0074 actual IQ fixture proves +40dB image blocker corrupts speech. Compare
+single/double moving-average responses against an independently verified FIR.
+Engineering candidate target: <0.1dB ripple through12.5kHz (covers maximum
+25kHz NFM channel) and >=80dB stopband from0.75*post-decimation rate to input
+Nyquist.80dB is a design target giving40dB margin against the tested40dB blocker,
+not a claimed RF sensitivity standard. Initial candidate16*M+1 Kaiser taps,
+cutoff0.25/M cycles/input sample, beta from existing80dB Kaiser design formula.
+Measure actual response; window parameter alone is not proof. Evaluate only
+retained outputs at input indices M-1,2M-1,... to preserve existing sample count.
+Persistent ring history, explicit reset; report causal delay8*M input samples.
+Use existing windowed-sinc design pattern; reference structure and delay:
+https://liquidsdr.org/api/firdecim_crcf/ and https://www.liquidsdr.org/doc/firdes/.
+Run actual clean/blocker PCM comparison, tone gates and timing before choosing
+default. NFM downstream filter/deviation/de-emphasis, WFM/HF/P25 remain unchanged.
+
+Candidate measured stop grid below-93dB and passband ripple~0.0024dB at common
+rates, versus double-boxcar image rejection only~59-60dB at image+6250Hz.
+Actual +40dB image blocker difference improved+3.23 to-72.49dB at2.4MS/s;
+wanted gain loss removed. Three matrices and20 additional first/second image
+cases pass; NFM/CTCSS/DCS gates pass. Adopt FIR subject to full release gates;
+keep low-rate path unchanged. Report increased cost and added causal delay.
+
 ## DEC-0147 - Optimize WFM FIR without changing its response (2026-09-27)
 
 T-0074 measured >99% cost in WFM channelizer at10MS/s. Current FIR wraps a ring
