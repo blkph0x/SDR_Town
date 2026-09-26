@@ -2,6 +2,10 @@
 
 ## 2026-09-27 - T-0078 WFM sweep
 
+Published test source f52275e. Windows CI 36279199045 and workflow validation
+36279198984 SUCCESS. No runtime change or new release asset; v0.2.110 remains
+the verified public application build.
+
 Release test build PASS. Two 72-case WFM sweeps validate and repeat all signal
 metrics exactly (build/wfm-sweep-110.json). Seven Python parser tests PASS;
 all 15 CTest suites PASS (50.60 s). Test-only changes on ecfe239; measured
