@@ -2,6 +2,28 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - 0.2.104 public asset verified
+
+Source 25236d289dc1228ecc2632a3b52356619bb2e659. Windows release run
+36234984587 and master 36234982550 SUCCESS; YAML 36234984518 and 36234982549
+SUCCESS. Initial SQLite lifecycle failure repaired; intermediate superseded
+runs canceled by normal concurrency. Final release public/non-draft:
+https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.104
+
+Independent download: 42,478,012-byte ZIP, checksum and embedded source/run/
+version provenance PASS. Extracted CLI help, SDRplay status, RDS fixtures and
+five dated Aero surveys PASS. Consent-off HTTPS defaults with collector-only
+credential and 65536-byte budget present; secret values never printed. P25
+guard against 46984f3: 39 paths / 0 protected PASS. Signed updater Latest
+remains v0.2.96; no installer claim.
+
+ZIP SHA256 ad43c67ab29cc6371b60155b5d5e843317c1e88b26c118c878a1a7871f598982
+EXE SHA256 4493fe086fa404e624db61705636cfc35f42c51842527f2b4890b26d24ca0b6b
+SDRplay SHA256 53676afe92834fcd00d9222469d7ca0ecd48b1f1d5c0358362cf1ea51562c053
+
+T-0068 software milestone complete; physical rotor/SWR acceptance ISS-0036
+and collector deployment/security ISS-0035 remain open, explicitly documented.
+
 ## 2026-09-26 - Rotor GUI full-path repetition
 
 Added actual widget Connect/Arm-confirmation/Move/Close-to-Stop loop against

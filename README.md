@@ -1,10 +1,10 @@
 # SDR Town
 
-Development: opt-in diagnostics and performance reporting are being qualified
-for 0.2.104; production deployment is not yet complete. See the
+0.2.104 adds opt-in diagnostics and performance reporting; collector hardening
+deployment is not yet complete. See the
 [diagnostics guide](docs/DIAGNOSTICS_SHARING.md) for controls and limitations.
 
-Development: **Tools > Antenna Rotator & SWR** adds manual Hamlib-compatible
+**Tools > Antenna Rotator & SWR** adds manual Hamlib-compatible
 antenna control, saved limits/park and hardware-only SWR readback. See the
 [setup and ten-controller compatibility targets](docs/ANTENNA_CONTROL.md).
 Physical controller acceptance and automatic satellite tracking remain open.

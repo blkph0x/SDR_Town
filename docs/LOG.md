@@ -1,5 +1,15 @@
 # Development log
 
+## 2026-09-26 - Rotor milestone published and verified
+
+Source 25236d2 / public v0.2.104 delivered after passing master/release Windows
+and YAML CI. Independent ZIP hash/provenance/default-config and extracted
+executable smoke tests PASS; full evidence in BUILD_NOTES. T-0068 complete
+as manual Hamlib bridge/SWR-monitor software milestone, not physical hardware
+certification or automatic TLE tracking. Diagnostics client changes shipped;
+blocked server deployment and per-install security remain ISS-0035. No P25
+changes; signed updater Latest preserved at v0.2.96.
+
 ## 2026-09-26 - Antenna control release qualification
 
 User requested broad rotor support and hardware SWR. DEC-0140/T-0068 adds
