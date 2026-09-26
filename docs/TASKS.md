@@ -1,9 +1,12 @@
 # Task list (canonical)
 
-T-0073 | in progress | WFM speech stream continuity |
+T-0073 | done | WFM speech stream continuity |
 DEC-0145 / ISS-0037. Repair reproduced WFM FIR/decimator/PCM boundaries,
 preserve separate RDS branch and NFM/P25/HF. Promote characterization to gate,
 add tiny blocks, output-rate/reset tests and verify release.
+Sourceffd68c6 / experimental v0.2.108 published; local15/15, WFM80, NFM1626,
+RDS23235 assertions PASS. Windows/YAML master and release CI SUCCESS; downloaded
+hashes/provenance/CLI/RDS/GUI PASS. Physical listening remains acceptance work.
 
 T-0072 | done | Global monitor Auto BW control |
 DEC-0144. Persistent checkbox gates automatic bandwidth in all monitor modes,

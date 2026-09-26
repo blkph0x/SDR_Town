@@ -1,5 +1,17 @@
 # Build notes
 
+## 2026-09-26 - T-0073 public release verified
+
+Sourceffd68c6 / experimental v0.2.108. Windows release36245181841 and
+master36245181642 SUCCESS; YAML36245181839 and36245181638 SUCCESS.
+https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.108
+Downloaded ZIP SHA256:
+f30bd6bf0e7b922ce288d68b2702ee34f07de4e666d6972488a659f0122597c4.
+Embedded source/version/run and EXE/SDRplay module hashes verified. Public CLI
+help/status, channel survey, RDS references and GUI startup PASS (exit0, ok=true,
+empty warnings/errors). Transient local DNS failures recovered on retry without
+changing network/security settings. Physical listening not claimed.
+
 ## 2026-09-26 - T-0073 WFM repair qualification
 
 Baseline0.2.107 has measured PCM partition failures in DEC-0144/ISS-0037.

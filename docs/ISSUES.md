@@ -4,7 +4,9 @@
 
 T-0073 / DEC-0145 repairs WFM speech FIR, decimator and PCM boundaries while
 keeping RDS/NFM independent. Former hidden WFM fixture is promoted to mandatory
-[wfm][pcm-stream], now passes first32 assertions. Final qualification pending.
+[wfm][pcm-stream], now passes80 assertions. Full15/15 suites and public release
+0.2.108 verified; software continuity scope closed. Historical failure below
+describes the pre-repair0.2.107 baseline, not the current mandatory test.
 RF blocker rejection, cost profiling and physical listening remain open.
 
 DEC-0144 characterization: actual WFM PCM at2.048MS/s whole/split counts4800/4800

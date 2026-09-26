@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-09-26 - T-0073 published
+
+WFM speech timing repair shipped as experimental0.2.108, sourceffd68c6.
+Local full suite and Windows/YAML CI successful. Public archive provenance,
+checksums and shipped CLI/RDS/GUI verification PASS. NFM/P25/HF and Auto BW
+policy unchanged. Remaining ISS-0037 scope is RF/performance/live acceptance,
+not the now-repaired synthetic callback-partition defects.
+
 ## 2026-09-26 - T-0073 WFM software repair
 
 Repaired reproduced WFM callback-boundary defects with separate causal FIR,
