@@ -1,5 +1,14 @@
 # Development log
 
+## 2026-09-26 - Contributor aircraft-map branch merged for PR
+
+T-0064 merges `release/v0.2.98-experimental` into current master while keeping
+the already-shipped v0.2.101 DEC-0135 position cache. The older branch's direct
+GUI regression now proves the live map still renders the decoded aircraft after
+750 later channel messages. Obsolete v0.2.98 implementation/release edits were
+resolved in favor of current upstream. Clean MinGW/UCRT target build and
+InmarsatLiveGui suite pass; application behavior and version are unchanged.
+
 ## 2026-09-26 - Aero multi-channel first stage delivered
 
 T-0063 shipped in regular public v0.2.101 from 9ff87c6. Both Windows Actions

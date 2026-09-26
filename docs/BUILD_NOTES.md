@@ -2,6 +2,22 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - Contributor aircraft-map GUI regression merge
+
+T-0064. Clean clone of current upstream master merged contributor branch
+`release/v0.2.98-experimental`; current v0.2.101 DEC-0135 implementation won
+all production-code and stale-release conflicts. Added the contributor's direct
+GUI proof that one validated ADS-C aircraft remains rendered after 750 later
+non-position messages evict it from the 500-message chronological ring.
+
+Windows MinGW/UCRT Debug, CMake/Ninja: `inmarsat_live_gui_tests` target PASS.
+`InmarsatLiveGui` PASS, 0.59 s, with normal isolated Qt AppData access. The
+first sandboxed run timed out after Qt could not create that AppData directory;
+the same binary passed outside that restriction. Initial clean-clone build also
+failed on missing `external/miniaudio/miniaudio.h`; pinned submodules were then
+initialized and the unchanged source target built successfully. No application
+runtime or release-version change.
+
 ## 2026-09-26 - Verified 0.2.101 public release
 
 Source 9ff87c6573090212333f693842eb8e0180408b27. Windows release 36211687629

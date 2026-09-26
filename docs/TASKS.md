@@ -1,5 +1,13 @@
 # Task list (canonical)
 
+T-0064 | done | Merge contributor aircraft-map regression |
+Rebase contributor branch release/v0.2.98-experimental onto current master.
+Keep the stronger v0.2.101 DEC-0135 position cache and add direct GUI coverage
+that a decoded aircraft remains visible after 750 later channel messages.
+MinGW/UCRT Debug target built and InmarsatLiveGui passed (0.59 s). The merge
+retains the contributor branch as a parent without restoring obsolete v0.2.98
+release changes.
+
 T-0062 | planned | Per-device multi-mode sessions |
 User authorized shared ownership redesign. DEC-0135 / MULTI_SDR_SESSIONS.md.
 Replace global leases and GUI takeover, add persistent role/device assignment,
