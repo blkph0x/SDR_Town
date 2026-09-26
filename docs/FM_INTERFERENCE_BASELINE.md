@@ -58,6 +58,16 @@ image case (>99%). The RF/DDC/FIR stage therefore dominates this measurement.
 
 ## Next isolated work
 
+### WFM computation follow-up (DEC-0147 / 0.2.109)
+
+Contiguous history and SIMD across independent FIR outputs preserve all full-rate
+power samples and tap accumulation order. Three repeated matrices (108 cases)
+match baseline wanted gain, blocker audio, RMS difference and PCM counts exactly.
+WFM10MS/s time/input ratios0.63875-0.65294, mean0.64522, versus~2.59 baseline.
+419 assertions independently match the original ring convolution including
+impulses, tiny blocks and reset. This is an x64 Windows measurement, not an
+ARM speed claim or total app/RDS cost measurement. NFM rejection is unchanged.
+
 1. NFM: compare anti-alias first-stage candidates against this image-blocker
    reproduction. Preserve wanted passband, CTCSS/DCS taps, stream counts and
    latency accounting. Measure a broader offset sweep before choosing a default.

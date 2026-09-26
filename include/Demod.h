@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include "NfmPcmClock.h"
+#include "WfmSpeechFir.h"
 
 enum class DemodMode { NFM, WFM, AM, USB, LSB, CW, AUTO };
 
@@ -140,8 +141,8 @@ private:
     NfmPcmClock nfmPcmClock;
     bool nfmPostAudioReset = true;
     // DEC-0145: separate speech state; never share RDS or NFM histories.
-    std::vector<std::complex<float>> wfmSpeechFirDelay;
-    size_t wfmFirWrite = 0, wfmDecimationPhase = 0;
+    WfmSpeechFir wfmSpeechFir;
+    size_t wfmDecimationPhase = 0;
     int wfmDecimationFactor = 0;
     double wfmStreamRate = 0, wfmStreamCenter = 0;
     NfmPcmClock wfmPcmClock;

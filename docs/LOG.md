@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-09-27 - T-0075 WFM computation repair
+
+Contiguous FIR history and SSE2 across outputs preserve ordered sums and every
+power sample. Reference419 assertions and WFM/NFM/RDS25360 assertions PASS.
+Three36-case benchmark runs match signal metrics exactly; WFM10MS/s mean cost
+0.64522 input duration versus~2.59 before. Full app/publication gates pending.
+
 ## 2026-09-27 - T-0074 benchmark and next targets
 
 Published source0dfe8cf; Windows and YAML CI successful. Task closes measurement

@@ -1,5 +1,8 @@
 # SDR Town
 
+0.2.109 reduces WFM filter processing cost while preserving its ordered output
+calculations. See [release notes](docs/RELEASE_0.2.109.md) for measurements and limits.
+
 Developer diagnostics: [FM interference and performance benchmark](docs/FM_INTERFERENCE_BASELINE.md)
 now records repeatable two-signal measurements without changing receiver settings.
 
@@ -28,7 +31,7 @@ antenna control, saved limits/park and hardware-only SWR readback. See the
 [setup and ten-controller compatibility targets](docs/ANTENNA_CONTROL.md).
 Physical controller acceptance and automatic satellite tracking remain open.
 
-**[Download 0.2.108 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.108)**
+**[Download 0.2.109 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.109)**
 includes a matched SDRplay plugin and corrected, dated Inmarsat frequency/rate
 presets. Install the official SDRplay API 3.15+ and service separately. Extract
 the entire ZIP into a fresh folder. RTL bias-T is in Device Manager after

@@ -513,8 +513,8 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         wfmStreamCenter = cf;
         if (dspStateNeedsReset) {
             ph = 0;
-            wfmSpeechFirDelay.clear();
-            wfmFirWrite = wfmDecimationPhase = 0;
+            wfmSpeechFir.reset();
+            wfmDecimationPhase = 0;
             prev = {1, 0};
         }
     }
@@ -725,8 +725,8 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         }
         internalRate = workRate;
     } else if (mode == DemodMode::WFM) {
-        // DEC-0145: same causal FIR operation as NFM, separate history.
-        filterNfm(baseband, chanTaps, wfmSpeechFirDelay, wfmFirWrite);
+        // DEC-0147: identical ordered FIR sums, vectorized across outputs.
+        wfmSpeechFir.process(baseband, chanTaps);
         diagnostic.values[fmDiagnostics::MaxFirDelayUs] = static_cast<uint64_t>(
             (chanTaps.size()-1)*0.5e6/sr);
     } else if (!chanTaps.empty() && channelBwHz > 0) {

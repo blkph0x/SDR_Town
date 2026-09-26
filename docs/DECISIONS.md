@@ -1,5 +1,16 @@
 # Decisions
 
+## DEC-0147 - Optimize WFM FIR without changing its response (2026-09-27)
+
+T-0074 measured >99% cost in WFM channelizer at10MS/s. Current FIR wraps a ring
+index per tap/output. Prototype contiguous raw history and SIMD across independent
+output samples, not across taps: preserve original accumulation order and every
+full-rate filtered sample, hence power/squelch semantics. SSE2-capable builds use
+explicit multiply then add (no FMA); other targets retain ordered scalar math.
+Compare with old ring implementation using deterministic random/impulse input,
+short chunks and tap changes. No NFM/P25/RDS/coefficients/decimation changes.
+Accept only measured improvement with passing signal metrics and full tests.
+
 ## DEC-0146 - Measure FM blockers before changing accepted filters (2026-09-26)
 
 User confirms0.2.108 WFM sounds good; NFM also accepted. No production changes

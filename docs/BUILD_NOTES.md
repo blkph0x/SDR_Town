@@ -1,5 +1,17 @@
 # Build notes
 
+## 2026-09-27 - T-0075 WFM FIR prototype evidence
+
+Reference ring/impulse/reset/tap-length fixture419 assertions PASS. Three36-case
+benchmark runs saved to build/fm-benchmark-109.json. Against0.2.108 baseline,
+all36 first-run cases have identical wantedGainDb, blockerAudioRelativeDb,
+differenceRelativeDb and audioSamples. WFM10MS/s time/input ratio~0.64 versus
+~2.59 baseline;2.4MS/s~0.16 versus~0.63. This is speech-demod cost on this host,
+not GUI/RDS-total CPU. All108 repeated cases match baseline signal metrics.
+Release app/test build PASS; combined WFM/NFM/RDS25360 assertions PASS. RDS CLI
+reference and GUI dry-run (exit0, ok=true, no warnings/errors) PASS. Full suite
+PASS15/15 in45.05sec. Public CI/asset results pending.
+
 ## 2026-09-27 - T-0074 measured FM baseline
 
 Release test build PASS, measurement math5 assertions PASS. Explicit benchmark

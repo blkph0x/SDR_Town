@@ -2,6 +2,11 @@
 
 ## ISS-0037 - FM chunk boundaries and sample lattice (2026-09-26, OPEN)
 
+T-0075 prototype targets WFM cost without changing output math. SSE2 across
+independent outputs matches419 reference assertions and all36 benchmark signal
+metrics, reducing10MS/s cost~2.59 to~0.64 input duration on this host. Full gates
+pending; NFM image rejection remains a separate open issue.
+
 T-0074 / DEC-0146: three36-case benchmark runs confirm NFM first-image weakness
 at+40dB blockers (2.4MS/s wanted gain-5.55dB, difference+3.23dB), and WFM10MS/s
 cost~2.59x real time on this host (>99% channelizer). Full matrix/method/limits

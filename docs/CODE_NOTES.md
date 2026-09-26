@@ -1,5 +1,14 @@
 # Code notes (tree map)
 
+## WFM FIR computation (DEC-0147)
+
+WfmSpeechFir retains raw causal history and contiguous scratch input. SSE2
+computes four complex outputs per tap loop using two float vectors, preserving
+ordered multiply/add without FMA. Scalar fallback handles tails and non-SSE2
+builds. Every full-rate sample remains available to the existing power estimate.
+Reset and tap-length changes zero history; same-length coefficient changes
+preserve it as before. No change to NFM's ring FIR or independent RDS branch.
+
 ## FM benchmark (DEC-0146)
 
 tests/test_fm_benchmark.cpp adds a default measurement-math test and opt-in

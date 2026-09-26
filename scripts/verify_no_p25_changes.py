@@ -49,6 +49,25 @@ PROTECTED_PATTERNS: tuple[str, ...] = (
 )
 
 SATCOM_MAINWINDOW_PATH = "src/MainWindow.cpp"
+# DEC-0147: WFM FIR computation only; same full-rate outputs and power semantics.
+WFM_FIR_DIGESTS = {
+    "src/Demod.cpp": (
+        "7610e29cbe34ac0f4d03ff896622fbb24f957e89882a28c3b5e8ab9a2bd53f9a",
+        "0737fc0ab93edc0f93fb99f89069b3718efe009458e938c11bf4777ac15762ba"),
+    "include/Demod.h": (
+        "1d110e0fa0ea2d682fa0c5c02ed5e9ffb8f58da39949c8984da8db01ec5937a9",
+        "090773e1eaa3b410361a6c52207587118cecc2d4e705544f78e6b91004c6a766"),
+}
+
+
+def wfm_fir_text_allowed(path: str, before: str, after: str) -> bool:
+    pair = WFM_FIR_DIGESTS.get(path)
+    return pair is not None and pair == (
+        hashlib.sha256(before.encode("utf-8")).hexdigest(),
+        hashlib.sha256(after.encode("utf-8")).hexdigest(),
+    )
+
+
 # DEC-0145: exact WFM speech-only continuity repair; RDS/NFM/P25 unchanged.
 WFM_PCM_DIGESTS = {
     "src/Demod.cpp": (
@@ -384,6 +403,17 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
+        if path in WFM_FIR_DIGESTS and args.paths is None:
+            try:
+                allowed = wfm_fir_text_allowed(
+                    path, git_file_text(args.base, path), git_file_text(args.head, path)
+                )
+            except RuntimeError as exc:
+                print(f"P25 guard error: {exc}", file=sys.stderr)
+                return 2
+            if allowed:
+                print(f"P25 guard: accepted exact DEC-0147 WFM FIR optimization: {path}")
+                continue
         if path in WFM_PCM_DIGESTS and args.paths is None:
             try:
                 allowed = wfm_pcm_text_allowed(

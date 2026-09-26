@@ -7,6 +7,7 @@
 #include <cmath>
 #include <iostream>
 #include <vector>
+#include <random>
 
 namespace {
 // DEC-0146: integer-period projection; this is tone amplitude, not SINAD.
@@ -59,6 +60,37 @@ TEST_CASE("FM benchmark measures independent tones and RMS", "[fm][measurement]"
     REQUIRE(toneAmplitude(tone,2300)<1e-7);
     REQUIRE(std::abs(rms(tone)-std::sqrt(.05))<1e-7);
     REQUIRE(std::abs(db(.1)+20)<1e-12);
+}
+
+TEST_CASE("WFM FIR matches original ordered ring convolution exactly", "[wfm][fir]") {
+    const size_t count=GENERATE(1u,2u,31u,321u);
+    std::mt19937 random(147);
+    std::uniform_real_distribution<float> value(-1,1);
+    std::vector<float> taps(count);
+    for(auto& t:taps)t=value(random);
+    WfmSpeechFir fir;
+    std::vector<std::complex<float>> history(count);
+    size_t write=0;
+    for(size_t chunk:{1u,2u,3u,4u,7u,8192u,17u}) {
+        std::vector<std::complex<float>> actual(chunk),expected;
+        for(auto& s:actual)s={value(random),value(random)};
+        expected=actual;
+        for(auto& s:expected) {
+            history[write]=s;size_t at=write;std::complex<float> sum{};
+            for(float t:taps) {sum+=t*history[at];at=at==0?count-1:at-1;}
+            s=sum;if(++write==count)write=0;
+        }
+        fir.process(actual,taps);
+        REQUIRE(actual==expected);
+    }
+    fir.reset();
+    std::vector<std::complex<float>> impulse(count+8);impulse[0]={1,0};
+    fir.process(impulse,taps);
+    for(size_t i=0;i<impulse.size();++i)
+        REQUIRE(impulse[i]==std::complex<float>(i<count?taps[i]:0,0));
+    std::vector<std::complex<float>> next(5,{1,1});
+    fir.process(next,std::vector<float>{2});
+    REQUIRE(next==std::vector<std::complex<float>>(5,{2,2}));
 }
 
 TEST_CASE("FM two-signal interference and cost report", "[.fm-benchmark]") {
