@@ -1,5 +1,9 @@
 # Task list (canonical)
 
+T-0064 | in_progress | Continuous in-band Aero and spectrum navigation |
+DEC-0136. Combine data/voice when the whole watch fits RF and CPU budgets;
+retain scheduled fallback. Add aligned mouse zoom/pan and regression tests.
+
 T-0062 | planned | Per-device multi-mode sessions |
 User authorized shared ownership redesign. DEC-0135 / MULTI_SDR_SESSIONS.md.
 Replace global leases and GUI takeover, add persistent role/device assignment,

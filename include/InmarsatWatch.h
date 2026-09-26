@@ -22,6 +22,7 @@ struct InmarsatWatchChannel {
 struct InmarsatWatchConfig {
     static constexpr int kMaxConcurrentChannels = 16; // DEC-0135 resource budget, not RF capacity.
     bool enabled = false;
+    bool simultaneousInBand = true; // DEC-0136: all channels must fit, no partial starvation.
     std::vector<InmarsatWatchChannel> channels;
     int maxConcurrentChannels = 2; // DEC-0124 measured live-input headroom.
     int dataMinSeconds = 10, dataDwellSeconds = 30, positionTarget = 10;
@@ -34,6 +35,7 @@ struct InmarsatWatchConfig {
 
 struct InmarsatWatchGroup {
     bool voice = false;
+    bool simultaneous = false;
     double centerHz = 0;
     std::vector<InmarsatWatchChannel> channels;
 };

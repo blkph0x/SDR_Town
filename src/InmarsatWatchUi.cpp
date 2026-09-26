@@ -44,6 +44,10 @@ QWidget* InmarsatWidget::buildWatchUi() {
     clickAdd_=new QCheckBox("Click to add");clickAdd_->setObjectName("inmarsatWatchClickAdd");
     clickAdd_->setToolTip("Add each clicked frequency using the selected decoder rate. Existing channels are selected, not duplicated.");
     row->addWidget(clickAdd_);
+    simultaneousWatch_=new QCheckBox("Simultaneous in-band");
+    simultaneousWatch_->setObjectName("inmarsatWatchSimultaneous");
+    simultaneousWatch_->setToolTip("Keep data and voice running together when every enabled channel fits the RF bandwidth and decoder limit. Save timing to apply.");
+    row->addWidget(simultaneousWatch_);
     watchName_=new QLineEdit;watchName_->setPlaceholderText("Channel name");watchName_->setMaxLength(100);
     watchName_->setObjectName("inmarsatWatchName");row->addWidget(watchName_,1);
     auto* add=new QPushButton(style()->standardIcon(QStyle::SP_FileDialogNewFolder),"Add channel");
@@ -124,6 +128,7 @@ void InmarsatWidget::reloadWatchUi() {
     voiceAcquire_->setValue(c.voiceAcquireSeconds);voiceIdle_->setValue(c.voiceIdleSeconds);
     refreshInterval_->setValue(c.refreshSeconds);maxVoice_->setValue(c.maxVoiceSeconds);
     watchConcurrent_->setValue(c.maxConcurrentChannels);
+    simultaneousWatch_->setChecked(c.simultaneousInBand);
 }
 void InmarsatWidget::saveWatchPolicy() {
     try {
@@ -132,6 +137,7 @@ void InmarsatWidget::saveWatchPolicy() {
         w.voiceAcquireSeconds=voiceAcquire_->value();w.voiceIdleSeconds=voiceIdle_->value();
         w.refreshSeconds=refreshInterval_->value();w.maxVoiceSeconds=maxVoice_->value();
         w.maxConcurrentChannels=watchConcurrent_->value();
+        w.simultaneousInBand=simultaneousWatch_->isChecked();
         if(!InmarsatEngine::instance().setConfig(c))throw std::runtime_error(InmarsatEngine::instance().snapshot().lastStatus);
         watchStatus_->setText("Watch timing saved");
     }catch(const std::exception& e){QMessageBox::warning(this,"Watch timing",e.what());}
@@ -150,7 +156,7 @@ void InmarsatWidget::updateWatchUi(bool running,const nlohmann::json& report) {
             .arg(QString::fromStdString(w.value("collection",std::string{})))
             .arg(w.value("refreshDue",false)?"Refresh pending while voice active":QString::fromStdString(w.value("reason",std::string{}))));
         const auto load=w.value("loadRatio",0.0);
-        if(w.value("phase",std::string{})=="positions")
+        if(w.value("dataChannels",0)>0)
             watchStatus_->setText(watchStatus_->text()+QString(" | Valid data channels: %1/%2%3")
                 .arg(w.value("validatedDataChannels",0)).arg(w.value("dataChannels",0))
                 .arg(w.value("dataReady",false)?" - ready":""));

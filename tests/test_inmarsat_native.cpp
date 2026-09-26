@@ -1,5 +1,6 @@
 #include "InmarsatAdsc.h"
 #include "InmarsatAero.h"
+#include "InmarsatFirHistory.h"
 #include "InmarsatAudio.h"
 #include "AeroCodec.h"
 #include <catch2/catch_test_macros.hpp>
@@ -30,8 +31,23 @@ TEST_CASE("Aero ADS-C independent JAERO report and bad CRC", "[inmarsat][native]
     for(size_t i=0;i<example.size();++i) CHECK_FALSE(InmarsatAdsc::parse(example.substr(0,i)));
     CHECK_FALSE(InmarsatAdsc::parse("AES=123456 LAT=-34 LON=151"));
 }
+TEST_CASE("Aero contiguous FIR matches original modulo history exactly", "[inmarsat][native]") {
+    InmarsatFirHistory<65> optimized;
+    std::array<std::complex<float>,65> reference{};
+    std::array<double,65> coefficients{};
+    for(size_t i=0;i<65;++i)coefficients[i]=std::sin(double(i+1))/65;
+    size_t cursor=0;uint32_t random=0x12345678;
+    auto sample=[&](){random=random*1664525u+1013904223u;return float(random>>8)/8388608.0f-1;};
+    for(int n=0;n<20000;++n) {
+        const std::complex<float> input(sample(),sample());
+        reference[cursor]=input;cursor=(cursor+1)%65;optimized.push(input);
+        std::complex<double> expected=0;
+        for(size_t i=0;i<65;++i)expected+=std::complex<double>(reference[(cursor+i)%65])*coefficients[i];
+        REQUIRE(optimized.filter(coefficients)==std::complex<float>(expected));
+    }
+}
 TEST_CASE("Aero channelizer is continuous across arbitrary chunks", "[inmarsat][native]") {
-    for(double rate:{48000.,96000.,192000.}) {
+    for(double rate:{48000.,96000.,192000.,2048000.,10000000.}) {
         InmarsatChannelizer whole(rate,2000),chunks(rate,2000);
         std::vector<std::complex<float>> iq(static_cast<size_t>(rate/5));
         for(size_t i=0;i<iq.size();++i) iq[i]=std::polar(0.5f,float(2*std::numbers::pi*3000*i/rate));

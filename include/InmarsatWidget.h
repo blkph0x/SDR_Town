@@ -72,6 +72,7 @@ private:
     QTimer* refreshTimer_ = nullptr;
     QTimer* visualTimer_ = nullptr;
     QCheckBox* clickAdd_ = nullptr;
+    QCheckBox* simultaneousWatch_ = nullptr;
     QComboBox* constellationChannel_ = nullptr;
     InmarsatConstellationWidget* constellation_ = nullptr;
     InmarsatWatchSpectrum* watchSpectrum_ = nullptr;

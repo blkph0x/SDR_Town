@@ -1,5 +1,32 @@
 # Decisions
 
+## DEC-0136 - Continuous in-band Aero and one RF viewport (2026-09-26)
+
+T-0064. The planner currently separates data and voice even when all enabled
+channels fit its existing 90% passband and decoder budget. Add a persisted,
+default-on simultaneous policy: combine only when ALL enabled channels fit;
+otherwise preserve the tested data/voice rotation. A combined group never
+advances on dwell/idle timers, so modem state and position updates continue.
+CRC evidence counts data workers only. Keep single-conversation speaker focus.
+Reuse the existing channel-aware physical-center/DC-avoidance planner rather
+than hard-code a 2 MHz LO displacement that could clip selected RF channels.
+The native modem requires 48 kHz real IF at 8 kHz; do not replace this with an
+unproven 12 kHz output. No claim of SIMD/PFB or 10 MS/s capacity without measures.
+
+Spectrum navigation uses one normalized, bounded RF viewport for trace,
+waterfall, markers, labels and clicks. Wheel zoom is cursor-anchored, drag pans
+only within captured RF, double-click restores full span. Navigation never
+retunes hardware or adds a channel on drag. Reset viewport on RF/rate change.
+Shared multi-SDR ownership/audio buses remain T-0062, not bypassed here.
+
+Unloaded build/watch-102-idle-benchmark.log measures 10 MS/s load ratios 1.32
+(one worker) to 2.29 (sixteen); this is not realtime. First bounded optimization:
+replace the 65-tap HalfRate modulo-indexed history with a mirrored ring. Each
+sample is stored twice so the dot product traverses contiguous history in
+EXACTLY the original tap/accumulation order. Coefficients, decimation phase,
+NCO and modem rate remain identical. Compare against the original modulo
+reference over many wraps before retaining it; repeat whole-chain benchmark.
+
 ## DEC-0135 - Multi-SDR sessions and evidence-based Aero collection (2026-09-26)
 
 User requires independently assigned radios across modes, including P25 and two

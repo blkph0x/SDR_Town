@@ -1,4 +1,5 @@
 #include "InmarsatAero.h"
+#include "InmarsatFirHistory.h"
 #include "InmarsatAdsc.h"
 #include "AeroCodec.h"
 #include "aerol.h"
@@ -200,15 +201,13 @@ std::array<double,taps> lowpass(double cutoff, double fraction=0) {
     return h;
 }
 struct HalfRate {
-    std::array<std::complex<float>,taps> history{};
+    InmarsatFirHistory<taps> history;
     std::array<double,taps> h=lowpass(0.20);
-    size_t cursor=0; bool phase=false;
+    bool phase=false;
     bool push(std::complex<float> x,std::complex<float>& y) {
-        history[cursor]=x; cursor=(cursor+1)%taps; phase=!phase;
+        history.push(x);phase=!phase;
         if(phase) return false;
-        std::complex<double> sum=0;
-        for(size_t i=0;i<taps;++i) sum+=std::complex<double>(history[(cursor+i)%taps])*h[i];
-        y=std::complex<float>(sum); return true;
+        y=history.filter(h);return true;
     }
 };
 }

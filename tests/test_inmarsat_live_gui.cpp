@@ -18,6 +18,7 @@
 #include <QTableWidget>
 #include <QSpinBox>
 #include <QMouseEvent>
+#include <QWheelEvent>
 #include "InmarsatWatchSpectrum.h"
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -361,6 +362,8 @@ TEST_CASE("Inmarsat watch spectrum maps clicks to actual RF coordinates", "[inma
     double selected=0;
     QObject::connect(&spectrum,&InmarsatWatchSpectrum::frequencySelected,[&](double hz){selected=hz;});
     auto click=[&](double x,double y) {
+        QMouseEvent down(QEvent::MouseButtonPress,QPointF(x,y),QPointF(x,y),Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);
+        QApplication::sendEvent(&spectrum,&down);
         QMouseEvent e(QEvent::MouseButtonRelease,QPointF(x,y),QPointF(x,y),Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
         QApplication::sendEvent(&spectrum,&e);
     };
@@ -370,6 +373,46 @@ TEST_CASE("Inmarsat watch spectrum maps clicks to actual RF coordinates", "[inma
     click(204,150);REQUIRE(selected==1541750000); // Same axis in waterfall.
     spectrum.setSpectrum(std::vector<float>(1024,-110),1543e6,1e6,{});
     click(400,80);REQUIRE(selected==1543e6); // Retune invalidates the old axis.
+}
+
+TEST_CASE("Aero zoom and pan share waterfall coordinates without selecting on drag", "[inmarsat][gui]") {
+    InmarsatWatchSpectrum spectrum;spectrum.resize(800,240);
+    std::vector<float> bins(1024,-110);bins[512]=-20;
+    spectrum.setSpectrum(bins,1545500000,10e6,{});
+    int selections=0;double selected=0;
+    QObject::connect(&spectrum,&InmarsatWatchSpectrum::frequencySelected,[&](double hz){++selections;selected=hz;});
+    auto wheel=[&](int delta){
+        QWheelEvent e(QPointF(596,150),QPointF(596,150),QPoint(),QPoint(0,delta),Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+        QApplication::sendEvent(&spectrum,&e);
+    };
+    auto mouse=[&](QEvent::Type type,double x,Qt::MouseButton button,Qt::MouseButtons buttons){
+        QMouseEvent e(type,QPointF(x,150),QPointF(x,150),button,buttons,Qt::NoModifier);
+        QApplication::sendEvent(&spectrum,&e);
+    };
+    wheel(120);CHECK(std::abs(spectrum.visibleSpanHz()-8e6)<0.001);
+    mouse(QEvent::MouseButtonPress,596,Qt::LeftButton,Qt::LeftButton);
+    mouse(QEvent::MouseButtonRelease,596,Qt::LeftButton,Qt::NoButton);
+    CHECK(std::abs(selected-1548000000)<0.001); // Cursor-anchored 75% frequency is unchanged.
+    const auto rows=spectrum.waterfallRows();
+    const auto center=spectrum.visibleCenterHz();
+    mouse(QEvent::MouseButtonPress,400,Qt::LeftButton,Qt::LeftButton);
+    mouse(QEvent::MouseMove,480,Qt::NoButton,Qt::LeftButton);
+    mouse(QEvent::MouseButtonRelease,480,Qt::LeftButton,Qt::NoButton);
+    CHECK(selections==1);CHECK(spectrum.visibleCenterHz()<center);
+    const auto picture=spectrum.grab();REQUIRE_FALSE(picture.isNull());CHECK(spectrum.waterfallRows()==rows);
+    const auto visualDir=qEnvironmentVariable("SDR_TOWN_TEST_VISUAL_DIR");
+    if(!visualDir.isEmpty())REQUIRE(picture.save(visualDir+"/inmarsat-zoom-pan.png"));
+    for(int i=0;i<80;++i)wheel(120);
+    CHECK(spectrum.visibleSpanHz()>=10e6*16/1024);
+    mouse(QEvent::MouseButtonPress,400,Qt::LeftButton,Qt::LeftButton);
+    mouse(QEvent::MouseMove,100000,Qt::NoButton,Qt::LeftButton);
+    mouse(QEvent::MouseButtonRelease,100000,Qt::LeftButton,Qt::NoButton);
+    CHECK(std::abs(spectrum.visibleCenterHz()-spectrum.visibleSpanHz()/2-(1545500000-5e6))<0.001);
+    mouse(QEvent::MouseButtonDblClick,400,Qt::LeftButton,Qt::LeftButton);
+    mouse(QEvent::MouseButtonRelease,400,Qt::LeftButton,Qt::NoButton);
+    CHECK(selections==1);CHECK(spectrum.visibleSpanHz()==10e6);
+    wheel(120);spectrum.setSpectrum(bins,1546e6,2e6,{});
+    CHECK(spectrum.visibleSpanHz()==2e6);CHECK(spectrum.visibleCenterHz()==1546e6);
 }
 
 TEST_CASE("Inmarsat multi click adds independent saved channels without duplicates", "[inmarsat][gui]") {
@@ -419,11 +462,15 @@ TEST_CASE("Aero GUI saves the expanded decoder budget", "[inmarsat][gui]") {
         auto* budget=widget.findChild<QSpinBox*>("inmarsatWatchConcurrent");
         REQUIRE(budget);CHECK(budget->maximum()==16);
         budget->setValue(16);
+        auto* simultaneous=widget.findChild<QCheckBox*>("inmarsatWatchSimultaneous");
+        REQUIRE(simultaneous);CHECK(simultaneous->isChecked());simultaneous->setChecked(false);
         widget.findChild<QPushButton*>("inmarsatWatchSave")->click();
         CHECK(engine.config().watch.maxConcurrentChannels==16);
+        CHECK_FALSE(engine.config().watch.simultaneousInBand);
     }
     InmarsatWidget reopened;
     CHECK(reopened.findChild<QSpinBox*>("inmarsatWatchConcurrent")->value()==16);
+    CHECK_FALSE(reopened.findChild<QCheckBox*>("inmarsatWatchSimultaneous")->isChecked());
 }
 
 TEST_CASE("Manual Aero tuning releases a pinned watch constellation", "[inmarsat][gui]") {

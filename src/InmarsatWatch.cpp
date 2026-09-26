@@ -38,7 +38,7 @@ void InmarsatWatchConfig::validate() const {
 }
 
 nlohmann::json InmarsatWatchConfig::toJson() const {
-    nlohmann::json j={{"enabled",enabled},{"maxConcurrentChannels",maxConcurrentChannels},{"dataMinSeconds",dataMinSeconds},
+    nlohmann::json j={{"enabled",enabled},{"simultaneousInBand",simultaneousInBand},{"maxConcurrentChannels",maxConcurrentChannels},{"dataMinSeconds",dataMinSeconds},
         {"dataDwellSeconds",dataDwellSeconds},{"positionTarget",positionTarget},
         {"voiceAcquireSeconds",voiceAcquireSeconds},{"voiceIdleSeconds",voiceIdleSeconds},
         {"refreshSeconds",refreshSeconds},{"maxVoiceSeconds",maxVoiceSeconds},
@@ -52,6 +52,7 @@ InmarsatWatchConfig InmarsatWatchConfig::fromJson(const nlohmann::json& j) {
     InmarsatWatchConfig c;
     if(!j.is_object()) throw std::invalid_argument("Invalid saved watch settings");
     c.enabled=j.value("enabled",false);
+    c.simultaneousInBand=j.value("simultaneousInBand",c.simultaneousInBand);
     c.maxConcurrentChannels=j.value("maxConcurrentChannels",c.maxConcurrentChannels);
     c.dataMinSeconds=j.value("dataMinSeconds",c.dataMinSeconds);
     c.dataDwellSeconds=j.value("dataDwellSeconds",c.dataDwellSeconds);
@@ -78,15 +79,24 @@ std::vector<InmarsatWatchGroup> planInmarsatWatch(const InmarsatWatchConfig& cfg
     std::vector<InmarsatWatchGroup> result;
     // Match the native 6.5 kHz channelizer margin. Reserve outer 10% of RF bandwidth.
     const double half=rate*0.45-6500;
+    std::vector<InmarsatWatchChannel> enabled;
+    for(const auto& c:cfg.channels)if(c.enabled)enabled.push_back(c);
+    std::stable_sort(enabled.begin(),enabled.end(),[](const auto& a,const auto& b){return a.frequencyHz<b.frequencyHz;});
+    const bool mixed=std::any_of(enabled.begin(),enabled.end(),[](const auto& c){return c.voice();}) &&
+        std::any_of(enabled.begin(),enabled.end(),[](const auto& c){return !c.voice();});
+    const bool simultaneous=cfg.simultaneousInBand && mixed &&
+        enabled.size()<=size_t(cfg.maxConcurrentChannels) &&
+        enabled.back().frequencyHz-enabled.front().frequencyHz<=2*half;
     for(bool voice:{false,true}) {
+        if(simultaneous && voice)break;
         std::vector<InmarsatWatchChannel> sorted;
-        for(const auto& c:cfg.channels) if(c.enabled && c.voice()==voice) sorted.push_back(c);
+        for(const auto& c:enabled) if(simultaneous || c.voice()==voice) sorted.push_back(c);
         std::stable_sort(sorted.begin(),sorted.end(),[](const auto& a,const auto& b){return a.frequencyHz<b.frequencyHz;});
         for(size_t i=0;i<sorted.size();) {
             const size_t first=i++;
             while(i<sorted.size() && i-first<size_t(cfg.maxConcurrentChannels) && sorted[i].frequencyHz-sorted[first].frequencyHz<=2*half) ++i;
             InmarsatWatchGroup g;
-            g.voice=voice;g.channels.assign(sorted.begin()+first,sorted.begin()+i);
+            g.voice=voice;g.simultaneous=simultaneous;g.channels.assign(sorted.begin()+first,sorted.begin()+i);
             const double lo=sorted[i-1].frequencyHz-half, hi=sorted[first].frequencyHz+half;
             // InmarScope voice_ops.cpp offsets by min(200 kHz, Fs/4) to avoid
             // tuner DC. Fit the entire group, preferring this over an RF edge.
@@ -112,18 +122,20 @@ std::vector<InmarsatWatchGroup> planInmarsatWatch(const InmarsatWatchConfig& cfg
 InmarsatWatchSchedule::InmarsatWatchSchedule(InmarsatWatchConfig cfg,double rate,double now)
     :cfg_(std::move(cfg)),groups_(planInmarsatWatch(cfg_,rate)),entered_(now),voiceStarted_(now),lastSpeech_(now) {
     dataCount_=std::count_if(groups_.begin(),groups_.end(),[](const auto& g){return !g.voice;});
+    if(group().simultaneous){reason_="Continuous in-band reception";collection_="continuous";}
 }
 void InmarsatWatchSchedule::position(uint32_t aes) {
     if(!group().voice && aes && positions_.size()<256) positions_.insert(aes);
 }
 void InmarsatWatchSchedule::validatedData(const std::string& id,double now) {
     if(group().voice || !std::isfinite(now))return;
-    if(std::any_of(group().channels.begin(),group().channels.end(),[&](const auto& c){return c.id==id;}))
+    if(std::any_of(group().channels.begin(),group().channels.end(),[&](const auto& c){return !c.voice() && c.id==id;}))
         dataEvidence_[id]=now;
 }
 size_t InmarsatWatchSchedule::freshDataChannels(double now) const {
     size_t count=0;
     for(const auto& c:group().channels) {
+        if(c.voice())continue;
         const auto it=dataEvidence_.find(c.id);
         if(it!=dataEvidence_.end() && now>=it->second && now-it->second<=cfg_.dataDwellSeconds)++count;
     }
@@ -131,6 +143,7 @@ size_t InmarsatWatchSchedule::freshDataChannels(double now) const {
 }
 void InmarsatWatchSchedule::speech(double now) { if(group().voice){lastSpeech_=now;heardSpeech_=true;} }
 bool InmarsatWatchSchedule::advance(double now) {
+    if(group().simultaneous)return false; // DEC-0136: both roles are already receiving.
     size_t next=index_;
     if(!group().voice) {
         // DEC-0135: map population alone cannot prove most current channels work.
@@ -162,14 +175,16 @@ bool InmarsatWatchSchedule::advance(double now) {
     return true;
 }
 nlohmann::json InmarsatWatchSchedule::report(double now) const {
-    return {{"phase",group().voice?"voice":"positions"},{"group",index_+1},{"groups",groups_.size()},
+    const size_t dataChannels=std::count_if(group().channels.begin(),group().channels.end(),[](const auto& c){return !c.voice();});
+    return {{"phase",group().simultaneous?"data + voice":group().voice?"voice":"positions"},
+        {"simultaneous",group().simultaneous},{"group",index_+1},{"groups",groups_.size()},
         {"visitPositions",positions_.size()},{"positionTarget",cfg_.positionTarget},{"collection",collection_},
         {"reason",reason_},{"groupSeconds",std::max(0.0,now-entered_)},
         {"refreshDue",group().voice && dataCount_>0 && now-voiceStarted_>=cfg_.refreshSeconds},
         {"validatedDataChannels",group().voice?size_t{0}:freshDataChannels(now)},
-        {"dataChannels",group().voice?size_t{0}:group().channels.size()},
-        {"dataReady",!group().voice && positions_.size()>=size_t(cfg_.positionTarget) &&
-            freshDataChannels(now)*2>group().channels.size()}};
+        {"dataChannels",dataChannels},
+        {"dataReady",dataChannels>0 && positions_.size()>=size_t(cfg_.positionTarget) &&
+            freshDataChannels(now)*2>dataChannels}};
 }
 
 struct InmarsatWatchSession::Channel {
@@ -286,7 +301,7 @@ void InmarsatWatchSession::process(std::span<const std::complex<float>> iq,uint6
             if(messageSink_)messageSink_(m);
         }
         const auto speech=c->report.value("speechFrames",uint64_t{0});
-        c->speech=speech>c->speechFrames;c->speechFrames=speech;
+        c->speech=c->config.voice() && speech>c->speechFrames;c->speechFrames=speech;
         activity.push_back(c->speech);
         if(c->speech)schedule_.speech(now);
     }

@@ -1,5 +1,21 @@
 # Code notes (tree map)
 
+## Continuous in-band Aero / RF viewport (DEC-0136, 0.2.102)
+
+InmarsatWatchConfig.simultaneousInBand persists with default true. Planner
+combines mixed roles only when all enabled channels fit bandwidth and budget.
+Group.simultaneous suppresses scheduler transitions; validatedData excludes
+voice channels, speaker activity explicitly requires a voice worker. Existing
+channel worker barrier and separate modem/vocoder ownership stay unchanged.
+InmarsatWatchSpectrum stores normalized viewStart/viewSpan, reused for every
+visual/click transform; pan/zoom never requests RF tuning. Drag threshold uses
+Qt's platform setting. Minimum span is 16 FFT bins (UI policy, not RF resolution).
+Wheel scales by 0.8 per notch, with bounded exponent; RF/rate changes reset view.
+InmarsatFirHistory mirrors the 65-sample FIR ring so dot products need no modulo
+per tap. Original tap order and double accumulation are preserved and compared
+exactly against the old reference for 20,000 inputs. Chunk parity now covers
+2.048 and 10 MS/s as well. This is not a new PFB, SIMD or oscillator algorithm.
+
 ## Aero channel budget/readiness (DEC-0135, 0.2.101)
 
 InmarsatWatchConfig defines a shared UI/validation bound of 16 concurrent

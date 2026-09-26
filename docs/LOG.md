@@ -1,5 +1,14 @@
 # Development log
 
+## 2026-09-26 - Continuous Aero group and navigation qualification
+
+DEC-0136 combines all-fitting mixed watch roles without timer resets, adds
+persisted opt-out and mouse zoom/pan sharing the actual RF axis. Local 13/13
+tests PASS. Measured FIR optimization preserves exact reference arithmetic but
+does not solve 10 MS/s realtime headroom (ISS-0032). P25 unchanged. T-0062
+multi-SDR ownership and cross-mode audio focus remain explicitly unimplemented.
+Preparing CI-built 0.2.102 portable testing release; publication not yet verified.
+
 ## 2026-09-26 - Aero multi-channel first stage delivered
 
 T-0063 shipped in regular public v0.2.101 from 9ff87c6. Both Windows Actions

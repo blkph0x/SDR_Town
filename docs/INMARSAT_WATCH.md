@@ -62,6 +62,16 @@ IQ replay stays source-local and never attempts RF hopping outside its file.
 
 ## Cycle
 
+From 0.2.102, **Simultaneous in-band** (default on, persisted with Save timing)
+combines data and voice only when the entire enabled watch fits the decoder
+budget and usable captured bandwidth. Those workers remain active continuously;
+data refresh, voice idle and maximum-visit timers never reset that combined
+group. Status reads **data + voice**. All data keeps updating while one selected
+voice conversation plays. If either budget does not fit, or the option is off,
+the following role-separated cycle applies unchanged. Quiet channels do not
+block combined-mode voice while waiting for positions. A populated map is not
+required to hear validated voice; identity is still matched only by decoded AES.
+
 - Enabled data and voice channels are grouped separately by actual sample rate,
   two independent decoders per group by default (adjustable 1-16), with RF/filter edge clearance.
   Each decoder gets the same chronological IQ within its group and owns separate
@@ -106,6 +116,29 @@ not be mistaken for simultaneous P25/data/voice radio ownership.
   is live-session memory, not a source of inferred aircraft identities.
 
 ## Diagnostics
+
+Wheel over the spectrum or waterfall to zoom around the pointer; drag to pan
+within captured RF; double-click restores full span. A drag never adds a watch
+channel, even with Click to add enabled. Navigation does not retune hardware.
+Zoom magnifies existing FFT bins, not RF resolution. Actual retuning or sample
+rate changes reset the viewport so old frequency coordinates cannot survive.
+
+### RSPdx and wideband reception
+
+The planner already fits selected carriers with edge clearance and chooses a
+physical center away from their occupied channel bands when possible. A fixed
+2 MHz shift is not universally safe: it can move a required carrier outside the
+sampled passband. Display and DDC offsets use the actual RF center, not a false
+logical center. 10 MS/s complex float input is 80 MB/s in memory before DSP.
+Each native modem still receives 48 kHz real IF centered at 8 kHz; blindly
+reducing this to 12 kHz would violate that modem interface and alias the signal.
+
+RSPdx API 3.15 `sdrplay_api_rspDx.h` exposes `rfNotchEnable` and
+`rfDabNotchEnable`; the matched SoapySDRPlay3 Settings.cpp maps these to RF
+broadcast and DAB controls. There is no dedicated L-band cellular notch control.
+See the [manufacturer datasheet](https://www.sdrplay.com/resources/RSPdxDatasheet.pdf).
+Keep manual RF gain/AGC under operator control; CRC failures alone do not prove
+front-end overload and must not trigger speculative gain changes.
 
 The four-quadrant display is a **constellation diagram**. Its selector changes
 only which channel is inspected, not speaker focus. Each worker supplies its own

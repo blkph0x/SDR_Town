@@ -1,5 +1,24 @@
 # Issues (canonical)
 
+## ISS-0032 - Aero 10 MS/s realtime headroom remains insufficient (2026-09-26, OPEN)
+
+Unloaded synthetic 64 x 65536 CF32 benchmark measures pre-optimization load
+ratio 1.32 with one worker and 2.29 with sixteen. DEC-0136 contiguous FIR
+history lowers these to 1.22 and 1.74, respectively; still slower than realtime.
+2.048 MS/s ratios after optimization are 0.26-0.41 for 1-16 workers. Logs:
+build/watch-102-idle-benchmark.log and build/watch-102-fir-benchmark.log.
+This includes modem startup and synthetic quiet IQ, not valid multi-call speech.
+Do not promise reliable 10 MS/s or increase buffering to hide sustained overload.
+Next: profile NCO and shared coarse channelization/PFB, preserve frequency/phase
+and channel isolation against reference IQ; qualify on RSPdx and slower PCs.
+
+## ISS-0033 - In-band data/voice unnecessarily retuned (2026-09-26, FIXED locally)
+
+Planner separated roles even when the entire list fit one passband/budget.
+DEC-0136 combines only the all-fitting case, retaining independent workers and
+one speaker focus; no dwell/refresh transition resets a combined group. Unit
+and real-widget tests pass. Public release verification pending T-0064.
+
 ## ISS-0031 - Global receiver ownership blocks independent modes (2026-09-26, OPEN)
 
 DeviceManager has one lease owner/index, MainWindow has one takeover record,

@@ -54,8 +54,10 @@ active. Keep the map through retunes and mark stale reports honestly.
 Two assigned SDRs: data and voice sessions run continuously and independently;
 do not run the single-radio alternating scheduler across both. Each source may
 still need to rotate its own groups if passband or processing budget is exceeded.
-If both bands fit one source, a later mixed-role grouping optimization may avoid
-retuning, but must preserve separate channel/identity/audio state.
+DEC-0136 implements mixed-role reception on one source when the entire enabled
+watch fits bandwidth and decoder budget; persistent workers keep separate
+channel/identity/audio state. This does not resolve the global ownership issues
+required for multiple physical devices and cross-mode audio focus.
 
 Aircraft identity: correlate validated Aero AES identity with validated ADS-C
 reports. The current C-channel wrapper extracts AES from validated signalling;

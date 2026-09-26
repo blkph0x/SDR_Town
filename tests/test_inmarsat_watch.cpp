@@ -11,10 +11,35 @@
 
 namespace {
 InmarsatWatchConfig example() {
-    InmarsatWatchConfig c;c.enabled=true;
+    InmarsatWatchConfig c;c.enabled=true;c.simultaneousInBand=false; // Explicit legacy rotation fixtures.
     c.channels={{"data","Position",1542e6,10500,true},{"voice","Voice",1543e6,8400,true}};
     return c;
 }
+}
+TEST_CASE("Aero in-band data and voice remain continuous without timer retunes", "[inmarsat][watch]") {
+    auto c=example();c.simultaneousInBand=true;c.positionTarget=1;
+    InmarsatWatchSchedule s(c,2e6,0);
+    REQUIRE(s.groupCount()==1);REQUIRE(s.group().simultaneous);
+    REQUIRE(s.group().channels.size()==2);
+    for(const auto& ch:s.group().channels)
+        REQUIRE(std::abs(ch.frequencyHz-s.group().centerHz)+6500<=2e6*.45);
+    s.position(1);s.validatedData("voice",1);
+    REQUIRE(s.report(1)["validatedDataChannels"]==0);
+    s.validatedData("data",1);
+    REQUIRE(s.report(1)["dataChannels"]==1);REQUIRE(s.report(1)["dataReady"]==true);
+    for(double now:{10.,30.,180.,600.,7200.})REQUIRE_FALSE(s.advance(now));
+    REQUIRE(s.report(7200)["validatedDataChannels"]==0);
+    REQUIRE(s.report(7200)["refreshDue"]==false);
+    REQUIRE(InmarsatWatchConfig::fromJson(c.toJson()).simultaneousInBand);
+    auto old=c.toJson();old.erase("simultaneousInBand");
+    REQUIRE(InmarsatWatchConfig::fromJson(old).simultaneousInBand);
+    SECTION("budget forces rotation") {c.maxConcurrentChannels=1;REQUIRE(planInmarsatWatch(c,2e6).size()==2);}
+    SECTION("bandwidth forces rotation") {REQUIRE(planInmarsatWatch(c,96000).size()==2);}
+    SECTION("opt out preserves rotation") {c.simultaneousInBand=false;REQUIRE(planInmarsatWatch(c,2e6).size()==2);}
+    SECTION("disabled distant channel is excluded") {
+        c.channels.push_back({"off","",1600e6,10500,false});
+        REQUIRE(planInmarsatWatch(c,2e6).size()==1);
+    }
 }
 TEST_CASE("Aero watch settings are bounded and round trip", "[inmarsat][watch]") {
     auto c=example();c.channels.push_back({"burst","Burst",1544e6,-1200,false});
@@ -28,6 +53,24 @@ TEST_CASE("Aero watch settings are bounded and round trip", "[inmarsat][watch]")
     SECTION("invalid timing") {c.maxVoiceSeconds=10;REQUIRE_THROWS(c.validate());}
     SECTION("invalid JSON") {REQUIRE_THROWS(InmarsatWatchConfig::fromJson({{"channels",false}}));}
     SECTION("empty selection") {for(auto& ch:c.channels)ch.enabled=false;REQUIRE_THROWS(planInmarsatWatch(c,2e6));}
+}
+
+TEST_CASE("Aero mixed workers preserve all channels across refresh deadlines", "[inmarsat][watch]") {
+    auto c=example();c.simultaneousInBand=true;
+    c.channels[1].frequencyHz=c.channels[0].frequencyHz+25000;
+    int flushes=0,pcm=0;
+    InmarsatWatchSession session(c,96000,0,{},[&](std::span<const int16_t>,uint32_t){++pcm;},[&]{++flushes;});
+    std::vector<std::complex<float>> iq(4096);
+    for(int i=0;i<3;++i) {
+        session.process(iq,uint64_t(i)*iq.size(),96000,session.centerHz(),false,i*0.05);
+        REQUIRE_FALSE(session.advance(7200+i));
+    }
+    const auto report=session.report(7202)["watch"];
+    REQUIRE(report["simultaneous"]==true);REQUIRE(report["workerCount"]==2);
+    REQUIRE(report["channels"][0]["rate"]==10500);REQUIRE(report["channels"][1]["rate"]==8400);
+    REQUIRE(report["switches"]==0);REQUIRE(flushes==0);REQUIRE(pcm==0);
+    const auto displays=session.displays();REQUIRE(displays.size()==2);
+    REQUIRE(displays[0].id=="data");REQUIRE(displays[1].id=="voice");
 }
 
 TEST_CASE("Aero map retains validated latest positions beyond message history", "[inmarsat][watch]") {
@@ -128,14 +171,14 @@ TEST_CASE("Aero watch telemetry excludes frequencies and aircraft identifiers", 
 TEST_CASE("Aero watch multichannel throughput probe", "[.inmarsat-watch-benchmark]") {
     auto c=example();c.channels.clear();
     for(int i=0;i<16;++i)c.channels.push_back({std::to_string(i),"",1542e6+i*25000,8400,true});
-    for(int concurrent:{1,2,4,8,16}) {
+    for(double sampleRate:{2048000.,10000000.})for(int concurrent:{1,2,4,8,16}) {
     c.maxConcurrentChannels=concurrent;
-    InmarsatWatchSession session(c,2048000,0,{},{},{});
+    InmarsatWatchSession session(c,sampleRate,0,{},{},{});
     std::vector<std::complex<float>> iq(65536,{0.01f,0.02f});
-    for(int i=0;i<64;++i)session.process(iq,uint64_t(i)*iq.size(),2048000,session.centerHz(),false,i*0.032);
-    auto r=session.report(2.048);
+    for(int i=0;i<64;++i)session.process(iq,uint64_t(i)*iq.size(),sampleRate,session.centerHz(),false,i*iq.size()/sampleRate);
+    auto r=session.report(64*iq.size()/sampleRate);
     REQUIRE(r["watch"]["channels"].size()==size_t(concurrent));
-    r["watch"].erase("channels");r["watch"]["concurrent"]=concurrent;
+    r["watch"].erase("channels");r["watch"]["concurrent"]=concurrent;r["watch"]["sampleRate"]=sampleRate;
     std::cout<<"WATCH_BENCH "<<r["watch"].dump()<<std::endl;
     }
 }

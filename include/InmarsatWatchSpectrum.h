@@ -11,16 +11,25 @@ public:
     void setSpectrum(const std::vector<float>&,double center,double rate,
                      const std::vector<InmarsatWatchChannel>&);
     uint64_t waterfallRows() const {return rows_;}
+    double visibleCenterHz() const {return center_+(viewStart_+viewSpan_/2-0.5)*rate_;}
+    double visibleSpanHz() const {return viewSpan_*rate_;}
 signals:
     void frequencySelected(double hz);
 protected:
     void paintEvent(QPaintEvent*) override;
     void mouseReleaseEvent(QMouseEvent*) override;
+    void mousePressEvent(QMouseEvent*) override;
+    void mouseMoveEvent(QMouseEvent*) override;
+    void mouseDoubleClickEvent(QMouseEvent*) override;
+    void wheelEvent(QWheelEvent*) override;
 private:
     QRectF plot() const;
     std::vector<float> bins_;
     std::vector<InmarsatWatchChannel> channels_;
     double center_=0,rate_=0;
+    double viewStart_=0,viewSpan_=1,dragStart_=0;
+    QPointF press_;
+    bool pressed_=false,dragged_=false;
     QImage waterfall_;
     int head_=0;
     uint64_t rows_=0;

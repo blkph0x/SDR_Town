@@ -2,6 +2,28 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - DEC-0136 local qualification, 0.2.102
+
+Windows / MSVC 2022 Release app, native GUI, core and workspace build PASS.
+Initial CTest 13/13 in 40.75 s. After mirrored FIR optimization, final CTest
+13/13 in 37.86 s (build/repair-102-fir-build.log, repair-102-fir-ctest.log).
+Exact old/new FIR arithmetic test: 20,000 inputs, many ring wraps. Whole versus
+fragmented channelizer parity includes 2.048 and 10 MS/s. Mixed data/voice test
+verifies both workers persist beyond timer deadlines with no reset or false PCM.
+GUI tests exercise wheel anchor, pan clamp, click mapping, no drag selection,
+retune reset and persistence. Render inspected: build/inmarsat-zoom-pan.png.
+Direct fixture invocation initially lacked its Qt DLL path (0xC0000135); rerun
+through CTest's configured environment PASS (repair-102-gui.log).
+Frozen P25 guard PASS: no protected implementation changes.
+
+Idle synthetic benchmark before/after (1,2,4,8,16 workers):
+2.048 MS/s before 0.33/0.31/0.31/0.33/0.51; after 0.26/0.30/0.27/0.28/0.41.
+10 MS/s before 1.32/1.34/1.36/1.41/2.29; after 1.22/1.21/1.18/1.22/1.74.
+Ratios are processing/RF seconds, lower is better. These short synthetic
+measurements include startup and no real speech. Earlier benchmark during
+compilation is excluded as contaminated. 10 MS/s realtime remains ISS-0032.
+Public CI/release verification remains pending before delivery is complete.
+
 ## 2026-09-26 - Verified 0.2.101 public release
 
 Source 9ff87c6573090212333f693842eb8e0180408b27. Windows release 36211687629
