@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-09-26 - SDRplay delivery and Aero presets (DEC-0132)
+
+Build/package matched SDRplay plugin; retain vendor service requirement and
+add explicit API DLL override. Replace interpolated frequency/rate tables
+with dated source survey facts, correct default and display precision, preserve
+user watch lists. Local full build and 13/13 suites PASS; CLI loads bundled
+driver. Push 0.2.98 for CI public package validation. P25 unchanged.
+
 ## 2026-09-25 - Mandatory delivery rule and verified release (T-0057)
 
 Persisted automatic push/CI release/public verification requirements. Fixed

@@ -32,7 +32,7 @@ struct InmarsatEngineConfig {
     size_t deviceIndex = 0;
     std::string deviceStableKey;
     std::string bandPlanId = "4f2";
-    double channelHz = 1542935000.0;
+    double channelHz = 1546005000.0; // DEC-0132: APAC surveyed 10500 bit/s data center.
     std::string mode = "aero_oqpsk"; // aero_msk | aero_oqpsk | aero_voice | egc
     int baud = 10500;
     bool voiceFollow = false; // disabled until validated assignment frames exist

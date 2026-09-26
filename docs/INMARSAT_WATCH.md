@@ -3,6 +3,16 @@
 Experimental single-SDR automation. Rates such as 10500 and 8400 are **bits per
 second**, not MHz ranges. Enter the actual RF frequency separately.
 
+0.2.98 corrects the former interpolated preset frequencies. The table now uses
+individual published channel centers with their actual survey rate, displays
+four decimal MHz places, and labels the rate bit/s. Plans name their survey date;
+hover over the table for provenance. These are historical reference presets,
+not guaranteed active assignments. Existing saved watch channels are not
+silently retuned: remove/re-add incorrect entries from the corrected table or
+enter your locally verified frequency. 6F1 has data-only presets because the
+source explicitly marks its older voice list obsolete. EGC presets without a
+verified source have been removed; manual tuning remains available.
+
 ## Setup
 
 1. Open **Tools > Inmarsat Aero**. Choose the SDR, a manual frequency and decoder,

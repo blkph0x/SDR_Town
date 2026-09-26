@@ -8,20 +8,21 @@ RTL-SDR and HackRF.
 ## Install (Windows)
 
 1. Install **SDRplay API 3.x** from [sdrplay.com](https://www.sdrplay.com/downloads/).
-2. Install a **64-bit SoapySDRPlay3** build compatible with the app's Soapy
-   ABI and your model (module typically `sdrPlaySupport.dll` under
-   `lib\SoapySDR\modules0.8`). An existing PothosSDR/radioconda install may
-   provide it; not every distribution includes this module or supports newer RSPs.
+2. From **0.2.98**, extract the complete Windows portable ZIP: it includes
+   `sdrPlaySupport.dll`, built against the app's own Soapy runtime and API 3.15.
+   Older packages require a separately installed compatible SoapySDRPlay3 plugin.
 3. Use **Rescan Devices**. Restart SDR Town after replacing a DLL that was
    already loaded; follow any reboot instruction from the vendor installer.
 
 Device Manager shows the current discovery status. CLI: `sdrplay status`.
 
 The standalone release does not redistribute the proprietary SDRplay API or
-third-party SoapySDRPlay3 binaries. It discovers the normal SDRplay, PothosSDR
+service. It includes the MIT SoapySDRPlay3 plugin and its licence. Use the vendor's
+API **3.15 or newer** for this build. `SDRPLAY_API_PATH` can specify the full API
+DLL path for a nonstandard installation. It discovers the normal SDRplay, PothosSDR
 (both Program Files layouts), radioconda, and application-local locations at
-runtime. The API DLL and Soapy module must be installed on the same machine as
-the app.
+runtime. The vendor service must still be installed and running. A bundled
+plugin does not install USB drivers or create a service.
 
 ### Troubleshooting “RSP not connected”
 

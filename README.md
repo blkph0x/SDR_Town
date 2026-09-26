@@ -1,5 +1,12 @@
 # SDR Town
 
+**[Download 0.2.98 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.98)**
+includes a matched SDRplay plugin and corrected, dated Inmarsat frequency/rate
+presets. Install the official SDRplay API 3.15+ and service separately. Extract
+the entire ZIP into a fresh folder. RTL bias-T is in Device Manager after
+selecting the RTL device. This is not a signed installer/in-app updater package.
+See [release notes](docs/RELEASE_0.2.98.md).
+
 ## Help build SDR Town and FUBAR
 
 **All support is welcome. [Donate through GoFundMe](https://gofund.me/56ead97a0)**.
@@ -87,7 +94,7 @@ status are visible. See [tone/no-voice troubleshooting](docs/INMARSAT.md#tone-or
 
 | | |
 |---|---|
-| **Current version** | **0.2.96** (experimental channel) |
+| **Current version** | **0.2.98** portable testing release; **0.2.96** signed updater |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |

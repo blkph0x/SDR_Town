@@ -7,6 +7,12 @@ completion. No RF/hardware qualification is implied by a successful build.
 
 ## Mandatory CI portable release
 
+For 0.2.98 the user requested a regular Releases entry: use `release/v0.2.98`.
+Non-prerelease portable publications explicitly use `--latest=false` to preserve
+the signed updater's Latest URL. The 0.2.97 entry was promoted from prerelease
+on 26 September without changing its tag or assets. A normal Releases entry
+does not by itself certify stable RF reception or an in-app update package.
+
 1. Review source, run local gates, bump the CMake/SoT version and write
    `docs/RELEASE_X.Y.Z.md`. Keep README and trackers current.
 2. Commit and push the source. Push the same commit to

@@ -108,21 +108,9 @@ void InmarsatBandPlanStore::reload(std::string* error) {
         }
     }
     if (plans_.empty()) {
-        // Embedded minimal fallback so API/UI still work without data files.
-        InmarsatBandPlan p;
-        p.id = "4f2";
-        p.name = "I-4 F2 (fallback)";
-        p.orbitalSlotDegE = 143.5;
-        p.region = "APAC";
-        p.source = "Built-in fallback";
-        p.channels = {
-            {"STD-C / EGC", 1541450000.0, "egc", 1200},
-            {"Aero P1", 1542935000.0, "aero_oqpsk", 10500},
-            {"Aero Voice 8400", 1544500000.0, "aero_voice", 8400},
-        };
-        plans_.push_back(p);
-        if (error) *error = "No band plan JSON found; using built-in 4f2 fallback";
-        spdlog::warn("InmarsatBandPlanStore: using built-in fallback");
+        // DEC-0132: missing survey data must never create invented RF channels.
+        if (error) *error = "No band plan JSON found; enter a known channel manually";
+        spdlog::warn("InmarsatBandPlanStore: no plans found; manual tuning remains available");
     } else {
         spdlog::info("InmarsatBandPlanStore: loaded {} plans from {}", plans_.size(), used);
         if (error) error->clear();

@@ -147,6 +147,16 @@ jobs:
           New-Item -ItemType Directory -Path build/bin/Release -Force | Out-Null
           Copy-Item build/rtl-driver-build/Release/rtlsdrSupport.dll build/bin/Release/SoapyRTLSDR.dll
 
+      - name: Build matched SDRplay module
+        shell: pwsh
+        run: ./scripts/build_sdrplay_module.ps1
+
+      - name: Verify Inmarsat channel survey
+        shell: pwsh
+        run: |
+          python scripts/test_inmarsat_bandplans.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Build SDR_Town and native tests
         shell: pwsh
         run: |
@@ -248,6 +258,11 @@ jobs:
           if (-not $crt) { throw "x64 MSVC CRT directory unavailable" }
           Copy-Item (Join-Path $crt.FullName '*.dll') $stage
           Copy-Item build/rtl-driver-source/LICENSE.txt (Join-Path $stage 'licenses/SoapyRTLSDR-LICENSE.txt')
+          Copy-Item build/sdrplay-driver-source/LICENSE.txt (Join-Path $stage 'licenses/SoapySDRPlay3-LICENSE.txt')
+          if (-not (Test-Path (Join-Path $stage 'sdrPlaySupport.dll'))) { throw 'Missing matched SDRplay module' }
+          if (Test-Path (Join-Path $stage 'sdrplay_api.dll')) { throw 'Do not bundle proprietary SDRplay API DLL' }
+          python scripts/test_inmarsat_bandplans.py --data-dir "$stage/data/inmarsat"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           foreach ($required in @('sdrtown_rds_dsp.dll', 'sdr_aero_codec.dll', 'SdrTownControl.dll', 'SoapyRTLSDR.dll', 'rtlsdr.dll', 'vcruntime140.dll', 'msvcp140.dll')) {
             if (-not (Test-Path (Join-Path $stage $required))) { throw "portable staging is missing $required" }
           }
@@ -288,6 +303,9 @@ jobs:
             sstvBackend = "required"
             p25PipelineGuard = "passed"
             rtlModuleCommit = "6ca357c15cbf676ff30eb8eb445d1e1eac17c136"
+            sdrplayModuleCommit = "48bd8b41072534018de1d74deb3dea5874d9e0e0"
+            sdrplayModuleSha256 = (Get-FileHash (Join-Path $stage 'sdrPlaySupport.dll')).Hash.ToLowerInvariant()
+            sdrplayApiRequired = "3.15 or newer; official vendor installation required"
           }
           $buildInfo | ConvertTo-Json | Set-Content `
             (Join-Path $stage "build-info.json") -Encoding utf8
@@ -361,7 +379,7 @@ jobs:
                 --repo $env:GITHUB_REPOSITORY `
                 --target $env:GITHUB_SHA `
                 --title "SDR Town $tag" `
-                --notes-file $notes
+                --notes-file $notes --latest=false
             }
           }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -392,6 +410,11 @@ jobs:
             throw "public asset provenance does not match this Actions run"
           }
           $exe = Join-Path $out "extracted/SDR_Town.exe"
+          if ((Get-FileHash (Join-Path $out 'extracted/sdrPlaySupport.dll')).Hash.ToLowerInvariant() -ne $info.sdrplayModuleSha256) {
+            throw 'Published SDRplay plugin hash mismatch'
+          }
+          python scripts/test_inmarsat_bandplans.py --data-dir "$out/extracted/data/inmarsat"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ((Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $info.executableSha256) {
             throw "published executable hash mismatch"
           }

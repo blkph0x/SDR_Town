@@ -3,6 +3,19 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+
+#ifdef _WIN32
+TEST_CASE("SDRplay explicit API DLL path precedes discovery", "[sdrplay]") {
+    const char* before = std::getenv("SDRPLAY_API_PATH");
+    const std::string saved = before ? before : "";
+    REQUIRE(_putenv_s("SDRPLAY_API_PATH", "C:\\custom\\sdrplay_api.dll") == 0);
+    const auto paths = SdrplayProfile::windowsApiCandidates("C:\\SDR Town");
+    _putenv_s("SDRPLAY_API_PATH", saved.c_str());
+    REQUIRE_FALSE(paths.empty());
+    CHECK(paths.front() == "C:\\custom\\sdrplay_api.dll");
+}
+#endif
 
 TEST_CASE("SdrplayProfile detects driver names", "[sdrplay]") {
     CHECK(SdrplayProfile::isSdrplayDriver("sdrplay"));

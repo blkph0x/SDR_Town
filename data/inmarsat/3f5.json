@@ -1,16 +1,332 @@
 {
   "id": "3f5",
-  "name": "I-3 F5",
-  "aliases": ["3F5", "I3F5", "AORE"],
-  "orbitalSlotDegE": -54.0,
-  "region": "AORE: Atlantic Ocean East",
-  "source": "Public AORE L-band Aero/STD-C survey references. Partial; verify on-air.",
+  "name": "I-3 F5 (February 2024 survey)",
+  "aliases": [
+    "3F5",
+    "I3F5",
+    "AORE"
+  ],
+  "orbitalSlotDegE": -54,
+  "region": "Atlantic Ocean East",
+  "source": "Wilson/Sergi.vdl2 survey via https://raw.githubusercontent.com/thebaldgeek/thebaldgeek.github.io/828314e0512604879df6828ee5cbda2d02f9ea6d/L-Band.md. February 2024 survey; voice spot beams may not cover your location. Verify on air; not a live 2026 survey.",
   "channels": [
-    {"label": "STD-C / EGC", "freqHz": 1541450000, "mode": "egc", "baud": 1200},
-    {"label": "Aero P1", "freqHz": 1543100000, "mode": "aero_oqpsk", "baud": 10500},
-    {"label": "Aero P2", "freqHz": 1543250000, "mode": "aero_oqpsk", "baud": 10500},
-    {"label": "Aero P3", "freqHz": 1543400000, "mode": "aero_oqpsk", "baud": 10500},
-    {"label": "Aero MSK 1200", "freqHz": 1542950000, "mode": "aero_msk", "baud": 1200},
-    {"label": "Aero Voice 8400", "freqHz": 1544100000, "mode": "aero_voice", "baud": 8400}
+    {
+      "label": "Aero data 600 bit/s 1545.0250 MHz",
+      "freqHz": 1545025000,
+      "mode": "aero_msk",
+      "baud": 600
+    },
+    {
+      "label": "Aero data 600 bit/s 1545.0300 MHz",
+      "freqHz": 1545030000,
+      "mode": "aero_msk",
+      "baud": 600
+    },
+    {
+      "label": "Aero data 600 bit/s 1545.0350 MHz",
+      "freqHz": 1545035000,
+      "mode": "aero_msk",
+      "baud": 600
+    },
+    {
+      "label": "Aero data 600 bit/s 1545.0400 MHz",
+      "freqHz": 1545040000,
+      "mode": "aero_msk",
+      "baud": 600
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1541.5050 MHz",
+      "freqHz": 1541505000,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1541.5100 MHz",
+      "freqHz": 1541510000,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1541.5150 MHz",
+      "freqHz": 1541515000,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1541.5200 MHz",
+      "freqHz": 1541520000,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1541.5250 MHz",
+      "freqHz": 1541525000,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1541.5300 MHz",
+      "freqHz": 1541530000,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1541.5350 MHz",
+      "freqHz": 1541535000,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1541.5400 MHz",
+      "freqHz": 1541540000,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1542.9750 MHz",
+      "freqHz": 1542975000,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1542.9800 MHz",
+      "freqHz": 1542980000,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1542.9850 MHz",
+      "freqHz": 1542985000,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1543.4025 MHz",
+      "freqHz": 1543402500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1543.4075 MHz",
+      "freqHz": 1543407500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1543.4125 MHz",
+      "freqHz": 1543412500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1543.4175 MHz",
+      "freqHz": 1543417500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1543.4225 MHz",
+      "freqHz": 1543422500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1543.4275 MHz",
+      "freqHz": 1543427500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1543.4325 MHz",
+      "freqHz": 1543432500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1543.4375 MHz",
+      "freqHz": 1543437500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1546.8225 MHz",
+      "freqHz": 1546822500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1546.8275 MHz",
+      "freqHz": 1546827500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1546.8325 MHz",
+      "freqHz": 1546832500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1546.8375 MHz",
+      "freqHz": 1546837500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1546.8425 MHz",
+      "freqHz": 1546842500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1546.8475 MHz",
+      "freqHz": 1546847500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1546.8525 MHz",
+      "freqHz": 1546852500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1546.8575 MHz",
+      "freqHz": 1546857500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1547.4125 MHz",
+      "freqHz": 1547412500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1547.4175 MHz",
+      "freqHz": 1547417500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1547.4225 MHz",
+      "freqHz": 1547422500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1547.4275 MHz",
+      "freqHz": 1547427500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1547.4325 MHz",
+      "freqHz": 1547432500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1547.4375 MHz",
+      "freqHz": 1547437500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1547.4425 MHz",
+      "freqHz": 1547442500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1547.4475 MHz",
+      "freqHz": 1547447500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1549.7800 MHz",
+      "freqHz": 1549780000,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1549.7850 MHz",
+      "freqHz": 1549785000,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1549.7900 MHz",
+      "freqHz": 1549790000,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1549.7950 MHz",
+      "freqHz": 1549795000,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1550.4125 MHz",
+      "freqHz": 1550412500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1550.4175 MHz",
+      "freqHz": 1550417500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1550.4225 MHz",
+      "freqHz": 1550422500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1550.4275 MHz",
+      "freqHz": 1550427500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1550.4325 MHz",
+      "freqHz": 1550432500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1550.4375 MHz",
+      "freqHz": 1550437500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1550.4425 MHz",
+      "freqHz": 1550442500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero voice 8400 bit/s 1550.4475 MHz",
+      "freqHz": 1550447500,
+      "mode": "aero_voice",
+      "baud": 8400
+    },
+    {
+      "label": "Aero data 10500 bit/s 1546.0550 MHz",
+      "freqHz": 1546055000,
+      "mode": "aero_oqpsk",
+      "baud": 10500
+    },
+    {
+      "label": "Aero data 10500 bit/s 1546.0700 MHz",
+      "freqHz": 1546070000,
+      "mode": "aero_oqpsk",
+      "baud": 10500
+    }
   ]
 }

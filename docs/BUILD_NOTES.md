@@ -2,6 +2,21 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - 0.2.98 local qualification (DEC-0132)
+
+MSVC2022/Qt6.11.1 app/core/workspace/Inmarsat GUI builds PASS, final repeated
+build PASS. CTest 13/13 PASS in 39.65 seconds. New GUI case verifies exact
+1546.0625 MHz selection, 10500 bit/s and engine settings; default corrected to
+1546.005 MHz. Five source survey JSON gates PASS; workflow YAML self-tests and
+P25 guard negative tests PASS. No P25 decoder/receiver/audio edits.
+Pinned SDRplay module built against build/vcpkg_installed x64 Soapy and API
+3.15 development headers. Actual app CLI status exit 0 reports bundled
+sdrPlaySupport.dll 0.5.2-48bd8b4 registered. This PC lacks the vendor service;
+no RSP RF/voltage acceptance claimed. Upstream format/narrowing warnings remain.
+Logs: build/repair-098-{build,final-build,ctest,sdrplay.out,sdrplay.err}.log.
+CI publication/public-asset qualification pending. Existing 0.2.97 promoted to
+regular non-Latest release at user request without changing its asset bytes.
+
 ## 2026-09-25 - Verified CI-built 0.2.97 experimental publication
 
 Source bf83d97c6029b866227eaa11ea4fc8fb3ad2f0e3. Windows release run

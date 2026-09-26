@@ -1,5 +1,24 @@
 # Decisions
 
+## DEC-0132 - Matched SDRplay package and sourced Aero channels (2026-09-26)
+
+T-0059 / ISS-0027. Build SoapySDRPlay3 48bd8b41072534018de1d74deb3dea5874d9e0e0
+against this app's Soapy runtime and API 3.15 development files, matching the
+InmarScope approach. Ship the MIT plugin and licence, never the vendor API DLL
+or service. Support its explicit SDRPLAY_API_PATH override. Test actual plugin
+registration separately from hardware acceptance.
+
+The existing Aero JSON interpolates channel centers and assigns wrong rates.
+Replace it with frequency facts from Wilson/Sergi.vdl2 February 2024 survey,
+published in thebaldgeek L-Band.md at 828314e0512604879df6828ee5cbda2d02f9ea6d;
+6F1 uses that source's April 2025 update, not its explicitly obsolete list.
+APAC 4F2 presets are historical regional references, not a current RF survey.
+Remove invented missing-data fallback. Keep user-saved watch channels intact.
+Display 4 decimal MHz places and bit/s, not rounded 3-place MHz or baud.
+Publish 0.2.98 as a regular GitHub release at user request, explicitly testing/
+portable only and not Latest, preserving signed 0.2.96 updater discovery.
+P25 DSP remains unchanged.
+
 ## DEC-0131 - README support appeal with verifiable claims (2026-09-25)
 
 User requested a prominent donation appeal for SDR Town/FUBAR. Root commit

@@ -544,3 +544,11 @@ become the active REQ.
 
 **Rule:** change policy in the owning TU; both live and replay/CLI paths must call the same helpers (no duplicated constants).
 
+# 0.2.98 packaging/preset repair (DEC-0132)
+
+scripts/build_sdrplay_module.ps1 builds pinned MIT SoapySDRPlay3 against local
+Soapy and hash-verified API development files; CI requires it in the ZIP.
+SdrplayProfile adds the full-DLL override used by InmarScope. InmarsatBandPlan
+no longer invents fallback frequencies. Five survey JSONs retain exact Hz/rates;
+test_inmarsat_bandplans.py gates source and staged copies. The GUI regression
+checks 1546.0625 MHz display, 10500 bit/s and the activated engine settings.

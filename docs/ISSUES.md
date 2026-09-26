@@ -1,11 +1,22 @@
 # Issues (canonical)
 
+## ISS-0028 - Incorrect Aero rate/frequency presets (2026-09-26, FIX IN VALIDATION)
+
+APAC JSON assigned 10500 bit/s to 1542.935 MHz (surveyed 8400 voice), interpolated
+22 data channels without a source, and used an unsupported voice default. Other
+regional tables similarly lacked actual survey entries. DEC-0132 replaces all
+five using dated source facts, removes fake fallback, fixes first-run center and
+four-place MHz display. Saved user watch lists are preserved, not silently retuned.
+Offline survey tests and GUI exact-selection tests gate the new release.
+
 ## ISS-0027 - SDRplay release prerequisite mismatch (2026-09-26, OPEN)
 
 InmarScope bundles a matched SoapySDRPlay3 plugin; SDR Town 0.2.97 does not.
 The vendor API alone is insufficient for the latter. See
 SDRPLAY_RELEASE_AUDIT_20260926.md for confirmed package/log evidence and the
 separate unresolved RTL-visibility and P25 field reports. No RF repair claimed.
+DEC-0132 builds/ships the matched MIT plugin against Town's Soapy runtime.
+Local module build PASS; full app tests and public-package verification pending.
 
 ## ISS-0026 - CI portable missing RTL module (2026-09-25, FIXED)
 

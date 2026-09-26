@@ -52,6 +52,30 @@ int main(int argc, char** argv) {
     return result;
 }
 
+TEST_CASE("Aero presets retain exact surveyed frequency and rate", "[inmarsat][gui]") {
+    const auto defaults = InmarsatEngineConfig::defaults();
+    CHECK(defaults.channelHz == 1546005000.0);
+    CHECK(defaults.baud == 10500);
+    InmarsatWidget widget;
+    auto* combo = widget.findChild<QComboBox*>("inmarsatBandPlan");
+    auto* table = widget.findChild<QTableWidget*>("inmarsatPresetChannels");
+    REQUIRE(combo); REQUIRE(table);
+    REQUIRE(combo->findData("4f3") >= 0);
+    combo->setCurrentIndex(combo->findData("4f3"));
+    CHECK(table->horizontalHeaderItem(3)->text() == "bit/s");
+    bool found = false;
+    for (int row = 0; row < table->rowCount(); ++row) {
+        if (table->item(row, 1)->text() != "1546.0625") continue;
+        found = true;
+        CHECK(table->item(row, 3)->text() == "10500");
+        REQUIRE(QMetaObject::invokeMethod(table, "cellDoubleClicked", Qt::DirectConnection,
+            Q_ARG(int, row), Q_ARG(int, 1)));
+        CHECK(InmarsatEngine::instance().config().channelHz == 1546062500.0);
+        CHECK(InmarsatEngine::instance().config().baud == 10500);
+    }
+    CHECK(found);
+}
+
 TEST_CASE("Opening Inmarsat preserves saved voice and burst selection", "[inmarsat][gui]") {
     auto& engine = InmarsatEngine::instance();
     REQUIRE(DeviceManager::instance().getDevices().empty()); // Never enumerate hardware.

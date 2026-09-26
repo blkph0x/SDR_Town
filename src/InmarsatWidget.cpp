@@ -157,7 +157,8 @@ void InmarsatWidget::buildUi() {
     root->addLayout(actions);
 
     channelTable_ = new QTableWidget(0, 4);
-    channelTable_->setHorizontalHeaderLabels({"Label", "MHz", "Mode", "Baud"});
+    channelTable_->setObjectName("inmarsatPresetChannels");
+    channelTable_->setHorizontalHeaderLabels({"Label", "MHz", "Mode", "bit/s"});
     channelTable_->horizontalHeader()->setStretchLastSection(true);
     channelTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
     channelTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -298,12 +299,13 @@ void InmarsatWidget::populateChannels() {
     const QString id = planCombo_->currentData().toString();
     const auto* plan = InmarsatBandPlanStore::instance().findById(id.toStdString());
     channelTable_->setRowCount(0);
+    channelTable_->setToolTip(plan ? QString::fromStdString(plan->source) : QString());
     if (!plan) return;
     channelTable_->setRowCount(static_cast<int>(plan->channels.size()));
     for (int row = 0; row < static_cast<int>(plan->channels.size()); ++row) {
         const auto& channel = plan->channels[static_cast<size_t>(row)];
         channelTable_->setItem(row, 0, new QTableWidgetItem(QString::fromStdString(channel.label)));
-        channelTable_->setItem(row, 1, new QTableWidgetItem(QString::number(channel.freqHz / 1e6, 'f', 3)));
+        channelTable_->setItem(row, 1, new QTableWidgetItem(QString::number(channel.freqHz / 1e6, 'f', 4)));
         channelTable_->setItem(row, 2, new QTableWidgetItem(QString::fromStdString(channel.mode)));
         channelTable_->setItem(row, 3, new QTableWidgetItem(QString::number(channel.baud)));
     }

@@ -1,10 +1,14 @@
 # Inmarsat L-band band plans (SDR Town)
 
-Public-sourced Classic Aero / STD-C channel catalogues for the native Inmarsat
-decoder. Frequencies are compiled from published hobby surveys (KrakenRF
-Discovery Dish Inmarsat guide, APAC Aero channel surveys) and regional satellite
-slot references (Viasat Aero Services / JSAT bulletins). They are **partial**
-and must be confirmed against local reception.
+Classic Aero frequency facts from the [Wilson/Sergi.vdl2 survey published by
+thebaldgeek](https://raw.githubusercontent.com/thebaldgeek/thebaldgeek.github.io/828314e0512604879df6828ee5cbda2d02f9ea6d/L-Band.md).
+February 2024 entries are historical references; 6F1 uses its April 2025 update,
+excluding the explicitly obsolete voice list. APAC was labelled 4F1 in that
+survey: these are regional reference channels, not newly verified 4F2 traffic.
+Verify actual channels/spot beams locally. No frequency is inferred from a rate.
+Unsupported STD-C presets and the old evenly spaced invented channels were
+removed in 0.2.98. Rate is bit/s; the legacy JSON key remains `baud` for API
+compatibility. User watch lists remain independent and are not overwritten.
 
 Not derived from InmarScope GPL bandplan JSON files.
 

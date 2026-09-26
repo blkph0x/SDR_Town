@@ -507,6 +507,8 @@ std::string extRefUiTooltip(const std::string& model) {
 
 std::vector<std::string> windowsApiCandidates(const std::string& appDir) {
     std::vector<std::string> paths;
+    // DEC-0132: same explicit full-DLL override as InmarScope.
+    appendUnique(paths, environmentPath("SDRPLAY_API_PATH"));
     const auto add = [&](const std::string& root) {
         if (root.empty()) return;
         appendUnique(paths, root + "\\sdrplay_api.dll");
