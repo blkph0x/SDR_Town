@@ -1,5 +1,10 @@
 # Task list (canonical)
 
+T-0066 | in_progress | Inmarsat decoder monitor and aircraft registry |
+DEC-0138. Add bounded aircraft tracking, per-channel status/history and pop-out
+views. Repair combined-watch status. Test identity, retention, clear/copy/filter,
+inactive channels and rendering; qualify and publish a new CI-built release.
+
 T-0065 | done | Selective fubarzi PR 33 integration |
 DEC-0137. Adopt and strengthen map GUI and synthetic SDRplay/Inmarsat lifecycle
 coverage without runtime changes. Run complete local/CI gates, then close PR

@@ -1,5 +1,31 @@
 # Decisions
 
+## DEC-0138 - Inmarsat monitoring without decoder policy changes (2026-09-26)
+
+T-0066. User requests InmarScope-style channel and aircraft windows. Existing
+store retains only 500 messages and 256 positions; non-position identities and
+message totals are lost. Add an independent 256-aircraft LRU-by-receipt registry
+(same bounded policy as positions), accepting validated ACARS/SU/assignment
+messages only. Preserve nonempty identity fields, ignore older field updates,
+and keep position receipt age separate from last-message age. Clear aircraft
+also clears positions, not decoder/message counters or the rolling message log.
+No aircraft identities are added to remote diagnostics.
+
+Show actual per-channel protocol lock, bit rate, CRC counts and emitted message
+counts, with a 500-line transition log (existing message-log size policy).
+Inactive/stopped workers cannot display a live lock. Views are tabs with optional
+independent pop-outs, refreshed at the existing 500 ms UI budget, never by DSP
+callbacks. Fix combined data+voice phase wrongly being labelled data-only.
+
+Do not copy InmarScope GPL implementation. ICAO is populated only from the
+explicit ADS-C airframe identifier already parsed and checked against AES;
+do not silently equate every AES to an ICAO address. Country lookup uses the
+CC0 Annex 10 Amendment 92 transcription by ibosoftnet, pinned at
+2ac0f294274beddb57212eb7531ff87dfd869de5. Preserve full allocation names;
+unknown/unassigned codes remain blank. No online registration lookup is implied.
+P25, tuning, voice gates and multi-device ownership are unchanged. Physical
+satellite acceptance, 10 MS/s headroom (ISS-0032) and multi-SDR (ISS-0031) stay open.
+
 ## DEC-0137 - Selective fubarzi PR 33 test adoption (2026-09-26)
 
 T-0065. User authorized selective integration, full regression tests and PR

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.102 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.103 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -183,6 +183,7 @@ set(SDR_TOWN_SOURCES
     src/InmarsatEngine.cpp
     include/InmarsatEngine.h
     src/InmarsatWidget.cpp
+    src/InmarsatMonitorWidget.cpp
     src/InmarsatWatch.cpp
     src/InmarsatWatchUi.cpp
     src/InmarsatWatchSpectrum.cpp
@@ -607,6 +608,7 @@ if(BUILD_TESTS)
   list(REMOVE_ITEM inmarsat_gui_libs Catch2::Catch2WithMain)
   add_executable(inmarsat_live_gui_tests tests/test_inmarsat_live_gui.cpp
       ${inmarsat_gui_sources} src/InmarsatWidget.cpp include/InmarsatWidget.h
+      src/InmarsatMonitorWidget.cpp
       src/InmarsatWatchUi.cpp src/InmarsatWatchSpectrum.cpp include/InmarsatWatchSpectrum.h
       src/InmarsatReplayDialog.cpp)
   foreach(property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS)

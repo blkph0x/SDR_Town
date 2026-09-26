@@ -8,6 +8,39 @@
 #include <QProcessEnvironment>
 #include <thread>
 #include <chrono>
+#include "InmarsatIcaoCountry.h"
+
+TEST_CASE("Aero aircraft identity survives eviction without stale field replacement", "[inmarsat][watch]") {
+    auto& store=InmarsatMessageStore::instance();store.clear();
+    struct Cleanup { ~Cleanup(){InmarsatMessageStore::instance().clear();} } cleanup;
+    InmarsatMessage m;m.kind=InmarsatMsgKind::Acars;m.validated=true;m.aesId=0x7c1234;
+    m.unixTime=100;m.registration="VH-TEST";m.icaoHex="7C1234";m.callsign="TEST1";
+    m.hasPosition=true;m.latDeg=-34;m.lonDeg=151;
+    store.push(m);
+    m.unixTime=110;m.registration.clear();m.icaoHex.clear();m.callsign.clear();m.hasPosition=false;
+    store.push(m);
+    m.unixTime=99;m.registration="OLD";store.push(m);
+    for(int i=0;i<600;++i)store.push(InmarsatMessage{});
+    auto a=store.aircraft();REQUIRE(a.size()==1);
+    CHECK(a[0].messages==3);CHECK(a[0].identity.registration=="VH-TEST");
+    CHECK(a[0].identity.icaoHex=="7C1234");CHECK(a[0].identity.callsign=="TEST1");
+    CHECK(a[0].identity.unixTime==110);CHECK(a[0].positionTime==100);
+    m.aesId=2;m.validated=false;store.push(m);CHECK(store.aircraft().size()==1);
+    m.validated=true;m.unixTime=std::numeric_limits<double>::quiet_NaN();store.push(m);CHECK(store.aircraft().size()==1);
+    m.unixTime=111;m.kind=InmarsatMsgKind::Status;store.push(m);CHECK(store.aircraft().size()==1);
+    m.kind=InmarsatMsgKind::CAssign;
+    for(uint32_t i=1;i<=300;++i){m.aesId=i;m.unixTime=200+i;store.push(m);}
+    REQUIRE(store.aircraft().size()==256);CHECK(store.aircraft().front().identity.aesId==45);
+    store.clearAircraft();CHECK(store.aircraft().empty());CHECK(store.positions().empty());CHECK(store.recent().size()>0);
+}
+
+TEST_CASE("ICAO allocation lookup is bounded and does not invent unassigned countries", "[inmarsat][watch]") {
+    CHECK(inmarsatIcaoCountry(0x7c0000)=="Australia");CHECK(inmarsatIcaoCountry(0x7fffff)=="Australia");
+    CHECK(inmarsatIcaoCountry(0x800000)=="India");CHECK(inmarsatIcaoCountry(0xab436f)=="United States");
+    CHECK(inmarsatIcaoCountry(0x4002ac)=="United Kingdom");CHECK(inmarsatIcaoCountry(0x76cdb5)=="Singapore");
+    CHECK(inmarsatIcaoCountry(0)=="");CHECK(inmarsatIcaoCountry(0xffffff)=="");
+    CHECK(inmarsatIcaoCountry(0x1000000)=="");CHECK(inmarsatIcaoCountry(0xf00001)=="");
+}
 
 namespace {
 InmarsatWatchConfig example() {

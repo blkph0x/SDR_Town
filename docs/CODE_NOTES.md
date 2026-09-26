@@ -1,5 +1,16 @@
 # Code notes (tree map)
 
+## Inmarsat monitoring (DEC-0138 / T-0066)
+
+InmarsatMonitorWidget provides passive decoder/aircraft tabs and pop-outs.
+It polls snapshots only while visible at 500 ms, bounds history to 500 lines,
+preserves table sort/selection, and never owns a DSP callback. MessageStore
+adds a mutex-protected bounded aircraft registry independent of rolling logs;
+position age is distinct from identity receipt age. InmarsatPipeline counts
+actual emitted messages separately from CRC units. InmarsatAero forwards the
+explicit ADS-C airframe ID after the existing identity/CRC checks. Country
+range facts are pinned CC0 data; see INMARSAT_MONITOR.md. P25 unchanged.
+
 ## Contributor regression coverage (DEC-0137 / T-0065)
 
 PR #33 from fubarzi supplies the busy-traffic map regression; its historical

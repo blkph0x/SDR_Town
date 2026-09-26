@@ -1,5 +1,15 @@
 # Development log
 
+## 2026-09-26 - Inmarsat decoder/aircraft visibility and gap reconciliation
+
+T-0066 / DEC-0138 implements passive monitoring, bounded aircraft retention,
+per-channel counters/history and pop-outs. Fixed combined-watch speaker label
+and renderer frequency rounding. Reviewed current issues; GAPS_20260926.md
+orders remaining RF, high-rate, multi-SDR, hardware and receive-chain gates.
+Corrected stale publication/base-environment issue notes. Full local 13/13
+and native screenshot review PASS. P25 code unchanged. Publishing CI is next;
+no clear-speech, physical RSP or multi-device acceptance claim is made.
+
 ## 2026-09-26 - Current tester download matches local application source
 
 Rebuilt local Release and passed 13/13 tests. Public v0.2.102 has identical

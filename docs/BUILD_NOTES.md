@@ -2,6 +2,26 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - Inmarsat monitor qualification in progress
+
+Final local Release targets SDR_Town, inmarsat_live_gui_tests, sdr_town_tests,
+sdr_town_workspace_tests PASS; CTest 13/13 PASS (40.27 s). New monitor tests
+exercise registry retention/ordering/age/clear, country boundaries, live vs
+inactive/stopped status, bounded history, copy/filter/pop-out and numeric sort.
+Native screenshots exposed QStyledItemDelegate double rounding despite correct
+item->text(); display-role strings now preserve frequency precision and that
+case has a regression assertion. Reviewed build/monitor-103-visual PNGs after
+repair; no overlap, horizontal scroll preserves additional aircraft columns.
+Logs: monitor-103-final-build.log, monitor-103-display-build.log,
+monitor-103-final-ctest.log. Frozen P25 path guard PASS. CI/publication pending.
+
+MSVC 2022 / Qt 6.11.1 local Release. Initial monitor/store compilation PASS.
+First test invocation used a new screenshot directory without creating it;
+existing constellation screenshot checks failed to save (not a DSP failure).
+The newly added GUI tests were edited after that target compiled, so this run
+is not qualification of those tests. Rebuild all affected targets and create
+the visual output directory before the final full CTest run. No release yet.
+
 ## 2026-09-26 - Tester release parity recheck
 
 At local HEAD 5724777, git diff v0.2.102..HEAD changes only tests and docs;

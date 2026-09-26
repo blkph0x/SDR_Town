@@ -8,6 +8,7 @@
 #include "InmarsatDiagnostics.h"
 #include "InmarsatMapWidget.h"
 #include "InmarsatWatchSpectrum.h"
+#include "InmarsatMonitorWidget.h"
 #include <QTabWidget>
 #include <QDoubleSpinBox>
 #include <QDateTime>
@@ -230,6 +231,8 @@ void InmarsatWidget::buildUi() {
     msgView_->setReadOnly(true);
     auto* tabs=new QTabWidget;map_=new InmarsatMapWidget;
     tabs->addTab(buildWatchUi(),"Watch channels");tabs->addTab(map_,"Aircraft map");
+    tabs->addTab(new InmarsatMonitorWidget(InmarsatMonitorWidget::View::Decoders),"Decoders");
+    tabs->addTab(new InmarsatMonitorWidget(InmarsatMonitorWidget::View::Aircraft),"Aircraft");
     tabs->addTab(msgView_,"Messages");tabs->addTab(channelTable_,"Band plan");root->addWidget(tabs,1);
 
     connect(startBtn_, &QPushButton::clicked, this, &InmarsatWidget::onStart);
@@ -458,7 +461,8 @@ void InmarsatWidget::refreshUi() {
     if (!error.empty()) audioState = QString::fromStdString(error);
     else if (!snapshot.config.playAudio) audioState = "Speaker off";
     else if (!running) audioState = "Stopped";
-    else if (snapshot.diagnostics.contains("watch") ? snapshot.diagnostics["watch"].value("phase",std::string{})!="voice" :
+    else if (snapshot.diagnostics.contains("watch") ? (snapshot.diagnostics["watch"].value("phase",std::string{})!="voice" &&
+             !snapshot.diagnostics["watch"].value("simultaneous",false)) :
              snapshot.config.baud != 8400 || snapshot.config.mode == "egc" || snapshot.config.mode == "aero_burst")
         audioState = "Data channel (no voice output)";
     else if (audio.value("pcmReceived", uint64_t{0}) == 0)

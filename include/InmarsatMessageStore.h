@@ -41,6 +41,12 @@ struct InmarsatMessage {
     static const char* kindName(InmarsatMsgKind k);
 };
 
+struct InmarsatAircraft {
+    InmarsatMessage identity;
+    uint64_t messages = 0;
+    double positionTime = 0;
+};
+
 class InmarsatMessageStore {
 public:
     static InmarsatMessageStore& instance();
@@ -48,6 +54,8 @@ public:
     void push(InmarsatMessage msg);
     std::vector<InmarsatMessage> recent(size_t limit = 100) const;
     std::vector<InmarsatMessage> positions() const;
+    std::vector<InmarsatAircraft> aircraft() const;
+    void clearAircraft();
     nlohmann::json recentJson(size_t limit = 100, size_t offset = 0) const;
     void clear();
 
@@ -56,6 +64,7 @@ private:
     mutable std::mutex mutex_;
     std::deque<InmarsatMessage> msgs_;
     std::map<uint32_t,InmarsatMessage> positions_; // DEC-0135: independent of message-log eviction.
+    std::map<uint32_t,InmarsatAircraft> aircraft_; // DEC-0138: bounded, independent identity history.
     static constexpr size_t kMaxPositions = 256;
     static constexpr size_t kMax = 500;
 };

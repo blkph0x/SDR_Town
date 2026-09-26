@@ -11,6 +11,7 @@ struct InmarsatPipeline::Native {
     InmarsatAero::PcmSink pcmSink;
     uint64_t validated=0, failed=0, voice=0, pcm=0, rejected=0, corrections=0, repeats=0, mutes=0, speech=0;
     std::vector<InmarsatMessage> positions;
+    uint64_t messages=0;
     void reset(int bitRate,double rate,double offset,double channel,bool burst) {
         aero.reset(); channelizer.reset(); positions.clear();
         if(bitRate==0) return;
@@ -18,6 +19,7 @@ struct InmarsatPipeline::Native {
         aero=std::make_unique<InmarsatAero>(bitRate,burst);
         aero->setMessageSink([this,channel](const InmarsatMessage& incoming) {
             auto m=incoming; m.freqHz=channel;
+            ++messages;
             if(m.hasPosition) {
                 auto it=std::find_if(positions.begin(),positions.end(),[&](const auto& p){return p.aesId==m.aesId;});
                 if(it!=positions.end()) *it=m;
@@ -130,7 +132,7 @@ nlohmann::json InmarsatPipeline::report() const {
         {"processingMs", totalMs_}, {"maxBlockMs", maxMs_}, {"peakComponent", peak_},
         {"rms", samples_ ? std::sqrt(sumPower_ / samples_) : 0},
         {"protocolLock", s.locked}, {"validatedFrames", native_->validated}, {"voiceFrames", native_->voice},
-        {"speechFrames",native_->speech},
+        {"speechFrames",native_->speech},{"messages",native_->messages},
         {"crcFailed",native_->failed},{"rejectedCFrames",native_->rejected},
         {"codecCorrections",native_->corrections},{"codecRepeats",native_->repeats},{"codecMutes",native_->mutes},
         {"positions",positions},{"pcmSamples", native_->pcm},

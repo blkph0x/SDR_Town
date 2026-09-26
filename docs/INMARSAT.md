@@ -5,6 +5,9 @@ antenna/SDR. P25 is unchanged. This is not a decoder for every Inmarsat service.
 
 ## Implemented
 
+- Per-channel decoder log and aircraft registry with optional pop-out windows:
+  [monitor guide and field provenance](INMARSAT_MONITOR.md).
+
 - Saved click-to-place Aero watch channels and automatic position/voice cycling:
   [setup, policy, diagnostics and InmarScope comparison](INMARSAT_WATCH.md).
 

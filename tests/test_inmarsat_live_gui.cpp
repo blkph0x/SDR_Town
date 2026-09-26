@@ -3,6 +3,11 @@
 #include "InmarsatDiagnostics.h"
 #include "InmarsatMapWidget.h"
 #include "InmarsatMessageStore.h"
+#include "InmarsatMonitorWidget.h"
+#include <QPlainTextEdit>
+#include <QToolButton>
+#include <QClipboard>
+#include <QDialog>
 #include "DeviceManager.h"
 #include "SatcomHostServices.h"
 #include <catch2/catch_session.hpp>
@@ -54,6 +59,57 @@ int main(int argc, char** argv) {
     InmarsatEngine::instance().stop();
     QDir(path).removeRecursively(); // Only this generated, verified test directory.
     return result;
+}
+
+TEST_CASE("Aircraft monitor shows verified fields and supports filter copy clear and popout", "[inmarsat][gui]") {
+    auto& store=InmarsatMessageStore::instance();store.clear();
+    struct Cleanup { ~Cleanup(){InmarsatMessageStore::instance().clear();} } cleanup;
+    InmarsatMessage m;m.kind=InmarsatMsgKind::Acars;m.validated=true;m.aesId=0x7c1234;
+    m.icaoHex="7C1234";m.registration="VH-TEST";m.callsign="TEST1";
+    m.unixTime=100;m.hasPosition=true;m.latDeg=-34;m.lonDeg=151;m.altitudeFt=35000;
+    store.push(m);m.unixTime=110;m.hasPosition=false;store.push(m);
+    m.aesId=0xab436f;m.icaoHex.clear();m.registration.clear();m.callsign.clear();store.push(m);
+    InmarsatMonitorWidget widget(InmarsatMonitorWidget::View::Aircraft);widget.resize(1100,400);
+    widget.show();QApplication::processEvents();
+    widget.updateSnapshot({},store.aircraft(),120);
+    auto* table=widget.findChild<QTableWidget*>("inmarsatAircraftTable");REQUIRE(table);REQUIRE(table->rowCount()==2);
+    CHECK(table->item(0,0)->text()=="7C1234");CHECK(table->item(0,2)->text()=="Australia");
+    CHECK(table->item(0,8)->text()=="10");CHECK(table->item(0,10)->text()=="20");CHECK(table->item(0,9)->text()=="2");
+    CHECK(table->item(1,1)->text().isEmpty());CHECK(table->item(1,2)->text().isEmpty());
+    widget.findChild<QCheckBox*>("inmarsatAircraftPositionOnly")->setChecked(true);CHECK(table->rowCount()==1);
+    widget.findChild<QToolButton*>("inmarsatMonitorCopy")->click();CHECK(QApplication::clipboard()->text().contains("VH-TEST"));
+    CHECK_FALSE(QApplication::clipboard()->text().contains("AB436F"));
+    widget.updateSnapshot({},store.aircraft(),120);
+    const auto dir=qEnvironmentVariable("SDR_TOWN_TEST_VISUAL_DIR");
+    if(!dir.isEmpty()){QDir().mkpath(dir);REQUIRE(widget.grab().save(dir+"/inmarsat-aircraft.png"));}
+    widget.findChild<QToolButton*>("inmarsatMonitorPopout")->click();QApplication::processEvents();
+    auto* dialog=widget.findChild<QDialog*>();REQUIRE(dialog);CHECK(dialog->isVisible());dialog->close();
+    widget.findChild<QToolButton*>("inmarsatMonitorClear")->click();CHECK(table->rowCount()==0);
+    CHECK(store.positions().empty());CHECK_FALSE(store.recent().empty());
+}
+
+TEST_CASE("Decoder monitor distinguishes protocol lock inactive and stopped channels", "[inmarsat][gui]") {
+    InmarsatMonitorWidget widget(InmarsatMonitorWidget::View::Decoders);widget.resize(1000,450);
+    InmarsatEngineSnapshot s;s.state=InmarsatEngineState::Running;s.config.watch.enabled=true;
+    s.config.watch.channels={{"a","Data",1546005000,10500,true},{"b","Voice",1542935000,8400,true}};
+    s.diagnostics={{"watch",{{"channels",nlohmann::json::array({{{"id","a"},{"decoder",{
+        {"protocolLock",true},{"messages",7},{"validatedFrames",30},{"crcFailed",2}}}}})}}}};
+    widget.show();QApplication::processEvents();widget.updateSnapshot(s,{},100);
+    auto* table=widget.findChild<QTableWidget*>("inmarsatDecoderTable");REQUIRE(table);REQUIRE(table->rowCount()==2);
+    CHECK(table->item(0,3)->text()=="Locked");CHECK(table->item(0,4)->text()=="7");CHECK(table->item(0,5)->text()=="30");
+    CHECK(table->item(0,1)->text()=="1546.005");
+    CHECK(table->item(0,1)->data(Qt::DisplayRole).metaType().id()==QMetaType::QString);
+    CHECK(table->item(1,3)->text()=="Not active");CHECK(table->item(1,4)==nullptr);
+    table->sortItems(2,Qt::AscendingOrder);CHECK(table->item(0,2)->text()=="8400");
+    table->sortItems(0,Qt::AscendingOrder);
+    auto* log=widget.findChild<QPlainTextEdit*>("inmarsatDecoderHistory");REQUIRE(log);
+    const auto initial=log->toPlainText();widget.updateSnapshot(s,{},101);CHECK(log->toPlainText()==initial);
+    const auto dir=qEnvironmentVariable("SDR_TOWN_TEST_VISUAL_DIR");
+    if(!dir.isEmpty()){QDir().mkpath(dir);REQUIRE(widget.grab().save(dir+"/inmarsat-decoders.png"));}
+    s.state=InmarsatEngineState::Idle;widget.updateSnapshot(s,{},102);
+    CHECK(table->item(0,3)->text()=="Stopped");CHECK(table->item(1,3)->text()=="Stopped");
+    for(int i=0;i<600;++i){s.state=i%2?InmarsatEngineState::Idle:InmarsatEngineState::Running;widget.updateSnapshot(s,{},103+i);}
+    CHECK(log->blockCount()<=500);
 }
 
 TEST_CASE("Aero presets retain exact surveyed frequency and rate", "[inmarsat][gui]") {

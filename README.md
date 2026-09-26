@@ -1,6 +1,6 @@
 # SDR Town
 
-**[Download 0.2.102 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.102)**
+**[Download 0.2.103 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.103)**
 includes a matched SDRplay plugin and corrected, dated Inmarsat frequency/rate
 presets. Install the official SDRplay API 3.15+ and service separately. Extract
 the entire ZIP into a fresh folder. RTL bias-T is in Device Manager after
@@ -11,7 +11,10 @@ diagram labels its actual frequency/rate. Aero watch supports a user-selected
 budget of up to 16 simultaneous in-band decoders. Data and voice now stay active
 together when the full watch list fits; the waterfall supports wheel zoom and
 drag pan. Multi-SDR role assignment is still planned, not delivered here.
-See [release notes](docs/RELEASE_0.2.102.md).
+Inmarsat now includes per-channel lock/rate/message diagnostics and a retained
+aircraft table with copy/filter controls and pop-out windows. Identity fields
+are populated only when verified, with separate message/position ages.
+See [release notes](docs/RELEASE_0.2.103.md) and [monitor guide](docs/INMARSAT_MONITOR.md).
 
 ## Help build SDR Town and FUBAR
 

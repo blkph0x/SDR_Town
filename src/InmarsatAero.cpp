@@ -73,6 +73,9 @@ struct InmarsatAero::Impl {
                 m.hasPosition=true; m.latDeg=position->latitude; m.lonDeg=position->longitude;
                 m.altitudeFt=position->altitudeFt; m.positionSecondsPastHour=position->secondsPastHour;
                 m.registration=position->registration; m.callsign=position->callsign;
+                // ADS-C airframe ID is explicit evidence; an arbitrary AES alone is not.
+                if(position->airframeId)
+                    m.icaoHex=QString("%1").arg(position->airframeId,6,16,QChar('0')).toUpper().toStdString();
                 ++stats.positions;
             }
             if(messageSink) messageSink(m);

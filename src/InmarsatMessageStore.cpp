@@ -58,6 +58,35 @@ InmarsatMessageStore& InmarsatMessageStore::instance() {
 void InmarsatMessageStore::push(InmarsatMessage msg) {
     if (msg.unixTime <= 0.0) msg.unixTime = unixNow();
     std::lock_guard<std::mutex> lk(mutex_);
+    const bool trackable = msg.validated && msg.aesId > 0 && msg.aesId <= 0xffffff &&
+        std::isfinite(msg.unixTime) && (msg.kind == InmarsatMsgKind::Acars ||
+        msg.kind == InmarsatMsgKind::Su || msg.kind == InmarsatMsgKind::CAssign);
+    if (trackable) {
+        auto it = aircraft_.find(msg.aesId);
+        if (it == aircraft_.end() && aircraft_.size() == kMaxPositions) {
+            const auto oldest = std::min_element(aircraft_.begin(), aircraft_.end(),
+                [](const auto& a, const auto& b) { return a.second.identity.unixTime < b.second.identity.unixTime; });
+            if (msg.unixTime >= oldest->second.identity.unixTime) aircraft_.erase(oldest);
+        }
+        if (it != aircraft_.end() || aircraft_.size() < kMaxPositions) {
+            auto& a = aircraft_[msg.aesId];
+            ++a.messages;
+            auto& id = a.identity;
+            if (msg.unixTime >= id.unixTime) {
+                id.aesId = msg.aesId; id.unixTime = msg.unixTime;
+                id.freqHz = msg.freqHz; id.validated = true;
+                if (!msg.icaoHex.empty()) id.icaoHex = msg.icaoHex;
+                if (!msg.registration.empty()) id.registration = msg.registration;
+                if (!msg.callsign.empty()) id.callsign = msg.callsign;
+            }
+            if (msg.hasPosition && msg.unixTime >= a.positionTime &&
+                std::isfinite(msg.latDeg) && std::isfinite(msg.lonDeg) &&
+                std::abs(msg.latDeg) <= 90 && std::abs(msg.lonDeg) <= 180) {
+                id.hasPosition = true; id.latDeg = msg.latDeg; id.lonDeg = msg.lonDeg;
+                id.altitudeFt = msg.altitudeFt; a.positionTime = msg.unixTime;
+            }
+        }
+    }
     if(msg.validated && msg.hasPosition && msg.aesId>0 && msg.aesId<=0xffffff &&
        std::isfinite(msg.unixTime) && std::isfinite(msg.latDeg) && std::isfinite(msg.lonDeg) &&
        std::abs(msg.latDeg)<=90 && std::abs(msg.lonDeg)<=180) {
@@ -83,6 +112,20 @@ std::vector<InmarsatMessage> InmarsatMessageStore::positions() const {
     std::vector<InmarsatMessage> result;result.reserve(positions_.size());
     for(const auto& [id,message]:positions_)result.push_back(message);
     return result;
+}
+
+std::vector<InmarsatAircraft> InmarsatMessageStore::aircraft() const {
+    std::lock_guard<std::mutex> lk(mutex_);
+    std::vector<InmarsatAircraft> result;
+    result.reserve(aircraft_.size());
+    for (const auto& [id, aircraft] : aircraft_) result.push_back(aircraft);
+    return result;
+}
+
+void InmarsatMessageStore::clearAircraft() {
+    std::lock_guard<std::mutex> lk(mutex_);
+    aircraft_.clear();
+    positions_.clear();
 }
 
 std::vector<InmarsatMessage> InmarsatMessageStore::recent(size_t limit) const {
@@ -115,4 +158,5 @@ void InmarsatMessageStore::clear() {
     std::lock_guard<std::mutex> lk(mutex_);
     msgs_.clear();
     positions_.clear();
+    aircraft_.clear();
 }

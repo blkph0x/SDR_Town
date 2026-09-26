@@ -1,5 +1,13 @@
 # Issues (canonical)
 
+## ISS-0034 - Inmarsat aircraft/status visibility gaps (2026-09-26, IN PROGRESS)
+
+Non-position identities/counters were not retained outside the 500-message log.
+There was no per-channel status/history table. Combined data+voice watch was
+incorrectly described as data-only in speaker status. DEC-0138 / T-0066 adds
+passive monitoring and bounded aircraft storage; no DSP/gating changes.
+Full satellite field acceptance and unreceived identity enrichment stay open.
+
 ## ISS-0032 - Aero 10 MS/s realtime headroom remains insufficient (2026-09-26, OPEN)
 
 Unloaded synthetic 64 x 65536 CF32 benchmark measures pre-optimization load
@@ -159,7 +167,7 @@ report. Need tester frequency, live vs replay, selected decoder, fresh Inmarsat
 JSONL and preferably the same IQ producing voice in JAERO. Do not equate an
 8 kHz PCM stream or public reference silence/tone with intelligible speech.
 
-Local DEC-0123 repairs complete, not yet published: manual Tune/Start selection,
+Local DEC-0123 repairs complete and published in v0.2.93 (ca6354e; T-0051): manual Tune/Start selection,
 panel-open persistence, paired host takeover, default-output visibility and
 bounded PCM diagnostics. GUI 33 assertions plus 20 hardware-free takeover
 assertions pass; 20 focused native/replay tests pass. Reference PCM unchanged
@@ -246,6 +254,12 @@ confirmed public HTTPS endpoint, external reachability, authenticated receipt an
 preserved tester opt-in before packaging. User asked for endpoint; no token requested.
 
 ## ISS-0015 - Push CI P25 guard checks an empty diff (2026-09-24, OPEN)
+
+2026-09-26 reconciliation: ca6354e already wires GITHUB_EVENT_BEFORE from
+github.event.before. Normal pushes now use the actual prior commit; the next
+release pass will record that guard's concrete comparison. First-branch pushes
+still fall back to origin/master, so explicit first-push/PR base-selection
+coverage remains an open follow-up, not an unfixed missing-environment claim.
 
 Observed in completed Windows run 35986929161: guard output compares origin/master
 to HEAD and reports 0 changed paths, although the push contains SSTV changes.
