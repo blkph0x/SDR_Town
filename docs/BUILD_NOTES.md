@@ -4,6 +4,11 @@ Newest entry at the top. Record facts, not hopes.
 
 ## 2026-09-26 - fubarzi PR 33 selective test integration (T-0065)
 
+Final integration source: 9237e7747c79f19a9e8eadc20338e0c7e70108b4.
+Full Windows CI 36224393076 PASS; workflow validation 36224393080 PASS.
+PR #33 closed 2026-09-26 with explicit selective-integration explanation,
+commit/test links and contributor attribution. No contributor branch deletion.
+
 MSVC 2022 Release native GUI/core test targets build PASS. Full local CTest:
 13/13 PASS in 41.02 s (build/pr33-build.log, build/pr33-ctest.log).
 Final explicit-include rebuild PASS (build/pr33-final-build.log).
@@ -13,7 +18,7 @@ synthetic Inmarsat start/process/stop cycles. Zero-IQ generated no valid voice
 or PCM. Map test verifies painted-image retention after 750 messages evict the
 position from chronological history, plus explicit clear. Not an RF/audio test.
 Frozen P25 guard PASS. Only tests/docs changed; application version stays
-0.2.102. GitHub full Windows CI and PR closure are pending before completion.
+0.2.102. Full CI and PR closure are now complete as recorded above.
 
 ## 2026-09-26 - Verified 0.2.102 public release
 

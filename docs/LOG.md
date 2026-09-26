@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-09-26 - Contributor integration complete
+
+T-0065 complete in 9237e77, co-authored credit to fubarzi. Windows CI
+36224393076 and YAML 36224393080 PASS after full local and repeated tests.
+PR #33 closed as selectively integrated, not wholesale merged; branch retained.
+Only tests/docs changed. Public v0.2.102 runtime and protected P25 are unchanged.
+
 ## 2026-09-26 - Selected contributor regression tests
 
 DEC-0137 / T-0065: adapted fubarzi PR 33's GUI retention case and its historical
