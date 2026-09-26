@@ -1,5 +1,9 @@
 # Task list (canonical)
 
+T-0074 | in progress | FM interference and throughput baseline |
+DEC-0146. User confirms WFM sounds good. Preserve production DSP; build actual
+two-signal IQ benchmark and structured report before selecting filter changes.
+
 T-0073 | done | WFM speech stream continuity |
 DEC-0145 / ISS-0037. Repair reproduced WFM FIR/decimator/PCM boundaries,
 preserve separate RDS branch and NFM/P25/HF. Promote characterization to gate,

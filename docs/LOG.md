@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-09-27 - T-0074 benchmark and next targets
+
+User accepts WFM0.2.108. Added reproducible two-signal benchmark with bounded
+local JSON output, validated measurement math and report checks. Three matrices
+reproduce NFM image-blocker weakness and WFM high-rate channelizer cost. Preserve
+runtime baseline; next repairs must address these independently with comparisons.
+
 ## 2026-09-26 - T-0073 published
 
 WFM speech timing repair shipped as experimental0.2.108, sourceffd68c6.

@@ -442,6 +442,7 @@ if(BUILD_TESTS)
     src/BandPlan.cpp
     tests/test_audiocapture.cpp
     tests/test_demod.cpp
+    tests/test_fm_benchmark.cpp
     tests/test_hf_demod.cpp
     tests/test_p25control.cpp
     tests/test_p25live.cpp

@@ -1,5 +1,13 @@
 # Code notes (tree map)
 
+## FM benchmark (DEC-0146)
+
+tests/test_fm_benchmark.cpp adds a default measurement-math test and opt-in
+[.fm-benchmark] matrix using actual Demodulator calls. scripts/benchmark_fm.py
+validates36 cases/run, records provenance and writes a local JSON report.
+scripts/test_benchmark_fm.py covers parser negative cases. No device, application
+setting or production DSP changes; timing is a measurement, not a CI threshold.
+
 ## WFM speech timing (DEC-0145)
 
 Separate WFM FIR ring/decimator phase and cubic clock now preserve stream time.

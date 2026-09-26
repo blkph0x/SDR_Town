@@ -2,6 +2,12 @@
 
 ## ISS-0037 - FM chunk boundaries and sample lattice (2026-09-26, OPEN)
 
+T-0074 / DEC-0146: three36-case benchmark runs confirm NFM first-image weakness
+at+40dB blockers (2.4MS/s wanted gain-5.55dB, difference+3.23dB), and WFM10MS/s
+cost~2.59x real time on this host (>99% channelizer). Full matrix/method/limits
+in FM_INTERFERENCE_BASELINE.md. No production DSP change; user confirms WFM
+sounds good on0.2.108. These results narrow next work, not universal RF claims.
+
 T-0073 / DEC-0145 repairs WFM speech FIR, decimator and PCM boundaries while
 keeping RDS/NFM independent. Former hidden WFM fixture is promoted to mandatory
 [wfm][pcm-stream], now passes80 assertions. Full15/15 suites and public release

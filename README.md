@@ -1,5 +1,8 @@
 # SDR Town
 
+Developer diagnostics: [FM interference and performance benchmark](docs/FM_INTERFERENCE_BASELINE.md)
+now records repeatable two-signal measurements without changing receiver settings.
+
 0.2.108 repairs WFM speech timing across uneven input blocks, with persistent
 filter/decimator/PCM history. NFM/P25 and the separate RDS branch are unchanged.
 See [release notes](docs/RELEASE_0.2.108.md).

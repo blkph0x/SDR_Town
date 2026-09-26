@@ -1,5 +1,21 @@
 # Decisions
 
+## DEC-0146 - Measure FM blockers before changing accepted filters (2026-09-26)
+
+User confirms0.2.108 WFM sounds good; NFM also accepted. No production changes
+in this pass. Measure both demods at2.048/2.4/10MS/s with desired900Hz audio,
+blocker1700Hz audio, equal/+20/+40dB RF amplitude ratios. Test adjacent25kHz
+NFM/400kHz WFM and first decimation image plus1500Hz, derived from actual
+rounding/rate plan. IQ peak bounded to0.5; no ADC/front-end overload modeled.
+Use200ms recordings and last100ms audio (4800 samples at48kHz), giving integer
+cycles for both measurement tones after startup. Compare against desired-only
+at identical desired amplitude. Report tone levels and RMS difference, not BER
+or SINAD. Time demod calls only, separately from fixture generation and report
+IO; include stage counter deltas. CPU results are host-specific, not CI gates.
+Default tests validate measurement math; opt-in benchmark emits structured data
+with executable/source provenance. No invented rejection threshold or claim of
+hardware sensitivity. Tests/docs-only work needs no new application asset.
+
 ## DEC-0145 - WFM speech clocks and causal history (2026-09-26)
 
 DEC-0144 fixture reproduced WFM4800/4805 PCM and0.209476 waveform error.

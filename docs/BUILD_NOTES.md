@@ -1,5 +1,14 @@
 # Build notes
 
+## 2026-09-27 - T-0074 measured FM baseline
+
+Release test build PASS, measurement math5 assertions PASS. Explicit benchmark
+180 assertions/36 cases PASS; wrapper repeated three complete matrices and saved
+build/fm-benchmark-108.json. Parser four tests including negative cases PASS.
+Default full CTest15/15 in47.84sec PASS. Results/provenance/limitations recorded
+in FM_INTERFERENCE_BASELINE.md. Tests/docs only; app version remains0.2.108.
+CI qualification pending; no new binary release needed for unchanged runtime.
+
 ## 2026-09-26 - T-0073 public release verified
 
 Sourceffd68c6 / experimental v0.2.108. Windows release36245181841 and
