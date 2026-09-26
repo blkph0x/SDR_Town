@@ -49,6 +49,26 @@ PROTECTED_PATTERNS: tuple[str, ...] = (
 )
 
 SATCOM_MAINWINDOW_PATH = "src/MainWindow.cpp"
+# DEC-0142: exact reviewed NFM-only FIR/decimator repair and read-only FM counters.
+# No path-wide exemption. Any subsequent shared-pipeline byte needs fresh review.
+NFM_CONTINUITY_DIGESTS = {
+    "src/Demod.cpp": (
+        "28d8e1b490c6a48d7ac111beb59b369e969fe5c818fbf2b113fe83b738ab86a8",
+        "34eadd76f7639c1ef49ad46c2f2b73bb8223b16bcac2aec47836a0bde7b9e134"),
+    "include/Demod.h": (
+        "c8f7a2fa628e9ecbac2951ce5e0ca719c6beef2ab8aabd0798edcf3e7a9608f5",
+        "f2dd4a3665f8f5a2d290cb54ab296a50434a5eb00004055dd02554b2428c1379"),
+}
+
+
+def nfm_continuity_text_allowed(path: str, before: str, after: str) -> bool:
+    pair = NFM_CONTINUITY_DIGESTS.get(path)
+    return pair is not None and pair == (
+        hashlib.sha256(before.encode("utf-8")).hexdigest(),
+        hashlib.sha256(after.encode("utf-8")).hexdigest(),
+    )
+
+
 SATCOM_MARKER_BEGIN = "// SATCOM_HOST_INTEGRATION_BEGIN"
 SATCOM_MARKER_END = "// SATCOM_HOST_INTEGRATION_END"
 SATCOM_HOST_INCLUDE = '#include "SatcomHostServices.h"'
@@ -307,6 +327,17 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
+        if path in NFM_CONTINUITY_DIGESTS and args.paths is None:
+            try:
+                allowed = nfm_continuity_text_allowed(
+                    path, git_file_text(args.base, path), git_file_text(args.head, path)
+                )
+            except RuntimeError as exc:
+                print(f"P25 guard error: {exc}", file=sys.stderr)
+                return 2
+            if allowed:
+                print(f"P25 guard: accepted exact DEC-0142 NFM continuity/telemetry patch: {path}")
+                continue
         if path in RTL_BIAS_DIGESTS and args.paths is None:
             try:
                 allowed = rtl_bias_text_allowed(

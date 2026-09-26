@@ -1,5 +1,9 @@
 # SDR Town
 
+0.2.105 repairs NFM block-boundary filtering/decimation and adds bounded FM
+timing/sample diagnostics. P25 and WFM processing are unchanged. See
+[release notes](docs/RELEASE_0.2.105.md) and [diagnostics](docs/FM_DIAGNOSTICS.md).
+
 0.2.104 adds opt-in diagnostics and performance reporting; collector hardening
 deployment is not yet complete. See the
 [diagnostics guide](docs/DIAGNOSTICS_SHARING.md) for controls and limitations.
@@ -9,7 +13,7 @@ antenna control, saved limits/park and hardware-only SWR readback. See the
 [setup and ten-controller compatibility targets](docs/ANTENNA_CONTROL.md).
 Physical controller acceptance and automatic satellite tracking remain open.
 
-**[Download 0.2.104 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.104)**
+**[Download 0.2.105 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.105)**
 includes a matched SDRplay plugin and corrected, dated Inmarsat frequency/rate
 presets. Install the official SDRplay API 3.15+ and service separately. Extract
 the entire ZIP into a fresh folder. RTL bias-T is in Device Manager after

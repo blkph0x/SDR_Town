@@ -1,5 +1,14 @@
 # Code notes (tree map)
 
+## NFM continuity / FM telemetry (DEC-0142 / T-0070)
+
+Demod.cpp NFM branch uses persistent causal FIR history and decimation phase;
+coefficients and WFM/HF/P25 algorithms are unchanged. FmDiagnostics.h collects
+bounded lock-free numerical process/mode counters and stage durations, never
+controls DSP. FmDiagnosticsLog.cpp samples on a dedicated Qt thread, rotates
+local JSONL, retains inactive sessions and forwards opt-in summaries through
+RemoteDiagnostics. See FM_DIAGNOSTICS.md for fields, privacy and known gaps.
+
 ## Antenna control (DEC-0140 / T-0068)
 
 AntennaControl.h/.cpp isolates bounded asynchronous Hamlib ERP transport,

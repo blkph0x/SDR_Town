@@ -1,5 +1,9 @@
 # Diagnostics sharing (0.2.104, local qualification)
 
+0.2.105 also adds [FM stage diagnostics](FM_DIAGNOSTICS.md): bounded local logs
+and opt-in `fm.pipeline.sample` numeric summaries. These never include recordings
+or tuned frequencies. Local logging does not require remote consent.
+
 Open **Help > Share Diagnostic Reports** and accept the disclosure. No server
 address or credential entry is needed in an officially configured build. The
 choice is saved. Turn it off in the same menu to discard pending reports and

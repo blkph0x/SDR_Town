@@ -1,5 +1,28 @@
 # Decisions
 
+## DEC-0142 - Isolated NFM continuity repair and bounded telemetry (2026-09-26)
+
+User approved implementation of DEC-0141 and instrumentation. First reproduce
+actual NFM discriminator tap failures. Preserve existing filter coefficients,
+deviation, de-emphasis, squelch and final audio policy in this pass; replace only
+NFM block-local FIR application with persistent causal history and preserve
+second-stage downsample phase. Verify whole/split sample and waveform equivalence
+and explicit reset/rate-change behavior. Causal FIR latency is (taps-1)/2 at its
+input rate and must be reported, not hidden by invented samples.
+
+Demod.cpp/Demod.h are protected shared files: permit only final reviewed exact
+before/after digests, with negative mutation tests, as prior DEC-0128/0129 do.
+Do not remove paths or authorize arbitrary future edits. WFM/HF/P25 algorithms,
+Receiver, audio engine and follow orchestration remain unchanged.
+
+Instrumentation uses fixed-size aggregate counters (no IQ/audio/frequency/IDs)
+and snapshots outside DSP. Record input/discriminator/output counts, resets,
+empty output, resampler unavailable lookahead/phase corrections, processing time
+and over-budget blocks. Bounded local rotating diagnostics; remote transport
+retains existing consent and byte limits. Logging must not write files/network
+or acquire logger locks in the sample processing loop. This does not certify
+unrepaired WFM boundary/resampler issues or physical RF acceptance.
+
 ## DEC-0141 - Characterize analogue stream boundaries before redesign (2026-09-26)
 
 Review the supplied DSP write-up against source baseline 09cc9dd (application

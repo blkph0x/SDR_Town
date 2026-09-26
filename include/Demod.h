@@ -134,6 +134,8 @@ private:
     int nfmCicFactor = 0;
     std::vector<float> nfmSpeechTaps;
     std::vector<std::complex<float>> nfmSpeechFirDelay;
+    size_t nfmFirWrite = 0, nfmDecimationPhase = 0;
+    double nfmStreamRate = 0, nfmStreamCenter = 0;
     double nfmSpeechLastBw = -1.0;
     double nfmSpeechLastRate = -1.0;
     float clickFadeGain = 1.0f;

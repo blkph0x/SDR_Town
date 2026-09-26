@@ -1,6 +1,7 @@
 #define _USE_MATH_DEFINES
 #include "Demod.h"
 #include "HfDemod.h"
+#include "FmDiagnostics.h"
 #include "SignalClassifier.h"
 #include <algorithm>
 #include <cmath>
@@ -9,6 +10,27 @@
 #include <cstddef>
 #include <limits>
 #include <array>
+
+// DEC-0142: causal NFM FIR; tiny blocks advance the same history as large ones.
+// Coefficients are unchanged. Delay is (taps.size()-1)/2 input samples.
+static void filterNfm(std::vector<std::complex<float>>& samples,
+    const std::vector<float>& taps, std::vector<std::complex<float>>& history,
+    size_t& write)
+{
+    if (taps.empty()) return;
+    if (history.size() != taps.size()) { history.assign(taps.size(), {}); write = 0; }
+    for (auto& sample : samples) {
+        history[write] = sample;
+        std::complex<float> sum{};
+        size_t at = write;
+        for (float tap : taps) {
+            sum += tap * history[at];
+            at = at == 0 ? history.size()-1 : at-1;
+        }
+        sample = sum;
+        if (++write == history.size()) write = 0;
+    }
+}
 
 static double localPercentile(std::vector<double>& values, double percentile, double fallback)
 {
@@ -433,6 +455,14 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
     rmsOut = -100;
     if (iq.empty()) return {};
     if (sr <= 0.0 || !std::isfinite(sr)) return {};
+    fmDiagnostics::Block diagnostic(mode == DemodMode::WFM, iq.size(), sr);
+    auto diagnosticStage = diagnostic.begin;
+    const auto diagnosticCheckpoint = [&](fmDiagnostics::Field field) {
+        const auto now = std::chrono::steady_clock::now();
+        diagnostic.values[field] += static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(now-diagnosticStage).count());
+        diagnosticStage = now;
+    };
     if (lpfHz <= 0) {
         if (mode == DemodMode::WFM || mode == DemodMode::AUTO) lpfHz = 15000.0;
         else if (mode == DemodMode::AM) lpfHz = 9000.0;
@@ -446,6 +476,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
     double chunkDuration = (double)iq.size() / sr;
     size_t exactAudioNeeded = target_audio_samples > 0 ? target_audio_samples
         : (size_t)std::llround(chunkDuration * outputRate);
+    diagnostic.values[fmDiagnostics::RequestedAudioSamples] = exactAudioNeeded;
 
     // All state is now per Demodulator instance (no more statics that bleed across receivers/modes).
     double localInternalRate = (mode == DemodMode::WFM || mode == DemodMode::AUTO) ? 192000.0 : 48000.0;
@@ -585,10 +616,19 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         // 2) Sharp channel FIR at that rate (the old full-rate FIR was capped at
         //    321 taps — far too weak at 2.4 Msps → aliasing = static/robotic)
         // 3) Decimate to ~48 kHz for the discriminator
+        if (nfmStreamRate != sr || nfmStreamCenter != cf) {
+            dspStateNeedsReset = true;
+            prev = {1, 0};
+            mpxContinuous = false;
+        }
+        nfmStreamRate = sr;
+        nfmStreamCenter = cf;
         if (dspStateNeedsReset) {
             nfmCicSum = {0.f, 0.f};
             nfmCicCount = 0;
             nfmSpeechFirDelay.clear();
+            nfmFirWrite = nfmDecimationPhase = 0;
+            prev = {1, 0};
             clickFadeGain = 0.0f;
         }
 
@@ -637,33 +677,15 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
                 if (sum != 0.0) for (auto& t : nfmSpeechTaps) t = static_cast<float>(t / sum);
                 nfmSpeechLastBw = channelBwHz;
                 nfmSpeechLastRate = workRate;
-                nfmSpeechFirDelay.assign(static_cast<size_t>(nTaps - 1), std::complex<float>(0, 0));
+                nfmSpeechFirDelay.assign(static_cast<size_t>(nTaps), std::complex<float>(0, 0));
+                nfmFirWrite = 0;
             }
 
             if (!nfmSpeechTaps.empty() && !baseband.empty()) {
-                const size_t M = nfmSpeechTaps.size();
-                const size_t D = M - 1;
-                if (nfmSpeechFirDelay.size() != D) nfmSpeechFirDelay.assign(D, std::complex<float>(0, 0));
-                std::vector<std::complex<float>> ext;
-                ext.reserve(D + baseband.size());
-                ext.insert(ext.end(), nfmSpeechFirDelay.begin(), nfmSpeechFirDelay.end());
-                ext.insert(ext.end(), baseband.begin(), baseband.end());
-                std::vector<std::complex<float>> inputTail;
-                if (baseband.size() >= D) inputTail.assign(ext.end() - static_cast<std::ptrdiff_t>(D), ext.end());
-                std::vector<std::complex<float>> filt(ext.size());
-                const int h = static_cast<int>(M / 2);
-                for (size_t n = 0; n < ext.size(); ++n) {
-                    std::complex<float> acc(0, 0);
-                    for (int k = -h; k <= h; ++k) {
-                        const long idx = static_cast<long>(n) + k;
-                        if (idx >= 0 && idx < static_cast<long>(ext.size()))
-                            acc += ext[static_cast<size_t>(idx)] * nfmSpeechTaps[static_cast<size_t>(k + h)];
-                    }
-                    filt[n] = acc;
-                }
-                baseband.assign(filt.begin() + static_cast<std::ptrdiff_t>(D), filt.end());
-                if (!inputTail.empty()) nfmSpeechFirDelay = std::move(inputTail);
+                filterNfm(baseband, nfmSpeechTaps, nfmSpeechFirDelay, nfmFirWrite);
             }
+            diagnostic.values[fmDiagnostics::MaxFirDelayUs] = static_cast<uint64_t>(
+                (nfmSpeechTaps.size()-1)*0.5e6/workRate);
 
             // Bring discriminator rate near 48 kHz.
             const double discTarget = 48000.0;
@@ -672,37 +694,20 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
                 if (M2 > 1) {
                     std::vector<std::complex<float>> dec;
                     dec.reserve(baseband.size() / static_cast<size_t>(M2) + 1);
-                    for (size_t i = 0; i < baseband.size(); i += static_cast<size_t>(M2))
-                        dec.push_back(baseband[i]);
+                    // DEC-0142: preserve phase across input block boundaries.
+                    for (const auto& sample : baseband) {
+                        if (nfmDecimationPhase == 0) dec.push_back(sample);
+                        if (++nfmDecimationPhase == static_cast<size_t>(M2)) nfmDecimationPhase = 0;
+                    }
                     baseband = std::move(dec);
                     workRate /= static_cast<double>(M2);
                 }
             }
         } else if (!chanTaps.empty()) {
             // Already near audio rate (tests / low SR): reuse the shared channel FIR.
-            size_t M = chanTaps.size();
-            size_t D = (M > 0 ? M - 1 : 0);
-            if (firDelay.size() != D) firDelay.resize(D, std::complex<float>(0, 0));
-            std::vector<std::complex<float>> ext;
-            ext.reserve(D + baseband.size());
-            ext.insert(ext.end(), firDelay.begin(), firDelay.end());
-            ext.insert(ext.end(), baseband.begin(), baseband.end());
-            std::vector<std::complex<float>> inputTail;
-            if (baseband.size() >= D)
-                inputTail.assign(ext.end() - static_cast<std::ptrdiff_t>(D), ext.end());
-            std::vector<std::complex<float>> filt(ext.size());
-            int h = static_cast<int>(M / 2);
-            for (size_t n = 0; n < ext.size(); ++n) {
-                std::complex<float> acc(0, 0);
-                for (int k = -h; k <= h; ++k) {
-                    long idx = static_cast<long>(n) + k;
-                    if (idx >= 0 && idx < static_cast<long>(ext.size()))
-                        acc += ext[static_cast<size_t>(idx)] * chanTaps[static_cast<size_t>(k + h)];
-                }
-                filt[n] = acc;
-            }
-            baseband.assign(filt.begin() + static_cast<std::ptrdiff_t>(D), filt.end());
-            if (!inputTail.empty()) firDelay = std::move(inputTail);
+            filterNfm(baseband, chanTaps, nfmSpeechFirDelay, nfmFirWrite);
+            diagnostic.values[fmDiagnostics::MaxFirDelayUs] = static_cast<uint64_t>(
+                (chanTaps.size()-1)*0.5e6/workRate);
         }
         internalRate = workRate;
     } else if (!chanTaps.empty() && channelBwHz > 0) {
@@ -772,6 +777,9 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
     }
 
     // Pre-disc FM limiter for FM modes only. Do not limit AM/SSB: their amplitude carries information.
+    diagnostic.values[fmDiagnostics::DiscSamples] = baseband.size();
+    diagnostic.values[fmDiagnostics::Resets] = dspStateNeedsReset;
+    diagnosticCheckpoint(fmDiagnostics::ChannelizerUs);
     if (isWFM) {
         for (auto &s : baseband) {
             float mag = std::abs(s) + 1e-9f;
@@ -899,6 +907,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
     }
 
     // Resample (streaming cubic with fractional phase carried between chunks)
+    diagnosticCheckpoint(fmDiagnostics::DiscriminatorUs);
     std::vector<float> aud;
     if (exactAudioNeeded > 0 && !base.empty()) {
         if (dspStateNeedsReset ||
@@ -924,7 +933,10 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
                     if (i == -3) return histYm2;
                     return 0.0f;
                 }
-                if ((size_t)i >= base.size()) return base.back();
+                if ((size_t)i >= base.size()) {
+                    ++diagnostic.values[fmDiagnostics::LookaheadReads];
+                    return base.back();
+                }
                 return base[i];
             };
             float ym1 = getY(idx - 1);
@@ -940,7 +952,10 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         }
         resampPhase += (double)exactAudioNeeded * step;
         resampPhase -= (double)base.size();
-        if (resampPhase < -3.0 || resampPhase > (double)base.size()) resampPhase = 0.0;
+        if (resampPhase < -3.0 || resampPhase > (double)base.size()) {
+            ++diagnostic.values[fmDiagnostics::PhaseRepairs];
+            resampPhase = 0.0;
+        }
         if (resampPhase < 0.0 && resampPhase > -3.0) {
             // Keep a tiny negative carry; the cubic history above provides those samples.
         } else if (resampPhase < 0.0) {
@@ -967,6 +982,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
     }
 
     // Final audio-rate processing (de-emph, notch, optional LPF, squelch, gain)
+    diagnosticCheckpoint(fmDiagnostics::ResamplerUs);
     if (!aud.empty()) {
         if (mode == DemodMode::WFM || mode == DemodMode::AUTO || (mode == DemodMode::NFM && audioLpfEnabled)) {
             if (dspStateNeedsReset) { des = 0; }
@@ -1070,6 +1086,8 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         dspStateNeedsReset = false;
     }
     dspStateNeedsReset = false;
+    diagnostic.values[fmDiagnostics::AudioSamples] = aud.size();
+    diagnosticCheckpoint(fmDiagnostics::PostAudioUs);
     return aud;
 }
 

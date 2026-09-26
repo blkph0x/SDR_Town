@@ -2,6 +2,7 @@
 #define _USE_MATH_DEFINES
 #include <catch2/catch_all.hpp>
 #include "Demod.h"
+#include "FmDiagnostics.h"
 #include "P25VoiceTiming.h"
 #include "SignalClassifier.h"
 #include "ClassifierModelBackend.h"
@@ -542,4 +543,64 @@ TEST_CASE("Demodulator state carry across chunks (no boundary click for FM)") {
     if (!a1.empty() && !a2.empty()) {
         REQUIRE(std::abs(a1.back() - a2.front()) < 0.8f); // loose but catches gross reset bugs
     }
+}
+
+TEST_CASE("NFM discriminator clock and samples do not depend on IQ partitions", "[nfm][stream]") {
+    const double rate = GENERATE(48000.0, 2048000.0, 2400000.0, 10000000.0);
+    const bool tiny = GENERATE(false, true);
+    auto iq = genNfmVoice(rate, 0.025, 1100, 1800);
+    const auto run = [&](bool split) {
+        Demodulator d;
+        std::vector<float> samples;
+        uint64_t expected = 0;
+        for (size_t at = 0; at < iq.size();) {
+            const size_t sizes[]{1, 7, 19, 257, 8192};
+            const size_t n = std::min(iq.size() - at,
+                split ? (tiny ? sizes[at % 5] : size_t(8192)) : iq.size());
+            std::vector<std::complex<float>> block(iq.begin()+at, iq.begin()+at+n);
+            FmMultiplexBlock tap;
+            double rms = -100;
+            d.demodulateToAudio(block, rate, 100e6, 100e6, DemodMode::NFM,
+                rms, 3000, -120, 1, 75, .96, 12500, 0, 48000,
+                std::numeric_limits<double>::quiet_NaN(), true, &tap);
+            if (!tap.samples.empty()) {
+                REQUIRE(tap.firstSample == expected);
+                expected += tap.samples.size();
+                samples.insert(samples.end(), tap.samples.begin(), tap.samples.end());
+            }
+            at += n;
+        }
+        return samples;
+    };
+    const auto whole = run(false), split = run(true);
+    INFO("rate=" << rate << " tiny=" << tiny << " whole=" << whole.size() << " split=" << split.size());
+    REQUIRE(whole.size() == split.size());
+    double error = 0;
+    for (size_t i=0; i<whole.size(); ++i) error=std::max(error, double(std::abs(whole[i]-split[i])));
+    REQUIRE(error < 1e-5);
+}
+
+TEST_CASE("NFM explicit reset and rate transition cannot inherit FIR or decimator history", "[nfm][stream]") {
+    Demodulator used, fresh;
+    const auto run=[](Demodulator& d, double rate, double tone) {
+        auto iq=genNfmVoice(rate, .02, tone, 1800);
+        FmMultiplexBlock tap;double rms=-100;
+        d.demodulateToAudio(iq,rate,100e6,100e6,DemodMode::NFM,rms,3000,-120,
+            1,75,.96,12500,0,48000,std::numeric_limits<double>::quiet_NaN(),true,&tap);
+        return tap;
+    };
+    const auto before=fmDiagnostics::snapshot(false);
+    run(used,2400000,600);
+    const bool explicitReset=GENERATE(false,true);
+    if(explicitReset)used.resetState();
+    const double nextRate=explicitReset?2400000:2048000;
+    const auto result=run(used,nextRate,1400), reference=run(fresh,nextRate,1400);
+    REQUIRE(result.discontinuity);
+    REQUIRE(result.firstSample==0);
+    REQUIRE(result.samples==reference.samples);
+    const auto after=fmDiagnostics::snapshot(false);
+    REQUIRE(after[fmDiagnostics::Blocks]-before[fmDiagnostics::Blocks]==3);
+    REQUIRE(after[fmDiagnostics::Resets]-before[fmDiagnostics::Resets]==3);
+    REQUIRE(after[fmDiagnostics::InputSamples]>before[fmDiagnostics::InputSamples]);
+    REQUIRE(after[fmDiagnostics::MaxFirDelayUs]>0);
 }

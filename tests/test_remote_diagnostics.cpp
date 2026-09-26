@@ -1,4 +1,5 @@
 #include "RemoteDiagnostics.h"
+#include "FmDiagnosticsLog.h"
 #include "DiagnosticsMenu.h"
 #include <QApplication>
 #include <QMainWindow>
@@ -12,6 +13,7 @@
 #include <QCoreApplication>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QDir>
 #include <QFile>
 #include <QJsonDocument>
 #include <QElapsedTimer>
@@ -21,6 +23,59 @@
 #include <QUuid>
 #include <QSettings>
 #include <vector>
+
+TEST_CASE("FM diagnostics are numeric bounded idle-aware local reports", "[fm][diagnostics]") {
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    FmDiagnosticsLog log(directory.path());
+    log.sample(); // Ignore counters from other tests in this process.
+    REQUIRE(log.sample().isEmpty());
+    {
+        fmDiagnostics::Block block(false,24000,2400000);
+        block.values[fmDiagnostics::DiscSamples]=462;
+        block.values[fmDiagnostics::AudioSamples]=480;
+        block.values[fmDiagnostics::LookaheadReads]=2;
+    }
+    const auto report=log.sample();
+    REQUIRE_FALSE(report.isEmpty());
+    REQUIRE_FALSE(report.contains("localWriteFailed"));
+    REQUIRE(report["modes"].toObject()["nfm"].toObject().contains("resamplerLookaheadReads"));
+    REQUIRE(report["modes"].toObject()["nfm"].toObject()["audioSamples"].toDouble()>=480);
+    REQUIRE(log.sample().isEmpty());
+    QFile file(log.path());REQUIRE(file.open(QIODevice::ReadOnly));
+    const auto text=file.readAll();file.close();
+    REQUIRE(text.contains("discriminatorSamples"));
+    REQUIRE_FALSE(text.contains("frequency"));
+    REQUIRE(file.open(QIODevice::Append));file.write(QByteArray(1024*1024,' '));file.close();
+    {fmDiagnostics::Block block(true,1920,192000);}
+    REQUIRE_FALSE(log.sample().contains("localWriteFailed"));
+    REQUIRE(QFile::exists(log.path()+".1"));
+    REQUIRE(QFile(log.path()).size()<4096);
+}
+
+TEST_CASE("FM diagnostics retain active logs and report local write failures", "[fm][diagnostics]") {
+    QTemporaryDir dir;REQUIRE(dir.isValid());
+    for(int i=0;i<12;++i) {
+        QFile f(dir.filePath("fm-old"+QString::number(i)+".jsonl"));
+        REQUIRE(f.open(QIODevice::WriteOnly));f.write("{}\n");
+    }
+    QLockFile active(dir.filePath("fm-old0.jsonl.lock"));REQUIRE(active.tryLock(0));
+    FmDiagnosticsLog log(dir.path());
+    REQUIRE(QFile::exists(dir.filePath("fm-old0.jsonl")));
+    REQUIRE(QDir(dir.path()).entryList({"*.jsonl"},QDir::Files).size()<=9);
+    FmDiagnosticsLog duplicate(dir.path()); // Cannot take the active writer's lock.
+    {fmDiagnostics::Block block(false,480,48000);}
+    REQUIRE(duplicate.sample()["localWriteFailed"].toBool());
+    REQUIRE_FALSE(log.sample().contains("localWriteFailed"));
+}
+
+TEST_CASE("FM diagnostics worker starts once and joins on owner destruction", "[fm][diagnostics]") {
+    auto owner=std::make_unique<QObject>();
+    startFmDiagnostics(owner.get());startFmDiagnostics(owner.get());
+    REQUIRE(owner->findChildren<QThread*>().size()==1);
+    {fmDiagnostics::Block block(false,480,48000);}
+    owner.reset(); // Must stop and join even if the thread is only just starting.
+}
 
 int main(int argc,char** argv) {
     QApplication app(argc,argv);QStandardPaths::setTestModeEnabled(true);

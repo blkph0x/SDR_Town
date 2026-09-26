@@ -2,6 +2,12 @@
 
 ## ISS-0037 - FM chunk boundaries and sample lattice (2026-09-26, OPEN)
 
+T-0070 / DEC-0142: actual NFM tests reproduced seven failures. Causal FIR and
+persistent decimator phase now satisfy discriminator partition equivalence at
+four rates, with explicit reset/rate-transition tests. This closes those NFM
+producer defects only. PCM resampling/rounding and WFM boundary behavior remain
+open, now with numerical diagnostics. No claim of complete audio-chain repair.
+
 DEC-0141 / DSP_AUDIT_20260926.md. NFM second-stage and WFM speech decimators
 restart at index zero per call. Centred speech FIRs omit future block input;
 short NFM blocks do not advance FIR history. Final fixed-count resampling can

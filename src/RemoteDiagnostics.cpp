@@ -1,4 +1,5 @@
 #include "RemoteDiagnostics.h"
+#include "FmDiagnosticsLog.h"
 
 #include <QByteArray>
 #include <QCoreApplication>
@@ -546,6 +547,7 @@ RemoteDiagnosticsConfig remoteDiagnosticsConfigFromProcess(int argc, char* argv[
 
 RemoteDiagnosticsClient* remoteDiagnosticsConfigureFromProcess(int argc, char* argv[], QObject* parent, const QString& mode)
 {
+    startFmDiagnostics(parent); // Local counters remain available with remote sharing disabled.
     const RemoteDiagnosticsConfig cfg = remoteDiagnosticsConfigFromProcess(argc, argv, mode);
     if (!cfg.enabled) return nullptr;
 

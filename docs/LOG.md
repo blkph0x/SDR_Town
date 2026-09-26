@@ -1,5 +1,15 @@
 # Development log
 
+## 2026-09-26 - T-0070 NFM repair locally qualified
+
+Reproduced seven actual NFM producer partition failures, then repaired causal FIR
+history and sample selection phase. All eight rate/partition combinations and
+reset/rate changes pass. Added bounded stage/count diagnostics off the DSP thread,
+local rotation/retention and consent-controlled remote reporting. Full local
+15/15 CTest, five repeated diagnostics suites and recorded RDS CLI checks pass.
+No P25/HF/WFM algorithm changes. Publication/asset verification pending; remaining
+PCM/WFM issues stay open in ISS-0037. Documentation: FM_DIAGNOSTICS.md.
+
 ## 2026-09-26 - DSP proposal evidence review
 
 T-0069 / DEC-0141 / ISS-0037. Read supplied proposal and inspected analogue,

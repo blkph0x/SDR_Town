@@ -1,5 +1,22 @@
 # Build notes
 
+## 2026-09-26 - T-0070 reproduce then repair NFM
+
+Windows/MSVC Release baseline f61ad0a. New actual Demodulator [nfm][stream]
+test first FAILED seven parameter combinations. At 2.4 MS/s whole/split counts
+were 1154/1157 (8192) and 1154/1272 (tiny); at 48 kHz tiny partition maximum
+waveform difference was 1.418734. After causal FIR/phase repair first rerun
+PASS 1561 assertions. Added explicit-reset/rate-transition and local logging
+tests; full CTest PASS 15/15 in 47.68 seconds before final stage-timing/retention
+additions. Final build/test/publication results follow when completed.
+No P25 or WFM DSP setting/algorithm changed; shared Demod changes are an exact
+reviewed digest pair in the frozen guard, with negative mutation tests PASS.
+
+Final local app/core/diagnostics Release build PASS. Full CTest 15/15 PASS in
+46.11 s; [nfm][stream] PASS 1575 assertions / 2 cases; RemoteDiagnostics suite
+repeated five times PASS in 4.38 s. Recorded RDS CLI positive/negative fixtures
+PASS against the rebuilt executable. No live RF test or audio listening claimed.
+
 ## 2026-09-26 - T-0069 read-only DSP baseline
 
 Windows host, existing MSVC Release build; source 09cc9dd / app 25236d2.
