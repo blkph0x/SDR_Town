@@ -1,6 +1,15 @@
 # SDR Town
 
-**[Download 0.2.103 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.103)**
+Development: opt-in diagnostics and performance reporting are being qualified
+for 0.2.104; production deployment is not yet complete. See the
+[diagnostics guide](docs/DIAGNOSTICS_SHARING.md) for controls and limitations.
+
+Development: **Tools > Antenna Rotator & SWR** adds manual Hamlib-compatible
+antenna control, saved limits/park and hardware-only SWR readback. See the
+[setup and ten-controller compatibility targets](docs/ANTENNA_CONTROL.md).
+Physical controller acceptance and automatic satellite tracking remain open.
+
+**[Download 0.2.104 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.104)**
 includes a matched SDRplay plugin and corrected, dated Inmarsat frequency/rate
 presets. Install the official SDRplay API 3.15+ and service separately. Extract
 the entire ZIP into a fresh folder. RTL bias-T is in Device Manager after
@@ -14,7 +23,7 @@ drag pan. Multi-SDR role assignment is still planned, not delivered here.
 Inmarsat now includes per-channel lock/rate/message diagnostics and a retained
 aircraft table with copy/filter controls and pop-out windows. Identity fields
 are populated only when verified, with separate message/position ages.
-See [release notes](docs/RELEASE_0.2.103.md) and [monitor guide](docs/INMARSAT_MONITOR.md).
+See [release notes](docs/RELEASE_0.2.104.md) and [monitor guide](docs/INMARSAT_MONITOR.md).
 
 ## Help build SDR Town and FUBAR
 

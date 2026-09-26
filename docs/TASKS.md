@@ -1,5 +1,20 @@
 # Task list (canonical)
 
+T-0068 | in_progress | Hamlib rotator control and hardware SWR monitoring |
+DEC-0140. Separate window/menu, bounded asynchronous protocol, saved limits,
+explicit arm/stop, real position feedback and read-only SWR. Hardware acceptance
+depends on tester controller/meter. Preserve frozen receive paths.
+
+T-0067 | blocked | Performance evidence and reliable diagnostics delivery |
+DEC-0139. Instrument Inmarsat stages/workers with bounded numerical telemetry,
+repair build configuration and consent precedence, verify server receipt and
+release packaging. Profile high-rate cost before any DSP optimization. Preserve
+P25; hardware acceptance and per-device ownership remain distinct gates.
+Local build and 14/14 CTest plus collector/packaging tests PASS. Menu opt-in
+persists; automatic config contains no admin authority. Collector restart
+rejected by environment policy: deployment/public receipt/CI release pending.
+ISS-0035 tracks this and per-install security/retention gaps. Not marked done.
+
 T-0066 | done | Inmarsat decoder monitor and aircraft registry |
 DEC-0138. Add bounded aircraft tracking, per-channel status/history and pop-out
 views. Repair combined-watch status. Test identity, retention, clear/copy/filter,

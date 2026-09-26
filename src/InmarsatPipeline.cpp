@@ -61,6 +61,7 @@ void InmarsatPipeline::process(const std::complex<float>* iq, size_t count,
         std::abs(channel - center) >= rate / 2)
         throw std::runtime_error("Inmarsat channel is outside the recorded IQ passband or rates are invalid");
     const auto begin = std::chrono::steady_clock::now();
+    const auto elapsed=[](auto from,auto to){return std::chrono::duration<double,std::milli>(to-from).count();};
     // Validate the whole block before modifying state: NaN must not poison PLL history.
     double power = 0, peak = 0;
     for (size_t i = 0; i < count; ++i) {
@@ -70,6 +71,8 @@ void InmarsatPipeline::process(const std::complex<float>* iq, size_t count,
         power += re * re + im * im;
         peak = std::max({peak, std::abs(re), std::abs(im)});
     }
+    const auto validatedAt=std::chrono::steady_clock::now();
+    validationMs_+=elapsed(begin,validatedAt);
     const bool gap = started_ && (discontinuity || start != nextSample_);
     if (!started_ || gap || rate_ != rate || center_ != center || channel_ != channel || mode_ != mode) {
         const bool burst=mode==InmarsatDemodMode::AeroBurstMsk1200 || mode==InmarsatDemodMode::AeroBurstOqpsk10500;
@@ -88,11 +91,18 @@ void InmarsatPipeline::process(const std::complex<float>* iq, size_t count,
     started_ = true;
     rate_ = rate; center_ = center; channel_ = channel; mode_ = mode;
     const auto before = demod_.stats();
+    const auto setupAt=std::chrono::steady_clock::now();
+    setupMs_+=elapsed(validatedAt,setupAt);
     demod_.process(iq, count);
+    const auto probeAt=std::chrono::steady_clock::now();
+    probeMs_+=elapsed(setupAt,probeAt);
     if(native_->aero) {
         const auto before=native_->aero->stats();
         const auto intermediate=native_->channelizer->process({iq,count});
+        const auto channelizedAt=std::chrono::steady_clock::now();
+        channelizerMs_+=elapsed(probeAt,channelizedAt);
         native_->aero->processIf(intermediate);
+        modemMs_+=elapsed(channelizedAt,std::chrono::steady_clock::now());
         const auto after=native_->aero->stats();
         native_->validated+=after.crcOk-before.crcOk;
         native_->failed+=after.crcBad-before.crcBad;
@@ -115,6 +125,9 @@ void InmarsatPipeline::process(const std::complex<float>* iq, size_t count,
     const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
     totalMs_ += ms;
     maxMs_ = std::max(maxMs_, ms);
+    lastBlockMs_=ms;lastInputMs_=1000.0*count/rate;
+    inputSeconds_+=double(count)/rate;
+    if(ms>lastInputMs_)++overBudgetBlocks_;
 }
 
 nlohmann::json InmarsatPipeline::report() const {
@@ -130,6 +143,10 @@ nlohmann::json InmarsatPipeline::report() const {
         {"mode", static_cast<int>(mode_)}, {"symbols", symbols_}, {"rawBlocks", rawBlocks_},
         {"carrierDetected", s.carrierDetected}, {"quality", s.quality}, {"carrierOffsetHz", s.freqOffsetHz},
         {"processingMs", totalMs_}, {"maxBlockMs", maxMs_}, {"peakComponent", peak_},
+        {"validationMs",validationMs_},{"setupMs",setupMs_},{"probeMs",probeMs_},
+        {"channelizerMs",channelizerMs_},{"modemMs",modemMs_},
+        {"inputSeconds",inputSeconds_},{"loadRatio",inputSeconds_>0?totalMs_/(1000*inputSeconds_):0},
+        {"lastBlockMs",lastBlockMs_},{"lastInputMs",lastInputMs_},{"overBudgetBlocks",overBudgetBlocks_},
         {"rms", samples_ ? std::sqrt(sumPower_ / samples_) : 0},
         {"protocolLock", s.locked}, {"validatedFrames", native_->validated}, {"voiceFrames", native_->voice},
         {"speechFrames",native_->speech},{"messages",native_->messages},

@@ -1,5 +1,62 @@
 # Decisions
 
+## DEC-0140 - Rotator bridge and honest SWR (2026-09-26)
+
+Use existing Qt Network, no new linked dependency. Connect to a user-installed
+Hamlib rotctld bridge; controller model/serial driver is owned by Hamlib.
+Protocol reference: https://hamlib.sourceforge.net/html/rotctld.1.html
+Use extended newline responses (+p/+P/+S), one request at a time, strict echo,
+bounded 8 KiB replies and 1500 ms deadlines. Poll at 1000 ms; position expires
+after 2500 ms. These are explicit UI/transport safety policies, not RF constants.
+Never reconnect/rearm/move automatically. Movement requires explicit arm and
+fresh position; validate configured endpoints/finite angles and soft limits.
+Park uses the configured validated absolute target, not an uncontrolled device
+park command. Stop is prioritized after the current transaction, never retried
+as movement. Network stop is not a physical emergency interlock. Close disarms
+and requests stop; hardware limit switches and physical stop remain essential.
+
+SWR is optional read-only rigctld (+t then +l SWR) hardware feedback, not an
+SDR receive-power estimate. No PTT/set-level/TX command is implemented. Require
+an affirmative PTT observation and valid finite ratio >=1; unsupported, idle,
+stale or failed readings are unavailable. Reference rigctld.1 get_ptt/get_level
+and Hamlib tests/rigctl_parse.c Level Value/PTT labels. No automatic TLE motor
+tracking in this first hardware-control milestone; don't imply it is implemented.
+Manual pointing/readback, persisted soft limits and park are testable without
+changing the existing satellite RF or P25 paths. Physical acceptance remains open.
+
+## DEC-0139 - Bounded performance diagnostics and build parity (2026-09-26)
+
+User clarification: consent must be a persistent menu choice with no credential
+entry. Add a standalone Help-menu integration; explicit CLI off wins and opt-out
+discards queued telemetry. Distribution tokens are public-client credentials,
+not proof of authentic software (RFC 8252 section 8.5). Never grant them admin
+authority. Validate incoming envelopes and bound request time, size and rate
+at the collector (OWASP API4:2023). These controls limit junk and resource abuse;
+they cannot prove that plausible values from an untrusted client are genuine.
+Per-install enrollment/revocation remains a separate security gate until tested
+end to end; do not describe a packaged token as tamper-proof authentication.
+
+T-0067. Current release.ps1 injects opt-in collector config, but CMake/Windows
+CI portable builds omit it. RemoteDiagnostics config loading also treats false
+as no-op, so an earlier enabled file cannot be disabled by a later file. Fix
+explicit consent precedence and give every build the same public HTTPS default
+endpoint without embedding administrator credentials. Release authentication
+must use a restricted collector credential, not administrator authority.
+
+Instrument existing per-block clocks: input validation, reset/setup, legacy
+physical probe, native channelizer, modem/codec/callback time, total RF duration,
+last/maximum block time and over-budget block count. Timing is observational;
+do not change gates or increase queues. Remote summaries retain the five-second
+cadence and 64 KiB/min transport cap. Include at most 16 anonymous per-worker
+numerical summaries, never frequencies, names, AES/ICAO, positions, IQ or PCM.
+Tests must reject wrong types/nonfinite values and verify transport/consent.
+
+Profile before optimizing. The legacy probe repeats full-rate mixing alongside
+the native modem, so measure its cost separately; no speculative removal or
+NCO arithmetic changes are authorized by timing alone. True multi-device
+ownership, physical hardware/speech acceptance and collector-wide retention
+remain separate substantive work, not silently declared solved by telemetry.
+
 ## DEC-0138 - Inmarsat monitoring without decoder policy changes (2026-09-26)
 
 T-0066. User requests InmarScope-style channel and aircraft windows. Existing

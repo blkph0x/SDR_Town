@@ -1,5 +1,32 @@
 # Issues (canonical)
 
+## ISS-0036 - Rotator physical acceptance (2026-09-26, OPEN)
+
+DEC-0140 uses the documented Hamlib ERP bridge for ten named controller
+targets plus other supported backends. Software fixtures do not prove physical
+movement/stop, axis support, serial setup, limit switches or hardware SWR
+accuracy. Test with controller owners before claiming device certification.
+No automatic TLE tracking or native serial/backend bundling in this milestone.
+Network Stop is best-effort, not a hardware emergency interlock. App/process
+termination or lost connectivity cannot guarantee a physical stop.
+
+## ISS-0035 - Diagnostics delivery/configuration/security (2026-09-26, OPEN)
+
+Recent CI ZIPs omitted the diagnostics defaults supplied by release.ps1;
+later enabled:false configuration could not override enabled:true. Client had
+unbounded network waits and accepted non-error replies without JSON receipt.
+Collector accepted arbitrary JSON objects, lacked submission/concurrency
+limits, and allowed client-key admin fallback when no admin key was supplied.
+Local DEC-0139 repairs pass 14 CTest suites and collector/packaging tests.
+Deployment restart was denied by environment policy; existing server is not
+running the repair. Do not claim secure live delivery or publish this as fully
+qualified until server deployment and public receipt have been verified.
+
+Threat-model gap: distributed shared client credentials are extractable.
+Schema/rate limits mitigate abuse but cannot establish truthful reports.
+Per-install enrollment, revocation and durable retention quotas remain open;
+no per-install authentication or anti-forgery guarantee is claimed.
+
 ## ISS-0034 - Inmarsat aircraft/status visibility gaps (2026-09-26, FIXED)
 
 Non-position identities/counters were not retained outside the 500-message log.

@@ -82,6 +82,7 @@ docs/generated/
 *.wav
 *.png
 *.json
+!config/diagnostics-defaults.json
 !vcpkg.json
 !CMakePresets.json
 !resources/*.json

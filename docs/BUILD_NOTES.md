@@ -2,6 +2,48 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - Antenna control local gate
+
+DEC-0140 / T-0068. MSVC2022/Qt6.11.1 SDR_Town and antenna_control_tests
+Release builds PASS. Full CTest 15/15 PASS (59.75 s), antenna-all-tests.log.
+Native window screenshot inspected; fixed compass-label placement/contrast
+and escaped tab ampersand. Additional split-response, Stop ordering and
+unsupported-SWR tests added for final qualification. No rotctld/rigctld binary
+or physical rotor/meter is present; no hardware acceptance claimed.
+
+Publish rotor/client telemetry as an experimental milestone independently of
+the blocked collector deployment. Release notes explicitly retain ISS-0035;
+server-side protections are not claimed deployed. No workaround/retry of the
+blocked service restart. CI/public asset verification pending at this entry.
+
+## 2026-09-26 - 0.2.104 diagnostics local qualification; deployment blocked
+
+Windows/MSVC2022/Qt6.11.1 Release builds SDR_Town, sdr_town_tests,
+sdr_town_workspace_tests, inmarsat_live_gui_tests and remote_diagnostics_tests
+PASS. Full CTest 14/14 PASS, 58.90 seconds (build/diag-104-ctest.log).
+Collector Python regression tests 3/3 PASS: auth separation, malformed/deep/
+nonfinite payloads, rate ceilings and actual localhost receipt. Packaging test
+PASS for missing-required credential, configured consent-off defaults and
+invalid credential rejection. Menu cancellation/opt-out and persisted consent,
+CLI forced-off, timeout/recovery and acknowledgement are in RemoteDiagnostics.
+
+Local generated defaults verified: expected public HTTPS endpoint, enabled
+false, collector credential present, 65536-byte/min cap. Secret values were
+not printed. Collector-only GitHub secret configured; no admin key published.
+Frozen-path guard on modified runtime paths PASS; git diff --check PASS.
+
+Synthetic watch benchmark 10 cases PASS. 2.048 MS/s load ratios 0.266-0.410;
+10 MS/s 1.163-1.759 (still overloaded). Stage fixture for one 2.048 MS/s
+worker: 540.6 ms total, channelizer321.9/probe71.5/validation69.8/modem59.9/
+setup17.5 ms. Synthetic quiet IQ does not establish real voice acceptance.
+
+Collector deployment attempt was rejected by environment policy before
+execution. Existing listener PID13624/proxy left unchanged. New server
+protections are only locally tested, NOT deployed. Public receipt of the new
+configuration and external-network acceptance remain unverified. No commit,
+CI release, or public 0.2.104 asset claimed. Release held for deployment/security
+qualification; shared-key authenticity and per-install enrollment remain open.
+
 ## 2026-09-26 - 0.2.103 public release verified
 
 Source cb2ee37dcb6566b95c360e1725884f6b41a2e32d. Local full CTest 13/13

@@ -23,7 +23,7 @@ void configureInmarsatReplaySharing(InmarsatReplayDialog& dialog) {
         if (remoteDiagnosticsEnabled()) return true;
         const auto answer = QMessageBox::question(&dialog, "Share diagnostics for this run?",
             "Send decoder counters, timing, format/rate and error categories to the configured SDR Town server? "
-            "The existing diagnostics client also sends app/OS details and pseudonymous installation/hardware IDs. "
+            "The diagnostics client also sends CPU, memory, thread/handle counts, delivery status, app/OS details and pseudonymous installation/hardware IDs. "
             "Inmarsat reports exclude IQ, audio, file paths, aircraft IDs and locations. "
             "Local reports stay on this PC. This enables the app diagnostics transport for this run.",
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No);

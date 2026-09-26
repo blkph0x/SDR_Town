@@ -28,4 +28,8 @@ private:
     uint64_t nextSample_ = 0, samples_ = 0, blocks_ = 0, resets_ = 0, gaps_ = 0;
     uint64_t symbols_ = 0, rawBlocks_ = 0;
     double totalMs_ = 0, maxMs_ = 0, peak_ = 0, sumPower_ = 0;
+    // DEC-0139: worker-owned block clocks, no logging or allocation per sample.
+    double validationMs_=0, setupMs_=0, probeMs_=0, channelizerMs_=0, modemMs_=0;
+    double inputSeconds_=0, lastBlockMs_=0, lastInputMs_=0;
+    uint64_t overBudgetBlocks_=0;
 };

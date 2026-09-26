@@ -122,8 +122,7 @@ void applyDiagnosticsJsonConfig(RemoteDiagnosticsConfig& cfg,
                                 const QString& source,
                                 bool* requested)
 {
-    const bool enabled = jsonBool(obj, "enabled", false);
-    if (enabled && requested) *requested = true;
+    if (obj.contains("enabled") && requested) *requested = jsonBool(obj,"enabled",false);
 
     const QString url = obj.value("url").toString(obj.value("endpoint").toString()).trimmed();
     if (!url.isEmpty()) cfg.endpoint = QUrl(url);
@@ -142,6 +141,7 @@ QStringList defaultDiagnosticsConfigPaths()
 {
     QStringList paths;
     if (QCoreApplication::instance()) {
+        paths << QCoreApplication::applicationDirPath() + "/remote_diagnostics.defaults.json";
         paths << QCoreApplication::applicationDirPath() + "/remote_diagnostics.json";
     }
     const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -237,9 +237,26 @@ void RemoteDiagnosticsClient::configure(const RemoteDiagnosticsConfig& cfg)
     m_cfg.maxPayloadBytes = std::clamp(m_cfg.maxPayloadBytes, 2048, 128 * 1024);
     m_cfg.minIntervalMs = std::clamp(m_cfg.minIntervalMs, 100, 60 * 1000);
     m_cfg.maxQueue = std::clamp(m_cfg.maxQueue, 4, 1024);
+    m_cfg.requestTimeoutMs = std::clamp(m_cfg.requestTimeoutMs,100,60000);
     m_clientId = ensureClientId();
     m_hardwareHash = ensureHardwareHash();
     m_windowStartMs = QDateTime::currentMSecsSinceEpoch();
+    if(!m_performanceTimer) {
+        m_performanceTimer=new QTimer(this);
+        connect(m_performanceTimer,&QTimer::timeout,this,[this] {
+            auto report=m_performance.sample();report["delivery"]=deliveryStatistics();
+            submit("app.performance.sample","info",report);
+        });
+    }
+    if(enabled()) {m_performance.sample();m_performanceTimer->start(30000);} // DEC-0139: bounded sampling budget.
+    else m_performanceTimer->stop();
+}
+
+QJsonObject RemoteDiagnosticsClient::deliveryStatistics() const {
+    return {{"acknowledged",double(m_acknowledged)},{"networkDropped",double(m_networkDropped)},
+        {"queueDropped",double(m_queueDropped)},{"budgetDeferred",double(m_budgetDropped)},
+        {"oversizeDropped",double(m_oversizeDropped)},{"queued",m_queue.size()},
+        {"inFlight",m_inFlight},{"lastHttpStatus",m_lastHttpStatus}};
 }
 
 bool RemoteDiagnosticsClient::enabled() const
@@ -341,6 +358,8 @@ void RemoteDiagnosticsClient::checkClientStatus(QObject* context, std::function<
     }
 
     QNetworkRequest request(clientStatusUrlForEndpoint(m_cfg.endpoint, m_clientId));
+    request.setTransferTimeout(m_cfg.requestTimeoutMs);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,QNetworkRequest::ManualRedirectPolicy);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     request.setRawHeader("User-Agent", QByteArray("SDR_Town/") + QByteArray(SDR_TOWN_VERSION));
     if (!m_cfg.bearerToken.trimmed().isEmpty()) {
@@ -429,6 +448,8 @@ void RemoteDiagnosticsClient::pump()
     m_inFlight = true;
 
     QNetworkRequest request(m_cfg.endpoint);
+    request.setTransferTimeout(m_cfg.requestTimeoutMs);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,QNetworkRequest::ManualRedirectPolicy);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     request.setRawHeader("User-Agent", QByteArray("SDR_Town/") + QByteArray(SDR_TOWN_VERSION));
     if (!m_cfg.bearerToken.trimmed().isEmpty()) {
@@ -436,8 +457,17 @@ void RemoteDiagnosticsClient::pump()
     }
 
     QNetworkReply* reply = m_network->post(request, pending.body);
+    // Bound total lifetime and reply size, including a peer that trickles bytes.
+    QTimer::singleShot(m_cfg.requestTimeoutMs, reply, [reply]() { if (!reply->isFinished()) reply->abort(); });
+    connect(reply, &QNetworkReply::readyRead, reply, [reply]() {
+        if (reply->bytesAvailable() > 4096) reply->abort();
+    });
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        if (reply->error() != QNetworkReply::NoError) ++m_networkDropped;
+        m_lastHttpStatus=reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const auto ack=QJsonDocument::fromJson(reply->readAll()).object();
+        if (reply->error()!=QNetworkReply::NoError || m_lastHttpStatus<200 || m_lastHttpStatus>=300 ||
+            !ack.value("ok").toBool(false)) ++m_networkDropped;
+        else ++m_acknowledged;
         reply->deleteLater();
         m_inFlight = false;
         if (!m_queue.isEmpty()) schedulePump(m_cfg.minIntervalMs);
@@ -507,6 +537,9 @@ RemoteDiagnosticsConfig remoteDiagnosticsConfigFromProcess(int argc, char* argv[
         }
     }
 
+    QSettings settings;
+    if (settings.contains("remoteDiagnostics/consent"))
+        requested = settings.value("remoteDiagnostics/consent").toBool();
     cfg.enabled = !forcedOff && requested && diagnosticsConfigUsable(cfg);
     return cfg;
 }
@@ -597,7 +630,18 @@ QString remoteDiagnosticsClientId()
     return g_remoteDiagnosticsClientId;
 }
 
-void remoteDiagnosticsShutdown()
+void RemoteDiagnosticsClient::stopWithoutSending()
+{
+    m_cfg.enabled = false;
+    m_queue.clear();
+    if (m_timer) m_timer->stop();
+    if (m_performanceTimer) m_performanceTimer->stop();
+    if (m_network) {
+        for (auto* reply : m_network->findChildren<QNetworkReply*>()) reply->abort();
+    }
+}
+
+void remoteDiagnosticsShutdown(bool flushPending)
 {
     QPointer<RemoteDiagnosticsClient> client;
     QPointer<QThread> thread;
@@ -613,10 +657,12 @@ void remoteDiagnosticsShutdown()
     }
     if (client) {
         if (QThread::currentThread() == client->thread()) {
-            client->drainForMs(1500);
+            if (flushPending) client->drainForMs(1500);
+            else client->stopWithoutSending();
         } else {
-            QMetaObject::invokeMethod(client, [client]() {
-                client->drainForMs(1500);
+            QMetaObject::invokeMethod(client, [client, flushPending]() {
+                if (flushPending) client->drainForMs(1500);
+                else client->stopWithoutSending();
             }, Qt::BlockingQueuedConnection);
         }
     }

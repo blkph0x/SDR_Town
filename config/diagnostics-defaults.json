@@ -1,0 +1,8 @@
+{
+  "enabled": false,
+  "url": "https://gearsqueens.online/sdr-town-diag/ingest",
+  "maxBytesPerMinute": 65536,
+  "maxPayloadBytes": 49152,
+  "minIntervalMs": 1000,
+  "maxQueue": 128
+}

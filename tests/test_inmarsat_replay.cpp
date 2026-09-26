@@ -215,3 +215,18 @@ TEST_CASE("Inmarsat diagnostics enforce per-session consent and bounded remote c
     CHECK(received.back()["processedSampleCount"] == 64);
     CHECK(received.back()["event"] == "summary");
 }
+
+TEST_CASE("Inmarsat performance telemetry keeps workers anonymous and bounded", "[inmarsat][replay]") {
+    nlohmann::json report={{"probeMs",12.3},{"channelizerMs",45.6},{"modemMs",7.8},
+        {"loadRatio",.5},{"messages",3},{"state","private aircraft text"},{"rateHz","secret"}};
+    report["watch"]["channels"]=nlohmann::json::array();
+    for(int i=0;i<100;++i)report["watch"]["channels"].push_back({{"id","private-identifier"},
+        {"frequencyHz",1542935000},{"rate",8400},{"decoder",{{"probeMs",2.0},{"channelizerMs",4.0},
+        {"messages",7},{"protocolLock",true},{"aesId",123456},{"positions",{1,2,3}}}}});
+    const auto safe=InmarsatDiagnostics::remotePayload(report);
+    CHECK(safe["probeMs"]==12.3);CHECK_FALSE(safe.contains("state"));CHECK_FALSE(safe.contains("rateHz"));
+    REQUIRE(safe["workers"].size()==16);CHECK(safe["workers"][0]["messages"]==7);
+    CHECK(safe.dump().find("private")==std::string::npos);CHECK(safe.dump().find("1542935000")==std::string::npos);
+    CHECK(safe.dump().find("aesId")==std::string::npos);CHECK(safe.dump().size()<8192);
+    CHECK_FALSE(InmarsatDiagnostics::remotePayload({{"probeMs",std::numeric_limits<double>::infinity()}}).contains("probeMs"));
+}

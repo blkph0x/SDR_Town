@@ -1,12 +1,14 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.103 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.104 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
+set(SDR_TOWN_DIAGNOSTICS_TOKEN_FILE "" CACHE FILEPATH "Distribution-only collector token file (never admin)")
+option(SDR_TOWN_REQUIRE_DIAGNOSTICS_TOKEN "Fail unconfigured official releases" OFF)
 
 # DEC-0112: pinned Vallado-derived core (MSVC symbol rename only).
 set_source_files_properties(external/sgp4/SGP4.c PROPERTIES LANGUAGE CXX)
@@ -224,6 +226,10 @@ set(SDR_TOWN_SOURCES
     src/SdrTownControlServer.cpp
     include/SdrTownControlServer.h
     src/RemoteDiagnostics.cpp
+    src/ProcessPerformance.cpp
+    src/DiagnosticsMenu.cpp
+    src/AntennaControl.cpp include/AntennaControl.h
+    src/AntennaControlWindow.cpp
     include/RemoteDiagnostics.h
     src/UpdateManager.cpp   # professional GitHub release + safe in-app updater
     src/UpdateManifestSignature.cpp
@@ -631,8 +637,36 @@ if(BUILD_TESTS)
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${PROJECT_NAME}>")
 
   # CLI black-box tests via PowerShell harness (run manually or in CI)
+  add_executable(antenna_control_tests tests/test_antenna_control.cpp
+      src/AntennaControl.cpp include/AntennaControl.h src/AntennaControlWindow.cpp)
+  target_include_directories(antenna_control_tests PRIVATE include)
+  target_link_libraries(antenna_control_tests PRIVATE Catch2::Catch2 Qt6::Widgets Qt6::Network)
+  add_test(NAME AntennaControl COMMAND antenna_control_tests)
+  set_tests_properties(AntennaControl PROPERTIES TIMEOUT 40
+      ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QWindowsIntegrationPlugin>")
+  add_executable(remote_diagnostics_tests tests/test_remote_diagnostics.cpp
+      src/RemoteDiagnostics.cpp src/ProcessPerformance.cpp src/DiagnosticsMenu.cpp)
+  target_include_directories(remote_diagnostics_tests PRIVATE include)
+  target_link_libraries(remote_diagnostics_tests PRIVATE Catch2::Catch2 Qt6::Widgets Qt6::Network)
+  if(WIN32)
+    target_link_libraries(remote_diagnostics_tests PRIVATE Psapi)
+  endif()
+  set_target_properties(remote_diagnostics_tests PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test-fixtures/diagnostics")
+  add_test(NAME RemoteDiagnostics COMMAND remote_diagnostics_tests)
+  set_tests_properties(RemoteDiagnostics PROPERTIES TIMEOUT 30
+      ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QWindowsIntegrationPlugin>"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${PROJECT_NAME}>")
   message(STATUS "Tests enabled. Run 'ctest' for C++ units. Use tests/run_cli_tests.ps1 for end-to-end CLI tests.")
 endif()
+
+add_custom_command(TARGET SDR_Town POST_BUILD
+    COMMAND ${CMAKE_COMMAND}
+      "-DTEMPLATE=${CMAKE_CURRENT_SOURCE_DIR}/config/diagnostics-defaults.json"
+      "-DOUTPUT=$<TARGET_FILE_DIR:SDR_Town>/remote_diagnostics.defaults.json"
+      "-DTOKEN_FILE=${SDR_TOWN_DIAGNOSTICS_TOKEN_FILE}"
+      "-DREQUIRE_TOKEN=${SDR_TOWN_REQUIRE_DIAGNOSTICS_TOKEN}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/StageDiagnostics.cmake" VERBATIM)
 
 # --- Proper deployment + self-contained installer (NSIS) + GitHub Release pipeline (state-of-the-art, no compromise) ---
 # MUST use clean deploy_staging (Big Caveat from audit). Never package the raw build Release tree for public releases.
@@ -679,6 +713,12 @@ endif()
 add_custom_target(deploy
     COMMAND ${CMAKE_COMMAND} -E remove_directory "${DEPLOY_STAGING}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}"
+    COMMAND ${CMAKE_COMMAND}
+      "-DTEMPLATE=${CMAKE_CURRENT_SOURCE_DIR}/config/diagnostics-defaults.json"
+      "-DOUTPUT=${DEPLOY_STAGING}/remote_diagnostics.defaults.json"
+      "-DTOKEN_FILE=${SDR_TOWN_DIAGNOSTICS_TOKEN_FILE}"
+      "-DREQUIRE_TOKEN=${SDR_TOWN_REQUIRE_DIAGNOSTICS_TOKEN}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/StageDiagnostics.cmake"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/tools/diagnostics"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/scripts"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/licenses/sgp4"
@@ -764,6 +804,7 @@ endif()
 
 # Fallback / extra safety: also install the directory the normal way (helps with some generators)
 if(WIN32)
+  install(FILES "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Release/remote_diagnostics.defaults.json" DESTINATION .)
   install(DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Release/
           DESTINATION .
           FILES_MATCHING

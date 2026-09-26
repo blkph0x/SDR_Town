@@ -1,5 +1,36 @@
 # Code notes (tree map)
 
+## Antenna control (DEC-0140 / T-0068)
+
+AntennaControl.h/.cpp isolates bounded asynchronous Hamlib ERP transport,
+RotatorController finite limits/freshness/arming/stop ordering and SwrMonitor's
+read-only PTT/SWR queries. AntennaControlWindow provides pointing, limits/park,
+meter and bounded event tabs. Main only installs the standalone menu; no SDR
+ownership or receive-chain changes. Settings persist, armed/connected states
+do not. Local antenna/control.log rotates to control.previous.log at 1 MiB.
+No new linked dependency: external rotctld/rigctld own the hardware drivers.
+Controller catalog facts and setup limitations are in ANTENNA_CONTROL.md.
+
+## Diagnostics delivery/performance (DEC-0139 / T-0067)
+
+DiagnosticsMenu installs a standalone Help sharing action, saved via QSettings;
+explicit launch-off overrides it. Opt-out discards queued reports and aborts
+in-flight requests (already transmitted bytes cannot be recalled). No P25
+receive/audio/orchestration files changed. ProcessPerformance samples CPU,
+working/private memory, handles and thread count on the diagnostics thread
+every 30 seconds. InmarsatPipeline adds measured stage timing; remotePayload
+allowlists bounded anonymous worker summaries. No RF math or queue enlargement.
+
+StageDiagnostics.cmake generates consent-off defaults beside the executable
+and in deploy staging. Official release builds fail without the restricted
+collector credential. CI credential is separate from local admin credentials.
+RemoteDiagnostics checks JSON acknowledgement, bounds POST lifetime/response,
+and reports delivery counters. The collector rejects invalid envelopes,
+nonfinite/over-deep data, excess per-client/global bytes and requests; caps
+concurrent request threads at 32 and socket inactivity at 10 seconds. Admin
+authority never falls back to the client key. Shared distribution credentials
+are extractable: per-install enrollment/revocation is NOT implemented here.
+
 ## Inmarsat monitoring (DEC-0138 / T-0066)
 
 InmarsatMonitorWidget provides passive decoder/aircraft tabs and pop-outs.

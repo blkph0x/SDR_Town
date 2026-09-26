@@ -1,5 +1,27 @@
 # Development log
 
+## 2026-09-26 - Antenna control release qualification
+
+User requested broad rotor support and hardware SWR. DEC-0140/T-0068 adds
+manual Hamlib ERP control with ten documented controller targets, explicit
+arm, configured limits/park, stale-position protection, Stop priority and
+read-only SWR. Full local 15/15 CTest PASS; final added Stop/unsupported-meter
+fixtures PASS. Native window inspected. Physical acceptance is ISS-0036.
+Proceed with experimental app publication independently of blocked collector
+deployment; ISS-0035 remains open and release notes explicitly retain it.
+
+## 2026-09-26 - Diagnostics qualification and deployment blocker
+
+T-0067 local 0.2.104 adds persistent menu consent, build-default parity,
+Inmarsat stage/worker telemetry, CPU/memory/thread/handle measurements and
+delivery acknowledgement/timeout counters. Collector validation, rate caps,
+concurrency cap and admin-key separation have local negative tests. Full
+14/14 CTest and Python collector/packaging tests PASS. No P25 path changed.
+High-rate benchmark still exceeds real-time at 10 MS/s; no DSP repair claimed.
+Environment rejected collector restart; did not retry through another route
+or modify unrelated services. Production deployment/public receipt/release
+are pending. Work remains uncommitted in the canonical development folder.
+
 ## 2026-09-26 - Inmarsat monitor shipped
 
 cb2ee37 published as portable v0.2.103. Both Windows and both YAML workflows

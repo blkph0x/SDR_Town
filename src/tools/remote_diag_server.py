@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import html
 import json
+import math
 import re
 import sqlite3
 import sys
@@ -30,6 +32,42 @@ LONG_NUM_RE = re.compile(r"\b\d{5,}\b")
 UUID_RE = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
 ISSUE_STATUSES = {"outstanding", "fixed", "unrequired"}
 ISSUE_SEVERITIES = {"warn", "warning", "error", "critical", "fatal"}
+
+
+def valid_event(event: Any) -> bool:
+    """DEC-0139: bounded technical envelopes, not arbitrary uploads."""
+    if not isinstance(event, dict) or event.get("schema") != "sdr-town-remote-diagnostics-v1":
+        return False
+    if event.get("app") != "SDR_Town" or not isinstance(event.get("payload"), dict):
+        return False
+    for field in ("clientId", "sessionId"):
+        value = event.get(field)
+        if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,96}", value):
+            return False
+    if event.get("severity") not in {"debug", "info", "warn", "warning", "error", "critical", "fatal"}:
+        return False
+    if not isinstance(event.get("type"), str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", event["type"]):
+        return False
+    nodes = 0
+
+    def bounded(value: Any, depth: int) -> bool:
+        nonlocal nodes
+        nodes += 1
+        if nodes > 4096 or depth > 12:
+            return False
+        if isinstance(value, dict):
+            return len(value) <= 256 and all(
+                isinstance(k, str) and len(k) <= 128 and bounded(v, depth + 1)
+                for k, v in value.items())
+        if isinstance(value, list):
+            return len(value) <= 512 and all(bounded(v, depth + 1) for v in value)
+        if isinstance(value, str):
+            return len(value) <= 16384
+        if isinstance(value, float):
+            return math.isfinite(value)
+        return value is None or isinstance(value, (bool, int))
+
+    return bounded(event, 0)
 
 
 def utc_now() -> str:
@@ -98,9 +136,31 @@ class DiagnosticsState:
         self.count = 0
         self.started = time.time()
         self.lock = threading.Lock()
+        self.rate_lock = threading.Lock()
+        self.rate_window = time.monotonic()
+        self.rate_clients: dict[str, tuple[int, int]] = {}
+        self.rate_bytes = 0
         self.db_path = out_dir / "diagnostics.sqlite3"
         out_dir.mkdir(parents=True, exist_ok=True)
         self._init_db()
+
+    def allow_event(self, client: str, size: int) -> bool:
+        # Global ceiling prevents bypass by inventing unlimited client IDs.
+        # Per-client quota permits bounded reconnect bursts above app's 64 KiB/min.
+        with self.rate_lock:
+            now = time.monotonic()
+            if now - self.rate_window >= 60:
+                self.rate_window = now
+                self.rate_clients.clear()
+                self.rate_bytes = 0
+            count, total = self.rate_clients.get(client, (0, 0))
+            if (count >= 120 or total + size > 128 * 1024 or
+                    self.rate_bytes + size > 16 * 1024 * 1024 or
+                    (client not in self.rate_clients and len(self.rate_clients) >= 2048)):
+                return False
+            self.rate_clients[client] = (count + 1, total + size)
+            self.rate_bytes += size
+            return True
 
     def _connect(self) -> sqlite3.Connection:
         con = sqlite3.connect(self.db_path)
@@ -429,18 +489,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def _client_authorized(self) -> bool:
         if not self.state.token:
-            return True
-        return client_token_from_header(self.headers) == self.state.token
+            return False
+        return hmac.compare_digest(client_token_from_header(self.headers), self.state.token)
 
     def _admin_authorized(self, values: dict[str, list[str]] | None = None) -> bool:
-        token = self.state.admin_token or self.state.token
+        token = self.state.admin_token
         if not token:
-            return True
-        if client_token_from_header(self.headers) == token:
+            return False
+        if hmac.compare_digest(client_token_from_header(self.headers), token):
             return True
         values = values if values is not None else self._query()
         supplied = values.get("token", [""])[0]
-        return supplied == token
+        return hmac.compare_digest(supplied, token)
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -538,14 +598,25 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(413, {"ok": False, "error": "payload too large"})
             return
 
-        raw = self.rfile.read(length)
+        self.connection.settimeout(10)
+        if self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
+            self._send_json(415, {"ok": False, "error": "application/json required"})
+            return
+        try:
+            raw = self.rfile.read(length)
+        except TimeoutError:
+            self._send_json(408, {"ok": False, "error": "request timeout"})
+            return
         try:
             event = json.loads(raw.decode("utf-8"))
         except Exception as exc:
             self._send_json(400, {"ok": False, "error": f"bad json: {exc}"})
             return
-        if not isinstance(event, dict):
-            self._send_json(400, {"ok": False, "error": "root must be an object"})
+        if not valid_event(event):
+            self._send_json(400, {"ok": False, "error": "invalid diagnostics envelope"})
+            return
+        if not self.state.allow_event(event["clientId"], length):
+            self._send_json(429, {"ok": False, "error": "diagnostics quota exceeded"})
             return
 
         path_written = self.state.write_event(event)
@@ -660,6 +731,28 @@ class DiagnosticsServer(ThreadingHTTPServer):
     def __init__(self, addr: tuple[str, int], state: DiagnosticsState) -> None:
         super().__init__(addr, Handler)
         self.state = state
+        self.workers = threading.BoundedSemaphore(32)
+
+    def get_request(self):
+        connection, address = super().get_request()
+        connection.settimeout(10)
+        return connection, address
+
+    def process_request(self, request, client_address):
+        if not self.workers.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self.workers.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.workers.release()
 
 
 def parse_args() -> argparse.Namespace:

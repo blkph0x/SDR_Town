@@ -7,6 +7,8 @@
 #include "AppBootstrap.h"
 #include "CliApp.h"
 #include "MainWindow.h"
+#include "DiagnosticsMenu.h"
+#include "AntennaControlWindow.h"
 #include "P25DebugStage.h"
 #include "RemoteDiagnostics.h"
 #include "InmarsatReplayCommand.h"
@@ -122,6 +124,8 @@ int main(int argc, char *argv[])
         writeEarlyCrashLog("before-mainwindow");
 
         MainWindow w(guiConfig);
+        installDiagnosticsMenu(w);
+        installAntennaControlMenu(w);
 
         w.show();
 

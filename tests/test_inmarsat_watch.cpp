@@ -211,6 +211,8 @@ TEST_CASE("Aero watch multichannel throughput probe", "[.inmarsat-watch-benchmar
     for(int i=0;i<64;++i)session.process(iq,uint64_t(i)*iq.size(),sampleRate,session.centerHz(),false,i*iq.size()/sampleRate);
     auto r=session.report(64*iq.size()/sampleRate);
     REQUIRE(r["watch"]["channels"].size()==size_t(concurrent));
+    for(const auto& channel:r["watch"]["channels"])
+        std::cout<<"WATCH_STAGE "<<InmarsatDiagnostics::remotePayload(channel["decoder"]).dump()<<std::endl;
     r["watch"].erase("channels");r["watch"]["concurrent"]=concurrent;r["watch"]["sampleRate"]=sampleRate;
     std::cout<<"WATCH_BENCH "<<r["watch"].dump()<<std::endl;
     }
@@ -303,8 +305,11 @@ TEST_CASE("Aero workers drain failures and retain independent ordered timelines"
             const auto& c=cfg.channels[i];
             serial[i].process(iq.data(),iq.size(),start,96000,session.centerHz(),c.frequencyHz,c.mode(),false);
             auto expected=serial[i].report();auto actual=report["watch"]["channels"][i]["decoder"];
-            expected.erase("processingMs");expected.erase("maxBlockMs");
-            actual.erase("processingMs");actual.erase("maxBlockMs");
+            // Wall-clock observations differ; all RF/protocol outputs must match.
+            for(const char* key:{"processingMs","maxBlockMs","validationMs","setupMs","probeMs",
+                "channelizerMs","modemMs","loadRatio","lastBlockMs","overBudgetBlocks"}) {
+                expected.erase(key);actual.erase(key);
+            }
             REQUIRE(actual==expected);
             REQUIRE(session.displays()[i].id==c.id);
         }
@@ -354,8 +359,10 @@ TEST_CASE("Aero channel workers match serial decode of a supplied real IQ refere
             serial[i].process(block.samples.data(),block.samples.size(),block.startSample,rate,block.centerHz,
                 cfg.channels[i].frequencyHz,cfg.channels[i].mode(),block.discontinuity);
             auto expected=serial[i].report(),actual=report["watch"]["channels"][i]["decoder"];
-            expected.erase("processingMs");expected.erase("maxBlockMs");
-            actual.erase("processingMs");actual.erase("maxBlockMs");
+            for(const char* key:{"processingMs","maxBlockMs","validationMs","setupMs","probeMs",
+                "channelizerMs","modemMs","loadRatio","lastBlockMs","overBudgetBlocks"}) {
+                expected.erase(key);actual.erase(key);
+            }
             REQUIRE(actual==expected);
         }
     }

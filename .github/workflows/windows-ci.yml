@@ -23,6 +23,7 @@ jobs:
     env:
       VCPKG_DEFAULT_TRIPLET: x64-windows
       GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+      SDR_TOWN_DIAG_RELEASE_TOKEN: ${{ secrets.SDR_TOWN_DIAG_RELEASE_TOKEN }}
 
     steps:
       - name: Checkout
@@ -40,6 +41,10 @@ jobs:
         shell: pwsh
         run: |
           python scripts/test_verify_release.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/test_remote_diag_server.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/test_diagnostics_packaging.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Enforce frozen P25 pipeline
@@ -114,7 +119,9 @@ jobs:
           }
           if (-not $cc) { throw "Matching x64 MinGW GCC/G++/make required for published RDS support" }
           Write-Host "RDS toolchain: $cc"
+          $requireDiagnostics = if ($env:GITHUB_REF_NAME.StartsWith('release/')) { 'ON' } else { 'OFF' }
           cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+            "-DSDR_TOWN_REQUIRE_DIAGNOSTICS_TOKEN=$requireDiagnostics" `
             -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" `
@@ -161,7 +168,7 @@ jobs:
         shell: pwsh
         run: |
           cmake --build build --config Release `
-            --target SDR_Town sdr_town_tests sdr_town_workspace_tests inmarsat_live_gui_tests -j 4
+            --target SDR_Town sdr_town_tests sdr_town_workspace_tests inmarsat_live_gui_tests remote_diagnostics_tests antenna_control_tests -j 4
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run core unit tests
@@ -181,7 +188,7 @@ jobs:
       - name: Run SDRplay loader and Inmarsat lifecycle tests
         shell: pwsh
         run: |
-          ctest --test-dir build -C Release -R "SdrplayRuntime|SdrplayControlLifecycle|RtlBiasTLifecycle|InmarsatLiveGui|InmarsatHostLifecycle" --output-on-failure --no-tests=error
+          ctest --test-dir build -C Release -R "SdrplayRuntime|SdrplayControlLifecycle|RtlBiasTLifecycle|InmarsatLiveGui|InmarsatHostLifecycle|RemoteDiagnostics|AntennaControl" --output-on-failure --no-tests=error
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run Qt workspace and live-decoder tests
@@ -223,6 +230,13 @@ jobs:
           $stage = Join-Path $env:GITHUB_WORKSPACE "build/deploy_staging"
           $exe = Join-Path $stage "SDR_Town.exe"
           if (-not (Test-Path $exe)) { throw "deploy staging did not produce SDR_Town.exe" }
+          $diag = Get-Content (Join-Path $stage 'remote_diagnostics.defaults.json') -Raw | ConvertFrom-Json
+          if ($diag.enabled -ne $false -or $diag.url -ne 'https://gearsqueens.online/sdr-town-diag/ingest') {
+            throw 'Invalid opt-in diagnostics defaults'
+          }
+          if ($env:GITHUB_REF_NAME.StartsWith('release/') -and [string]::IsNullOrWhiteSpace($diag.token)) {
+            throw 'Release has no collector credential'
+          }
 
           $sstv = Join-Path $stage "sdrtown_sstv.exe"
           if (-not (Test-Path $sstv)) {
