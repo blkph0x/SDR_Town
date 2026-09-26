@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-09-26 - T-0071 shipped as experimental 0.2.106
+
+ff98664 published via successful master/release Windows and YAML workflows.
+Public archive provenance/checksums and shipped CLI/RDS/survey/GUI checks PASS.
+NFM clock software scope complete; no classifier or P25/WFM/HF algorithm edits.
+User-confirmed 0.2.105 remains available as reference. Physical listening and
+separate WFM/blocker/collector work remain open; see ISS-0037 and ISS-0035.
+
 ## 2026-09-26 - T-0071 NFM PCM repair locally qualified
 
 Preserved user-confirmed 0.2.105 baseline and auto-bandwidth behavior. Reproduced

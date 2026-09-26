@@ -1,5 +1,17 @@
 # Build notes
 
+## 2026-09-26 - T-0071 public release verified
+
+Source ff986642df8e32a5135df11ed7621b54506f5fa5. Windows release36240404038
+and master36240403829 SUCCESS; YAML36240404019 and36240403802 SUCCESS.
+Public experimental v0.2.106, not a draft; signed latest remains v0.2.96.
+Downloaded ZIP42,483,830 bytes; SHA256
+401f063c0c0c799ec6bb59cf4b78790f1710c0685e02384100bb95ababe15b06.
+Embedded source/version/run, executable and SDRplay module hashes verified.
+Public CLI help, SDRplay status, RDS reference and survey tests PASS; public
+GUI dry-run exit0, ok=true, no warnings/errors. Hardware reception/listening
+not inferred from smoke tests. Collector deployment remains ISS-0035.
+
 ## 2026-09-26 - T-0071 PCM reproduction and isolated repair
 
 Base b5cd608 / accepted app 80155ac (0.2.105). Actual PCM partition fixture

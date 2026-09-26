@@ -1,9 +1,12 @@
 # Task list (canonical)
 
-T-0071 | in progress | NFM PCM sample-clock continuity |
+T-0071 | done | NFM PCM sample-clock continuity |
 DEC-0143 / ISS-0037. Preserve the user-confirmed clear 0.2.105 baseline;
 characterize PCM partitions, then remove NFM-only block-sized interpolation
 and unavailable lookahead. Do not alter bandwidth/classifier/WFM/HF/P25.
+Source ff98664 / experimental v0.2.106 published. Local15/15 suites and PCM51
+assertions PASS; both Windows CI and YAML runs successful. Downloaded public
+hashes/provenance/CLI/RDS/survey/GUI smoke PASS. Physical acceptance remains open.
 
 T-0070 | done | NFM stream-boundary repair and bounded FM diagnostics |
 DEC-0142 / ISS-0037. Reproduce actual NFM tap count/waveform failures, repair
