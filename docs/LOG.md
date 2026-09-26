@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-09-27 - T-0079 WFM cause isolated
+
+Independent causal oracle confirms substantial blocker residue before decimation
+at high device rate. Longer FIR helps separated spectra but not overlapping wide
+FM; direct full-rate adoption rejected on arithmetic cost. Production repair
+must use a rate-efficient design with PCM/MPX and power-meter qualification.
+
 ## 2026-09-27 - T-0078 broader WFM reproduction
 
 Added reproducible bandwidth/deviation/image sweeps and validated JSON reports.

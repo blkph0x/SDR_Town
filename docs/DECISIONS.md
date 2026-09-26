@@ -1,5 +1,17 @@
 # Decisions
 
+## DEC-0151 - Isolate WFM leakage with an independent oracle (2026-09-27)
+
+T-0079: independently model the current 321-tap Kaiser coefficients, causal
+convolution, retained input positions and phase discriminator using NumPy FFT
+convolution. Compare blocker-only IQ before decimation, mixed vs clean
+discriminator, and clean vs delayed ideal FM. Candidate 2049/4097 taps at the
+same cutoff, beta for 80 dB, are experiments, not adopted settings. Qualify FFT
+convolution against direct convolution first; do not silently use installed
+SciPy (its version reports incompatibility with installed NumPy). No production
+or P25 change. A longer filter must not be shipped without real-time cost and
+full MPX/RDS/continuity qualification.
+
 ## DEC-0150 - Broaden WFM image characterization (2026-09-27)
 
 T-0078: measure actual demodulated IQ, not a replacement filter model. Sweep

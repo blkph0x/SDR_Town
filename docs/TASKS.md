@@ -1,5 +1,12 @@
 # Task list (canonical)
 
+T-0079 | done | Isolate WFM filter leakage and candidate response |
+DEC-0151. Independent causal oracle, pre-decimation leakage and clean-reference
+error; quantify candidate delay/cost before any production adoption.
+24 offline cases confirm pre-decimation blocker leakage. Longer candidate improves
+the 50 kHz deviation case but full-rate cost is unacceptable; no runtime adoption.
+See WFM_FILTER_ISOLATION.md. Rate-efficient implementation remains open.
+
 T-0078 | done | WFM bandwidth/deviation/image sweep |
 DEC-0150. Two 72-case sweeps reproduce closer-blocker corruption with identical
 signal metrics. Seven parser tests and 15/15 CTest suites PASS. Runtime unchanged;

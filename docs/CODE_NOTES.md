@@ -1,5 +1,12 @@
 # Code notes (tree map)
 
+## Independent WFM filter oracle (DEC-0151)
+
+scripts/analyze_wfm_filter.py: NumPy-only offline coefficient, causal convolution,
+pre-decimation IQ leakage and delayed-ideal discriminator comparison. No app
+mutation. scripts/test_wfm_filter_oracle.py verifies convolution and scaling.
+Report embeds source/dirty state, script hash and NumPy version.
+
 ## WFM image characterization (DEC-0150)
 
 tests/test_fm_benchmark.cpp adds opt-in [.wfm-image-sweep] through the real

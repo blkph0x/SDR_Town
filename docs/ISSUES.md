@@ -2,6 +2,12 @@
 
 ## ISS-0037 - FM chunk boundaries and sample lattice (2026-09-26, OPEN)
 
+T-0079 independent causal model isolates pre-decimation leakage: 10 MS/s,
+180 kHz, 50 kHz deviation, +40 dB blocker at +166078.43 Hz remains +14.16 dB
+above wanted after current FIR. 2049 taps reduce to -52.40 dB but require 6.38x
+full-rate tap arithmetic. Direct longer-FIR adoption rejected; staged/retained
+implementation and real PCM/MPX gates remain open. See WFM_FILTER_ISOLATION.md.
+
 T-0078: closer first-image offsets reproduce WFM corruption, unlike the prior
 limited matrix. Two identical 72-case signal runs. At 10 MS/s / 180 kHz /
 50 kHz deviation / -166078.43 Hz blocker: wanted loss 3.38 dB and PCM difference

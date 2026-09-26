@@ -1,5 +1,12 @@
 # Build notes
 
+## 2026-09-27 - T-0079 independent filter isolation
+
+Three oracle unit tests PASS; 24 offline cases complete with finite results.
+NumPy 2.0.2 on this Windows host; SciPy deliberately unused due version warning.
+Results in WFM_FILTER_ISOLATION.md. No C++ or runtime changes; no app rebuild
+required for the offline scripts. Longer full-rate candidate rejected for cost.
+
 ## 2026-09-27 - T-0078 WFM sweep
 
 Published test source f52275e. Windows CI 36279199045 and workflow validation
