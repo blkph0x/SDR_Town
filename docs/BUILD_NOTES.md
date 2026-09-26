@@ -2,6 +2,19 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - fubarzi PR 33 selective test integration (T-0065)
+
+MSVC 2022 Release native GUI/core test targets build PASS. Full local CTest:
+13/13 PASS in 41.02 s (build/pr33-build.log, build/pr33-ctest.log).
+Final explicit-include rebuild PASS (build/pr33-final-build.log).
+InmarsatLiveGui and SdrplayControlLifecycle repeated ten times each: all
+20 suite executions PASS in 27.28 s (build/pr33-repeat.log), including 50
+synthetic Inmarsat start/process/stop cycles. Zero-IQ generated no valid voice
+or PCM. Map test verifies painted-image retention after 750 messages evict the
+position from chronological history, plus explicit clear. Not an RF/audio test.
+Frozen P25 guard PASS. Only tests/docs changed; application version stays
+0.2.102. GitHub full Windows CI and PR closure are pending before completion.
+
 ## 2026-09-26 - Verified 0.2.102 public release
 
 Source 89a0067be09ec555ab7d00250e0a9167e9b3ba19. Windows release 36222945435

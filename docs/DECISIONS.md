@@ -1,5 +1,22 @@
 # Decisions
 
+## DEC-0137 - Selective fubarzi PR 33 test adoption (2026-09-26)
+
+T-0065. User authorized selective integration, full regression tests and PR
+closure. Retain our newer runtime and release state. Adopt the map-retention
+GUI regression from a06413d and the synthetic active-IQ start/stop idea from
+aa8c4d5, with attribution. Strengthen map coverage with rendered-image equality,
+actual chronological-ring eviction and clear behavior. Strengthen lifecycle
+coverage by waiting for processed IQ (bounded 10 s, matching the existing
+fixture startup budget), not assuming a fixed 50 ms sleep proves work occurred.
+Use silent synthetic IQ, no attached-device open/audio/network requirement.
+Five restart cycles follow the contributor fixture; sample delivery pauses
+10 ms per block to bound synthetic producer load (test policy, not RF timing).
+Do not import obsolete release edits, weaker position storage, or unqualified
+third-party DLL search paths; the current release bundles a matched SDRplay
+plugin and honors explicit plugin configuration. Tests/docs only, no application
+version or runtime change; push and await Windows CI before closing PR 33.
+
 ## DEC-0136 - Continuous in-band Aero and one RF viewport (2026-09-26)
 
 T-0064. The planner currently separates data and voice even when all enabled

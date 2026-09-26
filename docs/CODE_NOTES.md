@@ -1,5 +1,16 @@
 # Code notes (tree map)
 
+## Contributor regression coverage (DEC-0137 / T-0065)
+
+PR #33 from fubarzi supplies the busy-traffic map regression; its historical
+aa8c4d5 supplies the active-IQ SDRplay restart idea. Adapted tests prove actual
+map painting survives chronological eviction and clears with the store, plus
+five Inmarsat worker restarts consume synthetic IQ and restore live receiver
+ownership without producing frames/PCM from zeros. RAII cleanup covers failures.
+No production source, P25 pipeline, profile search paths or release version
+is changed. Third-party DLL discovery and obsolete cache/release edits are not
+adopted; the shipped matched driver/current validated cache remain authoritative.
+
 ## Continuous in-band Aero / RF viewport (DEC-0136, 0.2.102)
 
 InmarsatWatchConfig.simultaneousInBand persists with default true. Planner

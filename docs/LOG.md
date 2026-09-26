@@ -1,5 +1,14 @@
 # Development log
 
+## 2026-09-26 - Selected contributor regression tests
+
+DEC-0137 / T-0065: adapted fubarzi PR 33's GUI retention case and its historical
+aa8c4d5 active-IQ restart test. Added actual painting, chronological eviction,
+clear behavior, processed-sample checks and failure cleanup. Local full suite
+and ten-repeat GUI/lifecycle gate PASS. Runtime/source settings unchanged;
+obsolete contributor cache/release/DLL search changes deliberately not imported.
+Await Windows CI, then close PR with attribution and selected integration commit.
+
 ## 2026-09-26 - 0.2.102 delivered and publicly verified
 
 T-0064 complete: 89a0067, both Windows CI runs PASS, regular public release

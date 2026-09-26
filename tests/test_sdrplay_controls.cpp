@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "DeviceManager.h"
+#include "InmarsatEngine.h"
 #include "SdrplayControl.h"
 #ifdef HAVE_SOAPYSDR
 #include "SdrplayControlFixture.h"
@@ -153,6 +154,38 @@ TEST_CASE("SDRplay light discovery to real open controls restart and persistence
     CHECK(mgr.getDevices()[index].agcEnabled);
     CHECK(mgr.setLiveAntenna(index, "Antenna A", &error));
     CHECK(mgr.getDevices()[index].soapySettings.at("biasT_ctrl") == "false");
+    // DEC-0137: extend fubarzi's five-cycle test with proof of decoder input.
+    struct InmarsatCleanup {
+        DeviceManager& manager;size_t index;
+        ~InmarsatCleanup() {
+            InmarsatEngine::instance().stop();
+            manager.stopStreaming(index);
+            SdrplayControlFixture::produceSamples.store(false,std::memory_order_release);
+        }
+    } cleanup{mgr,index};
+    SdrplayControlFixture::produceSamples.store(true,std::memory_order_release);
+    auto& inmarsat=InmarsatEngine::instance();
+    auto config=InmarsatEngineConfig::defaults();
+    config.deviceIndex=index;config.deviceStableKey=mgr.getDevices()[index].stableKey;
+    config.playAudio=false;config.recordVoice=false;
+    REQUIRE(inmarsat.setConfig(config));
+    for(int cycle=0;cycle<5;++cycle) {
+        CAPTURE(cycle);
+        REQUIRE(inmarsat.start(true));
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+        while(std::chrono::steady_clock::now()<deadline &&
+              inmarsat.snapshot().diagnostics.value("samples",uint64_t{0})==0)
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        const auto snapshot=inmarsat.snapshot();
+        CHECK(snapshot.deviceConnected);
+        CHECK(snapshot.diagnostics.value("samples",uint64_t{0})>0);
+        CHECK(snapshot.validatedFrames==0);CHECK(snapshot.voiceFrames==0);
+        CHECK(snapshot.diagnostics.value("pcmSamples",uint64_t{0})==0);
+        inmarsat.stop();
+        CHECK(inmarsat.snapshot().state==InmarsatEngineState::Idle);
+        CHECK(mgr.isStreaming(index));
+        CHECK(mgr.getRuntimeStateLabel(index)=="live hardware");
+    }
     mgr.stopStreaming(index);
 }
 #endif

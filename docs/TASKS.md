@@ -1,5 +1,10 @@
 # Task list (canonical)
 
+T-0065 | in_progress | Selective fubarzi PR 33 integration |
+DEC-0137. Adopt and strengthen map GUI and synthetic SDRplay/Inmarsat lifecycle
+coverage without runtime changes. Run complete local/CI gates, then close PR
+with attribution and exact disposition. Do not reuse contributor T-0064 ID.
+
 T-0064 | done | Continuous in-band Aero and spectrum navigation |
 DEC-0136. Combine data/voice when the whole watch fits RF and CPU budgets;
 retain scheduled fallback. Add aligned mouse zoom/pan and regression tests.

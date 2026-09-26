@@ -1,6 +1,8 @@
 #include "InmarsatWidget.h"
 #include "InmarsatEngine.h"
 #include "InmarsatDiagnostics.h"
+#include "InmarsatMapWidget.h"
+#include "InmarsatMessageStore.h"
 #include "DeviceManager.h"
 #include "SatcomHostServices.h"
 #include <catch2/catch_session.hpp>
@@ -25,6 +27,7 @@
 #include <QTimer>
 #include <QElapsedTimer>
 #include <iostream>
+#include <algorithm>
 #include <stdexcept>
 
 #ifdef HAVE_SOAPYSDR
@@ -136,6 +139,36 @@ TEST_CASE("Opening Inmarsat preserves saved voice and burst selection", "[inmars
         CHECK(widget.findChild<QComboBox*>("inmarsatDecoder")->currentData().toInt() == rate);
         CHECK(widget.findChild<QDoubleSpinBox*>("inmarsatFrequencyMHz")->value() == cfg.channelHz/1e6);
     }
+}
+
+TEST_CASE("Inmarsat live map retains rendered aircraft through busy traffic", "[inmarsat][gui][map]") {
+    // DEC-0137: adapted from fubarzi PR #33; exercise the store-to-painter chain.
+    auto& store=InmarsatMessageStore::instance();store.clear();
+    struct ClearStore { ~ClearStore(){InmarsatMessageStore::instance().clear();} } cleanup;
+    REQUIRE(InmarsatEngine::instance().setConfig(InmarsatEngineConfig::defaults()));
+    InmarsatWidget widget;
+    auto* map=widget.findChild<InmarsatMapWidget*>("inmarsatMap");REQUIRE(map);
+    map->resize(720,360);
+    REQUIRE(QMetaObject::invokeMethod(&widget,"refreshUi"));
+    REQUIRE(map->aircraftCount()==0);
+    const auto empty=map->grab().toImage();REQUIRE_FALSE(empty.isNull());
+    InmarsatMessage position;position.kind=InmarsatMsgKind::Acars;position.validated=true;
+    position.hasPosition=true;position.aesId=0x123456;position.latDeg=-34.4;position.lonDeg=150.9;
+    store.push(position);
+    REQUIRE(QMetaObject::invokeMethod(&widget,"refreshUi"));
+    REQUIRE(map->aircraftCount()==1);
+    const auto populated=map->grab().toImage();REQUIRE(populated!=empty);
+    for(size_t i=0;i<750;++i) {
+        InmarsatMessage traffic;traffic.kind=InmarsatMsgKind::Su;traffic.validated=true;
+        traffic.aesId=static_cast<uint32_t>(i+1);store.push(std::move(traffic));
+    }
+    const auto recent=store.recent(1000);REQUIRE(recent.size()==500);
+    REQUIRE(std::none_of(recent.begin(),recent.end(),[](const auto& m){return m.hasPosition;}));
+    REQUIRE(QMetaObject::invokeMethod(&widget,"refreshUi"));
+    REQUIRE(map->aircraftCount()==1);
+    CHECK(map->grab().toImage()==populated);
+    store.clear();REQUIRE(QMetaObject::invokeMethod(&widget,"refreshUi"));
+    CHECK(map->aircraftCount()==0);CHECK(map->grab().toImage()==empty);
 }
 
 TEST_CASE("Inmarsat Start applies visible voice frequency without needing Tune", "[inmarsat][gui]") {
