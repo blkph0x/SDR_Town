@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-09-26 - T-0072 published
+
+Auto BW switch delivered as v0.2.107 experimental, source2133b44. Full local and
+CI gates passed; downloaded executable/provenance and smoke tests passed.
+Existing clear NFM/P25 algorithms unchanged. Next WFM repair has an explicit
+failing opt-in characterization, not an inferred success or hidden release gate.
+
 ## 2026-09-26 - T-0072 Auto BW and next WFM evidence
 
 Added persistent global monitor Auto BW policy across automatic mode, band-plan,

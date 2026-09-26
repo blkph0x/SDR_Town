@@ -1,5 +1,17 @@
 # Build notes
 
+## 2026-09-26 - T-0072 public release verified
+
+Source2133b44, v0.2.107. Windows release36242577020/master36242576898 SUCCESS;
+YAML release36242577024/master36242576895 SUCCESS. Public portable prerelease:
+https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.107
+Downloaded archive SHA256:
+4a0ccbc7e59aa75aab0c495b613f0efb2688ba84dff76eb037e0269cd463e80d.
+Embedded source/version/workflow and executable/SDRplay module hashes verified.
+Downloaded CLI help/status, Inmarsat survey, RDS references and GUI startup PASS;
+GUI exit0, ok=true, empty errors/warnings. Transient local network lookup failure
+recovered; release metadata update retried successfully. No RF listening claim.
+
 ## 2026-09-26 - T-0072 local Auto BW gates
 
 Release app/native/workspace build PASS. Checkbox Qt fixture18 assertions PASS:

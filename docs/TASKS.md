@@ -1,9 +1,12 @@
 # Task list (canonical)
 
-T-0072 | in progress | Global monitor Auto BW control |
+T-0072 | done | Global monitor Auto BW control |
 DEC-0144. Persistent checkbox gates automatic bandwidth in all monitor modes,
 including classifier/band-plan/mode/remote paths. Test policy and persistence;
 preserve explicit widths and P25 protocol setup. Then continue WFM evidence.
+Source2133b44 / experimental v0.2.107 published; local15/15, Qt18 assertions,
+both Windows and YAML CI successful; public hashes/provenance/CLI/RDS/GUI PASS.
+WFM evidence now recorded in ISS-0037; its DSP repair remains separate work.
 
 T-0071 | done | NFM PCM sample-clock continuity |
 DEC-0143 / ISS-0037. Preserve the user-confirmed clear 0.2.105 baseline;
