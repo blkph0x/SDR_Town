@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-09-26 - Current tester download matches local application source
+
+Rebuilt local Release and passed 13/13 tests. Public v0.2.102 has identical
+application source to 5724777; subsequent commits are tests/docs only. Current
+public asset digest matches the previously verified downloaded ZIP. Fresh
+download/execute command was policy-blocked; no new smoke-pass claimed.
+No runtime edits or new version; direct tester ZIP remains v0.2.102.
+
 ## 2026-09-26 - Contributor integration complete
 
 T-0065 complete in 9237e77, co-authored credit to fubarzi. Windows CI

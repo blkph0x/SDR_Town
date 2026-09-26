@@ -2,6 +2,25 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - Tester release parity recheck
+
+At local HEAD 5724777, git diff v0.2.102..HEAD changes only tests and docs;
+src/include/external/data/CMakeLists.txt/cmake are identical. Local Release
+SDR_Town target rebuild PASS; full CTest 13/13 in 38.84 s
+(build/release-parity-build.log, build/release-parity-ctest.log).
+GitHub v0.2.102 remains public, regular, with the 42,420,596-byte ZIP and checksum.
+Current GitHub asset digest matches the independently rehashed previously
+verified ZIP: 3e9f9aafcb46c0e7f0f3061c784c286879aff27848313b11f619d56a45e9dfc5.
+Extracted executable hash matches embedded provenance. Release CI 36222945435
+and latest test integration CI 36224393076 both remain successful.
+A new combined download/extract/execute verification command was blocked by
+the execution policy and was not retried. This recheck uses the current GitHub
+digest against the previously downloaded and smoke-tested package, not a new
+download/smoke claim. Local and CI toolchains need not yield identical EXE bytes;
+application source parity is proven, not reproducible-binary identity.
+No duplicate application release is needed. v0.2.102 is the newest portable
+tester release; GitHub latest remains v0.2.96 for signed-installer updater safety.
+
 ## 2026-09-26 - fubarzi PR 33 selective test integration (T-0065)
 
 Final integration source: 9237e7747c79f19a9e8eadc20338e0c7e70108b4.
