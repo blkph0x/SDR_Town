@@ -1,5 +1,16 @@
 # Issues (canonical)
 
+## ISS-0037 - FM chunk boundaries and sample lattice (2026-09-26, OPEN)
+
+DEC-0141 / DSP_AUDIT_20260926.md. NFM second-stage and WFM speech decimators
+restart at index zero per call. Centred speech FIRs omit future block input;
+short NFM blocks do not advance FIR history. Final fixed-count resampling can
+mask sample-accounting errors. Source evidence and exact stage-count example
+are in the audit, not yet an end-to-end audible reproduction. Existing 15/15
+tests pass but FM coverage does not establish high-rate partition invariance.
+Add actual pipeline characterization before isolated fixes. Preserve P25 and
+existing WFM/RDS acceptance; do not change shared protected files casually.
+
 ## ISS-0036 - Rotator physical acceptance (2026-09-26, OPEN)
 
 DEC-0140 uses the documented Hamlib ERP bridge for ten named controller

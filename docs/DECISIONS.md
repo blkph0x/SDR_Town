@@ -1,5 +1,17 @@
 # Decisions
 
+## DEC-0141 - Characterize analogue stream boundaries before redesign (2026-09-26)
+
+Review the supplied DSP write-up against source baseline 09cc9dd (application
+25236d2). Do not adopt proposed CIC orders, HF tap counts, CTCSS thresholds or
+P25 live streaming defaults without measurements. Demod.cpp contains block-local
+downsample phases and centred convolution with missing future input. First gate
+for a later repair is whole-stream versus irregular-block equivalence, followed
+by adjacent-channel rejection and decoder fixtures. This pass is documentation
+only: preserve every production/test source and the frozen P25 guard.
+See DSP_AUDIT_20260926.md for evidence and limits. Publication of the audit does
+not require a new executable or change the current release.
+
 ## DEC-0140 - Rotator bridge and honest SWR (2026-09-26)
 
 Use existing Qt Network, no new linked dependency. Connect to a user-installed

@@ -1,5 +1,12 @@
 # Task list (canonical)
 
+T-0069 | done | Evidence review of proposed DSP improvements |
+DEC-0141. Audit the supplied write-up against current source and baseline tests;
+record confirmed defects separately from unmeasured proposals. No receiver DSP
+or P25 changes. DSP_AUDIT_20260926.md records findings, all 15 baseline suites
+passing, calculated sample-count mismatch and the ordered repair gates.
+Implementation remains future work under ISS-0037; this closes the audit only.
+
 T-0068 | done | Hamlib rotator control and hardware SWR monitoring |
 DEC-0140. Separate window/menu, bounded asynchronous protocol, saved limits,
 explicit arm/stop, real position feedback and read-only SWR. Hardware acceptance

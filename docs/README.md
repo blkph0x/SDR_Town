@@ -1,5 +1,9 @@
 # SDR Town tracking desk
 
+DSP proposal review: [2026-09-26 evidence audit](DSP_AUDIT_20260926.md).
+Confirmed FM block-boundary issues, proposal corrections and non-regression gates;
+documentation only, accepted receiver paths unchanged.
+
 In-tree trackers are canonical. GitHub issues/PRs are a public mirror.
 
 Current baseline review: [2026-09-24 audit and repair plan](AUDIT_20260924.md).

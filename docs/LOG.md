@@ -1,5 +1,14 @@
 # Development log
 
+## 2026-09-26 - DSP proposal evidence review
+
+T-0069 / DEC-0141 / ISS-0037. Read supplied proposal and inspected analogue,
+decoder-tap, HF, registry and Inmarsat contracts. Recorded FM phase/history
+defects, insufficient existing FM boundary coverage, incorrect/risky proposed
+changes and staged characterization/repair gates. Full 15-test baseline passes;
+no production or test source changes. Audit is not an application update and
+does not certify field reception or require a new release executable.
+
 ## 2026-09-26 - Rotor milestone published and verified
 
 Source 25236d2 / public v0.2.104 delivered after passing master/release Windows

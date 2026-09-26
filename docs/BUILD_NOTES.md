@@ -1,5 +1,16 @@
 # Build notes
 
+## 2026-09-26 - T-0069 read-only DSP baseline
+
+Windows host, existing MSVC Release build; source 09cc9dd / app 25236d2.
+`ctest --test-dir build -C Release --output-on-failure`: 15/15 PASS, 46.48 s.
+No recompilation or live RF acceptance claimed. All production/test files
+unchanged. PowerShell calculation matching C++ round(sr/target) at 2.4 MS/s:
+M1=13, M2=4, rate=46153.8461538462; whole 16384 input =>315 stage-two samples,
+two 8192 inputs =>316. Boxcar response at fs/13+1500 Hz: -41.7886708 dB.
+These are isolated stage calculations, not measured final receiver audio.
+Full evidence and follow-up gates: DSP_AUDIT_20260926.md.
+
 Newest entry at the top. Record facts, not hopes.
 
 ## 2026-09-26 - 0.2.104 public asset verified
