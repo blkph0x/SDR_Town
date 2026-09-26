@@ -22,10 +22,33 @@ TEST_CASE("Aero watch settings are bounded and round trip", "[inmarsat][watch]")
     SECTION("duplicate ID") {c.channels[1].id=c.channels[0].id;REQUIRE_THROWS(c.validate());}
     SECTION("duplicate frequency and rate") {c.channels[1].frequencyHz=c.channels[0].frequencyHz;c.channels[1].rate=10500;REQUIRE_THROWS(c.validate());}
     SECTION("invalid rate") {c.channels[1].rate=4800;REQUIRE_THROWS(c.validate());}
+    SECTION("expanded concurrency") {c.maxConcurrentChannels=16;REQUIRE_NOTHROW(c.validate());}
+    SECTION("unbounded concurrency") {c.maxConcurrentChannels=17;REQUIRE_THROWS(c.validate());}
     SECTION("nonfinite") {c.channels[1].frequencyHz=std::numeric_limits<double>::quiet_NaN();REQUIRE_THROWS(c.validate());}
     SECTION("invalid timing") {c.maxVoiceSeconds=10;REQUIRE_THROWS(c.validate());}
     SECTION("invalid JSON") {REQUIRE_THROWS(InmarsatWatchConfig::fromJson({{"channels",false}}));}
     SECTION("empty selection") {for(auto& ch:c.channels)ch.enabled=false;REQUIRE_THROWS(planInmarsatWatch(c,2e6));}
+}
+
+TEST_CASE("Aero map retains validated latest positions beyond message history", "[inmarsat][watch]") {
+    auto& store=InmarsatMessageStore::instance();store.clear();
+    InmarsatMessage position;position.aesId=1;position.validated=true;position.hasPosition=true;
+    position.unixTime=100;position.latDeg=-34;position.lonDeg=151;
+    store.push(position);
+    for(int i=0;i<600;++i)store.push(InmarsatMessage{});
+    REQUIRE(store.recent(1000).size()==500);REQUIRE(store.positions().size()==1);
+    CHECK(store.positions()[0].unixTime==100);
+    position.unixTime=99;position.latDeg=-35;store.push(position);
+    CHECK(store.positions()[0].latDeg==-34);
+    position.unixTime=101;store.push(position);CHECK(store.positions()[0].latDeg==-35);
+    position.aesId=2;position.validated=false;store.push(position);
+    position.validated=true;position.latDeg=91;store.push(position);
+    CHECK(store.positions().size()==1);
+    position.latDeg=-34;
+    for(uint32_t id=2;id<=300;++id) {position.aesId=id;position.unixTime=100+id;store.push(position);}
+    REQUIRE(store.positions().size()==256);
+    CHECK(store.positions().front().aesId==45);
+    store.clear();CHECK(store.positions().empty());CHECK(store.recent().empty());
 }
 TEST_CASE("Aero watch grouping preserves full channels and separates roles", "[inmarsat][watch]") {
     auto c=example();c.channels.clear();
@@ -48,7 +71,7 @@ TEST_CASE("Aero watch target counts distinct current visit aircraft", "[inmarsat
     InmarsatWatchSchedule s(c,2e6,100);
     s.position(1);s.position(1);s.position(0);
     REQUIRE(s.report(110)["visitPositions"]==1);REQUIRE_FALSE(s.advance(110));
-    s.position(2);REQUIRE(s.advance(111));REQUIRE(s.group().voice);
+    s.position(2);s.validatedData("data",110);REQUIRE(s.advance(111));REQUIRE(s.group().voice);
     REQUIRE(s.report(111)["collection"]=="target reached");
     s.position(3);REQUIRE(s.report(111)["visitPositions"]==2);
     REQUIRE_FALSE(s.advance(122));REQUIRE(s.advance(123));
@@ -69,8 +92,8 @@ TEST_CASE("Aero watch visits multiple groups without cross visit stale counts", 
     c.channels.push_back({"data2","",1550e6,600,true});
     c.channels.push_back({"voice2","",1551e6,8400,true});
     InmarsatWatchSchedule s(c,96000,0);
-    s.position(1);REQUIRE(s.advance(10));REQUIRE_FALSE(s.group().voice);
-    REQUIRE_FALSE(s.advance(19));REQUIRE(s.advance(20));REQUIRE(s.group().voice);
+    s.position(1);s.validatedData("data",9);REQUIRE(s.advance(10));REQUIRE_FALSE(s.group().voice);
+    REQUIRE_FALSE(s.advance(19));s.validatedData("data2",19);REQUIRE(s.advance(20));REQUIRE(s.group().voice);
     REQUIRE(s.advance(32));REQUIRE(s.group().channels[0].id=="voice2");
     REQUIRE(s.advance(44));REQUIRE_FALSE(s.group().voice);
     REQUIRE(s.report(44)["visitPositions"]==0);
@@ -104,8 +127,8 @@ TEST_CASE("Aero watch telemetry excludes frequencies and aircraft identifiers", 
 
 TEST_CASE("Aero watch multichannel throughput probe", "[.inmarsat-watch-benchmark]") {
     auto c=example();c.channels.clear();
-    for(int i=0;i<4;++i)c.channels.push_back({std::to_string(i),"",1542e6+i*25000,8400,true});
-    for(int concurrent:{1,2,4}) {
+    for(int i=0;i<16;++i)c.channels.push_back({std::to_string(i),"",1542e6+i*25000,8400,true});
+    for(int concurrent:{1,2,4,8,16}) {
     c.maxConcurrentChannels=concurrent;
     InmarsatWatchSession session(c,2048000,0,{},{},{});
     std::vector<std::complex<float>> iq(65536,{0.01f,0.02f});
@@ -115,6 +138,39 @@ TEST_CASE("Aero watch multichannel throughput probe", "[.inmarsat-watch-benchmar
     r["watch"].erase("channels");r["watch"]["concurrent"]=concurrent;
     std::cout<<"WATCH_BENCH "<<r["watch"].dump()<<std::endl;
     }
+}
+
+TEST_CASE("Aero wide groups require majority data evidence before early voice", "[inmarsat][watch]") {
+    auto c=example();c.maxConcurrentChannels=16;c.positionTarget=2;c.channels.clear();
+    for(int i=0;i<8;++i)c.channels.push_back({"d"+std::to_string(i),"",1545e6+i*12500,10500,true});
+    for(int i=0;i<8;++i)c.channels.push_back({"v"+std::to_string(i),"",1543e6+i*12500,8400,true});
+    const auto groups=planInmarsatWatch(c,2e6);
+    REQUIRE(groups.size()==2);REQUIRE(groups[0].channels.size()==8);REQUIRE(groups[1].channels.size()==8);
+    InmarsatWatchSchedule s(c,2e6,0);
+    s.position(1);s.position(2);
+    s.validatedData("not-a-channel",5);
+    REQUIRE(s.report(10)["validatedDataChannels"]==0);
+    for(int i=0;i<4;++i)s.validatedData("d"+std::to_string(i),9);
+    REQUIRE_FALSE(s.report(10)["dataReady"].get<bool>());
+    REQUIRE_FALSE(s.advance(10)); // Half is not a majority.
+    s.validatedData("d4",10);
+    REQUIRE(s.report(10)["dataReady"]==true);
+    REQUIRE(s.advance(10));REQUIRE(s.group().voice);
+    REQUIRE(s.report(10)["validatedDataChannels"]==0);
+    REQUIRE(s.advance(22));REQUIRE_FALSE(s.group().voice);
+    REQUIRE(s.report(22)["visitPositions"]==0);
+    REQUIRE(s.report(22)["validatedDataChannels"]==0);
+    s.position(1);s.position(2);
+    REQUIRE_FALSE(s.advance(32)); // Old visit's locks cannot shorten this visit.
+    REQUIRE(s.advance(52)); // Deadline is still bounded, even if channels are quiet.
+    REQUIRE(s.report(52)["collection"]=="partial refresh");
+}
+
+TEST_CASE("Aero data evidence expires rather than counting stale channels", "[inmarsat][watch]") {
+    auto c=example();c.positionTarget=1;
+    InmarsatWatchSchedule s(c,2e6,0);s.position(1);s.validatedData("data",0);
+    REQUIRE(s.report(10)["dataReady"]==true);
+    REQUIRE(s.report(31)["dataReady"]==false);
 }
 
 TEST_CASE("Aero watch speaker stays on one conversation until idle", "[inmarsat][watch]") {

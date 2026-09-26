@@ -16,7 +16,8 @@ InmarsatDemodMode InmarsatWatchChannel::mode() const {
 
 void InmarsatWatchConfig::validate() const {
     if(channels.size()>32) throw std::invalid_argument("Watch list is limited to 32 channels");
-    if(maxConcurrentChannels<1 || maxConcurrentChannels>4)throw std::invalid_argument("Concurrent decoders must be 1 to 4");
+    if(maxConcurrentChannels<1 || maxConcurrentChannels>kMaxConcurrentChannels)
+        throw std::invalid_argument("Concurrent decoders must be 1 to " + std::to_string(kMaxConcurrentChannels));
     std::set<std::string> ids;
     std::set<std::pair<double,int>> frequencies;
     for(const auto& c:channels) {
@@ -115,11 +116,26 @@ InmarsatWatchSchedule::InmarsatWatchSchedule(InmarsatWatchConfig cfg,double rate
 void InmarsatWatchSchedule::position(uint32_t aes) {
     if(!group().voice && aes && positions_.size()<256) positions_.insert(aes);
 }
+void InmarsatWatchSchedule::validatedData(const std::string& id,double now) {
+    if(group().voice || !std::isfinite(now))return;
+    if(std::any_of(group().channels.begin(),group().channels.end(),[&](const auto& c){return c.id==id;}))
+        dataEvidence_[id]=now;
+}
+size_t InmarsatWatchSchedule::freshDataChannels(double now) const {
+    size_t count=0;
+    for(const auto& c:group().channels) {
+        const auto it=dataEvidence_.find(c.id);
+        if(it!=dataEvidence_.end() && now>=it->second && now-it->second<=cfg_.dataDwellSeconds)++count;
+    }
+    return count;
+}
 void InmarsatWatchSchedule::speech(double now) { if(group().voice){lastSpeech_=now;heardSpeech_=true;} }
 bool InmarsatWatchSchedule::advance(double now) {
     size_t next=index_;
     if(!group().voice) {
-        const bool target=positions_.size()>=size_t(cfg_.positionTarget);
+        // DEC-0135: map population alone cannot prove most current channels work.
+        const bool target=positions_.size()>=size_t(cfg_.positionTarget) &&
+            freshDataChannels(now)*2>group().channels.size();
         if(now-entered_<(target?cfg_.dataMinSeconds:cfg_.dataDwellSeconds)) return false;
         next=index_+1;
         if(next==dataCount_) {
@@ -140,7 +156,7 @@ bool InmarsatWatchSchedule::advance(double now) {
         }
     }
     if(next==0) {positions_.clear(); if(dataCount_) collection_="refreshing";}
-    entered_=now;lastSpeech_=now;heardSpeech_=false;
+    entered_=now;lastSpeech_=now;heardSpeech_=false;dataEvidence_.clear();
     if(next==index_) return false; // Single-role/single-group: no unnecessary DSP reset.
     index_=next;
     return true;
@@ -149,7 +165,11 @@ nlohmann::json InmarsatWatchSchedule::report(double now) const {
     return {{"phase",group().voice?"voice":"positions"},{"group",index_+1},{"groups",groups_.size()},
         {"visitPositions",positions_.size()},{"positionTarget",cfg_.positionTarget},{"collection",collection_},
         {"reason",reason_},{"groupSeconds",std::max(0.0,now-entered_)},
-        {"refreshDue",group().voice && dataCount_>0 && now-voiceStarted_>=cfg_.refreshSeconds}};
+        {"refreshDue",group().voice && dataCount_>0 && now-voiceStarted_>=cfg_.refreshSeconds},
+        {"validatedDataChannels",group().voice?size_t{0}:freshDataChannels(now)},
+        {"dataChannels",group().voice?size_t{0}:group().channels.size()},
+        {"dataReady",!group().voice && positions_.size()>=size_t(cfg_.positionTarget) &&
+            freshDataChannels(now)*2>group().channels.size()}};
 }
 
 struct InmarsatWatchSession::Channel {
@@ -160,6 +180,7 @@ struct InmarsatWatchSession::Channel {
     std::vector<int16_t> pcm;
     uint32_t aes=0;
     uint64_t speechFrames=0;
+    uint64_t validatedFrames=0;
     bool speech=false;
     struct Input {
         std::span<const std::complex<float>> iq;
@@ -256,6 +277,10 @@ void InmarsatWatchSession::process(std::span<const std::complex<float>> iq,uint6
     for(auto& c:channels_) {auto error=c->wait();if(error&&!failure)failure=error;}
     if(failure)std::rethrow_exception(failure);
     for(auto& c:channels_) {
+        const auto validated=c->report.value("validatedFrames",uint64_t{0});
+        if(!c->config.voice() && validated>c->validatedFrames)
+            schedule_.validatedData(c->config.id,now);
+        c->validatedFrames=validated;
         for(const auto& m:c->messages) {
             if(m.validated && m.hasPosition)schedule_.position(m.aesId);
             if(messageSink_)messageSink_(m);

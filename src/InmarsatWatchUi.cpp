@@ -70,7 +70,7 @@ QWidget* InmarsatWidget::buildWatchUi() {
     voiceIdle_=spin("Voice idle hold (s)","inmarsatVoiceIdle",1,120,4);
     refreshInterval_=spin("Refresh interval (s)","inmarsatRefresh",10,3600,5);
     maxVoice_=spin("Maximum voice visit (s)","inmarsatMaxVoice",10,7200,6);
-    watchConcurrent_=spin("Concurrent decoders","inmarsatWatchConcurrent",1,4,7);
+    watchConcurrent_=spin("Concurrent decoders","inmarsatWatchConcurrent",1,InmarsatWatchConfig::kMaxConcurrentChannels,7);
     auto* save=new QPushButton(style()->standardIcon(QStyle::SP_DialogSaveButton),"Save timing");
     save->setObjectName("inmarsatWatchSave");grid->addWidget(save,5,2);editors->addLayout(grid);
     root->addWidget(watchEditors_,3);
@@ -150,6 +150,10 @@ void InmarsatWidget::updateWatchUi(bool running,const nlohmann::json& report) {
             .arg(QString::fromStdString(w.value("collection",std::string{})))
             .arg(w.value("refreshDue",false)?"Refresh pending while voice active":QString::fromStdString(w.value("reason",std::string{}))));
         const auto load=w.value("loadRatio",0.0);
+        if(w.value("phase",std::string{})=="positions")
+            watchStatus_->setText(watchStatus_->text()+QString(" | Valid data channels: %1/%2%3")
+                .arg(w.value("validatedDataChannels",0)).arg(w.value("dataChannels",0))
+                .arg(w.value("dataReady",false)?" - ready":""));
         watchStatus_->setText(watchStatus_->text()+QString(" | Processing: %1x RF time%2")
             .arg(load,0,'f',2).arg(load>=1?" - OVERLOADED":""));
     }

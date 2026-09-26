@@ -1,5 +1,28 @@
 # Decisions
 
+## DEC-0135 - Multi-SDR sessions and evidence-based Aero collection (2026-09-26)
+
+User requires independently assigned radios across modes, including P25 and two
+Inmarsat roles. Audit: one global DeviceManager lease, one GUI takeover record,
+one singleton Inmarsat IQ cursor/worker prevent that. Do not disguise this by
+relaxing P25 ownership checks. Design and acceptance: MULTI_SDR_SESSIONS.md.
+First independently deliverable step: expose up to 16 concurrent Aero workers
+within the existing 32-channel saved-list bound. Existing saved limits remain;
+default stays conservative until broad hardware load evidence exists. Capacity
+is a user resource budget, not an RF/protocol guarantee. Measure 2/4/8/16 workers.
+Early data-to-voice transition needs both distinct validated positions and fresh
+CRC-valid data from a strict majority of the current group's channels. The
+existing dwell deadline still permits an explicitly partial collection rather
+than waiting forever for quiet channels. Never infer the active aircraft from
+frequency/nearest position. Shared ownership migration is a separate acceptance
+gate, not part of this isolated scheduler change.
+
+Same audit found the live map rebuilt from recent(500), so unrelated message
+traffic evicted valid positions. Maintain a separate bounded latest-position
+cache keyed by validated AES, reject malformed/older updates, preserve receipt
+age and clear with the store. The 256-entry bound matches the existing native
+position cache. This is live-session state, not invented aircraft identification.
+
 ## DEC-0134 - Constellation identity follows explicit manual tuning (2026-09-26)
 
 T-0061 / ISS-0030. Manual engine snapshots publish an empty decoder ID, while

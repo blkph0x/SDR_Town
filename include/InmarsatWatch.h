@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 #include <functional>
 #include <memory>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -19,6 +20,7 @@ struct InmarsatWatchChannel {
 };
 
 struct InmarsatWatchConfig {
+    static constexpr int kMaxConcurrentChannels = 16; // DEC-0135 resource budget, not RF capacity.
     bool enabled = false;
     std::vector<InmarsatWatchChannel> channels;
     int maxConcurrentChannels = 2; // DEC-0124 measured live-input headroom.
@@ -44,6 +46,7 @@ public:
     size_t index() const { return index_; }
     size_t groupCount() const { return groups_.size(); }
     void position(uint32_t aes); // Only current-visit, CRC-validated positions.
+    void validatedData(const std::string& channelId, double now);
     void speech(double now);
     bool advance(double now); // True requires confirmed retune before more IQ.
     nlohmann::json report(double now) const;
@@ -54,6 +57,8 @@ private:
     double entered_ = 0, voiceStarted_ = 0, lastSpeech_ = 0;
     bool heardSpeech_ = false;
     std::set<uint32_t> positions_;
+    std::map<std::string,double> dataEvidence_;
+    size_t freshDataChannels(double now) const;
     std::string reason_ = "Initial collection", collection_ = "pending";
 };
 

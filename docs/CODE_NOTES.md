@@ -1,5 +1,18 @@
 # Code notes (tree map)
 
+## Aero channel budget/readiness (DEC-0135, 0.2.101)
+
+InmarsatWatchConfig defines a shared UI/validation bound of 16 concurrent
+decoders. Planner still groups by role and actual sample-rate/filter margin.
+InmarsatWatchSchedule accepts current-group CRC progress and expires it after
+dataDwellSeconds. Early transition requires strict majority plus positionTarget;
+deadline fallback remains explicit partial/no-position collection. Worker results
+feed evidence only after the job barrier. Per-source multi-SDR migration remains
+T-0062, documented in MULTI_SDR_SESSIONS.md, not implemented in this change.
+InmarsatMessageStore separately retains the latest validated position per AES,
+bounded to 256 entries and evicting oldest receipt when full. The live map uses
+positions(), not the 500-message presentation log. Replay remains independent.
+
 ## Constellation identity (DEC-0134, 0.2.100)
 
 InmarsatWidget successful manual tuning releases pinned watch UUID selection.

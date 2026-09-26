@@ -411,6 +411,21 @@ TEST_CASE("Inmarsat visual history advances only for fresh RF and clears on retu
     scatter.setChannel(nullptr);REQUIRE(scatter.pointCount()==0);
 }
 
+TEST_CASE("Aero GUI saves the expanded decoder budget", "[inmarsat][gui]") {
+    auto& engine=InmarsatEngine::instance();
+    REQUIRE(engine.setConfig(InmarsatEngineConfig::defaults()));
+    {
+        InmarsatWidget widget;
+        auto* budget=widget.findChild<QSpinBox*>("inmarsatWatchConcurrent");
+        REQUIRE(budget);CHECK(budget->maximum()==16);
+        budget->setValue(16);
+        widget.findChild<QPushButton*>("inmarsatWatchSave")->click();
+        CHECK(engine.config().watch.maxConcurrentChannels==16);
+    }
+    InmarsatWidget reopened;
+    CHECK(reopened.findChild<QSpinBox*>("inmarsatWatchConcurrent")->value()==16);
+}
+
 TEST_CASE("Manual Aero tuning releases a pinned watch constellation", "[inmarsat][gui]") {
     auto& engine=InmarsatEngine::instance();
     auto cfg=InmarsatEngineConfig::defaults();

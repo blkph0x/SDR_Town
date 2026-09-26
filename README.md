@@ -1,13 +1,15 @@
 # SDR Town
 
-**[Download 0.2.100 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.100)**
+**[Download 0.2.101 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.101)**
 includes a matched SDRplay plugin and corrected, dated Inmarsat frequency/rate
 presets. Install the official SDRplay API 3.15+ and service separately. Extract
 the entire ZIP into a fresh folder. RTL bias-T is in Device Manager after
 selecting the RTL device. This is not a signed installer/in-app updater package.
 Changing the Aero rate now selects a matching satellite survey frequency;
 Tune/Start applies it and selects the current decoder's constellation. The
-diagram labels its actual frequency/rate. See [release notes](docs/RELEASE_0.2.100.md).
+diagram labels its actual frequency/rate. Aero watch supports a user-selected
+budget of up to 16 simultaneous in-band decoders. Multi-SDR role assignment is
+still planned, not delivered here. See [release notes](docs/RELEASE_0.2.101.md).
 
 ## Help build SDR Town and FUBAR
 
@@ -96,7 +98,7 @@ status are visible. See [tone/no-voice troubleshooting](docs/INMARSAT.md#tone-or
 
 | | |
 |---|---|
-| **Current version** | **0.2.100** portable testing release; **0.2.96** signed updater |
+| **Current version** | **0.2.101** portable testing release; **0.2.96** signed updater |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
 | **License** | See `LICENSE.txt` |

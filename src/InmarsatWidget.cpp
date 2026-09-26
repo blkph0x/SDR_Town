@@ -480,7 +480,7 @@ void InmarsatWidget::refreshUi() {
     // ADS-C messages enter this view; replay owns an entirely separate map.
     report["positions"]=nlohmann::json::array();
     std::vector<uint32_t> seen;
-    const auto mapMessages=InmarsatMessageStore::instance().recent(500);
+    const auto mapMessages=InmarsatMessageStore::instance().positions();
     for(auto it=mapMessages.rbegin();it!=mapMessages.rend();++it) {
         const auto& m=*it;
         if(!m.validated || !m.hasPosition || !m.aesId || std::find(seen.begin(),seen.end(),m.aesId)!=seen.end())continue;

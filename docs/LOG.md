@@ -1,5 +1,14 @@
 # Development log
 
+## 2026-09-26 - Expanded Aero groups and multi-SDR audit
+
+User expanded requirement to all modes on independent SDRs. Documented actual
+global lease, GUI takeover and singleton engine blockers in MULTI_SDR_SESSIONS.
+No unsafe global-check bypass. Isolated T-0063 implements 1-16 worker budget,
+majority CRC/position readiness and bounded map cache independent of log churn.
+Local 13/13 PASS; synthetic capacity measured, live RF not claimed. Prepare
+0.2.101 testing release; per-device multi-mode runtime remains T-0062 open work.
+
 ## 2026-09-26 - Constellation repair published
 
 T-0061 complete: c313f06 passed local and both CI build/test pipelines.

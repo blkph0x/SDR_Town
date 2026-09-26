@@ -2,6 +2,22 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - 0.2.101 channel budget and map-cache qualification
+
+DEC-0135 / T-0063. Final MSVC2022 Release app/unit/GUI/workspace rebuild PASS;
+CTest 13/13 PASS in 38.54 seconds (repair-101-qualified-build/ctest.log).
+Tests cover 16-budget validation/persistence, 8 data + 8 voice grouping, strict
+majority evidence, expiry/visit reset, bounded partial fallback, and independent
+map retention through >500 messages, stale updates and 256-aircraft eviction.
+
+Synthetic watch benchmark at 2.048 MS/s, 64 x 65536 samples (2.048 RF seconds):
+1/2/4/8/16 workers wall processing/RF ratios 0.299/0.305/0.310/0.326/0.513.
+16-worker max block 48.13 ms; average alone does not guarantee no live overruns.
+No valid voice frames in synthetic input: NOT a full vocoder/live RF benchmark.
+Evidence build/watch-expanded-benchmark.log; earlier baseline in
+build/watch-baseline-benchmark.log. Keep existing conservative saved budgets.
+Shared device ownership remains unchanged; multi-SDR is T-0062, not delivered.
+
 ## 2026-09-26 - Public 0.2.100 constellation release verified
 
 Source c313f065c9f308958653397b7a9176c12430868b. Windows release 36208705124

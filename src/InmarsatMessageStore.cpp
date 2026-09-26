@@ -1,4 +1,5 @@
 #include "InmarsatMessageStore.h"
+#include <cmath>
 
 #include <algorithm>
 #include <chrono>
@@ -57,8 +58,31 @@ InmarsatMessageStore& InmarsatMessageStore::instance() {
 void InmarsatMessageStore::push(InmarsatMessage msg) {
     if (msg.unixTime <= 0.0) msg.unixTime = unixNow();
     std::lock_guard<std::mutex> lk(mutex_);
+    if(msg.validated && msg.hasPosition && msg.aesId>0 && msg.aesId<=0xffffff &&
+       std::isfinite(msg.unixTime) && std::isfinite(msg.latDeg) && std::isfinite(msg.lonDeg) &&
+       std::abs(msg.latDeg)<=90 && std::abs(msg.lonDeg)<=180) {
+        const auto existing=positions_.find(msg.aesId);
+        if(existing!=positions_.end()) {
+            if(msg.unixTime>=existing->second.unixTime)existing->second=msg;
+        } else {
+            if(positions_.size()==kMaxPositions) {
+                const auto oldest=std::min_element(positions_.begin(),positions_.end(),
+                    [](const auto& a,const auto& b){return a.second.unixTime<b.second.unixTime;});
+                if(msg.unixTime>=oldest->second.unixTime) {
+                    positions_.erase(oldest);positions_.emplace(msg.aesId,msg);
+                }
+            } else positions_.emplace(msg.aesId,msg);
+        }
+    }
     msgs_.push_back(std::move(msg));
     while (msgs_.size() > kMax) msgs_.pop_front();
+}
+
+std::vector<InmarsatMessage> InmarsatMessageStore::positions() const {
+    std::lock_guard<std::mutex> lk(mutex_);
+    std::vector<InmarsatMessage> result;result.reserve(positions_.size());
+    for(const auto& [id,message]:positions_)result.push_back(message);
+    return result;
 }
 
 std::vector<InmarsatMessage> InmarsatMessageStore::recent(size_t limit) const {
@@ -90,4 +114,5 @@ nlohmann::json InmarsatMessageStore::recentJson(size_t limit, size_t offset) con
 void InmarsatMessageStore::clear() {
     std::lock_guard<std::mutex> lk(mutex_);
     msgs_.clear();
+    positions_.clear();
 }

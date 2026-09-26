@@ -63,21 +63,29 @@ IQ replay stays source-local and never attempts RF hopping outside its file.
 ## Cycle
 
 - Enabled data and voice channels are grouped separately by actual sample rate,
-  two independent decoders per group by default (adjustable 1-4), with RF/filter edge clearance.
+  two independent decoders per group by default (adjustable 1-16), with RF/filter edge clearance.
   Each decoder gets the same chronological IQ within its group and owns separate
   carrier, framing and vocoder state. Frequency groups outside the passband need
   retuning; they cannot be watched simultaneously on one receiver.
   Each active decoder now owns a persistent thread. There is one shared immutable
   IQ block in flight, no growing per-channel backlog. All results are joined in
   channel order before messages and single-speaker selection. Default remains two;
-  increase Concurrent decoders to four when processing load stays below 1.
+  increase Concurrent decoders to 8 or 16 when processing load stays comfortably
+  below 1 and IQ gaps remain zero. Save timing applies the chosen budget. Existing
+  saved limits are preserved; more workers are not automatically enabled on old PCs.
 - Each data group gets the minimum dwell. Continue up to the per-group maximum
-  until the visit's distinct validated aircraft count reaches the target. Every
+  until the visit's distinct validated aircraft count reaches the target AND a
+  strict majority of this group's channels supplied CRC-valid data within the
+  data-dwell interval. Carrier energy or a populated old map is not sufficient. Every
   group is visited at least once. Duplicate aircraft and earlier visits do not
   inflate the count. Reaching a target is not proof of complete coverage.
 - Data dwell default: minimum 10 s, maximum 30 s/group, target 10 aircraft. No
   decoded positions yields **no positions decoded**, not a fake refreshed map.
   Partial refresh still proceeds to voice rather than waiting forever.
+
+Multi-SDR role assignments are not yet implemented. The audited migration plan
+is [MULTI_SDR_SESSIONS.md](MULTI_SDR_SESSIONS.md); this worker-budget increase must
+not be mistaken for simultaneous P25/data/voice radio ownership.
 - Voice gets 12 s to acquire. After decoded speech starts, retain the group until
   6 s without new speech. Carrier lock alone does not extend it. Monitor one
   conversation at a time; other in-band decoders remain independent. Switch focus
@@ -93,6 +101,9 @@ IQ replay stays source-local and never attempts RF hopping outside its file.
 - Map positions are last received reports. Gray means the receipt is older than
   the chosen refresh interval. Hover shows receipt age and transmitted report
   time. Green identifies the selected decoded voice AES when it has a position.
+  Latest validated reports are retained independently of message-log churn, up
+  to 256 aircraft; older reports cannot replace newer positions. This cache
+  is live-session memory, not a source of inferred aircraft identities.
 
 ## Diagnostics
 

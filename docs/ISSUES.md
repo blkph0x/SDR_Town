@@ -1,5 +1,13 @@
 # Issues (canonical)
 
+## ISS-0031 - Global receiver ownership blocks independent modes (2026-09-26, OPEN)
+
+DeviceManager has one lease owner/index, MainWindow has one takeover record,
+InmarsatEngine owns one cursor/worker/config. Independent P25/data/voice radios
+need all three migrated, with generation-safe stop/restore and stable device
+assignments. Merely removing the global rejection would permit ownership races.
+Tracked by T-0062 and MULTI_SDR_SESSIONS.md; no working multi-SDR claim yet.
+
 ## ISS-0030 - Saved constellation selection hides manual decoder (2026-09-26, FIXED)
 
 refreshVisuals matches a selected watch UUID, but manual snapshots use empty ID.

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <deque>
 #include <mutex>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -46,6 +47,7 @@ public:
 
     void push(InmarsatMessage msg);
     std::vector<InmarsatMessage> recent(size_t limit = 100) const;
+    std::vector<InmarsatMessage> positions() const;
     nlohmann::json recentJson(size_t limit = 100, size_t offset = 0) const;
     void clear();
 
@@ -53,5 +55,7 @@ private:
     InmarsatMessageStore() = default;
     mutable std::mutex mutex_;
     std::deque<InmarsatMessage> msgs_;
+    std::map<uint32_t,InmarsatMessage> positions_; // DEC-0135: independent of message-log eviction.
+    static constexpr size_t kMaxPositions = 256;
     static constexpr size_t kMax = 500;
 };
