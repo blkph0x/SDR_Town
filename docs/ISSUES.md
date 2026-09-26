@@ -1,11 +1,13 @@
 # Issues (canonical)
 
-## ISS-0029 - Rate dropdown did not select a frequency (2026-09-26, FIX IN VALIDATION)
+## ISS-0029 - Rate dropdown did not select a frequency (2026-09-26, FIXED)
 
 Changing Aero rate altered only the decoder combo; no signal handler selected
 a corresponding preset. DEC-0133 adds explicit user-activation preview using
 the current plan, preserves programmatic restoration and reports missing
 survey entries. Tune/Start retain their existing retune/commit responsibility.
+Fixed in 9834492 / v0.2.99. All 35 plan/rate combinations covered by the GUI
+regression; local and CI gates PASS and public release asset verified.
 
 ## ISS-0028 - Incorrect Aero rate/frequency presets (2026-09-26, FIXED)
 

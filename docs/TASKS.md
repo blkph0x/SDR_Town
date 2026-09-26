@@ -1,8 +1,10 @@
 # Task list (canonical)
 
-T-0060 | in_progress | Inmarsat rate selector frequency presets |
+T-0060 | done | Inmarsat rate selector frequency presets |
 DEC-0133. Apply satellite-specific surveyed centers on explicit decoder dropdown
 activation; preserve restoration/manual tuning and report missing presets.
+Source 9834492; local 13/13 suites PASS, release CI 36206766578 and master
+36206766533 PASS. Public v0.2.99 downloaded and verified; see BUILD_NOTES.
 
 T-0059 | done (delivery; hardware/field acceptance open) | SDRplay packaged-driver parity and field regression evidence |
 Initial comparison recorded in SDRPLAY_RELEASE_AUDIT_20260926.md. Confirmed

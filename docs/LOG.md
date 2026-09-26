@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-09-26 - 0.2.99 delivered and checked
+
+T-0060 / ISS-0029 closed after source 9834492 passed both Windows CI runs
+(36206766578 release, 36206766533 master) and the regular public release ZIP
+passed independent download/checksum/provenance/CLI/preset/RDS checks.
+Rate selection updates the frequency preview; Tune/Start commits reception.
+No new satellite reception or physical RSP test claimed; P25 untouched.
+
 ## 2026-09-26 - Rate selection now previews a surveyed center
 
 DEC-0133 / T-0060: wired explicit decoder selection to the selected satellite's

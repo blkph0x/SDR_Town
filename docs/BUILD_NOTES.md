@@ -2,6 +2,22 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - Public 0.2.99 verification
+
+Source 9834492c7d5f222b48471a2b504812693d5381ea; Windows release run
+36206766578 and master 36206766533 PASS. YAML 36206766545/36206766515 PASS.
+Regular public release: https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.99
+ZIP 42,414,667 bytes plus SHA256 sidecar. Anonymous download, source/version/run
+provenance, executable/module hashes, CLI help, all five survey datasets and
+recorded-MPX RDS tests PASS. Downloaded plugin registers from the extracted
+folder as 0.5.2-48bd8b4; vendor service absent here, no RSP RF acceptance claim.
+ZIP: c4a7a8e635f01c040f7833ee46a697dd830ce0f3a8ed1e1b89e47fd86df61487
+EXE: 73853a21e4516885fb98c4eef7eb7231bf1e83982390729a7568dbc26ecd49ae
+SDRplay: cf5ad380afbc4207c3a8790e39b616b619820e43432af31e5bd727b0eeaed8e4
+Evidence: build/repair-099-public-check.log, public-099-local/, and CI logs.
+P25 guard 1c0777d..9834492 PASS: 14 paths changed, none protected. Portable
+testing release, not signed updater replacement; dated presets not live survey.
+
 ## 2026-09-26 - 0.2.99 rate-selector qualification (DEC-0133)
 
 Initial MSVC Release link failed LNK1104: running SDR_Town.exe locked the
