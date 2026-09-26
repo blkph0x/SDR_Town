@@ -2,6 +2,21 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - Verified 0.2.101 public release
+
+Source 9ff87c6573090212333f693842eb8e0180408b27. Windows release 36211687629
+and master 36211687681 PASS; YAML 36211687620/36211687791 PASS.
+Public regular release: https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.101
+ZIP 42,418,875 bytes plus checksum, independently downloaded and extracted.
+Checksum/source/run/executable/module provenance, CLI smoke, Aero survey and
+recorded-MPX RDS tests PASS. Evidence build/repair-101-public-check.log and
+build/public-0.2.101-local/. Physical satellite/multi-SDR acceptance not claimed.
+ZIP: de6ee176586c195754a6562a9311954d020558e43158ccaac2ab284aa64cc51c
+EXE: f66c366ee1eed0299f69ddd9e2f2bf65f717406f6acf44e2fa4edc36374c89d3
+SDRplay: 230c9934baeb6cb24f10f1a9741af053ec6a32f7d20f5e2da9bb4f9ac61cde4e
+P25 guard 831c6e6..9ff87c6 PASS: 20 paths, zero protected changes. Portable
+testing release does not replace signed updater. T-0062 multi-SDR remains open.
+
 ## 2026-09-26 - 0.2.101 channel budget and map-cache qualification
 
 DEC-0135 / T-0063. Final MSVC2022 Release app/unit/GUI/workspace rebuild PASS;

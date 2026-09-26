@@ -5,9 +5,12 @@ User authorized shared ownership redesign. DEC-0135 / MULTI_SDR_SESSIONS.md.
 Replace global leases and GUI takeover, add persistent role/device assignment,
 then dual Inmarsat roles alongside P25. No claim this is implemented yet.
 
-T-0063 | in_progress | Aero multi-channel capacity and collection evidence |
+T-0063 | done | Aero multi-channel capacity and collection evidence |
 DEC-0135. Raise tested worker budget, retain bandwidth grouping, require majority
 CRC evidence plus distinct ADS-C positions for early voice transition.
+Also retain map positions independently of rolling message history. Source
+9ff87c6 / public v0.2.101, local 13/13 and both Windows CI runs PASS; downloaded
+asset verified. Multi-SDR runtime remains separate T-0062, not delivered here.
 
 T-0061 | done | Constellation selection and retune regression |
 DEC-0134: reproduce saved-ID/manual-decoder mismatch, repair manual retune

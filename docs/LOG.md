@@ -1,5 +1,14 @@
 # Development log
 
+## 2026-09-26 - Aero multi-channel first stage delivered
+
+T-0063 shipped in regular public v0.2.101 from 9ff87c6. Both Windows Actions
+runs and independent public ZIP/provenance/smoke checks PASS. Up to 16 active
+in-band decoders, majority CRC readiness and separate latest-position cache.
+Explicitly incomplete broader request: T-0062 per-device multi-mode ownership,
+GUI session restoration, role assignment and dual Inmarsat sources remain to
+implement and test. No claim of concurrent P25/data/voice on separate SDRs yet.
+
 ## 2026-09-26 - Expanded Aero groups and multi-SDR audit
 
 User expanded requirement to all modes on independent SDRs. Documented actual
