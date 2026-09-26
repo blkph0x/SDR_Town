@@ -1,5 +1,15 @@
 # Issues (canonical)
 
+## ISS-0028 - Inmarsat aircraft vanish after busy-channel message eviction (2026-09-26, SOFTWARE FIXED)
+
+Local live diagnostics contain one decoded position in the current long watch
+run and two in an earlier run, yet the map later returns to zero. The decoder's
+per-channel position list is reset on scheduled retune by design, while the live
+widget reconstructs tracks from the shared 500-message ring. Thousands of later
+valid Aero messages therefore evict the last ADS-C fix. DEC-0133 adds a separate
+bounded latest-position cache keyed by AES ID. Core and actual-widget regressions
+prove a position remains visible after 750 later messages. CI/release pending.
+
 ## ISS-0027 - Installed SkyRoof SDRplay module is not discovered (2026-09-26, OPEN)
 
 The supplied 0.2.96 build loads the official x64 API 3.15 but reports the

@@ -1,4 +1,5 @@
 #include "InmarsatDemod.h"
+#include "InmarsatMessageStore.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -148,4 +149,49 @@ TEST_CASE("Inmarsat retune resets physical-layer confidence", "[inmarsat]")
     CHECK_FALSE(resetStats.locked);
     CHECK(resetStats.rawBlocksOut == 0);
     CHECK(resetStats.framesOut == 0);
+}
+
+TEST_CASE("Inmarsat map positions outlive the chronological message ring", "[inmarsat][map]")
+{
+    auto& store = InmarsatMessageStore::instance();
+    store.clear();
+
+    InmarsatMessage position;
+    position.kind = InmarsatMsgKind::Acars;
+    position.validated = true;
+    position.hasPosition = true;
+    position.aesId = 0x123456;
+    position.latDeg = -34.4;
+    position.lonDeg = 150.9;
+    store.push(position);
+
+    for (size_t i = 0; i < 750; ++i) {
+        InmarsatMessage traffic;
+        traffic.kind = InmarsatMsgKind::Su;
+        traffic.validated = true;
+        traffic.aesId = static_cast<uint32_t>(i + 1);
+        store.push(std::move(traffic));
+    }
+
+    const auto messages = store.recent(500);
+    REQUIRE(messages.size() == 500);
+    CHECK(std::none_of(messages.begin(), messages.end(),
+        [](const InmarsatMessage& message) { return message.hasPosition; }));
+    const auto positions = store.recentPositions();
+    REQUIRE(positions.size() == 1);
+    CHECK(positions.front().aesId == 0x123456);
+    CHECK(positions.front().latDeg == -34.4);
+    CHECK(positions.front().lonDeg == 150.9);
+
+    auto update = position;
+    update.latDeg = -35.0;
+    update.lonDeg = 151.5;
+    store.push(update);
+    const auto updated = store.recentPositions();
+    REQUIRE(updated.size() == 1);
+    CHECK(updated.front().latDeg == -35.0);
+    CHECK(updated.front().lonDeg == 151.5);
+
+    store.clear();
+    CHECK(store.recentPositions().empty());
 }

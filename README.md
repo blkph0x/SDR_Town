@@ -50,7 +50,9 @@ each project's code retains its own licence.
 SoapySDRPlay3 modules installed with Afreet SkyRoof, while retaining API/ABI
 and driver-registration validation. An attached RSPdx completed five live
 Inmarsat open/tune/status/stop cycles without a crash; the same ownership loop
-is now covered by a fake-driver regression test. This proves lifecycle stability,
+is now covered by a fake-driver regression test. The Inmarsat map also keeps each
+latest validated ADS-C position independently of the bounded message history,
+so busy watch sessions no longer erase aircraft. This proves lifecycle stability,
 not successful satellite decoding. See [tester release notes](docs/RELEASE_0.2.98.md).
 
 **0.2.97 experimental: RTL-SDR Bias-T** now has a capability-gated control in

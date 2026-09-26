@@ -46,6 +46,7 @@ public:
 
     void push(InmarsatMessage msg);
     std::vector<InmarsatMessage> recent(size_t limit = 100) const;
+    std::vector<InmarsatMessage> recentPositions(size_t limit = 256) const;
     nlohmann::json recentJson(size_t limit = 100, size_t offset = 0) const;
     void clear();
 
@@ -53,5 +54,7 @@ private:
     InmarsatMessageStore() = default;
     mutable std::mutex mutex_;
     std::deque<InmarsatMessage> msgs_;
+    std::deque<InmarsatMessage> positions_;
     static constexpr size_t kMax = 500;
+    static constexpr size_t kMaxPositions = 256;
 };

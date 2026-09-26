@@ -1,5 +1,14 @@
 # Code notes (tree map)
 
+## Inmarsat last-position retention (DEC-0133)
+
+`InmarsatMessageStore` keeps the existing 500-record chronological message ring
+and a separate 256-aircraft latest-position cache keyed by validated nonzero AES
+ID. `InmarsatWidget` renders the latter, so watch retunes and later SU/ACARS
+traffic cannot erase a received fix. Replay remains separate and no external or
+invented aircraft data is mixed into the Inmarsat map. Core and live-widget tests
+force 750 post-position messages, then check retention, update and clear behavior.
+
 ## SkyRoof RSPdx discovery and Inmarsat lifecycle (DEC-0132)
 
 SdrplayProfile includes installed Afreet SkyRoof roots alongside existing

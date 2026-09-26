@@ -1,5 +1,15 @@
 # Development log
 
+## 2026-09-26 - Inmarsat aircraft map retention (DEC-0133 / ISS-0028)
+
+Confirmed from live diagnostics that positions were decoded and later vanished,
+rather than failing to render initially. The live map depended on the bounded
+general message history, so busy Aero traffic evicted its only copy after each
+watch retune cleared decoder-local state. Added a bounded per-aircraft latest-fix
+cache, routed the live map to it and retained replay isolation and validation
+gates. Core Inmarsat and real-widget regression suites pass; public 0.2.98 CI
+publication/asset verification remains required.
+
 ## 2026-09-26 - RSPdx SkyRoof discovery and Inmarsat crash regression
 
 Traced the apparent missing RSPdx support to an omitted installed-module root,

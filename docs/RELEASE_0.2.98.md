@@ -16,8 +16,11 @@ or its in-app update metadata.
   when a matching x64 DLL is present.
 - The RSPdx fixture can provide active IQ for five repeated Inmarsat
   start/stop/restore cycles, covering leases, worker shutdown and stream reuse.
+- The Inmarsat aircraft map now retains the latest validated ADS-C fix per
+  aircraft independently of the busy general message history, so channel
+  cycling and later Aero traffic no longer make decoded aircraft disappear.
 - No Aero modem/FEC/codec, P25, RF tuning, audio, Bias-T or driver teardown
-  behavior changed.
+  behavior changed; the map still never invents positions or mixes in OpenSky.
 
 ## Evidence and tester limits
 
@@ -28,7 +31,9 @@ tuned to 1542.935 MHz, and completed five Inmarsat start/status/stop cycles
 without a crash. Bias-T was not enabled.
 
 The focused local suite passes 179 SDRplay assertions across 19 cases. The
-real-handle RSPdx/Inmarsat lifecycle passes 52 assertions. Clean MSVC build,
+real-handle RSPdx/Inmarsat lifecycle passes 52 assertions. Inmarsat core passes
+1,883 assertions across 33 cases and the hardware-free live GUI suite passes,
+including retention after 750 later messages. Clean MSVC build,
 full tests, packaging and public downloaded-asset smoke checks are performed by
 the release workflow. This testing establishes discovery and lifecycle
 stability only; it does not prove satellite lock, message decode or clear voice.

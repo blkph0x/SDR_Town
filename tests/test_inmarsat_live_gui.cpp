@@ -1,6 +1,8 @@
 #include "InmarsatWidget.h"
 #include "InmarsatEngine.h"
 #include "InmarsatDiagnostics.h"
+#include "InmarsatMapWidget.h"
+#include "InmarsatMessageStore.h"
 #include "DeviceManager.h"
 #include "SatcomHostServices.h"
 #include <catch2/catch_session.hpp>
@@ -67,6 +69,22 @@ TEST_CASE("Opening Inmarsat preserves saved voice and burst selection", "[inmars
         CHECK(widget.findChild<QComboBox*>("inmarsatDecoder")->currentData().toInt() == rate);
         CHECK(widget.findChild<QDoubleSpinBox*>("inmarsatFrequencyMHz")->value() == cfg.channelHz/1e6);
     }
+}
+
+TEST_CASE("Inmarsat live map keeps a decoded aircraft through busy channel traffic", "[inmarsat][gui][map]") {
+    auto& store=InmarsatMessageStore::instance();store.clear();
+    InmarsatMessage position;position.kind=InmarsatMsgKind::Acars;position.validated=true;
+    position.hasPosition=true;position.aesId=0x123456;position.latDeg=-34.4;position.lonDeg=150.9;
+    store.push(position);
+    for(size_t i=0;i<750;++i) {
+        InmarsatMessage traffic;traffic.kind=InmarsatMsgKind::Su;traffic.validated=true;
+        traffic.aesId=static_cast<uint32_t>(i+1);store.push(std::move(traffic));
+    }
+    InmarsatWidget widget;
+    REQUIRE(QMetaObject::invokeMethod(&widget,"refreshUi"));
+    auto* map=widget.findChild<InmarsatMapWidget*>("inmarsatMap");REQUIRE(map);
+    CHECK(map->aircraftCount()==1);
+    store.clear();
 }
 
 TEST_CASE("Inmarsat Start applies visible voice frequency without needing Tune", "[inmarsat][gui]") {

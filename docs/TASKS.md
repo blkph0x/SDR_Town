@@ -1,11 +1,13 @@
 # Task list (canonical)
 
-T-0059 | in_progress | RSPdx SkyRoof discovery and Inmarsat crash regression |
-DEC-0132 / ISS-0027. The attached RSPdx is usable through the installed SkyRoof
+T-0059 | in_progress | RSPdx discovery and Inmarsat lifecycle/map regressions |
+DEC-0132/0133 / ISS-0027/0028. The attached RSPdx is usable through the installed SkyRoof
 SoapySDRPlay3 0.5.2 module, but automatic discovery omits that standard layout.
 Add the validated path, align preflight diagnostics and stress real/fixture
-Inmarsat start-stop ownership. Physical live loop is clean so far; publish only
-after local/CI/package gates and downloaded-release smoke testing pass.
+Inmarsat start-stop ownership. Live logs also prove decoded ADS-C positions are
+lost after the shared 500-message ring fills; retain one bounded latest fix per
+aircraft independently and cover the real widget path. Focused core/GUI tests
+pass. Publish only after CI/package gates and downloaded-release smoke testing.
 
 T-0058 | awaiting_clarification | README community support appeal |
 DEC-0131. Add donation link, verified first commit, sourced AUD estimate and

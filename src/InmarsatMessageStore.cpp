@@ -57,6 +57,16 @@ InmarsatMessageStore& InmarsatMessageStore::instance() {
 void InmarsatMessageStore::push(InmarsatMessage msg) {
     if (msg.unixTime <= 0.0) msg.unixTime = unixNow();
     std::lock_guard<std::mutex> lk(mutex_);
+    // DEC-0133: the chronological message ring is intentionally small, but a
+    // busy Aero channel must not evict the last validated map fix. Keep one
+    // separately bounded, latest-first-generation record per aircraft.
+    if (msg.validated && msg.hasPosition && msg.aesId != 0) {
+        const auto existing = std::find_if(positions_.begin(), positions_.end(),
+            [&](const InmarsatMessage& position) { return position.aesId == msg.aesId; });
+        if (existing != positions_.end()) positions_.erase(existing);
+        positions_.push_back(msg);
+        while (positions_.size() > kMaxPositions) positions_.pop_front();
+    }
     msgs_.push_back(std::move(msg));
     while (msgs_.size() > kMax) msgs_.pop_front();
 }
@@ -67,6 +77,15 @@ std::vector<InmarsatMessage> InmarsatMessageStore::recent(size_t limit) const {
     if (msgs_.empty() || limit == 0) return out;
     const size_t n = std::min(limit, msgs_.size());
     out.assign(msgs_.end() - static_cast<std::ptrdiff_t>(n), msgs_.end());
+    return out;
+}
+
+std::vector<InmarsatMessage> InmarsatMessageStore::recentPositions(size_t limit) const {
+    std::lock_guard<std::mutex> lk(mutex_);
+    std::vector<InmarsatMessage> out;
+    if (positions_.empty() || limit == 0) return out;
+    const size_t n = std::min(limit, positions_.size());
+    out.assign(positions_.end() - static_cast<std::ptrdiff_t>(n), positions_.end());
     return out;
 }
 
@@ -90,4 +109,5 @@ nlohmann::json InmarsatMessageStore::recentJson(size_t limit, size_t offset) con
 void InmarsatMessageStore::clear() {
     std::lock_guard<std::mutex> lk(mutex_);
     msgs_.clear();
+    positions_.clear();
 }

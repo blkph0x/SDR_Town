@@ -2,6 +2,24 @@
 
 Newest entry at the top. Record facts, not hopes.
 
+## 2026-09-26 - Inmarsat live aircraft retention (DEC-0133)
+
+Inspected the scalar-only local live diagnostics. Session
+`45b4e95a-fd9c-4717-b4fb-976286c7bb3c` decoded one position and up to 1,430
+validated frames; earlier session `6cabc13c-f124-40a1-b075-03014115f98a`
+decoded two positions and 24,518 validated frames. Later progress reports show
+zero positions after scheduled decoder resets, and the live map's sole fallback
+was the 500-record message ring. This reproduces eviction, not a paint failure.
+
+Added separate bounded latest-position retention and core/widget regressions.
+Local UCRT application target builds after temporarily adding the already-needed
+`<iomanip>` include for an unrelated GCC 16 compile and restoring that file
+unchanged. Focused `[inmarsat]`: 1,883 assertions / 33 cases PASS. Hardware-free
+InmarsatLiveGui: PASS in 0.40 s, including the 750-message live-map regression.
+An initial sandboxed GUI run could not create Qt's isolated AppData directory;
+the identical suite passes outside that filesystem restriction. CI/release gate
+remains pending.
+
 ## 2026-09-26 - RSPdx SkyRoof discovery and Inmarsat lifecycle (DEC-0132)
 
 Supplied 0.2.96 initially reports the official x64 API 3.15 and running service

@@ -435,12 +435,9 @@ void InmarsatWidget::refreshUi() {
     // Live aircraft survive a manual data-to-voice retune. Only native, validated
     // ADS-C messages enter this view; replay owns an entirely separate map.
     report["positions"]=nlohmann::json::array();
-    std::vector<uint32_t> seen;
-    const auto mapMessages=InmarsatMessageStore::instance().recent(500);
+    const auto mapMessages=InmarsatMessageStore::instance().recentPositions();
     for(auto it=mapMessages.rbegin();it!=mapMessages.rend();++it) {
         const auto& m=*it;
-        if(!m.validated || !m.hasPosition || !m.aesId || std::find(seen.begin(),seen.end(),m.aesId)!=seen.end())continue;
-        seen.push_back(m.aesId);
         const double age=std::max(0.0,QDateTime::currentMSecsSinceEpoch()/1000.0-m.unixTime);
         report["positions"].push_back({{"aesId",m.aesId},{"latDeg",m.latDeg},{"lonDeg",m.lonDeg},
             {"altitudeFt",m.altitudeFt},{"registration",m.registration},{"callsign",m.callsign},

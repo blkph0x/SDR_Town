@@ -1,5 +1,22 @@
 # Decisions
 
+## DEC-0133 - Retain validated Inmarsat positions independently of message history (2026-09-26)
+
+The current live watch decoded positions, but they disappeared after channel
+cycling and high message volume. `InmarsatPipeline` correctly resets its local
+state on retune; `InmarsatMessageStore` intentionally limits chronological API/UI
+history to 500 records. The map incorrectly used that history as its track store,
+so ordinary validated traffic evicted the last position even though the UI calls
+these last-known tracks.
+
+Keep the chronological ring and API unchanged. In the same mutex-protected store,
+retain at most 256 validated position messages, one latest record per nonzero AES
+ID. The live map reads only that cache; replay remains isolated. Invalid,
+unvalidated and identity-free messages never enter it. Explicit store clear
+clears tracks too. Do not invent positions, merge OpenSky/ADS-B data, or claim
+that every L-band channel carries ADS-C. Prove eviction, replacement, clear and
+the actual widget path after 750 later messages.
+
 ## DEC-0132 - Discover installed SkyRoof SoapySDRPlay3 and stress Inmarsat ownership (2026-09-26)
 
 The attached RSPdx is visible through SkyRoof's x64 ABI-0.8 module at
