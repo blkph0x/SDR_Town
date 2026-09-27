@@ -83,6 +83,13 @@ Position reports and voice need not be on the same channel or link direction.
 Aircraft-originated ADS-C generally requires appropriate C-band/return-link
 reception or relayed data. A good L-band voice recording may contain no positions.
 Map reports are last-known decoded positions, not navigation-grade live tracks.
+The 0.2.117 reports distinguish complete ACARS direction (`acarsAirToGround`,
+`acarsGroundToAir`, `acarsUnknownDirection`), valid `adscDecoded` applications
+and accepted `positionReports`. ADS-C contracts/identity-only messages can
+increase `adscDecoded` without adding coordinates. A good CRC or populated
+aircraft identity table alone is not evidence of a position-bearing message.
+These numeric counters are also captured before/after a reviewed recording;
+cold replay may miss messages that started before the five-second clip.
 Aircraft photos, extrapolation and external identity lookup are not implemented.
 EGC/STD-C still has only physical diagnostics, not a completed protocol decoder.
 

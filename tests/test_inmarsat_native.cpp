@@ -261,16 +261,28 @@ TEST_CASE("Inmarsat diagnostic recording is bounded explicit and source isolated
     REQUIRE(R::arm(1545000000));CHECK_FALSE(R::arm(1545000000));
     R::begin(&second,1546000000,3,false,input);CHECK(R::status().startsWith("Waiting"));
     R::begin(&first,1545000000,3,false,input);
+    InmarsatAeroStats before;before.positions=2;before.adscDecoded=3;before.acarsAirToGround=4;
+    before.acarsGroundToAir=5;before.acarsUnknownDirection=6;before.applicationControl=7;
+    R::counters(&first,before);
+    auto after=before;++after.positions;++after.adscDecoded;++after.acarsGroundToAir;
+    after.applicationInvalid=1;after.positionIdentityMismatches=2;
+    R::counters(&second,after); // Unselected workers cannot contaminate the snapshot.
     const std::vector<std::complex<float>> iq(32768,{0.25f,-0.5f});
     R::iq(&first,iq,2400000,1545000000,42);
     R::begin(&second,1545000000,3,false,input);R::pcm(&second,input);
-    for(int i=0;i<4;++i){R::begin(&first,1545000000,3,false,input);R::pcm(&first,input);R::end(&first);}
+    for(int i=0;i<4;++i){R::begin(&first,1545000000,3,false,input);R::pcm(&first,input);R::counters(&first,after);R::end(&first);}
     const auto body=R::bundle();REQUIRE(!body.isEmpty());CHECK(body.size()<1024*1024);
     const auto json=QJsonDocument::fromJson(body).object();
     CHECK(QByteArray::fromBase64(json["ifBase64"].toString().toLatin1()).size()==480000);
     CHECK(QByteArray::fromBase64(json["pcmBase64"].toString().toLatin1()).size()==80000);
     CHECK(QByteArray::fromBase64(json["iqBase64"].toString().toLatin1()).size()==131072);
     CHECK(json["iqStartSample"].toString()=="42");
+    const auto firstStats=json["before"].toObject(),lastStats=json["after"].toObject();
+    CHECK(firstStats["positionReports"].toDouble()==2);CHECK(lastStats["positionReports"].toDouble()==3);
+    CHECK(firstStats["adscDecoded"].toDouble()==3);CHECK(lastStats["adscDecoded"].toDouble()==4);
+    CHECK(lastStats["acarsAirToGround"].toDouble()==4);CHECK(lastStats["acarsGroundToAir"].toDouble()==6);
+    CHECK(lastStats["acarsUnknownDirection"].toDouble()==6);CHECK(lastStats["applicationControl"].toDouble()==7);
+    CHECK(lastStats["applicationInvalid"].toDouble()==1);CHECK(lastStats["positionIdentityMismatches"].toDouble()==2);
     REQUIRE(R::arm(1545000000));R::begin(&first,1545000000,3,false,input);
     R::begin(&first,1545000000,3,true,input);CHECK(R::bundle().isEmpty());CHECK(R::status().startsWith("Cancelled"));
     REQUIRE(R::arm(1545000000));R::begin(&first,1545000000,3,false,input);

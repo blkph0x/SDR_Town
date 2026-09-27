@@ -9,6 +9,7 @@
 #include <QtEndian>
 #include <cstring>
 #include <limits>
+#include <array>
 
 namespace {
 void write(const QString& path, const QByteArray& bytes) {
@@ -148,6 +149,20 @@ TEST_CASE("Inmarsat remote rejection metrics cannot carry receiver identities", 
     CHECK(safe["positionIdentityMismatches"]==3);
     CHECK_FALSE(safe.contains("lastError"));CHECK_FALSE(safe.contains("voiceAesId"));
     CHECK_FALSE(safe.contains("pcm"));CHECK_FALSE(safe.contains("identityChanges"));
+}
+TEST_CASE("Inmarsat map diagnostic counters exclude location and message content", "[inmarsat][replay]") {
+    nlohmann::json input={{"positions",{{"latDeg",-34},{"lonDeg",151}}},{"text","private"}};
+    const std::array keys={"acarsAirToGround","acarsGroundToAir","acarsUnknownDirection","adscDecoded","positionReports"};
+    for(const auto* key:keys)input[key]=3;
+    input["watch"]={{"channels",{{{"decoder",input},{"rate",10500}}}}};
+    const auto safe=InmarsatDiagnostics::remotePayload(input);
+    REQUIRE(safe["workers"].size()==1);
+    for(const auto* key:keys){CHECK(safe[key]==3);CHECK(safe["workers"][0][key]==3);}
+    CHECK_FALSE(safe.contains("positions"));CHECK_FALSE(safe.contains("text"));
+    CHECK_FALSE(safe["workers"][0].contains("positions"));
+    for(const auto* key:keys)input[key]="private text";
+    const auto rejected=InmarsatDiagnostics::remotePayload(input);
+    for(const auto* key:keys)CHECK_FALSE(rejected.contains(key));
 }
 TEST_CASE("Inmarsat replay paced and fast results agree with bounded reports", "[inmarsat][replay]") {
     QTemporaryDir dir; const auto base = dir.filePath("reference");

@@ -83,17 +83,29 @@ class CollectorTests(unittest.TestCase):
                    iqBase64=base64.b64encode(bytes(131072)).decode(),iqRate=2400000,
                    iqCenterHz=1545000000,iqStartSample="0",iqFormat="cf32_le")
         self.assertTrue(collector.valid_recording(value))
+        extended=dict(value,after={"positionReports":2,"adscDecoded":3,"acarsAirToGround":4,
+            "acarsGroundToAir":5,"acarsUnknownDirection":0,"positionIdentityMismatches":0,
+            "applicationDecoded":6,"applicationInvalid":0,"applicationUnsupported":0,"applicationControl":1})
+        self.assertTrue(collector.valid_recording(extended))
+        for counters in ({"positions":[1,2]},{"text":"private"},{"positionReports":"private"},
+                         {"adscDecoded":float("nan")},{"acarsAirToGround":-1}):
+            self.assertFalse(collector.valid_recording(dict(value,after=counters)))
         for key, bad in (("mode", 4), ("channelHz", float("nan")),
                          ("ifBase64", "garbage"), ("clientId", "../bad"),
                          ("pcmBase64", base64.b64encode(bytes(80002)).decode())):
             broken=dict(value);broken[key]=bad;self.assertFalse(collector.valid_recording(broken))
         with tempfile.TemporaryDirectory() as d:
             state=collector.DiagnosticsState(Path(d), "ingest", "admin", 49152)
-            for _ in range(4):self.assertIsNotNone(state.save_recording(value))
+            for _ in range(15):self.assertIsNotNone(state.save_recording(value))
             self.assertIsNone(state.save_recording(value))
             state=collector.DiagnosticsState(Path(d), "ingest", "admin", 49152)
             self.assertIsNone(state.save_recording(value))
-            self.assertEqual(len(list((Path(d)/"recordings").glob("*.json"))),4)
+            self.assertEqual(len(list((Path(d)/"recordings").glob("*.json"))),15)
+            with state._connect() as con:
+                con.execute("UPDATE recordings SET created=? WHERE id=(SELECT id FROM recordings ORDER BY created LIMIT 1)",
+                            (time.time()-86401,))
+            self.assertIsNotNone(state.save_recording(value))
+            self.assertIsNone(state.save_recording(value))
             with state._connect() as con:
                 con.execute("UPDATE recordings SET created=0")
             state.expire_recordings()
@@ -140,6 +152,8 @@ class CollectorTests(unittest.TestCase):
                     with urlopen(req, timeout=3) as response: return response.status
                 except HTTPError as exc: return exc.code
             try:
+                with urlopen(f"http://127.0.0.1:{server.server_port}/health",timeout=3) as response:
+                    self.assertEqual(json.load(response)["recordingsPer24Hours"],15)
                 self.assertEqual(request("/ingest", "wrong", event()), 401)
                 self.assertEqual(request("/api/issues", "ingest"), 401)
                 self.assertEqual(request("/api/issues", "admin"), 200)

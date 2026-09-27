@@ -38,6 +38,7 @@ InmarsatMapWidget::InmarsatMapWidget(QWidget* parent):QWidget(parent) {
         }
     }
     auto* layout=new QVBoxLayout(this);
+    layout->setContentsMargins(12,12,12,32); // Keep status text above the painted legend.
     auto* bar=new QHBoxLayout; bar->setAlignment(Qt::AlignTop|Qt::AlignRight);
     layout->addLayout(bar);layout->addStretch();
     auto* voiceStatus=new QLabel(this);voiceStatus->setObjectName("inmarsatMapVoiceStatus");
@@ -91,6 +92,8 @@ void InmarsatMapWidget::setReport(const nlohmann::json& report,bool replay) {
     if((speaking || report.value("speechActive",false)) && !reported) text=tr("Voice active - aircraft identity unavailable");
     else if(active && std::none_of(tracks_.begin(),tracks_.end(),[&](const auto& t){return t.aes==active;}))
         text=tr("Talking AES %1 - no ADS-C position yet").arg(QString("%1").arg(active,6,16,QChar('0')).toUpper());
+    else if(tracks_.empty() && report.value("messages",uint64_t{0})>0)
+        text=tr("Messages received - no validated ADS-C position available");
     status->setText(text);status->setVisible(!text.isEmpty());
     update();
 }

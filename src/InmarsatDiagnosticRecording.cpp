@@ -80,7 +80,12 @@ void counters(const void* source,const InmarsatAeroStats& s) {
     std::lock_guard lock(mutex);if(!armed || source!=owner)return;
     lastCounters={{"input48k",double(s.input48k)},{"crcOk",double(s.crcOk)},
         {"crcBad",double(s.crcBad)},{"pcmSamples",double(s.pcmSamples)},
-        {"codecErrors",double(s.codecErrors)},{"codecMutes",double(s.codecMutes)}};
+        {"codecErrors",double(s.codecErrors)},{"codecMutes",double(s.codecMutes)},
+        {"acarsAirToGround",double(s.acarsAirToGround)},{"acarsGroundToAir",double(s.acarsGroundToAir)},
+        {"acarsUnknownDirection",double(s.acarsUnknownDirection)},{"adscDecoded",double(s.adscDecoded)},
+        {"positionReports",double(s.positions)},{"positionIdentityMismatches",double(s.positionIdentityMismatches)},
+        {"applicationDecoded",double(s.applicationDecoded)},{"applicationInvalid",double(s.applicationInvalid)},
+        {"applicationUnsupported",double(s.applicationUnsupported)},{"applicationControl",double(s.applicationControl)}};
     if(firstCounters.isEmpty())firstCounters=lastCounters;
 }
 void iq(const void* source,std::span<const std::complex<float>> samples,double rate,double center,uint64_t start) {

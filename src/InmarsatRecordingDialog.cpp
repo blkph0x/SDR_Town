@@ -79,7 +79,7 @@ void showInmarsatDiagnosticRecording(QWidget* parent,double channelHz) {
         if(body.size()>1024*1024)return;
         QUrl url=cfg.endpoint;auto path=url.path();path.chop(7);url.setPath(path+"/recordings");url.setQuery({});url.setFragment({});
         if(QMessageBox::question(dialog,"Send private diagnostic recording?",
-            QString("Send %1 KiB to %2?\n\nContains five seconds of modem signal, decoded voice, and %3 ms of original IQ at %4 samples/sec, plus channel frequency, time, app version and installation ID. These may reveal aircraft identities, locations or private speech. Only send recordings you are authorized to share.\n\nStored for up to 30 days; at most four uploads per installation per day. No automatic retries. Ordinary telemetry remains counters-only.")
+            QString("Send %1 KiB to %2?\n\nContains five seconds of modem signal, decoded voice, and %3 ms of original IQ at %4 samples/sec, plus channel frequency, time, app version and installation ID. These may reveal aircraft identities, locations or private speech. Only send recordings you are authorized to share.\n\nStored for up to 30 days; at most 15 uploads per installation per rolling 24 hours. No automatic retries. Ordinary telemetry remains counters-only.")
                 .arg((body.size()+1023)/1024).arg(url.toDisplayString(QUrl::RemoveUserInfo))
                 .arg(1000.0*QByteArray::fromBase64(object["iqBase64"].toString().toLatin1()).size()/8/std::max(1.0,object["iqRate"].toDouble()),0,'f',2)
                 .arg(object["iqRate"].toDouble(),0,'f',0),
@@ -96,9 +96,13 @@ void showInmarsatDiagnosticRecording(QWidget* parent,double channelHz) {
         QObject::connect(reply,&QNetworkReply::finished,dialog,[=] {
             *uploading=false;
             const auto ack=QJsonDocument::fromJson(reply->readAll()).object();
-            const bool ok=reply->error()==QNetworkReply::NoError && reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt()==201 && ack["ok"].toBool();
+            const int httpStatus=reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const bool ok=reply->error()==QNetworkReply::NoError && httpStatus==201 && ack["ok"].toBool();
+            const QString failure=httpStatus==429
+                ? "Collector upload limit reached. The allowance is 15 recordings per installation per rolling 24 hours; request-rate and total-storage limits also apply. Save this recording locally, then retry later or contact the administrator. It has not been received."
+                : "The server did not acknowledge this recording. It remains available locally; no automatic retry will occur.";
             QMessageBox::information(dialog,ok?"Recording received":"Upload failed",
-                ok?"Server receipt: "+ack["recordingId"].toString():"The server did not acknowledge this recording. It remains available locally; no automatic retry will occur.");
+                ok?"Server receipt: "+ack["recordingId"].toString():failure);
             reply->deleteLater();
         });
     });

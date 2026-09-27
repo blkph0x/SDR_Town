@@ -72,6 +72,9 @@ struct InmarsatAero::Impl {
             const bool downlink=item.BI>='0' && item.BI<='9';
             const auto direction=downlink?InmarsatMessageDirection::AirToGround:
                 item.BI>='A' && item.BI<='Z'?InmarsatMessageDirection::GroundToAir:InmarsatMessageDirection::Unknown;
+            if(direction==InmarsatMessageDirection::AirToGround) ++stats.acarsAirToGround;
+            else if(direction==InmarsatMessageDirection::GroundToAir) ++stats.acarsGroundToAir;
+            else ++stats.acarsUnknownDirection;
             const auto application=decodeInmarsatAcarsApplication(m.label,m.text,direction,downlink && item.hastext);
             m.applicationProtocol=application.protocol;
             m.applicationStatus=application.status;
@@ -80,6 +83,7 @@ struct InmarsatAero::Impl {
             if(application.status=="invalid") ++stats.applicationInvalid;
             if(application.status=="unsupported") ++stats.applicationUnsupported;
             if(application.status=="control") ++stats.applicationControl;
+            if(application.protocol=="ADS-C" && application.status=="decoded") ++stats.adscDecoded;
             m.registration=item.PLANEREG.toStdString();
             const auto& position=application.aircraft;
             if(position && !InmarsatAdsc::matchesIdentity(m.aesId,position->airframeId))++stats.positionIdentityMismatches;

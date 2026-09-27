@@ -32,7 +32,51 @@ Neither position report supplies group 17, so ICAO stays blank. Tests exercise
 ICAO-only messages, direction, malformed hex, CRC/truncation, CPDLC CONTACT text
 and compressed OHMA JSON.
 
-## 8400 voice chain
+## T-0094 InmarScope Map Comparison
+
+User confirms InmarScope plots aircraft while SDR Town does not. Checked the
+clean reference checkout 26ae80af4bcfa4c86ed55f4383d1c95481d3450b and upstream
+HEAD ea3602e92ba35a061140456013d60d436a40bd33: the sole intervening change is
+README download text. The inspected decoder/map implementation is current.
+
+| Path | InmarScope | SDR Town / consequence |
+|---|---|---|
+| Native position extraction | `acars_apps.cpp`: libacars ADS-C downlink basic groups 7/9/10/18/19/20 | Same groups; additionally checks ARINC CRC before accepting coordinates |
+| Direction | JAERO `parserisu->downlink=burstmode`, forwarded by `fill_acars_msg` | ACARS block-ID direction per libacars; normal P-channel ACKs in submitted clips are ground-to-air |
+| Internet map input | `flight_map_webview.h`: `onlinePositions=true`; `/v2/hex/...` at api.adsb.lol, batches of 100, every 20 s | No online enrichment in Inmarsat map; separate Aircraft Map internet control is not connected to it |
+| Source identity | `onAcars2` initially copies AES hex to ICAO, then may replace with ADS-C group 17 | Only explicit group 17 populates ICAO; do not silently equate distinct identity namespaces |
+| Display | `flight_map_data.cpp`: decoded position first, otherwise fresh online coordinate, `positionSource` label | Native validated ADS-C only; empty map is expected without accepted coordinates |
+
+InmarScope README calls decoded markers blue and online markers orange. Its
+normal non-burst 10500 path does not convert an ACK or ground-service message
+to a native position. Historical decoded positions can also remain in its table.
+Thus a populated InmarScope map alone is not evidence that the same 10500 bytes
+carry aircraft coordinates. This is a confirmed feature difference, not proof
+of which source the remote tester's individual markers used.
+
+The submitted cfef9adc/cd0e5a9c/570087e1 clips recover eight complete messages
+in cold replay: seven ACKs and one A4 ground-service message; all block IDs
+ground-to-air, zero ADS-C or application/identity failures. No changes to
+modem/FEC, CRC or direction gates are justified by these recovered payloads.
+10500 can carry position-bearing applications; do not infer otherwise from
+three five-second clips. Raw airline position text, flight plans and clearance
+waypoints are not interchangeable with a current aircraft position.
+
+Next feature (T-0095): explicitly opt-in online enrichment of received aircraft,
+separate source/age/identity provenance, decoded coordinates taking priority,
+bounded asynchronous requests and cancellation on disable. Reuse the existing
+internet-aircraft policy; never upload message contents or treat guessed AES as
+confirmed ICAO. Validate identity association against explicit ADS-C identity or
+independent matching evidence before attaching online positions. Turning off
+internet must remove only the online layer and preserve RF records. Offline RF
+decoding remains independent. Not included or silently enabled in 0.2.117.
+
+Primary source links:
+[InmarScope lookup](https://github.com/SarahRoseLives/InmarScope/blob/26ae80af4bcfa4c86ed55f4383d1c95481d3450b/src/web/flight_map_webview.cpp),
+[source selection](https://github.com/SarahRoseLives/InmarScope/blob/26ae80af4bcfa4c86ed55f4383d1c95481d3450b/src/web/flight_map_data.cpp),
+[native parser](https://github.com/SarahRoseLives/InmarScope/blob/26ae80af4bcfa4c86ed55f4383d1c95481d3450b/src/decode/acars_apps.cpp).
+
+## 8400 Voice Evidence
 
 | Stage | Implementation / evidence |
 |---|---|

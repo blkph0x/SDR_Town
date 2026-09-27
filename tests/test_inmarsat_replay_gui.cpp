@@ -8,6 +8,7 @@
 #include <QSlider>
 #include <QThread>
 #include <QFile>
+#include <QLabel>
 
 TEST_CASE("Inmarsat IQ GUI runs shared replay and preserves responsive controls", "[inmarsat][gui]") {
     QTemporaryDir dir; REQUIRE(dir.isValid());
@@ -53,6 +54,16 @@ TEST_CASE("Inmarsat map renders offline and bounds positions", "[inmarsat][gui]"
     if(!path.isEmpty())REQUIRE(image.save(path));
     auto invalid=position;invalid["latDeg"]=91;
     map.setReport({{"positions",{invalid}}},false);CHECK(map.aircraftCount()==0);
+    auto* status=map.findChild<QLabel*>("inmarsatMapVoiceStatus");REQUIRE(status);
+    map.setReport({{"messages",3}},false);
+    CHECK(map.aircraftCount()==0);CHECK(status->text().contains("no validated ADS-C position"));
+    QApplication::processEvents();
+    CHECK(status->geometry().bottom()<map.height()-24);
+    if(const auto path=qEnvironmentVariable("SDR_TOWN_INMARSAT_EMPTY_MAP_SCREENSHOT");!path.isEmpty())
+        REQUIRE(map.grab().save(path));
+    map.setReport({{"messages",4},{"positions",{position}}},false);
+    CHECK(map.aircraftCount()==1);CHECK(status->text().isEmpty());
+    map.setReport(nlohmann::json::object(),false);CHECK(status->text().isEmpty());
 }
 TEST_CASE("Aero public burst recording reaches the GUI map", "[inmarsat][gui][reference]") {
     const auto iq=qEnvironmentVariable("SDR_TOWN_AERO_BURST_IQ");
@@ -62,8 +73,12 @@ TEST_CASE("Aero public burst recording reaches the GUI map", "[inmarsat][gui][re
     options.mode=InmarsatDemodMode::AeroBurstOqpsk10500;options.logDirectory=dir.path();
     dialog.startReplay(options);
     for(int i=0;i<15000 && dialog.snapshot().running;++i){QApplication::processEvents();QThread::msleep(2);}
-    const auto s=dialog.snapshot();REQUIRE_FALSE(s.running);REQUIRE(s.state=="complete");
+    const auto s=dialog.snapshot();INFO(s.toJson().dump());REQUIRE_FALSE(s.running);REQUIRE(s.state=="complete");
     CHECK(s.pipeline["validatedFrames"]==8);REQUIRE(s.pipeline["positions"].size()==2);
+    // Four validated reports, two unique aircraft (JAERO reference probe).
+    CHECK(s.pipeline["positionReports"]==4);
+    CHECK(s.pipeline["adscDecoded"].get<uint64_t>()>=2);
+    CHECK(s.pipeline["acarsAirToGround"].get<uint64_t>()>=2);
     auto* map=dialog.findChild<InmarsatMapWidget*>("inmarsatMap");REQUIRE(map);
     for(int i=0;i<200 && map->aircraftCount()!=2;++i){QApplication::processEvents();QThread::msleep(2);}
     REQUIRE(map->aircraftCount()==2);

@@ -27,6 +27,9 @@ with tempfile.TemporaryDirectory() as folder:
     report=json.loads(output.read_text())
     assert report["input48k"]==240000 and report["coldStart"]
     assert report["pcmSamples"]==0 and not report["continuousAudioVerified"]
+    for key in ("acarsAirToGround","acarsGroundToAir","acarsUnknownDirection","adscDecoded",
+                "positionReports","positionIdentityMismatches","applicationDecoded","applicationInvalid"):
+        assert report[key]==0,(key,report[key])
     subprocess.run([sys.executable,str(Path(__file__).with_name("unpack_inmarsat_recording.py")),str(path),str(root/"unpacked")],check=True,timeout=10)
     assert (root/"unpacked/source.sigmf-data").stat().st_size==131072
     clip["ifBase64"]="invalid";path.write_text(json.dumps(clip))

@@ -36,6 +36,8 @@ LONG_NUM_RE = re.compile(r"\b\d{5,}\b")
 UUID_RE = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
 ISSUE_STATUSES = {"outstanding", "fixed", "unrequired"}
 ISSUE_SEVERITIES = {"warn", "warning", "error", "critical", "fatal"}
+# DEC-0163: explicitly authorized tester allowance; size/rate/storage caps remain.
+RECORDINGS_PER_DAY = 15
 
 
 def valid_event(event: Any) -> bool:
@@ -99,7 +101,10 @@ def valid_recording(value: Any) -> bool:
     for field in ("before", "after"):
         counters = value[field]
         if (not isinstance(counters, dict) or set(counters) - {
-                "input48k", "crcOk", "crcBad", "pcmSamples", "codecErrors", "codecMutes"} or
+                "input48k", "crcOk", "crcBad", "pcmSamples", "codecErrors", "codecMutes",
+                "acarsAirToGround", "acarsGroundToAir", "acarsUnknownDirection", "adscDecoded",
+                "positionReports", "positionIdentityMismatches", "applicationDecoded", "applicationInvalid",
+                "applicationUnsupported", "applicationControl"} or
                 any(type(v) not in (int, float) or not math.isfinite(v) or v < 0 or v > 2**53
                     for v in counters.values())):
             return False
@@ -390,7 +395,7 @@ class DiagnosticsState:
                                 (value["clientId"], now-86400)).fetchone()[0]
             # Filesystem total also counts orphan files after an interrupted DB commit.
             total = sum(p.stat().st_size for p in directory.glob("*.json"))
-            if count >= 4 or total + len(raw) > 128*1024*1024:
+            if count >= RECORDINGS_PER_DAY or total + len(raw) > 128*1024*1024:
                 return None
             identity = uuid.uuid4().hex
             path = directory / (identity + ".json")
@@ -723,6 +728,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/health":
             self._send_json(200, {
                 "ok": True,
+                "recordingsPer24Hours": RECORDINGS_PER_DAY,
                 "events": self.state.count,
                 "uptimeSeconds": round(time.time() - self.state.started, 2),
                 "issues": self.state.issue_summary(),

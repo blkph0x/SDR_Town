@@ -16,6 +16,7 @@ struct InmarsatPipeline::Native {
     InmarsatMessageStore aircraft;
     uint64_t messages=0;
     uint64_t applicationDecoded=0,applicationInvalid=0,applicationUnsupported=0,applicationControl=0;
+    uint64_t acarsAirToGround=0,acarsGroundToAir=0,acarsUnknownDirection=0,adscDecoded=0,positionReports=0;
     uint64_t codecFailures=0,codecAttemptedWords=0,invalidCFrames=0,identityChanges=0,unidentifiedSpeech=0,positionMismatches=0;
     void reset(int bitRate,double rate,double offset,double channel,bool burst) {
         aero.reset(); channelizer.reset(); aircraft.clear();
@@ -151,6 +152,11 @@ void InmarsatPipeline::process(const std::complex<float>* iq, size_t count,
         native_->applicationInvalid+=after.applicationInvalid-before.applicationInvalid;
         native_->applicationUnsupported+=after.applicationUnsupported-before.applicationUnsupported;
         native_->applicationControl+=after.applicationControl-before.applicationControl;
+        native_->acarsAirToGround+=after.acarsAirToGround-before.acarsAirToGround;
+        native_->acarsGroundToAir+=after.acarsGroundToAir-before.acarsGroundToAir;
+        native_->acarsUnknownDirection+=after.acarsUnknownDirection-before.acarsUnknownDirection;
+        native_->adscDecoded+=after.adscDecoded-before.adscDecoded;
+        native_->positionReports+=after.positions-before.positions;
     }
     const auto after = demod_.stats();
     symbols_ += after.symbolsOut - before.symbolsOut;
@@ -185,6 +191,9 @@ nlohmann::json InmarsatPipeline::report() const {
         {"unidentifiedSpeechFrames",native_->unidentifiedSpeech},{"positionIdentityMismatches",native_->positionMismatches},
         {"applicationDecoded",native_->applicationDecoded},{"applicationInvalid",native_->applicationInvalid},
         {"applicationUnsupported",native_->applicationUnsupported},{"applicationControl",native_->applicationControl},
+        {"acarsAirToGround",native_->acarsAirToGround},{"acarsGroundToAir",native_->acarsGroundToAir},
+        {"acarsUnknownDirection",native_->acarsUnknownDirection},{"adscDecoded",native_->adscDecoded},
+        {"positionReports",native_->positionReports},
         {"resets", resets_}, {"discontinuities", gaps_}, {"rateHz", rate_},
         {"centerHz", center_}, {"channelHz", channel_}, {"offsetHz", channel_ - center_},
         {"mode", static_cast<int>(mode_)}, {"symbols", symbols_}, {"rawBlocks", rawBlocks_},

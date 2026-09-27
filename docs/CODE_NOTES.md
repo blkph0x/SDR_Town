@@ -1,5 +1,18 @@
 # Code notes (tree map)
 
+T-0094 / DEC-0163: InmarsatAero counts ACARS block-ID direction and valid ADS-C
+applications; existing accepted position count is preserved through pipeline
+resets into `positionReports`. InmarsatDiagnostics allows only numeric counters
+through the existing opt-in route. DiagnosticRecording stores live before/after
+counts, with backward-compatible collector allowlisting. ReplayCommand exposes
+the same cold-start counters; the map reports messages without coordinates.
+No new inferred coordinates, raw-message telemetry, framing or voice decisions.
+
+T-0094 / DEC-0163: remote_diag_server.RECORDINGS_PER_DAY controls the durable
+per-installation rolling allowance, advertised by /health for deployment checks.
+InmarsatRecordingDialog describes 15 and handles HTTP 429 distinctly, retaining
+the recording for manual save/retry. Authentication and other quotas unchanged.
+
 T-0092 / DEC-0162: InmarsatAcarsApplication dispatches bounded libacars v2.2.1
 applications with explicit direction, statuses and structured ADS-C fields.
 InmarsatAero supplies ACARS block-ID direction and downlink-header evidence.

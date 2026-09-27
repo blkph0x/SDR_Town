@@ -1,5 +1,25 @@
 # Decisions
 
+## DEC-0163 - Explicitly raise recording allowance to 15 (2026-09-27)
+
+User authorized 15 uploads after the collector's durable ledger confirmed the
+tester already had four uploads in the rolling 24-hour window. Raise only the
+per-installation recording allowance; keep separate consent/review, authenticated
+HTTPS, 1 MiB request size, 128 MiB total recording storage, 30-day retention and
+the independent request-rate guard. Do not delete history or change client IDs
+to evade the quota. Expose the policy in health for deployment verification and
+show a useful quota error instead of only a generic failed upload. No automatic
+retry. Test the 15th/16th boundary, restart persistence and rolling expiry.
+The resent cfef9adc/cd0e5a9c/570087e1 10500 bundles each have live +260 good/
+zero bad CRC units. Cold replay completes ACKs and a ground-service message,
+not a position report. Five seconds of cold acquisition cannot establish which
+messages the already-locked live decoder completed. Add numeric message-direction,
+ADS-C decoded and accepted-position counters to existing reports and reviewed
+recording before/after snapshots; never send raw messages/coordinates as routine
+telemetry. Keep old recordings compatible. Show an empty-map status when messages
+exist without map positions. Test the actual reference IQ-to-GUI map path. Do not
+weaken direction, CRC or identity gates or modify the working 8400 path.
+
 ## DEC-0162 - Direction-aware Aero applications and 8400 audit (2026-09-27)
 
 User extended T-0092 before publication. libacars v2.2.1 README/API and the

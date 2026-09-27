@@ -1,5 +1,24 @@
 # Development log
 
+## 2026-09-27 - T-0094 allowance and position-source evidence
+
+Raised authorized recording quota to 15 per rolling day, tested durable limits
+and deployed to existing HTTPS collector without changing credentials or proxy.
+Received/diagnosed the three requested 10500 submissions. Live CRC counters are
+clean; cold replay yields ACKs/service text, no position-bearing ADS-C messages.
+Added message-direction, ADS-C and accepted-position counters to existing local,
+opted-in remote and reviewed-recording reports, plus an explicit empty-map status.
+No payload/coordinate upload in routine telemetry and no voice/parser changes.
+
+Read InmarScope source through 26ae80a (current source unchanged by ea3602e):
+its separate ADSB.lol enrichment defaults on and can locate radio identities
+without radio coordinates. Our Inmarsat map lacks that optional feature. This
+does not establish the source of any particular remote marker; T-0095 records
+an explicit-opt-in, source-labelled implementation plan. No automatic third-party
+lookup added. Local release build and all 16 suites PASS; 20 independent map
+replays PASS. Test-launch error and non-reproduced anomaly recorded honestly in
+BUILD_NOTES/ISS-0049. Preparing v0.2.117 experimental CI/public asset verification.
+
 ## 2026-09-27 - T-0093 first submitted 8400 speech check
 
 Inspected new v0.2.116 recording and matching remote telemetry. This live PCM

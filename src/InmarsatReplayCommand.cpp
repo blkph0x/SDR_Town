@@ -89,6 +89,11 @@ int runInmarsatReplayAutomation(bool gui) {
             nlohmann::json report={{"schema","inmarsat-if-reproduction-v1"},
                 {"input48k",stats.input48k},{"crcOk",stats.crcOk},{"crcBad",stats.crcBad},
                 {"pcmSamples",stats.pcmSamples},{"audio",audio.report()},
+                {"acarsAirToGround",stats.acarsAirToGround},{"acarsGroundToAir",stats.acarsGroundToAir},
+                {"acarsUnknownDirection",stats.acarsUnknownDirection},{"adscDecoded",stats.adscDecoded},
+                {"positionReports",stats.positions},{"positionIdentityMismatches",stats.positionIdentityMismatches},
+                {"applicationDecoded",stats.applicationDecoded},{"applicationInvalid",stats.applicationInvalid},
+                {"applicationUnsupported",stats.applicationUnsupported},{"applicationControl",stats.applicationControl},
                 {"coldStart",true},{"continuousAudioVerified",false}};
             const auto json=QByteArray::fromStdString(report.dump(2));std::cout<<json.constData()<<'\n';
             if(!resultPath.isEmpty()) {

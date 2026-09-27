@@ -1,5 +1,57 @@
 # Build notes
 
+## 2026-09-27 - T-0094 final local qualification
+
+Windows Release rebuilt successfully (t0094-layout-build.log). Full CTest with
+the independent burst IQ enabled: 16/16 PASS, 53.57s (t0094-verified-ctest.log).
+Whole Workspace suite repeated five times PASS; separate reference-to-GUI map
+case repeated 20 times PASS. Four accepted position reports produce two tracks.
+Collector 6/6, diagnostics packaging 1/1, release verifier 16/16 and recording
+CLI tests PASS; P25 freeze guard passes with no protected source changed.
+
+An earlier optional GUI reference run reported non-complete state without a
+readable QString value. Added snapshot INFO output; this did not recur in the
+repeated tests. Cause remains unproven (ISS-0049), not a repaired decoder defect.
+A later attempted headless run exited 0xc0000409 before test output. CDB confirmed
+Qt could not load the requested offscreen plugin: this deployment contains only
+qwindows.dll. Remove that test-only environment override; do not alter decoder
+code or the Windows package to conceal a test-launch error. CDB evidence is in
+ignored build/t0094-cdb.log. No physical SDR/remote marker source acceptance
+is inferred from these local passes. GitHub/public asset qualification pending.
+
+## 2026-09-27 - T-0094 10500 receipt and map evidence
+
+Confirmed cfef9adc91cd498183b32da77b3c4c91 plus cd0e5a9c/570087e1 on the
+collector after allowance deployment. Each five-second live snapshot has +260
+good/zero bad CRC SUs. Cold replay completes 4/3/1 messages respectively, all
+ground-to-air block IDs: seven empty ACKs and one A4 ground-service message.
+Zero ADS-C, accepted positions, application failures or identity mismatches.
+Cold CRC failures are acquisition; they are not the live CRC measurements.
+Two earlier new submissions also yield ACK/MIAM ACK, not position reports.
+Original 10 Msps IQ is only 1.6384 ms; the five-second full reproduction is modem
+IF, not complete wideband RF. Private bytes/text stay under ignored build/.
+
+Added scalar direction/ADS-C/position counters to existing telemetry and
+before/after recording snapshots. Quota-only full CTest initially 16/16 PASS
+(55.45s). Expanded reference run then found two test-expectation errors: an
+empty initializer constructs null JSON rather than an empty report object, and
+the independent burst has FOUR accepted reports for TWO aircraft. Direct-IF
+probe confirms reports on AES 3958038 three times and 4195750 once; correct
+those assertions, not the parser/acceptance rules. Final qualification pending.
+
+## 2026-09-27 - T-0094 upload allowance deployment
+
+Collector tests 6/6 PASS after raising allowance to 15. Tests cover the 15th
+acceptance/16th rejection, restart persistence, one rolling-day expiry, retained
+request-rate/format/auth guards and public health policy. SQLite backed up via
+SQLite backup API before restarting only the verified collector process on 8787;
+existing credentials/configuration and recording history preserved. Public
+https://gearsqueens.online/sdr-town-diag/health returns ok=true and
+recordingsPer24Hours=15. Existing clients may resend without an app update.
+The affected installation had four accepted recordings; no new 10500 payload
+had reached storage when the user requested this change. Do not infer position
+parser/map failure from a recording which has not arrived.
+
 ## 2026-09-27 - T-0093 submitted 8400 live speech
 
 Received bundle 086bf146 from v0.2.116, five seconds of 48 kHz modem IF and

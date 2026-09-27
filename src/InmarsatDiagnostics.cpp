@@ -41,7 +41,8 @@ nlohmann::json InmarsatDiagnostics::remotePayload(const nlohmann::json& details)
             "inputRejected","consecutiveRejected","invalidGeometry","invalidAmplitude","invalidAeroPassband",
             "probeSkippedBlocks","codecFailures","codecAttemptedWords","invalidCFrames","identityChanges",
             "unidentifiedSpeechFrames","positionIdentityMismatches","applicationDecoded","applicationInvalid",
-            "applicationUnsupported","applicationControl"})
+            "applicationUnsupported","applicationControl","acarsAirToGround","acarsGroundToAir",
+            "acarsUnknownDirection","adscDecoded","positionReports"})
             if(input.contains(key) && input[key].is_number() && std::isfinite(input[key].get<double>()))output[key]=input[key];
     };
     numbers(details,result);

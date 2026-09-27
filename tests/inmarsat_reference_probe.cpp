@@ -55,7 +55,10 @@ int main(int argc,char** argv) {
         nlohmann::json j={{"input48k",s.input48k},{"softBits",s.softBits},{"crcOk",s.crcOk},
             {"crcBad",s.crcBad},{"cFrames",s.cFrames},{"rejectedCFrames",s.rejectedCFrames},
             {"voiceWords",s.voiceWords},{"pcmSamples",s.pcmSamples},{"codecErrors",s.codecErrors},
-            {"codecRepeats",s.codecRepeats},{"codecMutes",s.codecMutes},{"messages",messages},{"positions",s.positions}};
+            {"codecRepeats",s.codecRepeats},{"codecMutes",s.codecMutes},{"messages",messages},{"positions",s.positions},
+            {"acarsAirToGround",s.acarsAirToGround},{"acarsGroundToAir",s.acarsGroundToAir},
+            {"acarsUnknownDirection",s.acarsUnknownDirection},{"adscDecoded",s.adscDecoded},
+            {"positionIdentityMismatches",s.positionIdentityMismatches}};
         std::cout<<j.dump(2)<<std::endl;
         return 0;
     } catch(const std::exception& e) {std::cerr<<e.what()<<std::endl;return 2;}

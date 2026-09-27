@@ -1,5 +1,13 @@
 # SDR Town
 
+0.2.117 raises reviewed diagnostic recordings to **15 per installation per
+rolling 24 hours** and explains upload-limit failures. Recording consent, size,
+storage and retention limits remain intact. Numeric map diagnostics distinguish
+message direction, decoded ADS-C and accepted positions; no coordinates or
+message bodies are added to automatic telemetry. See [release notes](docs/RELEASE_0.2.117.md).
+The latest real 8400 sample contains coherent speech according to local STT;
+there is no speculative voice/DSP change in this update.
+
 0.2.116 interprets **ADS-C, CPDLC, MIAM, OHMA and media-advisory** applications,
 including acknowledgements that previously looked like scrambled text. Aircraft
 identity can update independently of position; direction/CRC checks protect the map. Raw

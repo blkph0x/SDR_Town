@@ -487,6 +487,7 @@ void InmarsatWidget::refreshUi() {
     }
     audioLabel_->setToolTip(QString::fromStdString(snapshot.diagnosticLog));
     auto report=snapshot.diagnostics;if(!running){report["voiceActive"]=false;report["speechActive"]=false;}
+    report["messages"]=snapshot.messages; // Includes all watch workers, not only focused audio.
     // Live aircraft survive a manual data-to-voice retune. Only native, validated
     // ADS-C messages enter this view; replay owns an entirely separate map.
     report["positions"]=nlohmann::json::array();

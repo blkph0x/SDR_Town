@@ -1,5 +1,36 @@
 # Issues (canonical)
 
+## ISS-0049 - Optional GUI reference completion anomaly (2026-09-27, monitor)
+
+One T-0094 qualification run failed the complete-state assertion without a
+readable QString dump; no evidence establishes whether stop input or application
+logic caused it. Snapshot INFO added for any recurrence. Five full Workspace
+repeats, 20 isolated reference replays and final full CTest pass. No replay state
+machine change is justified. Preserve failing snapshot/log if this recurs.
+Separate offscreen-launch fast-fail was diagnosed by CDB as missing Qt offscreen
+plugin, not replay code; use the shipped Windows platform for qualification.
+
+## ISS-0048 - 10500 empty map lacks live position evidence (2026-09-27, field acceptance OPEN)
+
+T-0094 / DEC-0163. Quota blocked additional recordings at four per rolling day;
+authorized allowance now 15, deployed and receipt cfef9adc confirmed. Three
+latest clips each have live +260 good/zero bad CRC units. Cold replays complete
+ACKs and ground-service prose, no ADS-C position-bearing messages. Earlier two
+new clips likewise give ACK/MIAM ACK, not coordinates. Cold acquisition cannot
+describe every message the already-running live modem completed.
+
+Add numeric direction/ADS-C/accepted-position counters to existing logs, opted-in
+reports and reviewed recording snapshots, plus an honest empty-map status.
+Do not weaken parser direction/CRC/identity checks or infer positions from ACKs.
+Independent burst-reference-to-GUI test is the positive control. Field closure
+requires a real position-bearing message/capture from this installation, ideally
+the same IQ decoded by JAERO/InmarScope. No RF/map defect is established by
+these samples; proprietary text and CPDLC waypoint extraction are separate scope.
+Source comparison also confirms InmarScope defaults to online ADSB.lol enrichment
+for received identities, which SDR Town's Inmarsat map lacks. This explains a
+possible map-population difference without a decoder defect; the remote marker's
+actual source is not established. Scope and safe implementation are T-0095.
+
 ## ISS-0046 - Aero encoded applications displayed as prose (2026-09-27, REPAIRED in v0.2.116-experimental; remaining formats open)
 
 T-0092 / DEC-0161: three submitted 10500 recordings have +260 good/+0 bad CRC
