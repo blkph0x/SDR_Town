@@ -1,5 +1,23 @@
 # Build notes
 
+## 2026-09-27 - T-0083 bounded diagnostic recording
+
+Collector tests PASS (validation, quota across restart, expiry, HTTP authority).
+Synthetic CLI IF reproduction PASS: exactly 240000 samples, no invented PCM,
+malformed input rejected. Initial public POST failed Apache 404, not collector.
+Deployed matching collector (only SDR Town service restarted). Added recording
+upload to dedicated /etc/apache2/sdr-town-diag.conf; backup before-v112 retained;
+Apache configtest PASS and reload PASS. No other proxy routes changed; admin
+API stays LAN-only. Synthetic public HTTPS upload and exact local admin retrieval
+PASS receipt ae969ec26e43418285554873b8a70cb8. Packaged credential matches local
+collector, value never logged. No private radio data used in service validation.
+Release app/test builds PASS. New pipeline fixture initially failed compilation
+(missing InmarsatPipeline.h include); repaired, then 21630 native assertions /
+12 cases PASS. Full CTest 15/15 PASS (51.54 s). GUI consent dialog screenshot
+inspected at 500x340: controls fit; capture/send disabled before consent/data.
+Application GUI dry-run PASS with no errors/warnings. Public binary qualification
+pending; no live RF acceptance claimed.
+
 ## 2026-09-27 - T-0082 Inmarsat identity hardening
 
 Focused native/watch/replay tests PASS: 23040 assertions / 39 cases. Release app,

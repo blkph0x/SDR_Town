@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """SDR Town remote diagnostics collector with lightweight issue tracking.
 
-The collector accepts compact JSON events only. It is not an IQ, audio, or
-crash-dump upload service. Raw events are kept as JSONL, while warning/error
+The collector accepts compact JSON events and separately consented, bounded
+Inmarsat modem recordings. Raw events are kept as JSONL, while warning/error
 events are grouped into issues in SQLite so fixes can be marked and reported
 back to the affected installation on the next app start.
 """
@@ -10,6 +10,8 @@ back to the affected installation on the next app start.
 from __future__ import annotations
 
 import argparse
+import base64
+import uuid
 from contextlib import contextmanager
 import hashlib
 import hmac
@@ -69,6 +71,54 @@ def valid_event(event: Any) -> bool:
         return value is None or isinstance(value, (bool, int))
 
     return bounded(event, 0)
+
+
+def valid_recording(value: Any) -> bool:
+    """DEC-0155: exact modem recording schema, never arbitrary file uploads."""
+    if not isinstance(value, dict) or set(value) != {
+        "schema", "channelHz", "mode", "timeUtc", "ifRate", "pcmRate", "format",
+        "ifBase64", "pcmBase64", "clientId", "version", "before", "after",
+        "iqBase64", "iqRate", "iqCenterHz", "iqStartSample", "iqFormat"
+    }:
+        return False
+    if (value["schema"] != "sdr-town-inmarsat-recording-v1" or
+            value["ifRate"] != 48000 or value["pcmRate"] != 8000 or value["format"] != "s16le"):
+        return False
+    if type(value["mode"]) is not int or value["mode"] not in (0, 1, 2, 3, 5, 6):
+        return False
+    hz = value["channelHz"]
+    if type(hz) not in (int, float) or not math.isfinite(hz) or not 0 < hz <= 10e9:
+        return False
+    if value["iqFormat"] != "cf32_le" or not isinstance(value["iqStartSample"],str) or not re.fullmatch(r"[0-9]{1,20}",value["iqStartSample"]):
+        return False
+    for field, upper in (("iqRate",40e6),("iqCenterHz",10e9)):
+        v=value[field]
+        if type(v) not in (int,float) or not math.isfinite(v) or not 0 < v <= upper:
+            return False
+    for field in ("before", "after"):
+        counters = value[field]
+        if (not isinstance(counters, dict) or set(counters) - {
+                "input48k", "crcOk", "crcBad", "pcmSamples", "codecErrors", "codecMutes"} or
+                any(type(v) not in (int, float) or not math.isfinite(v) or v < 0 or v > 2**53
+                    for v in counters.values())):
+            return False
+    for field, pattern in (("clientId", r"[A-Za-z0-9_-]{1,96}"),
+                           ("version", r"[A-Za-z0-9_.-]{1,64}"),
+                           ("timeUtc", r"[0-9TZ:.+-]{1,40}")):
+        if not isinstance(value[field], str) or not re.fullmatch(pattern, value[field]):
+            return False
+    try:
+        for field, maximum in (("ifBase64", 480000), ("pcmBase64", 80000), ("iqBase64",131072)):
+            if not isinstance(value[field], str) or len(value[field]) > (maximum + 2)//3*4:
+                return False
+            raw = base64.b64decode(value[field], validate=True)
+            if len(raw) % 2 or len(raw) > maximum or (field == "ifBase64" and len(raw) != maximum):
+                return False
+            if field=="iqBase64" and (not raw or len(raw)%8):
+                return False
+    except (ValueError, TypeError):
+        return False
+    return True
 
 
 def utc_now() -> str:
@@ -141,6 +191,8 @@ class DiagnosticsState:
         self.rate_window = time.monotonic()
         self.rate_clients: dict[str, tuple[int, int]] = {}
         self.rate_bytes = 0
+        self.recording_window = time.monotonic()
+        self.recording_requests = 0
         self.db_path = out_dir / "diagnostics.sqlite3"
         out_dir.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -163,6 +215,17 @@ class DiagnosticsState:
             self.rate_bytes += size
             return True
 
+    def allow_recording_request(self) -> bool:
+        # Global request budget cannot be bypassed by fabricated installation IDs.
+        with self.rate_lock:
+            now=time.monotonic()
+            if now-self.recording_window >= 60:
+                self.recording_window=now;self.recording_requests=0
+            if self.recording_requests >= 16:
+                return False
+            self.recording_requests += 1
+            return True
+
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
         con = sqlite3.connect(self.db_path)
@@ -180,6 +243,10 @@ class DiagnosticsState:
             con.executescript(
                 """
                 PRAGMA journal_mode=WAL;
+                CREATE TABLE IF NOT EXISTS recordings (
+                    id TEXT PRIMARY KEY, client TEXT NOT NULL, created REAL NOT NULL,
+                    bytes INTEGER NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS clients (
                     client_id TEXT PRIMARY KEY,
                     first_seen TEXT NOT NULL,
@@ -221,6 +288,42 @@ class DiagnosticsState:
                 CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status);
                 """
             )
+
+    def save_recording(self, value: dict[str, Any]) -> str | None:
+        if not valid_recording(value):
+            raise ValueError("invalid recording")
+        raw = json.dumps(value, separators=(",", ":")).encode("utf-8")
+        directory = self.out_dir / "recordings"
+        directory.mkdir(exist_ok=True)
+        with self.lock, self._connect() as con:
+            now = time.time()
+            for row in con.execute("SELECT id FROM recordings WHERE created < ?", (now-30*86400,)):
+                (directory / (row["id"] + ".json")).unlink(missing_ok=True)
+            con.execute("DELETE FROM recordings WHERE created < ?", (now-30*86400,))
+            count = con.execute("SELECT COUNT(*) FROM recordings WHERE client=? AND created>?",
+                                (value["clientId"], now-86400)).fetchone()[0]
+            # Filesystem total also counts orphan files after an interrupted DB commit.
+            total = sum(p.stat().st_size for p in directory.glob("*.json"))
+            if count >= 4 or total + len(raw) > 128*1024*1024:
+                return None
+            identity = uuid.uuid4().hex
+            path = directory / (identity + ".json")
+            try:
+                with path.open("xb") as output:
+                    output.write(raw)
+                con.execute("INSERT INTO recordings VALUES (?,?,?,?)",
+                            (identity, value["clientId"], now, len(raw)))
+            except Exception:
+                path.unlink(missing_ok=True)
+                raise
+            return identity
+
+    def expire_recordings(self) -> None:
+        with self.lock, self._connect() as con:
+            cutoff=time.time()-30*86400
+            for row in con.execute("SELECT id FROM recordings WHERE created < ?", (cutoff,)):
+                (self.out_dir / "recordings" / (row["id"] + ".json")).unlink(missing_ok=True)
+            con.execute("DELETE FROM recordings WHERE created < ?", (cutoff,))
 
     def write_event(self, event: dict[str, Any]) -> Path:
         session = safe_name(event.get("sessionId"))
@@ -543,6 +646,30 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "issues": self.state.list_issues()})
             return
 
+        if path == "/api/recordings":
+            if not self._admin_authorized(query):
+                self._send_json(401, {"ok": False, "error": "admin unauthorized"})
+                return
+            identity = query.get("id", [""])[0]
+            if identity:
+                if not re.fullmatch(r"[0-9a-f]{32}", identity):
+                    self._send_json(400, {"ok": False, "error": "invalid id"})
+                    return
+                with self.state.lock, self.state._connect() as con:
+                    row=con.execute("SELECT id FROM recordings WHERE id=? AND created>?",
+                                    (identity, time.time()-30*86400)).fetchone()
+                    file=self.state.out_dir / "recordings" / (identity+".json")
+                    if row and file.is_file():
+                        self._send_json(200, json.loads(file.read_bytes()))
+                        return
+                self._send_json(404, {"ok": False, "error": "not found"})
+            else:
+                with self.state.lock, self.state._connect() as con:
+                    rows=con.execute("SELECT * FROM recordings WHERE created>? ORDER BY created DESC LIMIT 200",
+                                     (time.time()-30*86400,)).fetchall()
+                self._send_json(200, {"ok": True, "recordings": [dict(r) for r in rows]})
+            return
+
         if path == "/api/clients":
             if not self._admin_authorized(query):
                 self._send_json(401, {"ok": False, "error": "admin unauthorized"})
@@ -562,6 +689,40 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
+
+        if path == "/recordings":
+            if not self._client_authorized():
+                self._send_json(401, {"ok": False, "error": "unauthorized"})
+                return
+            if not self.state.allow_recording_request():
+                self._send_json(429, {"ok": False, "error": "recording request quota"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                length = 0
+            if not 0 < length <= 1024*1024:
+                self._send_json(413, {"ok": False, "error": "recording size limit"})
+                return
+            if self.headers.get("Content-Type", "").split(";", 1)[0] != "application/json":
+                self._send_json(415, {"ok": False, "error": "application/json required"})
+                return
+            self.connection.settimeout(10)
+            try:
+                raw = self.rfile.read(length)
+                value = json.loads(raw)
+                if len(raw) != length or not valid_recording(value):
+                    raise ValueError("invalid recording")
+            except (ValueError, TimeoutError, OSError):
+                self._send_json(400, {"ok": False, "error": "invalid recording"})
+                return
+            try:
+                identity = self.state.save_recording(value)
+            except (OSError, sqlite3.Error):
+                self._send_json(503, {"ok": False, "error": "recording storage unavailable"})
+                return
+            self._send_json(201 if identity else 429, {"ok": bool(identity), "recordingId": identity})
+            return
 
         if path == "/admin/issue":
             length = int(self.headers.get("Content-Length", "0") or "0")
@@ -740,6 +901,15 @@ class DiagnosticsServer(ThreadingHTTPServer):
         super().__init__(addr, Handler)
         self.state = state
         self.workers = threading.BoundedSemaphore(32)
+        self.next_expiry = 0.0
+
+    def service_actions(self):
+        if time.monotonic() >= self.next_expiry:
+            self.next_expiry=time.monotonic()+60
+            try:
+                self.state.expire_recordings()
+            except (OSError, sqlite3.Error):
+                print("Recording retention maintenance failed", file=sys.stderr)
 
     def get_request(self):
         connection, address = super().get_request()

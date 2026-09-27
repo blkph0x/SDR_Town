@@ -1,4 +1,5 @@
 #include "InmarsatWidget.h"
+#include "InmarsatDiagnosticRecording.h"
 #include "InmarsatEngine.h"
 #include "InmarsatDiagnostics.h"
 #include "InmarsatMapWidget.h"
@@ -57,6 +58,18 @@ TEST_CASE("Aero map distinguishes unlocated and unidentified voice", "[inmarsat]
     report["voiceActive"]=false;map.setReport(report,true);CHECK(status->isHidden());
     CHECK_FALSE(map.grab().toImage().isNull());
 }
+TEST_CASE("Inmarsat diagnostic recording requires consent and discards on close", "[inmarsat][gui]") {
+    QWidget parent;
+    showInmarsatDiagnosticRecording(&parent,1545000000);
+    auto* dialog=parent.findChild<QDialog*>();REQUIRE(dialog);
+    auto* consent=dialog->findChild<QCheckBox*>("inmarsatRecordingConsent");REQUIRE(consent);
+    auto* start=dialog->findChild<QPushButton*>("recordingStart");REQUIRE(start);
+    CHECK_FALSE(consent->isChecked());CHECK_FALSE(start->isEnabled());
+    const auto screenshot=qEnvironmentVariable("SDR_TOWN_INMARSAT_RECORDING_SCREENSHOT");
+    if(!screenshot.isEmpty()) {QApplication::processEvents();CHECK(dialog->grab().save(screenshot));}
+    REQUIRE(InmarsatDiagnosticRecording::arm(1545000000));
+    delete dialog;CHECK(InmarsatDiagnosticRecording::status()=="Idle");
+}
 #include <stdexcept>
 
 #ifdef HAVE_SOAPYSDR
@@ -66,6 +79,9 @@ TEST_CASE("Aero map distinguishes unlocated and unidentified voice", "[inmarsat]
 // Deliberately omit the network adapter in this UI test executable. The real
 // widget, engine, device manager and decoder implementations are linked below.
 void connectInmarsatRemoteDiagnostics() {}
+#include "RemoteDiagnostics.h"
+RemoteDiagnosticsConfig remoteDiagnosticsConfigFromProcess(int,char**,const QString&) {return {};}
+QString remoteDiagnosticsClientId() {return {};}
 void configureInmarsatReplaySharing(InmarsatReplayDialog&) {}
 
 int main(int argc, char** argv) {

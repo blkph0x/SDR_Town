@@ -105,6 +105,7 @@ void InmarsatWidget::applyNeonStyle() {
     )");
 }
 
+#include "InmarsatDiagnosticRecording.h"
 void InmarsatWidget::buildUi() {
     auto* root = new QVBoxLayout(this);
     auto* title = new QLabel("INMARSAT AERO / EGC");
@@ -130,6 +131,11 @@ void InmarsatWidget::buildUi() {
         dialog->show();
     });
     root->addWidget(replayButton);
+    auto* diagnosticRecording=new QPushButton("Diagnostic recording...");
+    connect(diagnosticRecording,&QPushButton::clicked,this,[this] {
+        showInmarsatDiagnosticRecording(this,frequency_->value()*1e6);
+    });
+    root->addWidget(diagnosticRecording);
 
     auto* top = new QHBoxLayout();
     top->addWidget(new QLabel("BAND PLAN"));

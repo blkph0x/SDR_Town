@@ -1,5 +1,9 @@
 # Task list (canonical)
 
+T-0083 | in progress | Bounded Inmarsat diagnostic recordings |
+DEC-0155. Manual capture/review/send, authenticated collector quota/storage,
+reproduction tool, privacy/error tests and public release qualification.
+
 T-0082 | done | Inmarsat identity isolation and map usability |
 DEC-0154. Preserve PCM AES in all paths, flush on changes and show unlocated or
 unknown voice without guessing aircraft. Test native audio, GUI and privacy.

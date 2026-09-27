@@ -1,7 +1,11 @@
 #include "InmarsatAdsc.h"
 #include "InmarsatAero.h"
+#include "InmarsatPipeline.h"
 #include "InmarsatFirHistory.h"
 #include "InmarsatAudio.h"
+#include "InmarsatDiagnosticRecording.h"
+#include <QJsonDocument>
+#include <QJsonObject>
 #include "AeroCodec.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
@@ -178,4 +182,40 @@ TEST_CASE("Aero audio preserves source identity without attributing unknown PCM"
     CHECK(audio.report()["audioAesId"]==0xffffff);
     CHECK(audio.report()["audioSourceChanges"]==3);
     CHECK(audio.report()["pcmReceived"]==960);
+}
+
+TEST_CASE("Inmarsat diagnostic recording is bounded explicit and source isolated", "[inmarsat][native]") {
+    namespace R=InmarsatDiagnosticRecording;
+    R::cancel();int first=0,second=0;std::vector<int16_t> input(48000,123);
+    R::begin(&first,1545000000,3,false,input);CHECK(R::bundle().isEmpty());
+    REQUIRE(R::arm(1545000000));CHECK_FALSE(R::arm(1545000000));
+    R::begin(&second,1546000000,3,false,input);CHECK(R::status().startsWith("Waiting"));
+    R::begin(&first,1545000000,3,false,input);
+    const std::vector<std::complex<float>> iq(32768,{0.25f,-0.5f});
+    R::iq(&first,iq,2400000,1545000000,42);
+    R::begin(&second,1545000000,3,false,input);R::pcm(&second,input);
+    for(int i=0;i<4;++i){R::begin(&first,1545000000,3,false,input);R::pcm(&first,input);R::end(&first);}
+    const auto body=R::bundle();REQUIRE(!body.isEmpty());CHECK(body.size()<1024*1024);
+    const auto json=QJsonDocument::fromJson(body).object();
+    CHECK(QByteArray::fromBase64(json["ifBase64"].toString().toLatin1()).size()==480000);
+    CHECK(QByteArray::fromBase64(json["pcmBase64"].toString().toLatin1()).size()==80000);
+    CHECK(QByteArray::fromBase64(json["iqBase64"].toString().toLatin1()).size()==131072);
+    CHECK(json["iqStartSample"].toString()=="42");
+    REQUIRE(R::arm(1545000000));R::begin(&first,1545000000,3,false,input);
+    R::begin(&first,1545000000,3,true,input);CHECK(R::bundle().isEmpty());CHECK(R::status().startsWith("Cancelled"));
+    REQUIRE(R::arm(1545000000));R::begin(&first,1545000000,3,false,input);
+    R::release(&first);CHECK(R::status().startsWith("Cancelled"));R::cancel();
+}
+
+TEST_CASE("Inmarsat pipeline supplies replayable diagnostic boundaries", "[inmarsat][native]") {
+    namespace R=InmarsatDiagnosticRecording;
+    R::cancel();REQUIRE(R::arm(1545000000));
+    InmarsatPipeline pipeline;std::vector<std::complex<float>> iq(48000);
+    for(int i=0;i<6 && R::bundle().isEmpty();++i)
+        pipeline.process(iq.data(),iq.size(),uint64_t(i)*iq.size(),48000,1545000000,1545000000,
+                         InmarsatDemodMode::AeroVoice8400,false);
+    const auto json=QJsonDocument::fromJson(R::bundle()).object();REQUIRE(!json.isEmpty());
+    CHECK(json["iqRate"].toDouble()==48000);CHECK(json["iqStartSample"].toString()=="0");
+    CHECK(json["after"].toObject()["input48k"].toDouble()>=240000);
+    CHECK(json["pcmBase64"].toString().isEmpty());R::cancel();
 }

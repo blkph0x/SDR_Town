@@ -216,6 +216,8 @@ jobs:
         run: |
           python scripts/verify_inmarsat_replay.py --exe build/bin/Release/SDR_Town.exe --out build/inmarsat-replay-ci
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/test_inmarsat_recording.py --exe build/bin/Release/SDR_Town.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run SSTV backend tests
         shell: pwsh

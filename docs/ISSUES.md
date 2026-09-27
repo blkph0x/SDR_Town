@@ -1,5 +1,14 @@
 # Issues (canonical)
 
+## ISS-0039 - Diagnostic recording scope (2026-09-27, OPEN)
+
+T-0083 five-second IF clip starts mid-stream, without warmed PLL/FEC/vocoder state.
+Its short original-IQ excerpt is not a full RF regression fixture. Separate PCM
+is emitted data, not the actual speaker timeline. Full-length channelized IQ and
+warm-state deterministic replay remain future work; never claim cold replay
+silence proves the live decoder failed. Real tester clips still needed. Shared
+collector credentials remain extractable; quotas do not authenticate RF truth.
+
 ## ISS-0038 - Inmarsat identity handoff and scanner qualification (2026-09-27, OPEN)
 
 T-0082/DEC-0154 fixes discarded PCM AES in live/watch/replay callbacks, flushes

@@ -1,5 +1,22 @@
 # Decisions
 
+## DEC-0155 - Explicit bounded Inmarsat diagnostic recordings (2026-09-27)
+
+T-0083: user requests short remote evidence recordings. Capture the exact 48 kHz
+real IF at the native modem boundary plus its emitted 8 kHz PCM, not wideband IQ.
+Also retain the first 16384 original complex float samples, with source clock
+and center, per user's IQ+audio choice. Duration is explicit, not five seconds
+of wideband IQ. Manual per-recording consent; five seconds maximum, one selected pipeline,
+abort on discontinuity/reconfiguration. No rolling recording when disabled.
+Review/save/send separately; no automatic send or background retry. Maximum
+1 MiB JSON, four submissions per client/day, 128 MiB collector retained ceiling,
+30-day expiry. These are explicit product resource limits, not DSP thresholds.
+Require HTTPS and collector credential; no redirect or token in logs. Existing
+telemetry remains counters-only. Recordings can contain voice/aircraft/location
+data even without explicit identity fields. Shared client key does not prove
+authenticity; per-install authentication remains a separate open issue.
+
+
 ## DEC-0154 - Inmarsat identity-safe audio and map status (2026-09-27)
 
 T-0082: supplied review at 00cd3a5 confirms AES is discarded by single-channel,

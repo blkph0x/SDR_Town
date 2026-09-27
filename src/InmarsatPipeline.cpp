@@ -1,10 +1,12 @@
 #include "InmarsatPipeline.h"
+#include "InmarsatDiagnosticRecording.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <stdexcept>
 
 struct InmarsatPipeline::Native {
+    ~Native() {InmarsatDiagnosticRecording::release(this);}
     std::unique_ptr<InmarsatAero> aero;
     std::unique_ptr<InmarsatChannelizer> channelizer;
     InmarsatAero::MessageSink messageSink;
@@ -28,6 +30,7 @@ struct InmarsatPipeline::Native {
             if(messageSink) messageSink(m);
         });
         aero->setPcmSink([this](std::span<const int16_t> samples,uint32_t aes) {
+            InmarsatDiagnosticRecording::pcm(this,samples);
             if(pcmSink) pcmSink(samples,aes);
         });
     }
@@ -74,6 +77,7 @@ void InmarsatPipeline::process(const std::complex<float>* iq, size_t count,
     const auto validatedAt=std::chrono::steady_clock::now();
     validationMs_+=elapsed(begin,validatedAt);
     const bool gap = started_ && (discontinuity || start != nextSample_);
+    const bool recordingReset=gap || (started_ && (rate_!=rate || center_!=center || channel_!=channel || mode_!=mode));
     if (!started_ || gap || rate_ != rate || center_ != center || channel_ != channel || mode_ != mode) {
         const bool burst=mode==InmarsatDemodMode::AeroBurstMsk1200 || mode==InmarsatDemodMode::AeroBurstOqpsk10500;
         const auto probe=mode==InmarsatDemodMode::AeroBurstMsk1200?InmarsatDemodMode::AeroMsk1200:
@@ -101,7 +105,12 @@ void InmarsatPipeline::process(const std::complex<float>* iq, size_t count,
         const auto intermediate=native_->channelizer->process({iq,count});
         const auto channelizedAt=std::chrono::steady_clock::now();
         channelizerMs_+=elapsed(probeAt,channelizedAt);
+        InmarsatDiagnosticRecording::begin(native_.get(),channel,static_cast<int>(mode),recordingReset,intermediate);
+        InmarsatDiagnosticRecording::iq(native_.get(),{iq,count},rate,center,start);
+        InmarsatDiagnosticRecording::counters(native_.get(),before);
         native_->aero->processIf(intermediate);
+        InmarsatDiagnosticRecording::counters(native_.get(),native_->aero->stats());
+        InmarsatDiagnosticRecording::end(native_.get());
         modemMs_+=elapsed(channelizedAt,std::chrono::steady_clock::now());
         const auto after=native_->aero->stats();
         native_->validated+=after.crcOk-before.crcOk;

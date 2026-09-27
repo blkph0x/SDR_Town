@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-09-27 - T-0083 explicit recording evidence
+
+Added manual five-second modem IF/PCM recording with a 16384-sample original IQ
+excerpt, separate consent, bounded review/send and cold-start reproduction.
+Collector durable quotas/retention and admin-only retrieval tested. Updated only
+the dedicated proxy upload route after reproducing 404; synthetic public receipt
+verified. Ordinary telemetry remains counters-only; no always-on audio capture.
+
 ## 2026-09-27 - T-0082 Inmarsat hardening
 
 Reviewed supplied association audit. Existing watch focus is sticky as requested;

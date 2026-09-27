@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.111 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.112 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -193,8 +193,10 @@ set(SDR_TOWN_SOURCES
     include/InmarsatWidget.h
     src/InmarsatIqFile.cpp
     src/InmarsatPipeline.cpp
+    src/InmarsatDiagnosticRecording.cpp
     src/InmarsatDiagnostics.cpp
     src/InmarsatRemoteDiagnostics.cpp
+    src/InmarsatRecordingDialog.cpp
     src/InmarsatReplay.cpp
     src/InmarsatReplayDialog.cpp
     src/InmarsatReplayCommand.cpp
@@ -463,6 +465,7 @@ if(BUILD_TESTS)
     src/InmarsatWatch.cpp
     src/InmarsatIqFile.cpp
     src/InmarsatPipeline.cpp
+    src/InmarsatDiagnosticRecording.cpp
     src/InmarsatDiagnostics.cpp
     src/InmarsatReplay.cpp
     src/Ax25AprsDecoder.cpp
@@ -582,6 +585,7 @@ if(BUILD_TESTS)
   add_executable(sdr_town_workspace_tests tests/test_workspace.cpp src/WorkspaceLayout.cpp
     tests/test_inmarsat_replay_gui.cpp src/InmarsatReplayDialog.cpp
     src/InmarsatReplay.cpp src/InmarsatIqFile.cpp src/InmarsatPipeline.cpp
+    src/InmarsatDiagnosticRecording.cpp
     src/InmarsatDemod.cpp src/InmarsatDiagnostics.cpp
     tests/test_p25_aliases.cpp src/P25Aliases.cpp src/P25AliasCsv.cpp src/P25AliasDialog.cpp
     src/P25TalkgroupPresentation.cpp
@@ -616,6 +620,7 @@ if(BUILD_TESTS)
   list(REMOVE_ITEM inmarsat_gui_libs Catch2::Catch2WithMain)
   add_executable(inmarsat_live_gui_tests tests/test_inmarsat_live_gui.cpp
       ${inmarsat_gui_sources} src/InmarsatWidget.cpp include/InmarsatWidget.h
+      src/InmarsatRecordingDialog.cpp
       src/InmarsatMonitorWidget.cpp
       src/InmarsatWatchUi.cpp src/InmarsatWatchSpectrum.cpp include/InmarsatWatchSpectrum.h
       src/InmarsatReplayDialog.cpp)

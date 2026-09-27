@@ -1,5 +1,12 @@
 # Code notes (tree map)
 
+T-0083: InmarsatDiagnosticRecording holds one explicitly armed, bounded modem IF
+and PCM capture. InmarsatPipeline feeds it at the existing modem boundary;
+InmarsatRecordingDialog owns consent/review/save/HTTPS submission. No recorder
+network or disk I/O runs on the decoder worker. InmarsatReplayCommand supports
+diagnostic_if cold-start reproduction. remote_diag_server.py validates bundles
+and maintains durable upload quotas, storage bounds and expiry.
+
 ## Inmarsat source identity (DEC-0154)
 
 InmarsatAudio::push accepts AES and preserves unknown as zero. Source changes
