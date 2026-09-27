@@ -2,6 +2,10 @@
 
 ## 2026-09-27 - T-0079 independent filter isolation
 
+Published source 8e600d2. Windows CI 36280496010 and YAML validation
+36280496001 SUCCESS. Offline oracle tests were run locally; no claim that CI
+runs the optional NumPy study. Public app v0.2.110 unchanged.
+
 Three oracle unit tests PASS; 24 offline cases complete with finite results.
 NumPy 2.0.2 on this Windows host; SciPy deliberately unused due version warning.
 Results in WFM_FILTER_ISOLATION.md. No C++ or runtime changes; no app rebuild
