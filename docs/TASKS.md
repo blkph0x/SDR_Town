@@ -1,6 +1,6 @@
 # Task list (canonical)
 
-T-0094 | in_progress | Restore tester upload capacity and trace missing Aero map positions |
+T-0094 | done | Restore tester upload capacity and trace missing Aero map positions |
 DEC-0163. User requests 15 recordings per rolling day after the current four
 upload quota blocked further evidence. Preserve authentication, consent, file
 size/storage/retention bounds; update server, client notice and quota tests.
@@ -8,6 +8,11 @@ Diagnose new 10500 content before changing ADS-C acceptance or working voice.
 New receipts now diagnosed; add direction/ADS-C/position counters and empty-map
 status. Source comparison confirms InmarScope has a separate online map source;
 do not silently add one or call these non-position clips a decoder failure.
+v0.2.117-experimental published from 884c87d; master/release Windows Actions
+36317237872/36317237782 and YAML checks PASS. Public ZIP/hash/provenance and
+shipped GUI/CLI map reference, unchanged 8400 PCM, three submitted 10500 bundles,
+RDS and recording negative tests PASS. Field position acceptance remains open
+in ISS-0048; optional online enrichment is T-0095, not included in this release.
 
 T-0095 | planned | Source-labelled Inmarsat received-aircraft online positions |
 InmarScope comparison in INMARSAT_APPLICATION_VOICE_AUDIT_20260927.md. Explicit

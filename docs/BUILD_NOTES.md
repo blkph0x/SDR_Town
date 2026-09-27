@@ -1,5 +1,25 @@
 # Build notes
 
+## 2026-09-27 - T-0094 public release verification
+
+Source 884c87d791d3d893d6618004dd17e2d3ae73865e. Windows master/release Actions
+36317237872/36317237782 PASS; YAML 36317237855/36317237788 PASS. Public release
+https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.117-experimental is a
+non-draft prerelease; latest signed updater remains v0.2.96. Anonymous download
+ZIP SHA256 `bedb9c53721f2be5a3de8475ab8da4e84e928f020410ad70172636c9793b45f6`;
+executable `00e583b57fb3090f175a69edeb47201e921dd923f2127aedd4d11571836e650e`;
+SDRplay module `55613a347aaac2f3fb52b9e2f1d9e09bb2156746dddbc55eceffbbbaaa0e5ee6`.
+Embedded version, source commit and workflow run match. CLI help/bias-T, RDS
+and diagnostic recording positive/negative checks PASS on the downloaded EXE.
+Shipped CLI and GUI independent 10500-burst replay both finish with eight
+validated frames, four position reports and two map tracks. Submitted 8400
+analytic-IF reconstruction (not full tuner IQ) yields byte-identical WAV in both
+paths to v0.2.116: `b1d4c75b92ece9280769de46fc3d0f3d224c990d40ee189e0f4afa7e74659282`.
+Three private 10500 bundles again produce ground-to-air counts 4/3/1, zero ADS-C
+or accepted positions on cold replay. Public collector health still confirms 15.
+Private recordings/results remain local under ignored build/. No online lookup,
+RF acceptance or remote marker provenance is claimed by these verification gates.
+
 ## 2026-09-27 - T-0094 final local qualification
 
 Windows Release rebuilt successfully (t0094-layout-build.log). Full CTest with

@@ -1,5 +1,14 @@
 # Development log
 
+## 2026-09-27 - T-0094 published verification
+
+v0.2.117-experimental source 884c87d, both Windows CI runs and both YAML checks
+PASS. Downloaded public asset source/hash/version and shipped CLI/RDS/recording
+checks PASS. Actual GUI/CLI replay reaches two reference map tracks and retains
+exact prior 8400 speech WAV bytes; private 10500 results reproduce. Quota 15 is
+publicly verified. T-0094 complete, field map-source evidence ISS-0048 and optional
+online enrichment T-0095 remain open. Signed stable updater unchanged at v0.2.96.
+
 ## 2026-09-27 - T-0094 allowance and position-source evidence
 
 Raised authorized recording quota to 15 per rolling day, tested durable limits
