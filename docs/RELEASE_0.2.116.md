@@ -29,6 +29,17 @@ fragments are marked unsupported/incomplete, not complete decoded messages.
 Unknown airline-specific formats are explicitly uninterpreted.
 There is no speculative PLL/FEC/radio gain change, or new Inmarsat voice claim.
 
+## 8400 voice qualification
+
+Audited shared live/replay channelization, current-frame CRC, 96-bit Aero voice
+mapping, persistent codec state, aircraft ownership and speaker queuing. GUI
+and CLI, fast and real-time replay produce identical reference WAVs; the public
+release executable reproduces that same file. Default-output GUI replay reports
+no device errors or queue overflow. Much of this reference is codec silence, so
+these checks do not establish clear continuous conversation on a tester's RF.
+A matched 8400 speech recording is still needed; submitted clips were 10500 data.
+See [the detailed audit](https://github.com/blkph0x/SDR_Town/blob/master/docs/INMARSAT_APPLICATION_VOICE_AUDIT_20260927.md).
+
 ## Aircraft Map
 
 - Set **Capture bandwidth** (default 20 MHz), then **Tune 1090**. This selects

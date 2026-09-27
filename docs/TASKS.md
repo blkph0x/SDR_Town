@@ -1,6 +1,6 @@
 # Task list (canonical)
 
-T-0092 | in_progress | Inmarsat 10500 field evidence and aircraft receive controls |
+T-0092 | done | Inmarsat 10500 field evidence and aircraft receive controls |
 Replay the three submitted IF bundles before changing DSP. Separate internet
 and locally received aircraft; persistent network off must reject late replies.
 Qualify 1090 capture-rate/bandwidth selection against device capabilities, not
@@ -8,6 +8,12 @@ the unrelated analog channel filter. Add negative tests and diagnostic evidence;
 preserve P25 and publish a tested experimental release. DEC-0161.
 Scope extended by user: interpret supported ACARS application families, retain
 independent identity/position evidence, audit 8400 voice end-to-end. DEC-0162.
+Released v0.2.116-experimental from 238d48f via Actions 36311464893; anonymous
+ZIP/hash/provenance and shipped CLI/RDS/10500/8400 replay checks PASS. Local
+CTest 16/16 PASS. CI selection now includes AircraftGui explicitly (12/12 local
+lifecycle selection PASS). Multipart applications, matched 8400 field speech
+and maximum-rate physical ADS-B acceptance remain open in ISS-0046/0047 and
+INMARSAT_APPLICATION_VOICE_AUDIT_20260927.md; this task does not close those gates.
 
 T-0091 | done | Automatic opted-in diagnostics and event dashboard |
 DEC-0160. Startup PC/build details, settings/control/runtime evidence, bounded

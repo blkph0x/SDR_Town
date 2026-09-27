@@ -1,5 +1,17 @@
 # Development log
 
+## 2026-09-27 - T-0092 published qualification
+
+Published v0.2.116-experimental from 238d48f through successful release Actions
+36311464893. Downloaded public ZIP/checksum/provenance, required decoder DLLs
+and notices, shipped CLI/RDS checks PASS. Public executable reproduces both
+10500 reference positions and the exact 8400 reference WAV. Stable signed
+updater latest remains v0.2.96. Final follow-up adds the previously local-only
+AircraftGui CTest selection to CI; it changes no application or release bytes.
+Do not describe ACK interpretation as corrected RF bit errors or codec silence
+as intelligible voice. Multipart applications, matched 8400 field speech and
+sustained maximum-rate ADS-B remain explicit acceptance limits.
+
 ## 2026-09-27 - T-0092 expanded application/map/voice audit
 
 User expanded the task before publication. Added bounded libacars ADS-C, CPDLC,

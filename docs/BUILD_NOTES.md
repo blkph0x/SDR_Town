@@ -1,5 +1,33 @@
 # Build notes
 
+## 2026-09-27 - T-0092 public release verification
+
+Source 238d48fd835f29672f1f4598672a134e4a922e53; release Windows Actions
+36311464893 PASS, release/master YAML 36311464826/36311464563 PASS. Public
+release https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.116-experimental
+is not a draft and is explicitly a prerelease. Signed updater latest stays
+v0.2.96. Anonymous ZIP download 42,787,326 bytes, SHA256
+`6da79b321f1b2922e27de59a033f98d171de228e914a172e1216ae47a2e1d03f`.
+Executable SHA256
+`f077b0477f6eea08a4821d183dd9b1ce00242188cfd8b40d3e2237aeacd9e766`.
+SDRplay plugin SHA256
+`457ab33e4da9d6804da0e9f561e1305f17d61efce3897f75bad36be18892216e`.
+Version/commit/run and both binary hashes match embedded provenance; zlib,
+Jansson, Aero codec and all application licence files exist. Shipped CLI help
+exit 0, biastee command present, independent RDS black-box suite PASS.
+Shipped 10500-burst reference: eight messages, five interpreted applications,
+zero application failures and two positions. Shipped 8400 reference: 1375 words,
+220000 PCM, WAV SHA256 identical to all four local GUI/CLI runs (audit linked
+below). Private captures and credentials were not published. This is decoder
+and playback-path evidence, not physical RF/clear-conversation acceptance.
+
+Final CI review found AircraftGui was compiled into inmarsat_live_gui_tests but
+omitted from the CI CTest selection. Add that selection in the documentation/
+qualification follow-up, without changing application code or published assets.
+Exact expanded selection passes locally: 12/12, 13.97 s. Follow-up master Actions
+must complete before closing the user-facing delivery; source release Actions
+already tests and publishes the exact application commit above.
+
 ## 2026-09-27 - T-0092 expanded application/identity qualification
 
 DEC-0162 extends scope before publication. Added pinned libacars application

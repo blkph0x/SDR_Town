@@ -1,6 +1,6 @@
 # Issues (canonical)
 
-## ISS-0046 - Aero encoded applications displayed as prose (2026-09-27, REPAIRED; release validation pending)
+## ISS-0046 - Aero encoded applications displayed as prose (2026-09-27, REPAIRED in v0.2.116-experimental; remaining formats open)
 
 T-0092 / DEC-0161: three submitted 10500 recordings have +260 good/+0 bad CRC
 units in their live windows. Cold replay 30409b9e completes MA/T MIAM CORE ACK

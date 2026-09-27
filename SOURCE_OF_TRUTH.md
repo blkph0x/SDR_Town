@@ -3,7 +3,7 @@ SDR TOWN — SOURCE OF TRUTH (SoT)
 ================================================================================
 VERSION: 1.0.0
 PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
-CURRENT VERSION IN TREE: 0.2.116 (MIAM interpretation and aircraft controls; release validation pending)
+CURRENT VERSION IN TREE: 0.2.116 (Aero applications/map identity and aircraft controls; experimental public asset verified)
 ACTIVE PHASE: Receive decoder expansion; P25 acceptance remains open, work deferred by user
 METHOD: Athanor / SovereignFoundry process (never guess, evidence, trackers).
          This tree is NOT Athanor. Qt, SoapySDR, mbelib, miniaudio stay.
