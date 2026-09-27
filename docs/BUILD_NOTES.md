@@ -8,7 +8,17 @@ with inherited QT_QPA_PLATFORM=offscreen stalled WorkspaceTests and was stopped.
 Normal Windows environment passes both that test alone and the complete suite.
 GUI dry-run self-test PASS (ok=true, no errors/warnings). Inmarsat GUI suite PASS;
 360x220 map screenshot inspected: unlocated voice status fits without overlap.
-Public release verification pending.
+Source: 96a10d632153d429b9bd2181a096e7314e71490b. Windows CI master 36287882575
+and release 36287882996 SUCCESS; YAML master 36287882564/release 36287883001 SUCCESS.
+Public release: https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.111
+Public ZIP and checksum downloaded; version/source/run provenance verified.
+ZIP SHA256: e6bfb57d57572db19771d15044354b70abaf9a0ca1856816d4a7c728dfaafd73
+EXE SHA256: 4bce153055dda610614d3499e9b4488203f3880157381e2bb87ae3098e823d3c
+SDRplay SHA256: f7348530c6a10d6d6ce6afd41fe2c323684f8f8534cb9cd6b0f8cd2f09f95687
+Downloaded app CLI help/SDRplay status, five Aero survey checks, RDS reference
+tests and GUI dry-run self-test PASS (ok=true, no errors/warnings).
+Release public/non-draft/experimental prerelease; latest remains v0.2.96.
+P25 guard: 19 changed paths, zero protected. No P25/NFM/WFM runtime edits.
 No real Inmarsat antenna or physical speaker source-switch verification claimed.
 
 ## 2026-09-27 - T-0081 RDS and power gates

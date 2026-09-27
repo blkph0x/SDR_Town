@@ -6,6 +6,9 @@ Reviewed supplied association audit. Existing watch focus is sticky as requested
 fixed identity lost at speaker callbacks and added honest no-position/unknown
 map status. Source changes clear playback; diagnostics retain opt-in privacy.
 Assignment follow, recording attribution and stale policy remain separate gates.
+Released v0.2.111 from 96a10d6 through successful Windows CI 36287882996;
+public ZIP hashes/provenance and shipped CLI/GUI/RDS checks PASS. Portable-only
+experimental prerelease; signed updater latest v0.2.96 remains unchanged.
 
 ## 2026-09-27 - T-0081 RDS prototype route corrected
 
