@@ -37,7 +37,10 @@ nlohmann::json InmarsatDiagnostics::remotePayload(const nlohmann::json& details)
     // is not permission to upload arbitrary decoder text. DEC-0139.
     const auto numbers=[](const nlohmann::json& input,nlohmann::json& output) {
         for(const char* key:{"validationMs","setupMs","probeMs","channelizerMs","modemMs",
-            "inputSeconds","loadRatio","lastBlockMs","lastInputMs","overBudgetBlocks","messages"})
+            "inputSeconds","loadRatio","lastBlockMs","lastInputMs","overBudgetBlocks","messages",
+            "inputRejected","consecutiveRejected","invalidGeometry","invalidAmplitude","invalidAeroPassband",
+            "probeSkippedBlocks","codecFailures","codecAttemptedWords","invalidCFrames","identityChanges",
+            "unidentifiedSpeechFrames","positionIdentityMismatches"})
             if(input.contains(key) && input[key].is_number() && std::isfinite(input[key].get<double>()))output[key]=input[key];
     };
     numbers(details,result);

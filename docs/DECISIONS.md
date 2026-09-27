@@ -1,5 +1,25 @@
 # Decisions
 
+## DEC-0156 - Inmarsat rejection recovery and identity evidence (2026-09-27)
+
+T-0084 supplied audit confirmed pipeline geometry/amplitude throws, mutation
+before Aero passband check, literal codec availability, frame-increment focus,
+and disabled-watch staleness dependence. Move all input checks before mutation,
+return bounded reason counters on rejection, preserve decoder state, and let
+the next noncontiguous accepted sample trigger the existing reset contract.
+Known valid 24-bit AES plus existing 24000-sample window qualifies voiceActive;
+raw speechActive remains separately observable and PCM with AES zero still flows.
+Keep focus hold algorithm; change only its activity evidence. Clear last speech
+on a new validated AES so the new aircraft cannot inherit old speech activity.
+Extract existing C-frame handler to test its real failure path with an injected
+codec call. Negative codec result currently indicates invalid API arguments,
+not measured RF BER (AeroCodec.cpp). Reject whole output frame, count and reset;
+do not weaken CRC/size predicates. No probe framing, assignment retune or P25
+changes. Optional probe switch defaults on; toggling resets probe only.
+Use 300 seconds as explicit UI freshness policy with watch disabled, not a radio
+timeout. Normal remote telemetry remains numeric/boolean allowlist only; prior
+separately consented recording feature is not automatically invoked by errors.
+
 ## DEC-0155 - Explicit bounded Inmarsat diagnostic recordings (2026-09-27)
 
 T-0083: user requests short remote evidence recordings. Capture the exact 48 kHz

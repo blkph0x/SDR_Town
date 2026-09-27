@@ -86,7 +86,7 @@ void InmarsatMapWidget::setReport(const nlohmann::json& report,bool replay) {
     }
     auto* status=findChild<QLabel*>("inmarsatMapVoiceStatus");
     QString text;
-    if(speaking && !active) text=tr("Voice active - aircraft identity unavailable");
+    if((speaking || report.value("speechActive",false)) && !reported) text=tr("Voice active - aircraft identity unavailable");
     else if(active && std::none_of(tracks_.begin(),tracks_.end(),[&](const auto& t){return t.aes==active;}))
         text=tr("Talking AES %1 - no ADS-C position yet").arg(QString("%1").arg(active,6,16,QChar('0')).toUpper());
     status->setText(text);status->setVisible(!text.isEmpty());

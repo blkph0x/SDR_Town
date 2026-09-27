@@ -301,7 +301,7 @@ void InmarsatWatchSession::process(std::span<const std::complex<float>> iq,uint6
             if(messageSink_)messageSink_(m);
         }
         const auto speech=c->report.value("speechFrames",uint64_t{0});
-        c->speech=c->config.voice() && speech>c->speechFrames;c->speechFrames=speech;
+        c->speech=c->config.voice() && InmarsatWatchFocus::hasIdentifiedSpeech(c->report);c->speechFrames=speech;
         activity.push_back(c->speech);
         if(c->speech)schedule_.speech(now);
     }

@@ -1,4 +1,8 @@
 #pragma once
+// DEC-0156: display freshness when automatic watch scheduling is disabled.
+inline double inmarsatPositionFreshSeconds(bool watchEnabled,double watchRefreshSeconds) {
+    return watchEnabled?watchRefreshSeconds:300.0;
+}
 #include <QWidget>
 #include <QPainterPath>
 #include <nlohmann/json.hpp>

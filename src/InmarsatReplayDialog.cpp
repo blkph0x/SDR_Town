@@ -192,7 +192,7 @@ void InmarsatReplayDialog::refresh() {
     status_->setText(s.state + (s.error.isEmpty() ? "" : ": " + s.error));
     log_->setText(s.logError.isEmpty() ? s.logPath : s.logPath + "\n" + s.logError);
     auto report=s.pipeline;
-    if(!active || s.state=="paused") report["voiceActive"]=false;
+    if(!active || s.state=="paused") {report["voiceActive"]=false;report["speechActive"]=false;}
     map_->setReport(report,true);
     const auto text = QString::fromStdString(s.toJson().dump(2));
     if (details_->toPlainText() != text) {

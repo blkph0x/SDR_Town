@@ -67,6 +67,12 @@ private:
 // Stable speaker arbitration: a second active decoder never interleaves PCM.
 class InmarsatWatchFocus {
 public:
+    static bool hasIdentifiedSpeech(const nlohmann::json& report) {
+        const auto active=report.find("voiceActive"),aes=report.find("voiceAesId");
+        if(active==report.end() || !active->is_boolean() || !active->get<bool>() || aes==report.end())return false;
+        if(aes->is_number_unsigned())return aes->get<uint64_t>()>0 && aes->get<uint64_t>()<=0xffffff;
+        return aes->is_number_integer() && aes->get<int64_t>()>0 && aes->get<int64_t>()<=0xffffff;
+    }
     int select(std::span<const uint8_t> speech, double now, int idleSeconds);
     void reset() {channel_=-1;lastSpeech_=0;}
     int channel() const {return channel_;}

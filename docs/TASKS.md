@@ -1,5 +1,10 @@
 # Task list (canonical)
 
+T-0084 | in progress | Inmarsat fail-closed audit and recovery instrumentation |
+DEC-0156. Validate supplied audit against executable paths; reject malformed
+blocks before mutation, preserve unknown PCM, qualify activity by identity,
+report real codec availability and bounded failure counters; test all branches.
+
 T-0083 | done | Bounded Inmarsat diagnostic recordings |
 DEC-0155. Manual capture/review/send, authenticated collector quota/storage,
 reproduction tool, privacy/error tests and public release qualification.

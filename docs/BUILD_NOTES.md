@@ -1,5 +1,18 @@
 # Build notes
 
+## 2026-09-27 - T-0084 Inmarsat rejection/identity audit
+
+Windows / VS2022 Release: SDR_Town, sdr_town_tests, inmarsat_live_gui_tests and
+sdr_town_workspace_tests build PASS. Inmarsat filter: 23168 assertions / 50 cases
+PASS. Full CTest: 15/15 PASS, 52.69 seconds. GUI map screenshot inspected;
+identified-but-unlocated status visible without a fabricated aircraft marker.
+Application GUI dry-run exit 0, ok=true, no errors/warnings. Recording reproduction,
+remote collector four tests, and RDS CLI reference checks PASS.
+GUI/CLI paced/fast replay first failed the old literal-true EGC codec expectation;
+updated it to false plus physical_probe_only, then all four replay modes and
+malformed-file rejection PASS. No failing tests waived. RF audio not claimed.
+Publication and downloaded-asset verification pending.
+
 ## 2026-09-27 - T-0083 bounded diagnostic recording
 
 Collector tests PASS (validation, quota across restart, expiry, HTTP authority).

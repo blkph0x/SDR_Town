@@ -36,6 +36,8 @@
 #include <algorithm>
 
 TEST_CASE("Aero map distinguishes unlocated and unidentified voice", "[inmarsat][gui]") {
+    CHECK(inmarsatPositionFreshSeconds(false,30)==300);
+    CHECK(inmarsatPositionFreshSeconds(true,30)==30);
     InmarsatMapWidget map;map.resize(360,220);map.show();
     auto* status=map.findChild<QLabel*>("inmarsatMapVoiceStatus");REQUIRE(status);
     nlohmann::json report={{"voiceActive",true},{"voiceAesId",0x123456}};
@@ -55,7 +57,9 @@ TEST_CASE("Aero map distinguishes unlocated and unidentified voice", "[inmarsat]
     CHECK(status->text().contains("identity unavailable"));
     report["positions"][0]["aesId"]=uint64_t{0x100123456};map.setReport(report,false);
     CHECK(map.aircraftCount()==0);
-    report["voiceActive"]=false;map.setReport(report,true);CHECK(status->isHidden());
+    report["voiceActive"]=false;report["speechActive"]=true;
+    map.setReport(report,false);CHECK(status->text().contains("identity unavailable"));
+    report["speechActive"]=false;map.setReport(report,true);CHECK(status->isHidden());
     CHECK_FALSE(map.grab().toImage().isNull());
 }
 TEST_CASE("Inmarsat diagnostic recording requires consent and discards on close", "[inmarsat][gui]") {

@@ -45,7 +45,8 @@ def main():
         assert report["samples"] == report["positionSamples"] == report["totalSamples"] == 48000
         assert report["validatedFrames"] == report["pcmSamples"] == report["voiceFrames"] == 0
         assert not report["protocolDecoderAvailable"]  # EGC remains a physical probe.
-        assert report["aeroVocoderAvailable"]  # Separate codec DLL is installed, not proof of a voice frame.
+        assert not report["aeroVocoderAvailable"]  # No Aero codec instance in EGC's physical probe.
+        assert report["capability"] == "physical_probe_only"
         assert not report["logError"], report
         records = [json.loads(line) for line in Path(report["logPath"]).read_text(encoding="utf-8").splitlines()]
         assert records[-1]["event"] == "summary"

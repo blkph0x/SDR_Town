@@ -266,6 +266,21 @@ TEST_CASE("Aero watch speaker stays on one conversation until idle", "[inmarsat]
     focus.reset();REQUIRE(focus.select(second,17,6)==1);
 }
 
+TEST_CASE("Aero watch focus requires identified speech and does not steal active focus", "[inmarsat][watch]") {
+    nlohmann::json unknown={{"voiceActive",true},{"voiceAesId",0},{"speechFrames",20}};
+    nlohmann::json known={{"voiceActive",true},{"voiceAesId",0x123456}};
+    REQUIRE_FALSE(InmarsatWatchFocus::hasIdentifiedSpeech(unknown));
+    REQUIRE(InmarsatWatchFocus::hasIdentifiedSpeech(known));
+    InmarsatWatchFocus focus;
+    std::array<uint8_t,2> activity{uint8_t(InmarsatWatchFocus::hasIdentifiedSpeech(unknown)),1};
+    REQUIRE(focus.select(activity,0,6)==1);
+    activity[0]=1;
+    REQUIRE(focus.select(activity,10,6)==1);
+    for(const auto& id:{nlohmann::json(-1),nlohmann::json(0x1000000),nlohmann::json("123456")}) {
+        known["voiceAesId"]=id;REQUIRE_FALSE(InmarsatWatchFocus::hasIdentifiedSpeech(known));
+    }
+}
+
 TEST_CASE("Aero watch group changes destroy old decoder state before new IQ", "[inmarsat][watch]") {
     auto c=example();c.dataMinSeconds=1;c.dataDwellSeconds=2;c.voiceAcquireSeconds=1;
     int flushes=0;
@@ -294,7 +309,12 @@ TEST_CASE("Aero workers drain failures and retain independent ordered timelines"
         const uint64_t start=uint64_t(block)*iq.size();
         if(block==6) {
             iq[20]={std::numeric_limits<float>::quiet_NaN(),0};
-            REQUIRE_THROWS(session.process(iq,start,96000,session.centerHz(),false,block*.04));
+            REQUIRE_NOTHROW(session.process(iq,start,96000,session.centerHz(),false,block*.04));
+            for(size_t i=0;i<2;++i) {
+                const auto& c=cfg.channels[i];
+                serial[i].process(iq.data(),iq.size(),start,96000,session.centerHz(),c.frequencyHz,c.mode(),false);
+                REQUIRE(serial[i].report()["inputRejected"]==1);
+            }
             iq[20]={0.02f,0.03f};
         }
         session.process(iq,start,96000,session.centerHz(),false,block*.04);

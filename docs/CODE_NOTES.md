@@ -1,5 +1,12 @@
 # Code notes (tree map)
 
+T-0084: InmarsatVoiceEvidence holds the native validated-SU identity update and
+C-frame transaction, shared with injected codec-failure tests. Pipeline rejection
+counters are cumulative across receiver resets; lastInputRejected identifies the
+last block while lastError retains the last reason. InmarsatWatchFocus requires
+identified current speech. InmarsatDiagnostics allowlists numeric failure metrics
+for both single pipelines and watch workers. See INMARSAT_RECOVERY_AUDIT.md.
+
 T-0083: InmarsatDiagnosticRecording holds one explicitly armed, bounded modem IF
 and PCM capture. InmarsatPipeline feeds it at the existing modem boundary;
 InmarsatRecordingDialog owns consent/review/save/HTTPS submission. No recorder

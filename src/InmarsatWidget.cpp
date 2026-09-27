@@ -459,6 +459,7 @@ void InmarsatWidget::refreshUi() {
             .arg(snapshot.tunedHz / 1e6, 0, 'f', 3)
             .arg(snapshot.rawBlocks)
             .arg(snapshot.validatedFrames));
+    if(snapshot.config.mode=="egc")lockLabel_->setText(lockLabel_->text()+" | EGC physical probe only (no protocol decoder)");
 
     const bool running = snapshot.state != InmarsatEngineState::Idle;
     const auto audio = snapshot.diagnostics.value("audio", nlohmann::json::object());
@@ -485,7 +486,7 @@ void InmarsatWidget::refreshUi() {
             .arg(snapshot.voiceFrames).arg(audio.value("pcmReceived",uint64_t{0})).arg(audioState));
     }
     audioLabel_->setToolTip(QString::fromStdString(snapshot.diagnosticLog));
-    auto report=snapshot.diagnostics;if(!running)report["voiceActive"]=false;
+    auto report=snapshot.diagnostics;if(!running){report["voiceActive"]=false;report["speechActive"]=false;}
     // Live aircraft survive a manual data-to-voice retune. Only native, validated
     // ADS-C messages enter this view; replay owns an entirely separate map.
     report["positions"]=nlohmann::json::array();
@@ -499,7 +500,7 @@ void InmarsatWidget::refreshUi() {
         report["positions"].push_back({{"aesId",m.aesId},{"latDeg",m.latDeg},{"lonDeg",m.lonDeg},
             {"altitudeFt",m.altitudeFt},{"registration",m.registration},{"callsign",m.callsign},
             {"secondsPastHour",m.positionSecondsPastHour},{"ageSeconds",age},
-            {"stale",age>snapshot.config.watch.refreshSeconds}});
+            {"stale",age>inmarsatPositionFreshSeconds(snapshot.config.watch.enabled,snapshot.config.watch.refreshSeconds)}});
     }
     map_->setReport(report,false);
     speakerCheck_->setEnabled(!running);recordCheck_->setEnabled(!running);

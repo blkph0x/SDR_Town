@@ -1,8 +1,9 @@
 # SDR Town
 
-0.2.112 adds separately consented five-second Inmarsat diagnostic recordings,
-bounded HTTPS uploads and CLI modem-input reproduction. See
-[release notes](docs/RELEASE_0.2.112.md) for limits and tester instructions.
+0.2.113 hardens Inmarsat input recovery, aircraft identity and failure diagnostics.
+Separately consented five-second Inmarsat diagnostic recordings remain available,
+with bounded HTTPS uploads and CLI modem-input reproduction. See
+[release notes](docs/RELEASE_0.2.113.md) and [recording instructions](docs/RELEASE_0.2.112.md).
 
 0.2.111 preserves Inmarsat audio source identity across live/replay paths, clears
 queued audio on identity changes, and reports active voice without a known
@@ -42,7 +43,7 @@ antenna control, saved limits/park and hardware-only SWR readback. See the
 [setup and ten-controller compatibility targets](docs/ANTENNA_CONTROL.md).
 Physical controller acceptance and automatic satellite tracking remain open.
 
-**[Download 0.2.112 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.112)**
+**[Download 0.2.113 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.113)**
 includes a matched SDRplay plugin and corrected, dated Inmarsat frequency/rate
 presets. Install the official SDRplay API 3.15+ and service separately. Extract
 the entire ZIP into a fresh folder. RTL bias-T is in Device Manager after

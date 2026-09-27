@@ -18,7 +18,9 @@ public:
     InmarsatDemodStats stats() const;
     nlohmann::json report() const;
     InmarsatConstellation constellation() const;
+    void setProbeEnabled(bool enabled) {if(probeEnabled_!=enabled){probeEnabled_=enabled;probeReset_=true;}}
 private:
+    void rejectInput(const char* reason,uint64_t start,size_t count);
     struct Native;
     std::unique_ptr<Native> native_;
     InmarsatDemod demod_;
@@ -32,4 +34,8 @@ private:
     double validationMs_=0, setupMs_=0, probeMs_=0, channelizerMs_=0, modemMs_=0;
     double inputSeconds_=0, lastBlockMs_=0, lastInputMs_=0;
     uint64_t overBudgetBlocks_=0;
+    bool probeEnabled_=true,probeReset_=false,lastInputRejected_=false;
+    uint64_t rejectedBlocks_=0,consecutiveRejected_=0,lastRejectedStart_=0,lastRejectedCount_=0,probeSkippedBlocks_=0;
+    uint64_t invalidGeometry_=0,invalidAmplitude_=0,invalidAeroPassband_=0;
+    std::string lastError_;
 };

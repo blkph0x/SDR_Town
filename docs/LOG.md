@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-09-27 - T-0084 Inmarsat audit
+
+Verified supplied audit against executable code. Implemented nonthrowing bad-IQ
+recovery before modem mutation, atomic codec-failure rejection, identity-qualified
+voice/focus, truthful EGC/codec status and independent map freshness. Added bounded
+local and opt-in remote failure counters without raw data uploads. Local build,
+15 suites and GUI/CLI replay checks PASS; see INMARSAT_RECOVERY_AUDIT.md for limits.
+
 ## 2026-09-27 - T-0083 explicit recording evidence
 
 Added manual five-second modem IF/PCM recording with a 16384-sample original IQ

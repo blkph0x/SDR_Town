@@ -135,7 +135,19 @@ TEST_CASE("Inmarsat shared pipeline is chunk invariant and counts discontinuitie
     file.process(iq.data(), 10, 3, 48000, 1542935000, 1542935000, InmarsatDemodMode::EgcBpsk1200, true);
     CHECK(file.report()["discontinuities"] == 1);
     CHECK(file.report()["resets"] == 2);
-    CHECK_THROWS(file.process(iq.data(), 1, 0, 48000, 1542935000, 1543935000, InmarsatDemodMode::EgcBpsk1200, false));
+    CHECK_NOTHROW(file.process(iq.data(), 1, 0, 48000, 1542935000, 1543935000, InmarsatDemodMode::EgcBpsk1200, false));
+    CHECK(file.report()["inputRejected"] == 1);
+    CHECK(file.report()["resets"] == 2);
+}
+
+TEST_CASE("Inmarsat remote rejection metrics cannot carry receiver identities", "[inmarsat][replay]") {
+    const auto safe=InmarsatDiagnostics::remotePayload({{"inputRejected",2},{"codecFailures",1},
+        {"lastError","private text"},{"voiceAesId",0x123456},{"pcm","private audio"},
+        {"identityChanges","private text"},{"positionIdentityMismatches",3}});
+    CHECK(safe["inputRejected"]==2);CHECK(safe["codecFailures"]==1);
+    CHECK(safe["positionIdentityMismatches"]==3);
+    CHECK_FALSE(safe.contains("lastError"));CHECK_FALSE(safe.contains("voiceAesId"));
+    CHECK_FALSE(safe.contains("pcm"));CHECK_FALSE(safe.contains("identityChanges"));
 }
 TEST_CASE("Inmarsat replay paced and fast results agree with bounded reports", "[inmarsat][replay]") {
     QTemporaryDir dir; const auto base = dir.filePath("reference");

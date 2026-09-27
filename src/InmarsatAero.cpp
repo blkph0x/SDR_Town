@@ -1,4 +1,5 @@
 #include "InmarsatAero.h"
+#include "InmarsatVoiceEvidence.h"
 #include "InmarsatFirHistory.h"
 #include "InmarsatAdsc.h"
 #include "AeroCodec.h"
@@ -30,7 +31,7 @@ struct InmarsatAero::Impl {
     MessageSink messageSink;
     PcmSink pcmSink;
     explicit Impl(int bps,bool burst):rate(bps) {
-        if (!codec) throw std::bad_alloc();
+        stats.codecAvailable=bool(codec);
         if (bps!=600 && bps!=1200 && bps!=8400 && bps!=10500)
             throw std::invalid_argument("Unsupported Classic Aero bit rate");
         if(burst && bps!=1200 && bps!=10500) throw std::invalid_argument("Unsupported Aero burst bit rate");
@@ -47,10 +48,8 @@ struct InmarsatAero::Impl {
             if(su.size()!=12) return;
             const auto u=[&](int i){return uint32_t(uint8_t(su[i]));};
             const auto type=u(0), aes=(u(1)<<16)|(u(2)<<8)|u(3);
-            if(rate==8400 && (type==0x30 || type==0x60) && aes) {
-                if(stats.aes!=aes) sdr_aero_reset(codec.get());
-                stats.aes=aes;
-            }
+            if(rate==8400)inmarsatValidatedVoiceIdentity(stats,
+                {reinterpret_cast<const uint8_t*>(su.constData()),size_t(su.size())},[this]{sdr_aero_reset(codec.get());});
             if(type>=0x31 && type<=0x34 && rate!=8400 && aes) {
                 InmarsatMessage m;
                 m.kind=InmarsatMsgKind::CAssign; m.aesId=aes; m.gesId=u(4);
@@ -69,7 +68,8 @@ struct InmarsatAero::Impl {
             m.label=item.LABEL.toStdString(); m.text=item.message.toStdString();
             m.registration=item.PLANEREG.toStdString();
             const auto position=InmarsatAdsc::parse(item.message.toStdString());
-            if(position && (!position->airframeId || position->airframeId==m.aesId)) {
+            if(position && !InmarsatAdsc::matchesIdentity(m.aesId,position->airframeId))++stats.positionIdentityMismatches;
+            if(position && InmarsatAdsc::matchesIdentity(m.aesId,position->airframeId)) {
                 m.hasPosition=true; m.latDeg=position->latitude; m.lonDeg=position->longitude;
                 m.altitudeFt=position->altitudeFt; m.positionSecondsPastHour=position->secondsPastHour;
                 m.registration=position->registration; m.callsign=position->callsign;
@@ -81,30 +81,10 @@ struct InmarsatAero::Impl {
             if(messageSink) messageSink(m);
         });
         QObject::connect(&frames, &AeroL::CFrame, &frames, [this](const QByteArray& words, int validUnits) {
-            ++stats.cFrames;
-            // A CRC-valid subchannel in this frame proves framing. Carrier/DCD
-            // alone cannot release voice after a lost UW or source discontinuity.
-            if(validUnits==0 || words.size()!=300) {
-                ++stats.rejectedCFrames;
-                sdr_aero_reset(codec.get());
-                return;
-            }
-            std::array<int16_t,4000> pcm{};
-            bool hasSpeech=false;
-            for(int i=0;i<25;++i) {
-                char flags[64]{};
-                const int errors=sdr_aero_decode(codec.get(),
-                    reinterpret_cast<const uint8_t*>(words.constData())+i*12, pcm.data()+i*160, flags);
-                if(errors<0) throw std::runtime_error("Aero codec rejected a framed word");
-                stats.codecErrors+=errors;
-                if(std::strchr(flags,'R')) ++stats.codecRepeats;
-                if(std::strchr(flags,'M') || std::strchr(flags,'E') || std::strchr(flags,'T')) ++stats.codecMutes;
-                else hasSpeech=true;
-                ++stats.voiceWords;
-            }
-            stats.pcmSamples+=pcm.size();
-            if(hasSpeech) {stats.lastVoiceSample=stats.input48k;++stats.speechFrames;}
-            if(pcmSink) pcmSink(pcm,stats.aes);
+            inmarsatValidatedCFrame({reinterpret_cast<const uint8_t*>(words.constData()),size_t(words.size())},validUnits,stats,
+                [this](const uint8_t* word,int16_t* pcm,char* flags){return sdr_aero_decode(codec.get(),word,pcm,flags);},
+                [this]{sdr_aero_reset(codec.get());},
+                [this](std::span<const int16_t> pcm,uint32_t aes){if(pcmSink)pcmSink(pcm,aes);});
         });
         auto soft=[this](const QVector<short>& bits) {
             stats.softBits+=bits.size(); frames.processDemodulatedSoftBits(bits);

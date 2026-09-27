@@ -10,6 +10,7 @@ struct InmarsatAdscPosition {
 };
 class InmarsatAdsc {
 public:
+    static bool matchesIdentity(uint32_t aes,uint32_t airframe) {return !airframe || airframe==aes;}
     // Complete, reassembled ARINC622 ADS application. Never parse printable
     // coordinates or waypoints as position. Nullopt includes bad CRC/truncation.
     static std::optional<InmarsatAdscPosition> parse(std::string_view acars);

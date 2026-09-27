@@ -16,9 +16,11 @@ queued playback on source changes and surfaces voice without identity/position.
 Map rejects invalid 24-bit IDs rather than allowing integer truncation aliases.
 Watch focus already keeps an actively speaking channel; existing tests confirm it.
 Still open: C-ASSIGN fixture validation and safe candidate/follow acquisition,
-per-aircraft recording timeline, staleness policy independent of watch schedule,
+per-aircraft recording timeline,
 physical reception acceptance. Do not weaken ADS-C mismatch rejection or treat
 unvalidated probe output as decoded data. WFM prototype work remains separate.
+T-0084 adds independent disabled-watch freshness and identified speech focus;
+the remaining acquisition/acceptance limitations above stay open.
 
 ## ISS-0037 - FM chunk boundaries and sample lattice (2026-09-26, OPEN)
 
