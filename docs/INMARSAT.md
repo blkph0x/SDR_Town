@@ -5,6 +5,16 @@ antenna/SDR. P25 is unchanged. This is not a decoder for every Inmarsat service.
 
 ## Implemented
 
+- Bounded ACARS application interpretation: ADS-C, FANS CPDLC, MIAM CORE,
+  media advisory and OHMA (libacars v2.2.1). ACKs/control traffic are identified;
+  unknown payloads remain uninterpreted and multipart application payloads are
+  explicitly incomplete. Raw ACARS text is preserved separately.
+- ICAO/flight identity can arrive independently of position. Validated
+  aircraft-originated ADS-C basic reports update the map; airframe-ID group 17
+  supplies ICAO and group 12 supplies flight ID. A position is not inferred
+  from an AES number, a CPDLC clearance waypoint, or an uplink contract request.
+  Later identity updates do not refresh the age of old coordinates.
+
 - Per-channel decoder log and aircraft registry with optional pop-out windows:
   [monitor guide and field provenance](INMARSAT_MONITOR.md).
 

@@ -65,7 +65,9 @@ def verify(root, version, installer):
                     'sdr_aero_codec.dll', 'licenses/aero/README.sdr-town.md',
                     'licenses/aero/JAERO-MIT.txt', 'licenses/aero/JFFT-MIT.txt',
                     'licenses/aero/libcorrect-BSD.txt', 'licenses/aero/codec-COPYRIGHT.txt',
-                    'licenses/aero/libaeroambe-MIT.txt', 'licenses/aero/NaturalEarth.txt')
+                    'licenses/aero/libaeroambe-MIT.txt', 'licenses/aero/NaturalEarth.txt',
+                    'z.dll', 'jansson.dll', 'licenses/acars/LICENSE.md', 'licenses/acars/ZLIB-LICENSE.txt',
+                    'licenses/acars/JANSSON-LICENSE.txt', 'licenses/acars/UPSTREAM-README.md')
         for name in required:
             require(name in names, f'Missing runtime: {name}')
             require(archive.read(name) == (root / 'build/deploy_staging' / name).read_bytes(),

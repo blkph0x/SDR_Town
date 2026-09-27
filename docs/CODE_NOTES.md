@@ -1,5 +1,28 @@
 # Code notes (tree map)
 
+T-0092 / DEC-0162: InmarsatAcarsApplication dispatches bounded libacars v2.2.1
+applications with explicit direction, statuses and structured ADS-C fields.
+InmarsatAero supplies ACARS block-ID direction and downlink-header evidence.
+InmarsatMessageStore also supports isolated per-pipeline replay stores;
+positions() merges identity without refreshing coordinates. Map includes
+explicit ICAO. See INMARSAT_APPLICATION_VOICE_AUDIT_20260927.md for full path,
+reference results and remaining application/voice acceptance gates.
+
+T-0092 / DEC-0161: InmarsatAcarsApplication is the bounded, serialized adapter to
+external/acars (pinned libacars MIAM CORE). InmarsatAero adds application metadata
+without changing raw ACARS/ADS-C input; Pipeline accumulates interpretation
+counters and Diagnostics shares numeric counts only. The reference probe accepts
+submitted recording bundles, writes only new PCM outputs and reports actual
+messages. Private field recordings stay outside Git.
+
+AircraftReceivePlan qualifies capture rates/IF independently of analog filter
+bandwidth. AircraftMapWidget applies controls under the existing lease and reads
+chronological IQ with AircraftMagnitudeStream's bounded packet tail. The new
+internet checkbox persists through AdsBTrackStore; RF/network maps are separate,
+and generation checks reject stale network replies. Tests cover 20 Msps packets,
+block/epoch boundaries, source preservation, off/on races, malformed JSON, MIAM
+ack/data/CRC/DEFLATE and actual Qt controls/compact layout.
+
 T-0091 / DEC-0160: DiagnosticsObserver owns GUI-thread read-only actions and
 periodic snapshots. DiagnosticsMenu invokes the existing MainWindow diagnostic
 slot through Qt metadata, never opens a radio/audio engine. AppBootstrap cached

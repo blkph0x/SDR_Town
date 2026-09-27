@@ -35,6 +35,9 @@ nlohmann::json InmarsatMessage::toJson() const {
     j["icaoHex"] = icaoHex;
     j["label"] = label;
     j["text"] = text;
+    j["applicationProtocol"] = applicationProtocol;
+    j["applicationStatus"] = applicationStatus;
+    j["applicationText"] = applicationText;
     j["hasPosition"] = hasPosition;
     j["validated"] = validated;
     j["registration"] = registration;
@@ -110,7 +113,18 @@ void InmarsatMessageStore::push(InmarsatMessage msg) {
 std::vector<InmarsatMessage> InmarsatMessageStore::positions() const {
     std::lock_guard<std::mutex> lk(mutex_);
     std::vector<InmarsatMessage> result;result.reserve(positions_.size());
-    for(const auto& [id,message]:positions_)result.push_back(message);
+    for(const auto& [id,message]:positions_) {
+        auto position=message;
+        const auto aircraft=aircraft_.find(id);
+        if(aircraft!=aircraft_.end()) {
+            const auto& identity=aircraft->second.identity;
+            if(!identity.icaoHex.empty())position.icaoHex=identity.icaoHex;
+            if(!identity.registration.empty())position.registration=identity.registration;
+            if(!identity.callsign.empty())position.callsign=identity.callsign;
+        }
+        // Identity refresh must never change the last position's reception time.
+        result.push_back(std::move(position));
+    }
     return result;
 }
 

@@ -8,6 +8,8 @@
     "soapysdr",
     "rtlsdr",
     "catch2",
-    "libsodium"
+    "libsodium",
+    "zlib",
+    "jansson"
   ]
 }

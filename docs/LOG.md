@@ -1,5 +1,26 @@
 # Development log
 
+## 2026-09-27 - T-0092 expanded application/map/voice audit
+
+User expanded the task before publication. Added bounded libacars ADS-C, CPDLC,
+MIAM, OHMA and media-advisory dispatch, direction/header checks and identity-only
+map updates. No new inferred positions, no codec changes. Public 10500 burst
+reference preserves both aircraft positions. 8400 GUI/CLI fast/paced outputs
+match byte-for-byte; mostly muted reference is not clear-speech proof. Full
+local build and 16/16 suites pass. Application tests 142 assertions PASS.
+Publish 0.2.116 experimental after Actions/package gates; multipart applications,
+matched 8400 field audio and physical maximum-rate ADS-B remain explicit limits.
+
+## 2026-09-27 - T-0092 Inmarsat field text and aircraft controls
+
+Confirmed received MA bytes describe a MIAM acknowledgement. Added scoped
+application interpretation rather than retuning working RF/FEC. Source-separated
+internet-aircraft off, hardware-qualified 20 MHz request and chronological Mode-S
+packet input implemented with negative tests and local/remote numeric evidence.
+P25 source remains unchanged. Publication and remaining field acceptance are
+tracked in BUILD_NOTES and ISS-0046/0047; do not imply all encoded Aero protocols
+or physical 20 MHz real-time decoding were proven by an ACK and synthetic packets.
+
 ## 2026-09-27 - T-0091 session diagnostics
 
 User needs automatic opted-in startup/settings/actions/PC reports, not just the

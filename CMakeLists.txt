@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.115 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.116 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -460,6 +460,7 @@ if(BUILD_TESTS)
     tests/test_satcom_passes.cpp
     tests/test_adsb.cpp
     tests/test_inmarsat.cpp
+    tests/test_inmarsat_application.cpp
     tests/test_inmarsat_replay.cpp
     tests/test_inmarsat_native.cpp
     tests/test_inmarsat_watch.cpp
@@ -588,7 +589,7 @@ if(BUILD_TESTS)
 
   add_executable(sdr_town_workspace_tests tests/test_workspace.cpp src/WorkspaceLayout.cpp
     tests/test_inmarsat_replay_gui.cpp src/InmarsatReplayDialog.cpp
-    src/InmarsatReplay.cpp src/InmarsatIqFile.cpp src/InmarsatPipeline.cpp
+    src/InmarsatReplay.cpp src/InmarsatIqFile.cpp src/InmarsatPipeline.cpp src/InmarsatMessageStore.cpp
     src/InmarsatDiagnosticRecording.cpp
     src/InmarsatDemod.cpp src/InmarsatDiagnostics.cpp
     tests/test_p25_aliases.cpp src/P25Aliases.cpp src/P25AliasCsv.cpp src/P25AliasDialog.cpp
@@ -627,6 +628,7 @@ if(BUILD_TESTS)
       src/InmarsatRecordingDialog.cpp
       src/InmarsatMonitorWidget.cpp
       src/InmarsatWatchUi.cpp src/InmarsatWatchSpectrum.cpp include/InmarsatWatchSpectrum.h
+      tests/test_aircraft_gui.cpp src/AircraftMapWidget.cpp include/AircraftMapWidget.h
       src/InmarsatReplayDialog.cpp)
   foreach(property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS)
     get_target_property(value sdr_town_tests ${property})
@@ -642,8 +644,9 @@ if(BUILD_TESTS)
   set_target_properties(inmarsat_live_gui_tests PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test-fixtures/inmarsat-gui")
   add_test(NAME InmarsatLiveGui COMMAND inmarsat_live_gui_tests "[inmarsat][gui]")
+  add_test(NAME AircraftGui COMMAND inmarsat_live_gui_tests "[aircraft][gui]")
   add_test(NAME InmarsatHostLifecycle COMMAND inmarsat_live_gui_tests "[.inmarsat-host]")
-  set_tests_properties(InmarsatLiveGui InmarsatHostLifecycle PROPERTIES TIMEOUT 60
+  set_tests_properties(InmarsatLiveGui InmarsatHostLifecycle AircraftGui PROPERTIES TIMEOUT 60
       ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QWindowsIntegrationPlugin>"
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${PROJECT_NAME}>")
 
@@ -736,6 +739,12 @@ add_custom_target(deploy
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/external/sgp4/LICENSE"
             "${CMAKE_SOURCE_DIR}/external/sgp4/README.sdr-town.md" "${DEPLOY_STAGING}/licenses/sgp4"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/licenses/aero"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/licenses/acars"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/external/acars/LICENSE.md"
+            "${CMAKE_SOURCE_DIR}/external/acars/ZLIB-LICENSE.txt"
+            "${CMAKE_SOURCE_DIR}/external/acars/JANSSON-LICENSE.txt"
+            "${CMAKE_SOURCE_DIR}/external/acars/UPSTREAM-README.md"
+            "${CMAKE_SOURCE_DIR}/external/acars/README.sdr-town.md" "${DEPLOY_STAGING}/licenses/acars"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/external/aero/README.sdr-town.md" "${DEPLOY_STAGING}/licenses/aero"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/external/aero/jaero/LICENSE" "${DEPLOY_STAGING}/licenses/aero/JAERO-MIT.txt"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/external/aero/jfft/LICENSE" "${DEPLOY_STAGING}/licenses/aero/JFFT-MIT.txt"

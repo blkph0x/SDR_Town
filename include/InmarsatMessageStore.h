@@ -26,6 +26,9 @@ struct InmarsatMessage {
     std::string icaoHex;
     std::string label;
     std::string text;
+    std::string applicationProtocol;
+    std::string applicationStatus;
+    std::string applicationText;
     double latDeg = 0.0;
     double lonDeg = 0.0;
     bool hasPosition = false;
@@ -49,6 +52,8 @@ struct InmarsatAircraft {
 
 class InmarsatMessageStore {
 public:
+    // Replay/channel pipelines own isolated stores; the singleton is live UI state.
+    InmarsatMessageStore() = default;
     static InmarsatMessageStore& instance();
 
     void push(InmarsatMessage msg);
@@ -60,7 +65,6 @@ public:
     void clear();
 
 private:
-    InmarsatMessageStore() = default;
     mutable std::mutex mutex_;
     std::deque<InmarsatMessage> msgs_;
     std::map<uint32_t,InmarsatMessage> positions_; // DEC-0135: independent of message-log eviction.

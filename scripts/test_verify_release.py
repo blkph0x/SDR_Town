@@ -32,7 +32,9 @@ class ReleaseTests(unittest.TestCase):
                  'sdr_aero_codec.dll', 'licenses/aero/README.sdr-town.md',
                  'licenses/aero/JAERO-MIT.txt', 'licenses/aero/JFFT-MIT.txt',
                  'licenses/aero/libcorrect-BSD.txt', 'licenses/aero/codec-COPYRIGHT.txt',
-                 'licenses/aero/libaeroambe-MIT.txt', 'licenses/aero/NaturalEarth.txt')
+                 'licenses/aero/libaeroambe-MIT.txt', 'licenses/aero/NaturalEarth.txt',
+                 'z.dll', 'jansson.dll', 'licenses/acars/LICENSE.md', 'licenses/acars/ZLIB-LICENSE.txt',
+                 'licenses/acars/JANSSON-LICENSE.txt', 'licenses/acars/UPSTREAM-README.md')
         for name in names:
             path = self.staging / name
             path.parent.mkdir(parents=True, exist_ok=True)

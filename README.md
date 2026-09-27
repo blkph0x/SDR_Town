@@ -1,5 +1,14 @@
 # SDR Town
 
+0.2.116 interprets **ADS-C, CPDLC, MIAM, OHMA and media-advisory** applications,
+including acknowledgements that previously looked like scrambled text. Aircraft
+identity can update independently of position; direction/CRC checks protect the map. Raw
+ACARS stays available separately. Aircraft Map now has a **20 MHz capture
+request**, qualified against the selected SDR's capabilities, and a persistent
+**Internet aircraft** checkbox that removes network tracks while preserving RF
+aircraft. Local 1090 reads IQ in order instead of sampling once every two seconds.
+See [release notes and limitations](docs/RELEASE_0.2.116.md).
+
 0.2.115 adds automatic **opted-in** startup PC/build reports, receive/audio
 settings and control-action telemetry. The diagnostics admin now exposes a
 filterable report history alongside grouped issues. Enable **Help > Share
@@ -54,7 +63,7 @@ antenna control, saved limits/park and hardware-only SWR readback. See the
 [setup and ten-controller compatibility targets](docs/ANTENNA_CONTROL.md).
 Physical controller acceptance and automatic satellite tracking remain open.
 
-**[Download 0.2.115 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.115)**
+**[Download 0.2.116 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.116-experimental)**
 includes a matched SDRplay plugin and corrected, dated Inmarsat frequency/rate
 presets. Install the official SDRplay API 3.15+ and service separately. Extract
 the entire ZIP into a fresh folder. RTL bias-T is in Device Manager after

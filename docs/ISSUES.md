@@ -1,5 +1,30 @@
 # Issues (canonical)
 
+## ISS-0046 - Aero encoded applications displayed as prose (2026-09-27, REPAIRED; release validation pending)
+
+T-0092 / DEC-0161: three submitted 10500 recordings have +260 good/+0 bad CRC
+units in their live windows. Cold replay 30409b9e completes MA/T MIAM CORE ACK
+and four empty ACARS ACKs; raw display was not an RF bit-error diagnosis. Added
+pinned MIAM CORE single-transfer interpretation with separate raw/status/text,
+bounded parsing/decompression, application CRC tests and diagnostic counters.
+Other two five-second clips contain no completed cold-start ACARS messages.
+DEC-0162 adds ADS-C/CPDLC/media advisory/OHMA dispatch and identity-only map
+updates, with direction/CRC guards. Segmented MIAM/OHMA reassembly and broader
+field-text acceptance remain open, not silently described as fixed.
+
+## ISS-0047 - Aircraft RF capture and internet source ownership (2026-09-27, REPAIRED; hardware acceptance open)
+
+Tune 1090 previously changed frequency only; local decode examined 8192 recent
+samples every two seconds. OpenSky overwrote RF fields, refresh fetched twice,
+and short state rows could access missing elements. T-0092 separates sources,
+guards late replies, persists network-off, capability-qualifies a 20 MHz capture
+request and consumes ordered IQ with packet-tail/gap handling. Maximum-rate
+continuous RF processing remains unqualified on physical 20 Msps hardware.
+Existing scalar noise scan measured 0.021 s for 2.5 ms RF on this host, so
+the new capture setting is not a claim of real-time full-rate packet coverage.
+Measure processedSamples/gaps under live load before claiming that capability;
+never hide backlog loss or alter P25 to cover an aircraft throughput problem.
+
 ## ISS-0045 - Missing diagnostic context and hidden routine reports (2026-09-27, CLOSED)
 
 Collector inspection found only two installation IDs (local and synthetic), no

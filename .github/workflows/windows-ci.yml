@@ -281,7 +281,7 @@ jobs:
           if (Test-Path (Join-Path $stage 'sdrplay_api.dll')) { throw 'Do not bundle proprietary SDRplay API DLL' }
           python scripts/test_inmarsat_bandplans.py --data-dir "$stage/data/inmarsat"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          foreach ($required in @('sdrtown_rds_dsp.dll', 'sdr_aero_codec.dll', 'SdrTownControl.dll', 'SoapyRTLSDR.dll', 'rtlsdr.dll', 'vcruntime140.dll', 'msvcp140.dll')) {
+          foreach ($required in @('sdrtown_rds_dsp.dll', 'sdr_aero_codec.dll', 'SdrTownControl.dll', 'SoapyRTLSDR.dll', 'rtlsdr.dll', 'z.dll', 'jansson.dll', 'licenses/acars/LICENSE.md', 'licenses/acars/ZLIB-LICENSE.txt', 'licenses/acars/JANSSON-LICENSE.txt', 'licenses/acars/UPSTREAM-README.md', 'vcruntime140.dll', 'msvcp140.dll')) {
             if (-not (Test-Path (Join-Path $stage $required))) { throw "portable staging is missing $required" }
           }
           python scripts/test_rds_cli.py --exe $exe

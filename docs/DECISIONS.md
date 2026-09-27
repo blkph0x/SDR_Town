@@ -1,5 +1,84 @@
 # Decisions
 
+## DEC-0162 - Direction-aware Aero applications and 8400 audit (2026-09-27)
+
+User extended T-0092 before publication. libacars v2.2.1 README/API and the
+InmarScope acars_apps adapter establish dispatch for ADS-C, FANS CPDLC, MIAM,
+media advisory and OHMA. Expand the pinned vendored implementation, including
+ASN.1 licence notices; Jansson (MIT) is needed for OHMA JSON. No XML pretty
+printer dependency: readable XML does not require one. Preserve input bounds,
+application CRC/error status and raw evidence; unknown airline-specific payloads
+must remain explicitly unsupported, not described as decrypted/readable text.
+
+Confirmed current defects: the native handler ignores ACARSItem.downlink when
+parsing ADS-C, and InmarsatAdsc::parse returns identity only if a basic position
+is in that same message. Use validated downlink ADS-C tags for independent
+identity/position updates; uplink contracts/waypoints never become map positions.
+Preserve AES/airframe mismatch rejection and no AES-to-ICAO guessing. Validate
+application CRC before extracting any map fields. Cross-check existing JAERO
+position fixtures and independent synthetic corrupt/wrong-direction cases.
+Use ACARS block ID (libacars acars.c IS_DOWNLINK_BLK) for application direction:
+digits are aircraft-originated messages, letters ground-originated. JAERO retains
+the ten-character downlink message-number/flight header in message text; remove
+it only with that framing evidence. RF channel direction is not a substitute.
+
+Audit 8400 IQ/channelizer/OQPSK/C-frame/mini-m AMBE/PCM/output with existing
+reference fixtures and tests. Do not change vocoder/framing thresholds without
+a failing case. Counted PCM or codec silence is not clear-speech acceptance.
+P25 remains frozen. Publication follows the expanded tests, not before them.
+
+## DEC-0161 - Evidence-led Aero text and source-owned aircraft (2026-09-27)
+
+Three real submitted five-second IF bundles (3c9e216d, c4d6b99e, 30409b9e)
+each record +260 SU CRC successes and +0 CRC failures. This does not prove
+ACARS reassembly or text interpretation. Extend the existing reference probe
+to replay bounded bundles and report actual messages before selecting a repair;
+never tune PLL/FEC thresholds from the description of garbled text alone.
+
+AircraftMapWidget currently retunes without setting sample rate, and reads only
+8192 recent samples every two seconds. The main window's 500 kHz control is an
+analog channel filter; Mode-S reads raw IQ independently. Requested 20 MHz must
+be a capability-qualified capture setting with requested/applied values and
+explicit limitations, not an invented hardware bandwidth. P25 remains frozen.
+
+AdsBTrackStore currently overwrites RF track fields with OpenSky data. Preserve
+separate source records so disabling internet removes all network-derived fields
+without deleting locally received aircraft. Network disable persists, prevents
+new requests, invalidates/aborts pending requests and guards CLI/API merges too.
+Test malformed records and off/on/stale-response races; do not disable map tiles
+under a control labelled only as internet aircraft.
+
+Replay 30409b9e recovers an MA/T single-transfer MIAM message and four empty
+ACARS acknowledgements. The MA payload is base85 protocol data, not prose.
+Reference: szpajder/libacars v2.2.1, commit
+9af09a0121d4ec577339cbd4c7420d7519da48fa, doc/API_REFERENCE.md and
+libacars/miam-core.c. Vendor its MIT MIAM CORE decoder and support files only,
+using existing zlib for bounded decompression, not a new demodulator/vocoder.
+Keep raw ACARS text unchanged for ADS-C and forensic evidence; add separate
+application type/status/text. Unsupported segmented MIAM is explicitly pending,
+not garbled text labelled as decoded. Application error flags never become RF
+CRC failures. Serialize the library's lazy global configuration across workers.
+Bound inputs/output and validate base85 before this upstream parser.
+
+Aircraft controls use a dedicated 20 MHz capture request, capped at advertised
+rates; SDRplay advertises at most 10 Msps and up to 8 MHz hardware IF, RTL-SDR
+typically 2.4 Msps. Display actual capture/IF separately. Preserve analog filter
+limits. Keep network source separation and rate selection under fixture tests.
+
+Confirmed reference decode: 30409b9e's MA payload is MIAM CORE v1 ACK, not prose.
+Fresh synthetic ACK and DATA fixtures verify uncompressed/raw-DEFLATE content and
+CRC rejection independently; field bytes are not checked into tests. Preserve
+unknown application formats explicitly. Source schema reference for squawk14:
+https://openskynetwork.github.io/opensky-api/rest.html . libacars subset retains
+upstream licence; zlib is an explicit vcpkg dependency and shipped runtime.
+
+The 1090 worker uses existing chronological cursor API, 8192-sample work units,
+and a one-second maximum backlog budget for interactive use. This is scheduling
+policy, not a decoder threshold. Retain only the unexamined 120 us Mode-S packet
+tail (extractor's existing 3-sample margin). Reset on sample/epoch/rate gaps and
+log counts every 30 seconds. No change to detector thresholds or P25. Synthetic
+20 Msps packet correctness is not a maximum-rate real-time throughput claim.
+
 ## DEC-0160 - Opted-in session evidence, not only issues (2026-09-27)
 
 Collector inspection found two installations (one local, one synthetic), no

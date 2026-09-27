@@ -13,22 +13,19 @@ struct InmarsatPipeline::Native {
     InmarsatAero::MessageSink messageSink;
     InmarsatAero::PcmSink pcmSink;
     uint64_t validated=0, failed=0, voice=0, pcm=0, rejected=0, corrections=0, repeats=0, mutes=0, speech=0;
-    std::vector<InmarsatMessage> positions;
+    InmarsatMessageStore aircraft;
     uint64_t messages=0;
+    uint64_t applicationDecoded=0,applicationInvalid=0,applicationUnsupported=0,applicationControl=0;
     uint64_t codecFailures=0,codecAttemptedWords=0,invalidCFrames=0,identityChanges=0,unidentifiedSpeech=0,positionMismatches=0;
     void reset(int bitRate,double rate,double offset,double channel,bool burst) {
-        aero.reset(); channelizer.reset(); positions.clear();
+        aero.reset(); channelizer.reset(); aircraft.clear();
         if(bitRate==0) return;
         channelizer=std::make_unique<InmarsatChannelizer>(rate,offset);
         aero=std::make_unique<InmarsatAero>(bitRate,burst);
         aero->setMessageSink([this,channel](const InmarsatMessage& incoming) {
             auto m=incoming; m.freqHz=channel;
             ++messages;
-            if(m.hasPosition) {
-                auto it=std::find_if(positions.begin(),positions.end(),[&](const auto& p){return p.aesId==m.aesId;});
-                if(it!=positions.end()) *it=m;
-                else {if(positions.size()==256) positions.erase(positions.begin()); positions.push_back(m);}
-            }
+            aircraft.push(m);
             if(messageSink) messageSink(m);
         });
         aero->setPcmSink([this](std::span<const int16_t> samples,uint32_t aes) {
@@ -146,6 +143,10 @@ void InmarsatPipeline::process(const std::complex<float>* iq, size_t count,
         native_->identityChanges+=after.identityChanges-before.identityChanges;
         native_->unidentifiedSpeech+=after.unidentifiedSpeechFrames-before.unidentifiedSpeechFrames;
         native_->positionMismatches+=after.positionIdentityMismatches-before.positionIdentityMismatches;
+        native_->applicationDecoded+=after.applicationDecoded-before.applicationDecoded;
+        native_->applicationInvalid+=after.applicationInvalid-before.applicationInvalid;
+        native_->applicationUnsupported+=after.applicationUnsupported-before.applicationUnsupported;
+        native_->applicationControl+=after.applicationControl-before.applicationControl;
     }
     const auto after = demod_.stats();
     symbols_ += after.symbolsOut - before.symbolsOut;
@@ -167,7 +168,7 @@ nlohmann::json InmarsatPipeline::report() const {
     const auto s = stats();
     const auto a=native_->aero?native_->aero->stats():InmarsatAeroStats{};
     nlohmann::json positions=nlohmann::json::array();
-    for(const auto& p:native_->positions) positions.push_back({{"aesId",p.aesId},
+    for(const auto& p:native_->aircraft.positions()) positions.push_back({{"aesId",p.aesId},{"icaoHex",p.icaoHex},
         {"latDeg",p.latDeg},{"lonDeg",p.lonDeg},{"altitudeFt",p.altitudeFt},
         {"callsign",p.callsign},{"registration",p.registration},{"secondsPastHour",p.positionSecondsPastHour}});
     return {{"samples", samples_}, {"blocks", blocks_}, {"nextSample", nextSample_},
@@ -178,6 +179,8 @@ nlohmann::json InmarsatPipeline::report() const {
         {"codecFailures",native_->codecFailures},{"codecAttemptedWords",native_->codecAttemptedWords},
         {"invalidCFrames",native_->invalidCFrames},{"identityChanges",native_->identityChanges},
         {"unidentifiedSpeechFrames",native_->unidentifiedSpeech},{"positionIdentityMismatches",native_->positionMismatches},
+        {"applicationDecoded",native_->applicationDecoded},{"applicationInvalid",native_->applicationInvalid},
+        {"applicationUnsupported",native_->applicationUnsupported},{"applicationControl",native_->applicationControl},
         {"resets", resets_}, {"discontinuities", gaps_}, {"rateHz", rate_},
         {"centerHz", center_}, {"channelHz", channel_}, {"offsetHz", channel_ - center_},
         {"mode", static_cast<int>(mode_)}, {"symbols", symbols_}, {"rawBlocks", rawBlocks_},

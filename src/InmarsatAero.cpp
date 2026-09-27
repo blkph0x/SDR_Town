@@ -2,6 +2,7 @@
 #include "InmarsatVoiceEvidence.h"
 #include "InmarsatFirHistory.h"
 #include "InmarsatAdsc.h"
+#include "InmarsatAcarsApplication.h"
 #include "AeroCodec.h"
 #include "aerol.h"
 #include "oqpskdemodulator.h"
@@ -66,17 +67,30 @@ struct InmarsatAero::Impl {
             m.kind=InmarsatMsgKind::Acars; m.validated=true;
             m.aesId=item.isuitem.AESID; m.gesId=item.isuitem.GESID;
             m.label=item.LABEL.toStdString(); m.text=item.message.toStdString();
+            // ACARS block ID is message-direction evidence; RF link direction
+            // alone cannot distinguish relayed aircraft messages (DEC-0162).
+            const bool downlink=item.BI>='0' && item.BI<='9';
+            const auto direction=downlink?InmarsatMessageDirection::AirToGround:
+                item.BI>='A' && item.BI<='Z'?InmarsatMessageDirection::GroundToAir:InmarsatMessageDirection::Unknown;
+            const auto application=decodeInmarsatAcarsApplication(m.label,m.text,direction,downlink && item.hastext);
+            m.applicationProtocol=application.protocol;
+            m.applicationStatus=application.status;
+            m.applicationText=application.text;
+            if(application.status=="decoded") ++stats.applicationDecoded;
+            if(application.status=="invalid") ++stats.applicationInvalid;
+            if(application.status=="unsupported") ++stats.applicationUnsupported;
+            if(application.status=="control") ++stats.applicationControl;
             m.registration=item.PLANEREG.toStdString();
-            const auto position=InmarsatAdsc::parse(item.message.toStdString());
+            const auto& position=application.aircraft;
             if(position && !InmarsatAdsc::matchesIdentity(m.aesId,position->airframeId))++stats.positionIdentityMismatches;
             if(position && InmarsatAdsc::matchesIdentity(m.aesId,position->airframeId)) {
-                m.hasPosition=true; m.latDeg=position->latitude; m.lonDeg=position->longitude;
+                m.hasPosition=application.hasPosition; m.latDeg=position->latitude; m.lonDeg=position->longitude;
                 m.altitudeFt=position->altitudeFt; m.positionSecondsPastHour=position->secondsPastHour;
                 m.registration=position->registration; m.callsign=position->callsign;
                 // ADS-C airframe ID is explicit evidence; an arbitrary AES alone is not.
                 if(position->airframeId)
                     m.icaoHex=QString("%1").arg(position->airframeId,6,16,QChar('0')).toUpper().toStdString();
-                ++stats.positions;
+                if(m.hasPosition) ++stats.positions;
             }
             if(messageSink) messageSink(m);
         });

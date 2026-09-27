@@ -1,5 +1,56 @@
 # Build notes
 
+## 2026-09-27 - T-0092 expanded application/identity qualification
+
+DEC-0162 extends scope before publication. Added pinned libacars application
+modules/ASN.1 and Jansson 2.15.0. Initial full-app integration compile failed
+because the legacy ASN.1 MSVC header redefines int8_t in a C++ translation unit;
+isolated CPDLC status behind a small C adapter rather than modifying ASN.1
+math/platform code. Also exported libacars' required generated config include.
+Rebuild PASS. First application run 138/139 assertions: old test expected MIAM
+file-request metadata to be unsupported, which is now correctly parsed as
+control; expectation changed to control, never decoded file content. New
+independent CPDLC, compressed OHMA, ADS-C direction/identity/CRC tests pass.
+Expanded full build initially found missing InmarsatMessageStore linkage in the
+Workspace test harness after sharing identity handling with replay; added its
+source to that harness. Next full build and CTest 16/16 PASS (55.98 s).
+CLI/GUI fast/paced 8400 reference all byte-identical, 1375 words/220000 PCM;
+see INMARSAT_APPLICATION_VOICE_AUDIT_20260927.md. Public 10500 burst gives two
+positions/five interpreted applications with zero application failures. Final
+additional fragment-safety/prose tests PASS (142 assertions / seven application
+cases); final full Release build PASS and CTest 16/16 PASS (55.62 s). Release
+verifier 16/16 PASS, frozen-P25 guard PASS with zero protected changes. Public
+release verification remains pending at this checkpoint.
+
+## 2026-09-27 - T-0092 field evidence and local qualification
+
+Windows/MSVC 19.44, source baseline e63d1e7. Extended reference probe compiled;
+three real IF bundles replayed locally. 30409b9e produces 104 CRC successes,
+77 acquisition failures, five ACARS messages after cold start. New application
+adapter decodes the MA payload as MIAM CORE v1 ACK and labels the four empty
+ACKs. Other two clips yield 104/156 CRC successes but no complete cold-start
+messages. Live five-second deltas +260/+0 are different from cold acquisition.
+Private logs/PCM under ignored build/inmarsat-field-0092, never published.
+
+New dependency installed using C:/vcpkg (stale environment path has no binary).
+First MIAM compile failed for missing upstream version.h; added that support
+header. Subsequent probe/app/test builds pass. Focused ADS-B/application run:
+133 assertions / 17 cases PASS. AircraftGui via CTest PASS, screenshots 560x360
+and 1100x650 inspected, no overlap. Direct GUI harness invocation initially lacked
+Qt's platform-plugin path; CTest supplies the configured path and passes.
+Release verifier Python 16/16 PASS; frozen-P25 guard 0 protected files changed.
+Full Release build PASS (`build/t0092-qualification-build.log`); final CTest
+16/16 PASS, 55.38 s (`build/t0092-ctest.log`). This includes native unit,
+Inmarsat application/live GUI, AircraftGui, device and remote diagnostics suites.
+Inmarsat band-plan and P25 guard negative tests PASS. No protected P25 source
+changed. Public Actions/package verification remains pending at this checkpoint.
+
+Existing scalar Mode-S throughput is not qualified for continuous 20 Msps:
+the noise fixture's 6000 samples at 2.4 Msps took 0.021 s on this host for
+0.0025 s of RF. Packet correctness at 20 Msps is covered; sustained physical
+capture/decoding is a separate open performance gate (ISS-0047). Runtime gap
+counters expose backlog loss. No detector-threshold workaround was introduced.
+
 ## 2026-09-27 - T-0091 public release verification
 
 Final source 31235b890dafb0fd5283792f9baf3807c7a844ff. Final local full CTest

@@ -7,6 +7,8 @@
 #include <cmath>
 #include <cstdio>
 #include <sstream>
+#include <algorithm>
+#include <QSettings>
 
 namespace {
 
@@ -22,6 +24,7 @@ AdsBTrackStore& AdsBTrackStore::instance() {
 }
 
 AdsBTrackStore::AdsBTrackStore() {
+    networkEnabled_ = QSettings("SDR_Town", "SDR Town").value("aircraft/networkEnabled", true).toBool();
     const auto obs = SatPassPlanner::instance().observer();
     centerLat_ = obs.latDeg;
     centerLon_ = obs.lonDeg;
@@ -78,6 +81,14 @@ void AdsBTrackStore::pruneLocked(double now) {
         if (now - it->second.lastSeenUnix > 120.0) it = tracks_.erase(it);
         else ++it;
     }
+    for (auto it = networkTracks_.begin(); it != networkTracks_.end();) {
+        if (now - it->second.lastSeenUnix > 120.0) it = networkTracks_.erase(it);
+        else ++it;
+    }
+    for (auto it = cpr_.begin(); it != cpr_.end();) {
+        if (now - std::max(it->second.tE, it->second.tO) > 120.0) it = cpr_.erase(it);
+        else ++it;
+    }
 }
 
 void AdsBTrackStore::ingestAdscPosition(uint32_t icao, double latDeg, double lonDeg,
@@ -88,6 +99,7 @@ void AdsBTrackStore::ingestAdscPosition(uint32_t icao, double latDeg, double lon
     const double now = unixNow();
     {
         std::lock_guard<std::mutex> lk(mutex_);
+        pruneLocked(now);
         auto& t = tracks_[icao];
         t.icao = icao;
         t.icaoHex = icaoHex.empty() ? hexIcao(icao) : icaoHex;
@@ -112,6 +124,8 @@ void AdsBTrackStore::ingestModeSFrame(const uint8_t* msg14) {
     const int tc = ModeS::typeCode(msg14);
 
     std::lock_guard<std::mutex> lk(mutex_);
+    pruneLocked(now);
+    ++localFrames_;
     ++localCrcOk_;
     auto& t = tracks_[icao];
     t.icao = icao;
@@ -170,10 +184,6 @@ void AdsBTrackStore::processMagnitude(const float* mag, size_t n, double sampleR
         n = maxN;
     }
     auto frames = ModeS::extractFramesFromMagnitude(mag, n, sampleRateHz);
-    {
-        std::lock_guard<std::mutex> lk(mutex_);
-        localFrames_ += frames.size();
-    }
     for (const auto& f : frames) {
         if (f.size() == 14) ingestModeSFrame(f.data());
     }
@@ -181,6 +191,11 @@ void AdsBTrackStore::processMagnitude(const float* mag, size_t n, double sampleR
 }
 
 bool AdsBTrackStore::refreshNetwork(std::string* error) {
+    const auto generation = networkGeneration();
+    if (!networkEnabled()) {
+        if (error) *error = "Internet aircraft disabled";
+        return false;
+    }
     double lat = 0, lon = 0, nm = 120.0;
     observer(&lat, &lon, &nm);
     const double dlat = nm / 60.0;
@@ -192,71 +207,130 @@ bool AdsBTrackStore::refreshNetwork(std::string* error) {
                   lat - dlat, lon - dlon, lat + dlat, lon + dlon);
     std::string body, err;
     if (!httpGetUrl(url, &body, &err, 20000)) {
-        setNetworkError(err);
+        setNetworkError(err, generation);
         if (error) *error = err;
         return false;
     }
-    mergeNetworkJson(body);
-    return true;
+    const bool accepted = mergeNetworkJson(body, generation);
+    if (!accepted && error) *error = "Aircraft response invalid or request cancelled";
+    return accepted;
 }
 
 void AdsBTrackStore::mergeNetworkJson(const std::string& body) {
+    mergeNetworkJson(body, networkGeneration());
+}
+
+bool AdsBTrackStore::mergeNetworkJson(const std::string& body, uint64_t generation) {
     try {
+        // DEC-0161: bound untrusted responses and parse before modifying source state.
+        if (body.size() > 2 * 1024 * 1024) throw std::runtime_error("response too large");
         auto j = nlohmann::json::parse(body);
-        if (!j.contains("states") || !j["states"].is_array()) return;
+        if (!j.is_object() || !j.contains("states") ||
+            !(j["states"].is_array() || j["states"].is_null())) return false;
         const double now = unixNow();
+        std::map<uint32_t, AircraftTrack> incoming;
+        for (const auto& st : j["states"]) {
+            // OpenSky REST state vector: lon=5, lat=6, squawk=14 (not 16).
+            if (!st.is_array() || st.size() < 12 || !st[0].is_string()) continue;
+            const auto key = st[0].get<std::string>();
+            if (key.size() != 6 || key.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) continue;
+            if (!st[5].is_number() || !st[6].is_number()) continue;
+            AircraftTrack t;
+            t.icao = static_cast<uint32_t>(std::stoul(key, nullptr, 16));
+            if (!t.icao) continue;
+            t.icaoHex = hexIcao(t.icao);
+            t.lonDeg = st[5].get<double>();
+            t.latDeg = st[6].get<double>();
+            if (!std::isfinite(t.latDeg) || !std::isfinite(t.lonDeg) ||
+                std::abs(t.latDeg) > 90 || std::abs(t.lonDeg) > 180) continue;
+            t.fromNetwork = t.positionValid = true;
+            t.lastSeenUnix = now;
+            if (st[1].is_string()) {
+                t.callsign = st[1].get<std::string>().substr(0, 32);
+                while (!t.callsign.empty() && t.callsign.back() == ' ') t.callsign.pop_back();
+            }
+            if (st[7].is_number()) t.altFt = st[7].get<double>() * 3.28084;
+            if (st[9].is_number()) t.gsKt = st[9].get<double>() * 1.94384;
+            if (st[10].is_number()) t.trackDeg = st[10].get<double>();
+            if (st[11].is_number()) t.verticalRateFpm = st[11].get<double>() * 196.85;
+            if (st.size() > 14 && st[14].is_string()) t.squawk = st[14].get<std::string>().substr(0, 8);
+            t.photoUrl = photoUrlFor(t);
+            incoming[t.icao] = std::move(t);
+            if (incoming.size() >= 4000) break;
+        }
         {
             std::lock_guard<std::mutex> lk(mutex_);
-            for (const auto& st : j["states"]) {
-                if (!st.is_array() || st.size() < 8) continue;
-                std::string icaoStr = st[0].is_string() ? st[0].get<std::string>() : "";
-                if (icaoStr.size() < 6) continue;
-                uint32_t icao = 0;
-                try {
-                    icao = std::stoul(icaoStr, nullptr, 16);
-                } catch (...) {
-                    continue;
-                }
-                auto& t = tracks_[icao];
-                t.icao = icao;
-                t.icaoHex = hexIcao(icao);
-                t.fromNetwork = true;
-                t.lastSeenUnix = now;
-                if (st[1].is_string()) {
-                    std::string cs = st[1].get<std::string>();
-                    while (!cs.empty() && cs.back() == ' ') cs.pop_back();
-                    if (!cs.empty()) t.callsign = cs;
-                }
-                if (!st[5].is_null() && !st[6].is_null()) {
-                    t.lonDeg = st[5].get<double>();
-                    t.latDeg = st[6].get<double>();
-                    t.positionValid = true;
-                }
-                if (!st[7].is_null()) t.altFt = st[7].get<double>() * 3.28084;
-                if (!st[9].is_null()) t.gsKt = st[9].get<double>() * 1.94384;
-                if (!st[10].is_null()) t.trackDeg = st[10].get<double>();
-                if (!st[11].is_null()) t.verticalRateFpm = st[11].get<double>() * 196.85;
-                if (st.size() > 16 && st[16].is_string()) t.squawk = st[16].get<std::string>();
-                if (t.photoUrl.empty()) t.photoUrl = photoUrlFor(t);
-            }
+            if (!networkEnabled_ || generation != networkGeneration_) return false;
+            networkTracks_ = std::move(incoming);
             networkUnix_ = int64_t(now);
             networkOnline_ = true;
             pruneLocked(now);
             lastStatus_ = "OpenSky enrichment OK";
         }
         notify();
+        return true;
     } catch (...) {
-        setNetworkError("OpenSky parse failed");
+        setNetworkError("OpenSky parse failed", generation);
+        return false;
     }
 }
 
 void AdsBTrackStore::setNetworkError(const std::string& err) {
+    setNetworkError(err, networkGeneration());
+}
+
+void AdsBTrackStore::setNetworkError(const std::string& err, uint64_t generation) {
     {
         std::lock_guard<std::mutex> lk(mutex_);
+        if (!networkEnabled_ || generation != networkGeneration_) return;
         networkOnline_ = false;
         lastStatus_ = err.empty() ? "OpenSky error" : err;
     }
     notify();
+}
+
+void AdsBTrackStore::setNetworkEnabled(bool enabled) {
+    {
+        std::lock_guard<std::mutex> lk(mutex_);
+        if (enabled == networkEnabled_) return;
+        networkEnabled_ = enabled;
+        ++networkGeneration_;
+        networkTracks_.clear();
+        networkOnline_ = false;
+        networkUnix_ = 0;
+        lastStatus_ = enabled ? "Internet aircraft enabled" : "Internet aircraft disabled; network tracks removed";
+        QSettings("SDR_Town", "SDR Town").setValue("aircraft/networkEnabled", enabled);
+    }
+    notify();
+}
+
+bool AdsBTrackStore::networkEnabled() const {
+    std::lock_guard<std::mutex> lk(mutex_);
+    return networkEnabled_;
+}
+
+uint64_t AdsBTrackStore::networkGeneration() const {
+    std::lock_guard<std::mutex> lk(mutex_);
+    return networkGeneration_;
+}
+
+std::map<uint32_t, AircraftTrack> AdsBTrackStore::visibleTracksLocked(double now) const {
+    std::map<uint32_t, AircraftTrack> result;
+    if (networkEnabled_) for (const auto& [id, track] : networkTracks_)
+        if (now - track.lastSeenUnix <= 120.0) result[id] = track;
+    for (const auto& [id, local] : tracks_) {
+        if (now - local.lastSeenUnix > 120.0) continue;
+        // Keep RF fields authoritative and stored separately. A network position
+        // may fill a missing local position, but must never masquerade as RF.
+        auto it = result.find(id);
+        if (it == result.end() || local.positionValid) result[id] = local;
+        else {
+            it->second.fromLocal = local.fromLocal;
+            it->second.fromAdsc = local.fromAdsc;
+            if (!local.callsign.empty()) it->second.callsign = local.callsign;
+        }
+    }
+    return result;
 }
 
 AircraftMapSnapshot AdsBTrackStore::snapshot() const {
@@ -269,8 +343,9 @@ AircraftMapSnapshot AdsBTrackStore::snapshot() const {
     s.localCrcOk = localCrcOk_;
     s.lastStatus = lastStatus_;
     s.networkOnline = networkOnline_;
+    s.networkEnabled = networkEnabled_;
     if (networkUnix_ > 0) s.networkAgeSec = int64_t(unixNow()) - networkUnix_;
-    for (const auto& kv : tracks_) {
+    for (const auto& kv : visibleTracksLocked(unixNow())) {
         if (kv.second.positionValid) s.tracks.push_back(kv.second);
     }
     if (s.tracks.size() > 400) s.tracks.resize(400);
@@ -279,8 +354,9 @@ AircraftMapSnapshot AdsBTrackStore::snapshot() const {
 
 AircraftTrack AdsBTrackStore::trackByIcao(uint32_t icao) const {
     std::lock_guard<std::mutex> lk(mutex_);
-    auto it = tracks_.find(icao);
-    if (it == tracks_.end()) return {};
+    const auto visible = visibleTracksLocked(unixNow());
+    auto it = visible.find(icao);
+    if (it == visible.end()) return {};
     return it->second;
 }
 
@@ -311,6 +387,7 @@ nlohmann::json AdsBTrackStore::statusJson() const {
             {"radiusNm", s.radiusNm},
             {"networkAgeSec", s.networkAgeSec},
             {"networkOnline", s.networkOnline},
+            {"networkEnabled", s.networkEnabled},
             {"localFrames", s.localFrames},
             {"localCrcOk", s.localCrcOk},
             {"lastStatus", s.lastStatus}};

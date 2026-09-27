@@ -42,6 +42,7 @@ struct AircraftMapSnapshot {
     uint64_t localCrcOk = 0;
     std::string lastStatus;
     bool networkOnline = false;
+    bool networkEnabled = true;
 };
 
 class AdsBTrackStore {
@@ -61,8 +62,14 @@ public:
 
     // OpenSky JSON merge (GUI NAM or blocking httpGetUrl from CLI/worker).
     void mergeNetworkJson(const std::string& body);
+    bool mergeNetworkJson(const std::string& body, uint64_t generation);
     void setNetworkError(const std::string& err);
+    void setNetworkError(const std::string& err, uint64_t generation);
     bool refreshNetwork(std::string* error = nullptr);
+    // DEC-0161: disabling invalidates even replies from before an off/on cycle.
+    void setNetworkEnabled(bool enabled);
+    bool networkEnabled() const;
+    uint64_t networkGeneration() const;
 
     AircraftMapSnapshot snapshot() const;
     AircraftTrack trackByIcao(uint32_t icao) const;
@@ -79,9 +86,11 @@ private:
     void notify();
     static std::string hexIcao(uint32_t icao);
     static std::string photoUrlFor(const AircraftTrack& t);
+    std::map<uint32_t, AircraftTrack> visibleTracksLocked(double now) const;
 
     mutable std::mutex mutex_;
     std::map<uint32_t, AircraftTrack> tracks_;
+    std::map<uint32_t, AircraftTrack> networkTracks_;
     struct CprBuf {
         bool hasEven = false, hasOdd = false;
         int latE = 0, lonE = 0, latO = 0, lonO = 0;
@@ -97,6 +106,8 @@ private:
     uint64_t localCrcOk_ = 0;
     std::string lastStatus_ = "Aircraft map idle";
     bool networkOnline_ = false;
+    bool networkEnabled_ = true;
+    uint64_t networkGeneration_ = 1;
 
     std::function<void()> updateCb_;
 };

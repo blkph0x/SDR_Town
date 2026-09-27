@@ -23,6 +23,7 @@ struct InmarsatAeroStats {
     uint64_t speechFrames=0; // Valid C-frames containing non-muted voice words.
     uint64_t codecFailures=0,codecAttemptedWords=0,invalidCFrames=0;
     uint64_t identityChanges=0,unidentifiedSpeechFrames=0,positionIdentityMismatches=0;
+    uint64_t applicationDecoded=0,applicationInvalid=0,applicationUnsupported=0,applicationControl=0;
     bool codecAvailable=false;
 };
 // Single-worker owner; direct signals never cross threads. Recreate on source gap.

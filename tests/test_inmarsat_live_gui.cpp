@@ -4,6 +4,7 @@
 #include "InmarsatDiagnostics.h"
 #include "InmarsatMapWidget.h"
 #include "InmarsatMessageStore.h"
+#include "InmarsatAcarsApplication.h"
 #include "InmarsatMonitorWidget.h"
 #include <QPlainTextEdit>
 #include <QToolButton>
@@ -130,6 +131,25 @@ TEST_CASE("Aircraft monitor shows verified fields and supports filter copy clear
     auto* dialog=widget.findChild<QDialog*>();REQUIRE(dialog);CHECK(dialog->isVisible());dialog->close();
     widget.findChild<QToolButton*>("inmarsatMonitorClear")->click();CHECK(table->rowCount()==0);
     CHECK(store.positions().empty());CHECK_FALSE(store.recent().empty());
+}
+
+TEST_CASE("Inmarsat GUI renders application meaning and API preserves raw evidence", "[inmarsat][gui]") {
+    auto& store = InmarsatMessageStore::instance(); store.clear();
+    struct Clear { ~Clear() { InmarsatMessageStore::instance().clear(); } } clear;
+    InmarsatMessage m;
+    m.kind = InmarsatMsgKind::Acars; m.validated = true;
+    m.label = std::string("_\x7f", 2);
+    const auto app = decodeInmarsatAcarsApplication(m.label, m.text);
+    m.applicationProtocol = app.protocol; m.applicationStatus = app.status; m.applicationText = app.text;
+    store.push(m);
+    CHECK(m.toJson().at("text") == "");
+    CHECK(m.toJson().at("applicationStatus") == "control");
+    InmarsatWidget widget;
+    REQUIRE(QMetaObject::invokeMethod(&widget, "refreshUi", Qt::DirectConnection));
+    bool found = false;
+    for (auto* view : widget.findChildren<QPlainTextEdit*>())
+        found = found || view->toPlainText().contains("ACARS acknowledgement (no text payload)");
+    CHECK(found);
 }
 
 TEST_CASE("Decoder monitor distinguishes protocol lock inactive and stopped channels", "[inmarsat][gui]") {

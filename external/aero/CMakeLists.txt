@@ -1,5 +1,6 @@
 # DEC-0121: pinned upstream receive core, with no P25 codec symbol interposition.
 enable_language(C)
+add_subdirectory(../acars ${CMAKE_CURRENT_BINARY_DIR}/acars)
 file(GLOB correct_sources CONFIGURE_DEPENDS correct/convolutional/*.c)
 add_library(sdr_aero_correct STATIC ${correct_sources})
 target_include_directories(sdr_aero_correct PUBLIC correct/include)
@@ -35,9 +36,9 @@ install(FILES jfft/LICENSE DESTINATION licenses/aero/jfft)
 install(FILES correct/LICENSE DESTINATION licenses/aero/correct)
 install(FILES codec/COPYRIGHT codec/LICENSE-wrapper codec/README.md DESTINATION licenses/aero/codec)
 
-add_library(sdr_inmarsat_native STATIC ../../src/InmarsatAero.cpp ../../src/InmarsatAdsc.cpp)
+add_library(sdr_inmarsat_native STATIC ../../src/InmarsatAero.cpp ../../src/InmarsatAdsc.cpp ../../src/InmarsatAcarsApplication.cpp)
 target_include_directories(sdr_inmarsat_native PUBLIC ../../include)
-target_link_libraries(sdr_inmarsat_native PUBLIC sdr_aero_codec sdr_aero_receive nlohmann_json::nlohmann_json)
+target_link_libraries(sdr_inmarsat_native PUBLIC sdr_aero_codec sdr_aero_receive nlohmann_json::nlohmann_json PRIVATE sdr_miam)
 add_library(sdr_inmarsat_audio STATIC ../../src/InmarsatAudio.cpp)
 target_include_directories(sdr_inmarsat_audio PUBLIC ../../include PRIVATE ../miniaudio)
 target_link_libraries(sdr_inmarsat_audio PUBLIC Qt6::Core nlohmann_json::nlohmann_json)

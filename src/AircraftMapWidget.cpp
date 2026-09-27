@@ -2,9 +2,17 @@
 #include "AdsBTrackStore.h"
 #include "DeviceManager.h"
 #include "SatPassPlanner.h"
+#include "AircraftReceivePlan.h"
+#include "AircraftMagnitudeStream.h"
+#include "Receiver.h"
 
 #include <QCheckBox>
 #include <QDialog>
+#include <QDoubleSpinBox>
+#include <QGridLayout>
+#include <QSettings>
+#include <QSignalBlocker>
+#include <spdlog/spdlog.h>
 #include <QHideEvent>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -42,7 +50,7 @@ void latLonToTileXY(double lat, double lon, int z, double* x, double* y) {
 AircraftMapWidget::AircraftMapWidget(QWidget* parent)
     : QWidget(parent)
 {
-    setMinimumSize(480, 360);
+    setMinimumSize(560, 360);
     setWindowTitle("Aircraft Map");
 
     status_ = new QLabel("Aircraft map — OpenSky (local 1090 off)", this);
@@ -50,10 +58,35 @@ AircraftMapWidget::AircraftMapWidget(QWidget* parent)
     netBtn_ = new QPushButton("Refresh net", this);
     localAdsbCheck_ = new QCheckBox("Local 1090 decode", this);
     localAdsbCheck_->setChecked(false);
-    localAdsbCheck_->setToolTip("Off by default. Enable only when tuned to 1090; runs a light background worker so the main demod stays responsive.");
+    toolbar_ = new QWidget(this);
+    auto* layout = new QGridLayout(toolbar_);
+    layout->setContentsMargins(6, 6, 6, 6);
+    internetCheck_ = new QCheckBox("Internet aircraft", toolbar_);
+    internetCheck_->setObjectName("aircraftInternetEnabled");
+    internetCheck_->setChecked(AdsBTrackStore::instance().networkEnabled());
+    internetCheck_->setToolTip("Turn off to stop aircraft lookups and remove their data. Local ADS-B/ADS-C remain; map tiles are separate.");
+    captureBandwidth_ = new QDoubleSpinBox(toolbar_);
+    captureBandwidth_->setObjectName("aircraftCaptureBandwidthMHz");
+    captureBandwidth_->setRange(2, 20);
+    captureBandwidth_->setDecimals(1);
+    captureBandwidth_->setSuffix(" MHz");
+    captureBandwidth_->setValue(20);
+    captureBandwidth_->setToolTip("Requested RF capture span. Limited to the receiver's advertised sample rates; not the audio filter.");
+    layout->addWidget(status_, 0, 0, 1, 4);
+    status_->setWordWrap(true);
+    layout->addWidget(localAdsbCheck_, 1, 0, 1, 2);
+    layout->addWidget(internetCheck_, 1, 2);
+    layout->addWidget(netBtn_, 1, 3);
+    layout->addWidget(new QLabel("Capture bandwidth", toolbar_), 2, 0);
+    layout->addWidget(captureBandwidth_, 2, 1, 1, 2);
+    layout->addWidget(tuneBtn_, 2, 3);
+    toolbar_->setStyleSheet("QWidget { background: #202428; color: #eeeeee; }");
+    netBtn_->setEnabled(internetCheck_->isChecked());
+    localAdsbCheck_->setToolTip("Decode new IQ in order on the selected receiver at 1090 MHz. Processing gaps are logged.");
     status_->setStyleSheet("background:rgba(0,0,0,180);color:#9dff9d;padding:6px;");
     tuneBtn_->setStyleSheet("background:#0c160c;color:#39FF14;border:1px solid #39FF14;padding:6px;");
     netBtn_->setStyleSheet("background:#0c160c;color:#39FF14;border:1px solid #39FF14;padding:6px;");
+    netBtn_->setStyleSheet("QPushButton {background:#0c160c;color:#39FF14;border:1px solid #39FF14;padding:6px;} QPushButton:disabled {color:#999999;border-color:#666666;}");
     localAdsbCheck_->setStyleSheet("background:rgba(0,0,0,160);color:#39FF14;padding:4px;");
 
     nam_ = new QNetworkAccessManager(this);
@@ -67,20 +100,19 @@ AircraftMapWidget::AircraftMapWidget(QWidget* parent)
     connect(tuneBtn_, &QPushButton::clicked, this, &AircraftMapWidget::onTune1090);
     connect(netBtn_, &QPushButton::clicked, this, &AircraftMapWidget::onRefreshNetwork);
     connect(localAdsbCheck_, &QCheckBox::toggled, this, &AircraftMapWidget::onLocalAdsbToggled);
+    connect(internetCheck_, &QCheckBox::toggled, this, &AircraftMapWidget::onInternetAircraftToggled);
 
     const auto obs = SatPassPlanner::instance().observer();
     centerLat_ = obs.latDeg != 0 ? obs.latDeg : -33.87;
     centerLon_ = obs.lonDeg != 0 ? obs.lonDeg : 151.21;
     AdsBTrackStore::instance().setObserver(centerLat_, centerLon_);
-    AdsBTrackStore::instance().setUpdateCallback([this]() {
-        QMetaObject::invokeMethod(this, "refreshUi", Qt::QueuedConnection);
-    });
+    // UI timer reads snapshots; no callback may race QWidget destruction.
 }
 
 void AircraftMapWidget::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);
     if (uiTimer_ && !uiTimer_->isActive()) uiTimer_->start(1500);
-    if (netTimer_ && !netTimer_->isActive()) netTimer_->start(30000);
+    if (AdsBTrackStore::instance().networkEnabled() && !netTimer_->isActive()) netTimer_->start(30000);
     if (localAdsbCheck_ && localAdsbCheck_->isChecked()) startLocalWorker();
     fetchOpenSky();
     refreshUi();
@@ -90,12 +122,12 @@ void AircraftMapWidget::hideEvent(QHideEvent* event) {
     QWidget::hideEvent(event);
     if (uiTimer_) uiTimer_->stop();
     if (netTimer_) netTimer_->stop();
+    if (aircraftReply_) aircraftReply_->abort();
     stopLocalWorker();
 }
 
 AircraftMapWidget::~AircraftMapWidget() {
     stopLocalWorker();
-    AdsBTrackStore::instance().setUpdateCallback({});
 }
 
 void AircraftMapWidget::setEmbedded(bool embedded) {
@@ -115,29 +147,50 @@ void AircraftMapWidget::startLocalWorker() {
     stopLocalWorker();
     localRun_.store(true);
     localThread_ = std::thread([this]() {
+        Receiver cursor;
+        AircraftMagnitudeStream decoder;
+        size_t selected = static_cast<size_t>(-1);
+        uint64_t next = 0, epoch = 0, samples = 0, gaps = 0, decoded = 0;
+        auto reportAt = std::chrono::steady_clock::now();
         while (localRun_.load()) {
+            bool received = false;
             try {
                 auto& mgr = DeviceManager::instance();
                 const auto devs = mgr.getDevices();
-                for (size_t i = 0; i < devs.size(); ++i) {
-                    if (!devs[i].enabled) continue;
-                    std::vector<float> power;
-                    double cf = 0.0, sr = 0.0;
-                    if (!mgr.getLatestSpectrum(i, power, cf, sr)) continue;
-                    if (cf < 1085e6 || cf > 1095e6) continue;
-                    // Small window only — Mode-S scan is O(n) and must not starve the demod ring.
-                    auto iq = mgr.getRecentIQWindow(i, 8192);
-                    if (iq.size() < 2048) break;
-                    std::vector<float> mag(iq.size());
-                    for (size_t k = 0; k < iq.size(); ++k) mag[k] = std::abs(iq[k]);
-                    const double rate = (sr > 0.0) ? sr : (devs[i].sampleRate > 0 ? devs[i].sampleRate : 2.048e6);
-                    AdsBTrackStore::instance().processMagnitude(mag.data(), mag.size(), rate);
-                    break;
+                const auto i = mgr.preferredListenDeviceIndex();
+                const double rate = mgr.getCurrentSampleRate(i);
+                if (i < devs.size() && devs[i].enabled && mgr.isStreaming(i) &&
+                    mgr.getCurrentCenterFreq(i) == 1090e6 && rate >= 2e6 && rate <= 20e6) {
+                    if (selected != i) { mgr.setReceiverCursorToLiveEdge(i, cursor); decoder.reset(); selected = i; next = 0; }
+                    // Bounded work units, chronological cursor. One-second backlog
+                    // budget protects interactive use; any skipped samples reset the tail.
+                    auto iq = mgr.getNewIQWindowForReceiver(i, cursor, 8192, static_cast<size_t>(rate));
+                    received = !iq.samples.empty();
+                    if (received) {
+                        if (iq.cursorDiscontinuity || (next && (epoch != iq.streamEpoch || next != iq.startAbsolute))) {
+                            ++gaps; decoder.reset();
+                        }
+                        epoch = iq.streamEpoch; next = iq.endAbsolute;
+                        if (!iq.cursorDiscontinuity) {
+                            std::vector<float> mag(iq.samples.size());
+                            for (size_t k = 0; k < mag.size(); ++k) mag[k] = std::abs(iq.samples[k]);
+                            const auto frames = decoder.process(mag, iq.startAbsolute, iq.streamEpoch, rate);
+                            for (const auto& frame : frames) AdsBTrackStore::instance().ingestModeSFrame(frame.data());
+                            samples += mag.size(); decoded += frames.size();
+                        }
+                    }
+                } else {
+                    decoder.reset(); selected = static_cast<size_t>(-1); next = 0;
                 }
-            } catch (...) {
+                if (std::chrono::steady_clock::now() - reportAt >= std::chrono::seconds(30)) {
+                    spdlog::info("Aircraft IQ dev={} rateHz={} processedSamples={} gaps={} decodedFrames={}", i, rate, samples, gaps, decoded);
+                    reportAt = std::chrono::steady_clock::now();
+                }
+            } catch (const std::exception& e) {
+                spdlog::warn("Aircraft IQ worker stopped: {}", e.what());
+                localRun_.store(false);
             }
-            for (int i = 0; i < 20 && localRun_.load(); ++i)
-                std::this_thread::sleep_for(std::chrono::milliseconds(100)); // ~2 Hz
+            if (!received) std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
     });
 }
@@ -150,15 +203,14 @@ void AircraftMapWidget::onLocalAdsbToggled(bool on) {
 
 void AircraftMapWidget::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
-    status_->setGeometry(8, 8, width() - 340, 28);
-    localAdsbCheck_->setGeometry(8, 40, 160, 24);
-    netBtn_->setGeometry(width() - 210, 8, 100, 28);
-    tuneBtn_->setGeometry(width() - 100, 8, 92, 28);
+    toolbar_->setGeometry(8, 8, width() - 16, toolbar_->sizeHint().height());
     ensureTiles();
 }
 
 void AircraftMapWidget::refreshUi() {
     const auto snap = AdsBTrackStore::instance().snapshot();
+    { const QSignalBlocker block(internetCheck_); internetCheck_->setChecked(snap.networkEnabled); }
+    netBtn_->setEnabled(snap.networkEnabled);
     if (!followIcao_.isEmpty()) {
         // keep center if following — optional
     }
@@ -168,14 +220,17 @@ void AircraftMapWidget::refreshUi() {
         QString("Tracks %1 · local CRC %2 · net %3 · localIQ %4 · %5")
             .arg(snap.tracks.size())
             .arg(snap.localCrcOk)
-            .arg(snap.networkOnline ? QString("OK age %1s").arg(snap.networkAgeSec) : QString("offline"))
+            .arg(!snap.networkEnabled ? QString("disabled") : snap.networkOnline ? QString("OK age %1s").arg(snap.networkAgeSec) : QString("offline"))
             .arg(localRun_.load() ? "on" : "off")
-            .arg(QString::fromStdString(snap.lastStatus)));
+            .arg(QString::fromStdString(snap.lastStatus)) + (tuneStatus_.isEmpty() ? QString{} : "\n" + tuneStatus_));
+    toolbar_->setGeometry(8, 8, width() - 16, toolbar_->sizeHint().height());
     ensureTiles();
     update();
 }
 
 void AircraftMapWidget::fetchOpenSky() {
+    if (!isVisible() || !AdsBTrackStore::instance().networkEnabled() || aircraftReply_) return;
+    const auto generation = AdsBTrackStore::instance().networkGeneration();
     double lat = centerLat_, lon = centerLon_, nm = 120.0;
     AdsBTrackStore::instance().observer(&lat, &lon, &nm);
     const double dlat = nm / 60.0;
@@ -186,13 +241,20 @@ void AircraftMapWidget::fetchOpenSky() {
                        .arg(lat + dlat, 0, 'f', 4)
                        .arg(lon + dlon, 0, 'f', 4));
     QNetworkRequest req(url);
+    req.setTransferTimeout(20000);
     req.setHeader(QNetworkRequest::UserAgentHeader, "SDR-Town-AircraftMap/0.2.71");
     QNetworkReply* reply = nam_->get(req);
-    connect(reply, &QNetworkReply::finished, this, [reply]() {
+    aircraftReply_ = reply;
+    connect(reply, &QNetworkReply::readyRead, this, [reply]() {
+        if (reply->bytesAvailable() > 2 * 1024 * 1024) reply->abort();
+    });
+    connect(reply, &QNetworkReply::finished, this, [this, reply, generation]() {
+        if (aircraftReply_ == reply) aircraftReply_.clear();
         if (reply->error() != QNetworkReply::NoError) {
-            AdsBTrackStore::instance().setNetworkError(reply->errorString().toStdString());
+            if (reply->error() != QNetworkReply::OperationCanceledError)
+                AdsBTrackStore::instance().setNetworkError(reply->errorString().toStdString(), generation);
         } else {
-            AdsBTrackStore::instance().mergeNetworkJson(reply->readAll().toStdString());
+            AdsBTrackStore::instance().mergeNetworkJson(reply->readAll().toStdString(), generation);
         }
         reply->deleteLater();
     });
@@ -201,31 +263,64 @@ void AircraftMapWidget::fetchOpenSky() {
 void AircraftMapWidget::onTune1090() {
     auto& mgr = DeviceManager::instance();
     const auto devs = mgr.getDevices();
-    size_t idx = 0;
-    for (size_t i = 0; i < devs.size(); ++i) {
-        if (devs[i].enabled) {
-            idx = i;
-            break;
-        }
+    const size_t idx = mgr.preferredListenDeviceIndex();
+    if (idx >= devs.size()) { tuneStatus_ = "No receiver available"; refreshUi(); return; }
+    const auto plan = aircraftReceivePlan(captureBandwidth_->value() * 1e6,
+        devs[idx].sampleRates, devs[idx].bandwidthsHz);
+    if (plan.sampleRateHz == 0) {
+        tuneStatus_ = "No advertised Mode-S capture rate. Rescan the receiver in Devices.";
+        refreshUi(); return;
     }
-    if (devs.empty()) return;
+    if (devs[idx].maxFreq > 0 && (devs[idx].maxFreq < 1090e6 || devs[idx].minFreq > 1090e6)) {
+        tuneStatus_ = "Selected receiver cannot tune 1090 MHz"; refreshUi(); return;
+    }
     std::string err;
-    mgr.setEnabled(idx, true);
     if (!mgr.acquireDeviceLease(idx, DeviceManager::DeviceLeaseOwner::Aircraft, false, &err)) {
-        status_->setText(QString::fromStdString(err));
+        tuneStatus_ = QString::fromStdString(err); refreshUi();
         return;
     }
-    mgr.startStreaming(idx, true);
-    mgr.retuneWithLease(idx, 1090e6, DeviceManager::DeviceLeaseOwner::Aircraft, true, nullptr);
-    status_->setText("Tuned to 1090 MHz — enable Local 1090 decode if you want Mode-S markers");
+    stopLocalWorker();
+    // Apply capture geometry while stopped so startup cannot copy old IF settings.
+    mgr.stopStreaming(idx);
+    mgr.applyLiveSampleRate(idx, plan.sampleRateHz);
+    bool ok = mgr.setEnabled(idx, true);
+    if (ok && devs[idx].isSdrplay && plan.hardwareBandwidthHz > 0)
+        ok = mgr.setLiveBandwidth(idx, plan.hardwareBandwidthHz, &err);
+    if (ok) ok = mgr.retuneWithLease(idx, 1090e6, DeviceManager::DeviceLeaseOwner::Aircraft, false, &err);
+    if (ok) ok = mgr.startStreaming(idx, true);
+    if (!ok) {
+        mgr.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Aircraft);
+        tuneStatus_ = "1090 setup failed: " + QString::fromStdString(err.empty() ? mgr.getRuntimeStateLabel(idx) : err);
+    } else {
+        const double actual = mgr.getCurrentSampleRate(idx);
+        tuneStatus_ = QString("1090 MHz requested | Capture %1 / requested %2 MHz | IF %3")
+            .arg(actual / 1e6, 0, 'f', 2).arg(plan.requestedHz / 1e6, 0, 'f', 1)
+            .arg(devs[idx].isSdrplay && plan.hardwareBandwidthHz > 0 ?
+                QString::number(plan.hardwareBandwidthHz / 1e6, 'f', 2) + " MHz" : "driver managed");
+        spdlog::info("Aircraft tune dev={} requestedHz={} captureHz={} plannedIfHz={} state={}",
+            idx, plan.requestedHz, actual, plan.hardwareBandwidthHz, mgr.getRuntimeStateLabel(idx));
+        if (localAdsbCheck_->isChecked() && isVisible()) startLocalWorker();
+    }
+    refreshUi();
 }
 
 void AircraftMapWidget::onRefreshNetwork() {
     fetchOpenSky();
-    std::thread([]() {
-        std::string err;
-        AdsBTrackStore::instance().refreshNetwork(&err);
-    }).detach();
+}
+
+void AircraftMapWidget::onInternetAircraftToggled(bool on) {
+    AdsBTrackStore::instance().setNetworkEnabled(on);
+    netBtn_->setEnabled(on);
+    if (!on) {
+        netTimer_->stop();
+        if (aircraftReply_) aircraftReply_->abort();
+        for (auto* dialog : findChildren<QDialog*>()) dialog->close();
+    } else if (isVisible()) {
+        netTimer_->start(30000);
+        fetchOpenSky();
+    }
+    spdlog::info("Aircraft internet source enabled={} (network tracks cleared)", on);
+    refreshUi();
 }
 
 QPointF AircraftMapWidget::latLonToPixel(double lat, double lon) const {
@@ -379,8 +474,8 @@ void AircraftMapWidget::showPopout(const QString& icaoHex) {
     auto* lay = new QVBoxLayout(dlg);
     lay->addWidget(new QLabel(
         QString("<b>%1</b><br>ICAO %2<br>Alt %3 ft · %4 kt<br>Source: %5%6%7")
-            .arg(QString::fromStdString(t.callsign.empty() ? "(no callsign)" : t.callsign))
-            .arg(QString::fromStdString(t.icaoHex))
+            .arg(QString::fromStdString(t.callsign.empty() ? "(no callsign)" : t.callsign).toHtmlEscaped())
+            .arg(QString::fromStdString(t.icaoHex).toHtmlEscaped())
             .arg(t.altFt, 0, 'f', 0)
             .arg(t.gsKt, 0, 'f', 0)
             .arg(t.fromLocal ? "local " : "")

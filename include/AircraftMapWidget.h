@@ -4,6 +4,7 @@
 #include <QPixmap>
 #include <QHash>
 #include <QPointF>
+#include <QPointer>
 #include <atomic>
 #include <thread>
 
@@ -12,6 +13,8 @@ class QLabel;
 class QPushButton;
 class QCheckBox;
 class QNetworkAccessManager;
+class QNetworkReply;
+class QDoubleSpinBox;
 
 class AircraftMapWidget : public QWidget {
     Q_OBJECT
@@ -27,6 +30,7 @@ public slots:
     void onTune1090();
     void onRefreshNetwork();
     void onLocalAdsbToggled(bool on);
+    void onInternetAircraftToggled(bool on);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -54,6 +58,11 @@ private:
     QPushButton* tuneBtn_ = nullptr;
     QPushButton* netBtn_ = nullptr;
     QCheckBox* localAdsbCheck_ = nullptr;
+    QCheckBox* internetCheck_ = nullptr;
+    QDoubleSpinBox* captureBandwidth_ = nullptr;
+    QWidget* toolbar_ = nullptr;
+    QPointer<QNetworkReply> aircraftReply_;
+    QString tuneStatus_;
     QNetworkAccessManager* nam_ = nullptr;
     QHash<QString, QPixmap> tiles_;
     QString followIcao_;

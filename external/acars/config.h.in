@@ -1,0 +1,8 @@
+#pragma once
+#define WITH_ZLIB 1
+#define WITH_JANSSON 1
+#cmakedefine IS_BIG_ENDIAN
+#ifndef _WIN32
+#define HAVE_UNISTD_H 1
+#define HAVE_SYS_TIME_H 1
+#endif

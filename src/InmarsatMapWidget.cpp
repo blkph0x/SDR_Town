@@ -75,9 +75,11 @@ void InmarsatMapWidget::setReport(const nlohmann::json& report,bool replay) {
             const auto hex=QString("%1").arg(aes,6,16,QChar('0')).toUpper();
             const auto reg=QString::fromStdString(p.value("registration",std::string{}));
             const auto call=QString::fromStdString(p.value("callsign",std::string{}));
+            const auto icao=QString::fromStdString(p.value("icaoHex",std::string{}));
             QString detail=QString("AES %1\nRegistration: %2\nCallsign: %3\n%4, %5\nAltitude: %6 ft\nReport: %7 s past hour\n%8 ADS-C (CRC valid)")
                 .arg(hex,reg,call).arg(lat,0,'f',5).arg(lon,0,'f',5).arg(p.value("altitudeFt",0.0),0,'f',0)
                 .arg(p.value("secondsPastHour",0.0),0,'f',3).arg(replay?"Replay":"Live");
+            detail+=QString("\nICAO: %1").arg(icao.isEmpty()?"not received":icao);
             const bool stale=p.value("stale",false);
             if(p.contains("ageSeconds")) detail+=QString("\nReceived %1 s ago%2").arg(p.value("ageSeconds",0.0),0,'f',0).arg(stale?" (position needs refresh)":"");
             tracks_.push_back({aes,{lon,-lat},reg.isEmpty()?hex:reg,detail,aes==active,stale});

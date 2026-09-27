@@ -1,5 +1,8 @@
 #include "ModeS.h"
 #include "AdsBTrackStore.h"
+#include "AircraftReceivePlan.h"
+#include "AircraftMagnitudeStream.h"
+#include <QSettings>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -147,7 +150,7 @@ TEST_CASE("CPR local decode is finite in both hemispheres", "[adsb]")
 TEST_CASE("ADS-B PPM extractor handles fractional phase at common SDR rates", "[adsb][ppm]")
 {
     const auto expected = hexFrame("8D40621D58C382D690C8AC2863A7");
-    for (const double sampleRate : {2.0e6, 2.4e6, 4.0e6}) {
+    for (const double sampleRate : {2.0e6, 2.4e6, 4.0e6, 10.0e6, 20.0e6}) {
         const auto magnitude = synthesizePpm(expected, sampleRate, 31.37);
         const auto frames = ModeS::extractFramesFromMagnitude(
             magnitude.data(), magnitude.size(), sampleRate);
@@ -184,4 +187,95 @@ TEST_CASE("ADS-C merges into AdsBTrackStore", "[adsb]")
     REQUIRE(track.fromAdsc);
     REQUIRE(track.positionValid);
     REQUIRE(track.latDeg == Catch::Approx(-33.87).margin(1e-4));
+}
+
+TEST_CASE("Aircraft capture request respects RF capabilities not audio filter", "[adsb]") {
+    CHECK(aircraftReceivePlan(20e6, {2e6, 10e6, 20e6}, {}).sampleRateHz == 20e6);
+    const auto rsp = aircraftReceivePlan(20e6, {2e6, 8e6, 10e6}, {200e3, 1.536e6, 8e6});
+    CHECK(rsp.sampleRateHz == 10e6);
+    CHECK(rsp.hardwareBandwidthHz == 8e6);
+    CHECK(aircraftReceivePlan(20e6, {250e3, 1.024e6, 2.4e6}, {}).sampleRateHz == 2.4e6);
+    CHECK(aircraftReceivePlan(20e6, {}, {}).sampleRateHz == 0);
+    CHECK(aircraftReceivePlan(500e3, {2e6}, {}).sampleRateHz == 0);
+    CHECK(aircraftReceivePlan(20e6, {INFINITY, NAN, -1}, {}).sampleRateHz == 0);
+}
+
+TEST_CASE("Aircraft streaming packet crosses chunks once but never crosses a gap", "[adsb]") {
+    const auto expected = hexFrame("8D40621D58C382D690C8AC2863A7");
+    const auto samples = synthesizePpm(expected, 20e6, 31.37);
+    const size_t split = samples.size() / 2;
+    AircraftMagnitudeStream stream;
+    CHECK(stream.process(std::span(samples).first(split), 0, 1, 20e6).empty());
+    CHECK(stream.process(std::span(samples).subspan(split), split, 1, 20e6).size() == 1);
+    std::vector<float> quiet(3000, .055f);
+    CHECK(stream.process(quiet, samples.size(), 1, 20e6).empty());
+    stream.reset();
+    stream.process(std::span(samples).first(split), 0, 1, 20e6);
+    CHECK(stream.process(std::span(samples).subspan(split), split + 1, 1, 20e6).empty());
+    stream.reset();
+    stream.process(std::span(samples).first(split), 0, 1, 20e6);
+    CHECK(stream.process(std::span(samples).subspan(split), split, 2, 20e6).empty());
+}
+
+namespace {
+struct RestoreAircraftNetwork {
+    QSettings settings{"SDR_Town", "SDR Town"};
+    QVariant saved = settings.value("aircraft/networkEnabled");
+    bool enabled = AdsBTrackStore::instance().networkEnabled();
+    ~RestoreAircraftNetwork() {
+        AdsBTrackStore::instance().setNetworkEnabled(enabled);
+        if (saved.isValid()) settings.setValue("aircraft/networkEnabled", saved);
+        else settings.remove("aircraft/networkEnabled");
+    }
+};
+nlohmann::json networkAircraft(std::string icao, std::string call, double lat = 40) {
+    return nlohmann::json::array({icao, call, "Test", 0, 0, 30, lat, 1000,
+        false, 100, 90, 0, nullptr, 1000, "1200", false, 0});
+}
+}
+
+TEST_CASE("Internet off removes network fields but preserves RF provenance", "[adsb]") {
+    RestoreAircraftNetwork restore;
+    auto& store = AdsBTrackStore::instance();
+    store.setNetworkEnabled(false);
+    store.setNetworkEnabled(true);
+    const auto generation = store.networkGeneration();
+    store.ingestAdscPosition(0xA0B001, -34, 151, {}, "LOCAL1");
+    const std::string body = nlohmann::json{{"states", {
+        networkAircraft("a0b001", "INTERNET1"), networkAircraft("a0b002", "INTERNET2")}}}.dump();
+    REQUIRE(store.mergeNetworkJson(body, generation));
+    const auto local = store.trackByIcao(0xA0B001);
+    CHECK(local.callsign == "LOCAL1"); CHECK(local.latDeg == -34);
+    CHECK_FALSE(local.fromNetwork);
+    CHECK(store.trackByIcao(0xA0B002).squawk == "1200");
+    store.setNetworkEnabled(false);
+    CHECK(store.trackByIcao(0xA0B002).icao == 0);
+    CHECK(store.trackByIcao(0xA0B001).callsign == "LOCAL1");
+    CHECK_FALSE(store.mergeNetworkJson(body, generation));
+    std::string error;
+    CHECK_FALSE(store.refreshNetwork(&error)); // no HTTP request while disabled
+    CHECK(error == "Internet aircraft disabled");
+    store.setNetworkEnabled(true);
+    CHECK_FALSE(store.mergeNetworkJson(body, generation)); // off/on cannot revive old reply
+    store.setNetworkError("obsolete", generation);
+    CHECK(store.snapshot().lastStatus != "obsolete");
+}
+
+TEST_CASE("Aircraft network decoder rejects malformed rows independently", "[adsb]") {
+    RestoreAircraftNetwork restore;
+    auto& store = AdsBTrackStore::instance();
+    store.setNetworkEnabled(true);
+    auto malformed = networkAircraft("a0b005", "BAD"); malformed[5] = "not longitude";
+    auto j = nlohmann::json{{"states", {nlohmann::json::array({"a0b004", "short", 0, 0, 0, 0, 0, 0}),
+        networkAircraft("a0b003x", "BAD"), networkAircraft("a0b003", "BAD", 999),
+        malformed, networkAircraft("a0b006", "GOOD")}}};
+    REQUIRE(store.mergeNetworkJson(j.dump(), store.networkGeneration()));
+    CHECK(store.trackByIcao(0xA0B004).icao == 0);
+    CHECK(store.trackByIcao(0xA0B003).icao == 0);
+    CHECK(store.trackByIcao(0xA0B005).icao == 0);
+    CHECK(store.trackByIcao(0xA0B006).callsign == "GOOD");
+    CHECK_FALSE(store.mergeNetworkJson("{", store.networkGeneration()));
+    CHECK_FALSE(store.mergeNetworkJson(std::string(2 * 1024 * 1024 + 1, 'x'), store.networkGeneration()));
+    CHECK(store.statusJson().at("networkEnabled").get<bool>());
+    store.setNetworkEnabled(false);
 }

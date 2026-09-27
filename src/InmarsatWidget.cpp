@@ -497,7 +497,7 @@ void InmarsatWidget::refreshUi() {
         if(!m.validated || !m.hasPosition || !m.aesId || std::find(seen.begin(),seen.end(),m.aesId)!=seen.end())continue;
         seen.push_back(m.aesId);
         const double age=std::max(0.0,QDateTime::currentMSecsSinceEpoch()/1000.0-m.unixTime);
-        report["positions"].push_back({{"aesId",m.aesId},{"latDeg",m.latDeg},{"lonDeg",m.lonDeg},
+        report["positions"].push_back({{"aesId",m.aesId},{"icaoHex",m.icaoHex},{"latDeg",m.latDeg},{"lonDeg",m.lonDeg},
             {"altitudeFt",m.altitudeFt},{"registration",m.registration},{"callsign",m.callsign},
             {"secondsPastHour",m.positionSecondsPastHour},{"ageSeconds",age},
             {"stale",age>inmarsatPositionFreshSeconds(snapshot.config.watch.enabled,snapshot.config.watch.refreshSeconds)}});
@@ -517,8 +517,9 @@ void InmarsatWidget::refreshUi() {
     for (auto it = messages.rbegin(); it != messages.rend(); ++it) {
         text += QString("[%1] %2 %3\n")
                     .arg(InmarsatMessage::kindName(it->kind))
-                    .arg(QString::fromStdString(it->label))
-                    .arg(QString::fromStdString(it->text).left(160));
+                    .arg(QString::fromStdString(it->applicationProtocol.empty() ? it->label :
+                        it->applicationProtocol + " / " + it->applicationStatus))
+                    .arg(QString::fromStdString(it->applicationText.empty() ? it->text : it->applicationText).left(16384));
     }
     if (msgView_->toPlainText() != text) msgView_->setPlainText(text);
 }
