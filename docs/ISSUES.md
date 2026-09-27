@@ -1,5 +1,17 @@
 # Issues (canonical)
 
+## ISS-0041 - SSTV Auto spurious trailing partial (2026-09-27, OPEN)
+
+Published 0.2.113 and 0.2.114 produce identical complete Robot36 RGB hash
+27c7c73298b3f9834300d0873edaf71cded9dd9f47ceb4b0927cf80bb9c69c36 plus a
+26-row partial PD50 hash 9eb8fa54d87a9b9775dd55c07b3d164453884695bd1ed83fe2f63259ee9e6afc
+from the independent real_recording.wav.gz fixture in Auto. Explicit Robot36
+returns the expected single image. Legacy test_sstv_images_cli.py expects only
+one image and fails on both releases; do not weaken it or claim it passed.
+T-0086 changes saving only; no acquisition thresholds altered. Need forensic
+inspection of the trailing audio and line-sync candidate decision before fixing.
+Partial remains explicitly labelled and must not be presented as complete.
+
 ## ISS-0040 - SSTV live failure not reproduced with complete header (2026-09-27, OPEN)
 
 User Scottie1 WAV passes file, fast NFM router and paced virtual-SDR live session

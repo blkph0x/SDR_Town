@@ -8,7 +8,11 @@ temporary RGB removed, last 64 metadata entries retained. Cancellation/error
 preserves previously saved pictures; input gaps still fail explicitly. File
 limits and explicit-path automation remain unchanged. All 15 local suites,
 independent GUI recordings, repeated archive/cancel and paced virtual NFM pass.
-Preparing v0.2.114 experimental release; CI/public asset verification pending.
+Published v0.2.114 experimental release from 68a6586; Windows CI and YAML PASS.
+Downloaded ZIP/provenance verified, shipped CLI and continuous helper tests PASS.
+Stable latest remains v0.2.96. An optional legacy CLI image test reveals an
+identical pre-existing Auto trailing-partial issue in v113/v114: ISS-0041 remains
+open rather than changing acquisition behavior in this archive-only update.
 
 ## 2026-09-27 - T-0085 SSTV virtual SDR
 

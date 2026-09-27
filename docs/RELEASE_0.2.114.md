@@ -26,3 +26,8 @@ SDRplay or Inmarsat DSP changes. No claim of physical RF validation: the
 automated live test uses a virtual NFM device driven by recorded SSTV audio.
 
 This portable prerelease is not a signed stable updater package.
+
+Known pre-existing limitation (also reproduced in 0.2.113): Auto image detection
+can save a spurious trailing partial after a valid image on some recordings.
+Those files remain labelled partial; acquisition changes are tracked separately
+as ISS-0041. Physical off-air reception acceptance remains open.

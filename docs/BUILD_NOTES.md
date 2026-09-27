@@ -13,7 +13,20 @@ second run cancellation preserves all six. Parser test archives 100 events with
 no retained pixels/metadata. Rolling-report filenames and GUI save-root/repeated
 unique sessions pass. Paced virtual Soapy live NFM test produces complete Scottie1
 320x256, 5310490 input samples; evidence build/sstv-autosave-virtual.
-No physical RF proof or production P25/shared demod edits. Publication pending.
+No physical RF proof or production P25/shared demod edits. Source
+68a6586873b19d82b57c783247918c35f372268a published: Windows master/release runs
+36297862530 / 36297862769 and YAML runs 36297862518 / 36297862738 all PASS.
+Public v0.2.114 ZIP SHA256
+e7d45f67c2d36b56d84c27cabb2acf5a4af00fb6b7fde5e0e03e55811500dcd3 verified;
+embedded version/source/run, EXE and SDRplay hashes match. Shipped CLI help,
+SDRplay status, RDS and Inmarsat survey tests PASS. Shipped CLI user Scottie1
+WAV decode complete; shipped continuous helper five complete images over
+556.717 seconds PASS. GUI normal/small screenshots inspected.
+Extra legacy image CLI script fails on Auto Robot36's trailing partial in both
+0.2.113 and 0.2.114, with identical hashes: recorded as ISS-0041, not a regression
+or a passing gate. Existing GUI instance left running; offline checks explicitly
+allow multiple instances and disable remote diagnostics/control server.
+Prerelease is public with ZIP/checksum; stable latest remains signed v0.2.96.
 
 ## 2026-09-27 - T-0085 SSTV paced virtual device
 

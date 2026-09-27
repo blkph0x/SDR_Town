@@ -1,10 +1,12 @@
 # Task list (canonical)
 
-T-0086 | in progress | Continuous SSTV autosave |
+T-0086 | done | Continuous SSTV autosave |
 DEC-0158. Remember default image root, unique sessions, archive verified images
 as completed, bounded long-running live helper with unchanged file safety limits.
 Local gates PASS: 15 suites, repeated archive/cancel, GUI fixtures, paced NFM.
-Publication and downloaded-asset verification pending.
+v0.2.114 from 68a6586 published; Windows CI 36297862769/36297862530 and YAML
+PASS; public ZIP/provenance and shipped continuous helper verified. Separate
+pre-existing Auto trailing-partial issue documented as ISS-0041.
 
 T-0085 | done | Paced SSTV virtual-SDR reproduction |
 DEC-0157. Feed user Scottie1 audio through Soapy readStream, DeviceManager ring,
