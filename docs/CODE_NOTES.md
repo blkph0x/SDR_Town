@@ -1,5 +1,9 @@
 # Code notes (tree map)
 
+T-0085: tests/test_sstv_virtual_sdr.cpp registers a paced Soapy fixture and calls
+production decodeSstvRfLive. scripts/test_sstv_virtual_sdr.py prepares arbitrary
+short WAV fixtures and retains logs/images locally. See SSTV_VIRTUAL_SDR.md.
+
 T-0084: InmarsatVoiceEvidence holds the native validated-SU identity update and
 C-frame transaction, shared with injected codec-failure tests. Pipeline rejection
 counters are cumulative across receiver resets; lastInputRejected identifies the

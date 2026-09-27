@@ -1,5 +1,18 @@
 # Build notes
 
+## 2026-09-27 - T-0085 SSTV paced virtual device
+
+Test harness build initially needed Qt6::Gui for QImage and a missing closing
+lambda delimiter; corrected, then Release native and GUI targets PASS. Full
+CTest 15/15 PASS (49.00 s). User WAV: file + fast auto/manual NFM complete Scottie1.
+Paced 2.4 MS/s real DeviceManager/ring/live-session/helper: complete Scottie1,
+33 previews, 269624000 simulated IQ samples; RGB MAE 0.64425/255 vs file output.
+Late entry (first five seconds omitted), RF Auto: expected zero images PASS,
+route searching, zero helper input samples. No production code changed; fixture
+Late-entry manual NFM/image Auto PASS: 248-row partial Scottie1, 5152481 helper
+samples, rather than the Auto RF gate's zero samples.
+is synthetic RF and cannot verify physical USB/antenna/tuning or GUI selection.
+
 ## 2026-09-27 - T-0084 Inmarsat rejection/identity audit
 
 Windows / VS2022 Release: SDR_Town, sdr_town_tests, inmarsat_live_gui_tests and

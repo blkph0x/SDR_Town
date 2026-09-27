@@ -1,5 +1,14 @@
 # Decisions
 
+## DEC-0157 - SSTV real-time virtual device evidence (2026-09-27)
+
+User WAV decodes Scottie1 via file and synthetic NFM auto/manual router tests.
+Those bypass device buffering and helper streaming. Use the existing test-only
+Soapy registry fixture, produce paced NFM at SDR sample rate from recorded PCM,
+then invoke the production decodeSstvRfLive on its worker. Keep hardware unopened
+and production DeviceManager/P25 unchanged. RF is synthetic: no antenna/USB proof.
+Fixture timeouts and initial silence are test budgets, not decoder tolerances.
+
 ## DEC-0156 - Inmarsat rejection recovery and identity evidence (2026-09-27)
 
 T-0084 supplied audit confirmed pipeline geometry/amplitude throws, mutation

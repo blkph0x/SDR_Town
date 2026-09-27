@@ -1,5 +1,13 @@
 # Issues (canonical)
 
+## ISS-0040 - SSTV live failure not reproduced with complete header (2026-09-27, OPEN)
+
+User Scottie1 WAV passes file, fast NFM router and paced virtual-SDR live session
+at 2.4 MS/s (T-0085). This does not prove the off-air path: actual IQ including
+header and failing UI status still needed. RF Auto requires complete classic VIS;
+manual NFM bypasses this route gate without weakening header validation. Do not
+retune thresholds based on the user symptom alone.
+
 ## ISS-0039 - Diagnostic recording scope (2026-09-27, OPEN)
 
 T-0083 five-second IF clip starts mid-stream, without warmed PLL/FEC/vocoder state.

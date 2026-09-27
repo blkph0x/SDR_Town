@@ -508,6 +508,9 @@ if(BUILD_TESTS)
     src/Receiver.cpp
   )
   # Real Demodulator (full body, member state) is now always linked.
+  target_sources(sdr_town_tests PRIVATE tests/test_sstv_virtual_sdr.cpp
+    src/SstvRfLiveSession.cpp src/SstvLiveSession.cpp src/SstvStreamWorker.cpp src/SstvProgress.cpp)
+  target_link_libraries(sdr_town_tests PRIVATE Qt6::Gui)
   target_link_libraries(sdr_town_tests PRIVATE
     sdr_inmarsat_native sdr_inmarsat_audio
     sdr_town_decoders
