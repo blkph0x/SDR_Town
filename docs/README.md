@@ -1,5 +1,9 @@
 # SDR Town tracking desk
 
+P25 regression diagnosis: [2026-09-27 missed-grant / stale-allocation audit](P25_REGRESSION_AUDIT_20260927.md).
+Fresh live GUI capture, paired same-IQ tests and the next repair plan. No decoder
+changes in this diagnostic pass; ISS-0042..0044 remain open.
+
 DSP proposal review: [2026-09-26 evidence audit](DSP_AUDIT_20260926.md).
 Confirmed FM block-boundary issues, proposal corrections and non-regression gates;
 documentation only, accepted receiver paths unchanged.

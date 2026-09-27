@@ -1,5 +1,34 @@
 # Issues (canonical)
 
+## ISS-0044 - P25 capture retune metadata / ambiguous status (2026-09-27, OPEN)
+
+T-0087 fresh GUI capture contains several physical retunes but only one SigMF
+capture center at sample zero; gapless ring is not a constant RF tuning epoch.
+Replay needs explicit voicecenter. Generic no-voice/soft-filtered status merges
+opposite-slot, stale-TG and damaged-bit cases. T-0090 must log sample-indexed
+center/rate/epoch changes and precise bounded reasons in existing formats.
+
+## ISS-0043 - One-SDR follow suppresses recoverable in-band CC (2026-09-27, OPEN)
+
+MainWindow.cpp:5533-5542 stops CC decoding on a retuned primary or >75kHz CC
+offset even inside the passband. Fresh 061308 capture follows TG30302 while
+offline CC replay at +30s resolves TG10120 on the same RF/slot. Same +26..34s IQ:
+TG30302 zero PCM; TG10120 304 AMBE / 6.08s PCM, coherent local STT. Valid speech
+is rejected under stale ownership; do not weaken TG filtering. T-0089 needs
+bounded concurrent CC work and atomic validated allocation handoff after T-0088.
+See P25_REGRESSION_AUDIT_20260927.md for exact evidence and limits.
+
+## ISS-0042 - Raw/opposite/sticky evidence prolongs P25 call (2026-09-27, OPEN)
+
+Unchanged P25TrafficChannelProcessor.cpp compiled in isolated C++20 harness:
+opposite-TG/slot VCWs clear a selected-call END; invalid unmasked target VCWs
+refresh lastVoice; sticky sessionAudioRelease refreshes activity with zero
+VCWs/MAC CRC. GUI incorrectly treats global p2vcw as filtered meaningful voice
+and renews follow activity. Fresh capture holds TG30302 for 45.327s while later
+allocation belongs to TG10120. Existing 11 traffic / 51 follow tests pass but
+miss these transitions. T-0088: repair evidence contract across all consumers,
+not another timeout or a relaxed speaker gate. First introducing build unknown.
+
 ## ISS-0041 - SSTV Auto spurious trailing partial (2026-09-27, OPEN)
 
 Published 0.2.113 and 0.2.114 produce identical complete Robot36 RGB hash

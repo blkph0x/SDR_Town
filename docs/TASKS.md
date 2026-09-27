@@ -1,5 +1,23 @@
 # Task list (canonical)
 
+T-0087 | done (diagnosis; repair pending) | P25 missed-grant/no-voice audit |
+DEC-0159; P25_REGRESSION_AUDIT_20260927.md. Fresh 60s GUI capture, identical
+v113/v114 replay, stale-vs-current TG same-IQ test and local STT. Isolated
+production-cpp harness proves activity/end-state defects. ISS-0042..0044 open.
+No production P25 changes or new asset; documentation publication required.
+
+T-0088 | planned | Selected-call lifecycle evidence repair |
+ISS-0042. Deterministic regression tests, target-call evidence contract across
+traffic processor/GUI/follow SM; preserve acquisition and encrypted/slot gates.
+
+T-0089 | planned | In-passband control monitoring and allocation handoff |
+ISS-0043; depends on T-0088. Bounded independent CC work, sample/epoch ownership,
+validated allocation replacement and unchanged good-call output qualification.
+
+T-0090 | planned | Retune-aware capture and explicit follow decision reasons |
+ISS-0044. Existing SigMF/events, sample-indexed center/rate/epoch boundaries,
+selected/companion/stale-TG reasons; no unbounded telemetry or raw upload.
+
 T-0086 | done | Continuous SSTV autosave |
 DEC-0158. Remember default image root, unique sessions, archive verified images
 as completed, bounded long-running live helper with unchanged file safety limits.

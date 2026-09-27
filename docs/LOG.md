@@ -1,5 +1,18 @@
 # Development log
 
+## 2026-09-27 - T-0087 P25 missed grants / silent follow diagnosis
+
+User clarified missed grants and formerly clear talkgroups with no voice.
+Captured one bounded published-GUI run without production changes. Recovered
+CC updates for TG10120 while live was held on TG30302, same carrier/slot.
+Paired eight-second replay is silent under staleTG30302 and decodes304 frames
+underTG10120; local STT coherent. Latest v113/v114 replay is bit-identical.
+Compiled isolated existing traffic processor: proved opposite-slot candidates
+clear END and invalid/sticky evidence refreshes activity. Opened ISS-0042..0044
+and planned T-0088..0090. Plan preserves successful decoder and safety gates,
+addresses ownership and CC scheduling first, then retune-aware diagnostics.
+No source fixes/rollback or binary release in this diagnostic-only pass.
+
 ## 2026-09-27 - T-0086 continuous SSTV autosave
 
 Added persistent Pictures/SDR Town/SSTV root and automatic unique GUI sessions.

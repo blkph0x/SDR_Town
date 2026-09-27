@@ -1,5 +1,21 @@
 # Decisions
 
+## DEC-0159 - Evidence-first P25 regression diagnosis (2026-09-27)
+
+User reports missed grants and previously clear talkgroups showing no voice;
+requests diagnosis and a fix plan for the next pass. Preserve current production
+code/configuration, inventory recent changes and correlate validation records
+before attributing causality. Anomaly-selected JSONL is not an unbiased call or
+audio success rate. No threshold, security, slot, timer or demod changes during
+this diagnostic pass. Any live/offline checks must preserve encrypted-call mute.
+
+Evidence closure: fresh 061308 GUI capture and same-IQ allocation comparison
+isolate stale follow ownership. v113/v114 early replay counters and WAV hash
+match. Isolated unchanged production-cpp tests prove wrong-slot END reset,
+invalid-VCW activity refresh and sticky-release activity refresh. Next pass
+must repair activity ownership/CC scheduling; do not loosen speaker isolation
+or adjust timers to hide the failure. See P25_REGRESSION_AUDIT_20260927.md.
+
 ## DEC-0158 - Continuous SSTV image archive (2026-09-27)
 
 User requests unattended successive-image saving. Existing live helper stops at

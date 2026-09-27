@@ -1,5 +1,28 @@
 # Build notes
 
+## 2026-09-27 - T-0087 P25 diagnostic audit (no application rebuild)
+
+Published v0.2.114 GUI 60s capture / 75s exit PASS, exit0, 60.032s IQ,
+983564288 bytes, no capture overruns/resets/write errors. Capture and all
+private voice/STT evidence stay under ignored build/. CLI same-IQ +4.5..20.5s
+v113/v114 identical 272 frames / 5.44s output and WAV SHA256. Both partial,
+not full continuous acceptance. +26..34s staleTG30302 produces zero PCM;
+TG10120 produces 304/304 AMBE, 6.08s PCM, duty .76, valid clear ESS/MAC,
+PASS_CONTINUOUS_AUDIO numeric gate and coherent local base.en STT sentence.
+Offline CC +30..32s proves TG10120 grants existed in captured in-band RF.
+
+Local unchanged traffic/follow suites PASS: 68 assertions/11 and 190/51.
+Isolated production-cpp harness initially failed because C++17 cannot provide
+std::span; corrected harness to C++20, MSVC19.44.35227 Release build PASS.
+Harness reproduces all three invalid lifetime transitions documented in audit.
+P25 guard since1f7740e PASS:73 paths changed, zero protected. No runtime fixes.
+CLI logscan invocation with Python-only --json/--audit flags failed because the
+CLI treats the tail as its path; direct existing Python helper invocation PASS.
+Its slow-worker heuristic is not CPU-overload proof: measured worker median
+80.916ms/160ms fresh input, qDrop/rDrop/seqDrop and producer drops all zero.
+No physical transmitter, changed PPM/gain, forced-clear or unsafe slot flags.
+GUI stopped normally; no SDR_Town processes left by the audit.
+
 ## 2026-09-27 - T-0086 continuous SSTV autosave
 
 Initial workspace test link exposed its missing spdlog dependency; added the
