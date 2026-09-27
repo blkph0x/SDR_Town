@@ -2,6 +2,9 @@
 
 ## 2026-09-27 - T-0080 C++ prototype
 
+Published source 8e116ec. Windows CI 36284271627 and YAML 36284271706 SUCCESS.
+No runtime change; verified public application remains v0.2.110.
+
 Release tests build PASS; 478 retained-FIR/convolution/PCM/MPX assertions PASS.
 Three benchmark executions repeat signal metrics: isolated 50 kHz deviation
 case difference ~-85 dB at 10 MS/s, time/input ~0.29. Test-only cascade, not
