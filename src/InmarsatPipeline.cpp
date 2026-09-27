@@ -25,7 +25,11 @@ struct InmarsatPipeline::Native {
         aero->setMessageSink([this,channel](const InmarsatMessage& incoming) {
             auto m=incoming; m.freqHz=channel;
             ++messages;
-            aircraft.push(m);
+            // This private store supplies map identity, not a second message log.
+            // Avoid retaining raw/expanded payloads in each of up to 32 workers.
+            auto identity=m;
+            std::string{}.swap(identity.text);std::string{}.swap(identity.applicationText);
+            aircraft.push(std::move(identity));
             if(messageSink) messageSink(m);
         });
         aero->setPcmSink([this](std::span<const int16_t> samples,uint32_t aes) {

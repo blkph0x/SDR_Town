@@ -53,6 +53,13 @@ eight repeats and 1244 muted/tone/erasure words. All four WAV SHA256 values:
 `295ee11a0edc4e341ab66455ce283f7a0201e2f35a880eb555e47a19af6e176f`.
 No vocoder/cadence/CRC-release change was made in this pass.
 
+Additional real-time GUI run enabled the default miniaudio output: 220000 PCM
+received, 216160 consumed, queue empty at completion, zero overflow drops and
+zero device errors. One unknown-to-known source transition occurred; code
+flushes queued old-source PCM on that transition. Zero-fill also includes idle
+parts of the 87-second RF recording. These counters establish output delivery,
+not continuous conversation or an acoustic measurement at physical speakers.
+
 ## Remaining gates
 
 - Actual 8400 speech needs matched tester input with understandable reference

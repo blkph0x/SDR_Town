@@ -22,6 +22,14 @@ cases); final full Release build PASS and CTest 16/16 PASS (55.62 s). Release
 verifier 16/16 PASS, frozen-P25 guard PASS with zero protected changes. Public
 release verification remains pending at this checkpoint.
 
+Final review found per-channel map stores unnecessarily retained message bodies.
+Keep only identity fields in those private stores; live message log/sink retains
+raw/application text. Initial CI runs for 01efe0a cancelled before publication
+so this memory-bound repair can be included in the same unpublished version.
+Memory repair full Release build and CTest 16/16 PASS (55.27 s). Additional
+GUI default-output replay: zero overflow/device errors, one source transition;
+see the audit for consumed/flushed/idle distinctions rather than claiming speech.
+
 ## 2026-09-27 - T-0092 field evidence and local qualification
 
 Windows/MSVC 19.44, source baseline e63d1e7. Extended reference probe compiled;
