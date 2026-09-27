@@ -1,5 +1,9 @@
 # Task list (canonical)
 
+T-0082 | in progress | Inmarsat identity isolation and map usability |
+DEC-0154. Preserve PCM AES in all paths, flush on changes and show unlocated or
+unknown voice without guessing aircraft. Test native audio, GUI and privacy.
+
 T-0081 | done | WFM candidate RDS and signal-level qualification |
 DEC-0153. Recorded MPX remodulation through candidate and actual RDS decoder;
 stationary full/retained filter-power comparison before live integration.

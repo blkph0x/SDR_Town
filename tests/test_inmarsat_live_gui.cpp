@@ -33,6 +33,30 @@
 #include <QElapsedTimer>
 #include <iostream>
 #include <algorithm>
+
+TEST_CASE("Aero map distinguishes unlocated and unidentified voice", "[inmarsat][gui]") {
+    InmarsatMapWidget map;map.resize(360,220);map.show();
+    auto* status=map.findChild<QLabel*>("inmarsatMapVoiceStatus");REQUIRE(status);
+    nlohmann::json report={{"voiceActive",true},{"voiceAesId",0x123456}};
+    map.setReport(report,false);
+    CHECK(status->text().contains("123456"));CHECK(status->isVisible());
+    const auto screenshot=qEnvironmentVariable("SDR_TOWN_INMARSAT_MAP_SCREENSHOT");
+    if(!screenshot.isEmpty()) {
+        QApplication::processEvents();
+        CHECK(map.grab().save(screenshot));
+    }
+    CHECK(map.aircraftCount()==0);
+    report["positions"]={{{"aesId",0x123456},{"latDeg",-34.0},{"lonDeg",151.0}}};
+    map.setReport(report,false);CHECK(status->isHidden());CHECK(map.aircraftCount()==1);
+    report["voiceAesId"]=0;map.setReport(report,false);
+    CHECK(status->text().contains("identity unavailable"));
+    report["voiceAesId"]=uint64_t{0x100123456};map.setReport(report,false);
+    CHECK(status->text().contains("identity unavailable"));
+    report["positions"][0]["aesId"]=uint64_t{0x100123456};map.setReport(report,false);
+    CHECK(map.aircraftCount()==0);
+    report["voiceActive"]=false;map.setReport(report,true);CHECK(status->isHidden());
+    CHECK_FALSE(map.grab().toImage().isNull());
+}
 #include <stdexcept>
 
 #ifdef HAVE_SOAPYSDR

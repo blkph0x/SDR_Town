@@ -88,7 +88,8 @@ nlohmann::json InmarsatDiagnostics::remotePayload(const nlohmann::json& details)
     }
     if(details.contains("audio") && details["audio"].is_object())
         for(const char* key:{"speakerQueued","speakerDropped","speakerZeroFill","speakerConsumed",
-                            "pcmReceived","pcmNonzero","pcmPeak","pcmRms","wavSamples"})
+                            "pcmReceived","pcmNonzero","pcmPeak","pcmRms","wavSamples",
+                            "audioSourceChanges","unidentifiedPcmSamples"})
             if(details["audio"].contains(key) && details["audio"][key].is_number() && std::isfinite(details["audio"][key].get<double>()))result[key]=details["audio"][key];
     if(details.contains("audio") && details["audio"].is_object())
         for(const char* key:{"speakerRequested","speakerRunning","speakerFailed"})

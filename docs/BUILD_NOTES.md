@@ -1,5 +1,16 @@
 # Build notes
 
+## 2026-09-27 - T-0082 Inmarsat identity hardening
+
+Focused native/watch/replay tests PASS: 23040 assertions / 39 cases. Release app,
+native and GUI test builds PASS. Full CTest PASS 15/15 (52.09 s); first invocation
+with inherited QT_QPA_PLATFORM=offscreen stalled WorkspaceTests and was stopped.
+Normal Windows environment passes both that test alone and the complete suite.
+GUI dry-run self-test PASS (ok=true, no errors/warnings). Inmarsat GUI suite PASS;
+360x220 map screenshot inspected: unlocated voice status fits without overlap.
+Public release verification pending.
+No real Inmarsat antenna or physical speaker source-switch verification claimed.
+
 ## 2026-09-27 - T-0081 RDS and power gates
 
 Published source bf8e2bb. Windows CI 36285842641 and YAML 36285842668 SUCCESS.

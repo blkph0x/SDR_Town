@@ -1,5 +1,16 @@
 # Decisions
 
+## DEC-0154 - Inmarsat identity-safe audio and map status (2026-09-27)
+
+T-0082: supplied review at 00cd3a5 confirms AES is discarded by single-channel,
+watch speaker callbacks and replay. Pass identity into InmarsatAudio, clear
+queued playback on identity transitions (including unknown), and expose bounded
+source counters/sample offsets. Keep unknown audio playable, never invent AES.
+Map reports active voice without identity or without ADS-C explicitly and rejects
+out-of-range AES. Existing focus already retains speaking channel; keep its tests.
+Do not change FEC, ADS-C mismatch rejection or enable unvalidated assignment
+retunes. Automatic assignment candidates need separate real fixtures.
+
 ## DEC-0153 - WFM candidate RDS and level gates (2026-09-27)
 
 Measured outcome: reject the prototype's double-filter RDS route, not the

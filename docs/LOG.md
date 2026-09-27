@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-09-27 - T-0082 Inmarsat hardening
+
+Reviewed supplied association audit. Existing watch focus is sticky as requested;
+fixed identity lost at speaker callbacks and added honest no-position/unknown
+map status. Source changes clear playback; diagnostics retain opt-in privacy.
+Assignment follow, recording attribution and stale policy remain separate gates.
+
 ## 2026-09-27 - T-0081 RDS prototype route corrected
 
 Caught double-filter RDS regression before production. Direct retained-FIR

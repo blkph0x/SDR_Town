@@ -1,5 +1,16 @@
 # Issues (canonical)
 
+## ISS-0038 - Inmarsat identity handoff and scanner qualification (2026-09-27, OPEN)
+
+T-0082/DEC-0154 fixes discarded PCM AES in live/watch/replay callbacks, flushes
+queued playback on source changes and surfaces voice without identity/position.
+Map rejects invalid 24-bit IDs rather than allowing integer truncation aliases.
+Watch focus already keeps an actively speaking channel; existing tests confirm it.
+Still open: C-ASSIGN fixture validation and safe candidate/follow acquisition,
+per-aircraft recording timeline, staleness policy independent of watch schedule,
+physical reception acceptance. Do not weaken ADS-C mismatch rejection or treat
+unvalidated probe output as decoded data. WFM prototype work remains separate.
+
 ## ISS-0037 - FM chunk boundaries and sample lattice (2026-09-26, OPEN)
 
 T-0081 catches a candidate-only RDS regression: double channel filtering reduces

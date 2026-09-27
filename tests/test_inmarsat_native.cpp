@@ -158,3 +158,24 @@ TEST_CASE("Aero audio diagnostics distinguish no PCM from silence and muted outp
     CHECK_FALSE(report["speakerRunning"].get<bool>());
     CHECK_FALSE(report["speakerFailed"].get<bool>());
 }
+
+TEST_CASE("Aero audio preserves source identity without attributing unknown PCM", "[inmarsat][native]") {
+    InmarsatAudio audio(false);std::array<int16_t,160> pcm{};
+    audio.push(pcm,0x123456);audio.push(pcm,0x123456);
+    CHECK(audio.report()["audioSourceChanges"]==0);
+    CHECK(audio.report()["audioAesId"]==0x123456);
+    audio.push({},0x654321);CHECK(audio.report()["audioAesId"]==0x123456);
+    audio.push(pcm,0x654321);
+    CHECK(audio.report()["audioSourceChanges"]==1);
+    CHECK(audio.report()["audioSourceStartSample"]==320);
+    audio.push(pcm,0);
+    CHECK(audio.report()["audioAesId"]==0);
+    CHECK(audio.report()["unidentifiedPcmSamples"]==160);
+    audio.push(pcm,0x1000000);
+    CHECK(audio.report()["audioSourceChanges"]==2);
+    CHECK(audio.report()["unidentifiedPcmSamples"]==320);
+    audio.push(pcm,0xffffff);
+    CHECK(audio.report()["audioAesId"]==0xffffff);
+    CHECK(audio.report()["audioSourceChanges"]==3);
+    CHECK(audio.report()["pcmReceived"]==960);
+}

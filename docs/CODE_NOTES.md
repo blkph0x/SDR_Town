@@ -1,5 +1,13 @@
 # Code notes (tree map)
 
+## Inmarsat source identity (DEC-0154)
+
+InmarsatAudio::push accepts AES and preserves unknown as zero. Source changes
+discard queued speaker data and update constant-size local diagnostics. Engine
+and Replay forward callback AES, including watch sessions. Remote allowlist
+exports transition/unknown counts, not identities/offsets. InmarsatMapWidget
+shows unlocated/unknown voice and validates integer AES range before matching.
+
 ## Candidate WFM RF-to-RDS qualification (DEC-0153)
 
 test_fm_benchmark.cpp [rds-rf] remodulates recorded MPX, compares current,

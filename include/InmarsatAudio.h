@@ -9,7 +9,8 @@ class InmarsatAudio {
 public:
     InmarsatAudio(bool playback, const QString& wavPath={});
     ~InmarsatAudio();
-    void push(std::span<const int16_t> samples);
+    // One producer owns push/report; AES 0 means unknown, never inferred.
+    void push(std::span<const int16_t> samples, uint32_t aes=0);
     void discardPlayback();
     void finish();
     size_t queued() const;

@@ -16,6 +16,9 @@ struct InmarsatAudio::Impl {
     bool play=false,open=false;
     bool requested=false;
     uint64_t pcmReceived=0,pcmNonzero=0;
+    uint32_t aes=0;
+    bool haveSource=false;
+    uint64_t sourceChanges=0,unidentifiedPcm=0,sourceStartSample=0;
     double pcmSumSquares=0.0;
     int pcmPeak=0;
     std::atomic<uint64_t> speakerConsumed{0};
@@ -71,8 +74,16 @@ InmarsatAudio::~InmarsatAudio() {
     try { impl_->finishWav(); } catch (...) {} // Explicit finish() reports failures to the session.
 }
 void InmarsatAudio::finish() { impl_->finishWav(); }
-void InmarsatAudio::push(std::span<const int16_t> pcm) {
+void InmarsatAudio::push(std::span<const int16_t> pcm,uint32_t aes) {
     auto& s=*impl_;
+    if(pcm.empty()) return;
+    if(aes>0xffffff) aes=0;
+    // DEC-0154: queued audio must not survive a change of aircraft identity.
+    if(!s.haveSource || s.aes!=aes) {
+        if(s.haveSource) {discardPlayback();++s.sourceChanges;}
+        s.haveSource=true;s.aes=aes;s.sourceStartSample=s.pcmReceived;
+    }
+    if(!aes)s.unidentifiedPcm+=pcm.size();
     // DEC-0123: measure decoded PCM, not RF/IF. Zero samples is distinguishable
     // from codec silence, speaker disabled, or an unavailable output device.
     s.pcmReceived+=pcm.size();
@@ -113,6 +124,8 @@ nlohmann::json InmarsatAudio::report() const {
         {"speakerDevice",s.open ? std::string(s.device.playback.name) : std::string{}},
         {"speakerConsumed",s.speakerConsumed.load()},{"speakerFailed",!s.deviceError.isEmpty()},
         {"pcmReceived",s.pcmReceived},{"pcmNonzero",s.pcmNonzero},{"pcmPeak",s.pcmPeak},
+        {"audioAesId",s.aes},{"audioSourceChanges",s.sourceChanges},
+        {"unidentifiedPcmSamples",s.unidentifiedPcm},{"audioSourceStartSample",s.sourceStartSample},
         {"pcmRms",s.pcmReceived?std::sqrt(s.pcmSumSquares/s.pcmReceived):0.0},
         {"speakerZeroFill",s.underflow.load()},{"speakerError",s.deviceError.toStdString()},
         {"wavPath",s.wav.fileName().toStdString()},{"wavSamples",s.wavSamples},{"recording",s.wav.isOpen()}};

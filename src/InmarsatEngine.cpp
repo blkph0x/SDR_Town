@@ -888,7 +888,7 @@ void InmarsatEngine::workerLoop() {
             wav=dir.filePath("aero_"+QDateTime::currentDateTimeUtc().toString("yyyyMMdd_HHmmss_zzz")+".wav");
         }
         audio=std::make_unique<InmarsatAudio>(cfg.playAudio,wav);
-        pipeline_.setPcmSink([&](std::span<const int16_t> pcm,uint32_t){audio->push(pcm);});
+        pipeline_.setPcmSink([&](std::span<const int16_t> pcm,uint32_t aes){audio->push(pcm,aes);});
         pipeline_.setMessageSink([this](const InmarsatMessage& message){onMessage(message);});
         if(cfg.watch.enabled) {
             size_t device;
@@ -896,7 +896,7 @@ void InmarsatEngine::workerLoop() {
             watch_=std::make_unique<InmarsatWatchSession>(cfg.watch,
                 DeviceManager::instance().getCurrentSampleRate(device),steadySeconds(),
                 [this](const InmarsatMessage& m){onMessage(m);},
-                [&](std::span<const int16_t> pcm,uint32_t){audio->push(pcm);},
+                [&](std::span<const int16_t> pcm,uint32_t aes){audio->push(pcm,aes);},
                 [&]{audio->discardPlayback();});
         }
     } catch(const std::exception& e) {
@@ -951,12 +951,12 @@ void InmarsatEngine::workerLoop() {
                 // never from a GUI callback and never reuse old-channel PCM.
                 audio->discardPlayback();watch_.reset();pipeline_={};
                 {std::lock_guard lock(mutex_);displays_.clear();lastDisplayIqSeconds_=0;}
-                pipeline_.setPcmSink([&](std::span<const int16_t> pcm,uint32_t){audio->push(pcm);});
+                pipeline_.setPcmSink([&](std::span<const int16_t> pcm,uint32_t aes){audio->push(pcm,aes);});
                 pipeline_.setMessageSink([this](const InmarsatMessage& m){onMessage(m);});
                 if(cfg.watch.enabled)watch_=std::make_unique<InmarsatWatchSession>(cfg.watch,
                     DeviceManager::instance().getCurrentSampleRate(deviceIndex),steadySeconds(),
                     [this](const InmarsatMessage& m){onMessage(m);},
-                    [&](std::span<const int16_t> pcm,uint32_t){audio->push(pcm);},[&]{audio->discardPlayback();});
+                    [&](std::span<const int16_t> pcm,uint32_t aes){audio->push(pcm,aes);},[&]{audio->discardPlayback();});
                 const double target=watch_?watch_->centerHz():cfg.channelHz;
                 std::string error;
                 if(!tuneAndConfirm(deviceIndex,target,4000,&error))throw std::runtime_error(error);

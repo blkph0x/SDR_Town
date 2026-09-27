@@ -9,6 +9,8 @@
 #include <QWheelEvent>
 #include <QToolButton>
 #include <QHBoxLayout>
+#include <QVBoxLayout>
+#include <QLabel>
 #include <QStyle>
 #include <algorithm>
 #include <cmath>
@@ -35,7 +37,12 @@ InmarsatMapWidget::InmarsatMapWidget(QWidget* parent):QWidget(parent) {
             else for(const auto& p:g["coordinates"].toArray()) polygon(p.toArray());
         }
     }
-    auto* bar=new QHBoxLayout(this); bar->setAlignment(Qt::AlignTop|Qt::AlignRight);
+    auto* layout=new QVBoxLayout(this);
+    auto* bar=new QHBoxLayout; bar->setAlignment(Qt::AlignTop|Qt::AlignRight);
+    layout->addLayout(bar);layout->addStretch();
+    auto* voiceStatus=new QLabel(this);voiceStatus->setObjectName("inmarsatMapVoiceStatus");
+    voiceStatus->setWordWrap(true);voiceStatus->setStyleSheet("color: white; background-color: #15252b;");
+    layout->addWidget(voiceStatus);voiceStatus->hide();
     auto button=[&](QStyle::StandardPixmap icon,const char* title,auto action) {
         auto* b=new QToolButton(this); b->setIcon(style()->standardIcon(icon));
         b->setToolTip(title); b->setAccessibleName(title); b->setFixedSize(28,28);
@@ -49,12 +56,22 @@ double InmarsatMapWidget::scale() const { return std::min(width()/360.0,height()
 QPointF InmarsatMapWidget::screen(QPointF p) const {return QPointF(width()/2.0,height()/2.0)+(p-center_)*scale();}
 void InmarsatMapWidget::setReport(const nlohmann::json& report,bool replay) {
     tracks_.clear();replay_=replay;
-    const uint32_t active=report.value("voiceActive",false)?report.value("voiceAesId",uint32_t{0}):0;
+    const bool speaking=report.value("voiceActive",false);
+    const auto aesId=[](const nlohmann::json& object,const char* key)->uint32_t {
+        const auto it=object.find(key);
+        if(it==object.end() || !it->is_number_integer())return 0;
+        if(it->is_number_unsigned()) {
+            const auto value=it->get<uint64_t>();return value<=0xffffff?uint32_t(value):0;
+        }
+        const auto value=it->get<int64_t>();return value>0 && value<=0xffffff?uint32_t(value):0;
+    };
+    const uint32_t reported=aesId(report,"voiceAesId");
+    const uint32_t active=speaking && reported<=0xffffff?reported:0;
     if(report.contains("positions") && report["positions"].is_array()) {
         for(const auto& p:report["positions"]) {
             const double lat=p.value("latDeg",999.0),lon=p.value("lonDeg",999.0);
-            const auto aes=p.value("aesId",uint32_t{0});
-            if(!aes || !std::isfinite(lat) || !std::isfinite(lon) || std::abs(lat)>90 || std::abs(lon)>180)continue;
+            const auto aes=aesId(p,"aesId");
+            if(!aes || aes>0xffffff || !std::isfinite(lat) || !std::isfinite(lon) || std::abs(lat)>90 || std::abs(lon)>180)continue;
             const auto hex=QString("%1").arg(aes,6,16,QChar('0')).toUpper();
             const auto reg=QString::fromStdString(p.value("registration",std::string{}));
             const auto call=QString::fromStdString(p.value("callsign",std::string{}));
@@ -67,6 +84,12 @@ void InmarsatMapWidget::setReport(const nlohmann::json& report,bool replay) {
             if(tracks_.size()==256) break;
         }
     }
+    auto* status=findChild<QLabel*>("inmarsatMapVoiceStatus");
+    QString text;
+    if(speaking && !active) text=tr("Voice active - aircraft identity unavailable");
+    else if(active && std::none_of(tracks_.begin(),tracks_.end(),[&](const auto& t){return t.aes==active;}))
+        text=tr("Talking AES %1 - no ADS-C position yet").arg(QString("%1").arg(active,6,16,QChar('0')).toUpper());
+    status->setText(text);status->setVisible(!text.isEmpty());
     update();
 }
 void InmarsatMapWidget::paintEvent(QPaintEvent*) {

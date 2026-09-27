@@ -1,5 +1,9 @@
 # SDR Town
 
+0.2.111 preserves Inmarsat audio source identity across live/replay paths, clears
+queued audio on identity changes, and reports active voice without a known
+aircraft position. See [release notes](docs/RELEASE_0.2.111.md).
+
 0.2.110 improves NFM rejection of strong decimation-image interference using a
 tested first-stage anti-alias FIR. See [release notes](docs/RELEASE_0.2.110.md).
 
@@ -34,7 +38,7 @@ antenna control, saved limits/park and hardware-only SWR readback. See the
 [setup and ten-controller compatibility targets](docs/ANTENNA_CONTROL.md).
 Physical controller acceptance and automatic satellite tracking remain open.
 
-**[Download 0.2.110 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.110)**
+**[Download 0.2.111 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.111)**
 includes a matched SDRplay plugin and corrected, dated Inmarsat frequency/rate
 presets. Install the official SDRplay API 3.15+ and service separately. Extract
 the entire ZIP into a fresh folder. RTL bias-T is in Device Manager after

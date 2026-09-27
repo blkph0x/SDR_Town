@@ -178,6 +178,13 @@ TEST_CASE("Inmarsat replay pause seek stop and error reports are deterministic",
     CHECK(failure.state == "error"); CHECK_FALSE(failure.error.isEmpty()); CHECK(QFile::exists(failure.logPath));
 }
 TEST_CASE("Inmarsat remote summaries exclude recording and aircraft data", "[inmarsat][replay]") {
+    const auto identity=InmarsatDiagnostics::remotePayload({{"audio",{
+        {"audioAesId",0x123456},{"audioSourceStartSample",320},
+        {"audioSourceChanges",2},{"unidentifiedPcmSamples",160}}}});
+    CHECK(identity["audioSourceChanges"]==2);
+    CHECK(identity["unidentifiedPcmSamples"]==160);
+    CHECK_FALSE(identity.contains("audioAesId"));
+    CHECK_FALSE(identity.contains("audioSourceStartSample"));
     auto j = InmarsatDiagnostics::remotePayload({{"samples", uint64_t{123}}, {"rateHz", 48000},
         {"inputPath", "private"}, {"error", "private path"}, {"aesId", 123}, {"centerHz", 1542935000},
         {"position", {1, 2}}, {"iq", {1, 2}}, {"audio", {1, 2}}, {"state", "complete"}});

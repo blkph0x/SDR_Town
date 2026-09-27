@@ -78,7 +78,7 @@ void InmarsatReplay::worker(InmarsatReplayOptions options) {
         reader.open(options.path, options.input);
         if(options.playAudio && !options.realTime) throw std::runtime_error("Speaker playback requires real-time pacing; use WAV output for fast replay");
         audio=std::make_unique<InmarsatAudio>(options.playAudio,options.wavPath);
-        pipeline.setPcmSink([&](std::span<const int16_t> pcm,uint32_t){audio->push(pcm);});
+        pipeline.setPcmSink([&](std::span<const int16_t> pcm,uint32_t aes){audio->push(pcm,aes);});
         if (!std::isfinite(options.channelHz) || options.channelHz < 0)
             throw std::runtime_error("Invalid replay channel frequency");
         {
