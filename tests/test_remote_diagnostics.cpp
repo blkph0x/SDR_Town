@@ -126,6 +126,7 @@ TEST_CASE("Diagnostics defaults are configured but consent remains explicit") {
 TEST_CASE("Diagnostics require an actual acknowledgement and recover after stalled transport") {
     QTcpServer server;REQUIRE(server.listen(QHostAddress::LocalHost));
     int requests=0;bool stall=false;bool validAck=true;
+    QJsonObject received;
     QObject::connect(&server,&QTcpServer::newConnection,&server,[&] {
         while(auto* socket=server.nextPendingConnection()) {
             QObject::connect(socket,&QTcpSocket::readyRead,socket,[&,socket] {
@@ -137,6 +138,7 @@ TEST_CASE("Diagnostics require an actual acknowledgement and recover after stall
                 if(data.size()<boundary+4+length)return;
                 socket->setProperty("handled",true);++requests;
                 CHECK(QJsonDocument::fromJson(data.mid(boundary+4,length)).isObject());
+                received=QJsonDocument::fromJson(data.mid(boundary+4,length)).object();
                 if(stall)return;
                 const QByteArray body=validAck?"{\"ok\":true}":"{\"ok\":false}";
                 socket->write("HTTP/1.1 202 Accepted\r\nConnection: close\r\nContent-Length: "+QByteArray::number(body.size())+"\r\n\r\n"+body);
@@ -147,8 +149,16 @@ TEST_CASE("Diagnostics require an actual acknowledgement and recover after stall
     RemoteDiagnosticsConfig c;c.enabled=true;c.endpoint=QUrl("http://127.0.0.1:"+QString::number(server.serverPort())+"/ingest");
     c.minIntervalMs=100;c.requestTimeoutMs=200;
     RemoteDiagnosticsClient client;client.configure(c);
-    client.submit("test","info",{{"fixture",true}});
+    client.submit("test","info",{{"fixture",true},{"iq",QJsonArray{1,2}},
+        {"audio",QJsonObject{{"engineCreated",true},{"masterVolume",0.85},{"underruns",3},
+            {"activeOutputNames","Fixture speaker"},{"pcm",QJsonArray{1,2}},{"secret","never-upload"}}}});
     REQUIRE(waitFor([&]{return client.deliveryStatistics()["acknowledged"].toInt()==1;}));
+    const auto payload=received["payload"].toObject();
+    CHECK_FALSE(payload.contains("iq"));
+    const auto audio=payload["audio"].toObject();CHECK(audio["engineCreated"].toBool());
+    CHECK(audio["underruns"].toInt()==3);CHECK(audio["masterVolume"].toDouble()==0.85);
+    CHECK(audio["activeOutputNames"].toString()=="Fixture speaker");
+    CHECK_FALSE(audio.contains("pcm"));CHECK_FALSE(audio.contains("secret"));
     validAck=false;client.submit("test","info",{});
     REQUIRE(waitFor([&]{return client.deliveryStatistics()["networkDropped"].toInt()==1;}));
     stall=true;client.submit("test","info",{});

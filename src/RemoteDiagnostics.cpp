@@ -172,6 +172,17 @@ QStringList defaultDiagnosticsConfigPaths()
 
 QJsonObject sanitizedPayload(QJsonObject payload)
 {
+    // The legacy blanket removal also erased MainWindow's audio health object.
+    // Preserve only explicit scalar metadata, never arrays/PCM/unknown fields.
+    const auto audio=payload.value("audio").toObject();
+    QJsonObject status;
+    for(const auto* key:{"engineCreated","activeOutputCount","masterVolume","outputMuted",
+                         "queuedSamples","ringFillPercent","underruns"}) {
+        const auto value=audio.value(key);
+        if(value.isBool() || value.isDouble()) status[key]=value;
+    }
+    if(audio.value("activeOutputNames").isString())
+        status["activeOutputNames"]=audio.value("activeOutputNames").toString().left(240);
     // Remote diagnostics are for compact state, never bulk captures.
     payload.remove("iq");
     payload.remove("iqSamples");
@@ -180,6 +191,7 @@ QJsonObject sanitizedPayload(QJsonObject payload)
     payload.remove("samples");
     payload.remove("rawSymbols");
     payload.remove("rawDibits");
+    if(!status.isEmpty()) payload["audio"]=status;
     return payload;
 }
 

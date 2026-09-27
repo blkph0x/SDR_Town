@@ -26,6 +26,11 @@ dependency added; optional visual fixture uses the host's existing Playwright.
 An additional whole-process opt-out launch was denied by tool policy; no claim
 for that run. Config/menu/observer opt-out and cross-thread discard tests pass.
 
+Final server payload inspection caught the existing sanitizer removing the whole
+audio metadata object as though it were PCM. Corrected with an explicit scalar
+audio-health allowlist (arrays/unknown fields still removed) and network-body
+assertions. This finding does not alter the audio engine or speaker behavior.
+
 ## 2026-09-27 - T-0087 P25 diagnostic audit (no application rebuild)
 
 Published v0.2.114 GUI 60s capture / 75s exit PASS, exit0, 60.032s IQ,
