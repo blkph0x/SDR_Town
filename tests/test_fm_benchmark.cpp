@@ -2,6 +2,7 @@
 #include "Demod.h"
 #include "FmDiagnostics.h"
 #include "NfmInputDecimator.h"
+#include "WfmRetainedFirPrototype.h"
 #include <catch2/catch_all.hpp>
 #include <nlohmann/json.hpp>
 #include <chrono>
@@ -237,4 +238,114 @@ TEST_CASE("WFM bandwidth and high-deviation image characterization", "[.wfm-imag
         {"differenceRelativeDb",error},{"realtimeRatio",test.elapsedUs/200000},
         {"audioSamples",test.counts[fmDiagnostics::AudioSamples]}};
     std::cout << "WFM_SWEEP " << row.dump() << '\n';
+}
+
+TEST_CASE("Retained WFM prototype equals full convolution across partitions", "[wfm][retained]") {
+    const size_t factor=GENERATE(1u,7u,12u,51u);
+    const size_t length=GENERATE(1u,65u,2049u);
+    std::mt19937 random(152); std::uniform_real_distribution<float> value(-1,1);
+    std::vector<float> taps(length);for(auto& t:taps)t=value(random);
+    std::vector<std::complex<float>> input(7001);for(auto& s:input)s={value(random),value(random)};
+    WfmSpeechFir full;auto all=input;full.process(all,taps);
+    std::vector<std::complex<float>> expected;
+    for(size_t i=0;i<all.size();i+=factor)expected.push_back(all[i]);
+    WfmRetainedFirPrototype prototype(taps,factor);
+    REQUIRE(prototype.process(input)==expected);
+    prototype.reset();std::vector<std::complex<float>> split;
+    size_t step=0;
+    for(size_t at=0;at<input.size();) {
+        const size_t sizes[]{1,0,2,7,819,31};const auto n=std::min(sizes[step++%6],input.size()-at);
+        const auto out=prototype.process(std::span(input).subspan(at,n));
+        split.insert(split.end(),out.begin(),out.end());at+=n;
+    }
+    REQUIRE(split==expected);
+}
+
+namespace {
+std::vector<float> prototypeWfmTaps(double rate) {
+    const size_t half=size_t(std::ceil(rate*.0001024)); // DEC-0152: qualified candidate delay.
+    const double beta=.1102*(80-8.7);
+    std::vector<float> taps(half*2+1);double sum=0;
+    for(size_t i=0;i<taps.size();++i) {
+        const double m=double(i)-half,x=m/half,fc=90000/rate;
+        const double window=std::cyl_bessel_i(0,beta*std::sqrt(std::max(0.,1-x*x)))/std::cyl_bessel_i(0,beta);
+        taps[i]=float(window*(m==0?2*fc:std::sin(2*M_PI*fc*m)/(M_PI*m)));sum+=taps[i];
+    }
+    for(auto& t:taps)t=float(t/sum);
+    return taps;
+}
+}
+
+TEST_CASE("Retained WFM composite preserves PCM and multiplex partition timing", "[wfm][retained]") {
+    const double rate=GENERATE(2400000.0,10000000.0);
+    const auto taps=prototypeWfmTaps(rate);
+    const size_t factor=size_t(std::llround(rate/198000));
+    std::vector<std::complex<float>> input(size_t(rate*.04));double phase=0;
+    for(size_t i=0;i<input.size();++i) {
+        const double t=i/rate;
+        // Composite components exercise pilot/subcarrier paths, not encoded RDS messages.
+        const double mpx=.5*std::sin(2*M_PI*900*t)+.1*std::sin(2*M_PI*19000*t)
+            +.2*std::sin(2*M_PI*1200*t)*std::cos(2*M_PI*38000*t)
+            +.03*std::cos(2*M_PI*57000*t);
+        phase=std::remainder(phase+2*M_PI*75000*mpx/rate,2*M_PI);
+        input[i]=std::polar(.1f,float(phase));
+    }
+    auto run=[&](bool split) {
+        WfmRetainedFirPrototype filter(taps,factor);Demodulator d;
+        std::pair<std::vector<float>,std::vector<float>> result;size_t step=0;
+        for(size_t at=0;at<input.size();) {
+            const size_t sizes[]{1,2,7,8192,113};
+            const size_t n=std::min(split?sizes[step++%5]:input.size(),input.size()-at);
+            auto iq=filter.process(std::span(input).subspan(at,n));at+=n;
+            if(iq.empty())continue;
+            FmMultiplexBlock mpx;double level=-100;
+            const auto pcm=d.demodulateToAudio(iq,rate/factor,100e6,100e6,
+                DemodMode::WFM,level,15000,-200,1,75,.96,180000,0,48000,-30,true,&mpx);
+            REQUIRE(mpx.firstSample==result.second.size());
+            REQUIRE(mpx.sampleRate>=128000);REQUIRE(mpx.sampleRate<=384000);
+            result.first.insert(result.first.end(),pcm.begin(),pcm.end());
+            result.second.insert(result.second.end(),mpx.samples.begin(),mpx.samples.end());
+        }
+        return result;
+    };
+    const auto whole=run(false),split=run(true);
+    REQUIRE(whole.first.size()==split.first.size());
+    REQUIRE(whole.second==split.second);
+    double maximum=0;for(size_t i=0;i<whole.first.size();++i)
+        maximum=std::max(maximum,double(std::abs(whole.first[i]-split.first[i])));
+    REQUIRE(maximum<1e-5);
+}
+
+TEST_CASE("Retained WFM sharper FIR actual PCM and cost", "[.wfm-retained-benchmark]") {
+    const double rate=GENERATE(2400000.0,10000000.0);
+    const double deviation=GENERATE(50000.0,75000.0);
+    const int side=GENERATE(-1,1);
+    const size_t factor=size_t(std::llround(rate/198000));
+    const double reducedRate=rate/factor,offset=side*(reducedRate-30000);
+    const size_t half=size_t(std::ceil(rate*.0001024));
+    const auto taps=prototypeWfmTaps(rate);
+    std::vector<std::complex<float>> clean(size_t(rate*.2)),mixed(clean.size());double p=0,q=0;
+    for(size_t i=0;i<clean.size();++i) {
+        p=std::remainder(p+2*M_PI*deviation*std::sin(2*M_PI*900*i/rate)/rate,2*M_PI);
+        q=std::remainder(q+2*M_PI*(offset+deviation*std::sin(2*M_PI*1700*i/rate))/rate,2*M_PI);
+        clean[i]=std::polar(float(.5/101),float(p));mixed[i]=clean[i]+std::polar(float(50./101),float(q));
+    }
+    auto run=[&](const auto& input) {
+        WfmRetainedFirPrototype filter(taps,factor);std::vector<std::complex<float>> output;
+        const auto start=std::chrono::steady_clock::now();
+        for(size_t at=0;at<input.size();at+=8192) {
+            auto block=filter.process(std::span(input).subspan(at,std::min(size_t(8192),input.size()-at)));
+            output.insert(output.end(),block.begin(),block.end());
+        }
+        const double us=std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-start).count();
+        auto result=demod(output,reducedRate,true,180000);result.elapsedUs+=us;return result;
+    };
+    const auto a=run(clean),b=run(mixed);std::vector<float> error(a.tail.size());
+    for(size_t i=0;i<error.size();++i)error[i]=b.tail[i]-a.tail[i];
+    const double difference=db(rms(error)/rms(a.tail));
+    REQUIRE(std::isfinite(difference));
+    if(deviation==50000) REQUIRE(difference < -40);
+    std::cout<<"WFM_RETAINED "<<nlohmann::json{{"rate",rate},{"deviation",deviation},{"side",side},
+        {"taps",taps.size()},{"differenceDb",difference},{"gainDb",db(toneAmplitude(b.tail,900)/toneAmplitude(a.tail,900))},
+        {"realtimeRatio",b.elapsedUs/200000},{"delayUs",half/rate*1e6}}.dump()<<'\n';
 }

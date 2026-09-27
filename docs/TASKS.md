@@ -1,5 +1,12 @@
 # Task list (canonical)
 
+T-0080 | done | Efficient WFM FIR prototype |
+DEC-0152. Qualify retained-output convolution, stream clock and actual PCM/cost
+before integrating shared meter/RDS behavior.
+Prototype 478 assertions PASS; repeated actual downstream PCM benchmark fixes
+isolated 50 kHz-deviation blocker case with ~0.29 processing/input ratio at
+10 MS/s. Runtime integration, encoded-RDS and power semantics remain open.
+
 T-0079 | done | Isolate WFM filter leakage and candidate response |
 DEC-0151. Independent causal oracle, pre-decimation leakage and clean-reference
 error; quantify candidate delay/cost before any production adoption.

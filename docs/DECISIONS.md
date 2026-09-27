@@ -1,5 +1,16 @@
 # Decisions
 
+## DEC-0152 - Retained-output WFM FIR prototype (2026-09-27)
+
+T-0080: implement causal FIR at retained positions 0,M,2M in test support only.
+Reuse ordered coefficient accumulation and contiguous history; compare exactly
+to WfmSpeechFir followed by downsampling across arbitrary partitions and resets.
+Prototype the DEC-0151 2049-tap/10MS/s design with delay scaled by input rate,
+80 dB Kaiser beta and unchanged BW/2 cutoff. Feed retained IQ through actual
+Demodulator to measure clean/blocker PCM and wall-clock cost. Do not publish it
+as production: full-rate power estimates and RDS sharing still need explicit
+integration. No changes to P25/NFM/HF or current live DSP.
+
 ## DEC-0151 - Isolate WFM leakage with an independent oracle (2026-09-27)
 
 T-0079: independently model the current 321-tap Kaiser coefficients, causal

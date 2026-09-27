@@ -1,5 +1,12 @@
 # Code notes (tree map)
 
+## Retained WFM FIR prototype (DEC-0152)
+
+tests/WfmRetainedFirPrototype.h is test support only: persistent causal FIR
+evaluated on retained positions, resettable history and phase. Mandatory
+[wfm][retained] fixtures compare exact convolution and multiplex/PCM partitions;
+optional [.wfm-retained-benchmark] measures the cascade through Demodulator.
+
 ## Independent WFM filter oracle (DEC-0151)
 
 scripts/analyze_wfm_filter.py: NumPy-only offline coefficient, causal convolution,

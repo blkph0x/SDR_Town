@@ -1,5 +1,13 @@
 # Build notes
 
+## 2026-09-27 - T-0080 C++ prototype
+
+Release tests build PASS; 478 retained-FIR/convolution/PCM/MPX assertions PASS.
+Three benchmark executions repeat signal metrics: isolated 50 kHz deviation
+case difference ~-85 dB at 10 MS/s, time/input ~0.29. Test-only cascade, not
+production integration. Details and limits in WFM_RETAINED_PROTOTYPE.md.
+All 15 local CTest suites PASS (54.43 s).
+
 ## 2026-09-27 - T-0079 independent filter isolation
 
 Published source 8e600d2. Windows CI 36280496010 and YAML validation

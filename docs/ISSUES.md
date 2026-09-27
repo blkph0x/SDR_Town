@@ -2,6 +2,12 @@
 
 ## ISS-0037 - FM chunk boundaries and sample lattice (2026-09-26, OPEN)
 
+T-0080 test-only retained-output prototype now reproduces exact convolution and
+stream partitions; isolated 10 MS/s blocker PCM error improves to ~-85 dB at
+~0.29 processing/input ratio. This includes the existing reduced-rate FIR in
+cascade. WFM_RETAINED_PROTOTYPE.md records limits and meter/encoded-RDS gates.
+No runtime repair claimed yet; overlapping 75 kHz-deviation cases remain poor.
+
 T-0079 independent causal model isolates pre-decimation leakage: 10 MS/s,
 180 kHz, 50 kHz deviation, +40 dB blocker at +166078.43 Hz remains +14.16 dB
 above wanted after current FIR. 2049 taps reduce to -52.40 dB but require 6.38x

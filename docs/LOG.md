@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-09-27 - T-0080 efficient C++ WFM candidate
+
+Implemented retained-output FIR in test support and verified exact convolution,
+partitions and downstream PCM/MPX. Sharper filtering is affordable in the tested
+cascade; power-estimator and encoded-RDS integration remain gates before release.
+
 ## 2026-09-27 - T-0079 WFM cause isolated
 
 Independent causal oracle confirms substantial blocker residue before decimation
