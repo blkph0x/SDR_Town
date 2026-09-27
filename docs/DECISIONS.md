@@ -1,5 +1,22 @@
 # Decisions
 
+## DEC-0153 - WFM candidate RDS and level gates (2026-09-27)
+
+Measured outcome: reject the prototype's double-filter RDS route, not the
+sharper FIR. The same remodulated recording gives baseline 2/2 groups,
+double-filter 1/1, direct retained-FIR discriminator 3/2 (2.4/10 MS/s).
+Future integration must branch data before the additional speech channel FIR.
+Mandatory tests require direct groups >= baseline and expected PI/PTY. Meter
+stationary power agrees <0.1 dB; this is not transient squelch qualification.
+
+T-0081: qualify candidate before live integration. Remodulate the existing
+recorded mono MPX fixture as FM IQ, retaining continuous phase and linear MPX
+interpolation. Feed retained FIR and real Demodulator multiplex to shipped RDS
+decoder. Require CRC-valid expected PI, not just 57 kHz energy. This synthetic
+RF conversion is not over-air verification. Separately compare full/retained
+candidate-filter power after transients for stationary desired-plus-noise IQ;
+report relative dB, never calibrated dBm. Do not change runtime until gates pass.
+
 ## DEC-0152 - Retained-output WFM FIR prototype (2026-09-27)
 
 T-0080: implement causal FIR at retained positions 0,M,2M in test support only.

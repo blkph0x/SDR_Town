@@ -3,6 +3,8 @@
 #include "FmDiagnostics.h"
 #include "NfmInputDecimator.h"
 #include "WfmRetainedFirPrototype.h"
+#include "RdsMpxDecoder.h"
+#include "miniaudio.h"
 #include <catch2/catch_all.hpp>
 #include <nlohmann/json.hpp>
 #include <chrono>
@@ -349,3 +351,78 @@ TEST_CASE("Retained WFM sharper FIR actual PCM and cost", "[.wfm-retained-benchm
         {"taps",taps.size()},{"differenceDb",difference},{"gainDb",db(toneAmplitude(b.tail,900)/toneAmplitude(a.tail,900))},
         {"realtimeRatio",b.elapsedUs/200000},{"delayUs",half/rate*1e6}}.dump()<<'\n';
 }
+
+TEST_CASE("Retained WFM stationary power matches full filtered power", "[wfm][retained][power]") {
+    const double rate=GENERATE(2400000.0,10000000.0);
+    const size_t factor=size_t(std::llround(rate/198000));
+    auto taps=prototypeWfmTaps(rate);
+    std::mt19937 random(153);std::normal_distribution<float> noise(0,.01f);
+    std::vector<std::complex<float>> iq(size_t(rate*.02));
+    for(size_t i=0;i<iq.size();++i)iq[i]=std::polar(.1f,float(2*M_PI*1000*i/rate))
+        +std::complex<float>(noise(random),noise(random));
+    WfmRetainedFirPrototype retained(taps,factor);
+    const auto sparse=retained.process(iq);
+    WfmSpeechFir full;full.process(iq,taps);
+    double a=0,b=0;size_t na=0,nb=0;
+    for(size_t i=taps.size()*2;i<iq.size();++i){a+=std::norm(iq[i]);++na;}
+    for(size_t i=0;i<sparse.size();++i)if(i*factor>=taps.size()*2){b+=std::norm(sparse[i]);++nb;}
+    const double difference=10*std::log10((b/nb)/(a/na));
+    INFO("stationary full/retained level delta dB="<<difference);
+    REQUIRE(std::abs(difference)<.1);
+}
+
+#ifdef SDR_TOWN_TEST_RDS_DSP
+TEST_CASE("Retained WFM direct multiplex delivers CRC valid recorded RDS via RF", "[wfm][retained][rds-rf]") {
+    const double rate=GENERATE(2400000.0,10000000.0);
+    ma_decoder file{};auto config=ma_decoder_config_init(ma_format_f32,1,0);
+    REQUIRE(ma_decoder_init_file(SDR_TOWN_RDS_FIXTURE,&config,&file)==MA_SUCCESS);
+    struct Guard {ma_decoder* p;~Guard(){ma_decoder_uninit(p);}} guard{&file};
+    std::vector<float> recording(file.outputSampleRate*2);ma_uint64 frames=0;
+    const auto readResult=ma_decoder_read_pcm_frames(&file,recording.data(),recording.size(),&frames);
+    REQUIRE((readResult==MA_SUCCESS || readResult==MA_AT_END));
+    REQUIRE(frames>0);recording.resize(size_t(frames));
+    const size_t factor=size_t(std::llround(rate/198000));
+    WfmRetainedFirPrototype filter(prototypeWfmTaps(rate),factor);
+    Demodulator demod,baselineDemod;RdsMpxDecoder rds,baselineRds,firstStageRds;double phase=0;
+    std::complex<float> previous{1,0};uint64_t firstStageCount=0;
+    const size_t signalCount=size_t((recording.size()-1)*rate/file.outputSampleRate);
+    // Drain both causal FIR supports; capture end must not discard delayed RDS bits.
+    const size_t count=signalCount+prototypeWfmTaps(rate).size()-1+320*factor;
+    for(size_t at=0;at<count;at+=8192) {
+        std::vector<std::complex<float>> iq(std::min(size_t(8192),count-at));
+        for(size_t i=0;i<iq.size();++i) {
+            const double position=(at+i)*double(file.outputSampleRate)/rate;
+            const size_t index=size_t(position);const double f=position-index;
+            const double sample=index+1<recording.size()?recording[index]*(1-f)+recording[index+1]*f:0;
+            phase=std::remainder(phase+2*M_PI*75000*sample/rate,2*M_PI);
+            iq[i]=std::polar(.1f,float(phase));
+        }
+        double baselineLevel=-100;FmMultiplexBlock baselineMpx;
+        baselineDemod.demodulateToAudio(iq,rate,100e6,100e6,DemodMode::WFM,
+            baselineLevel,15000,-200,1,75,.96,180000,0,48000,-30,true,&baselineMpx);
+        REQUIRE(baselineRds.process(baselineMpx.samples,baselineMpx.sampleRate,baselineMpx.targetHz,
+            baselineMpx.epoch,baselineMpx.firstSample,baselineMpx.discontinuity));
+        auto filtered=filter.process(iq);if(filtered.empty())continue;
+        std::vector<float> directMpx;directMpx.reserve(filtered.size());
+        for(const auto sample:filtered) {
+            directMpx.push_back(std::arg(sample*std::conj(previous))*float((rate/factor)/(2*M_PI*75000)));
+            previous=sample;
+        }
+        REQUIRE(firstStageRds.process(directMpx,rate/factor,100e6,1,firstStageCount,firstStageCount==0));
+        firstStageCount+=directMpx.size();
+        double level=-100;FmMultiplexBlock mpx;
+        demod.demodulateToAudio(filtered,rate/factor,100e6,100e6,DemodMode::WFM,
+            level,15000,-200,1,75,.96,180000,0,48000,-30,true,&mpx);
+        REQUIRE(rds.process(mpx.samples,mpx.sampleRate,mpx.targetHz,mpx.epoch,mpx.firstSample,mpx.discontinuity));
+    }
+    // DEC-0153: do not route data through the speech cascade's second RF FIR.
+    const auto result=firstStageRds.snapshot();
+    INFO("rate="<<rate<<" direct groups="<<result.groups<<" PI="<<result.lastGroupWords[0]
+        <<" current-path groups="<<baselineRds.snapshot().groups<<" double-filter groups="<<rds.snapshot().groups);
+    REQUIRE(baselineRds.snapshot().groups>=2);
+    REQUIRE(result.groups>=2);
+    REQUIRE(result.groups>=baselineRds.snapshot().groups);
+    REQUIRE(result.lastGroupWords[0]==0x6201);
+    REQUIRE(((result.lastGroupWords[1]>>5)&31)==14);
+}
+#endif

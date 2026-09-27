@@ -1,5 +1,12 @@
 # Task list (canonical)
 
+T-0081 | done | WFM candidate RDS and signal-level qualification |
+DEC-0153. Recorded MPX remodulation through candidate and actual RDS decoder;
+stationary full/retained filter-power comparison before live integration.
+3207 assertions PASS. Double-filter candidate data route regresses 2 groups to
+1; direct retained-FIR discriminator recovers 3/2 groups at 2.4/10 MS/s. Do not
+route RDS through speech cascade. Transient/configuration and runtime work open.
+
 T-0080 | done | Efficient WFM FIR prototype |
 DEC-0152. Qualify retained-output convolution, stream clock and actual PCM/cost
 before integrating shared meter/RDS behavior.

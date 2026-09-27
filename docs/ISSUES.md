@@ -2,6 +2,11 @@
 
 ## ISS-0037 - FM chunk boundaries and sample lattice (2026-09-26, OPEN)
 
+T-0081 catches a candidate-only RDS regression: double channel filtering reduces
+recorded RF fixture groups from 2 to 1 at 2.4/10 MS/s. Direct candidate FIR
+discriminator gives 3/2 valid groups and expected PI/PTY. Future integration
+must separate data before speech's extra FIR. See WFM_RDS_QUALIFICATION.md.
+
 T-0080 test-only retained-output prototype now reproduces exact convolution and
 stream partitions; isolated 10 MS/s blocker PCM error improves to ~-85 dB at
 ~0.29 processing/input ratio. This includes the existing reduced-rate FIR in

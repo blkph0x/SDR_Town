@@ -1,5 +1,15 @@
 # Build notes
 
+## 2026-09-27 - T-0081 RDS and power gates
+
+Release tests build PASS. Initial harness assumed MA_AT_END for partial read;
+corrected to accept MA_SUCCESS or MA_AT_END with explicit returned frame count.
+Candidate double-filter route then FAILED expected two groups (got one); draining
+FIR supports did not alter failure. Direct discriminator branch passes expected
+PI/PTY and no fewer groups than baseline. Final focused run: 3207 assertions in
+two cases PASS. No production edits; WFM_RDS_QUALIFICATION.md records full scope.
+Full local CTest: 15/15 PASS (50.52 s).
+
 ## 2026-09-27 - T-0080 C++ prototype
 
 Published source 8e116ec. Windows CI 36284271627 and YAML 36284271706 SUCCESS.

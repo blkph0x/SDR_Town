@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-09-27 - T-0081 RDS prototype route corrected
+
+Caught double-filter RDS regression before production. Direct retained-FIR
+discriminator recovers reference groups; meter stationary average gate passes.
+Transient/configuration and production integration remain explicit follow-ups.
+
 ## 2026-09-27 - T-0080 efficient C++ WFM candidate
 
 Implemented retained-output FIR in test support and verified exact convolution,

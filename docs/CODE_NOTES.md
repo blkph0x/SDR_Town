@@ -1,5 +1,12 @@
 # Code notes (tree map)
 
+## Candidate WFM RF-to-RDS qualification (DEC-0153)
+
+test_fm_benchmark.cpp [rds-rf] remodulates recorded MPX, compares current,
+double-filter and direct-discriminator data branches through shipped RDS DSP.
+[power] compares stationary full/retained FIR power. Both are mandatory when
+their backend is enabled; no production route is selected by these tests.
+
 ## Retained WFM FIR prototype (DEC-0152)
 
 tests/WfmRetainedFirPrototype.h is test support only: persistent causal FIR
