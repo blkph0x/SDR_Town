@@ -8,10 +8,13 @@ CTest 15/15 PASS (49.00 s). User WAV: file + fast auto/manual NFM complete Scott
 Paced 2.4 MS/s real DeviceManager/ring/live-session/helper: complete Scottie1,
 33 previews, 269624000 simulated IQ samples; RGB MAE 0.64425/255 vs file output.
 Late entry (first five seconds omitted), RF Auto: expected zero images PASS,
-route searching, zero helper input samples. No production code changed; fixture
+route searching, zero helper input samples.
 Late-entry manual NFM/image Auto PASS: 248-row partial Scottie1, 5152481 helper
 samples, rather than the Auto RF gate's zero samples.
-is synthetic RF and cannot verify physical USB/antenna/tuning or GUI selection.
+No production code changed; fixture is synthetic RF and cannot verify physical
+USB/antenna/tuning or GUI selection. Source b8bd4e089e5fe6651a45b1438b013b288d2a7a4f
+published; Windows CI 36295831518 and YAML run 36295831513 PASS. P25 guard PASS,
+10 changed paths, zero protected files. Test-only update, no new app binary.
 
 ## 2026-09-27 - T-0084 Inmarsat rejection/identity audit
 

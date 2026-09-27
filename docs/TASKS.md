@@ -1,10 +1,11 @@
 # Task list (canonical)
 
-T-0085 | verification | Paced SSTV virtual-SDR reproduction |
+T-0085 | done | Paced SSTV virtual-SDR reproduction |
 DEC-0157. Feed user Scottie1 audio through Soapy readStream, DeviceManager ring,
 live RF session and streaming helper. No protected runtime edits or RF hardware.
 Complete image with full header; late Auto reproduces zero input; manual NFM
-recovers 248 rows. Local 15/15 suites PASS; publishing test harness (not app fix).
+recovers 248 rows. Local 15/15 suites and Windows CI 36295831518 PASS. Test harness
+published as b8bd4e0; no runtime change/release asset required. ISS-0040 stays open.
 
 T-0084 | done | Inmarsat fail-closed audit and recovery instrumentation |
 DEC-0156. Validate supplied audit against executable paths; reject malformed

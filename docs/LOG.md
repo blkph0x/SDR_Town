@@ -6,6 +6,8 @@ Added reusable paced WAV-to-NFM fake Soapy fixture, production live-session test
 and runner with local evidence outputs. Complete user fixture succeeds through
 device ring and streamed helper. Headerless late entry reproduces RF Auto waiting
 without helper input. Actual off-air root cause remains ISS-0040; no guessed DSP fix.
+Manual NFM late entry recovers 248 rows. Source b8bd4e0 pushed, Windows CI
+36295831518 and YAML checks PASS; no runtime change or replacement release asset.
 
 ## 2026-09-27 - T-0084 Inmarsat audit
 
