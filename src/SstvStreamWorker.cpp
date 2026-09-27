@@ -8,6 +8,9 @@
 #include <QFileInfo>
 #include <QProcess>
 #include <QTemporaryDir>
+#include <QSaveFile>
+#include <QDateTime>
+#include <spdlog/spdlog.h>
 #include <QThread>
 #include <QtEndian>
 #include <algorithm>
@@ -23,7 +26,7 @@ constexpr qint64 maxBlockBytes=(SstvInputEvent::maxSamples+1)*6*2;
 }
 
 SstvStreamResult decodeSstvStream(const SstvStreamRead& next,const QString& mode,
-                                 const std::function<bool()>& cancelled,const SstvPreview& preview) {
+                                 const std::function<bool()>& cancelled,const SstvPreview& preview,const QString& archiveDirectory) {
     require(QCoreApplication::instance()!=nullptr,"SSTV worker needs an application instance");
     require(QThread::currentThread()!=QCoreApplication::instance()->thread(),"SSTV streaming must run off the GUI thread");
     require(bool(next),"SSTV stream source is missing");
@@ -35,10 +38,14 @@ SstvStreamResult decodeSstvStream(const SstvStreamRead& next,const QString& mode
     QTemporaryDir temporary;
     require(temporary.isValid(),"Cannot create SSTV stream temporary directory");
     const auto rgbPath=temporary.filePath("images");
+    const bool continuous=!archiveDirectory.isEmpty();
+    if(continuous)require(QDir().mkdir(archiveDirectory),"Cannot create SSTV archive session directory");
     QProcess process;
     struct Guard {QProcess& p; ~Guard(){if(p.state()!=QProcess::NotRunning){p.kill();p.waitForFinished(5000);}}} guard{process};
     process.setProgram(helper);
-    process.setArguments({"--stdin","48000",rgbPath,mode,"--progress"});
+    QStringList arguments{"--stdin","48000",rgbPath,mode,"--progress"};
+    if(continuous)arguments<<"--continuous";
+    process.setArguments(arguments);
     process.start();
     QElapsedTimer wall,launch,stall,end;
     wall.start(); launch.start(); stall.start();
@@ -47,10 +54,36 @@ SstvStreamResult decodeSstvStream(const SstvStreamRead& next,const QString& mode
         process.waitForStarted(20);
     }
     require(process.state()==QProcess::Running,"SSTV helper failed to start");
-    SstvProgress progress(preview?preview:SstvPreview([](const auto&,const auto&,int){}));
     QByteArray errors;
     SstvRateConverter converter;
     SstvStreamResult result; result.metadata=nlohmann::json::array();
+    result.archived=continuous;
+    SstvProgress::Complete archive;
+    if(continuous)archive=[&](const QImage& image,const QByteArray& line) {
+        auto item=nlohmann::json::parse(line.constData(),line.constData()+line.size());
+        require(item.at("backend")=="16bf34aac81b0041f5fdce52a1aef64eea0d5f6e","SSTV helper revision mismatch");
+        QFile rgb(QDir(rgbPath).filePath(QString::fromStdString(item.at("file").get<std::string>())));
+        require(rgb.open(QIODevice::ReadOnly) && rgb.size()==image.width()*image.height()*3,"SSTV archive RGB size mismatch");
+        const auto bytes=rgb.readAll();
+        require(bytes.size()==rgb.size(),"SSTV archive RGB read failed");
+        for(int y=0;y<image.height();++y)
+            require(std::memcmp(image.constScanLine(y),bytes.constData()+y*image.width()*3,size_t(image.width()*3))==0,"SSTV archive pixel mismatch");
+        rgb.close();
+        const auto name=QString("image-%1%2.png").arg(result.savedImages).arg(item.at("complete").get<bool>()?"":".partial");
+        const auto path=QDir(archiveDirectory).filePath(name);
+        require(!QFileInfo::exists(path),"SSTV archive image already exists");
+        QSaveFile saved(path);
+        require(saved.open(QIODevice::WriteOnly) && image.save(&saved,"PNG") && saved.commit(),"Cannot save SSTV archive image");
+        item["file"]=name.toStdString();item["savedUtc"]=QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs).toStdString();
+        QSaveFile metadata(path+".json");const auto json=item.dump(2);
+        require(metadata.open(QIODevice::WriteOnly) && metadata.write(json.data(),qint64(json.size()))==qint64(json.size()) && metadata.commit(),"Cannot save SSTV image metadata");
+        require(rgb.remove(),"Cannot remove archived SSTV temporary RGB");
+        ++result.savedImages;
+        if(result.metadata.size()==64)result.metadata.erase(result.metadata.begin());
+        result.metadata.push_back(std::move(item));
+        spdlog::info("SSTV autosaved image {} source={} epoch={} rows={} complete={}",result.savedImages,result.sourceId,result.epoch,result.metadata.back().at("rows").get<int>(),result.metadata.back().at("complete").get<bool>());
+    };
+    SstvProgress progress(preview?preview:SstvPreview([](const auto&,const auto&,int){}),archive);
     bool identity=false,eof=false,haveGap=false;
     uint64_t expected=0,gapGeneration=0;
     qint64 previousPending=0;
@@ -60,7 +93,7 @@ SstvStreamResult decodeSstvStream(const SstvStreamRead& next,const QString& mode
         require(errors.size()<=65536,"SSTV helper stderr limit exceeded");
     };
     for(;;) {
-        cancel(); require(wall.elapsed()<540000,"SSTV stream wall limit exceeded");
+        cancel(); require(continuous || wall.elapsed()<540000,"SSTV stream wall limit exceeded");
         drain();
         const auto pending=process.bytesToWrite();
         if(pending==0 || pending<previousPending) stall.restart();
@@ -93,9 +126,11 @@ SstvStreamResult decodeSstvStream(const SstvStreamRead& next,const QString& mode
                     require(block->sourceId==result.sourceId && block->epoch==result.epoch && block->generation==result.generation &&
                             block->sampleRate==result.inputRate && block->targetHz==result.targetHz && block->firstSample==expected,
                             "SSTV stream identity/position changed without a gap");
-                    require(double(result.inputSamples+block->count)<=result.inputRate*kSstvMaxDurationSec,"SSTV input sample budget exceeded");
+                    require(result.inputSamples<=std::numeric_limits<uint64_t>::max()-block->count,"SSTV sample counter overflow");
+                    require(continuous || double(result.inputSamples+block->count)<=result.inputRate*kSstvMaxDurationSec,"SSTV input sample budget exceeded");
                     const auto converted=converter.process(std::span(block->samples.data(),block->count));
-                    require(result.outputSamples+converted.size()<=uint64_t{48000}*kSstvMaxDurationSec,"SSTV output sample budget exceeded");
+                    require(result.outputSamples<=std::numeric_limits<uint64_t>::max()-converted.size(),"SSTV output counter overflow");
+                    require(continuous || result.outputSamples+converted.size()<=uint64_t{48000}*kSstvMaxDurationSec,"SSTV output sample budget exceeded");
                     QByteArray pcm(qsizetype(converted.size()*2),Qt::Uninitialized);
                     for(size_t i=0;i<converted.size();++i) {
                         const auto value=qToLittleEndian(qint16(std::lround(std::clamp(double(converted[i]),-1.,32767./32768.)*32768)));

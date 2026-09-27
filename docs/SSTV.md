@@ -10,10 +10,12 @@ VIS inspection. This release adds independent RF acquisition
 1. Start and tune the main receiver to the SSTV carrier/dial frequency. P25 monitor
    and voice-follow must be off. SSTV never tunes or reconfigures the radio.
 2. Open **Tools > SSTV Images**, choose **Live RF - main receiver frequency**,
-   **RF demodulation: Auto**, **Image format: Automatic**, and a new output folder.
-3. Press **Receive**. Scanlines appear progressively. **Finish and save** stops
-   accepting new input, drains queued samples, and saves validated PNGs/report.
-   **Cancel** or closing the window discards provisional output.
+   **RF demodulation: Auto**, **Image format: Automatic**, and a Save folder.
+   The folder is remembered; its default is Pictures/SDR Town/SSTV.
+3. Press **Receive**. A unique session folder is created automatically. Scanlines
+   appear progressively and each finished image is saved immediately as PNG with
+   a JSON sidecar. **Stop receiving** drains queued samples and saves the report.
+   **Cancel** or closing discards the unfinished image, not images already saved.
 
 RF Auto tests USB, LSB and NFM independently for a known classic 7-bit VIS with
 valid framing/parity. It retains the header audio, checks for competing routes
@@ -30,8 +32,10 @@ thread. NFM uses raw discriminator audio; USB/LSB/AM use the HF decoder tap.
 Speaker LPF/EQ/squelch/volume do not affect these taps. The SSB decoder requests
 a 3 kHz one-sided passband (6 kHz in the existing HF demodulator's BW convention).
 A retune, stream gap, overrun or device loss aborts the session rather than
-joining incompatible samples; restart explicitly. Sessions are bounded to six
-minutes and four images. No automated repeated acquisition yet. Partial images
+joining incompatible samples; restart explicitly. As of 0.2.114, live sessions
+have no duration/image-count cap. Only 64 recent image descriptions and the
+current preview are retained in memory. All PNGs stay on disk; disk errors stop
+reception and no saved images are automatically deleted. Partial images
 are labelled and retain black missing rows. Finishing after an image begins can save a partial image;
 all rows received does not guarantee a noise-free image.
 
@@ -54,12 +58,21 @@ Automation: `POST /v1/sstv/live` accepts `mode` (image format), `rfMode`
 `rfMode`, `detectedRfMode`, and `rfAutoPath`; the saved report records requested
 and selected routes. Omitted `rfMode` defaults to Auto. FUBAR's existing button
 uses this default; adding its own RF dropdown is separate companion-app work.
+API/CLI automation still supplies an explicit new `outputDirectory`; automatic
+session naming applies to the GUI Receive/Decode buttons.
+
+Autosave regression: supply a short, complete SSTV WAV in
+`SDR_TOWN_SSTV_STREAM_INPUT` and run `sdr_town_workspace_tests.exe
+"[.sstv-archive-recording]"`. This repeats it six times plus 481 seconds of
+silence at accelerated speed, checks files exist before EOF, then repeats with
+cancellation. It exercises archive/converter/helper integration without RF.
 
 ## Image decoding
 
 **Tools > SSTV Images**, with Source set to **Recording**, opens a
-nonmodal window. Select a mono recording, give a new output directory (parent
-must exist), choose Automatic or a listed mode and Decode. The image list shows
+nonmodal window. Select a mono recording, choose the remembered Save folder,
+choose Automatic or a listed mode and Decode. The GUI creates a unique session
+directory automatically. The image list shows
 complete/partial status and row counts; selecting an item previews the original
 PNG without changing the saved pixels. Open output accesses PNGs and the report.
 One job runs at a time off the GUI thread. Cancel and closing the window request

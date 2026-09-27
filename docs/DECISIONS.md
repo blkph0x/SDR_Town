@@ -1,5 +1,18 @@
 # Decisions
 
+## DEC-0158 - Continuous SSTV image archive (2026-09-27)
+
+User requests unattended successive-image saving. Existing live helper stops at
+480 seconds/four images; parent caps 540 seconds and retains all images until EOF.
+Add explicit stdin-only continuous helper mode, validate and atomically archive
+each completion, remove verified temporary RGB, and keep only 64 recent metadata
+entries plus current canvas. Keep file-mode budgets unchanged. Live stops on
+user finish/cancel, device changes, gaps or I/O errors; no automatic retunes or
+invented gap concealment. Remember a Pictures/SDR Town/SSTV root in QSettings;
+GUI creates a unique timestamp/UUID session automatically. No overwrites, no
+automatic deletion of saved images. Full disk stops with an error. Completed
+images survive later cancellation/failure; provisional image is never called complete.
+
 ## DEC-0157 - SSTV real-time virtual device evidence (2026-09-27)
 
 User WAV decodes Scottie1 via file and synthetic NFM auto/manual router tests.

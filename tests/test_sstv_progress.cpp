@@ -53,3 +53,19 @@ TEST_CASE("SSTV zero-row partial stays partial and black", "[sstv-progress]") {
     s.append(end(0)); REQUIRE_NOTHROW(s.finish());
     REQUIRE(s.images().size()==1); CHECK(s.images()[0].pixelColor(0,0)==Qt::black);
 }
+
+TEST_CASE("Continuous SSTV archives beyond four images without retaining pixels", "[sstv-progress]") {
+    int completed=0;
+    SstvProgress s([](const auto&,const auto&,int){},[&](const QImage& image,const QByteArray& metadata) {
+        CHECK(image.pixelColor(0,0)==QColor(170,170,170));
+        CHECK(metadata.contains(QByteArray("image-")+QByteArray::number(completed)+".rgb"));
+        ++completed;
+    });
+    for(int i=0;i<100;++i) {
+        s.append(row(0,i));
+        auto e=end(1);e.replace("image-0.rgb",QByteArray("image-")+QByteArray::number(i)+".rgb");
+        s.append(e);
+        CHECK(s.images().empty());CHECK(s.metadata().isEmpty());
+    }
+    REQUIRE_NOTHROW(s.finish());CHECK(completed==100);
+}

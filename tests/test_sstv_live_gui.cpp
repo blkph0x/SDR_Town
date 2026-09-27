@@ -14,6 +14,8 @@
 #include <QTemporaryDir>
 #include <QThread>
 #include <QTimer>
+#include <QLineEdit>
+#include <QSettings>
 
 namespace {
 void backend() {
@@ -77,6 +79,25 @@ TEST_CASE("SSTV GUI separates RF route from image format", "[sstv-live-gui]") {
     CHECK(window.findChild<QComboBox*>("sstvRfMode")->isEnabled());
     const auto screenshot=qEnvironmentVariable("SDR_TOWN_SSTV_RF_SCREENSHOT");
     if(!screenshot.isEmpty()) CHECK(window.grab().save(screenshot));
+}
+
+TEST_CASE("SSTV save root is remembered and sessions never reuse directories", "[sstv-live-gui]") {
+    QTemporaryDir directory;REQUIRE(directory.isValid());
+    QSettings settings;const auto previous=settings.value("sstv/saveFolder");
+    struct Restore {QVariant value;~Restore(){QSettings s;if(value.isValid())s.setValue("sstv/saveFolder",value);else s.remove("sstv/saveFolder");}} restore{previous};
+    QStringList outputs;
+    SstvWindow window([&](const auto&,const QString& output,const auto&,const auto&,const auto&)->nlohmann::json {
+        outputs<<output;
+        if(!QDir().mkdir(output))throw std::runtime_error("session already exists");
+        return {{"outputDirectory",output.toStdString()},{"images",nlohmann::json::array()}};
+    });
+    window.findChild<QLineEdit*>("sstvInput")->setText("fixture.wav");
+    window.findChild<QLineEdit*>("sstvOutput")->setText(directory.filePath("saved"));
+    for(int i=0;i<2;++i){window.findChild<QPushButton*>("sstvDecode")->click();REQUIRE(wait(window));}
+    REQUIRE(outputs.size()==2);CHECK(outputs[0]!=outputs[1]);
+    CHECK(QFileInfo(outputs[0]).absolutePath()==directory.filePath("saved"));
+    SstvWindow reopened(decodeSstvImageFile);
+    CHECK(reopened.findChild<QLineEdit*>("sstvOutput")->text()==directory.filePath("saved"));
 }
 
 TEST_CASE("Live SSTV window saves independently verified streamed images","[sstv-live-gui-recording]") {

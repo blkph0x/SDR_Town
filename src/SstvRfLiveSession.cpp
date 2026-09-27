@@ -40,11 +40,10 @@ nlohmann::json decodeSstvRfLive(const std::shared_ptr<Receiver>& receiver,
     manager.setReceiverCursorToLiveEdge(device,cursor);
     QString detected=QString::fromUtf8(router.selectedMode().data(),qsizetype(router.selectedMode().size()));
     if(routeStatus) routeStatus(detected);
-    QElapsedTimer duration; duration.start();
     const auto result=decodeSstvStream([&]()->SstvStreamItem {
         validate();
         if(auto audio=router.pop()) return *audio;
-        if((finish && finish()) || duration.elapsed()>=540000) return SstvStreamEnd{};
+        if(finish && finish()) return SstvStreamEnd{};
         auto iq=manager.getNewIQWindowForReceiver(device,cursor,router.maxInputSamples());
         validate(); // A concurrent retune must not relabel old IQ with a new center.
         router.process(iq.samples,iq.startAbsolute,iq.streamEpoch,iq.cursorDiscontinuity);
@@ -52,7 +51,7 @@ nlohmann::json decodeSstvRfLive(const std::shared_ptr<Receiver>& receiver,
         if(now!=detected) {detected=now;if(routeStatus) routeStatus(now);}
         if(auto audio=router.pop()) return *audio;
         return SstvStreamIdle{};
-    },imageMode,cancel,preview);
+    },imageMode,cancel,preview,output);
     require(!cancel || !cancel(),"SSTV live session cancelled");
     return saveSstvLiveResult(result,output,{{"rfModeRequested",rfMode.toStdString()},
         {"rfModeSelected",detected.toStdString()},{"rfAutoEvidence",rfMode=="auto" && detected!="searching"?"classic-VIS-parity":"manual-or-no-lock"}});

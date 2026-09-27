@@ -213,7 +213,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if args.len() == 2 && args[1] == "--selftest-hamdrm" {
         return run_selftest_hamdrm();
     }
-    let progress = args.len() == 6 && args[5] == "--progress";
+    let continuous = args.len() == 7 && args[1] == "--stdin" && args[5] == "--progress" && args[6] == "--continuous";
+    let progress = (args.len() == 6 && args[5] == "--progress") || continuous;
     if args.len() != 5 && !progress {
         return Err("expected input.pcm|--stdin sample-rate output-directory MODE [--progress]".into());
     }
@@ -224,7 +225,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return run_hamdrm_file(&args);
     }
     let mode = parse_mode(mode_arg)?;
-    let limit = u64::from(rate) * 480;
+    let limit = if continuous { u64::MAX } else { u64::from(rate) * 480 };
     let (reader, length): (Box<dyn Read>, Option<u64>) = if args[1] == "--stdin" {
         (Box::new(io::stdin()), None)
     } else {
@@ -245,7 +246,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     for event in Decoder::from_samples(mode, samples.by_ref(), rate).events() {
         match event {
             Event::ImageStart(found) => {
-                if active || count >= 4 { return Err("image/session limit exceeded".into()); }
+                if active || (!continuous && count >= 4) { return Err("image/session limit exceeded".into()); }
                 mode_name_s = mode_name(found)?;
                 width = usize::try_from(found.image_width())?;
                 height = usize::try_from(found.image_height())?;
@@ -277,6 +278,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let file = format!("image-{count}.rgb");
                 let mut stream = fs::OpenOptions::new().write(true).create_new(true).open(output.join(&file))?;
                 stream.write_all(&canvas)?;
+                drop(stream); // Parent verifies and removes RGB immediately after this event.
                 println!("{{\"schema\":1,\"backend\":\"{REVISION}\",\"file\":\"{file}\",\"mode\":\"{mode_name_s}\",\"width\":{width},\"height\":{height},\"rows\":{rows},\"complete\":{complete}}}");
                 io::stdout().flush()?;
                 count += 1; active = false;

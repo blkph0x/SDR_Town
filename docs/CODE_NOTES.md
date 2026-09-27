@@ -1,5 +1,14 @@
 # Code notes (tree map)
 
+T-0086 / DEC-0158: SstvWindow remembers the save root and generates unique session
+paths. SstvStreamWorker's optional archive directory selects continuous helper
+stdin mode and completion callbacks in SstvProgress. RGB pixels/revision are
+verified before atomic PNG/JSON saves; temporary RGB is removed, metadata capped
+at 64. SstvLiveSession/SstvRfLiveSession no longer impose a session duration.
+Explicit-path automation and bounded file decoding remain compatible. Tests
+cover parser bounds, save-root persistence, repeat sessions, rolling filenames,
+and optional [.sstv-archive-recording] repeated real recordings beyond old limits.
+
 T-0085: tests/test_sstv_virtual_sdr.cpp registers a paced Soapy fixture and calls
 production decodeSstvRfLive. scripts/test_sstv_virtual_sdr.py prepares arbitrary
 short WAV fixtures and retains logs/images locally. See SSTV_VIRTUAL_SDR.md.

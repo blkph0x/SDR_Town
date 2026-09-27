@@ -1,5 +1,15 @@
 # Development log
 
+## 2026-09-27 - T-0086 continuous SSTV autosave
+
+Added persistent Pictures/SDR Town/SSTV root and automatic unique GUI sessions.
+Live helper archives verified PNG/JSON on completion; no four-image/time cap,
+temporary RGB removed, last 64 metadata entries retained. Cancellation/error
+preserves previously saved pictures; input gaps still fail explicitly. File
+limits and explicit-path automation remain unchanged. All 15 local suites,
+independent GUI recordings, repeated archive/cancel and paced virtual NFM pass.
+Preparing v0.2.114 experimental release; CI/public asset verification pending.
+
 ## 2026-09-27 - T-0085 SSTV virtual SDR
 
 Added reusable paced WAV-to-NFM fake Soapy fixture, production live-session test

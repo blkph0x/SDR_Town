@@ -1,5 +1,10 @@
 # SDR Town
 
+0.2.114 adds unattended SSTV image saving. Select **Save folder** once (default:
+Pictures/SDR Town/SSTV), then **Receive** on your SSTV channel. Each completed
+image is saved immediately into an automatically named session folder; reception
+continues until stopped or an input/device error. See [release notes](docs/RELEASE_0.2.114.md).
+
 0.2.113 hardens Inmarsat input recovery, aircraft identity and failure diagnostics.
 Separately consented five-second Inmarsat diagnostic recordings remain available,
 with bounded HTTPS uploads and CLI modem-input reproduction. See
@@ -43,7 +48,7 @@ antenna control, saved limits/park and hardware-only SWR readback. See the
 [setup and ten-controller compatibility targets](docs/ANTENNA_CONTROL.md).
 Physical controller acceptance and automatic satellite tracking remain open.
 
-**[Download 0.2.113 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.113)**
+**[Download 0.2.114 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.114)**
 includes a matched SDRplay plugin and corrected, dated Inmarsat frequency/rate
 presets. Install the official SDRplay API 3.15+ and service separately. Extract
 the entire ZIP into a fresh folder. RTL bias-T is in Device Manager after

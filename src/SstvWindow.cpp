@@ -23,6 +23,10 @@
 #include <array>
 #include <mutex>
 #include <QTimer>
+#include <QSettings>
+#include <QStandardPaths>
+#include <QDateTime>
+#include <QUuid>
 
 SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(std::move(decode)) {
     setWindowTitle("SSTV Recorded Images");
@@ -44,7 +48,9 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
         form->addRow(label,container);
     };
     row(input_,open_,"Recording",QStyle::SP_DialogOpenButton);
-    row(output_,destination_,"New output folder",QStyle::SP_DirIcon);
+    row(output_,destination_,"Save folder",QStyle::SP_DirIcon);
+    output_->setText(QSettings().value("sstv/saveFolder",
+        QDir(QStandardPaths::writableLocation(QStandardPaths::PicturesLocation)).filePath("SDR Town/SSTV")).toString());
     input_->setObjectName("sstvInput"); output_->setObjectName("sstvOutput");
     mode_=new QComboBox(this);
     mode_->addItem("Automatic (VIS / line sync)","auto");
@@ -65,7 +71,7 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
     auto* controls=new QHBoxLayout;
     decodeButton_=new QPushButton(style()->standardIcon(QStyle::SP_MediaPlay),"Decode",this);
     cancelButton_=new QPushButton(style()->standardIcon(QStyle::SP_MediaStop),"Cancel",this);
-    finishButton_=new QPushButton(style()->standardIcon(QStyle::SP_DialogSaveButton),"Finish and save",this);
+    finishButton_=new QPushButton(style()->standardIcon(QStyle::SP_MediaStop),"Stop receiving",this);
     finishButton_->setObjectName("sstvFinish");
     folder_=new QPushButton(style()->standardIcon(QStyle::SP_DirOpenIcon),"Open output",this);
     decodeButton_->setObjectName("sstvDecode"); cancelButton_->setObjectName("sstvCancel");
@@ -95,14 +101,20 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
         if(!path.isEmpty()) input_->setText(path);
     });
     connect(destination_,&QPushButton::clicked,this,[this] {
-        const auto path=QFileDialog::getSaveFileName(this,"New SSTV output directory",output_->text(),QString(),nullptr,QFileDialog::DontConfirmOverwrite);
-        if(!path.isEmpty()) output_->setText(path);
+        const auto path=QFileDialog::getExistingDirectory(this,"SSTV save folder",output_->text());
+        if(!path.isEmpty()) {output_->setText(path);QSettings().setValue("sstv/saveFolder",path);}
     });
-    connect(decodeButton_,&QPushButton::clicked,this,[this] {startDecode(input_->text(),output_->text(),mode_->currentData().toString());});
+    connect(decodeButton_,&QPushButton::clicked,this,[this] {
+        const auto root=QDir::cleanPath(output_->text().trimmed());
+        if(output_->text().trimmed().isEmpty() || !QDir().mkpath(root)) {status_->setText("Cannot create SSTV save folder");return;}
+        QSettings().setValue("sstv/saveFolder",root);
+        const auto session=QDateTime::currentDateTimeUtc().toString("yyyyMMdd_HHmmss_zzz")+"_"+QUuid::createUuid().toString(QUuid::Id128);
+        startDecode(input_->text(),QDir(root).filePath(session),mode_->currentData().toString());
+    });
     connect(cancelButton_,&QPushButton::clicked,this,&SstvWindow::cancel);
     connect(finishButton_,&QPushButton::clicked,this,&SstvWindow::finishLive);
     connect(source_,&QComboBox::currentIndexChanged,this,[this]{setBusy(busy());});
-    connect(folder_,&QPushButton::clicked,this,[this] {QDesktopServices::openUrl(QUrl::fromLocalFile(resultDirectory_));});
+    connect(folder_,&QPushButton::clicked,this,[this] {QDesktopServices::openUrl(QUrl::fromLocalFile(resultDirectory_.isEmpty()?output_->text():resultDirectory_));});
     connect(images_,&QListWidget::currentRowChanged,this,[this](int index) {
         original_=QImage();
         if(index>=0) original_.load(images_->item(index)->data(Qt::UserRole).toString());
@@ -155,8 +167,8 @@ bool SstvWindow::startDecode(const QString& input,const QString& output,const QS
         catch(const std::exception& error) {status_->setText(QString::fromUtf8(error.what())); finish_.reset();return false;}
     }
     if(!live) input_->setText(input);
-    output_->setText(output); mode_->setCurrentIndex(mode_->findData(mode));
-    images_->clear(); original_=QImage(); resultDirectory_.clear(); updatePreview();
+    mode_->setCurrentIndex(mode_->findData(mode));
+    images_->clear(); original_=QImage(); resultDirectory_=live?output:QString(); updatePreview();
     rfStatus_->setText(live?"searching":"Audio recording (no RF)");
     status_->setText(live?"Listening for SSTV...":"Decoding..."); setBusy(true);
     struct Result {
@@ -200,7 +212,8 @@ bool SstvWindow::startDecode(const QString& input,const QString& output,const QS
                         .arg(image.at("rows").get<int>()).arg(image.at("height").get<int>());
                     auto* item=new QListWidgetItem(description,images_); item->setData(Qt::UserRole,path); item->setToolTip(path);
                 }
-                status_->setText(images_->count()?QString("%1 image(s) saved").arg(images_->count()):"No images detected");
+                const auto saved=result->report.value("savedImages",uint64_t(images_->count()));
+                status_->setText(saved?QString("%1 image(s) saved%2").arg(saved).arg(saved>uint64_t(images_->count())?" (showing latest 64)":""):"No images detected");
                 if(images_->count()) images_->setCurrentRow(0);
             } catch(const std::exception& e) {success=false; result->error=QString::fromUtf8(e.what()); images_->clear(); resultDirectory_.clear();}
         }
@@ -219,7 +232,7 @@ void SstvWindow::setBusy(bool value) {
     source_->setEnabled(!value); input_->setEnabled(!value && !live); open_->setEnabled(!value && !live);
     decodeButton_->setText(live?"Receive":"Decode");
     finishButton_->setVisible(live); finishButton_->setEnabled(value && live);
-    cancelButton_->setEnabled(value); folder_->setEnabled(!value && !resultDirectory_.isEmpty());
+    cancelButton_->setEnabled(value); folder_->setEnabled(!output_->text().isEmpty());
 }
 void SstvWindow::cancel() {if(worker_) {worker_->requestInterruption(); cancelButton_->setEnabled(false); finishButton_->setEnabled(false); status_->setText("Cancelling...");}}
 void SstvWindow::closeEvent(QCloseEvent* event) {

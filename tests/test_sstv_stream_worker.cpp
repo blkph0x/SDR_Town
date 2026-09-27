@@ -1,6 +1,7 @@
 #include "SstvStreamWorker.h"
 #include "SstvImageFile.h"
 #include "SstvModes.h"
+#include "SstvLiveSession.h"
 #include "miniaudio.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -148,4 +149,58 @@ TEST_CASE("SSTV combined queue converter helper matches independent recorded pix
     REQUIRE(result.metadata[index]["complete"]==metadata["complete"]);
     }
     REQUIRE(result.sourceId==7); REQUIRE(result.inputSamples>0); REQUIRE(result.outputSamples>0);
+}
+
+TEST_CASE("SSTV archive report preserves rolling image names", "[sstv-stream-worker]") {
+    QTemporaryDir directory;REQUIRE(directory.isValid());
+    SstvStreamResult result;result.archived=true;result.savedImages=100;
+    result.metadata=nlohmann::json::array({{{"file","image-99.png"},{"complete",true}}});
+    const auto report=saveSstvLiveResult(result,directory.path());
+    CHECK(report.at("images")[0].at("file")=="image-99.png");CHECK(report.at("savedImages")==100);
+}
+
+TEST_CASE("SSTV continuous archive saves repeated images before EOF and survives cancellation", "[.sstv-archive-recording]") {
+    requireBackend();
+    const auto input=qEnvironmentVariable("SDR_TOWN_SSTV_STREAM_INPUT");
+    REQUIRE_FALSE(input.isEmpty());
+    ma_decoder decoder{};const auto config=ma_decoder_config_init(ma_format_f32,1,48000);
+    REQUIRE(ma_decoder_init_file_w(input.toStdWString().c_str(),&config,&decoder)==MA_SUCCESS);
+    struct Guard{ma_decoder* p;~Guard(){ma_decoder_uninit(p);}} guard{&decoder};
+    ma_uint64 length=0;REQUIRE(ma_decoder_get_length_in_pcm_frames(&decoder,&length)==MA_SUCCESS);
+    REQUIRE(length>0);REQUIRE(length<48000*180);
+    std::vector<float> samples(size_t(length),0.f);ma_uint64 read=0;
+    const auto status=ma_decoder_read_pcm_frames(&decoder,samples.data(),length,&read);
+    REQUIRE((status==MA_SUCCESS || status==MA_AT_END));REQUIRE(read==length);
+    for(bool cancelAfterSave:{false,true}) {
+        CAPTURE(cancelAfterSave);
+        QTemporaryDir directory;REQUIRE(directory.isValid());const auto path=directory.filePath("archive");
+        std::atomic<bool> stop=false;bool observed=false;
+        auto task=std::async(std::launch::async,[&] {
+            uint64_t offset=0;QElapsedTimer drain;
+            // Six copies cross the old four-image limit. Idle padding crosses the
+            // old sample budget even with a short Robot fixture, without RF hardware.
+            const uint64_t total=uint64_t(samples.size())*6+48000*481;
+            return decodeSstvStream([&]()->SstvStreamItem {
+                if(offset>=total) {
+                    observed=QFileInfo::exists(QDir(path).filePath("image-5.png.json"));
+                    if(observed){if(cancelAfterSave)stop=true;return SstvStreamEnd{};}
+                    if(!drain.isValid())drain.start();
+                    if(drain.elapsed()>10000)throw std::runtime_error("image not archived before EOF");
+                    return SstvStreamIdle{};
+                }
+                SstvInputEvent block;block.sampleRate=48000;block.targetHz=145800000;
+                block.sourceId=1;block.epoch=1;block.generation=1;block.firstSample=offset;
+                block.count=uint32_t(std::min(uint64_t(SstvInputEvent::maxSamples),total-offset));
+                for(size_t i=0;i<block.count;++i){const auto pos=offset+i;block.samples[i]=pos<uint64_t(samples.size())*6?samples[pos%samples.size()]:0.f;}
+                offset+=block.count;return block;
+            },"auto",[&]{return stop.load();},{},path);
+        });
+        if(cancelAfterSave) REQUIRE_THROWS_WITH(task.get(),Catch::Matchers::ContainsSubstring("cancelled"));
+        else {
+            const auto result=task.get();CHECK(result.savedImages>=6);CHECK(result.images.empty());CHECK(result.outputSamples>48000*480);
+            const auto report=saveSstvLiveResult(result,path);CHECK(report.at("savedImages")==result.savedImages);
+        }
+        REQUIRE(observed);
+        for(int i=0;i<6;++i){const auto file=QDir(path).filePath(QString("image-%1.png").arg(i));CHECK_FALSE(QImage(file).isNull());CHECK(QFileInfo::exists(file+".json"));}
+    }
 }

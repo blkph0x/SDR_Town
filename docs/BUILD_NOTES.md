@@ -1,5 +1,20 @@
 # Build notes
 
+## 2026-09-27 - T-0086 continuous SSTV autosave
+
+Initial workspace test link exposed its missing spdlog dependency; added the
+existing imported target, then app/native/workspace/Inmarsat GUI Release builds
+PASS. Full CTest 15/15 PASS (54.96 s), including Rust transport/backend tests.
+test_sstv_worker.py PASS for Robot36/Martin1, manual/auto and complete/partial,
+both stream worker and live GUI. GUI screenshot inspected at normal size.
+Hidden archive regression on user Scottie1 WAV PASS (41 assertions): six images
+plus 481 seconds silence, 1149 seconds total input, PNG/sidecars exist before EOF;
+second run cancellation preserves all six. Parser test archives 100 events with
+no retained pixels/metadata. Rolling-report filenames and GUI save-root/repeated
+unique sessions pass. Paced virtual Soapy live NFM test produces complete Scottie1
+320x256, 5310490 input samples; evidence build/sstv-autosave-virtual.
+No physical RF proof or production P25/shared demod edits. Publication pending.
+
 ## 2026-09-27 - T-0085 SSTV paced virtual device
 
 Test harness build initially needed Qt6::Gui for QImage and a missing closing

@@ -23,10 +23,10 @@ void SstvProgress::append(const QByteArray& bytes) {
 }
 void SstvProgress::line(const QByteArray& bytes) {
     const auto record=nlohmann::json::parse(bytes.constData(),bytes.constData()+bytes.size());
-    require(record.at("schema")==1 && images_.size()<4,"Invalid SSTV preview schema/image count");
+    require(record.at("schema")==1 && (complete_ || count_<4),"Invalid SSTV preview schema/image count");
     if(record.value("kind",std::string())!="row") {
         require(!record.contains("kind"),"Unknown SSTV preview event");
-        require(record.at("file")=="image-"+std::to_string(images_.size())+".rgb","Invalid SSTV preview image sequence");
+        require(record.at("file")=="image-"+std::to_string(count_)+".rgb","Invalid SSTV preview image sequence");
         if(image_.isNull() && record.at("rows")==0) {
             mode_=QString::fromStdString(record.at("mode").get<std::string>());
             const auto* spec=sstvModeById(record.at("mode").get<std::string>());
@@ -38,11 +38,12 @@ void SstvProgress::line(const QByteArray& bytes) {
             && record.at("width")==image_.width() && record.at("mode")==mode_.toStdString(),"SSTV preview completion mismatch");
         require(!record.at("complete").get<bool>() || rows_==image_.height(),"Missing SSTV preview rows");
         preview_(image_,mode_,rows_);
-        images_.push_back(image_); image_=QImage(); seen_.clear(); rows_=0;
-        metadata_+=bytes+'\n';
+        if(complete_) {complete_(image_,bytes);bytes_=0;}
+        else {images_.push_back(image_);metadata_+=bytes+'\n';}
+        ++count_;image_=QImage(); seen_.clear(); rows_=0;
         return;
     }
-    require(record.at("image")==images_.size(),"Invalid SSTV preview image index");
+    require(record.at("image")==count_,"Invalid SSTV preview image index");
     for(const auto* key:{"width","height","row","image"}) require(record.at(key).is_number_integer(),"Noninteger SSTV preview field");
     const auto mode=QString::fromStdString(record.at("mode").get<std::string>());
     const int width=record.at("width").get<int>(),height=record.at("height").get<int>(),row=record.at("row").get<int>();

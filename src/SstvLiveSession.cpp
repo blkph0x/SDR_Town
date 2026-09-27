@@ -17,25 +17,16 @@ nlohmann::json decodeSstvLive(const std::shared_ptr<SstvReceiverFeed>& feed,
     validateReceiver();
     auto queue=feed->attach();
     struct Guard {std::shared_ptr<SstvReceiverFeed> feed;std::shared_ptr<SstvLiveInput> queue;~Guard(){feed->detach(queue);}} guard{feed,queue};
-    QElapsedTimer duration; duration.start();
-    double seconds=0;
     bool finishing=false;
     const auto result=decodeSstvStream([&]()->SstvStreamItem {
         validateReceiver();
         if(!finishing && finish && finish()) {feed->finish(queue);finishing=true;}
-        if(duration.elapsed()>=540000 || seconds>=kSstvMaxDurationSec) return SstvStreamEnd{};
         if(auto item=queue->pop()) {
-            if(item->count && item->sampleRate>0) {
-                const size_t remaining=size_t(std::max(0.,std::floor((kSstvMaxDurationSec-seconds)*item->sampleRate)));
-                item->count=std::min(item->count,remaining);
-                if(!item->count) return SstvStreamEnd{};
-                seconds+=double(item->count)/item->sampleRate;
-            }
             return *item;
         }
         if(finishing) return SstvStreamEnd{};
         return SstvStreamIdle{};
-    },mode,cancel,preview);
+    },mode,cancel,preview,output);
     feed->detach(queue);
     require(!cancel || !cancel(),"SSTV live session cancelled");
     return saveSstvLiveResult(result,output);
@@ -43,14 +34,15 @@ nlohmann::json decodeSstvLive(const std::shared_ptr<SstvReceiverFeed>& feed,
 
 nlohmann::json saveSstvLiveResult(const SstvStreamResult& result,const QString& output,nlohmann::json extra) {
     auto images=result.metadata;
-    for(size_t i=0;i<images.size();++i)
+    for(size_t i=0;!result.archived && i<images.size();++i)
         images[i]["file"]="image-"+std::to_string(i)+(images[i].at("complete").get<bool>()?".png":".partial.png");
     nlohmann::json report{{"decoder","sstv-live"},{"images",images},
         {"outputDirectory",QFileInfo(output).absoluteFilePath().toStdString()},
         {"inputRate",result.inputRate},{"inputSamples",result.inputSamples},{"outputSamples",result.outputSamples},
-        {"targetHz",result.targetHz},{"sourceId",result.sourceId},{"epoch",result.epoch},{"generation",result.generation}};
+        {"targetHz",result.targetHz},{"sourceId",result.sourceId},{"epoch",result.epoch},{"generation",result.generation},
+        {"autosaved",result.archived},{"savedImages",result.archived?result.savedImages:result.images.size()}};
     report.update(extra);
-    require(QDir(QFileInfo(output).absolutePath()).mkdir(QFileInfo(output).fileName()),"Cannot create new SSTV output folder");
+    if(!result.archived)require(QDir(QFileInfo(output).absolutePath()).mkdir(QFileInfo(output).fileName()),"Cannot create new SSTV output folder");
     for(size_t i=0;i<result.images.size();++i) {
         QSaveFile image(QDir(output).filePath(QString::fromStdString(images[i].at("file").get<std::string>())));
         require(image.open(QIODevice::WriteOnly) && result.images[i].save(&image,"PNG") && image.commit(),"Cannot save SSTV live image");
