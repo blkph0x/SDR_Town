@@ -14,6 +14,7 @@ def main():
 
     def run(path, kind="bits", env=None):
         result = subprocess.run([str(args.exe.resolve()), "--cli", "--no-control-server",
+                                 "--allow-multiple", "--no-remote-diagnostics",
                                  "--cmd", f'rds {kind} "{path.resolve()}"'],
                                 capture_output=True, text=True, timeout=30, check=True, env=env)
         return result.stdout

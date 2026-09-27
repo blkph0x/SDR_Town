@@ -15,8 +15,23 @@ Release app/test builds PASS. New pipeline fixture initially failed compilation
 (missing InmarsatPipeline.h include); repaired, then 21630 native assertions /
 12 cases PASS. Full CTest 15/15 PASS (51.54 s). GUI consent dialog screenshot
 inspected at 500x340: controls fit; capture/send disabled before consent/data.
-Application GUI dry-run PASS with no errors/warnings. Public binary qualification
-pending; no live RF acceptance claimed.
+Application GUI dry-run PASS with no errors/warnings. No live RF acceptance claimed.
+
+Published source 8579852875211f5a05d379aa26cc42be5ad898b2. Windows master
+36290344389 and release 36290344624 SUCCESS; both YAML checks SUCCESS.
+Public: https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.112
+ZIP SHA256 b23b1653875857b49d5287b559abc673be6176cd0944f6f4902c42b97345763b
+EXE SHA256 1b27dcedfba285f2cc9f96ed7598deb477ba2a312d7bdbf3620f4d7b379f31ea
+SDRplay SHA256 470c1624300566f5c55a617293d247ca076238b9060c13b58eee8e59970a3bd2
+Downloaded source/version/run and hashes verified. CLI help/status and five Aero
+surveys PASS. RDS first failed due to user's open instance (not decoder failure);
+file-only test now explicitly allows another instance and disables telemetry.
+RDS, diagnostic reproduction/unpack and shipped GUI dry-run then PASS.
+Public synthetic upload using downloaded configuration and exact local admin
+retrieval PASS, receipt 85ecd41a8d944ea99bb18c6d1ea229cd. No real RF uploaded.
+Public/non-draft/experimental verified. Latest explicitly restored to signed
+v0.2.96 after GitHub reported v0.2.111; final latest API confirms v0.2.96.
+P25 guard PASS: 24 paths changed, no protected files. User's running app untouched.
 
 ## 2026-09-27 - T-0082 Inmarsat identity hardening
 

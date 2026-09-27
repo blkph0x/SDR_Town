@@ -1,8 +1,10 @@
 # Task list (canonical)
 
-T-0083 | in progress | Bounded Inmarsat diagnostic recordings |
+T-0083 | done | Bounded Inmarsat diagnostic recordings |
 DEC-0155. Manual capture/review/send, authenticated collector quota/storage,
 reproduction tool, privacy/error tests and public release qualification.
+15/15 suites, both Windows CI builds and downloaded app checks PASS; synthetic
+public HTTPS receipt verified with shipped configuration. Live RF: ISS-0039.
 
 T-0082 | done | Inmarsat identity isolation and map usability |
 DEC-0154. Preserve PCM AES in all paths, flush on changes and show unlocated or

@@ -127,6 +127,10 @@ running the repair. Do not claim secure live delivery or publish this as fully
 qualified until server deployment and public receipt have been verified.
 
 Threat-model gap: distributed shared client credentials are extractable.
+Deployment update 2026-09-27/T-0083: matching collector restarted and dedicated
+proxy upload route enabled; synthetic HTTPS recording delivery and exact local
+admin retrieval verified with shipped config. Earlier deployment blockage is
+resolved. Remaining enrollment/authenticity and broader event retention are open.
 Schema/rate limits mitigate abuse but cannot establish truthful reports.
 Per-install enrollment, revocation and durable retention quotas remain open;
 no per-install authentication or anti-forgery guarantee is claimed.

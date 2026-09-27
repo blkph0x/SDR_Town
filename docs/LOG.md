@@ -7,6 +7,9 @@ excerpt, separate consent, bounded review/send and cold-start reproduction.
 Collector durable quotas/retention and admin-only retrieval tested. Updated only
 the dedicated proxy upload route after reproducing 404; synthetic public receipt
 verified. Ordinary telemetry remains counters-only; no always-on audio capture.
+Published and verified v0.2.112 (8579852), Windows release run 36290344624 PASS.
+Downloaded app recording/RDS/GUI smoke checks PASS. Synthetic HTTPS upload
+using shipped credential verified; signed updater remains v0.2.96.
 
 ## 2026-09-27 - T-0082 Inmarsat hardening
 
