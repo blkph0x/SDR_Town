@@ -2,6 +2,9 @@
 
 ## 2026-09-27 - T-0081 RDS and power gates
 
+Published source bf8e2bb. Windows CI 36285842641 and YAML 36285842668 SUCCESS.
+No runtime change or new release; public v0.2.110 remains current.
+
 Release tests build PASS. Initial harness assumed MA_AT_END for partial read;
 corrected to accept MA_SUCCESS or MA_AT_END with explicit returned frame count.
 Candidate double-filter route then FAILED expected two groups (got one); draining
