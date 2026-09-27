@@ -62,8 +62,12 @@ not continuous conversation or an acoustic measurement at physical speakers.
 
 ## Remaining gates
 
-- Actual 8400 speech needs matched tester input with understandable reference
-  JAERO/InmarScope output. The submitted bundles are data, not voice.
+- T-0093 now adds a real submitted v0.2.116 8400 clip with five seconds of live
+  PCM and coherent local speech recognition. All four shipped replay paths
+  agree on its final three seconds after cold acquisition. No new input gaps,
+  speaker drops/zero-fill or resets in nearby live telemetry. This establishes
+  a useful working field example, not a quality score or universal acceptance.
+  Longer speech and matched JAERO/InmarScope reference output remain needed.
 - MIAM/OHMA multipart application reassembly remains unsupported. MIAM segments
   never enter the single-transfer parser or become completed messages. This
   is separate from existing ACARS transport reassembly.

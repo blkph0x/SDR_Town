@@ -1,5 +1,16 @@
 # Task list (canonical)
 
+T-0093 | done (diagnosis; no application change) | First submitted 8400 speech |
+Replay submitted bundle 086bf146 and correlate live output with remote counters.
+Five seconds of live PCM, coherent local STT at beam 1/5, no clipping; four
+zero intervals up to 100 ms are present before speaker playback. No new speaker
+overflow/zero-fill, input gaps, codec failures or resets around capture. Fresh
+decoder acquires late and produces the final three seconds; released GUI/CLI
+fast/paced analytic-IF replay is byte-identical to the native direct-IF probe.
+No quality percentage or universal RF acceptance inferred from this short clip.
+Private audio/transcripts remain under ignored build/. See BUILD_NOTES and
+INMARSAT_APPLICATION_VOICE_AUDIT_20260927.md. Documentation-only publication.
+
 T-0092 | done | Inmarsat 10500 field evidence and aircraft receive controls |
 Replay the three submitted IF bundles before changing DSP. Separate internet
 and locally received aircraft; persistent network off must reject late replies.

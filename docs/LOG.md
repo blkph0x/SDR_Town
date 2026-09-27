@@ -1,5 +1,16 @@
 # Development log
 
+## 2026-09-27 - T-0093 first submitted 8400 speech check
+
+Inspected new v0.2.116 recording and matching remote telemetry. This live PCM
+contains a coherent sentence according to local STT, not only codec silence.
+No clipping or observed playback starvation in its window; four brief zero
+intervals already exist in decoder PCM and cannot be classified as speech loss
+from the aggregate M/E/T counter. Native direct-IF and all four shipped replay
+paths match after cold acquisition. No speculative source changes or new binary;
+preserve this working result. Private waveform/transcript evidence stays local.
+Documented measurements and limits in BUILD_NOTES and the application/voice audit.
+
 ## 2026-09-27 - T-0092 published qualification
 
 Published v0.2.116-experimental from 238d48f through successful release Actions

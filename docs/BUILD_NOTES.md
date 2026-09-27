@@ -1,5 +1,43 @@
 # Build notes
 
+## 2026-09-27 - T-0093 submitted 8400 live speech
+
+Received bundle 086bf146 from v0.2.116, five seconds of 48 kHz modem IF and
+40000 live PCM samples at 8 kHz. Recording counter deltas: input +240000,
+CRC good +30/bad +0, PCM +40000, codec corrections +9, combined M/E/T flags +8.
+Do not describe all eight as erasures: InmarsatVoiceEvidence combines mute,
+erasure and tone flags. Live PCM has no clipped samples, peak 11416, RMS
+-26.6435 dBFS. Zero 20 ms frames occupy [0,.02], [3.5,3.52], [3.78,3.88],
+[4.2,4.22] seconds: 160 ms total, maximum contiguous 100 ms. These are decoder
+PCM intervals, not proof of lost speech or a speaker underrun.
+
+Existing project .venv-stt faster-whisper base.en CPU/int8 returns a coherent
+English sentence with both beam 1 and 5; beam 5 no-speech probability .01094,
+mean log probability -.35371. ASR is supporting evidence, not a human quality
+score or physical speaker measurement. Transcript and recording stay private.
+System Python STT was not usable (Torch/NumPy mismatch, faster-whisper child
+access violation); the existing project-local backend works, no environment or
+application dependency changes made.
+
+Native direct-IF cold replay: eight C frames, two rejected, CRC 18 good/6 bad,
+150 voice words/24000 PCM samples, seven corrections/seven combined mute flags,
+zero repeats. It recovers the final three seconds; last-second correlation
+with live PCM .99137. This is late cold acquisition, not a live two-second loss.
+Shipped v0.2.116 executable with analytic IQ reconstructed from the submitted
+IF (NOT the original tuner IQ): GUI/CLI fast/paced all match native direct-IF
+PCM exactly. WAV SHA256
+`b1d4c75b92ece9280769de46fc3d0f3d224c990d40ee189e0f4afa7e74659282`.
+The original wideband IQ excerpt is only 16384 samples at 2.048 Msps (8 ms),
+insufficient to reproduce the complete tuner/channelizer path for five seconds.
+
+Matching live session telemetry around capture has continuous lock, zero
+speaker drops/device failures, unchanged speakerZeroFill=10000, zero input
+discontinuities and unchanged reset/rejected-C-frame/source-identity counts.
+Average processing-time/input-time ratio ~.155, not a whole-PC CPU percentage.
+No warnings in the examined two-minute window. No DSP, queue, vocoder or gain
+change is justified by this sample. Longer speech, other sources and a known
+reference rendition are still needed for broader acceptance.
+
 ## 2026-09-27 - T-0092 public release verification
 
 Source 238d48fd835f29672f1f4598672a134e4a922e53; release Windows Actions
