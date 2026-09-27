@@ -1,5 +1,17 @@
 # Code notes (tree map)
 
+T-0091 / DEC-0160: DiagnosticsObserver owns GUI-thread read-only actions and
+periodic snapshots. DiagnosticsMenu invokes the existing MainWindow diagnostic
+slot through Qt metadata, never opens a radio/audio engine. AppBootstrap cached
+device inventory adds SDRplay/RTL settings, tune sequencing and a non-consuming
+single-sample cursor read (sample discarded). Existing MainWindow snapshot adds
+audio health; old health timers now check opt-out. No P25 algorithms changed.
+RemoteDiagnostics has bounded pre-Qt ingress, coalescing and priority; all data
+obeys the same byte ceiling. ProcessPerformance provides identifier-free PC specs.
+Collector indexes events separately from issue grouping, authenticates history,
+backfills bounded legacy data and applies retention. Tests cover consent, floods,
+privacy, migration, authorization, pagination and HTML escaping.
+
 T-0086 / DEC-0158: SstvWindow remembers the save root and generates unique session
 paths. SstvStreamWorker's optional archive directory selects continuous helper
 stdin mode and completion callbacks in SstvProgress. RGB pixels/revision are

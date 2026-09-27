@@ -222,9 +222,38 @@ QJsonArray diagnosticsDeviceInventory(bool includeRuntimeState)
             row["gainMaxDb"] = d.gainMax;
             row["ppm"] = d.frequencyCorrectionPpm;
             row["antenna"] = QString::fromStdString(d.antenna).left(80);
+            row["directSampling"] = d.directSampling;
+            row["isSdrplay"] = d.isSdrplay;
+            row["model"] = QString::fromStdString(d.sdrplayModel).left(80);
+            row["agcEnabled"] = d.agcEnabled;
+            row["ifGainReductionDb"] = d.ifgrDb;
+            row["rfGainReductionState"] = d.rfgrDb;
+            row["deviceBandwidthHz"] = d.bandwidthHz;
+            row["rxChannel"] = static_cast<int>(d.rxChannel);
+            row["sdrplayProbed"] = d.sdrplayProbed;
+            QJsonObject settings;
+            for(const auto* key:{SdrplaySettings::kBiasT,SdrplaySettings::kRfNotch,SdrplaySettings::kDabNotch,
+                                 SdrplaySettings::kExtRef,SdrplaySettings::kHdr,SdrplaySettings::kIqCorr,
+                                 SdrplaySettings::kAgcSetpoint,SdrplaySettings::kRfGainSel}) {
+                const auto value=d.soapySettings.find(key);
+                if(value!=d.soapySettings.end()) settings[key]=QString::fromStdString(value->second).left(24);
+            }
+            row["sdrplaySettings"] = settings;
+            row["controlStatus"] = diagnosticsRedactIdentifierLikeText(QString::fromStdString(d.sdrplayControlStatus)).left(240);
+            row["rtlBiasRequested"] = d.rtlBiasT.enabled;
+            row["rtlBiasSupported"] = d.rtlBiasT.supported;
+            if(d.rtlBiasT.reported.has_value()) row["rtlBiasReported"] = *d.rtlBiasT.reported;
             if (includeRuntimeState) {
                 row["streaming"] = mgr.isStreaming(i);
                 row["runtimeState"] = QString::fromStdString(mgr.getRuntimeStateLabel(i)).left(160);
+                row["currentCenterHz"] = mgr.getCurrentCenterFreq(i);
+                row["currentSampleRateHz"] = mgr.getCurrentSampleRate(i);
+                row["tuneRequested"] = QString::number(mgr.getCenterTuneRequestSeq(i));
+                row["tuneApplied"] = QString::number(mgr.getCenterTuneAppliedSeq(i));
+                // Non-consuming read: the sample itself is deliberately discarded.
+                const auto cursor=mgr.getRecentIQWindowWithCursor(i,1);
+                row["iqWritten"] = QString::number(cursor.endAbsolute);
+                row["streamEpoch"] = QString::number(cursor.streamEpoch);
             }
             rows.append(row);
         }

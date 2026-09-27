@@ -1,5 +1,14 @@
 # Development log
 
+## 2026-09-27 - T-0091 session diagnostics
+
+User needs automatic opted-in startup/settings/actions/PC reports, not just the
+few grouped issues. Implemented bounded observers and prioritized transport,
+authenticated report history and retention/migration. Local collector preserves
+credentials, consent and HTTPS endpoint; historical reports indexed. New app
+delivers PC/runtime evidence. P25 changes remain limited to observability only;
+missed-grant repair tasks are not implemented by this diagnostics pass.
+
 ## 2026-09-27 - T-0087 P25 missed grants / silent follow diagnosis
 
 User clarified missed grants and formerly clear talkgroups with no voice.

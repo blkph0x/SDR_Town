@@ -1,6 +1,12 @@
 #include "RemoteDiagnostics.h"
 #include "FmDiagnosticsLog.h"
 #include "DiagnosticsMenu.h"
+#include "DiagnosticsObserver.h"
+#include <QPushButton>
+#include <QLineEdit>
+#include <QDoubleSpinBox>
+#include <QFileDialog>
+#include <thread>
 #include <QApplication>
 #include <QMainWindow>
 #include <QMenuBar>
@@ -176,4 +182,61 @@ TEST_CASE("Diagnostics menu cancellation and opt-out preserve explicit consent")
     action->setChecked(true);action->trigger();
     CHECK_FALSE(action->isChecked());CHECK_FALSE(settings.value("remoteDiagnostics/consent").toBool());
     settings.remove("remoteDiagnostics/consent");
+}
+
+TEST_CASE("Opted-in GUI actions are bounded private and session scoped") {
+    QObject owner;QWidget panel;
+    QPushButton tune("Set/Tune Device",&panel),secret("private-call-sign",&panel);
+    secret.setObjectName("credential-do-not-send");
+    QLineEdit input("password-do-not-send",&panel);
+    QDoubleSpinBox number(&panel);number.setRange(0,1000);number.setValue(420.35);
+    QString session;int snapshots=0;
+    QList<QPair<QString,QJsonObject>> reports;
+    DiagnosticsObserver observer(&owner,[&]{++snapshots;return QJsonObject{{"fixture",true}};},
+        [&]{return session;},[&](const QString& type,const QJsonObject& value){if(type!="ui.intent")reports.append({type,value});});
+    observer.observe(&panel);observer.observe(&panel);
+    tune.click();observer.tick();CHECK(reports.isEmpty());CHECK(snapshots==0);
+    session="first";observer.tick();REQUIRE(reports.size()==1);CHECK(snapshots==1);
+    reports.clear();tune.click();secret.click();number.editingFinished();input.setText("other-secret");
+    observer.tick();observer.tick();
+    REQUIRE(reports.size()==2);
+    const auto actions=reports[0].second["actions"].toArray();REQUIRE(actions.size()==3);
+    CHECK(actions[0].toObject()["command"]=="Set/Tune Device");
+    CHECK(actions[2].toObject()["value"].toDouble()==420.35);
+    const auto encoded=QJsonDocument(reports[0].second).toJson();
+    CHECK_FALSE(encoded.contains("private-call"));CHECK_FALSE(encoded.contains("credential"));
+    CHECK_FALSE(encoded.contains("password"));CHECK_FALSE(encoded.contains("other-secret"));
+    reports.clear();for(int i=0;i<100;++i)tune.click();observer.tick();observer.tick();
+    REQUIRE(reports.size()==2);CHECK(reports[0].second["actions"].toArray().size()==32);
+    CHECK(reports[0].second["dropped"].toInt()==68);
+    reports.clear();tune.click();session.clear();observer.tick();CHECK(reports.isEmpty());
+    session="second";observer.tick();REQUIRE(reports.size()==1);CHECK(reports[0].first=="app.runtime");
+    QFileDialog file;QPushButton fileButton("Apply",&file);observer.observe(&file);
+    reports.clear();fileButton.click();observer.tick();observer.tick();CHECK(reports.isEmpty());
+}
+
+TEST_CASE("Diagnostic ingress and queues retain critical context under decoder floods") {
+    RemoteDiagnosticsConfig c;c.enabled=true;c.endpoint=QUrl("http://127.0.0.1:1/ingest");c.maxQueue=4;
+    RemoteDiagnosticsClient client;client.configure(c);
+    client.submit("app.system","info",{{"cpuModel","fixture"}});
+    client.submit("app.runtime","info",{{"fixture",true}});
+    for(int i=0;i<1000;++i) client.submit("p25.voice","info",{{"counter",i}});
+    auto stats=client.deliveryStatistics();CHECK(stats["queued"].toInt()==3);
+    CHECK(stats["coalesced"].toInt()==999);CHECK(stats["queueDropped"].toInt()==0);
+    std::thread producer([&]{for(int i=0;i<5000;++i)client.submit("p25.log","info",{{"counter",i}});});
+    producer.join();CHECK(client.deliveryStatistics()["ingressDropped"].toInt()==4999);
+    client.stopWithoutSending();QCoreApplication::processEvents();
+    CHECK(client.deliveryStatistics()["queued"].toInt()==0);
+    CHECK(client.deliveryStatistics()["acknowledged"].toInt()==0);
+    client.submit("app.runtime","info",{});CHECK(client.deliveryStatistics()["queued"].toInt()==0);
+}
+
+TEST_CASE("Startup system specifications omit personal machine identifiers") {
+    auto info=ProcessPerformance::systemInfo();
+    REQUIRE(info["logicalCpus"].toInt()>0);REQUIRE_FALSE(info["os"].toString().isEmpty());
+    CHECK_FALSE(info.contains("hostname"));CHECK_FALSE(info.contains("username"));
+    CHECK_FALSE(info.contains("machineId"));CHECK_FALSE(info.contains("ip"));
+#ifdef _WIN32
+    CHECK(info["physicalTotalBytes"].toDouble()>0);CHECK_FALSE(info["cpuModel"].toString().isEmpty());
+#endif
 }

@@ -41,6 +41,19 @@ bool g_remoteDiagnosticsEnabled = false;
 QString g_remoteDiagnosticsSessionId;
 QString g_remoteDiagnosticsClientId;
 
+// DEC-0160: routine decoder telemetry must not evict startup/control evidence.
+int eventPriority(const QString& type, const QString& severity) {
+    if(type=="app.system" || type=="app.start" || type=="diagnostics.enabled") return 3;
+    if(type=="ui.actions" || type=="ui.intent" || type=="app.runtime" || type=="diagnostics.snapshot" ||
+       severity=="error" || severity=="fatal" || severity=="critical") return 2;
+    if(type=="app.performance.sample" || severity=="warn" || severity=="warning") return 1;
+    return 0;
+}
+
+bool replaceableEvent(const QString& type, const QString& severity) {
+    return eventPriority(type,severity)==0 || type=="app.performance.sample";
+}
+
 QString envString(const char* name)
 {
     return QString::fromLocal8Bit(qgetenv(name)).trimmed();
@@ -251,12 +264,14 @@ void RemoteDiagnosticsClient::configure(const RemoteDiagnosticsConfig& cfg)
     }
     if(enabled()) {m_performance.sample();m_performanceTimer->start(30000);} // DEC-0139: bounded sampling budget.
     else m_performanceTimer->stop();
+    m_accepting.store(enabled(), std::memory_order_release);
 }
 
 QJsonObject RemoteDiagnosticsClient::deliveryStatistics() const {
     return {{"acknowledged",double(m_acknowledged)},{"networkDropped",double(m_networkDropped)},
         {"queueDropped",double(m_queueDropped)},{"budgetDeferred",double(m_budgetDropped)},
         {"oversizeDropped",double(m_oversizeDropped)},{"queued",m_queue.size()},
+        {"coalesced",double(m_coalesced)},{"ingressDropped",double(m_inputDropped.load())},
         {"inFlight",m_inFlight},{"lastHttpStatus",m_lastHttpStatus}};
 }
 
@@ -293,14 +308,42 @@ QString RemoteDiagnosticsClient::ensureClientId()
 
 void RemoteDiagnosticsClient::submit(QString type, QString severity, QJsonObject payload)
 {
+    if(!m_accepting.load(std::memory_order_acquire)) return;
     if (QThread::currentThread() != thread()) {
+        // One queued wakeup, not one Qt event per DSP report. Both queues are bounded.
+        std::lock_guard<std::mutex> lock(m_inputMutex);
+        if(!m_accepting.load(std::memory_order_relaxed)) return;
+        if(replaceableEvent(type,severity)) {
+            for(auto& input:m_input) if(input.type==type && input.severity==severity) {
+                input.payload=std::move(payload); ++m_inputDropped; return;
+            }
+        }
+        constexpr int ingressLimit=128; // DEC-0160 transport memory budget.
+        if(m_input.size()>=ingressLimit) {
+            auto victim=std::min_element(m_input.begin(),m_input.end(),[](const auto& a,const auto& b) {
+                return eventPriority(a.type,a.severity)<eventPriority(b.type,b.severity);
+            });
+            ++m_inputDropped;
+            if(eventPriority(victim->type,victim->severity)>eventPriority(type,severity)) return;
+            m_input.erase(victim);
+        }
+        m_input.push_back({std::move(type),std::move(severity),std::move(payload)});
+        if(m_inputScheduled) return;
+        m_inputScheduled=true;
         const QPointer<RemoteDiagnosticsClient> self(this);
-        QMetaObject::invokeMethod(this, [self, type = std::move(type), severity = std::move(severity), payload = std::move(payload)]() mutable {
-            if (self) self->submitOnOwnerThread(std::move(type), std::move(severity), std::move(payload));
-        }, Qt::QueuedConnection);
+        QMetaObject::invokeMethod(this, [self]() { if(self) self->drainInput(); }, Qt::QueuedConnection);
         return;
     }
     submitOnOwnerThread(std::move(type), std::move(severity), std::move(payload));
+}
+
+void RemoteDiagnosticsClient::drainInput() {
+    QList<InputEvent> input;
+    {
+        std::lock_guard<std::mutex> lock(m_inputMutex);
+        input.swap(m_input); m_inputScheduled=false;
+    }
+    for(auto& item:input) submitOnOwnerThread(std::move(item.type),std::move(item.severity),std::move(item.payload));
 }
 
 void RemoteDiagnosticsClient::submitOnOwnerThread(QString type, QString severity, QJsonObject payload)
@@ -330,18 +373,31 @@ void RemoteDiagnosticsClient::submitOnOwnerThread(QString type, QString severity
     envelope["oversizeDropped"] = QString::number(m_oversizeDropped);
 
     const QByteArray body = QJsonDocument(envelope).toJson(QJsonDocument::Compact);
-    if (body.size() > m_cfg.maxPayloadBytes) {
+    if (body.size() > std::min(m_cfg.maxPayloadBytes,m_cfg.maxBytesPerMinute)) {
         ++m_oversizeDropped;
         return;
     }
 
-    while (m_queue.size() >= m_cfg.maxQueue) {
-        m_queue.removeFirst();
+    const int priority=eventPriority(type,severity);
+    const QString key=type+":"+severity;
+    if(replaceableEvent(type,severity)) {
+        for(auto it=m_queue.begin();it!=m_queue.end();++it) if(it->key==key) {
+            m_queue.erase(it); ++m_coalesced; break;
+        }
+    }
+    if (m_queue.size() >= m_cfg.maxQueue) {
+        auto victim=std::min_element(m_queue.begin(),m_queue.end(),[](const auto& a,const auto& b) {
+            return a.priority<b.priority;
+        });
         ++m_queueDropped;
+        if(victim->priority>priority) return;
+        m_queue.erase(victim);
     }
     PendingEvent pending;
     pending.body = body;
     pending.bytes = body.size();
+    pending.key=key;
+    pending.priority=priority;
     m_queue.push_back(std::move(pending));
     schedulePump();
 }
@@ -432,18 +488,21 @@ void RemoteDiagnosticsClient::pump()
         return;
     }
 
-    if (m_windowBytes + m_queue.front().bytes > m_cfg.maxBytesPerMinute) {
+    // Priority applies within the same bandwidth ceiling. A smaller report may
+    // use the remaining budget even when a large report cannot fit this minute.
+    auto next=m_queue.end();
+    for(auto it=m_queue.begin();it!=m_queue.end();++it) {
+        if(m_windowBytes+it->bytes<=m_cfg.maxBytesPerMinute &&
+           (next==m_queue.end() || it->priority>next->priority)) next=it;
+    }
+    if (next==m_queue.end()) {
         schedulePump(static_cast<int>(std::max<qint64>(250, 60 * 1000 - (nowMs - m_windowStartMs))));
         ++m_budgetDropped;
-        while (m_queue.size() > std::max(1, m_cfg.maxQueue / 2)) {
-            m_queue.removeFirst();
-            ++m_queueDropped;
-        }
         return;
     }
 
-    PendingEvent pending = std::move(m_queue.front());
-    m_queue.removeFirst();
+    PendingEvent pending = std::move(*next);
+    m_queue.erase(next);
     m_windowBytes += pending.bytes;
     m_lastSendMs = nowMs;
     m_inFlight = true;
@@ -581,7 +640,8 @@ RemoteDiagnosticsClient* remoteDiagnosticsConfigureFromProcess(int argc, char* a
     QJsonObject payload;
     payload["endpointHost"] = cfg.endpoint.host();
     payload["endpointPath"] = cfg.endpoint.path().left(120);
-    payload["configSource"] = cfg.configSource.left(240);
+    payload["configSource"] = cfg.configSource.contains('/') || cfg.configSource.contains('\\')
+        ? QStringLiteral("configuration file") : cfg.configSource.left(120);
     payload["clientId"] = configuredClientId;
     payload["hardwareHash"] = configuredHardwareHash;
     payload["maxBytesPerMinute"] = cfg.maxBytesPerMinute;
@@ -589,29 +649,34 @@ RemoteDiagnosticsClient* remoteDiagnosticsConfigureFromProcess(int argc, char* a
     payload["minIntervalMs"] = cfg.minIntervalMs;
     payload["maxQueue"] = cfg.maxQueue;
     client->submit("diagnostics.enabled", "info", payload);
+    QMetaObject::invokeMethod(client,[client] {
+        auto system=ProcessPerformance::systemInfo();
+        system["version"]=SDR_TOWN_VERSION;
+        QFile provenance(QCoreApplication::applicationDirPath()+"/build-info.json");
+        if(provenance.open(QIODevice::ReadOnly) && provenance.size()<=16384) {
+            const auto info=QJsonDocument::fromJson(provenance.readAll()).object();
+            QJsonObject build;
+            for(const auto& key:{"commit","version","projectVersion","generatedUtc","workflowRun",
+                                 "sdrplayModuleCommit","sdrplayApiRequired"})
+                if(info.value(key).isString()) build[key]=info.value(key).toString().left(100);
+            system["build"]=build;
+        }
+        client->submit("app.system","info",system);
+    },Qt::QueuedConnection);
     return client;
 }
 
 void remoteDiagnosticsSubmit(const QString& type, const QString& severity, const QJsonObject& payload)
 {
-    QPointer<RemoteDiagnosticsClient> client;
-    {
-        QMutexLocker locker(&g_remoteDiagnosticsMutex);
-        client = g_remoteDiagnosticsClient;
-    }
-    if (!client) return;
-    client->submit(type, severity, payload);
+    // Keep shutdown from deleting the client between lookup and bounded enqueue.
+    QMutexLocker locker(&g_remoteDiagnosticsMutex);
+    if (g_remoteDiagnosticsClient) g_remoteDiagnosticsClient->submit(type, severity, payload);
 }
 
 void remoteDiagnosticsCheckClientStatus(QObject* context, std::function<void(const QJsonObject&)> callback)
 {
-    QPointer<RemoteDiagnosticsClient> client;
-    {
-        QMutexLocker locker(&g_remoteDiagnosticsMutex);
-        client = g_remoteDiagnosticsClient;
-    }
-    if (!client) return;
-    client->checkClientStatus(context, std::move(callback));
+    QMutexLocker locker(&g_remoteDiagnosticsMutex);
+    if (g_remoteDiagnosticsClient) g_remoteDiagnosticsClient->checkClientStatus(context, std::move(callback));
 }
 
 bool remoteDiagnosticsEnabled()
@@ -634,6 +699,8 @@ QString remoteDiagnosticsClientId()
 
 void RemoteDiagnosticsClient::stopWithoutSending()
 {
+    m_accepting.store(false,std::memory_order_release);
+    {std::lock_guard<std::mutex> lock(m_inputMutex);m_input.clear();}
     m_cfg.enabled = false;
     m_queue.clear();
     if (m_timer) m_timer->stop();

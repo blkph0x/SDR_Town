@@ -1,5 +1,8 @@
 #include "ProcessPerformance.h"
 #include <QThread>
+#include <QSysInfo>
+#include <QSettings>
+#include <QFile>
 #include <algorithm>
 #include <cmath>
 #ifdef _WIN32
@@ -11,7 +14,40 @@
 #include <tlhelp32.h>
 #else
 #include <sys/resource.h>
+#include <unistd.h>
+#ifdef __APPLE__
+#include <sys/sysctl.h>
 #endif
+#endif
+
+QJsonObject ProcessPerformance::systemInfo() {
+    QJsonObject out{{"os", QSysInfo::prettyProductName()},
+        {"kernel", QSysInfo::kernelType()+" "+QSysInfo::kernelVersion()},
+        {"cpuArch", QSysInfo::currentCpuArchitecture()},
+        {"buildArch", QSysInfo::buildCpuArchitecture()},
+        {"logicalCpus", std::max(1,QThread::idealThreadCount())},
+        {"qtVersion", qVersion()}, {"pointerBits", int(sizeof(void*)*8)}};
+#ifdef _WIN32
+    // Read only the CPU model, never registry identifiers or the machine name.
+    QSettings cpu("HKEY_LOCAL_MACHINE\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", QSettings::NativeFormat);
+    out["cpuModel"] = cpu.value("ProcessorNameString").toString().trimmed().left(160);
+    MEMORYSTATUSEX memory{}; memory.dwLength=sizeof(memory);
+    if(GlobalMemoryStatusEx(&memory)) out["physicalTotalBytes"]=double(memory.ullTotalPhys);
+#elif defined(__APPLE__)
+    uint64_t memory=0; size_t size=sizeof(memory);
+    if(sysctlbyname("hw.memsize", &memory, &size, nullptr, 0)==0) out["physicalTotalBytes"]=double(memory);
+    char model[256]{}; size=sizeof(model);
+    if(sysctlbyname("machdep.cpu.brand_string",model,&size,nullptr,0)==0) out["cpuModel"]=QString::fromUtf8(model).left(160);
+#else
+    const long pages=sysconf(_SC_PHYS_PAGES), pageSize=sysconf(_SC_PAGESIZE);
+    if(pages>0 && pageSize>0) out["physicalTotalBytes"]=double(pages)*double(pageSize);
+    QFile cpu("/proc/cpuinfo");
+    if(cpu.open(QIODevice::ReadOnly)) for(const auto& line:cpu.read(16384).split('\n')) {
+        if(line.startsWith("model name")) {out["cpuModel"]=QString::fromUtf8(line.mid(line.indexOf(':')+1)).trimmed().left(160);break;}
+    }
+#endif
+    return out;
+}
 
 double ProcessPerformance::cpuPercent(double cpu,double wall,int cpus) {
     if(!std::isfinite(cpu)||!std::isfinite(wall)||cpu<0||wall<=0||cpus<1)return 0;

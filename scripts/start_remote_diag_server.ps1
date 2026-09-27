@@ -55,8 +55,17 @@ if ([string]::IsNullOrWhiteSpace($adminToken)) {
     $adminToken | Set-Content -Path $AdminTokenFile -Encoding ascii
 }
 
+$config = @{ enabled = $false; maxBytesPerMinute = 65536; maxPayloadBytes = 16384; minIntervalMs = 1000; maxQueue = 128 }
+if (Test-Path -LiteralPath $ConfigFile) {
+    $savedConfig = Get-Content -LiteralPath $ConfigFile -Raw | ConvertFrom-Json
+    foreach ($property in $savedConfig.PSObject.Properties) { $config[$property.Name] = $property.Value }
+}
 if ([string]::IsNullOrWhiteSpace($CollectorUrl)) {
-    $CollectorUrl = "http://127.0.0.1:$Port/ingest"
+    $CollectorUrl = if ($config.url) { $config.url } else { 'https://gearsqueens.online/sdr-town-diag/ingest' }
+}
+$endpoint = $null
+if (-not [uri]::TryCreate($CollectorUrl, [UriKind]::Absolute, [ref]$endpoint) -or $endpoint.Scheme -ne 'https') {
+    throw 'The application collector URL must use HTTPS when a credential is configured.'
 }
 
 if ($OpenFirewall) {
@@ -105,22 +114,17 @@ $stderr = Join-Path $logsDir "server.err.log"
 $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
 if ($listeners.Count -eq 0) {
     $python = (Get-Command python -ErrorAction Stop).Source
-    $args = @($server, "--host", $BindHost, "--port", "$Port", "--token", $token, "--admin-token", $adminToken, "--out", $OutDir)
+    $args = @($server, "--host", $BindHost, "--port", "$Port", "--token-file", $TokenFile, "--admin-token-file", $AdminTokenFile, "--out", $OutDir) |
+        ForEach-Object { '"{0}"' -f $_ }
     $proc = Start-Process -FilePath $python -ArgumentList $args -PassThru -WindowStyle Hidden `
         -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     Start-Sleep -Milliseconds 500
     Write-Host "Started SDR Town diagnostics server pid=$($proc.Id) on $BindHost`:$Port"
 }
 
-$config = [ordered]@{
-    enabled = $true
-    url = $CollectorUrl
-    token = $token
-    maxBytesPerMinute = 65536
-    maxPayloadBytes = 16384
-    minIntervalMs = 1000
-    maxQueue = 128
-}
+# Starting the service must not enable sharing or replace a saved public URL.
+$config.url = $CollectorUrl
+$config.token = $token
 $config | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigFile -Encoding utf8
 
 $healthUrl = "http://127.0.0.1:$Port/health"

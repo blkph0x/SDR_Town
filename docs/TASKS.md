@@ -1,5 +1,11 @@
 # Task list (canonical)
 
+T-0091 | in_progress | Automatic opted-in diagnostics and event dashboard |
+DEC-0160. Startup PC/build details, settings/control/runtime evidence, bounded
+priority transport, authenticated searchable event history and safe deployment.
+No P25 DSP changes. Local 15/15 suites, collector6/6, package tests and GUI
+action/startup HTTPS receipt PASS; public Actions release verification pending.
+
 T-0087 | done (diagnosis; repair pending) | P25 missed-grant/no-voice audit |
 DEC-0159; P25_REGRESSION_AUDIT_20260927.md. Fresh 60s GUI capture, identical
 v113/v114 replay, stale-vs-current TG same-IQ test and local STT. Isolated

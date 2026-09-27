@@ -7428,6 +7428,13 @@ QJsonObject MainWindow::diagnosticsRuntimeSnapshot(const QString& reason)
         audio["engineCreated"] = engineForAudio != nullptr;
         audio["activeOutputCount"] = eng ? static_cast<int>(eng->activeOutputCount()) : 0;
         audio["activeOutputNames"] = eng ? QString::fromStdString(eng->getActiveDeviceNames()).left(240) : QString();
+        if (eng) {
+            audio["masterVolume"] = eng->getMasterVolume();
+            audio["outputMuted"] = eng->isOutputMuted();
+            audio["queuedSamples"] = static_cast<double>(eng->getRingQueuedSamples());
+            audio["ringFillPercent"] = eng->getRingFillPercent();
+            audio["underruns"] = eng->getUnderrunCount();
+        }
         payload["audio"] = audio;
         return payload;
     }
@@ -7443,13 +7450,14 @@ void MainWindow::maybeShowAlphaDiagnosticsDisclosure()
         box.setIcon(QMessageBox::Warning);
         box.setWindowTitle("Alpha Diagnostics Notice");
         box.setText(
-            "This alpha tester build sends compact diagnostics automatically.\n\n"
+            "Diagnostic sharing is enabled for this installation.\n\n"
             "Reports may include crash markers, exception summaries, device/open state, "
             "performance stalls, hardware class, hashed install/hardware identifiers, "
             "and any issue reports or capped file snippets you manually attach.\n\n"
             "Full IQ/audio files are not uploaded automatically. Manual attachments are capped.\n\n"
-            "If you do not agree during alpha testing, block SDR Town from internet access "
-            "or discontinue use until a later build has full diagnostics controls.");
+            "You can stop automatic sharing at any time using Help > Share Diagnostic Reports. "
+            "Startup PC specifications, radio settings, control actions and resource counters "
+            "are included; typed text and recordings are not sent automatically.");
         QPushButton* continueBtn = box.addButton("Continue Alpha Testing", QMessageBox::AcceptRole);
         QPushButton* exitBtn = box.addButton("Exit SDR Town", QMessageBox::RejectRole);
         box.setDefaultButton(continueBtn);
@@ -7494,6 +7502,7 @@ void MainWindow::startDiagnosticsHealthMonitors()
             diagnosticsHeartbeatTimer = new QTimer(this);
             diagnosticsHeartbeatTimer->setInterval(1000);
             connect(diagnosticsHeartbeatTimer, &QTimer::timeout, this, [this]() {
+                if (!remoteDiagnosticsEnabled()) return;
                 const qint64 now = QDateTime::currentMSecsSinceEpoch();
                 const qint64 drift = diagnosticsLastHeartbeatMs > 0 ? now - diagnosticsLastHeartbeatMs : 1000;
                 diagnosticsLastHeartbeatMs = now;
@@ -7511,6 +7520,7 @@ void MainWindow::startDiagnosticsHealthMonitors()
             diagnosticsResourceTimer = new QTimer(this);
             diagnosticsResourceTimer->setInterval(60000);
             connect(diagnosticsResourceTimer, &QTimer::timeout, this, [this]() {
+                if (!remoteDiagnosticsEnabled()) return;
                 const qint64 now = QDateTime::currentMSecsSinceEpoch();
                 if (now - diagnosticsLastResourceReportMs < 300000) return;
                 QJsonObject system = diagnosticsSystemHealthPayload();

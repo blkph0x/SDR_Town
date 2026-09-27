@@ -1,5 +1,7 @@
 #include "DiagnosticsMenu.h"
 #include "RemoteDiagnostics.h"
+#include "DiagnosticsObserver.h"
+#include <QMetaMethod>
 #include <QAction>
 #include <QCoreApplication>
 #include <QMainWindow>
@@ -11,6 +13,16 @@
 #include <vector>
 
 void installDiagnosticsMenu(QMainWindow& window) {
+    auto* observer=new DiagnosticsObserver(&window,[&window] {
+        QJsonObject snapshot;
+        const int index=window.metaObject()->indexOfMethod("diagnosticsRuntimeSnapshot(QString)");
+        if(index>=0) window.metaObject()->method(index).invoke(&window,Qt::DirectConnection,
+            Q_RETURN_ARG(QJsonObject,snapshot),Q_ARG(QString,QStringLiteral("automatic")));
+        else snapshot["runtimeAvailable"]=false;
+        return snapshot;
+    },[] {return remoteDiagnosticsEnabled()?remoteDiagnosticsSessionId():QString();},
+    [](const QString& type,const QJsonObject& payload){remoteDiagnosticsSubmit(type,"info",payload);});
+    observer->observe(&window);
     QMenu* menu = nullptr;
     for (auto* action : window.menuBar()->actions()) {
         if (action->menu() && action->text().remove('&') == "Help") {
@@ -30,7 +42,9 @@ void installDiagnosticsMenu(QMainWindow& window) {
     QObject::connect(action, &QAction::triggered, &window, [&window, action](bool enabled) {
         if (enabled && QMessageBox::question(&window, "Share diagnostic reports?",
             "Send technical error reports, decoder counters, CPU/memory usage, thread counts, "
-            "app/OS and radio details, and pseudonymous installation/device IDs to the SDR Town diagnostics server? "
+            "startup version, PC/OS specifications, radio/receive settings, output selection, "
+            "button/control actions (numeric values and selection indexes, not typed text), "
+            "and pseudonymous installation/device IDs to the SDR Town diagnostics server? "
             "Automatic reports do not upload IQ recordings or audio. Manual issue reports may include text you choose. "
             "Reports are bandwidth-limited. This choice is saved; you can turn it off here at any time.",
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {

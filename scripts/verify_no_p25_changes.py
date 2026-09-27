@@ -49,6 +49,22 @@ PROTECTED_PATTERNS: tuple[str, ...] = (
 )
 
 SATCOM_MAINWINDOW_PATH = "src/MainWindow.cpp"
+# DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.
+DIAGNOSTICS_DIGESTS = {
+    "src/MainWindow.cpp": (
+        "7e309ca8c17c89c5dd181a7f40b4a594f4e952ea963a69d0dbea8a97ea640c91",
+        "92525263836146028107d355bd4f2f2ef49c1ba757c2d0acee84c3cb42e2e03f"),
+}
+
+
+def diagnostics_text_allowed(path: str, before: str, after: str) -> bool:
+    pair = DIAGNOSTICS_DIGESTS.get(path)
+    return pair is not None and pair == (
+        hashlib.sha256(before.encode("utf-8")).hexdigest(),
+        hashlib.sha256(after.encode("utf-8")).hexdigest(),
+    )
+
+
 # DEC-0148: exact NFM first-stage anti-alias change; other demods unchanged.
 NFM_INPUT_DIGESTS = {
     "src/Demod.cpp": (
@@ -422,6 +438,15 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
+        if path in DIAGNOSTICS_DIGESTS and args.paths is None:
+            try:
+                allowed = diagnostics_text_allowed(path, git_file_text(args.base,path), git_file_text(args.head,path))
+            except RuntimeError as exc:
+                print(f"P25 guard error: {exc}",file=sys.stderr)
+                return 2
+            if allowed:
+                print(f"P25 guard: accepted exact DEC-0160 diagnostics-only change: {path}")
+                continue
         if path in NFM_INPUT_DIGESTS and args.paths is None:
             try:
                 allowed = nfm_input_text_allowed(

@@ -1,5 +1,31 @@
 # Build notes
 
+## 2026-09-27 - T-0091 opted-in diagnostics qualification
+
+Windows / MSVC 19.44.35227 Release build PASS. Full CTest 15/15 PASS (53.33s).
+New RemoteDiagnostics tests cover private-text exclusion, real Qt button signals,
+consent withdrawal/re-enable, 32-action overflow, 1000-report owner queue and
+5000-report cross-thread flood. Collector tests 6/6 and packaging test PASS.
+P25 guard negative tests PASS; exact MainWindow telemetry/consent-only digest.
+Collector SQLite backed up locally, service restarted with token files (not
+command-line credentials); public HTTPS health and 2080 historical event index
+verified. Local 0.2.115 app.system/app.runtime received through public endpoint;
+CPU/RAM fields populated, first runtime sample cost 2.7992ms. Release validation
+and physical RSPdx tester acceptance remain pending at this checkpoint.
+
+GUI smoke: real Refresh button produced ui.intent=Refresh/press, ui.actions
+batch count1, subsequent runtime state at HTTPS collector. Browser fixture
+desktop1366/mobile390 screenshots inspected; mobile table initially compressed
+payload columns, corrected to stacked full-width rows and rechecked. Filtering,
+detail expansion and no page overflow PASS (test_diagnostics_dashboard.cjs).
+Second full CTest 15/15 PASS (55.94s); final diagnostics rebuild/test PASS.
+Collector unauthorized large-body fixture intermittently saw Winsock10053:
+server rejects before consuming body. Authorization probe now uses a small body;
+full-size valid upload/quota tests retained, collector6/6 PASS again. No new
+dependency added; optional visual fixture uses the host's existing Playwright.
+An additional whole-process opt-out launch was denied by tool policy; no claim
+for that run. Config/menu/observer opt-out and cross-thread discard tests pass.
+
 ## 2026-09-27 - T-0087 P25 diagnostic audit (no application rebuild)
 
 Published v0.2.114 GUI 60s capture / 75s exit PASS, exit0, 60.032s IQ,

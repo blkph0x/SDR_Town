@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.114 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.115 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -231,6 +231,7 @@ set(SDR_TOWN_SOURCES
     src/FmDiagnosticsLog.cpp
     src/ProcessPerformance.cpp
     src/DiagnosticsMenu.cpp
+    src/DiagnosticsObserver.cpp
     src/AntennaControl.cpp include/AntennaControl.h
     src/AntennaControlWindow.cpp
     include/RemoteDiagnostics.h
@@ -655,7 +656,7 @@ if(BUILD_TESTS)
   set_tests_properties(AntennaControl PROPERTIES TIMEOUT 40
       ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QWindowsIntegrationPlugin>")
   add_executable(remote_diagnostics_tests tests/test_remote_diagnostics.cpp
-      src/RemoteDiagnostics.cpp src/ProcessPerformance.cpp src/DiagnosticsMenu.cpp src/FmDiagnosticsLog.cpp)
+      src/RemoteDiagnostics.cpp src/ProcessPerformance.cpp src/DiagnosticsMenu.cpp src/DiagnosticsObserver.cpp src/FmDiagnosticsLog.cpp)
   target_include_directories(remote_diagnostics_tests PRIVATE include)
   target_link_libraries(remote_diagnostics_tests PRIVATE Catch2::Catch2 Qt6::Widgets Qt6::Network)
   if(WIN32)

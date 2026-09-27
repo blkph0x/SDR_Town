@@ -1,5 +1,16 @@
 # Issues (canonical)
 
+## ISS-0045 - Missing diagnostic context and hidden routine reports (2026-09-27, FIX IMPLEMENTED)
+
+Collector inspection found only two installation IDs (local and synthetic), no
+external RSPdx report, and an issue-only dashboard hiding routine JSONL events.
+Client FIFO evicts older reports during decoder floods, including startup context.
+DEC-0160 / T-0091 adds authenticated event history, bounded migration/retention,
+PC/build/runtime/control evidence and priority/coalescing before and after the
+Qt queue. Local GUI button intent/batch and snapshots verified at public HTTPS
+collector. Full CTest 15/15, collector and privacy/flood tests pass. Physical
+RSPdx diagnosis remains open until an affected opted-in tester reproduces it.
+
 ## ISS-0044 - P25 capture retune metadata / ambiguous status (2026-09-27, OPEN)
 
 T-0087 fresh GUI capture contains several physical retunes but only one SigMF

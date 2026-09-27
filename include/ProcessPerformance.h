@@ -6,6 +6,7 @@
 class ProcessPerformance {
 public:
     QJsonObject sample();
+    static QJsonObject systemInfo();
     static double cpuPercent(double cpuSeconds,double wallSeconds,int logicalCpus);
 private:
     std::chrono::steady_clock::time_point previous_{};

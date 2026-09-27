@@ -1,5 +1,36 @@
 # Decisions
 
+## DEC-0160 - Opted-in session evidence, not only issues (2026-09-27)
+
+Collector inspection found two installations (one local, one synthetic), no
+external RSPdx evidence, and an issue-only dashboard. Raw JSONL contains routine
+events that are invisible there. Client FIFO drops oldest events during P25
+bursts, including startup context. Add an authenticated, paginated event view
+and bounded index; retain issue grouping separately. Historical indexing must
+not duplicate client/issue counts. Keep 30 days / 20000 indexed events, cap raw
+session logs and total storage; state these retention limits in documentation.
+
+Add consent-gated system/build startup, GUI control-action batches and periodic
+runtime snapshots through the existing diagnostics slot. Read-only observers;
+no RF/audio/P25 algorithm changes. Record numeric controls/indexes, approved
+static command captions and structural widget IDs, never arbitrary input text,
+paths, credentials or recordings. Extend device inventory using existing cached
+and read-only accessors, without probing hardware. One-second observer tick,
+two-second action batches (32 actions), thirty-second snapshots/performance are
+telemetry budgets, not decoder timing. Queue/coalescing counters must expose
+loss. Bounded ingress and priority preserve startup/state/error evidence under
+decoder floods; original 64 KiB/min budget and opt-out remain authoritative.
+
+MainWindow changes are limited to read-only audio statistics in the existing
+snapshot, opt-out checks in old health timers, and correction of the obsolete
+mandatory-sharing notice. Freeze the exact whole-file digest pair in the P25
+guard with negative tests; do not exempt the file or any decoder method.
+
+Verify temporary localhost transport, flood/consent/privacy tests, dashboard
+authorization/escaping/filter/pagination/retention/migration, full CTest and
+frozen-P25 guard. Publish through Actions; confirm public asset and local
+collector receipt. Physical RSPdx audio remains unverified without tester data.
+
 ## DEC-0159 - Evidence-first P25 regression diagnosis (2026-09-27)
 
 User reports missed grants and previously clear talkgroups showing no voice;

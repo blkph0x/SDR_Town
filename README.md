@@ -1,5 +1,11 @@
 # SDR Town
 
+0.2.115 adds automatic **opted-in** startup PC/build reports, receive/audio
+settings and control-action telemetry. The diagnostics admin now exposes a
+filterable report history alongside grouped issues. Enable **Help > Share
+Diagnostic Reports** once; recordings remain separately reviewed. See
+[release notes](docs/RELEASE_0.2.115.md) and [diagnostics guide](docs/DIAGNOSTICS_SHARING.md).
+
 0.2.114 adds unattended SSTV image saving. Select **Save folder** once (default:
 Pictures/SDR Town/SSTV), then **Receive** on your SSTV channel. Each completed
 image is saved immediately into an automatically named session folder; reception
@@ -48,7 +54,7 @@ antenna control, saved limits/park and hardware-only SWR readback. See the
 [setup and ten-controller compatibility targets](docs/ANTENNA_CONTROL.md).
 Physical controller acceptance and automatic satellite tracking remain open.
 
-**[Download 0.2.114 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.114)**
+**[Download 0.2.115 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.115)**
 includes a matched SDRplay plugin and corrected, dated Inmarsat frequency/rate
 presets. Install the official SDRplay API 3.15+ and service separately. Extract
 the entire ZIP into a fresh folder. RTL bias-T is in Device Manager after

@@ -26,6 +26,15 @@ def expect_allowed(path: str) -> None:
 
 
 def main() -> int:
+    import subprocess
+    path="src/MainWindow.cpp"
+    before=subprocess.check_output(["git","show","127469d:"+path],cwd=ROOT,text=True,encoding="utf-8")
+    after=(ROOT/path).read_text(encoding="utf-8")
+    assert MODULE.diagnostics_text_allowed(path,before,after)
+    assert not MODULE.diagnostics_text_allowed(path,before,after+"\nchange")
+    assert not MODULE.diagnostics_text_allowed(path,before+"\n",after)
+    assert not MODULE.diagnostics_text_allowed(path,after,before)
+    assert not MODULE.diagnostics_text_allowed("src/P25LiveDecoder.cpp",before,after)
     for path in (
         "src/P25LiveDecoder.cpp",
         "include/P25Control.h",

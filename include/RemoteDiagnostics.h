@@ -9,6 +9,8 @@
 #include "ProcessPerformance.h"
 
 #include <functional>
+#include <mutex>
+#include <atomic>
 
 struct RemoteDiagnosticsConfig {
     bool enabled = false;
@@ -44,7 +46,17 @@ private:
     struct PendingEvent {
         QByteArray body;
         int bytes = 0;
+        QString key;
+        int priority = 0;
     };
+
+    struct InputEvent { QString type, severity; QJsonObject payload; };
+    void drainInput();
+    std::mutex m_inputMutex;
+    QList<InputEvent> m_input;
+    bool m_inputScheduled = false;
+    std::atomic<bool> m_accepting{false};
+    std::atomic<quint64> m_inputDropped{0};
 
     void submitOnOwnerThread(QString type, QString severity, QJsonObject payload);
     void pump();
@@ -67,6 +79,7 @@ private:
     quint64 m_networkDropped = 0;
     quint64 m_oversizeDropped = 0;
     quint64 m_acknowledged = 0;
+    quint64 m_coalesced = 0;
     int m_lastHttpStatus = 0;
     QString m_clientId;
     QString m_hardwareHash;
