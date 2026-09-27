@@ -1,9 +1,12 @@
 # Task list (canonical)
 
-T-0084 | in progress | Inmarsat fail-closed audit and recovery instrumentation |
+T-0084 | done | Inmarsat fail-closed audit and recovery instrumentation |
 DEC-0156. Validate supplied audit against executable paths; reject malformed
 blocks before mutation, preserve unknown PCM, qualify activity by identity,
 report real codec availability and bounded failure counters; test all branches.
+50 Inmarsat cases / 23168 assertions, full 15 suites, both Windows CI builds PASS.
+v0.2.113 public asset provenance/hash and shipped GUI/CLI replay verified.
+Real RF acceptance and scanner qualification remain ISS-0038/ISS-0039.
 
 T-0083 | done | Bounded Inmarsat diagnostic recordings |
 DEC-0155. Manual capture/review/send, authenticated collector quota/storage,

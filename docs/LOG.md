@@ -7,6 +7,9 @@ recovery before modem mutation, atomic codec-failure rejection, identity-qualifi
 voice/focus, truthful EGC/codec status and independent map freshness. Added bounded
 local and opt-in remote failure counters without raw data uploads. Local build,
 15 suites and GUI/CLI replay checks PASS; see INMARSAT_RECOVERY_AUDIT.md for limits.
+Published b915bfd as experimental v0.2.113 through release CI 36292917785.
+Public ZIP/provenance verified; shipped GUI/CLI parity, recording and RDS PASS.
+No live RF/audio acceptance claim; no protected P25 paths changed.
 
 ## 2026-09-27 - T-0083 explicit recording evidence
 

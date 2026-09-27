@@ -11,7 +11,16 @@ remote collector four tests, and RDS CLI reference checks PASS.
 GUI/CLI paced/fast replay first failed the old literal-true EGC codec expectation;
 updated it to false plus physical_probe_only, then all four replay modes and
 malformed-file rejection PASS. No failing tests waived. RF audio not claimed.
-Publication and downloaded-asset verification pending.
+P25 guard PASS: 29 paths changed, zero protected files.
+Source b915bfd3a30f11feef8e227467a7ccb46462a5d4; Windows master run 36292917845
+and release run 36292917785 PASS; both YAML validations PASS.
+Public https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.113 is non-draft,
+experimental prerelease. Downloaded ZIP/source/run/version/module checks PASS.
+ZIP SHA256: 49ef36de4275c9c017180fa12a01c522e02ddd466437d6a8c0c7dfe459fbb356
+EXE SHA256: cff603e2c8ce17a45f61580d478a45329582363dc79084d12695bc492657a04c
+SDRplay SHA256: 809dd35175cd68f462abdd6d5500e7644bfeb513baaa93d5d2fe1770f690141d
+Downloaded app CLI/SDRplay status, Aero survey, RDS, recording reproduction and
+GUI/CLI paced/fast replay parity PASS. Stable latest remains signed v0.2.96.
 
 ## 2026-09-27 - T-0083 bounded diagnostic recording
 
