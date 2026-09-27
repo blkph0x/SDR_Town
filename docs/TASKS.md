@@ -1,10 +1,13 @@
 # Task list (canonical)
 
-T-0091 | in_progress | Automatic opted-in diagnostics and event dashboard |
+T-0091 | done | Automatic opted-in diagnostics and event dashboard |
 DEC-0160. Startup PC/build details, settings/control/runtime evidence, bounded
 priority transport, authenticated searchable event history and safe deployment.
-No P25 DSP changes. Local 15/15 suites, collector6/6, package tests and GUI
-action/startup HTTPS receipt PASS; public Actions release verification pending.
+No P25 DSP changes. Local 15/15 suites, collector 6/6, package tests and GUI
+action/startup HTTPS receipt PASS. Source 31235b8, master 36303530136 and release
+36303530038 Actions PASS; public v0.2.115 ZIP/checksum/provenance and shipped
+CLI smoke PASS. Shipped CLI build metadata received by HTTPS collector. Remote
+RSPdx physical reproduction remains separate; see ISS-0045 and BUILD_NOTES.
 
 T-0087 | done (diagnosis; repair pending) | P25 missed-grant/no-voice audit |
 DEC-0159; P25_REGRESSION_AUDIT_20260927.md. Fresh 60s GUI capture, identical

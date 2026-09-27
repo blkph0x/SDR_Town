@@ -1,6 +1,6 @@
 # Issues (canonical)
 
-## ISS-0045 - Missing diagnostic context and hidden routine reports (2026-09-27, FIX IMPLEMENTED)
+## ISS-0045 - Missing diagnostic context and hidden routine reports (2026-09-27, CLOSED)
 
 Collector inspection found only two installation IDs (local and synthetic), no
 external RSPdx report, and an issue-only dashboard hiding routine JSONL events.
@@ -10,6 +10,9 @@ PC/build/runtime/control evidence and priority/coalescing before and after the
 Qt queue. Local GUI button intent/batch and snapshots verified at public HTTPS
 collector. Full CTest 15/15, collector and privacy/flood tests pass. Physical
 RSPdx diagnosis remains open until an affected opted-in tester reproduces it.
+Observability fix released in v0.2.115 from 31235b8: both Windows Actions pass,
+downloaded public asset hash/provenance/CLI verified and shipped build metadata
+received at the HTTPS collector. This closure is not an RSPdx audio fix claim.
 
 ## ISS-0044 - P25 capture retune metadata / ambiguous status (2026-09-27, OPEN)
 

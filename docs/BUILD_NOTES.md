@@ -1,5 +1,32 @@
 # Build notes
 
+## 2026-09-27 - T-0091 public release verification
+
+Final source 31235b890dafb0fd5283792f9baf3807c7a844ff. Final local full CTest
+15/15 PASS (53.57s). Real GUI app.runtime includes allowlisted audio output,
+volume/mute/ring/underrun metadata; observed queue/budget/network drops zero,
+snapshot 3.0816 ms. This is idle telemetry validation, not physical RX acceptance.
+
+GitHub Windows master 36303530136 and release 36303530038 PASS. YAML runs
+36303530160/36303530036 PASS. Release workflow includes native suites, Python
+checks, GUI/CLI parity, package validation, public download and shipped CLI/RDS.
+Public release: https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.115
+Downloaded ZIP 42,546,521 bytes, SHA256
+`dab0de525499453723edf0794921076451751db5240ca08d1cbf8da6251f5703`.
+Executable SHA256
+`a43223b0caa8a82386dfc971eb31f0aff528108118cd039992eae56b26e210d0`.
+Embedded version/source/run and SDRplay plugin hash match. Packaged diagnostics
+target public HTTPS, require opt-in, contain ingest credential but not admin
+credential. Local shipped CLI help exit 0 / biastee command PASS; shipped Aero
+survey data verifier PASS. Collector received shipped CLI app.system with
+commit 31235b8 and workflow 36303530038 at 2026-09-27T08:00:01.622Z.
+
+Workflow's tag-name heuristic initially marked this numeric tag non-prerelease
+(already latest=false). Set GitHub release metadata explicitly to experimental
+prerelease; assets/tag unchanged. Signed updater latest remains v0.2.96. Future
+numeric portable releases must still verify their prerelease metadata. No real
+RSPdx was available; affected remote tester reproduction is still required.
+
 ## 2026-09-27 - T-0091 opted-in diagnostics qualification
 
 Windows / MSVC 19.44.35227 Release build PASS. Full CTest 15/15 PASS (53.33s).

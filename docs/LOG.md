@@ -9,6 +9,13 @@ credentials, consent and HTTPS endpoint; historical reports indexed. New app
 delivers PC/runtime evidence. P25 changes remain limited to observability only;
 missed-grant repair tasks are not implemented by this diagnostics pass.
 
+Released v0.2.115 from 31235b8 after local 15/15, collector 6/6 and both Windows
+Actions passes. Public ZIP/checksum/provenance and shipped CLI/data checks PASS;
+shipped CLI build identity received through HTTPS. Audio metadata stripping
+caught by end-to-end inspection and repaired with an explicit scalar allowlist.
+Admin All reports now exposes routine events. Release explicitly prerelease;
+stable latest remains v0.2.96. Remote RSPdx no-audio reproduction remains open.
+
 ## 2026-09-27 - T-0087 P25 missed grants / silent follow diagnosis
 
 User clarified missed grants and formerly clear talkgroups with no voice.

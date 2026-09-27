@@ -72,7 +72,9 @@ principle in [OWASP API4](https://owasp.org/API-Security/editions/2023/en/0xa4-u
 They reject malformed/excessive traffic, not all plausible forged reports.
 Per-install enrollment/revocation remains open; bounded event retention is now implemented.
 
-Current qualification: local builds/tests pass; collector updated and public
-HTTPS receipt verified from this PC. No external RSPdx evidence had arrived at
-the start of this pass. Physical no-audio diagnosis still requires the affected
+Current qualification: local 15/15 suites, collector tests and both GitHub Windows
+builds pass. Public v0.2.115 download/checksum/provenance and shipped CLI verified;
+its build identity was received through HTTPS. Collector updated and GUI action,
+runtime and audio-health receipt verified from this PC. No external RSPdx evidence
+had arrived at the start of this pass. Physical no-audio diagnosis still requires the affected
 tester to opt in and reproduce on the current build.
