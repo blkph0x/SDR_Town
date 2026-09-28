@@ -10,10 +10,14 @@ antenna/SDR. P25 is unchanged. This is not a decoder for every Inmarsat service.
   unknown payloads remain uninterpreted and multipart application payloads are
   explicitly incomplete. Raw ACARS text is preserved separately.
 - ICAO/flight identity can arrive independently of position. Validated
-  aircraft-originated ADS-C basic reports update the map; airframe-ID group 17
-  supplies ICAO and group 12 supplies flight ID. A position is not inferred
+  aircraft-originated ADS-C basic reports update the map; the validated Classic
+  Aero AES address supplies ICAO, group 17 cross-checks it and group 12 supplies
+  flight ID (DEC-0164 corrects the previous tag-17-only restriction). A position is not inferred
   from an AES number, a CPDLC clearance waypoint, or an uplink contract request.
   Later identity updates do not refresh the age of old coordinates.
+- Optional [hybrid map](INMARSAT_HYBRID_MAP.md): opt-in ADSB.lol lookup of received
+  ICAO addresses, independent source ages/expiry, conservative labelled estimates
+  and per-aircraft activity. RF reception and IQ replay remain offline-capable.
 
 - Per-channel decoder log and aircraft registry with optional pop-out windows:
   [monitor guide and field provenance](INMARSAT_MONITOR.md).

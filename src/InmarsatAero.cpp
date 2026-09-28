@@ -3,6 +3,7 @@
 #include "InmarsatFirHistory.h"
 #include "InmarsatAdsc.h"
 #include "InmarsatAcarsApplication.h"
+#include "InmarsatIdentity.h"
 #include "AeroCodec.h"
 #include "aerol.h"
 #include "oqpskdemodulator.h"
@@ -51,9 +52,15 @@ struct InmarsatAero::Impl {
             const auto type=u(0), aes=(u(1)<<16)|(u(2)<<8)|u(3);
             if(rate==8400)inmarsatValidatedVoiceIdentity(stats,
                 {reinterpret_cast<const uint8_t*>(su.constData()),size_t(su.size())},[this]{sdr_aero_reset(codec.get());});
+            // Publication is independent of speech/PCM eligibility. A call's
+            // identity is useful even when no position message is received.
+            if(rate==8400 && messageSink)
+                if(auto identity=inmarsatClassicVoiceIdentity({reinterpret_cast<const uint8_t*>(su.constData()),size_t(su.size())}))
+                    messageSink(*identity);
             if(type>=0x31 && type<=0x34 && rate!=8400 && aes) {
                 InmarsatMessage m;
                 m.kind=InmarsatMsgKind::CAssign; m.aesId=aes; m.gesId=u(4);
+                m.icaoHex=inmarsatClassicIcao(aes); m.classicAeroIdentity=!m.icaoHex.empty();
                 m.voiceRxHz=1510e6+double(((u(6)&0x7f)<<8)|u(7))*2500;
                 m.voiceTxHz=1611.5e6+double(((u(8)&0x7f)<<8)|u(9))*2500;
                 m.validated=true; m.label="C-ASSIGN";
@@ -66,6 +73,7 @@ struct InmarsatAero::Impl {
             InmarsatMessage m;
             m.kind=InmarsatMsgKind::Acars; m.validated=true;
             m.aesId=item.isuitem.AESID; m.gesId=item.isuitem.GESID;
+            m.icaoHex=inmarsatClassicIcao(m.aesId); m.classicAeroIdentity=!m.icaoHex.empty();
             m.label=item.LABEL.toStdString(); m.text=item.message.toStdString();
             // ACARS block ID is message-direction evidence; RF link direction
             // alone cannot distinguish relayed aircraft messages (DEC-0162).
@@ -90,10 +98,12 @@ struct InmarsatAero::Impl {
             if(position && InmarsatAdsc::matchesIdentity(m.aesId,position->airframeId)) {
                 m.hasPosition=application.hasPosition; m.latDeg=position->latitude; m.lonDeg=position->longitude;
                 m.altitudeFt=position->altitudeFt; m.positionSecondsPastHour=position->secondsPastHour;
+                m.positionHasTimestamp=m.hasPosition;
+                m.hasGroundVector=m.hasPosition && position->hasGroundVector;
+                m.groundTrackDeg=position->groundTrackDeg; m.groundSpeedKnots=position->groundSpeedKnots;
                 m.registration=position->registration; m.callsign=position->callsign;
-                // ADS-C airframe ID is explicit evidence; an arbitrary AES alone is not.
-                if(position->airframeId)
-                    m.icaoHex=QString("%1").arg(position->airframeId,6,16,QChar('0')).toUpper().toStdString();
+                // Explicit ADS-C airframe identity must agree with the already
+                // validated Classic Aero address (DEC-0164).
                 if(m.hasPosition) ++stats.positions;
             }
             if(messageSink) messageSink(m);

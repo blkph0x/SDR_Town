@@ -1,5 +1,51 @@
 # Build notes
 
+## 2026-09-28 - T-0095 qualification and consent test repair
+
+Windows MSVC 17.14.40 / Qt 6.11.1 Release build of SDR_Town, unit, Inmarsat
+GUI and Workspace targets PASS. Inmarsat unit selection: 70 cases / 23431
+assertions PASS. Actual local GUI/CLI reference replay: eight validated units,
+four position reports, two mapped aircraft, both ICAO fields equal validated
+Classic Aero addresses. GUI/CLI 8400 WAV SHA-256 remains
+`b1d4c75b92ece9280769de46fc3d0f3d224c990d40ee189e0f4afa7e74659282`.
+RDS CLI and reviewed-recording negative gates PASS. First full CTest run found
+new consent test used QMessageBox::done instead of activating its standard
+button: Yes was not recorded, then a further click waited without an answer.
+Repair the test to click the real Yes/No button and require acceptance before
+continuing. No production consent gate or timeout is weakened. Rerun required.
+Second run exposed unspecified argument evaluation order in new test setup:
+`setRf({received()}, now())` could sample `now` first, so strict future-receipt
+validation correctly dropped the row. Seed receipt and snapshot in separate
+statements; add pointer assertions before fake reply use. The GUI controller
+also now takes its immutable RF snapshot before its monotonic timestamp,
+avoiding a transient future-age rejection during a concurrent new reception.
+Third run: pre-existing live busy-traffic map test failed. Hidden receiver
+snapshots were skipped, and the recent-identity-only view could evict a retained
+position after 750 other identities. Keep hidden presentation snapshots current
+without network/logging; merge the two original independently bounded registries
+under one store lock, preserving monotonic receipt ages. Original retention test
+is unchanged; add a focused union/TTL regression. Full rerun required.
+
+Final local build PASS; 71 Inmarsat cases / 23439 assertions PASS. Complete
+Release CTest 16/16 PASS (64.80 s), with real burst IQ reference enabled for
+Workspace, plus live GUI lifecycle/consent/hostile API tests. Compact 560x360
+and desktop 1100x650 map PNGs inspected; green/blue/estimate pixel assertions
+and 512-marker bound PASS. Existing busy-traffic map retention gate unchanged
+and passing. P25/shared RF/audio guard: zero protected modifications. Python
+collector suite 6/6 PASS; updated collector restarted without proxy/firewall
+changes and public HTTPS health reports OK, allowance 15. Actions/public asset
+verification pending. Private fixtures/audio stay in ignored build/.
+Three further InmarsatLiveGui repeats PASS (12.26 / 12.27 / 12.17 s), including
+the real ten-second network deadline and Yes/No consent interaction.
+
+## 2026-09-28 - T-0095 implementation qualification (in progress)
+
+Initial Windows MSVC Release build compiled the application, then caught a
+missing initializer brace in the new synthetic multi-call test (C2059,
+test_inmarsat_tracking.cpp:114). Replaced the deeply nested initializer with
+explicit structured assignments; no runtime gate was weakened. Full rebuild
+and functional/public-release gates pending.
+
 ## 2026-09-27 - T-0094 public release verification
 
 Source 884c87d791d3d893d6618004dd17e2d3ae73865e. Windows master/release Actions

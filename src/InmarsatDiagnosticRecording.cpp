@@ -85,7 +85,11 @@ void counters(const void* source,const InmarsatAeroStats& s) {
         {"acarsUnknownDirection",double(s.acarsUnknownDirection)},{"adscDecoded",double(s.adscDecoded)},
         {"positionReports",double(s.positions)},{"positionIdentityMismatches",double(s.positionIdentityMismatches)},
         {"applicationDecoded",double(s.applicationDecoded)},{"applicationInvalid",double(s.applicationInvalid)},
-        {"applicationUnsupported",double(s.applicationUnsupported)},{"applicationControl",double(s.applicationControl)}};
+        {"applicationUnsupported",double(s.applicationUnsupported)},{"applicationControl",double(s.applicationControl)},
+        // Reviewed recordings already contain IQ/audio. Preserve call context
+        // for a cold replay; these IDs are excluded from routine telemetry.
+        {"voiceAesId",double(s.aes)},{"identityChanges",double(s.identityChanges)},
+        {"speechFrames",double(s.speechFrames)},{"unidentifiedSpeechFrames",double(s.unidentifiedSpeechFrames)}};
     if(firstCounters.isEmpty())firstCounters=lastCounters;
 }
 void iq(const void* source,std::span<const std::complex<float>> samples,double rate,double center,uint64_t start) {

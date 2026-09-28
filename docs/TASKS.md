@@ -14,11 +14,19 @@ shipped GUI/CLI map reference, unchanged 8400 PCM, three submitted 10500 bundles
 RDS and recording negative tests PASS. Field position acceptance remains open
 in ISS-0048; optional online enrichment is T-0095, not included in this release.
 
-T-0095 | planned | Source-labelled Inmarsat received-aircraft online positions |
+T-0095 | in progress | Source-labelled Inmarsat received-aircraft online positions |
 InmarScope comparison in INMARSAT_APPLICATION_VOICE_AUDIT_20260927.md. Explicit
 opt-in, verified identity association, bounded async lookup/cancellation, source
 and age labels, independent RF layer and disable/removal tests. Do not guess
 AES-to-ICAO or upload receiver message contents. No change to working voice.
+DEC-0164 corrects the previous identity restriction from primary Classic Aero
+documentation. Implement received-identity mapping, voice identity publication,
+bounded optional lookup, independent source expiry, conservative estimates,
+map/activity diagnostics and negative lifecycle tests. P25 and vocoder frozen.
+Implementation locally qualified: 71 Inmarsat unit cases, full 16/16 CTest,
+real GUI/CLI IQ-to-ICAO/map, byte-identical 8400 PCM, privacy/schema tests and
+rendered marker checks PASS. Retained RF position history survives identity
+eviction. Awaiting mandatory Actions/public asset verification before closure.
 
 T-0093 | done (diagnosis; no application change) | First submitted 8400 speech |
 Replay submitted bundle 086bf146 and correlate live output with remote counters.

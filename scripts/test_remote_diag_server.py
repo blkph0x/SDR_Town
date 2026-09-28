@@ -85,8 +85,11 @@ class CollectorTests(unittest.TestCase):
         self.assertTrue(collector.valid_recording(value))
         extended=dict(value,after={"positionReports":2,"adscDecoded":3,"acarsAirToGround":4,
             "acarsGroundToAir":5,"acarsUnknownDirection":0,"positionIdentityMismatches":0,
-            "applicationDecoded":6,"applicationInvalid":0,"applicationUnsupported":0,"applicationControl":1})
+            "applicationDecoded":6,"applicationInvalid":0,"applicationUnsupported":0,"applicationControl":1,
+            "voiceAesId":0x123456,"identityChanges":2,"speechFrames":3,"unidentifiedSpeechFrames":1})
         self.assertTrue(collector.valid_recording(extended))
+        for identity in (-1, 0x1000000, 1.5, "123456"):
+            self.assertFalse(collector.valid_recording(dict(value, after={"voiceAesId":identity})))
         for counters in ({"positions":[1,2]},{"text":"private"},{"positionReports":"private"},
                          {"adscDecoded":float("nan")},{"acarsAirToGround":-1}):
             self.assertFalse(collector.valid_recording(dict(value,after=counters)))

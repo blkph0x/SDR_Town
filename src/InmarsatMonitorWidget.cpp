@@ -80,7 +80,7 @@ InmarsatMonitorWidget::InmarsatMonitorWidget(View view, QWidget* parent, bool po
     table_->horizontalHeader()->setStretchLastSection(true);
     if(view==View::Aircraft) {
         table_->setColumnWidth(2,160);
-        table_->horizontalHeaderItem(1)->setToolTip("Explicit ADS-C airframe ID; unknown stays blank");
+        table_->horizontalHeaderItem(1)->setToolTip("Validated Classic Aero ICAO address; explicit ADS-C identity must agree");
         table_->horizontalHeaderItem(2)->setToolTip("ICAO address allocation, not aircraft location");
         table_->horizontalHeaderItem(8)->setToolTip("Seconds since last validated message received");
         table_->horizontalHeaderItem(9)->setToolTip("Validated decoded messages observed, not unique transmissions");

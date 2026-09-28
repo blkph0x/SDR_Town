@@ -104,9 +104,13 @@ def valid_recording(value: Any) -> bool:
                 "input48k", "crcOk", "crcBad", "pcmSamples", "codecErrors", "codecMutes",
                 "acarsAirToGround", "acarsGroundToAir", "acarsUnknownDirection", "adscDecoded",
                 "positionReports", "positionIdentityMismatches", "applicationDecoded", "applicationInvalid",
-                "applicationUnsupported", "applicationControl"} or
+                "applicationUnsupported", "applicationControl", "voiceAesId", "identityChanges",
+                "speechFrames", "unidentifiedSpeechFrames"} or
                 any(type(v) not in (int, float) or not math.isfinite(v) or v < 0 or v > 2**53
                     for v in counters.values())):
+            return False
+        if "voiceAesId" in counters and (counters["voiceAesId"] > 0xffffff or
+                                         counters["voiceAesId"] != int(counters["voiceAesId"])):
             return False
     for field, pattern in (("clientId", r"[A-Za-z0-9_-]{1,96}"),
                            ("version", r"[A-Za-z0-9_.-]{1,64}"),

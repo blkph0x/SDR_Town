@@ -1,5 +1,21 @@
 # Issues (canonical)
 
+## ISS-0050 - Classic Aero map identity and online bridge incomplete (2026-09-28, OPEN)
+
+Audit at 7b4effb: shipped 10500 reference recovers eight validated messages,
+four position reports and two aircraft but zero ICAO fields. Tag-17-only
+population is too restrictive for Classic Aero (DEC-0164). Voice identities
+remain private decoder state and do not create aircraft rows. The Inmarsat map
+has no online adapter/expiry/prediction; separate OpenSky aircraft UI is not a
+bridge. Five-second 8400 cold replay contains speech with unknown AES; the
+submitted recording does not preserve pre-capture identity, so it cannot prove
+live voice association. T-0095 fixes integration without changing working DSP.
+Local repair qualified under DEC-0164: Classic Aero identity, reviewed recording
+context, source-owned lookup/fallback, retained history, bounded estimates and
+multi-channel activity markers. 71 Inmarsat cases and all 16 CTests PASS; real
+IQ now supplies ICAO for both reference aircraft, 8400 PCM unchanged. Public
+release verification and field call-to-aircraft confirmation remain pending.
+
 ## ISS-0049 - Optional GUI reference completion anomaly (2026-09-27, monitor)
 
 One T-0094 qualification run failed the complete-state assertion without a

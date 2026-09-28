@@ -79,6 +79,10 @@ TEST_CASE("Aero public burst recording reaches the GUI map", "[inmarsat][gui][re
     CHECK(s.pipeline["positionReports"]==4);
     CHECK(s.pipeline["adscDecoded"].get<uint64_t>()>=2);
     CHECK(s.pipeline["acarsAirToGround"].get<uint64_t>()>=2);
+    for(const auto& p:s.pipeline["positions"]) {
+        CHECK(p["icaoHex"].get<std::string>().size()==6);
+        CHECK(std::stoul(p["icaoHex"].get<std::string>(),nullptr,16)==p["aesId"].get<uint32_t>());
+    }
     auto* map=dialog.findChild<InmarsatMapWidget*>("inmarsatMap");REQUIRE(map);
     for(int i=0;i<200 && map->aircraftCount()!=2;++i){QApplication::processEvents();QThread::msleep(2);}
     REQUIRE(map->aircraftCount()==2);

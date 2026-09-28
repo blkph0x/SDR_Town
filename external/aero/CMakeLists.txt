@@ -45,5 +45,8 @@ target_link_libraries(sdr_inmarsat_audio PUBLIC Qt6::Core nlohmann_json::nlohman
 add_executable(inmarsat_reference_probe EXCLUDE_FROM_ALL ../../tests/inmarsat_reference_probe.cpp)
 target_link_libraries(inmarsat_reference_probe PRIVATE sdr_inmarsat_native)
 add_library(sdr_inmarsat_map STATIC ../../src/InmarsatMapWidget.cpp ../../include/InmarsatMapWidget.h ../../resources/inmarsat_map.qrc)
+add_library(sdr_inmarsat_tracking STATIC ../../src/InmarsatTracking.cpp ../../src/InmarsatOnlineLookup.cpp)
+target_include_directories(sdr_inmarsat_tracking PUBLIC ../../include)
+target_link_libraries(sdr_inmarsat_tracking PUBLIC Qt6::Network nlohmann_json::nlohmann_json)
 target_include_directories(sdr_inmarsat_map PUBLIC ../../include)
 target_link_libraries(sdr_inmarsat_map PUBLIC Qt6::Widgets nlohmann_json::nlohmann_json)

@@ -33,6 +33,7 @@ nlohmann::json InmarsatMessage::toJson() const {
     j["aesId"] = aesId;
     j["gesId"] = gesId;
     j["icaoHex"] = icaoHex;
+    j["identitySource"] = classicAeroIdentity ? "classic_aero_address" : "unspecified";
     j["label"] = label;
     j["text"] = text;
     j["applicationProtocol"] = applicationProtocol;
@@ -47,6 +48,11 @@ nlohmann::json InmarsatMessage::toJson() const {
         j["lonDeg"] = lonDeg;
         j["altitudeFt"] = altitudeFt;
         j["secondsPastHour"] = positionSecondsPastHour;
+        j["positionHasTimestamp"] = positionHasTimestamp;
+        if (hasGroundVector) {
+            j["groundTrackDeg"] = groundTrackDeg;
+            j["groundSpeedKnots"] = groundSpeedKnots;
+        }
     }
     if (voiceRxHz > 0) j["voiceRxHz"] = voiceRxHz;
     if (voiceTxHz > 0) j["voiceTxHz"] = voiceTxHz;
@@ -61,6 +67,7 @@ InmarsatMessageStore& InmarsatMessageStore::instance() {
 void InmarsatMessageStore::push(InmarsatMessage msg) {
     if (msg.unixTime <= 0.0) msg.unixTime = unixNow();
     std::lock_guard<std::mutex> lk(mutex_);
+    msg.receivedMonotonic = inmarsatMonotonicSeconds();
     const bool trackable = msg.validated && msg.aesId > 0 && msg.aesId <= 0xffffff &&
         std::isfinite(msg.unixTime) && (msg.kind == InmarsatMsgKind::Acars ||
         msg.kind == InmarsatMsgKind::Su || msg.kind == InmarsatMsgKind::CAssign);
@@ -77,6 +84,8 @@ void InmarsatMessageStore::push(InmarsatMessage msg) {
             auto& id = a.identity;
             if (msg.unixTime >= id.unixTime) {
                 id.aesId = msg.aesId; id.unixTime = msg.unixTime;
+                a.lastSeenMonotonic = msg.receivedMonotonic;
+                id.classicAeroIdentity = msg.classicAeroIdentity || id.classicAeroIdentity;
                 id.freqHz = msg.freqHz; id.validated = true;
                 if (!msg.icaoHex.empty()) id.icaoHex = msg.icaoHex;
                 if (!msg.registration.empty()) id.registration = msg.registration;
@@ -87,6 +96,11 @@ void InmarsatMessageStore::push(InmarsatMessage msg) {
                 std::abs(msg.latDeg) <= 90 && std::abs(msg.lonDeg) <= 180) {
                 id.hasPosition = true; id.latDeg = msg.latDeg; id.lonDeg = msg.lonDeg;
                 id.altitudeFt = msg.altitudeFt; a.positionTime = msg.unixTime;
+                a.positionMonotonic = msg.receivedMonotonic;
+                id.positionSecondsPastHour = msg.positionSecondsPastHour;
+                id.positionHasTimestamp = msg.positionHasTimestamp;
+                id.hasGroundVector = msg.hasGroundVector;
+                id.groundTrackDeg = msg.groundTrackDeg; id.groundSpeedKnots = msg.groundSpeedKnots;
             }
         }
     }
@@ -133,6 +147,32 @@ std::vector<InmarsatAircraft> InmarsatMessageStore::aircraft() const {
     std::vector<InmarsatAircraft> result;
     result.reserve(aircraft_.size());
     for (const auto& [id, aircraft] : aircraft_) result.push_back(aircraft);
+    return result;
+}
+
+std::vector<InmarsatAircraft> InmarsatMessageStore::trackingAircraft() const {
+    std::lock_guard<std::mutex> lk(mutex_);
+    // DEC-0164 / DEC-0137: identity-only traffic must not evict the independent
+    // position history. This bounded union never renews an observation's age.
+    auto combined=aircraft_;
+    for(const auto& [id,position]:positions_) {
+        auto [it,inserted]=combined.try_emplace(id);
+        auto& a=it->second;
+        if(inserted) {
+            a.identity=position;a.lastSeenMonotonic=position.receivedMonotonic;
+            a.messages=1;
+        }
+        if(position.unixTime>=a.positionTime) {
+            a.positionTime=position.unixTime;a.positionMonotonic=position.receivedMonotonic;
+            auto& m=a.identity;
+            m.hasPosition=true;m.latDeg=position.latDeg;m.lonDeg=position.lonDeg;
+            m.altitudeFt=position.altitudeFt;m.positionSecondsPastHour=position.positionSecondsPastHour;
+            m.positionHasTimestamp=position.positionHasTimestamp;m.hasGroundVector=position.hasGroundVector;
+            m.groundTrackDeg=position.groundTrackDeg;m.groundSpeedKnots=position.groundSpeedKnots;
+        }
+    }
+    std::vector<InmarsatAircraft> result;result.reserve(combined.size());
+    for(auto& [id,a]:combined)result.push_back(std::move(a));
     return result;
 }
 

@@ -1,5 +1,60 @@
 # Decisions
 
+## DEC-0164 - Classic Aero identity and source-owned hybrid map (2026-09-28)
+
+T-0095. ICAO AMCP signal-unit Appendix C section 3 defines AES ID as the
+24-bit ICAO address. ICAO Doc 9925 Part III 6.3.1 and Cobham AVIATOR 700
+installation manual 98-124743-G table 5-65 confirm Classic Aero uses the same
+aircraft address as Mode S. This supersedes the tag-17-only ICAO restriction
+in DEC-0138/0162 and the 20260927 audit. Apply only at validated Classic Aero
+boundaries; reject zero, all-ones and out-of-range addresses for online lookup.
+ADS-C explicit identity conflicts remain rejected, never overwrite the AES.
+Sources: https://www.icao.int/safety/acp/Inactive%20working%20groups%20library/AMCP%202/item-2AC.pdf
+https://news.ncac.mn/uploads/bookSubject/2022-11/637331ac3d1fe.pdf
+https://fcc.report/FCC-ID/2A6TS-AVIATOR700/7186906.pdf
+
+Keep DSP, voice PCM, automatic speaker arbitration and P25 unchanged. Publish
+validated 8400 identity SUs to the aircraft store, without fabricating positions
+or treating assignments as current speech. The green marker means received
+aircraft-associated voice activity, not proof that the pilot is speaking nor
+sample-exact physical playback. All observed active channels may be marked;
+the selected speaker is independently labelled. Unidentified speech stays
+unattributed. No call identity is borrowed from nearest frequency or a stale call.
+
+Use an independently owned live Qt map controller, immutable mutex-protected RF
+snapshots, monotonic receipt ages and separate internet records. Offline/replay
+remain self-contained; replay never queries online. Online assistance defaults
+OFF, with persistent explicit consent: only received ICAO IDs and normal HTTPS
+connection metadata go to ADSB.lol, never IQ, speech, raw messages or locations.
+Provider: https://api.adsb.lol/docs and adsblol/api README (dynamic rate limits).
+Match provider IDs against each request and current received identities. No
+redirects, cookies or credentials. One async request, max 100 IDs/20 seconds,
+10-second deadline, 512 KiB body, exponential capped backoff and Retry-After.
+These are resource policy budgets, not radio protocol constants. Disable clears
+online data and aborts/invalidate replies; hidden windows suspend requests.
+
+User-requested RF/identity retention is 20 minutes, not a claim about L-band
+ADS-C frequency. Online positions expire at 5 minutes (InmarScope policy),
+prefer online only while <=60 seconds old and not older than RF; fall back to RF without modifying it.
+Never refresh position age on identity-only traffic or repeated online fixes.
+Optional estimates update in 10-second steps only for <=120 seconds using valid
+ground track/speed from the same position observation; retain the measured
+anchor and source label. No heading/Mach, waypoint or voice-derived position.
+The estimate is a bounded spherical great-circle display approximation, not a
+navigation or geolocation solution. No new third-party dependency.
+
+Instrument lookup/identity/source/expiry/activity decisions, latency and bounded
+counts locally; routine remote telemetry remains a numeric allowlist under the
+existing opt-in. No raw aircraft identities/positions in automatic telemetry.
+Qualify parser negatives, TTL boundaries, repeated fixes, late replies, source
+removal, map render/green state, real reference IQ and byte-identical 8400 PCM.
+Existing DEC-0137 busy-traffic GUI test exposed an integration regression:
+the 256-entry recent identity registry can evict an aircraft whose independent
+position record is still retained. Preserve both registries unchanged and expose
+one locked union snapshot (at most 512 distinct aircraft), with the original
+monotonic position receipt. Hidden map snapshots still update; only polling and
+map logging are suspended while hidden. No fresh timestamps invented on merge.
+
 ## DEC-0163 - Explicitly raise recording allowance to 15 (2026-09-27)
 
 User authorized 15 uploads after the collector's durable ledger confirmed the

@@ -7,6 +7,7 @@
 #include "InmarsatReplayDialog.h"
 #include "InmarsatDiagnostics.h"
 #include "InmarsatMapWidget.h"
+#include "InmarsatTrackingPanel.h"
 #include "InmarsatWatchSpectrum.h"
 #include "InmarsatMonitorWidget.h"
 #include <QTabWidget>
@@ -235,8 +236,8 @@ void InmarsatWidget::buildUi() {
 
     msgView_ = new QPlainTextEdit();
     msgView_->setReadOnly(true);
-    auto* tabs=new QTabWidget;map_=new InmarsatMapWidget;
-    tabs->addTab(buildWatchUi(),"Watch channels");tabs->addTab(map_,"Aircraft map");
+    auto* tabs=new QTabWidget;tracking_=new InmarsatTrackingPanel;
+    tabs->addTab(buildWatchUi(),"Watch channels");tabs->addTab(tracking_,"Aircraft map");
     tabs->addTab(new InmarsatMonitorWidget(InmarsatMonitorWidget::View::Decoders),"Decoders");
     tabs->addTab(new InmarsatMonitorWidget(InmarsatMonitorWidget::View::Aircraft),"Aircraft");
     tabs->addTab(msgView_,"Messages");tabs->addTab(channelTable_,"Band plan");root->addWidget(tabs,1);
@@ -488,22 +489,10 @@ void InmarsatWidget::refreshUi() {
     audioLabel_->setToolTip(QString::fromStdString(snapshot.diagnosticLog));
     auto report=snapshot.diagnostics;if(!running){report["voiceActive"]=false;report["speechActive"]=false;}
     report["messages"]=snapshot.messages; // Includes all watch workers, not only focused audio.
-    // Live aircraft survive a manual data-to-voice retune. Only native, validated
-    // ADS-C messages enter this view; replay owns an entirely separate map.
-    report["positions"]=nlohmann::json::array();
-    std::vector<uint32_t> seen;
-    const auto mapMessages=InmarsatMessageStore::instance().positions();
-    for(auto it=mapMessages.rbegin();it!=mapMessages.rend();++it) {
-        const auto& m=*it;
-        if(!m.validated || !m.hasPosition || !m.aesId || std::find(seen.begin(),seen.end(),m.aesId)!=seen.end())continue;
-        seen.push_back(m.aesId);
-        const double age=std::max(0.0,QDateTime::currentMSecsSinceEpoch()/1000.0-m.unixTime);
-        report["positions"].push_back({{"aesId",m.aesId},{"icaoHex",m.icaoHex},{"latDeg",m.latDeg},{"lonDeg",m.lonDeg},
-            {"altitudeFt",m.altitudeFt},{"registration",m.registration},{"callsign",m.callsign},
-            {"secondsPastHour",m.positionSecondsPastHour},{"ageSeconds",age},
-            {"stale",age>inmarsatPositionFreshSeconds(snapshot.config.watch.enabled,snapshot.config.watch.refreshSeconds)}});
-    }
-    map_->setReport(report,false);
+    // The map owns only presentation/online state; it reads immutable RF
+    // snapshots and never writes online positions into the decoder store.
+    report["receptionRunning"]=running;
+    tracking_->setReceiverReport(report);
     speakerCheck_->setEnabled(!running);recordCheck_->setEnabled(!running);
     startBtn_->setEnabled(!running);
     stopBtn_->setEnabled(running);

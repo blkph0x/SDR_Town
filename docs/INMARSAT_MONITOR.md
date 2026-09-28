@@ -37,10 +37,11 @@ Use **With position only** to filter and column headers to sort. Copy copies
 only visible rows. Radio reception continues while either window is closed.
 No aircraft identities or positions are added to automatic remote diagnostics.
 
-ICAO is currently populated only from an explicit CRC-validated ADS-C airframe
-ID that agrees with the decoded AES. Other rows can legitimately have blank
-ICAO/country. Registration and callsign must be received; no online lookup or
-guess from a nearby aircraft is performed. Country is an address allocation,
+ICAO is populated from the validated Classic Aero AES address (DEC-0164), with
+an explicit ADS-C airframe ID required to agree when present. Other services
+can legitimately have blank ICAO/country. Registration and callsign must be received; no
+guess from a nearby aircraft is performed. Optional online coordinates live in
+the separate hybrid map, not this RF registry. Country is an address allocation,
 not current location or operator nationality. This table is not a navigation
 or safety-of-flight product.
 
@@ -57,8 +58,8 @@ The screenshot's exact country abbreviations are not copied from InmarScope.
 
 ## Remaining gaps
 
-- No general aircraft-registration database or separate aircraft-ID-only
-  ADS-C report parsing; unknown fields remain blank.
+- No general aircraft-registration database; unknown fields remain blank.
+  Identity-only ADS-C groups and validated C-channel identities are supported.
 - This is live monitoring. IQ replay retains its own separate report/map;
   replay observations do not contaminate live aircraft ages or counts.
 - Multi-SDR independent mode ownership remains ISS-0031 / T-0062.

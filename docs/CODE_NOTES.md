@@ -1,5 +1,20 @@
 # Code notes (tree map)
 
+T-0095 / DEC-0164: InmarsatIdentity.h provides validated-Classic-Aero address
+formatting and C-identity publication. Native Aero supplies ICAO on ACARS and
+assignments; explicit ADS-C mismatches still reject coordinates. MessageStore
+records monotonic identity/position receipt times and typed earth-reference
+motion paired to its position. No decoder or speaker eligibility change.
+InmarsatTracking owns source selection, age/TTL, bounded estimates and activity
+association. InmarsatOnlineLookup owns one cancellable Qt HTTPS reply, strict
+provider validation/body/depth/deadline/backoff and fair received-ID batches.
+InmarsatTrackingPanel owns consent, live snapshots, lifecycle and bounded local
+evidence; numeric counters join the existing opt-in diagnostic allowlist.
+InmarsatMapWidget keeps the shared offline/replay renderer, adds source/estimate
+presentation and independently labels selected playback vs received activity.
+Recording before/after snapshots and collector validation retain reviewed-only
+voice identity context. No aircraft data in ordinary automatic telemetry.
+
 T-0094 / DEC-0163: InmarsatAero counts ACARS block-ID direction and valid ADS-C
 applications; existing accepted position count is preserved through pipeline
 resets into `positionReports`. InmarsatDiagnostics allows only numeric counters

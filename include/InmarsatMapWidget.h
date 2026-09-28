@@ -21,7 +21,7 @@ protected:
     void mouseMoveEvent(QMouseEvent*) override;
     void mouseReleaseEvent(QMouseEvent*) override;
 private:
-    struct Track { uint32_t aes; QPointF point; QString label, details; bool active, stale; };
+    struct Track { uint32_t aes; QPointF point; QString label, details; bool active, stale, online=false, estimated=false; };
     QPainterPath land_;
     std::vector<Track> tracks_;
     QPointF center_{0,0}, dragStart_, dragCenter_;

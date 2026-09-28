@@ -1,5 +1,19 @@
 # Development log
 
+## 2026-09-28 - T-0095 hybrid Inmarsat map locally qualified
+
+Corrected Classic Aero identity from primary protocol/manufacturer evidence;
+implemented optional consented ADSB.lol lookups with strict response bounds,
+independent RF/internet freshness, labelled short estimates, all-channel call
+markers and explicit unknown/unlocated states. Preserved original position
+history under busy identity traffic after the regression test caught the gap.
+Detailed bounded local decisions and numeric opted-in remote counters added;
+reviewed recording context and collector validator updated/deployed. Full local
+16/16 CTest, 71 Inmarsat unit cases and actual GUI/CLI reference map PASS; 8400
+audio bytes unchanged. P25 and shared RF/audio frozen. Preparing v0.2.118
+experimental; public asset verification and real installation call/plane
+association acceptance are not yet claimed.
+
 ## 2026-09-27 - T-0094 published verification
 
 v0.2.117-experimental source 884c87d, both Windows CI runs and both YAML checks

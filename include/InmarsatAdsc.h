@@ -6,6 +6,8 @@
 struct InmarsatAdscPosition {
     double latitude=0, longitude=0, altitudeFt=0, secondsPastHour=0;
     uint32_t airframeId=0;
+    bool hasGroundVector=false;
+    double groundTrackDeg=0, groundSpeedKnots=0;
     std::string registration, callsign;
 };
 class InmarsatAdsc {

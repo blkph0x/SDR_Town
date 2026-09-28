@@ -94,6 +94,16 @@ void aircraftFields(InmarsatAcarsApplication& result, la_proto_node* root) {
             p.callsign = id->id;
             while (!p.callsign.empty() && p.callsign.back() == ' ') p.callsign.pop_back();
             haveIdentity = true;
+        } else if (tag->tag == 14) {
+            // libacars adsc.c earth_ref: true track degrees / ground speed knots.
+            // Tag 15 is heading/Mach and must never drive map extrapolation.
+            const auto* vector = static_cast<const la_adsc_earth_air_ref_t*>(tag->data);
+            if (!vector->heading_invalid && std::isfinite(vector->heading) &&
+                std::isfinite(vector->speed) && vector->speed >= 0 && vector->speed <= 1200) {
+                p.hasGroundVector = true;
+                p.groundTrackDeg = std::fmod(vector->heading + 360.0, 360.0);
+                p.groundSpeedKnots = vector->speed;
+            }
         } else if (tag->tag == 17) {
             const auto* id = static_cast<const la_adsc_airframe_id_t*>(tag->data);
             const auto icao = uint32_t(id->icao_hex[0]) << 16 | uint32_t(id->icao_hex[1]) << 8 | id->icao_hex[2];

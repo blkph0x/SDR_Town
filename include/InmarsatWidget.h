@@ -14,6 +14,7 @@ class QTableWidget;
 class QShowEvent;
 class QHideEvent;
 class InmarsatMapWidget;
+class InmarsatTrackingPanel;
 class InmarsatWatchSpectrum;
 class InmarsatConstellationWidget;
 class QSpinBox;
@@ -63,7 +64,7 @@ private:
     QCheckBox* voiceFollowCheck_ = nullptr;
     QCheckBox* recordCheck_ = nullptr;
     QCheckBox* speakerCheck_ = nullptr;
-    InmarsatMapWidget* map_ = nullptr;
+    InmarsatTrackingPanel* tracking_ = nullptr;
     QLabel* statusLabel_ = nullptr;
     QLabel* lockLabel_ = nullptr;
     QLabel* audioLabel_ = nullptr;

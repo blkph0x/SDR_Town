@@ -1,5 +1,13 @@
 # SDR Town
 
+0.2.118 adds the **Inmarsat hybrid aircraft map**: validated Classic Aero ICAO
+identities, optional ADSB.lol positions, independent RF/online ages, bounded
+estimated movement and received-call highlighting. Online assistance is OFF
+until explicitly enabled in **Inmarsat > Aircraft map**. Diagnostic counters
+explain missing identities/positions and lookup failures without automatically
+uploading aircraft data. Voice DSP and P25 are unchanged.
+See [map guide](docs/INMARSAT_HYBRID_MAP.md) and [release notes](docs/RELEASE_0.2.118.md).
+
 0.2.117 raises reviewed diagnostic recordings to **15 per installation per
 rolling 24 hours** and explains upload-limit failures. Recording consent, size,
 storage and retention limits remain intact. Numeric map diagnostics distinguish

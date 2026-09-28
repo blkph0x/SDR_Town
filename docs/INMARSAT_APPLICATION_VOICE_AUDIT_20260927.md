@@ -1,5 +1,11 @@
 # Aero application, identity and 8400 audit
 
+**Identity correction, 2026-09-28:** the tag-17-only ICAO interpretation below
+describes the old implementation and was too restrictive. ICAO Doc 9925 III
+6.3.1 defines Classic Aero AES as the aircraft ICAO address. DEC-0164/T-0095
+supersede that restriction and the planned online-map section below. Preserve
+CRC/direction and explicit conflicting-airframe rejection. See INMARSAT_HYBRID_MAP.md.
+
 T-0092 / DEC-0161 / DEC-0162. This is evidence for v0.2.116, not acceptance
 of every satellite application or continuous intelligible speech.
 

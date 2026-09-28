@@ -1008,6 +1008,10 @@ void InmarsatEngine::workerLoop() {
         else if(now-lastIq>std::chrono::milliseconds(500)) {
             // One complete Aero C-frame with no input: never leave a stale talking marker.
             std::lock_guard<std::mutex> lock(mutex_);pipelineReport_["voiceActive"]=false;
+            pipelineReport_["speechActive"]=false;
+            if(pipelineReport_.contains("watch"))for(auto& channel:pipelineReport_["watch"]["channels"]) {
+                channel["decoder"]["voiceActive"]=false;channel["decoder"]["speechActive"]=false;
+            }
         }
         if (now >= nextLog && !diagnostics.path().isEmpty()) {
             auto report=watch_?watch_->report(steadySeconds()):pipeline_.report();

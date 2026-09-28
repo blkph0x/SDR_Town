@@ -7,6 +7,11 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <chrono>
+
+inline double inmarsatMonotonicSeconds() {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 
 enum class InmarsatMsgKind {
     Acars = 0,
@@ -18,12 +23,14 @@ enum class InmarsatMsgKind {
 };
 
 struct InmarsatMessage {
+    double receivedMonotonic = 0; // Local-only receipt; never serialized or supplied by RF.
     InmarsatMsgKind kind = InmarsatMsgKind::Status;
     double unixTime = 0.0;
     double freqHz = 0.0;
     uint32_t aesId = 0;
     uint8_t gesId = 0;
     std::string icaoHex;
+    bool classicAeroIdentity = false;
     std::string label;
     std::string text;
     std::string applicationProtocol;
@@ -35,6 +42,9 @@ struct InmarsatMessage {
     bool validated = false;
     double altitudeFt = 0.0;
     double positionSecondsPastHour = 0.0;
+    bool positionHasTimestamp = false;
+    bool hasGroundVector = false;
+    double groundTrackDeg = 0, groundSpeedKnots = 0;
     std::string registration;
     std::string callsign;
     double voiceRxHz = 0.0;
@@ -48,6 +58,7 @@ struct InmarsatAircraft {
     InmarsatMessage identity;
     uint64_t messages = 0;
     double positionTime = 0;
+    double lastSeenMonotonic = 0, positionMonotonic = 0;
 };
 
 class InmarsatMessageStore {
@@ -60,6 +71,7 @@ public:
     std::vector<InmarsatMessage> recent(size_t limit = 100) const;
     std::vector<InmarsatMessage> positions() const;
     std::vector<InmarsatAircraft> aircraft() const;
+    std::vector<InmarsatAircraft> trackingAircraft() const;
     void clearAircraft();
     nlohmann::json recentJson(size_t limit = 100, size_t offset = 0) const;
     void clear();

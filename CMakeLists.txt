@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.117 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.118 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -185,6 +185,7 @@ set(SDR_TOWN_SOURCES
     src/InmarsatEngine.cpp
     include/InmarsatEngine.h
     src/InmarsatWidget.cpp
+    src/InmarsatTrackingPanel.cpp
     src/InmarsatMonitorWidget.cpp
     src/InmarsatWatch.cpp
     src/InmarsatWatchUi.cpp
@@ -297,7 +298,7 @@ install(TARGETS sdrtown_control_client
 # Deployed Qt DLLs, plugins, and other runtime files from the build dir will be picked up if you run windeployqt before packaging, or manually copy them into the install prefix.
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
-    sdr_inmarsat_native sdr_inmarsat_audio sdr_inmarsat_map
+    sdr_inmarsat_native sdr_inmarsat_audio sdr_inmarsat_map sdr_inmarsat_tracking
     sdr_town_decoders
     Qt6::Core
     Qt6::Gui
@@ -512,6 +513,8 @@ if(BUILD_TESTS)
   # Real Demodulator (full body, member state) is now always linked.
   target_sources(sdr_town_tests PRIVATE tests/test_sstv_virtual_sdr.cpp
     src/SstvRfLiveSession.cpp src/SstvLiveSession.cpp src/SstvStreamWorker.cpp src/SstvProgress.cpp)
+  target_sources(sdr_town_tests PRIVATE tests/test_inmarsat_tracking.cpp)
+  target_link_libraries(sdr_town_tests PRIVATE sdr_inmarsat_tracking)
   target_link_libraries(sdr_town_tests PRIVATE Qt6::Gui)
   target_link_libraries(sdr_town_tests PRIVATE
     sdr_inmarsat_native sdr_inmarsat_audio
@@ -627,6 +630,7 @@ if(BUILD_TESTS)
       ${inmarsat_gui_sources} src/InmarsatWidget.cpp include/InmarsatWidget.h
       src/InmarsatRecordingDialog.cpp
       src/InmarsatMonitorWidget.cpp
+      src/InmarsatTrackingPanel.cpp tests/test_inmarsat_tracking_gui.cpp
       src/InmarsatWatchUi.cpp src/InmarsatWatchSpectrum.cpp include/InmarsatWatchSpectrum.h
       tests/test_aircraft_gui.cpp src/AircraftMapWidget.cpp include/AircraftMapWidget.h
       src/InmarsatReplayDialog.cpp)

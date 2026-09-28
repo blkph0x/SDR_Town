@@ -106,6 +106,19 @@ TEST_CASE("ADS-C identity does not require a position and contracts never become
     REQUIRE(wrapped.aircraft);CHECK(wrapped.aircraft->airframeId==0xabcdef);
 }
 
+TEST_CASE("ADS-C estimates use earth reference not heading or Mach", "[inmarsat][application]") {
+    // libacars tag 14 and tag 15 share bit layout, not physical interpretation.
+    std::vector<uint8_t> groups{7,0,0,0,0,0,0,0,0,0,0,14,0,0,0,0,0};
+    auto result=decodeInmarsatAcarsApplication("H1",arinc(groups),InmarsatMessageDirection::AirToGround);
+    REQUIRE(result.aircraft);CHECK(result.aircraft->hasGroundVector);
+    CHECK(result.aircraft->groundSpeedKnots==0);
+    groups[11]=15;result=decodeInmarsatAcarsApplication("H1",arinc(groups),InmarsatMessageDirection::AirToGround);
+    REQUIRE(result.aircraft);CHECK_FALSE(result.aircraft->hasGroundVector);
+    groups[11]=14;groups[12]=0x80;
+    result=decodeInmarsatAcarsApplication("H1",arinc(groups),InmarsatMessageDirection::AirToGround);
+    REQUIRE(result.aircraft);CHECK_FALSE(result.aircraft->hasGroundVector);
+}
+
 TEST_CASE("Independent CPDLC and media advisory applications produce text not invented positions", "[inmarsat][application]") {
     // Public libacars v2.2.1 PROG_GUIDE example 3, expected uplink CONTACT.
     const std::string raw="/AKLCDYA.AT1.9V-SVG21D0755D84AD067448398722949A7521C8AB4A1C8EAB5CE393";
