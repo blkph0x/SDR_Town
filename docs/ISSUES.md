@@ -1,6 +1,6 @@
 # Issues (canonical)
 
-## ISS-0050 - Classic Aero map identity and online bridge incomplete (2026-09-28, OPEN)
+## ISS-0050 - Classic Aero map identity and online bridge incomplete (2026-09-28, REPAIRED in v0.2.118-experimental; field association acceptance open)
 
 Audit at 7b4effb: shipped 10500 reference recovers eight validated messages,
 four position reports and two aircraft but zero ICAO fields. Tag-17-only
@@ -12,9 +12,14 @@ submitted recording does not preserve pre-capture identity, so it cannot prove
 live voice association. T-0095 fixes integration without changing working DSP.
 Local repair qualified under DEC-0164: Classic Aero identity, reviewed recording
 context, source-owned lookup/fallback, retained history, bounded estimates and
-multi-channel activity markers. 71 Inmarsat cases and all 16 CTests PASS; real
+multi-channel activity markers. 72 Inmarsat cases and all 16 CTests PASS; real
 IQ now supplies ICAO for both reference aircraft, 8400 PCM unchanged. Public
-release verification and field call-to-aircraft confirmation remain pending.
+release verified from 91b455a by Actions 36401138563 and independent anonymous
+download/hash/provenance/shipped GUI/CLI tests. Field call-to-aircraft
+confirmation remains pending: obtain an identity-bearing live call, correlate
+the displayed AES/ICAO with that channel's validated identity and activity,
+then confirm the marker source/age and stop behavior. Green means associated
+call activity, not proof of pilot speech or sample-exact speaker playback.
 Initial release CI 36398159214 also caught floating-point age subtraction at
 exact expiry. Fixed receipt-plus-TTL deadline comparison; deterministic receipt
 5937/7 reproduces before and passes after, with no epsilon or extended duration.
@@ -48,9 +53,11 @@ requires a real position-bearing message/capture from this installation, ideally
 the same IQ decoded by JAERO/InmarScope. No RF/map defect is established by
 these samples; proprietary text and CPDLC waypoint extraction are separate scope.
 Source comparison also confirms InmarScope defaults to online ADSB.lol enrichment
-for received identities, which SDR Town's Inmarsat map lacks. This explains a
+for received identities, which SDR Town's Inmarsat map lacked at this audit. This explains a
 possible map-population difference without a decoder defect; the remote marker's
-actual source is not established. Scope and safe implementation are T-0095.
+actual source is not established. T-0095 now provides an explicit-opt-in,
+source-labelled bridge in v0.2.118; that closes the integration gap, not this
+installation's RF position-evidence gate.
 
 ## ISS-0046 - Aero encoded applications displayed as prose (2026-09-27, REPAIRED in v0.2.116-experimental; remaining formats open)
 

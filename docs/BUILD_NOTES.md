@@ -1,5 +1,30 @@
 # Build notes
 
+## 2026-09-28 - T-0095 public release verification
+
+Source 91b455a7033bb7c85415c39451909d5de6f6c641. Master/release Windows Actions
+36401138823/36401138563 and YAML 36401138699/36401138592 all PASS. Release:
+https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.118-experimental
+Public non-draft experimental portable ZIP downloaded anonymously and verified:
+SHA256 `fcea31ff76be24994a9c5a6cf958cf2efbac152d85ae82915c333d23394cde30`;
+EXE `bbb27b1c9339ee66aa7b559f99adc1c266f0dccb64d5fd06f0b26f5c5ad02e19`;
+SDRplay module `3a2b3d3c1f14cbf413277ab772344afe60768cab917daa527218297c19658337`.
+Embedded source/version/workflow and binary hashes match. Shipped diagnostics
+defaults remain disabled with the existing public HTTPS collector endpoint.
+Signed stable updater release remains v0.2.96, not replaced by this portable.
+
+Downloaded executable: CLI help/bias-T, RDS reference/parity/negative checks,
+reviewed-recording valid/malformed checks, real 10500 GUI/CLI IQ replay all PASS.
+Each map path produces eight validated units, four position reports and two
+aircraft with Classic Aero ICAO fields. Both 8400 paths retain exact v116/v117
+WAV SHA256 `b1d4c75b92ece9280769de46fc3d0f3d224c990d40ee189e0f4afa7e74659282`.
+This is the private five-second analytic-IF reconstruction, not full tuner IQ;
+no private recordings, aircraft IDs or transcripts published. Local final gates:
+72 Inmarsat cases / 23442 assertions and full 16/16 CTest PASS after deadline
+repair. Collector 6/6 PASS, bounded numeric HTTPS synthetic report persisted.
+Physical live call/aircraft association and this installation's RF positions
+remain field acceptance gates. P25 and shared RF/audio unchanged.
+
 ## 2026-09-28 - T-0095 CI expiry boundary repair
 
 Release Actions 36398159214 built successfully but stopped before publication

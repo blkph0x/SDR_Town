@@ -1,5 +1,23 @@
 # Development log
 
+## 2026-09-28 - T-0095 published and public asset qualified
+
+v0.2.118-experimental published from 91b455a. Master/release Windows Actions
+36401138823/36401138563 and both YAML checks PASS. Anonymous public ZIP/hash,
+embedded source/version/workflow, EXE and SDRplay module hashes verified.
+Shipped GUI/CLI reference replay produces two correctly identified map tracks;
+8400 PCM is byte-identical to v116/v117. RDS and reviewed-recording positive
+and negative gates PASS. Stable updater latest remains v0.2.96.
+
+T-0095 integration complete: source-owned offline/online map, validated Classic
+Aero identities, bounded consented lookup, expiry/fallback, short labelled
+estimates, multi-channel call markers and diagnostic evidence. Online default
+OFF; no raw identities/coordinates/text/audio in routine remote telemetry.
+Field identity-bearing call association and genuine RF position evidence remain
+open, explicitly separate from proven replay and mocked-network/render tests.
+P25 and shared RF/audio were not changed. No claim of navigation-grade tracking
+or pilot-only speaker attribution; unknown identities remain unattributed.
+
 ## 2026-09-28 - T-0095 hybrid Inmarsat map locally qualified
 
 Initial release CI caught an exact-expiry floating-point boundary; deterministic
