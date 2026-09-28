@@ -22,7 +22,9 @@ uint32_t hexId(const nlohmann::json& row) {
     return inmarsatClassicIcao(id).empty()?0:id;
 }
 bool ageValid(double now,double received,double ttl) {
-    return std::isfinite(received) && received>0 && now>=received && now-received<ttl;
+    // DEC-0164: compare the deadline directly. Subtraction can round the
+    // exact expiry just below ttl on fractional monotonic clocks.
+    return std::isfinite(received) && received>0 && now>=received && now<received+ttl;
 }
 uint32_t voiceId(const nlohmann::json& report) {
     if(!report.is_object() || !report.value("voiceActive",false))return 0;

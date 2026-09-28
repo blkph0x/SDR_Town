@@ -15,6 +15,11 @@ context, source-owned lookup/fallback, retained history, bounded estimates and
 multi-channel activity markers. 71 Inmarsat cases and all 16 CTests PASS; real
 IQ now supplies ICAO for both reference aircraft, 8400 PCM unchanged. Public
 release verification and field call-to-aircraft confirmation remain pending.
+Initial release CI 36398159214 also caught floating-point age subtraction at
+exact expiry. Fixed receipt-plus-TTL deadline comparison; deterministic receipt
+5937/7 reproduces before and passes after, with no epsilon or extended duration.
+The original master build passed, confirming why exact-clock regression input
+is required rather than relying on the host's current uptime.
 
 ## ISS-0049 - Optional GUI reference completion anomaly (2026-09-27, monitor)
 

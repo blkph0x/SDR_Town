@@ -2,6 +2,12 @@
 
 ## 2026-09-28 - T-0095 hybrid Inmarsat map locally qualified
 
+Initial release CI caught an exact-expiry floating-point boundary; deterministic
+local reproduction added, deadline comparison repaired without changing TTL.
+All 72 Inmarsat cases and full 16/16 CTest pass after repair. No release asset
+was published by the failing run. Numeric-only synthetic map telemetry is
+confirmed through public HTTPS into the collector JSONL.
+
 Corrected Classic Aero identity from primary protocol/manufacturer evidence;
 implemented optional consented ADSB.lol lookups with strict response bounds,
 independent RF/internet freshness, labelled short estimates, all-channel call

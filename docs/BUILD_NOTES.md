@@ -1,5 +1,25 @@
 # Build notes
 
+## 2026-09-28 - T-0095 CI expiry boundary repair
+
+Release Actions 36398159214 built successfully but stopped before publication
+on one new unit assertion: retained position did not expire at receipt + 1200.
+467 cases passed, one failed, two explicit external-fixture skips. The age test
+used `now-received < ttl`; fractional monotonic receipts can produce
+1199.9999999999998 at an exactly computed 1200-second deadline. Add a fixed
+5937/7-second receipt case to reproduce locally, then compare `now < received+ttl`
+instead. Keep the strict boundary; no epsilon, relaxed test or duration change.
+The deterministic case reproduced locally before the repair (two assertions
+failed: position expiry and identity eligibility); this is not a speculative
+CI-only change.
+Rebuilt app, unit and GUI targets PASS; 72 Inmarsat cases / 23442 assertions
+PASS after repair. Original master Actions 36398159249 PASS; release run failed
+closed before assets were published. A labelled synthetic numeric-only map
+report was also posted through authenticated public HTTPS and verified in the
+collector's JSONL. No aircraft IDs, coordinates, speech or decoded text uploaded.
+Complete Release CTest after deadline repair: 16/16 PASS, 66.25 s, real reference
+IQ enabled. Re-run Actions on the repaired source before publishing.
+
 ## 2026-09-28 - T-0095 qualification and consent test repair
 
 Windows MSVC 17.14.40 / Qt 6.11.1 Release build of SDR_Town, unit, Inmarsat

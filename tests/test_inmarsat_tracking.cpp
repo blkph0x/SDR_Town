@@ -132,6 +132,16 @@ TEST_CASE("Map diagnostics transmit numeric evidence only", "[inmarsat][tracking
     CHECK(safe.size()==3);CHECK(safe["mapRfPositions"]==3);
     CHECK_FALSE(safe.contains("aircraft"));CHECK_FALSE(safe.contains("mapUnlocated"));
 }
+TEST_CASE("Fractional monotonic receipts expire exactly at their deadline", "[inmarsat][tracking]") {
+    // CI 36398159214 exposed cancellation at the exact TTL boundary. This
+    // receipt makes (receipt + 1200) - receipt round just below 1200.
+    constexpr double receipt=5937.0/7.0;
+    auto a=aircraft();a.lastSeenMonotonic=receipt;a.positionMonotonic=receipt;
+    InmarsatTracking model;model.setRf({a},receipt);
+    REQUIRE(model.report({},receipt+1199.999,false)["positions"].size()==1);
+    CHECK(model.report({},receipt+1200,false)["positions"].empty());
+    CHECK(model.eligibleIds(receipt+1200).empty());
+}
 TEST_CASE("Hybrid snapshot retains independent positions after identity eviction without age renewal", "[inmarsat][tracking]") {
     auto& store=InmarsatMessageStore::instance();store.clear();
     struct Cleanup {~Cleanup(){InmarsatMessageStore::instance().clear();}} cleanup;

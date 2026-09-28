@@ -54,6 +54,9 @@ position record is still retained. Preserve both registries unchanged and expose
 one locked union snapshot (at most 512 distinct aircraft), with the original
 monotonic position receipt. Hidden map snapshots still update; only polling and
 map logging are suspended while hidden. No fresh timestamps invented on merge.
+CI 36398159214 exposed floating subtraction at an exact TTL boundary. Compare
+against the receipt-plus-TTL deadline directly, not a rounded elapsed subtraction.
+Keep expiry strict; deterministic fractional-clock test required, no epsilon.
 
 ## DEC-0163 - Explicitly raise recording allowance to 15 (2026-09-27)
 
