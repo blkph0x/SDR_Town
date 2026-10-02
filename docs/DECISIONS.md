@@ -1,8 +1,8 @@
 # Decisions
 
-## DEC-0165 - FUBAR workspace parity without a second radio pipeline (2026-09-30)
+## DEC-0165 - FUBAR workspace parity without a second radio pipeline (2026-10-03)
 
-T-0096. FUBAR a858247 pairs with Town 0.2.80; current Town 555db8b is 0.2.118.
+T-0096. FUBAR source is being released as 1.1.42 against Town 0.2.118; Town commit 950ad45.
 Confirmed gaps: no Inmarsat web map, 1090 button calls generic NFM tune, satellite
 commands check lease but omit admin feature permission, fixed 64 KiB bridge
 responses can truncate populated registries, old SSTV UI omits RF selection,

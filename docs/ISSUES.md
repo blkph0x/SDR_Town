@@ -1,8 +1,9 @@
 # Issues (canonical)
 
-## ISS-0051 - FUBAR contract drift and missing satellite map (2026-09-30, OPEN)
+## ISS-0051 - FUBAR contract drift and missing satellite map (2026-09-30, RESOLVED IN SOURCE)
 
-T-0096 / DEC-0165. Companion remains at Town 0.2.80. Confirmed missing Inmarsat
+T-0096 / DEC-0165. Source alignment is complete for the Town 0.2.118 contract. The companion
+release still needs its CI publication to complete external verification. Confirmed missing Inmarsat
 map/watch controls, narrowband-only 1090 web tune, missing SSTV RF-mode selector,
 fixed response buffers, public map HTML injection, and satellite permission
 bypass through lease-only endpoints. Requalify matched source and release assets

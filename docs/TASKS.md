@@ -1,6 +1,6 @@
 # Task list (canonical)
 
-T-0096 | in progress | Requalify FUBAR web workspace against current Town |
+T-0096 | done (source) | Requalify FUBAR web workspace against current Town |
 DEC-0165. Inventory native/control/DLL/web differences; expose shared map snapshots
 and bounded workspace commands, preserve local privacy consent and P25/audio.
 Update companion controls, permissions, lease isolation and map lifecycle; test
