@@ -24,6 +24,7 @@ public:
     SatcomScannerWidget* satcom() const { return satcom_; }
     InmarsatWidget* inmarsat() const { return inmarsat_; }
     AircraftMapWidget* aircraft() const { return aircraft_; }
+    void prepareRemoteWorkspace() { ensureTabs(); }
 
     void showSatcomTab();
     void showInmarsatTab();

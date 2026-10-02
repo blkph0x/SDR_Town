@@ -56,11 +56,24 @@ void InmarsatTrackingPanel::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);lookup_.setActive(true);timer_.start();refresh();
 }
 void InmarsatTrackingPanel::hideEvent(QHideEvent* event) {
-    timer_.stop();lookup_.setActive(false);QWidget::hideEvent(event);
+    if(inmarsatMonotonicSeconds()>=webObserverUntil_) {timer_.stop();lookup_.setActive(false);}
+    QWidget::hideEvent(event);
+}
+nlohmann::json InmarsatTrackingPanel::webReport(const nlohmann::json& report) {
+    // DEC-0165: a bounded web observer shares the native cache and consent.
+    webObserverUntil_=inmarsatMonotonicSeconds()+6;
+    timer_.start();lookup_.setActive(true);setReceiverReport(report);
+    auto result=lastReport_;
+    result["onlineEnabled"]=online_->isChecked();
+    result["estimatesEnabled"]=estimates_->isChecked();
+    return result;
 }
 void InmarsatTrackingPanel::refresh() {
     const auto aircraft=InmarsatMessageStore::instance().trackingAircraft();
     const double now=inmarsatMonotonicSeconds();
+    const bool observed=isVisible() || now<webObserverUntil_;
+    lookup_.setActive(observed);
+    if(!observed)timer_.stop();
     model_.setRf(aircraft,now);
     lookup_.poll();
     auto activity=activity_;
@@ -69,13 +82,15 @@ void InmarsatTrackingPanel::refresh() {
     if(now-lastActivity_>2)activity["receptionRunning"]=false;
     auto report=model_.report(activity,now,estimates_->isChecked());
     auto counts=report["tracking"];counts.update(lookup_.report());
+    report["tracking"]=counts;
+    lastReport_=report;
     map_->setReport(report,false);
     const auto state=QString::fromStdString(counts.value("lookupState",std::string{})).replace('_',' ');
     status_->setText(QString("%1 aircraft | RF %2 | Online %3 | Estimated %4 | Unlocated %5 | %6")
         .arg(counts.value("mapAircraft",0)).arg(counts.value("mapRfPositions",0)).arg(counts.value("mapOnlinePositions",0))
         .arg(counts.value("mapEstimatedPositions",0)).arg(counts.value("mapUnlocated",0)).arg(state));
     if(!diagnosticError_.isEmpty())status_->setText(status_->text()+" | "+diagnosticError_);
-    if(now-lastLog_>=5 && isVisible()) {
+    if(now-lastLog_>=5 && observed) {
         lastLog_=now;
         try {
             if(diagnostics_.path().isEmpty())diagnostics_.open({},"inmarsat-map");

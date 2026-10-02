@@ -10,6 +10,7 @@
 #include <QDialog>
 #include <QDoubleSpinBox>
 #include <QGridLayout>
+#include <QJsonDocument>
 #include <QSettings>
 #include <QSignalBlocker>
 #include <spdlog/spdlog.h>
@@ -123,7 +124,7 @@ void AircraftMapWidget::hideEvent(QHideEvent* event) {
     if (uiTimer_) uiTimer_->stop();
     if (netTimer_) netTimer_->stop();
     if (aircraftReply_) aircraftReply_->abort();
-    stopLocalWorker();
+    if(!remoteLocal_)stopLocalWorker();
 }
 
 AircraftMapWidget::~AircraftMapWidget() {
@@ -196,7 +197,7 @@ void AircraftMapWidget::startLocalWorker() {
 }
 
 void AircraftMapWidget::onLocalAdsbToggled(bool on) {
-    if (on && isVisible()) startLocalWorker();
+    if (on && (isVisible() || remoteLocal_)) startLocalWorker();
     else stopLocalWorker();
     refreshUi();
 }
@@ -261,6 +262,7 @@ void AircraftMapWidget::fetchOpenSky() {
 }
 
 void AircraftMapWidget::onTune1090() {
+    tuneSucceeded_=false;
     auto& mgr = DeviceManager::instance();
     const auto devs = mgr.getDevices();
     const size_t idx = mgr.preferredListenDeviceIndex();
@@ -299,7 +301,8 @@ void AircraftMapWidget::onTune1090() {
                 QString::number(plan.hardwareBandwidthHz / 1e6, 'f', 2) + " MHz" : "driver managed");
         spdlog::info("Aircraft tune dev={} requestedHz={} captureHz={} plannedIfHz={} state={}",
             idx, plan.requestedHz, actual, plan.hardwareBandwidthHz, mgr.getRuntimeStateLabel(idx));
-        if (localAdsbCheck_->isChecked() && isVisible()) startLocalWorker();
+        tuneSucceeded_=true;
+        if (localAdsbCheck_->isChecked() && (isVisible() || remoteLocal_)) startLocalWorker();
     }
     refreshUi();
 }
@@ -321,6 +324,41 @@ void AircraftMapWidget::onInternetAircraftToggled(bool on) {
     }
     spdlog::info("Aircraft internet source enabled={} (network tracks cleared)", on);
     refreshUi();
+}
+
+QJsonObject AircraftMapWidget::webStatus() const {
+    auto result=QJsonDocument::fromJson(QByteArray::fromStdString(
+        AdsBTrackStore::instance().statusJson().dump())).object();
+    for(const auto* key:{"centerLat","centerLon","radiusNm"})result.remove(key);
+    result.insert("ok",true);result.insert("localDecodeEnabled",localAdsbCheck_->isChecked());
+    result.insert("localDecodeRunning",localRun_.load());
+    result.insert("captureBandwidthMHz",captureBandwidth_->value());
+    result.insert("tuneStatus",tuneStatus_);
+    return result;
+}
+
+QJsonObject AircraftMapWidget::webControl(const QJsonObject& body) {
+    const auto action=body.value("action").toString();
+    if(action=="tune") {
+        const double mhz=body.value("captureBandwidthMHz").toDouble(20);
+        if(!std::isfinite(mhz) || mhz<2 || mhz>20)
+            return {{"ok",false},{"status",400},{"error","captureBandwidthMHz must be 2..20"}};
+        captureBandwidth_->setValue(mhz);onTune1090();
+        if(!tuneSucceeded_)return {{"ok",false},{"status",409},{"error",tuneStatus_}};
+    } else if(action=="local") {
+        if(!body.value("enabled").isBool())return {{"ok",false},{"status",400},{"error","enabled boolean required"}};
+        remoteLocal_=body.value("enabled").toBool();
+        {QSignalBlocker block(localAdsbCheck_);localAdsbCheck_->setChecked(remoteLocal_);}
+        onLocalAdsbToggled(remoteLocal_);
+    } else if(action=="network-off") {
+        onInternetAircraftToggled(false);
+    } else if(action=="refresh") {
+        // Existing local privacy choice is authoritative. No web opt-in.
+        if(!AdsBTrackStore::instance().networkEnabled())
+            return {{"ok",false},{"status",403},{"error","Internet aircraft disabled by local operator"}};
+        onRefreshNetwork();
+    } else return {{"ok",false},{"status",400},{"error","unsupported aircraft action"}};
+    return webStatus();
 }
 
 QPointF AircraftMapWidget::latLonToPixel(double lat, double lon) const {

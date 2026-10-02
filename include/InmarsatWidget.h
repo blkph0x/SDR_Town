@@ -25,6 +25,7 @@ class InmarsatWidget : public QWidget {
 public:
     explicit InmarsatWidget(QWidget* parent = nullptr);
     ~InmarsatWidget() override;
+    nlohmann::json webMapReport();
 
 protected:
     void showEvent(QShowEvent* event) override;

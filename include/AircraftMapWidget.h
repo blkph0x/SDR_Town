@@ -5,6 +5,7 @@
 #include <QHash>
 #include <QPointF>
 #include <QPointer>
+#include <QJsonObject>
 #include <atomic>
 #include <thread>
 
@@ -24,6 +25,8 @@ public:
 
     // When embedded in a dock, do not force a top-level window.
     void setEmbedded(bool embedded);
+    QJsonObject webControl(const QJsonObject& body);
+    QJsonObject webStatus() const;
 
 public slots:
     void refreshUi();
@@ -69,4 +72,6 @@ private:
 
     std::atomic<bool> localRun_{false};
     std::thread localThread_;
+    bool remoteLocal_=false;
+    bool tuneSucceeded_=false;
 };

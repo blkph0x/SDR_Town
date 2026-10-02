@@ -1,5 +1,31 @@
 # Decisions
 
+## DEC-0165 - FUBAR workspace parity without a second radio pipeline (2026-09-30)
+
+T-0096. FUBAR a858247 pairs with Town 0.2.80; current Town 555db8b is 0.2.118.
+Confirmed gaps: no Inmarsat web map, 1090 button calls generic NFM tune, satellite
+commands check lease but omit admin feature permission, fixed 64 KiB bridge
+responses can truncate populated registries, old SSTV UI omits RF selection,
+and unescaped aircraft popup fields can interpret received/provider text as HTML.
+
+Keep P25/shared RF/audio unchanged. Add a versioned workspace API at the existing
+authenticated loopback boundary. Reuse native hub widgets, engine validation,
+tracking model, lookup and aircraft tune path; do not create parallel decoders
+or independent internet-position caches in FUBAR. A web map poll counts as an
+observer for six seconds (three missed two-second polls), not reception or call
+evidence; it only permits existing locally consented lookup work. Browser users
+cannot grant operator privacy consent or change home coordinates. Bound public
+responses, omit local paths and receiver coordinates, label data source/age and
+unidentified calls. Expired/offline responses clear active markers.
+
+FUBAR keeps DLL/loopback transport and server-enforced queued leases. Enforce
+admin permissions on every mutating route, use private unexposed per-browser
+control credentials, reject cross-origin mutation, and parse bounded JSON with
+nlohmann/json (MIT, pinned version already used by Town). No public generic
+proxy or filesystem path command. Maps render with escaped DOM content and
+stable markers; feature controls follow negotiated capabilities. Build/test
+both applications, preserve private local files, publish matched CI packages.
+
 ## DEC-0164 - Classic Aero identity and source-owned hybrid map (2026-09-28)
 
 T-0095. ICAO AMCP signal-unit Appendix C section 3 defines AES ID as the

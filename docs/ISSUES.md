@@ -1,5 +1,14 @@
 # Issues (canonical)
 
+## ISS-0051 - FUBAR contract drift and missing satellite map (2026-09-30, OPEN)
+
+T-0096 / DEC-0165. Companion remains at Town 0.2.80. Confirmed missing Inmarsat
+map/watch controls, narrowband-only 1090 web tune, missing SSTV RF-mode selector,
+fixed response buffers, public map HTML injection, and satellite permission
+bypass through lease-only endpoints. Requalify matched source and release assets
+with positive/negative API tests, multiple browser sessions and map lifecycle
+checks. Native replay parity remains mandatory; do not repair web drift in DSP.
+
 ## ISS-0050 - Classic Aero map identity and online bridge incomplete (2026-09-28, REPAIRED in v0.2.118-experimental; field association acceptance open)
 
 Audit at 7b4effb: shipped 10500 reference recovers eight validated messages,

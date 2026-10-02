@@ -1,5 +1,12 @@
 # Task list (canonical)
 
+T-0096 | in progress | Requalify FUBAR web workspace against current Town |
+DEC-0165. Inventory native/control/DLL/web differences; expose shared map snapshots
+and bounded workspace commands, preserve local privacy consent and P25/audio.
+Update companion controls, permissions, lease isolation and map lifecycle; test
+actual loopback DLL/API plus desktop/mobile browser paths and public CI packages.
+No claim of full parity for features without an implemented safe public contract.
+
 T-0094 | done | Restore tester upload capacity and trace missing Aero map positions |
 DEC-0163. User requests 15 recordings per rolling day after the current four
 upload quota blocked further evidence. Preserve authentication, consent, file

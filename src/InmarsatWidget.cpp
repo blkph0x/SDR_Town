@@ -440,6 +440,13 @@ void InmarsatWidget::onStop() {
     InmarsatEngine::instance().stop();
 }
 
+nlohmann::json InmarsatWidget::webMapReport() {
+    const auto snapshot=InmarsatEngine::instance().snapshot();
+    auto report=snapshot.diagnostics;
+    report["receptionRunning"]=snapshot.state!=InmarsatEngineState::Idle;
+    return tracking_->webReport(report);
+}
+
 void InmarsatWidget::refreshUi() {
     refreshDevices();
     const auto snapshot = InmarsatEngine::instance().snapshot();

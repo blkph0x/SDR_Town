@@ -12,6 +12,7 @@ class InmarsatTrackingPanel : public QWidget {
 public:
     explicit InmarsatTrackingPanel(QWidget* parent=nullptr);
     void setReceiverReport(const nlohmann::json& report);
+    nlohmann::json webReport(const nlohmann::json& report);
 protected:
     void showEvent(QShowEvent*) override;
     void hideEvent(QHideEvent*) override;
@@ -27,5 +28,7 @@ private:
     QLabel* status_;
     double lastLog_=0;
     double lastActivity_=0;
+    double webObserverUntil_=0;
+    nlohmann::json lastReport_=nlohmann::json::object();
     QString diagnosticError_;
 };

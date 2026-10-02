@@ -11105,6 +11105,29 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             out.insert("ok", true);
             return out;
         }
+        // SATCOM_HOST_INTEGRATION_BEGIN
+        // DEC-0165: FUBAR observes the native aircraft widget/model; it does
+        // not maintain a second ADS-B/ADS-C cache or receive local paths.
+        if (path == "/v1/aircraft/map-status" && method == "GET") {
+            auto* hub = findChild<SatcomHubWidget*>(QStringLiteral("satcomHub"));
+            if (!hub) return {{"ok", false}, {"status", 503}, {"error", "aircraft workspace unavailable"}};
+            hub->prepareRemoteWorkspace();
+            return hub->aircraft()->webStatus();
+        }
+        if (path == "/v1/aircraft/map-control" && method == "POST") {
+            auto* hub = findChild<SatcomHubWidget*>(QStringLiteral("satcomHub"));
+            if (!hub) return {{"ok", false}, {"status", 503}, {"error", "aircraft workspace unavailable"}};
+            hub->prepareRemoteWorkspace();
+            return hub->aircraft()->webControl(body);
+        }
+        if (path == "/v1/inmarsat/map-status" && method == "GET") {
+            auto* hub = findChild<SatcomHubWidget*>(QStringLiteral("satcomHub"));
+            if (!hub) return {{"ok", false}, {"status", 503}, {"error", "Inmarsat workspace unavailable"}};
+            hub->prepareRemoteWorkspace();
+            return QJsonDocument::fromJson(QByteArray::fromStdString(
+                hub->inmarsat()->webMapReport().dump())).object();
+        }
+        // SATCOM_HOST_INTEGRATION_END
         if (path == "/v1/aircraft/track" && method == "GET") {
             const QString icaoHex = body.value("icao").toString();
             bool ok = false;
