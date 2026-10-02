@@ -53,7 +53,7 @@ SATCOM_MAINWINDOW_PATH = "src/MainWindow.cpp"
 DIAGNOSTICS_DIGESTS = {
     "src/MainWindow.cpp": (
         "7e309ca8c17c89c5dd181a7f40b4a594f4e952ea963a69d0dbea8a97ea640c91",
-        "92525263836146028107d355bd4f2f2ef49c1ba757c2d0acee84c3cb42e2e03f"),
+        "833602464b0c73e1752970a1f86340a4aff78ea4466d51d840011df4b8366997"),
 }
 
 
