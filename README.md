@@ -1,6 +1,6 @@
 # SDR Town
 
-0.2.118 adds the **Inmarsat hybrid aircraft map**: validated Classic Aero ICAO
+0.2.119 adds the **FUBAR workspace contract** on top of the Inmarsat hybrid aircraft map: validated Classic Aero ICAO
 identities, optional ADSB.lol positions, independent RF/online ages, bounded
 estimated movement and received-call highlighting. Online assistance is OFF
 until explicitly enabled in **Inmarsat > Aircraft map**. Diagnostic counters
