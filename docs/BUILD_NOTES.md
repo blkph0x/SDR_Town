@@ -1,5 +1,23 @@
 # Build notes
 
+## 2026-10-03 - T-0097 desktop and companion usability
+
+Windows/MSVC Release local build passed; initial full CTest 16/16 passed.
+P25 exact-patch negative tests pass. New workspace GUI fixture covers selector,
+panel reopening, retained widget values, compact layout and persistence.
+Real browser control lease + 98.1 MHz WFM tune confirmed in the Town desktop.
+Mode/frequency drafts survive polls and tab switches. Browser walkthrough found
+the Inmarsat map missing-success-flag issue; repaired with a GUI regression test.
+Final local Windows/MSVC Release build and full CTest 16/16 PASS (68.67 s),
+including the new map test. Final FUBAR build and CTest 3/3 PASS. Browser checks
+at 1280x850 and 390x844 found no page overflow in any workspace tab; actual
+Inmarsat loopback map response now returns HTTP success with ok=true, not 502.
+Disconnected receiver disables commands; releasing the lease disables all
+mutating workspace controls. FUBAR native Tab traversal confirmed. Physical
+compact-height FUBAR scrolling remains a field check; Town compact layout is
+covered by Qt tests. Existing speaker/VB-CABLE routing was not changed, so no
+end-to-end live-audio claim is made. Public Actions qualification pending.
+
 ## 2026-09-28 - T-0095 public release verification
 
 Source 91b455a7033bb7c85415c39451909d5de6f6c641. Master/release Windows Actions

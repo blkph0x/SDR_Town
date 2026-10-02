@@ -84,11 +84,7 @@ AircraftMapWidget::AircraftMapWidget(QWidget* parent)
     toolbar_->setStyleSheet("QWidget { background: #202428; color: #eeeeee; }");
     netBtn_->setEnabled(internetCheck_->isChecked());
     localAdsbCheck_->setToolTip("Decode new IQ in order on the selected receiver at 1090 MHz. Processing gaps are logged.");
-    status_->setStyleSheet("background:rgba(0,0,0,180);color:#9dff9d;padding:6px;");
-    tuneBtn_->setStyleSheet("background:#0c160c;color:#39FF14;border:1px solid #39FF14;padding:6px;");
-    netBtn_->setStyleSheet("background:#0c160c;color:#39FF14;border:1px solid #39FF14;padding:6px;");
-    netBtn_->setStyleSheet("QPushButton {background:#0c160c;color:#39FF14;border:1px solid #39FF14;padding:6px;} QPushButton:disabled {color:#999999;border-color:#666666;}");
-    localAdsbCheck_->setStyleSheet("background:rgba(0,0,0,160);color:#39FF14;padding:4px;");
+    status_->setStyleSheet("padding:6px;");
 
     nam_ = new QNetworkAccessManager(this);
     uiTimer_ = new QTimer(this);

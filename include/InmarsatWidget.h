@@ -43,7 +43,6 @@ private slots:
 
 private:
     void buildUi();
-    void applyNeonStyle();
     void reloadBandPlans();
     void refreshDevices();
     void populateChannels();

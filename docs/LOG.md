@@ -1,5 +1,18 @@
 # Development log
 
+## 2026-10-03 - T-0097 paired UI usability and contract repairs
+
+Ran both native apps and local web interface. Added direct workspace selection,
+reopened panels, clearer tune action, compact inherited satellite styling and
+retained saved layouts. FUBAR has keyboard traversal/scrolling and a responsive
+tabbed website with persistent lease/listening/command feedback. Owner drafts
+survive polls, observers cannot issue UI commands, requests are bounded and
+maps retain marker identity. Real DLL testing found and repaired the missing
+map success field. Local Town 16/16 and FUBAR 3/3 CTest PASS, real web tuning
+reflected in the desktop and map bridge success verified. P25/DSP/audio and
+privacy settings unchanged. Preparing matched Actions releases; physical
+decoder acceptance and all-device auditory coverage are not claimed here.
+
 ## 2026-09-28 - T-0095 published and public asset qualified
 
 v0.2.118-experimental published from 91b455a. Master/release Windows Actions

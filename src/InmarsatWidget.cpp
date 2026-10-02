@@ -52,7 +52,6 @@ InmarsatWidget::InmarsatWidget(QWidget* parent)
 {
     connectInmarsatRemoteDiagnostics();
     buildUi();
-    applyNeonStyle();
     refreshDevices();
     reloadBandPlans();
     syncTuningControls();
@@ -84,33 +83,12 @@ InmarsatWidget::~InmarsatWidget() {
     InmarsatEngine::instance().setUpdateCallback({});
 }
 
-void InmarsatWidget::applyNeonStyle() {
-    setStyleSheet(R"(
-        InmarsatWidget {
-            background: #000000; color: #39FF14;
-            font-family: Consolas, "Courier New", monospace;
-        }
-        QLabel { color: #39FF14; }
-        QComboBox, QPlainTextEdit, QTableWidget {
-            background: #0a0f0a; color: #39FF14; border: 1px solid #1f3d1f; border-radius: 6px;
-            padding: 4px; font-weight: 700;
-        }
-        QHeaderView::section { background: #0a0f0a; color: #39FF14; border: 1px solid #1f3d1f; }
-        QPushButton {
-            background: #0c160c; color: #39FF14; border: 2px solid #39FF14; border-radius: 10px;
-            padding: 8px 12px; font-weight: 800; min-width: 90px;
-        }
-        QPushButton:hover { background: #132213; }
-        QPushButton:disabled { color: #2a5a2a; border-color: #1a331a; }
-        QCheckBox { color: #39FF14; }
-    )");
-}
 
 #include "InmarsatDiagnosticRecording.h"
 void InmarsatWidget::buildUi() {
     auto* root = new QVBoxLayout(this);
     auto* title = new QLabel("INMARSAT AERO / EGC");
-    title->setStyleSheet("font-size: 22px; font-weight: 900; letter-spacing: 2px;");
+    title->setStyleSheet("font-size: 16px; font-weight: 600;");
     root->addWidget(title);
     root->addWidget(new QLabel(
         "Classic Aero experimental | ADS-C | C-channel voice | EGC probe only"));

@@ -59,7 +59,6 @@ SatcomScannerWidget::SatcomScannerWidget(QWidget* parent)
     : QWidget(parent)
 {
     buildUi();
-    applyNeonStyle();
     refreshTimer_ = new QTimer(this);
     connect(refreshTimer_, &QTimer::timeout, this, &SatcomScannerWidget::refreshUi);
 
@@ -93,40 +92,13 @@ SatcomScannerWidget::~SatcomScannerWidget() {
     SatPassPlanner::instance().setUpdateCallback({});
 }
 
-void SatcomScannerWidget::applyNeonStyle() {
-    setStyleSheet(R"(
-        SatcomScannerWidget, QWidget#satcomRoot {
-            background: #000000; color: #39FF14;
-            font-family: Consolas, "Courier New", monospace;
-        }
-        QLabel { color: #39FF14; }
-        QGroupBox, QFrame#satcomBox {
-            border: 1px solid #39FF14; border-radius: 10px; margin-top: 6px; padding: 8px;
-            background: #050805;
-        }
-        QDoubleSpinBox, QComboBox, QPlainTextEdit, QLineEdit, QTableWidget {
-            background: #0a0f0a; color: #39FF14; border: 1px solid #1f3d1f; border-radius: 6px;
-            padding: 4px; font-size: 13px; font-weight: 700;
-        }
-        QHeaderView::section { background: #0a0f0a; color: #39FF14; border: 1px solid #1f3d1f; }
-        QPushButton {
-            background: #0c160c; color: #39FF14; border: 2px solid #39FF14; border-radius: 10px;
-            padding: 8px 12px; font-weight: 800; min-width: 90px;
-        }
-        QPushButton:hover { background: #132213; }
-        QPushButton:disabled { color: #2a5a2a; border-color: #1a331a; }
-        QSlider::groove:horizontal { height: 6px; background: #1a331a; border-radius: 3px; }
-        QSlider::handle:horizontal { background: #39FF14; width: 14px; margin: -5px 0; border-radius: 7px; }
-        QCheckBox { color: #39FF14; }
-    )");
-}
 
 void SatcomScannerWidget::buildUi() {
     setObjectName("satcomRoot");
     auto* root = new QVBoxLayout(this);
 
     auto* title = new QLabel("SATCOM SCANNER");
-    title->setStyleSheet("font-size: 22px; font-weight: 900; letter-spacing: 2px;");
+    title->setStyleSheet("font-size: 16px; font-weight: 600;");
     root->addWidget(title);
 
     auto* top = new QHBoxLayout();
@@ -140,6 +112,7 @@ void SatcomScannerWidget::buildUi() {
         spin->setRange(0.1, 6000.0);
         spin->setSuffix(" MHz");
         layout->addWidget(spin);
+        layout->addStretch();
         top->addWidget(box);
     };
     makeFrequency("LOW FREQUENCY", lowSpin_);

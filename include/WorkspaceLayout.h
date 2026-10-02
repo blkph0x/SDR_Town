@@ -9,6 +9,7 @@ class QMainWindow;
 class QMenu;
 class QSettings;
 class QWidget;
+class QComboBox;
 
 // Presentation-only ownership. Changing layouts never changes receiver state.
 class WorkspaceLayout final : public QObject {
@@ -28,4 +29,5 @@ private:
     QList<QDockWidget*> panels_;
     QString preset_ = "listening";
     bool locked_ = false;
+    QComboBox* presetSelector_ = nullptr;
 };

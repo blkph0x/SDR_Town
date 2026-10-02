@@ -4921,6 +4921,11 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
 
         // DEC-0075: move existing widgets, never recreate receivers or handlers.
         workspaceLayout = new WorkspaceLayout(this);
+        // DEC-0166: reparent presentation only; keep the existing monitor and signals.
+        rxLay->removeWidget(repeaterBox);
+        workspaceLayout->addPanel("repeater", "Repeater Tones", repeaterBox);
+        setMonBtn->setText("Tune and Receive");
+        scanBtn->setText("Start Smart Scan");
         auto* receiverPanel = new QWidget;
         auto* receiverLayout = new QVBoxLayout(receiverPanel);
         rxLay->removeWidget(rxTable);

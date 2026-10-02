@@ -1,5 +1,30 @@
 # Decisions
 
+## DEC-0166 - Usability follows the operator workflow (2026-10-03)
+
+T-0097. Running 0.2.119 / FUBAR 1.1.43 shows the inactive repeater monitor
+occupying the central listening area, no direct workspace selector, fixed-size
+FUBAR controls without dialog Tab traversal, an always-visible empty web player,
+and commands whose feedback is hidden on another tab. Browser reproduction:
+with a control lease, select WFM without submitting; the next status poll calls
+sdrHighlightMode and replaces the draft with AUTO. Form drafts must survive
+polls until submitted or control ownership changes.
+
+Move the existing repeater widget into a dock and expose workspace presets with
+a toolbar. This only reparents widgets; receiver connections stay intact. Keep
+saved layouts compatible and preserve the P25 protection through an exact,
+reviewed presentation-only transformation. Use restrained existing native
+controls; add keyboard traversal and scrolling to FUBAR. Web listening and
+lease state remain visible across tabs; commands share visible result feedback.
+Use semantic tabs, labelled fields, bounded non-overlapping polls, stable map
+markers and source-labelled empty states. No DSP or security policy changes.
+
+Actual DLL/web walkthrough exposed a missing `ok` field in the Inmarsat map
+snapshot: valid position arrays were rejected as an error. Add the explicit
+success contract at the producer and a GUI fixture, not a permissive consumer.
+Remove satellite widget-local neon styles so controls inherit the app theme.
+No lock, decoder, scheduler, audio, routing or consent logic changes.
+
 ## DEC-0165 - FUBAR workspace parity without a second radio pipeline (2026-10-03)
 
 T-0096. FUBAR source is being released as 1.1.42 against Town 0.2.118; Town commit 950ad45.

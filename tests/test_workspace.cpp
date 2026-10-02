@@ -213,6 +213,30 @@ TEST_CASE("Workspace roundtrips geometry visibility and lock state", "[workspace
     REQUIRE_FALSE(layout.isLocked());
 }
 
+TEST_CASE("Workspace selector reaches satellite and repeater panels without replacing widgets", "[workspace]") {
+    QMainWindow window;
+    WorkspaceLayout layout(&window);
+    auto* saved = layout.addPanel("saved", "Saved", new QLineEdit("98.100"));
+    auto* repeater = layout.addPanel("repeater", "Repeater Tones", new QLineEdit("123.0"));
+    auto* satellites = layout.addPanel("satcom", "Satellites", new QWidget);
+    window.show();
+    REQUIRE(layout.applyPreset("listening"));
+    REQUIRE(repeater->isHidden());
+    REQUIRE(satellites->isHidden());
+    auto* selector = window.findChild<QComboBox*>("workspace.selector");
+    REQUIRE(selector);
+    selector->activated(selector->findData("satellite"));
+    REQUIRE(layout.preset() == "satellite");
+    REQUIRE_FALSE(satellites->isHidden());
+    REQUIRE(saved->isHidden());
+    repeater->toggleViewAction()->trigger();
+    REQUIRE_FALSE(repeater->isHidden());
+    REQUIRE(repeater->findChild<QLineEdit*>()->text() == "123.0");
+    REQUIRE(layout.applyPreset("listening"));
+    REQUIRE(selector->currentData() == "listening");
+    REQUIRE(saved->findChild<QLineEdit*>()->text() == "98.100");
+}
+
 TEST_CASE("DCS status displays preferred label and hides stale data", "[workspace]") {
     RdsStatusWidget widget;
     CtcssSnapshot tone; tone.targetHz=100e6; tone.updatedMs=1000;

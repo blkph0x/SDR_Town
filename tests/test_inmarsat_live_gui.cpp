@@ -626,6 +626,16 @@ TEST_CASE("Aero GUI saves the expanded decoder budget", "[inmarsat][gui]") {
     CHECK_FALSE(reopened.findChild<QCheckBox*>("inmarsatWatchSimultaneous")->isChecked());
 }
 
+TEST_CASE("Aero web map snapshot satisfies the control DLL success contract", "[inmarsat][gui]") {
+    InmarsatWidget widget;
+    const auto report=widget.webMapReport();
+    REQUIRE(report.value("ok",false));
+    REQUIRE(report.contains("positions"));
+    REQUIRE(report["positions"].is_array());
+    REQUIRE(report.contains("aircraft"));
+    REQUIRE(report.contains("onlineEnabled"));
+}
+
 TEST_CASE("Manual Aero tuning releases a pinned watch constellation", "[inmarsat][gui]") {
     auto& engine=InmarsatEngine::instance();
     auto cfg=InmarsatEngineConfig::defaults();

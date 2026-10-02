@@ -1,5 +1,16 @@
 # Issues (canonical)
 
+## ISS-0052 - Companion usability and map success contract (2026-10-03)
+
+T-0097 / DEC-0166. Reproduced mode draft overwritten by status polling, hidden
+command errors, lease-less enabled decoder controls, oversized mobile player,
+and inaccessible desktop workspace selection. Repaired in FUBAR 1.1.44 and
+Town 0.2.120. Actual loopback map GET exposed an additional failure: webReport
+omitted `ok:true`, so the control DLL rejected a valid map snapshot as an error.
+Added an empty-map GUI regression test and verify through DLL/web after rebuild.
+Desktop satellite styles now inherit the native palette. Field RF/audio
+acceptance and physical rotor/SDRplay testing are not claimed by this UI pass.
+
 ## ISS-0051 - FUBAR contract drift and missing satellite map (2026-09-30, RESOLVED IN SOURCE)
 
 T-0096 / DEC-0165. Source alignment is complete for the Town 0.2.118 contract. The companion

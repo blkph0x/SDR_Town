@@ -64,6 +64,8 @@ nlohmann::json InmarsatTrackingPanel::webReport(const nlohmann::json& report) {
     webObserverUntil_=inmarsatMonotonicSeconds()+6;
     timer_.start();lookup_.setActive(true);setReceiverReport(report);
     auto result=lastReport_;
+    // The control DLL requires an explicit success flag even for an empty map.
+    result["ok"]=true;
     result["onlineEnabled"]=online_->isChecked();
     result["estimatesEnabled"]=estimates_->isChecked();
     return result;

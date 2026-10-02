@@ -48,7 +48,6 @@ private slots:
 
 private:
     void buildUi();
-    void applyNeonStyle();
     void refreshPassesTable();
     void updateAutoCapture(const SatPassPlannerSnapshot& plan);
     void stopAutoCapture(bool keepHandledKey);

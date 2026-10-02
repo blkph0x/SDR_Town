@@ -1,12 +1,17 @@
 #include "WorkspaceLayout.h"
 
 #include <QAction>
+#include <QComboBox>
 #include <QDockWidget>
 #include <QMainWindow>
 #include <QMenu>
 #include <QScrollArea>
 #include <QSettings>
 #include <QTabWidget>
+#include <QToolBar>
+#include <QToolButton>
+#include <QLabel>
+#include <QSignalBlocker>
 
 namespace {
 constexpr int layoutVersion = 1;
@@ -25,6 +30,33 @@ public:
 WorkspaceLayout::WorkspaceLayout(QMainWindow* window) : QObject(window), window_(window) {
     window_->setDockOptions(QMainWindow::AllowNestedDocks | QMainWindow::AllowTabbedDocks);
     window_->setTabPosition(Qt::AllDockWidgetAreas, QTabWidget::North);
+    auto* toolbar = window_->addToolBar("Workspace");
+    toolbar->setObjectName("workspace.navigation");
+    toolbar->setMovable(false);
+    toolbar->addWidget(new QLabel(" Workspace: ", toolbar));
+    presetSelector_ = new QComboBox(toolbar);
+    presetSelector_->setObjectName("workspace.selector");
+    presetSelector_->setAccessibleName("Workspace");
+    for (const auto& choice : QList<QPair<QString, QString>>{
+             {"Listen", "listening"}, {"P25 Trunking", "trunking"},
+             {"HF / DX", "hf"}, {"Satellites / Aircraft", "satellite"},
+             {"Signal Analysis", "analysis"}})
+        presetSelector_->addItem(choice.first, choice.second);
+    toolbar->addWidget(presetSelector_);
+    connect(presetSelector_, &QComboBox::activated, this, [this](int index) {
+        applyPreset(presetSelector_->itemData(index).toString());
+    });
+    auto* panelsButton = new QToolButton(toolbar);
+    panelsButton->setText("Panels");
+    panelsButton->setToolTip("Show or hide workspace panels");
+    panelsButton->setPopupMode(QToolButton::InstantPopup);
+    auto* panelMenu = new QMenu(panelsButton);
+    panelsButton->setMenu(panelMenu);
+    connect(panelMenu, &QMenu::aboutToShow, this, [this, panelMenu] {
+        panelMenu->clear();
+        for (auto* dock : panels_) panelMenu->addAction(dock->toggleViewAction());
+    });
+    toolbar->addWidget(panelsButton);
 }
 
 QDockWidget* WorkspaceLayout::addPanel(const QString& id, const QString& title, QWidget* content) {
@@ -46,8 +78,11 @@ bool WorkspaceLayout::applyPreset(const QString& id) {
     if (id == "listening" || id == "hf") selected = "saved";
     else if (id == "trunking") selected = "p25";
     else if (id == "analysis") selected = "capture";
+    else if (id == "satellite") selected = "satcom";
     else return false;
     preset_ = id;
+    const QSignalBlocker selectorBlock(presetSelector_);
+    presetSelector_->setCurrentIndex(presetSelector_->findData(id));
     QDockWidget* previous = nullptr;
     QDockWidget* active = nullptr;
     for (auto* dock : panels_) {
@@ -59,6 +94,8 @@ bool WorkspaceLayout::applyPreset(const QString& id) {
         if (id == "listening" && name == "workspace.p25") visible = false;
         if (id == "listening" && name == "workspace.satcom") visible = false;
         if (id == "hf" && (name == "workspace.p25" || name == "workspace.receivers")) visible = false;
+        if (name == "workspace.repeater") visible = false;
+        if (id == "satellite") visible = name == "workspace.satcom";
         dock->setVisible(visible);
         if (visible) {
             if (previous) window_->tabifyDockWidget(previous, dock);
@@ -69,7 +106,7 @@ bool WorkspaceLayout::applyPreset(const QString& id) {
     if (active) {
         active->show();
         active->raise();
-        window_->resizeDocks({active}, {id == "trunking" ? 320 : 220}, Qt::Vertical);
+        window_->resizeDocks({active}, {id == "satellite" ? 480 : id == "trunking" ? 320 : 220}, Qt::Vertical);
     }
     return true;
 }
@@ -119,7 +156,7 @@ void WorkspaceLayout::populateMenu(QMenu* menu) {
     auto* presets = menu->addMenu("Workspace");
     const QList<QPair<QString, QString>> choices = {
         {"Listening", "listening"}, {"Trunking", "trunking"},
-        {"HF / DX", "hf"}, {"Analysis", "analysis"}};
+        {"HF / DX", "hf"}, {"Satellites / Aircraft", "satellite"}, {"Analysis", "analysis"}};
     for (const auto& choice : choices) {
         auto* action = presets->addAction(choice.first);
         connect(action, &QAction::triggered, this, [this, id = choice.second] { applyPreset(id); });

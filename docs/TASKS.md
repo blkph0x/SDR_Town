@@ -1,5 +1,11 @@
 # Task list (canonical)
 
+T-0097 | in progress | Desktop and companion usability qualification |
+DEC-0166. Run both shipped apps and web workflows; improve workspace navigation,
+main receiver space, keyboard access, mobile layout and visible command feedback.
+Reproduce polling/draft defects; preserve DSP, leases and privacy boundaries.
+Qualify local builds, browser/Qt tests and matched public Actions releases.
+
 T-0096 | done (source) | Requalify FUBAR web workspace against current Town |
 DEC-0165. Inventory native/control/DLL/web differences; expose shared map snapshots
 and bounded workspace commands, preserve local privacy consent and P25/audio.

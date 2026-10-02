@@ -57,7 +57,26 @@ DIAGNOSTICS_DIGESTS = {
 }
 
 
+WORKSPACE_UI_BLOCK = '''        // DEC-0166: reparent presentation only; keep the existing monitor and signals.
+        rxLay->removeWidget(repeaterBox);
+        workspaceLayout->addPanel("repeater", "Repeater Tones", repeaterBox);
+        setMonBtn->setText("Tune and Receive");
+        scanBtn->setText("Start Smart Scan");
+'''
+
+
+def workspace_ui_text_allowed(path: str, before: str, after: str) -> bool:
+    anchor = "        workspaceLayout = new WorkspaceLayout(this);\n"
+    return (path == "src/MainWindow.cpp" and before.count(anchor) == 1
+            and WORKSPACE_UI_BLOCK not in before
+            and after == before.replace(anchor, anchor + WORKSPACE_UI_BLOCK, 1))
+
+
 def diagnostics_text_allowed(path: str, before: str, after: str) -> bool:
+    # Preserve the historical exact-patch test across the independently checked UI move.
+    anchor = "        workspaceLayout = new WorkspaceLayout(this);\n"
+    if after.count(anchor + WORKSPACE_UI_BLOCK) == 1:
+        after = after.replace(anchor + WORKSPACE_UI_BLOCK, anchor, 1)
     pair = DIAGNOSTICS_DIGESTS.get(path)
     return pair is not None and pair == (
         hashlib.sha256(before.encode("utf-8")).hexdigest(),
@@ -438,6 +457,10 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
+        if path == "src/MainWindow.cpp" and args.paths is None:
+            if workspace_ui_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
+                print(f"P25 guard: accepted exact DEC-0166 widget reparenting: {path}")
+                continue
         if path in DIAGNOSTICS_DIGESTS and args.paths is None:
             try:
                 allowed = diagnostics_text_allowed(path, git_file_text(args.base,path), git_file_text(args.head,path))

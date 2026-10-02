@@ -35,6 +35,11 @@ def main() -> int:
     assert not MODULE.diagnostics_text_allowed(path,before+"\n",after)
     assert not MODULE.diagnostics_text_allowed(path,after,before)
     assert not MODULE.diagnostics_text_allowed("src/P25LiveDecoder.cpp",before,after)
+    prior_ui = after.replace(MODULE.WORKSPACE_UI_BLOCK, "", 1)
+    assert MODULE.workspace_ui_text_allowed(path, prior_ui, after)
+    assert not MODULE.workspace_ui_text_allowed(path, prior_ui, after + "\nchange")
+    assert not MODULE.workspace_ui_text_allowed(path, after, prior_ui)
+    assert not MODULE.workspace_ui_text_allowed("src/P25LiveDecoder.cpp", prior_ui, after)
     for path in (
         "src/P25LiveDecoder.cpp",
         "include/P25Control.h",

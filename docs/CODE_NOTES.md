@@ -1,5 +1,11 @@
 # Code notes (tree map)
 
+T-0097 / DEC-0166: WorkspaceLayout owns the visible preset selector and panel
+menu. MainWindow only reparents the existing repeater widget; the P25 guard
+allows this exact insertion and rejects any additional protected edit.
+InmarsatTrackingPanel::webReport owns the web snapshot success flag required
+by SdrTownControl.dll. Native satellite widgets inherit the application palette.
+
 T-0095 / DEC-0164: InmarsatIdentity.h provides validated-Classic-Aero address
 formatting and C-identity publication. Native Aero supplies ICAO on ACARS and
 assignments; explicit ADS-C mismatches still reject coordinates. MessageStore

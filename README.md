@@ -1,5 +1,11 @@
 # SDR Town
 
+0.2.120 adds a visible **Workspace** selector and **Panels** menu, moves the
+repeater monitor out of the main receiver controls, and aligns satellite panels
+with the desktop theme. It also repairs the Inmarsat web-map success response
+used by FUBAR 1.1.44. No demodulator, P25, vocoder or audio-buffer changes.
+See [release notes](docs/RELEASE_0.2.120.md).
+
 0.2.119 adds the **FUBAR workspace contract** on top of the Inmarsat hybrid aircraft map: validated Classic Aero ICAO
 identities, optional ADSB.lol positions, independent RF/online ages, bounded
 estimated movement and received-call highlighting. Online assistance is OFF
