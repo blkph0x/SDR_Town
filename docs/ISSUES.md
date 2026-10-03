@@ -1,6 +1,6 @@
 # Issues (canonical)
 
-## ISS-0066 - Satellite auto-capture bypasses GUI dry-run (2026-10-04, LOCALLY REPAIRED)
+## ISS-0066 - Satellite auto-capture bypasses GUI dry-run (2026-10-04, SOURCE VERIFIED)
 
 T-0107 / DEC-0176. Packaged GUI listening smoke failed no-RX assertion at
 06:24 local: dryRun=true/startDevice=false, but live RTL RX opened. Satellite
@@ -9,7 +9,9 @@ This occurs in the unchanged ffd3ef98 application binary, not the source-kit
 exporter. Suppress the independent hub timer for that process only; retain
 saved settings, normal auto-capture and strict layout QA expectations.
 DEC-0176 implemented: four packaged GUI profiles PASS with suppression evidence
-and no RX starts;16/16 native suites PASS. Source CI remains required after push.
+and no RX starts;16/16 native suites PASS.8c8b529 Windows37150938612 and
+YAML37150938614 PASS. Actual four-profile GUI layout test is local evidence;
+CI native Qt suites pass but that specific layout script is not run in CI.
 
 ## ISS-0065 - Control cancellation deletes active notification objects (2026-10-03, SOURCE VERIFIED)
 
@@ -116,6 +118,13 @@ T-0104 / DEC-0172 stages original, codec and configured vcpkg notices; adds
 exact-file inventory and enforceable publication checks. Qt/source/relink,
 MinGW/Microsoft runtime and remaining static/data coverage are not closed.
 Source CI now uploads only evidence while blocked, not another binary ZIP.
+DEC-0177 adds exact ASN.1 per-file notice collection:488 inspected C/headers,
+59 copyright-bearing,426 generated and3 reviewed headerless files. Existing
+UPSTREAM-README.md already had full BSD terms; do not report those as absent.
+Pinned ICAO CC0/provenance and hashes for map/country/channel inputs now stage;
+changed bandplans fail against input evidence. Local11 notice and19 inventory
+tests,129-file ZIP and16/16 native suites PASS. Other static components, full
+source/rebuild/runtime kit and combined-work review remain open, not certified.
 
 ## ISS-0058 - DTMF confidence, short bursts and input-watch gaps (2026-10-03, REPAIRED IN SOURCE)
 

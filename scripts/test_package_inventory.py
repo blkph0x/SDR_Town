@@ -9,6 +9,8 @@ import zipfile
 
 import package_inventory as inventory
 import vcpkg_sources as sources
+import embedded_notices as embedded
+from test_embedded_notices import seed
 from test_vcpkg_sources import fixture
 
 
@@ -41,6 +43,10 @@ class InventoryTests(unittest.TestCase):
         self.write(inventory.RUNTIME_INPUTS, inventory.json_bytes(self.runtime))
         with patch('builtins.print'):
             sources.export_kit(self.source_doc, self.stage)
+        self.embedded_repo = self.root / 'embedded'
+        seed(self.embedded_repo)
+        for name, data in embedded.collect(self.embedded_repo, self.sha).items():
+            self.write(name, data)
 
     def write(self, name, data):
         p = self.stage / name
@@ -153,6 +159,21 @@ class InventoryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'deployment inventory mismatch'):
             inventory.generate(self.stage)
 
+    def test_bandplan_and_embedded_notices_cannot_be_reinventoried_after_tamper(self):
+        for name, match in (('data/inmarsat/4f2.json', 'Packaged embedded input mismatch'),
+                            (embedded.NOTICES, 'notice text mismatch')):
+            with self.subTest(name=name):
+                path = self.stage / name
+                original = path.read_bytes()
+                inventory.generate(self.stage)
+                path.write_bytes(original + b'tamper')
+                with self.assertRaisesRegex(ValueError, match):
+                    inventory.generate(self.stage)
+                self.pack()
+                with self.assertRaisesRegex(ValueError, match):
+                    inventory.verify_zip(self.archive)
+                path.write_bytes(original)
+
     def test_rtl_requires_transitive_usb_runtime(self):
         (self.stage / 'libusb-1.0.dll').unlink()
         with self.assertRaisesRegex(ValueError, 'missing required libusb'):
@@ -228,6 +249,7 @@ class InventoryTests(unittest.TestCase):
     def test_stage_notices_copies_exact_text_and_spdx(self):
         repo, vcpkg = self.root / 'repo', self.root / 'vcpkg'
         repo.mkdir()
+        seed(repo)
         for name in (*inventory.ROOT_NOTICES, *inventory.SOURCE_NOTICES):
             p = repo / name
             p.parent.mkdir(parents=True, exist_ok=True)

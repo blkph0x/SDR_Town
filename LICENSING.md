@@ -72,7 +72,7 @@ inputs. Preserve per-file notices even where the table gives a short label.
 | ONNX Runtime | Optional build integration, not a claim that a trained classifier ships; MIT and dependency terms | [Upstream](https://github.com/microsoft/onnxruntime) |
 | Whisper / faster-whisper | Optional external STT backends; their licenses and model/dependency terms apply independently | [Whisper](https://github.com/openai/whisper), [faster-whisper](https://github.com/SYSTRAN/faster-whisper) |
 | Natural Earth | Offline overview basemap; public domain | [Pinned source/terms](resources/maps/README.md) |
-| ICAO allocation transcription | Address-country allocation reference; CC0 for the pinned transcription, not blanket rights to ICAO publications | [Source/terms](docs/INMARSAT_MONITOR.md) |
+| ICAO allocation transcription | Address-country allocation reference; CC0 for the pinned transcription, not blanket rights to ICAO publications | [Provenance](resources/icao/README.md), [pinned dedication](resources/icao/LICENSE-CC0.txt), [use/limits](docs/INMARSAT_MONITOR.md) |
 
 Build/runtime dependencies can additionally include PThreads4W, compiler
 support libraries, Microsoft Visual C++ runtime, Qt plugins and their codecs.

@@ -1,5 +1,34 @@
 # Decisions
 
+## DEC-0177 - Preserve embedded ASN.1 notices and data provenance (2026-10-04)
+
+T-0104 / ISS-0060. The actual libacars ASN.1 tree has242 C and246 header
+files. UPSTREAM-README.md already supplies the full ASN.1 BSD terms, but the
+package omits individual Lev Walkin/X/IO Labs copyright notices from those
+files. Preserve leading comments verbatim (apart from newline normalization),
+group identical notices and record every inspected source hash, including
+generated files. Reject absent/unrecognized headers instead of inferring MIT.
+constraints.c, per_decoder.c and per_encoder.c have no leading notice in the
+pinned upstream either (live text comparison PASS); explicitly record them as
+headerless with reviewed normalized source hashes. Changes require re-review,
+not fabricated copyright text. The remaining485 files have recognized headers.
+This is notice evidence, not all application corresponding source or a linker
+map. Do not change the generated C, decoder, or DSP.
+
+Ship the pinned ICAO transcription's CC0 text and provenance, hash the actual
+country table, offline map/resource and packaged bandplan inputs. Verify the
+bandplan copies against those inputs, not just a self-consistent outer ZIP.
+Keep explicit historical-data/location limits. Use bounded, explicit source
+paths; no broad developer-folder sweep or private-recording collection.
+Recompute the notice text from its bounded evidence on archive verification;
+test missing/changed/linked inputs, unfamiliar headers, extra files, limits,
+determinism and staged/ZIP tampering. All existing release blockers remain
+until their independent source/rebuild/distribution requirements are met.
+
+Primary evidence: external/acars/UPSTREAM-README.md and actual per-file
+headers; pinned dataset dedication:
+https://github.com/ibosoftnet/icao-aircraft-addresses/blob/2ac0f294274beddb57212eb7531ff87dfd869de5/LICENSE .
+
 ## DEC-0176 - Suppress satellite auto-capture during GUI dry-run (2026-10-04)
 
 T-0107 / ISS-0066 interrupts packaging acceptance. The unchanged Release EXE

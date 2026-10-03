@@ -1,5 +1,21 @@
 # Development log
 
+## 2026-10-04 - T-0104 exact embedded notices without receiver changes
+
+Rolled forward previous-pass8c8b529 successful CI/evidence and T-0107 source
+acceptance. Continued release-kit work only: preserve per-file ASN.1 notices,
+identify all inspected generated/headerless sources, ship the pinned ICAO
+dedication/provenance and bind packaged bandplans to source input hashes.
+Three headerless upstream files independently compared, not guessed. New
+strict collector exposed them and now records explicit reviewed exceptions.
+Added11 direct notice tests and a staged/ZIP tamper regression (19 inventory
+tests total); all packaging tests, native16/16, actual deploy/RTL loader and
+129-file ZIP verification PASS. Executable hash unchanged. Existing release
+blockers deliberately retained; no claim of a complete SBOM or legal clearance.
+Documentation and trackers accompany source push; exact Actions acceptance
+remains required. No live reception, telemetry uploads, user settings, captures,
+FUBAR or server changes; user untracked reference work remains untouched.
+
 ## 2026-10-04 - T-0104 verified source materials; T-0107 dry-run repair
 
 Initial GitHub run37148789176 exposed the inventory fixture's noncanonical

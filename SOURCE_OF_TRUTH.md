@@ -12,6 +12,8 @@ UNRELEASED SOURCE: T-0102 infrastructure repairs; local 16/16 gates pass,
                   Qt/MSVC evidence and local package/GUI gates pass.
                   DEC-0175 adds exact vcpkg source archives/recipes/receipts;
                   independent rebuild and remaining component kit still open.
+                  DEC-0177 preserves ASN.1 per-file/data notices and verifies
+                  packaged channel-list inputs; local packaging/native gates pass.
                   DEC-0176 prevents saved satellite auto-capture during GUI
                   dry-run; local four-profile no-RX gate passes.
                   T-0106 repairs reproduced control cancellation lifetime

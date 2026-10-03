@@ -1,5 +1,46 @@
 # Build notes
 
+## 2026-10-04 - T-0104 embedded ASN.1/data notice evidence
+
+Baseline8c8b529; Windows/MSVC17.14, Qt6.11.1, existing pinned product inputs.
+No application C/C++ changes. First strict notice collector FAILS on headerless
+ASN.1 constraints.c/per_decoder.c/per_encoder.c. Compared the three complete
+texts to libacars9af09a0121d4ec577339cbd4c7420d7519da48fa: exact matches.
+Record specific reviewed normalized hashes, do not invent notice text. Actual
+collection now covers488 C/headers:59 copyright-bearing,426 generated,3
+headerless;16 other data/build inputs. Generated notices6983 bytes and evidence
+146118 bytes on local checkout; checkout newline conventions can change sizes.
+Pinned ICAO CC0 file matches upstream exactly after newline normalization:
+SHA256 a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499.
+
+PASS: test_embedded_notices11; test_package_inventory19;
+test_vcpkg_sources12; test_stage_runtime9; test_verify_release17;
+test_no_p25_guard; validate_github_workflows3. Negative tests reject changed
+channel data even when attempting to regenerate the outer inventory, changed
+notice text, missing/empty data, unknown headers, links and exceeded budgets.
+cmake --build build --config Release --target deploy -j4 PASS. Configured
+Qt/MSVC deployment PASS, with existing optional D3D12 dxcompiler/dxil warning;
+no claim that feature is qualified. Isolated RTL/module loader PASS with
+missing-USB negative fixture, no RF I/O. ctest full Release16/16 PASS in76.41s.
+Application SHA256 remains exactly
+57419c97bce700ddbf65fc7007f216b18ef6ee2e6c1ef57a632ee2a75dd5ffe7.
+
+Actual build/package-embedded-notices-20261004.zip inventories129 files and
+verifies. --require-publishable correctly fails on the five independent
+remaining requirements. Its build-info explicitly labels it as a local fixture
+with uncommitted packaging tooling, not exact clean-source release provenance.
+No binary/version/release changes. Exact pushed-source Actions still required.
+
+Previous-pass final acceptance:8c8b529 Windows37150938612 PASS20m24s and
+YAML37150938614 PASS. Downloaded inventory artifact11284880175/126 files has
+sourceCommit8c8b5292d18aaed7ba463d376efcf81630adf337, policy T-0104-notices-3;
+SHA256086a2dd395aac7b24ec5d3db933a633078fb52c0f642e6eec75e6d0982e92e7f.
+CI source materials:10 archives,3 downloaded patches,48 recipes;
+recorded bundle16762216 bytes,
+SHA2569f020a4606f43e7c1e7f4a672356d7d15ee24ce04c9c5b6f6dad855ebeb6fb4e.
+Five gates block binary uploads; only evidence was downloaded. Final acceptance:
+https://github.com/blkph0x/SDR_Town/commit/8c8b5292d18aaed7ba463d376efcf81630adf337#commitcomment-203306079 .
+
 ## 2026-10-04 - T-0104 exact sources and T-0107 dry-run isolation
 
 Follow-up fb6fc89 / Windows37148935496 passes compilation, core, GUI/lifecycle,

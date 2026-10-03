@@ -16,6 +16,9 @@ tests cannot silently start an automatic pass; normal pass settings are retained
 Local and CI packaging now share declared runtime inputs and configured Qt/MSVC
 deployment. Old DLLs in a developer's build folder are neither copied into the
 package nor deleted. Runtime hashes/version evidence is included in the inventory.
+DEC-0177 also preserves per-file ASN.1 notices and the ICAO dataset dedication,
+and verifies packaged Inmarsat channel lists against their source inputs.
+This is packaging hardening, with no receive/audio changes or new binary release.
 
 0.2.122 adds **Tools > DTMF Analysis**: short-burst decoding, explicit frequency
 inversion/shift/scale, sample-indexed evidence and local diagnostic export.

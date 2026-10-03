@@ -15,7 +15,7 @@ INVENTORY = 'package-inventory.json'
 INPUTS = 'licenses/build-inputs.json'
 RUNTIME_INPUTS = 'licenses/runtime-deployment.json'
 SOURCE_KIT = 'licenses/vcpkg/source-materials.zip'
-POLICY = 'T-0104-notices-3'
+POLICY = 'T-0104-notices-4'
 MAX_FILES = 10000
 MAX_BYTES = 512 * 1024 * 1024
 MAX_JSON = 8 * 1024 * 1024
@@ -66,6 +66,8 @@ STATIC_NOTICES = (
 )
 KNOWN_NOTICES = {
     *STATIC_NOTICES, INPUTS, RUNTIME_INPUTS, SOURCE_KIT,
+    'licenses/embedded-inputs.json', 'licenses/acars/ASN1-NOTICES.txt',
+    'licenses/icao/LICENSE-CC0.txt', 'licenses/icao/README.md',
     'licenses/SoapyRTLSDR-LICENSE.txt', 'licenses/SoapySDRPlay3-LICENSE.txt',
     'licenses/rtlsdr-COPYRIGHT.txt', 'licenses/liquid-dsp-LICENSE.txt',
     'licenses/redsea-block/LICENSE', 'licenses/redsea-block/UPSTREAM.md',
@@ -179,7 +181,9 @@ def component(name):
 
 
 def required_notices(names):
-    required = {*ROOT_NOTICES, INPUTS, SOURCE_KIT, *STATIC_NOTICES}
+    from embedded_notices import COPIES, EVIDENCE, NOTICES
+    required = {*ROOT_NOTICES, INPUTS, SOURCE_KIT, *STATIC_NOTICES,
+                EVIDENCE, NOTICES, *COPIES.values()}
     for port in PORTS:
         required.update((f'licenses/vcpkg/{port}/copyright', f'licenses/vcpkg/{port}/vcpkg.spdx.json'))
     by_component = {
@@ -227,8 +231,11 @@ def port_info(data, name):
 
 
 def stage_notices(repo, stage, vcpkg, qt_version):
+    from embedded_notices import collect
     tree_files(stage)  # Reject links before writing inside a caller-supplied tree.
     require(re.fullmatch(r'\d+\.\d+\.\d+', qt_version), 'Expected actual configured Qt version')
+    revision = git(repo, 'rev-parse', 'HEAD')
+    embedded = collect(repo, revision)  # Validate before changing the prior notices.
     copies = {name: repo / name for name in ROOT_NOTICES}
     copies.update({dest: repo / src for src, dest in SOURCE_NOTICES.items()})
     ports = {}
@@ -245,7 +252,6 @@ def stage_notices(repo, stage, vcpkg, qt_version):
     for file in (vcpkg / 'bin').glob('*.dll'):
         if file.name.lower() in VCPKG_DLLS:
             origins[file.name.lower()] = sha256(file)
-    revision = git(repo, 'rev-parse', 'HEAD')
     submodules = {}
     for name in ('miniaudio', 'mbelib', 'liquid-dsp'):
         path = 'external/' + name
@@ -260,12 +266,17 @@ def stage_notices(repo, stage, vcpkg, qt_version):
                 'vcpkg': ports, 'vcpkgBinarySha256': origins, 'submodules': submodules,
                 'scope': 'Configured build inputs; not a complete transitive SBOM or source kit'}
     (stage / INPUTS).write_bytes(json_bytes(evidence))
+    for name, data in embedded.items():
+        target = stage / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
 
 
 def make_document(entries, read):
     # Import at verification time: the source exporter reuses the bounded JSON
     # and package path rules above; ordinary runtime staging does not need it.
     from vcpkg_sources import MAX_KIT, checksum, verify_kit
+    from embedded_notices import EVIDENCE, NOTICES, verify as verify_embedded
     for name in required_notices(entries):
         require(name in entries and entries[name]['size'] > 0, f'Missing/empty required notice: {name}')
     require('SDR_Town.exe' in entries and 'build-info.json' in entries, 'Missing application/provenance')
@@ -305,9 +316,11 @@ def make_document(entries, read):
                 'Invalid runtime deployment identity')
         require(runtime.get('runtimeSha256') == deployed, 'Runtime deployment inventory mismatch: hashes')
     sources = verify_kit(read(SOURCE_KIT, MAX_KIT), receipts, inputs['sourceCommit'])
+    embedded = verify_embedded(read(EVIDENCE), read(NOTICES), inputs['sourceCommit'], entries)
     return {'schema': 1, 'policy': POLICY, 'sourceCommit': inputs['sourceCommit'],
             'scope': 'Exact files and known build inputs; NOT full transitive license clearance',
-            'releaseBlockers': blockers(entries), 'sourceMaterials': sources, 'files': entries}
+            'releaseBlockers': blockers(entries), 'sourceMaterials': sources,
+            'embeddedMaterials': embedded, 'files': entries}
 
 
 def generate(stage):

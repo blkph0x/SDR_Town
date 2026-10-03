@@ -1,5 +1,18 @@
 # Code notes (tree map)
 
+T-0104 / DEC-0177: scripts/embedded_notices.py inspects the explicit libacars
+ASN.1 source subtree, preserves leading copyright headers, accounts for generated
+files and three hash-reviewed upstream headerless files, and records selected
+country/map/bandplan source hashes. package_inventory.stage_notices stages its
+bounded, deterministic evidence plus exact data/dedication copies. make_document
+reconstructs ASN1-NOTICES.txt and cross-checks packaged data/notice bytes against
+that evidence even if the outer inventory is regenerated. It is not a complete
+SBOM, linker map, independent source provenance signature or rebuild kit.
+resources/icao retains the pinned dataset dedication/provenance; no aircraft,
+map, decoder or DSP code changed. test_embedded_notices covers actual source
+coverage, malformed/unknown/linked inputs, resource limits, exact copies and
+tampering; test_package_inventory checks the same constraints in a real ZIP.
+
 T-0104 / DEC-0175: vcpkg_sources.py collects only installed-receipt-named port
 files and SHA512-matching local archives/downloaded Git-format backport patches;
 deterministic bounded ZIP, atomic replacement, no network/extraction/execution.

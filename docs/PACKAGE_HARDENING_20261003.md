@@ -80,9 +80,11 @@ unqualified; the Qt deploy warning is recorded in BUILD_NOTES.
   not completion of those remaining obligations.
 - MinGW static runtime versions, applicable notices and exception evidence for
   the RDS DLL; Microsoft redistributable exact versions and applicable terms.
-- Remaining embedded/static/data notice coverage, including ASN.1 runtime
-  per-file notices and actual packaged data. Do not confuse component grouping
-  with complete transitive attribution.
+- DEC-0177 now preserves ASN.1 per-file notices, including explicit accounting
+  for3 upstream headerless files;488 C/headers are hashed. Pinned ICAO CC0 and
+  provenance ship, with map/country inputs and channel-list copy verification.
+  Remaining embedded/static/data coverage still needs full closure; this is
+  selected source evidence, not a complete linker map or transitive attribution.
 - Corresponding-source archive/rebuild gate, then a new Actions release and
   independent public download/loader/smoke acceptance. Do not overwrite 0.2.122.
 
@@ -94,6 +96,7 @@ qualified review rather than an invented all-clear.
 ## Commands
 
 ```text
+python scripts/test_embedded_notices.py
 python scripts/test_package_inventory.py
 python scripts/test_stage_runtime.py
 python scripts/test_verify_release.py
@@ -106,6 +109,17 @@ python scripts/package_inventory.py generate --stage build/deploy_staging
 python scripts/package_inventory.py verify --zip <portable.zip>
 python scripts/package_inventory.py verify --zip <portable.zip> --require-publishable
 ```
+
+DEC-0177 local evidence:11 notice/19 inventory/12 source/9 staging/17 release
+tests PASS,16/16 native suites, actual deploy and isolated RTL loader PASS.
+129-file ZIP verifies with unchanged application hash and the five independent
+publication requirements. `licenses/embedded-inputs.json` records selected
+source hashes and leading comments; `licenses/acars/ASN1-NOTICES.txt` groups
+identical copyright notices without discarding file associations. Full BSD
+terms were already in the packaged ACARS upstream README and remain there.
+Changing packaged data or notice text fails even when regenerating the outer
+inventory. These checks detect packaging mistakes, not a malicious publisher
+rewriting all source/evidence. Source CI and complete-kit acceptance stay distinct.
 
 `generate` requires final `build-info.json` after dependency/Qt deployment.
 It is not a replacement for the release helper or workflow. `verify` validates

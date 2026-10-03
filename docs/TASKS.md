@@ -1,12 +1,14 @@
 # Task list (canonical)
 
-T-0107 | locally repaired / source CI pending | GUI dry-run satellite auto-capture isolation |
+T-0107 | source verified / binary gate independent | GUI dry-run satellite auto-capture isolation |
 DEC-0176 / ISS-0066. Reproduced while qualifying T-0104's actual package.
 Prevent saved automatic pass capture from opening RX during layout QA; preserve
 normal hardware operation and settings. Gate: packaged four-profile GUI smoke
 with suppression evidence and no transient RX, native suites and source CI.
 Four packaged GUI profiles and16/16 native suites PASS after repair. No frozen
-pipeline edits; T-0104 resumes. Exact-commit Actions remains required.
+pipeline edits; T-0104 resumes.8c8b529 Windows37150938612/YAML37150938614 PASS;
+acceptance comment203306079 records exact inventory/hashes. The four actual
+GUI layout launches passed locally; CI runs the native Qt suites, not that script.
 
 T-0106 | source verified / binary gate independent | Control shutdown crash exposed by final source CI |
 DEC-0173 / ISS-0065. CI37117769454 and local repeat/CDB reproduce a socket
@@ -75,8 +77,14 @@ distribution questions. No RX/DSP or live server changes in this pass.
 - [X] DEC-0175: collect and independently verify exact vcpkg upstream archives,
   port recipes/patches and installed receipts; add hostile/missing-input tests.
   No source replacement, decoder changes or inferred publication clearance.
-  Local10 archives/48 recipes,11 exporter and18 inventory tests PASS; full16/16
-  suites pass. Exact-commit source CI remains required after push.
+  Local10 archives/48 recipes,12 exporter and18 inventory tests PASS; full16/16
+  suites pass.8c8b529 Windows37150938612/YAML37150938614 PASS. Clean CI includes
+  10 archives,3 downloaded backport patches,48 recipes;126-file inventory checked.
+- [X] DEC-0177: preserve per-file ASN.1 copyright notices and pinned data
+  dedication/provenance; verify exact bandplan copies and negative fixtures.
+  Local11 notice/19 inventory/12 source/9 staging/17 release tests PASS;
+  deploy,16/16 native suites, isolated RTL loader and129-file ZIP verify PASS.
+  Exact-commit source CI remains required. Five full-release gates stay open.
 - [ ] Full transitive/combined-distribution review, then public asset verification.
 15 new inventory tests, 17 release-verifier tests and 16/16 native suites pass
 locally. Source929cb11 Windows CI37116308564 and YAML37116308593 PASS; clean
