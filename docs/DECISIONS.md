@@ -18,6 +18,16 @@ No frozen P25/DSP files need to change.
 
 ## DEC-0175 - Ship hash-verified vcpkg source materials (2026-10-04)
 
+Clean CI37148935496 builds newer fmt/spdlog recipes which download three
+SHA512-recorded .patch resources in addition to archives. The archive-only
+collector correctly fails rather than omitting them. Extend exact resource
+collection to Git-format patches (never apply them), keep source/recipe hashes
+mandatory, report archive and downloaded-patch counts separately. Test an
+installed receipt with an additional patch, altered bytes and missing cache.
+Run the same source-material preflight immediately after dependency configure
+in CI so missing resources fail before the long application compilation. Deploy
+still recreates and verifies the final bundle; preflight is not a substitute.
+
 T-0104 / ISS-0060. Installed SPDX receipts describe exact port-file SHA256 and
 upstream archive SHA512. All48 recipe files for ten runtime/header dependencies
 match C:/vcpkg/ports on this host; the ten upstream archives exist in its cache.

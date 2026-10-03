@@ -5,6 +5,9 @@
 Initial GitHub run37148789176 exposed the inventory fixture's noncanonical
 Windows temporary path before compiling. Aligned it with existing resolved-root
 fixtures; no production destination guard changed. Follow-up source CI required.
+Run37148935496 passes build/application tests then exposes downloaded patch
+resources in newer CI fmt/spdlog recipes. Added a reproducing failing fixture
+and exact SHA512 patch collection, without relaxing archive or publication gates.
 
 Added deterministic, receipt-verified vcpkg source/patch/archive export and
 nested package validation, including installed DLL-to-source receipt hashes.

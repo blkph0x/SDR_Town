@@ -1,8 +1,9 @@
 # Code notes (tree map)
 
 T-0104 / DEC-0175: vcpkg_sources.py collects only installed-receipt-named port
-files and SHA512-matching local archives; deterministic bounded ZIP, atomic
-replacement, no network/extraction/execution. package_inventory.py independently
+files and SHA512-matching local archives/downloaded Git-format backport patches;
+deterministic bounded ZIP, atomic replacement, no network/extraction/execution.
+package_inventory.py independently
 validates nested membership/hashes and installed binary receipts. Runtime CMake
 config carries the explicit vcpkg root. CI disables dependency binary-cache
 reuse so exact sources are available. Tests cover tamper, missing/unsafe/linked

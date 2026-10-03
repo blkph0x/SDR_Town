@@ -80,12 +80,15 @@ def definitions(receipts):
     return expected, resources, ports
 
 
-def archive_suffix(data):
+def resource_suffix(data):
     if data.startswith(b'\x1f\x8b'):
         return '.tar.gz'
     if data.startswith(b'PK\x03\x04'):
         return '.zip'
-    raise ValueError('Unsupported source archive format')
+    # Git-hosted backport patches are resources too; never apply or execute them.
+    if b'\x00' not in data and all(mark in data for mark in (b'diff --git ', b'\n--- ', b'\n+++ ')):
+        return '.patch'
+    raise ValueError('Unsupported source resource format')
 
 
 def manifest(payloads, ports, source_commit):
@@ -112,16 +115,17 @@ def verify_kit(blob, receipts, source_commit):
             payloads[name] = archive.read(info)
     recorded = parse_json(payloads.pop('manifest.json', b'{}'))
     for prefix, sha512 in resources.items():
-        choices = [n for n in (prefix + '.tar.gz', prefix + '.zip') if n in payloads]
+        choices = [prefix + suffix for suffix in ('.tar.gz', '.zip', '.patch') if prefix + suffix in payloads]
         require(len(choices) == 1, 'Missing/ambiguous source archive')
         name = choices[0]
-        require(name == prefix + archive_suffix(payloads[name]), 'Source format mismatch')
+        require(name == prefix + resource_suffix(payloads[name]), 'Source format mismatch')
         expected[name] = ('sha512', sha512)
     require(set(payloads) == set(expected), 'Source membership mismatch')
     for name, (algorithm, wanted) in expected.items():
         require(digest(payloads[name], algorithm) == wanted, f'Source checksum mismatch: {name}')
     require(recorded == manifest(payloads, ports, source_commit), 'Source manifest mismatch')
-    return {'ports': len(ports), 'archives': len(resources),
+    patches = sum(n.startswith('archives/') and n.endswith('.patch') for n in payloads)
+    return {'ports': len(ports), 'archives': len(resources) - patches, 'downloadedPatches': patches,
             'recipeFiles': sum(n.startswith('ports/') for n in payloads)}
 
 
@@ -134,13 +138,13 @@ def read_bounded(path, maximum=MAX_JSON):
     return data
 
 
-def cached_archives(downloads, wanted):
+def cached_resources(downloads, wanted):
     downloads = plain(downloads, directory=True)
     candidates = list(downloads.iterdir())
     require(len(candidates) <= MAX_CACHE_FILES, 'Download cache file limit exceeded')
     found, total = {}, 0
     for path in sorted(candidates):
-        if not path.name.endswith(('.tar.gz', '.zip')) or not path.is_file():
+        if not path.name.endswith(('.tar.gz', '.zip', '.patch')) or not path.is_file():
             continue
         path = plain(path)
         size = path.stat().st_size
@@ -154,7 +158,7 @@ def cached_archives(downloads, wanted):
             found[sha] = data
             if set(found) == wanted:
                 return found
-    require(set(found) == wanted, 'Missing exact source archive in download cache')
+    require(set(found) == wanted, 'Missing exact source resource SHA512: ' + ', '.join(sorted(wanted - set(found))))
     return found
 
 
@@ -175,10 +179,10 @@ def export_kit(doc, stage, downloads=None):
             data = receipts[port][0 if leaf == 'vcpkg.spdx.json' else 1]
         require(digest(data, algorithm) == wanted, f'Recipe/receipt checksum mismatch: {name}')
         payloads[name] = data
-    found = cached_archives(downloads or root / 'downloads', set(resources.values()))
+    found = cached_resources(downloads or root / 'downloads', set(resources.values()))
     for prefix, sha in resources.items():
         data = found[sha]
-        payloads[prefix + archive_suffix(data)] = data
+        payloads[prefix + resource_suffix(data)] = data
     payloads['manifest.json'] = json_bytes(manifest(payloads, ports, inputs['sourceCommit']))
     require(sum(map(len, payloads.values())) <= MAX_KIT, 'Source material size limit exceeded')
     target = stage / KIT

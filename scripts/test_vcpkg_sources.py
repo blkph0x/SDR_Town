@@ -83,7 +83,7 @@ class SourceTests(unittest.TestCase):
     def test_exact_materials_and_deterministic_roundtrip(self):
         unrelated = self.root / 'vcpkg/ports/fmt/capture.wav'
         unrelated.write_bytes(b'never include this')
-        self.assertEqual(self.export(), {'ports': 10, 'archives': 10, 'recipeFiles': 20})
+        self.assertEqual(self.export(), {'ports': 10, 'archives': 10, 'downloadedPatches': 0, 'recipeFiles': 20})
         first = self.target.read_bytes()
         self.export()
         self.assertEqual(self.target.read_bytes(), first)
@@ -107,6 +107,28 @@ class SourceTests(unittest.TestCase):
         self.export()
         old = self.target.read_bytes()
         (self.root / 'vcpkg/downloads/fmt.zip').write_bytes(zipped({'COPYING': b'different version'}))
+        with self.assertRaisesRegex(ValueError, 'Missing exact source'):
+            self.export()
+        self.assertEqual(self.target.read_bytes(), old)
+
+    def test_downloaded_patch_is_required_and_hash_verified(self):
+        patch_data = b'From fixture\n\ndiff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+new\n'
+        path = self.root / 'vcpkg/downloads/fmt-fix.patch'
+        path.write_bytes(patch_data)
+        doc = inventory.parse_json(self.receipts['fmt'][0])
+        doc['packages'].append({'SPDXID': 'SPDXRef-resource-1', 'checksums': [
+            {'algorithm': 'SHA512', 'checksumValue': sources.digest(patch_data, 'sha512')}]})
+        self.receipts['fmt'] = inventory.json_bytes(doc), self.receipts['fmt'][1]
+        (self.stage / 'licenses/vcpkg/fmt/vcpkg.spdx.json').write_bytes(self.receipts['fmt'][0])
+        summary = self.export()
+        self.assertEqual(summary['archives'], 10)
+        self.assertEqual(summary['downloadedPatches'], 1)
+        self.assertEqual(self.verify(), summary)
+        old = self.target.read_bytes()
+        path.write_bytes(patch_data + b'wrong')
+        with self.assertRaisesRegex(ValueError, 'Missing exact source'):
+            self.export()
+        path.unlink()
         with self.assertRaisesRegex(ValueError, 'Missing exact source'):
             self.export()
         self.assertEqual(self.target.read_bytes(), old)

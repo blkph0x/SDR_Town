@@ -2,6 +2,21 @@
 
 ## 2026-10-04 - T-0104 exact sources and T-0107 dry-run isolation
 
+Follow-up fb6fc89 / Windows37148935496 passes compilation, core, GUI/lifecycle,
+replay parity and SSTV gates. Packaging FAILS: "Missing exact source archive in
+download cache". Configure logs show newer fmt12.2.0 and spdlog1.17.0 recipes
+download fmt-backport-4813.patch, spdlog-backport-3541.patch and
+spdlog-backport-3543.patch, alongside their source archives. The collector only
+considered .tar.gz/.zip, omitting receipt-required patches. New installed-receipt
+fixture reproduces exactly before repair. Collect/verify Git-format .patch
+resources by SHA512, never execute; keep all missing/tamper checks. Separate
+downloadedPatches count and missing-resource hashes improve diagnostics.
+YAML37148935782 PASS; source CI must rerun after this collector repair.
+Twelve source and18 inventory tests PASS after repair; all three exact patch
+URLs in the CI log independently checked for expected Git patch format without
+writing/executing them. Existing local10-source kit still passes. CI adds source
+preflight after configure to fail early, retaining final deploy verification.
+
 First source CI c93fa48 / Windows37148789176 FAILS before compilation: all18
 inventory fixtures reject "Destination must be exactly build/deploy_staging".
 Inventory fixture used unresolved TemporaryDirectory path, unlike existing

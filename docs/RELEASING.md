@@ -134,10 +134,12 @@ retain the exact source downloads. It does not fetch newer sources as a fallback
 
 `licenses/vcpkg/source-materials.zip` contains exact upstream archive bytes,
 port recipes/patches, notices and SPDX receipts. Recipe SHA256, upstream SHA512
-and installed DLL SHA256 must match those receipts. Export is bounded/atomic;
+and installed DLL SHA256 must match those receipts. Downloaded Git-format
+backport patches are included separately from port-local patches, also bound
+to receipt SHA512; no patches are executed or applied. Export is bounded/atomic;
 verification checks nested ZIP paths, membership and hashes without extracting
 or executing upstream code. Unsupported/missing materials fail packaging.
-The inventory exposes sourceMaterials counts; eleven source-kit negative tests
+The inventory exposes archive/downloaded-patch/sourceMaterials counts; twelve source-kit tests
 and nested-tamper/DLL-receipt inventory tests run in CI. Full vcpkg tooling,
 independent rebuild, Qt and other component requirements remain open in ISS-0060.
 

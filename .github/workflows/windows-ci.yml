@@ -143,6 +143,18 @@ jobs:
             "-DSDR_TOWN_RDS_CC=$cc" "-DSDR_TOWN_RDS_CXX=$cxx" "-DSDR_TOWN_RDS_MAKE=$make"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Preflight exact dependency source materials
+        shell: pwsh
+        run: |
+          # Fail on missing archives/patches before the long application compile.
+          New-Item -ItemType Directory -Path build/deploy_staging -Force | Out-Null
+          $runtime = Get-Content build/runtime-inputs-Release.json -Raw | ConvertFrom-Json
+          python scripts/package_inventory.py stage-notices --repo . --stage build/deploy_staging `
+            --vcpkg build/vcpkg_installed/x64-windows --qt-version $runtime.qtVersion
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/vcpkg_sources.py --config build/runtime-inputs-Release.json --stage build/deploy_staging
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Checkout pinned RTL-SDR driver module
         uses: actions/checkout@v7
         with:
