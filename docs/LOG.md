@@ -1,5 +1,16 @@
 # Development log
 
+## 2026-10-03 - T-0102 publication evidence and explicit remaining gates
+
+Both source repair commits pushed to master; 65e3da3 passed Windows CI
+37111782581 and workflow validation 37111782612. Downloaded CI ZIP hash,
+source/run/EXE/SDRplay provenance and DTMF/RDS smoke verified. BUILD_NOTES holds
+the exact SHA-256 and limits. Public release is blocked by ISS-0060, confirmed
+again against the produced archive; no binary release/version bump was made.
+T-0103 tracks physical-device ownership/lifecycle, T-0104 distribution inventory,
+T-0105 deeper timing/correlation and field RF acceptance. These are not marked
+implemented. README, diagnostic contract and the repair ledger remain aligned.
+
 ## 2026-10-03 - T-0102 evidence-led infrastructure repairs
 
 Follow-up after initial source push: proved and repaired empty-read epoch

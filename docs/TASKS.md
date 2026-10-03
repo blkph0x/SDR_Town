@@ -1,6 +1,6 @@
 # Task list (canonical)
 
-T-0102 | in progress | Shared infrastructure hardening and diagnostic evidence |
+T-0102 | source repairs verified; binary publication blocked | Shared infrastructure hardening and diagnostic evidence |
 DEC-0171; baseline d47f000 / 0.2.122. User authorizes the review follow-up and
 requires tracked progress. Preserve P25/FM DSP, vocoders, speaker gates and
 recording consent. Complete independent testable repairs before shared RX work.
@@ -13,10 +13,13 @@ recording consent. Complete independent testable repairs before shared RX work.
 - [X] Per-stream read/wait/error counters and nonblocking HF diagnostic publication.
 - [ ] Per-stream latency histograms, operation correlation and independent hang watchdog.
 - [X] Local Release build and 16/16 regression suites; exact-patch guard negative tests.
-- [ ] Source CI, Actions release and downloaded-asset verification (binary gate ISS-0060).
+- [X] Source CI and downloaded CI-artifact hash/provenance/smoke (65e3da3; run 37111782581).
+- [ ] Actions release and public downloaded-asset verification (binary gate ISS-0060).
 RF qualification, physical two-SDR arbitration and full driver-hang recovery
 must remain open unless their acceptance evidence is actually obtained.
 Repair details and follow-up order: INFRASTRUCTURE_HARDENING_20261003.md.
+The completed source batch is 90edc4a + 65e3da3. T-0103..0105 below retain the
+unimplemented larger work; there is no new public binary or version bump.
 
 T-0103 | queued | Device ownership and worker lifecycle qualification |
 Depends on T-0102 loss-boundary/source regression evidence; ISS-0055. Define

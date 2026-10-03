@@ -55,6 +55,9 @@ librtlsdr/libusb source/relink/distribution obligations against the versions
 actually shipped. Upstream URLs alone and acknowledgements are not a complete
 compliance package. This task changes source documentation only; published
 assets are not replaced or retrospectively certified.
+T-0102 verification: the CI 37111782581 artifact for 65e3da3 also lacks the
+root LICENSE.txt, LICENSING.md and ACKNOWLEDGEMENTS.md. Build/smoke/provenance
+passed, but no public release was attempted. T-0104 retains this blocker.
 
 ## ISS-0058 - DTMF confidence, short bursts and input-watch gaps (2026-10-03, REPAIRED IN SOURCE)
 

@@ -73,6 +73,13 @@ Qt 6.11.1. All 16 CTest suites pass (71.21 seconds after the follow-up); 240879 
 and private alias fixtures skipped in the generic test invocation are not
 claimed as tested. CI uses Qt 6.7.3 and must pass independently.
 
+Final source `65e3da3` passed [Windows CI](https://github.com/blkph0x/SDR_Town/actions/runs/37111782581)
+and [workflow validation](https://github.com/blkph0x/SDR_Town/actions/runs/37111782612).
+The downloaded CI package matched its checksum, embedded source/run, EXE and
+SDRplay plugin hashes and passed DTMF/RDS smoke. That package still omits the
+root license/scope/credits; it is not a public release and does not clear
+ISS-0060. Full artifact evidence is recorded in BUILD_NOTES.
+
 Follow-up test at `90edc4a` exposed premature consumer epoch acknowledgement
 on an empty post-overflow poll (one failed assertion). Acknowledgement now
 waits for a nonempty delivery, preserving the HF consumer's reset comparison.

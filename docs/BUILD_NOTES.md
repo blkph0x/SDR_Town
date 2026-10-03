@@ -1,5 +1,29 @@
 # Build notes
 
+## 2026-10-03 - T-0102 source CI and downloaded CI package verified
+
+Source: `65e3da36e17d1615dc9d148625e70506c20f1d67` (with initial repairs in
+90edc4a). Windows CI **PASS**, job 25m15s:
+https://github.com/blkph0x/SDR_Town/actions/runs/37111782581
+Workflow YAML validation **PASS**:
+https://github.com/blkph0x/SDR_Town/actions/runs/37111782612
+The superseded 90edc4a Windows run 37111242368 was cancelled after the new
+empty-poll regression was fixed; it is not presented as acceptance evidence.
+
+Downloaded the Actions artifact, not a public release:
+`SDR_Town-0.2.122-ci.515-win64.zip`, 42903894 bytes.
+SHA-256: `fbc919af825733ebd4a911884bf9938452d5ba5b15e68b3dc900adec33094d5b`.
+Sidecar checksum, safe ZIP paths, embedded source/run provenance, executable
+hash and SDRplay module hash all **PASS**. Downloaded-package DTMF CLI and
+reference/parity/malformed-file RDS CLI tests **PASS**. Local evidence is under
+`build/ci-hardening-65e3da3/verified-package` (not committed).
+
+Package audit independently confirms missing root LICENSE.txt, LICENSING.md
+and ACKNOWLEDGEMENTS.md. ISS-0060 remains OPEN for complete dependency notice/
+source coverage. No tag/release branch created, no public asset uploaded and
+no existing asset replaced. Source build success does not clear this separate
+release gate. No new on-air P25, physical TX or multi-device acceptance claim.
+
 ## 2026-10-03 - T-0102 empty-poll follow-up
 
 After source push `90edc4a`, tracing the HF read/reset contract exposed a missed
