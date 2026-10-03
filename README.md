@@ -1,5 +1,10 @@
 # SDR Town
 
+0.2.121 adds **Tools > CW / Morse Decoder** for live analog reception and audio
+recordings, plus tested HF input/continuity hardening. P25 and FM DSP stay unchanged.
+See [Morse guide](docs/CW_RECEIVE.md), [receive-chain audit](docs/RECEIVE_CHAIN_AUDIT_20261003.md)
+and [release notes](docs/RELEASE_0.2.121.md). Live Morse remains experimental.
+
 0.2.120 adds a visible **Workspace** selector and **Panels** menu, moves the
 repeater monitor out of the main receiver controls, and aligns satellite panels
 with the desktop theme. It also repairs the Inmarsat web-map success response

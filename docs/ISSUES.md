@@ -1,5 +1,37 @@
 # Issues (canonical)
 
+## ISS-0054 - HF poisoned input and identity correction resets (2026-10-03, REPAIRED IN SOURCE)
+
+T-0098 / DEC-0167. Two new executable tests failed on badcba4: NaN IQ was
+accepted, and a 1 Hz NCO correction reset the data epoch despite stable explicit
+station identity. Input rejection/reset, bounded rates, identity-aware phase
+continuity and per-owner counters added. Full existing HF suite passes. No
+claim that the GUI supplies stable explicit identity for every HF correction.
+
+## ISS-0055 - Receive ownership, hardware loss and lifecycle (2026-10-03, OPEN)
+
+Confirmed global lease and global Soapy lock, hardware-overflow logging without
+epoch advance, detached-worker recovery paths. Existing downstream epoch/gap
+handling is real; the missing hardware-loss publication is distinct. See
+RECEIVE_CHAIN_AUDIT_20261003.md for evidence, caveats and qualification order.
+Shared RF/P25 changes deferred until fault-injection and non-regression gates.
+
+## ISS-0056 - Test-tone hardware TX and control hardening (2026-10-03, OPEN)
+
+Explicit CLI tx tone bypasses the separate GUI P25 arming state; hardware
+configuration errors can be ignored before activation. No RF test performed.
+Control server does reject empty token on startup; normal string comparison,
+exception details and unbounded idle socket lifetime remain defense-in-depth
+work. Do not confuse the GUI stub TX state machine with hardware tone output.
+
+## ISS-0057 - Morse and analog RF field qualification (2026-10-03, OPEN)
+
+Morse synthetic RF/file/GUI tests are not live hand-keyed/weak signal acceptance.
+No AM fading/selectivity professional specification is claimed. WFM capped-rate
+plan and legacy dead detector branches remain documented work, not modified in
+this isolated HF/CW patch. New observer does not accept AUTO/P25/simulated or
+diversity composite sources. Re-test actual hardware before broad support claims.
+
 ## ISS-0052 - Companion usability and map success contract (2026-10-03, RESOLVED)
 
 T-0097 / DEC-0166. Reproduced mode draft overwritten by status polling, hidden

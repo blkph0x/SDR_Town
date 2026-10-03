@@ -1,5 +1,7 @@
 #include "MainWindow.h"
 #include "SstvWindow.h"
+#include "CwWindow.h"
+#include "CwRfSession.h"
 #include "SstvImageFile.h"
 #include "SstvLiveSession.h"
 #include "SstvRfLiveSession.h"
@@ -13181,6 +13183,16 @@ void MainWindow::createMenus()
             QSettings().setValue("bandplan/overlay", enabled);
         });
         QMenu* toolsMenu = menuBar()->addMenu("&Tools");
+        // DEC-0167: read-only Morse observer; no radio/speaker state changes.
+        toolsMenu->addAction("CW / Morse Decoder...", this, [this] {
+            auto* window = findChild<CwWindow*>("cwWindow");
+            if (!window) window = new CwWindow([this] {
+                std::shared_ptr<Receiver> receiver;
+                { std::lock_guard lock(receiversMutex); if (!receivers.empty()) receiver = receivers.front(); }
+                return cwReceiverSource(receiver);
+            }, this);
+            window->show(); window->raise(); window->activateWindow();
+        });
         toolsMenu->addAction("&SSTV Images...",this,[this] {
             if (auto* window = ensureSstvWindow()) {
                 window->show(); window->raise(); window->activateWindow();

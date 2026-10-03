@@ -1,5 +1,19 @@
 # Development log
 
+## 2026-10-03 - T-0098 audit, HF integrity and Morse window
+
+Audited the submitted receive-chain claims against badcba4. Confirmed device
+ownership, hardware-overflow epoch and TX authorization gaps; corrected claims
+about AUTO/WFM, existing gap metadata, HF data taps and empty-token startup.
+Full verdicts and staged repair gates: RECEIVE_CHAIN_AUDIT_20261003.md.
+Reproduced HF invalid-input poisoning and same-identity NCO-reset cases before
+repair. Added per-owner numeric diagnostics and CW pre-squelch tap; existing
+filter/AGC defaults retained. New receive-only Morse window uses pinned MIT
+GGMorse with existing JFFT/miniaudio; independent fixtures cover six demods.
+Full local build, 16 CTest groups and native WAV-to-text window pass. No physical
+CW or AM/SSB fading acceptance claimed. P25/shared device/FM/audio/network paths
+unchanged. Public 0.2.121 qualification remains in progress.
+
 ## 2026-10-03 - T-0097 published and public packages verified
 
 Town 0.2.120-experimental (6dc66fa), FUBAR 1.1.44 (d9bcb0a) published by Actions.

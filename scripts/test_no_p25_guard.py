@@ -30,6 +30,12 @@ def main() -> int:
     path="src/MainWindow.cpp"
     before=subprocess.check_output(["git","show","127469d:"+path],cwd=ROOT,text=True,encoding="utf-8")
     after=(ROOT/path).read_text(encoding="utf-8")
+    before_cw = after.replace(MODULE.CW_INCLUDES, "", 1).replace(MODULE.CW_MENU, "", 1)
+    assert MODULE.cw_window_text_allowed(path, before_cw, after)
+    assert not MODULE.cw_window_text_allowed(path, before_cw, after + "\nchange")
+    assert not MODULE.cw_window_text_allowed(path, before_cw, after.replace("receiver = receivers.front()", "receiver = receivers.back()"))
+    assert not MODULE.cw_window_text_allowed(path, after, before_cw)
+    assert not MODULE.cw_window_text_allowed("src/P25LiveDecoder.cpp", before_cw, after)
     assert MODULE.diagnostics_text_allowed(path,before,after)
     assert not MODULE.diagnostics_text_allowed(path,before,after+"\nchange")
     assert not MODULE.diagnostics_text_allowed(path,before+"\n",after)

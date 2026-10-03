@@ -65,6 +65,28 @@ WORKSPACE_UI_BLOCK = '''        // DEC-0166: reparent presentation only; keep th
 '''
 
 
+CW_INCLUDES = '#include "CwWindow.h"\n#include "CwRfSession.h"\n'
+CW_MENU = '''        // DEC-0167: read-only Morse observer; no radio/speaker state changes.
+        toolsMenu->addAction("CW / Morse Decoder...", this, [this] {
+            auto* window = findChild<CwWindow*>("cwWindow");
+            if (!window) window = new CwWindow([this] {
+                std::shared_ptr<Receiver> receiver;
+                { std::lock_guard lock(receiversMutex); if (!receivers.empty()) receiver = receivers.front(); }
+                return cwReceiverSource(receiver);
+            }, this);
+            window->show(); window->raise(); window->activateWindow();
+        });
+'''
+
+
+def cw_window_text_allowed(path: str, before: str, after: str) -> bool:
+    include = '#include "SstvWindow.h"\n'
+    menu = '        QMenu* toolsMenu = menuBar()->addMenu("&Tools");\n'
+    return (path == "src/MainWindow.cpp" and before.count(include) == 1
+            and before.count(menu) == 1 and CW_INCLUDES not in before and CW_MENU not in before
+            and after == before.replace(include, include + CW_INCLUDES, 1).replace(menu, menu + CW_MENU, 1))
+
+
 def workspace_ui_text_allowed(path: str, before: str, after: str) -> bool:
     anchor = "        workspaceLayout = new WorkspaceLayout(this);\n"
     return (path == "src/MainWindow.cpp" and before.count(anchor) == 1
@@ -73,6 +95,9 @@ def workspace_ui_text_allowed(path: str, before: str, after: str) -> bool:
 
 
 def diagnostics_text_allowed(path: str, before: str, after: str) -> bool:
+    # Historical exact patch remains testable after independently reviewed CW UI.
+    if after.count(CW_INCLUDES) == 1 and after.count(CW_MENU) == 1:
+        after = after.replace(CW_INCLUDES, "", 1).replace(CW_MENU, "", 1)
     # Preserve the historical exact-patch test across the independently checked UI move.
     anchor = "        workspaceLayout = new WorkspaceLayout(this);\n"
     if after.count(anchor + WORKSPACE_UI_BLOCK) == 1:
@@ -458,6 +483,9 @@ def main() -> int:
     blocked = []
     for path, pattern in protected_paths(changed):
         if path == "src/MainWindow.cpp" and args.paths is None:
+            if cw_window_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
+                print(f"P25 guard: accepted exact DEC-0167 read-only Morse window hook: {path}")
+                continue
             if workspace_ui_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
                 print(f"P25 guard: accepted exact DEC-0166 widget reparenting: {path}")
                 continue

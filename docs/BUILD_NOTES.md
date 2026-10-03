@@ -1,5 +1,29 @@
 # Build notes
 
+## 2026-10-03 - T-0098 full local qualification
+
+Windows/MSVC 17.14 Release full build PASS; CTest 16/16 PASS (77.72 s).
+After saturating the Morse startup counter and adding WFM RF coverage, rebuilt
+SDR_Town/core/workspace targets PASS; `[cw]` 6 cases/34 assertions PASS.
+`verify_hf_integration.py` PASS. Native Tools > CW window decoded the independent
+20 WPM / 700 Hz PCM16 WAV to four exact `CQ DE VK2ABC` phrases, zero gaps,
+one initial reset and zero rejects. During speech-free tone acquisition it
+reported 703 Hz / 20.0 WPM; EOF silence naturally clears the pitch estimate.
+Default window layout visually verified, no overlaps. Native RF/hand-keyed CW
+and fading AM/SSB were not tested. Public release qualification is pending.
+
+## 2026-10-03 - T-0098 reproduction and initial HF/CW gates
+
+Windows/MSVC17.14, existing Qt6/vcpkg build. Baseline badcba4 was clean.
+New `[hf][audit]` tests:2/2 FAIL before repair (accepted NaN block; reset on1 Hz
+same-explicit-identity correction). After repair `[hf]`:17 cases/667 assertions
+PASS. Initial compile failed because added state fields matched SincResampler
+instead of State; corrected placement, rebuilt successfully.
+Independent Morse fixtures plus RF NFM/AM/USB/LSB/CW,44100Hz recording input,
+silence/gaps/invalids/cancellation: `[cw]`6 cases/32 assertions PASS.
+CW Qt lifecycle/error tests:2 cases/7 assertions PASS. Guard positive/negative
+mutations PASS. Full build/CTest/publication evidence follows after completion.
+
 ## 2026-10-03 - T-0097 public paired release verification
 
 Town source 6dc66fa08f8554ce14cd7e438a0a7e657c77e76d: Windows master/release

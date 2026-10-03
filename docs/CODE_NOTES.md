@@ -1,5 +1,13 @@
 # Code notes (tree map)
 
+T-0098 / DEC-0167: HfDemod owns invalid-input rejection, identity-aware NCO
+continuity and per-owner numeric diagnostics; existing filter/AGC constants
+remain. CwDecoder validates bounded audio, filtered-resamples to4 kHz and owns
+one pinned GGMorse recognizer. CwSession streams recorded audio; CwRfSession
+observes chronological IQ with independent demod/cursor and no control writes.
+CwWindow owns cancellable worker/snapshot mailbox, local transcript/settings
+and UI; exact MainWindow menu hook only. External provenance and license ship.
+
 T-0097 / DEC-0166: WorkspaceLayout owns the visible preset selector and panel
 menu. MainWindow only reparents the existing repeater widget; the P25 guard
 allows this exact insertion and rejects any additional protected edit.

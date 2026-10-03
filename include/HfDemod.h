@@ -2,6 +2,7 @@
 
 #include <complex>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <vector>
 
@@ -9,6 +10,16 @@ enum class DemodMode;
 struct FmMultiplexBlock;
 
 namespace HfDemod {
+
+// Read-only, per-owner evidence. No log/file IO on the DSP thread.
+struct Diagnostics {
+    uint64_t blocks = 0, inputSamples = 0, resets = 0, rejectedBlocks = 0;
+    uint64_t continuousCorrections = 0;
+    double effectiveBandwidthHz = 0, effectiveLowPassHz = 0;
+    uint32_t lastResetReasons = 0;
+};
+enum ResetReason : uint32_t { Start = 1, Explicit = 2, Configuration = 4, Identity = 8, InvalidInput = 16 };
+Diagnostics diagnostics(const void* owner);
 
 // Returns true only for the analogue HF modes owned by this isolated path.
 bool supports(DemodMode mode) noexcept;

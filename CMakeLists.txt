@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.120 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.121 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -34,6 +34,14 @@ find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(unofficial-sodium CONFIG REQUIRED)
 add_subdirectory(external/aero)
+
+# DEC-0167: pinned MIT Morse core; existing JFFT and miniaudio implementations.
+add_library(sdr_town_morse STATIC src/CwDecoder.cpp external/ggmorse/src/ggmorse.cpp
+    external/ggmorse/src/resampler.cpp)
+target_include_directories(sdr_town_morse PUBLIC include PRIVATE external/ggmorse/include external/miniaudio)
+target_link_libraries(sdr_town_morse PRIVATE sdr_aero_receive)
+target_compile_definitions(sdr_town_morse PRIVATE _USE_MATH_DEFINES)
+install(FILES external/ggmorse/LICENSE external/ggmorse/README.sdr-town.md DESTINATION licenses/ggmorse)
 
 # SoapySDR for device support (PR 2+). vcpkg "soapy" port or system install.
 # After vcpkg install, it should be discoverable when using the vcpkg toolchain.
@@ -90,6 +98,10 @@ target_link_libraries(sdr_town_decoders PRIVATE nlohmann_json::nlohmann_json)
 include(cmake/RdsBackend.cmake)
 
 set(SDR_TOWN_SOURCES
+    src/CwWindow.cpp
+    include/CwWindow.h
+    src/CwSession.cpp
+    src/CwRfSession.cpp
     src/P25Aliases.cpp
     src/P25AliasCsv.cpp
     src/P25AliasDialog.cpp
@@ -290,6 +302,7 @@ endif()
 
 # Install rules (so cpack / make install knows what to package)
 install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION bin)
+target_link_libraries(${PROJECT_NAME} PRIVATE sdr_town_morse)
 install(TARGETS sdrtown_control_client
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION bin
@@ -514,6 +527,9 @@ if(BUILD_TESTS)
   target_sources(sdr_town_tests PRIVATE tests/test_sstv_virtual_sdr.cpp
     src/SstvRfLiveSession.cpp src/SstvLiveSession.cpp src/SstvStreamWorker.cpp src/SstvProgress.cpp)
   target_sources(sdr_town_tests PRIVATE tests/test_inmarsat_tracking.cpp)
+  target_sources(sdr_town_tests PRIVATE tests/test_cw.cpp)
+  target_link_libraries(sdr_town_tests PRIVATE sdr_town_morse)
+  target_sources(sdr_town_tests PRIVATE src/CwRfSession.cpp src/CwSession.cpp)
   target_link_libraries(sdr_town_tests PRIVATE sdr_inmarsat_tracking)
   target_link_libraries(sdr_town_tests PRIVATE Qt6::Gui)
   target_link_libraries(sdr_town_tests PRIVATE
@@ -607,6 +623,9 @@ if(BUILD_TESTS)
   target_include_directories(sdr_town_workspace_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/external/miniaudio)
   target_link_libraries(sdr_town_workspace_tests PRIVATE Catch2::Catch2 Qt6::Widgets nlohmann_json::nlohmann_json spdlog::spdlog sdr_town_tones sdr_inmarsat_native sdr_inmarsat_audio sdr_inmarsat_map)
   add_test(NAME WorkspaceTests COMMAND sdr_town_workspace_tests)
+  target_sources(sdr_town_workspace_tests PRIVATE tests/test_cw_gui.cpp
+    src/CwWindow.cpp include/CwWindow.h src/CwSession.cpp)
+  target_link_libraries(sdr_town_workspace_tests PRIVATE sdr_town_morse)
   target_sources(sdr_town_workspace_tests PRIVATE tests/test_sdrplay_controls_gui.cpp
       src/SdrplayControlsWidget.cpp src/SdrplayControl.cpp src/SdrplayProfile.cpp
       tests/test_rtl_bias_t_gui.cpp src/RtlBiasTWidget.cpp)
@@ -740,6 +759,9 @@ add_custom_target(deploy
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/tools/diagnostics"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/scripts"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/licenses/sgp4"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/licenses/ggmorse"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/external/ggmorse/LICENSE"
+            "${CMAKE_SOURCE_DIR}/external/ggmorse/README.sdr-town.md" "${DEPLOY_STAGING}/licenses/ggmorse"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/external/sgp4/LICENSE"
             "${CMAKE_SOURCE_DIR}/external/sgp4/README.sdr-town.md" "${DEPLOY_STAGING}/licenses/sgp4"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_STAGING}/licenses/aero"

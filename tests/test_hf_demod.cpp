@@ -10,6 +10,55 @@
 #include <limits>
 #include <vector>
 
+TEST_CASE("HF rejects poisoned blocks and recovers without inherited NaNs", "[hf][audit]") {
+    for (auto mode : {DemodMode::AM, DemodMode::USB, DemodMode::LSB, DemodMode::CW}) {
+        Demodulator owner;
+        double level;
+        FmMultiplexBlock tap;
+        std::vector<std::complex<float>> iq(4800, {0.2f, 0.0f});
+        auto decode = [&](double rate, double gain) {
+            return HfDemod::demodulate(&owner, iq, rate, 7e6, 7e6, mode,
+                level, 0, -140, gain, 0, 0, 48000,
+                std::numeric_limits<double>::quiet_NaN(), true, &tap);
+        };
+        iq[200] = {std::numeric_limits<float>::quiet_NaN(), 0};
+        REQUIRE(decode(48000, 1).empty());
+        REQUIRE(tap.samples.empty());
+        iq[200] = {0.2f, 0};
+        REQUIRE(decode(48000, std::numeric_limits<double>::quiet_NaN()).empty());
+        REQUIRE(decode(1000, 1).empty());
+        const auto recovered = decode(48000, 1);
+        REQUIRE_FALSE(recovered.empty());
+        REQUIRE(std::all_of(recovered.begin(), recovered.end(), [](float v) {return std::isfinite(v);}));
+    }
+}
+
+TEST_CASE("HF same-identity correction retains the sample clock and decoder epoch", "[hf][audit]") {
+    for (auto mode : {DemodMode::AM, DemodMode::USB, DemodMode::LSB}) {
+        Demodulator owner;
+        double level;
+        FmMultiplexBlock tap;
+        std::vector<std::complex<float>> iq(4800, {0.2f, 0});
+        auto decode = [&](double target, double identity) {
+            HfDemod::demodulate(&owner, iq, 48000, 7e6, target, mode, level,
+                0, -140, 1, 0, 0, 48000, -20, true, &tap, identity);
+        };
+        decode(7e6, 7e6);
+        const auto epoch = tap.epoch;
+        auto next = tap.firstSample + tap.samples.size();
+        for (int n = 1; n <= 8; ++n) {
+            decode(7e6 + n, 7e6);
+            REQUIRE_FALSE(tap.discontinuity);
+            REQUIRE(tap.epoch == epoch);
+            REQUIRE(tap.firstSample == next);
+            next += tap.samples.size();
+        }
+        decode(7e6 + 8, 7e6 + 1000);
+        REQUIRE(tap.discontinuity);
+        REQUIRE(tap.epoch > epoch);
+    }
+}
+
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;

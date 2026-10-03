@@ -1,5 +1,42 @@
 # Decisions
 
+## DEC-0167 - Evidence-scoped HF hardening and receive-only Morse (2026-10-03)
+
+T-0098, baseline badcba4. HfDemod clamps with upper bounds below their lower
+bounds when rates are too small; NaN IQ/gain can poison persistent state.
+Reject unsupported rates below 8 kHz (the existing decoder audio floor) and
+non-finite input, reset on rejection, and publish numeric reset/rejection
+diagnostics. Keep the existing filters, AGC constants and 700 Hz CW BFO.
+Input upper bound100 MHz and output384 kHz are allocation/resource policies,
+not device support claims. Reject extreme rates before resampler allocation.
+When the caller supplies an unchanged explicit dataIdentityHz, an NCO target
+correction is not a new station: preserve oscillator, FIR, resampler and AGC.
+Real source/rate/filter/mode changes and identity changes still reset. Callers
+without explicit identity keep conservative tune-reset behavior. Tests must
+demonstrate failure before repair and partition invariance after it.
+
+Use GGMorse (MIT), https://github.com/ggerganov/ggmorse at
+7b4822a8cfdbb1addfe497f3ae8186f142a4ee79, for pitch/speed detection and Morse
+timing, rather than inventing a new core. Vendor only its core with license and
+provenance; disable its unsolicited stdout text, retain decoded bytes locally.
+Remove the unused STFFT sample counter and saturate Goertzel's startup-fill
+counter at its window length: neither needs an unbounded signed sample count.
+ITU-R M.1677-1 defines Morse spacing; independent fixtures use those ratios:
+https://www.itu.int/rec/R-REC-M.1677-1-200910-I
+Validate the library with independent generated signals, not its own encoder.
+No RF or decoded text is automatically uploaded. CW reception is experimental
+until live keyed RF and hand-sent/noisy cases are independently qualified.
+
+The new window uses a worker-owned demodulator and chronological IQ cursor,
+following the existing SSTV RF observer pattern; it never opens, retunes or
+takes a lease. Snapshot the active analog receiver, reject P25 and simulated
+sources, stop on source/config changes, reset on IQ gaps. Support recorded WAV
+and all implemented analog modes. FM requires keyed audio (MCW); an unmodulated
+carrier requires CW/SSB to yield a tone. Bound buffers/history, join workers,
+keep UI responsive, and show source, estimated pitch/speed and gap diagnostics.
+The sole shared MainWindow edit is an exact menu/window hook; update the P25
+guard with positive and negative mutation tests, not blanket exclusions.
+
 ## DEC-0166 - Usability follows the operator workflow (2026-10-03)
 
 T-0097. Running 0.2.119 / FUBAR 1.1.43 shows the inactive repeater monitor

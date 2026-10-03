@@ -12,6 +12,15 @@ The GUI bounds HF reader lag to its existing 500 ms analog budget and resets
 HF state on observed discontinuity. No P25/WFM/NFM audio algorithm was changed.
 Regression/throughput results and remaining gates: [audit](AUDIT_20260924.md).
 
+2026-10-03 integrity repair (DEC-0167): reject non-finite IQ/configuration and
+unsupported rates before they contaminate persistent state. An unchanged
+explicit station identity allows target-NCO corrections without resetting the
+FIR, AGC or sample clock. Callers without that identity retain conservative
+retune resets; this is not a claim that every GUI AFC path supplies it.
+`HfDemod::diagnostics()` exposes numeric block/reset/rejection counts, reset
+reasons and effective bandwidth/LPF. The optional pre-squelch tap now also
+supports CW. Existing filters, AGC constants and 700 Hz beat note are unchanged.
+
 ## Supported HF analogue modes
 
 | Mode | RF channel default | Audio passband | Notes |
@@ -52,8 +61,9 @@ Important properties:
 - The streaming rate converter expands its anti-alias kernel for common
   multi-megasample SDR rates, preventing signals near 48 kHz multiples
   from folding into the selected HF audio channel.
-- Tune, sample-rate, mode, bandwidth and explicit reset changes clear all
-  streaming state.
+- Station, sample-rate, mode, bandwidth and explicit reset changes clear
+  streaming state. Target corrections with unchanged explicit station identity
+  preserve continuity.
 - Stale WFM bandwidth/LPF settings are rejected when entering HF. Safe
   mode defaults are used instead.
 - The Satcom/HF receive session publishes clean pre-squelch SSB decoder

@@ -48,6 +48,9 @@ struct SincResampler {
 
 struct State {
     std::mutex mutex;
+    double sourceIdentityHz = 0.0;
+    bool explicitIdentity = false;
+    Diagnostics diagnostics;
     bool configured = false;
     bool explicitReset = true;
     DemodMode mode = DemodMode::AM;
@@ -347,14 +350,27 @@ std::vector<float> demodulate(
 {
     if (decoderAudio) *decoderAudio = {};
     rmsOutDb = -140.0;
-    if (!owner || !supports(mode) || iq.empty() ||
-        !(inputRateHz > 0.0) || !std::isfinite(inputRateHz) ||
-        !std::isfinite(centerHz) || !std::isfinite(targetHz)) {
-        return {};
-    }
-
+    if (!owner || !supports(mode)) return {};
     if (!(outputRateHz > 0.0) || !std::isfinite(outputRateHz))
         outputRateHz = kWorkRateHz;
+    auto state = stateFor(owner);
+    std::lock_guard<std::mutex> stateLock(state->mutex);
+    // DEC-0167: reject a corrupt block as a gap, never retain poisoned FIR/AGC
+    // history. The 8 kHz floor makes all following filter bounds well ordered.
+    if (!std::isfinite(inputRateHz) || inputRateHz < 8000 || inputRateHz > 100e6 ||
+        outputRateHz < 8000 || outputRateHz > 384000 ||
+        !std::isfinite(centerHz) || !std::isfinite(targetHz) ||
+        !std::isfinite(targetHz - centerHz) || !std::isfinite(audioGain) ||
+        std::isnan(squelchDb) ||
+        !std::all_of(iq.begin(), iq.end(), [](const auto& x) {return std::isfinite(std::norm(x));})) {
+        clearStreamingState(*state);
+        state->configured = false;
+        ++state->diagnostics.rejectedBlocks;
+        ++state->diagnostics.resets;
+        state->diagnostics.lastResetReasons = InvalidInput;
+        return {};
+    }
+    if (iq.empty()) return {};
     if (!(audioLowPassHz > 0.0) || !std::isfinite(audioLowPassHz))
         audioLowPassHz = defaultAudioLowPass(mode);
     if (!(channelBandwidthHz > 0.0) || !std::isfinite(channelBandwidthHz))
@@ -387,21 +403,28 @@ std::vector<float> demodulate(
     audioGain = std::clamp(audioGain, 0.0, 20.0);
 
     const double workRateHz = std::min(kWorkRateHz, inputRateHz);
-    auto state = stateFor(owner);
-    std::lock_guard<std::mutex> stateLock(state->mutex);
+    const bool hasIdentity = std::isfinite(dataIdentityHz);
+    const double identity = hasIdentity ? dataIdentityHz : targetHz;
+    const bool identityChanged = state->explicitIdentity != hasIdentity ||
+        materiallyDifferent(state->sourceIdentityHz, identity, 0.5);
+    const bool continuousCorrection = hasIdentity && state->explicitIdentity && !identityChanged;
 
     const bool configurationChanged =
         !state->configured || state->explicitReset ||
         state->mode != mode ||
         materiallyDifferent(state->inputRate, inputRateHz, 0.5) ||
         materiallyDifferent(state->centerHz, centerHz, 0.5) ||
-        materiallyDifferent(state->targetHz, targetHz, 0.5) ||
+        (!continuousCorrection && materiallyDifferent(state->targetHz, targetHz, 0.5)) ||
+        identityChanged ||
         materiallyDifferent(
             state->channelBandwidthHz, channelBandwidthHz, 0.5) ||
         materiallyDifferent(state->audioLowPassHz, audioLowPassHz, 0.5) ||
         materiallyDifferent(state->outputRate, outputRateHz, 0.5);
 
     if (configurationChanged) {
+        ++state->diagnostics.resets;
+        state->diagnostics.lastResetReasons = !state->configured ? Start :
+            (state->explicitReset ? Explicit : 0u) | (identityChanged ? Identity : 0u) | Configuration;
         state->configured = true;
         state->mode = mode;
         state->inputRate = inputRateHz;
@@ -432,7 +455,16 @@ std::vector<float> demodulate(
                 workRateHz, -halfWidth, halfWidth, 257);
         }
         clearStreamingState(*state);
+    } else if (state->targetHz != targetHz) {
+        ++state->diagnostics.continuousCorrections;
     }
+    state->targetHz = targetHz;
+    state->sourceIdentityHz = identity;
+    state->explicitIdentity = hasIdentity;
+    ++state->diagnostics.blocks;
+    state->diagnostics.inputSamples += iq.size();
+    state->diagnostics.effectiveBandwidthHz = channelBandwidthHz;
+    state->diagnostics.effectiveLowPassHz = audioLowPassHz;
 
     const double phaseStep =
         2.0 * kPi * (targetHz - centerHz) / inputRateHz;
@@ -587,13 +619,9 @@ std::vector<float> demodulate(
         }
     }
 
-    const std::vector<float> decoderSource = audio;
-
-    // DEC-0117: explicit AM SSTV uses the same pre-squelch data tap as SSB.
-    if (decoderAudio && (mode == DemodMode::USB ||
-                         mode == DemodMode::LSB || mode == DemodMode::AM)) {
-        const double identity = std::isfinite(dataIdentityHz)
-            ? dataIdentityHz : targetHz;
+    // DEC-0167: all HF modes expose pre-squelch audio, including keyed CW.
+    // Avoid the copy entirely when there is no data consumer.
+    if (decoderAudio) {
         const bool discontinuity =
             !state->decoderContinuous ||
             state->decoderMode != mode ||
@@ -604,13 +632,13 @@ std::vector<float> demodulate(
             ++state->decoderEpoch;
             state->decoderSamples = 0;
         }
-        decoderAudio->samples = decoderSource;
+        decoderAudio->samples = audio;
         decoderAudio->sampleRate = workRateHz;
         decoderAudio->targetHz = identity;
         decoderAudio->epoch = state->decoderEpoch;
         decoderAudio->firstSample = state->decoderSamples;
         decoderAudio->discontinuity = discontinuity;
-        decoderAudio->resetReasons = discontinuity ? 1u : 0u;
+        decoderAudio->resetReasons = discontinuity ? state->diagnostics.lastResetReasons : 0u;
         state->decoderSamples += decoderAudio->samples.size();
         state->decoderContinuous = true;
         state->decoderMode = mode;
@@ -685,6 +713,18 @@ void reset(const void* owner) noexcept {
     }
     std::lock_guard<std::mutex> stateLock(state->mutex);
     state->explicitReset = true;
+}
+
+Diagnostics diagnostics(const void* owner) {
+    std::shared_ptr<State> state;
+    {
+        std::lock_guard lock(registryMutex());
+        const auto found = registry().find(owner);
+        if (found == registry().end()) return {};
+        state = found->second;
+    }
+    std::lock_guard lock(state->mutex);
+    return state->diagnostics;
 }
 
 void release(const void* owner) noexcept {
