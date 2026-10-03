@@ -15,7 +15,7 @@ inline std::string dcsKeyFromSnapshot(const DcsSnapshot& dcs)
 }
 
 inline void drainDtmfEvents(DtmfDecoder& decoder, ControlEventLog& log,
-                            ControlEvent::Channel channel, double freqHz)
+                            ControlEvent::Channel channel, double /* currentFreqHz */)
 {
     for (const auto& ev : decoder.takePendingEvents()) {
         // List view shows completed sequences only — per-digit spam is not useful.
@@ -24,7 +24,8 @@ inline void drainDtmfEvents(DtmfDecoder& decoder, ControlEventLog& log,
         ControlEvent out;
         out.ms = ev.ms;
         out.channel = channel;
-        out.freqHz = freqHz;
+        // A reset may finish the old channel's sequence before this drain.
+        out.freqHz = ev.targetHz;
         out.kind = ControlEvent::Kind::DtmfSequence;
         out.detail = ev.sequence;
         log.push(std::move(out));

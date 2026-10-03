@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.121 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.122 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -99,6 +99,8 @@ include(cmake/RdsBackend.cmake)
 
 set(SDR_TOWN_SOURCES
     src/CwWindow.cpp
+    src/DtmfWindow.cpp
+    include/DtmfWindow.h
     include/CwWindow.h
     src/CwSession.cpp
     src/CwRfSession.cpp
@@ -625,6 +627,8 @@ if(BUILD_TESTS)
   add_test(NAME WorkspaceTests COMMAND sdr_town_workspace_tests)
   target_sources(sdr_town_workspace_tests PRIVATE tests/test_cw_gui.cpp
     src/CwWindow.cpp include/CwWindow.h src/CwSession.cpp)
+  target_sources(sdr_town_workspace_tests PRIVATE tests/test_dtmf_gui.cpp
+    src/DtmfWindow.cpp include/DtmfWindow.h)
   target_link_libraries(sdr_town_workspace_tests PRIVATE sdr_town_morse)
   target_sources(sdr_town_workspace_tests PRIVATE tests/test_sdrplay_controls_gui.cpp
       src/SdrplayControlsWidget.cpp src/SdrplayControl.cpp src/SdrplayProfile.cpp

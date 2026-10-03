@@ -47,6 +47,11 @@ whatever frequency you are tuned to; the status line explains why dual-watch is 
 
 ## CLI
 
+**Tools > DTMF Analysis** adds conservative/fast burst profiles, known spectral
+inversion, shift/scale, bounded sample-indexed history and local JSON export.
+See [DTMF guide](DTMF_ANALYSIS.md). Input dual-watch now processes contiguous
+blocks; its former one-in-four duty cycle could miss short keys entirely.
+
 ```powershell
 build/bin/Release/SDR_Town.exe --cli --no-control-server --cmd 'tones dtmf "discriminator.wav"'
 ```

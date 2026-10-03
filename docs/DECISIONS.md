@@ -1,5 +1,45 @@
 # Decisions
 
+## DEC-0168 - Receive-only DTMF burst and transformation profiles (2026-10-03)
+
+T-0099 / ISS-0058, baseline ab21a4f. Keep the existing Goertzel detector rather
+than import LGPL SpanDSP into the MIT core. Reference its published algorithm
+and Q.24 timing/frequency rationale, not its implementation text:
+https://github.com/freeswitch/spandsp/blob/master/src/dtmf.c
+https://www.itu.int/rec/T-REC-Q.24-198811-I
+https://users.ece.utexas.edu/~bevans/papers/1998/dtmf/dtmf.pdf
+For rectangular analysis, sinusoidal energy is 2*|DFT|^2/N. Report pair purity
+against mean-removed sample energy, with row/column dominance and signed twist
+(column minus row). Reference limits: normal twist 8 dB, reverse 4 dB,
+neighbor dominance 8 dB, nominal frequency tolerance +/-1.5 percent. Scan
+nominal and both tolerance endpoints; do not claim Q.24 certification.
+
+Conservative analysis retains a 20 ms window, uses 2.5 ms hops and 37.5 ms
+candidate span; qualify 40 ms acceptance and <=23 ms rejection with phase
+offset fixtures. Fast analysis is explicitly non-telephone-conformant: 12.5 ms
+windows, 2.5 ms hops, 17.5 ms candidate span and 7.5 ms release, qualified
+against 20 ms tones / 15 ms gaps. Conservative release is 20 ms; sequence
+completion retains 300 ms. These are evidence-gated analysis policies, not
+RF protocol requirements. A 0.78 pair purity floor excludes broadband energy;
+test noise, single tones, competing pairs, harmonics and short transients.
+
+Audio polarity/phase needs no mode: magnitude is invariant. Explicit spectral
+inversion maps f to pivot-f. Known pitch scaling and additive shift are bounded
+configuration, never guessed from arbitrary noise. No encryption recovery,
+arbitrary scrambling, lost-band reconstruction or universal talk-off claim.
+Preserve unclipped discriminator input; remove per-window DC without a speech
+band filter that would bias twist or suppress the transformed frequencies.
+
+Time detections by source epoch/sample index; keep monotonic UI timestamps
+separate. Bound sequence/history/events and expose rejected-frame reasons,
+event overflow, analysis time and profile. Use a mutex for queued options and
+published snapshots/events, one producer for DSP state; EOF finishes explicitly
+without fabricated silence. File decode is cancellable and remains <=120 s.
+Continuous opt-in input-leg processing replaces the every-fourth-block skip;
+qualify cost and protect the exact NFM-only edit with positive/negative guard
+tests. UI is a separate analysis/settings window and exact menu hook. No P25,
+speaker, radio ownership or diagnostics consent behavior changes.
+
 ## DEC-0167 - Evidence-scoped HF hardening and receive-only Morse (2026-10-03)
 
 T-0098, baseline badcba4. HfDemod clamps with upper bounds below their lower

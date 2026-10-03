@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "SstvWindow.h"
+#include "DtmfWindow.h"
 #include "CwWindow.h"
 #include "CwRfSession.h"
 #include "SstvImageFile.h"
@@ -13183,6 +13184,17 @@ void MainWindow::createMenus()
             QSettings().setValue("bandplan/overlay", enabled);
         });
         QMenu* toolsMenu = menuBar()->addMenu("&Tools");
+        // DEC-0168: DTMF observer settings only; no tuning or audio controls.
+        toolsMenu->addAction("DTMF Analysis...", this, [this] {
+            auto* window = findChild<DtmfWindow*>("dtmfWindow");
+            if (!window) window = new DtmfWindow([this](bool input) -> std::shared_ptr<DtmfDecoder> {
+                std::lock_guard lock(receiversMutex);
+                if (receivers.empty()) return {};
+                auto receiver = receivers.front();
+                return {receiver, input ? &receiver->inputWatchDtmf : &receiver->dtmf};
+            }, this);
+            window->show(); window->raise(); window->activateWindow();
+        });
         // DEC-0167: read-only Morse observer; no radio/speaker state changes.
         toolsMenu->addAction("CW / Morse Decoder...", this, [this] {
             auto* window = findChild<CwWindow*>("cwWindow");

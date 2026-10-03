@@ -16,6 +16,7 @@
 #include "CtcssDecoder.h"
 #include "DcsDecoder.h"
 #include "DtmfDecoder.h"
+#include "DtmfReport.h"
 #include "ReceiveDecoder.h"
 #include "IP25AmbeEncoder.h"
 #include "P25AppGlobals.h"
@@ -1558,7 +1559,7 @@ int runCLI(int argc, char* argv[]) {
                         << "  tones file <quoted-path> CTCSS in mono discriminator WAV/FLAC, 8..96 kHz, max 120 s\n"
                         << "  tones dcs <quoted-path> Experimental DCS from mono discriminator WAV/FLAC\n"
                         << "  tones dcs-bits <quoted-path> DCS chronological ASCII bits; max 120 s\n"
-                        << "  tones dtmf <quoted-path> DTMF digits from mono discriminator WAV/FLAC\n"
+                        << "  tones dtmf <quoted-path> [--fast] [--invert-hz Hz] [--scale ratio] [--shift-hz Hz]\n"
                         << "  sstv inspect <quoted-path> SSTV VIS headers only; mono WAV/FLAC 8..96 kHz, max 120 s\n"
                         << "  sstv decode <input> <new-output-dir> [auto|robot36|martin1|scottie3|fax480|mp73|...]\n"
                       << "  rds bits <quoted-path>  Decode MSB-first differential-decoded RDS bits\n"
@@ -2685,11 +2686,22 @@ int runCLI(int argc, char* argv[]) {
             }
             try {
                 if (action == "dtmf") {
-                    const auto dtmf = decodeDtmfFile(input.toStdString());
-                    std::cout << nlohmann::json{{"decoder","dtmf"},{"digit",dtmf.digit ? std::string(1,dtmf.digit) : ""},
-                        {"sequence",dtmf.sequence},{"lastSequence",dtmf.lastSequence},
-                        {"samples",dtmf.samples},{"frames",dtmf.frames},{"confirmedDigits",dtmf.confirmedDigits},
-                        {"purity",dtmf.purity},{"twistDb",dtmf.twistDb},{"status",dtmf.status}}.dump() << '\n';
+                    const auto args=QProcess::splitCommand(QString::fromStdString(path).trimmed());
+                    if (args.isEmpty()) throw std::invalid_argument("DTMF recording path required");
+                    DtmfOptions options;
+                    for (qsizetype i=1;i<args.size();++i) {
+                        const auto flag=args[i];
+                        if (flag=="--fast") {options.fast=true;continue;}
+                        if (flag!="--invert-hz" && flag!="--scale" && flag!="--shift-hz")
+                            throw std::invalid_argument("Unknown DTMF option");
+                        if (++i>=args.size()) throw std::invalid_argument("Missing DTMF option value");
+                        bool ok=false; const double value=args[i].toDouble(&ok);
+                        if (!ok || !std::isfinite(value)) throw std::invalid_argument("Invalid DTMF option number");
+                        if (flag=="--invert-hz") {options.inverted=true;options.inversionHz=value;}
+                        else if (flag=="--scale") options.pitchScale=value;
+                        else options.shiftHz=value;
+                    }
+                    std::cout << dtmfReport(decodeDtmfFile(args[0].toUtf8().toStdString(),4096,options)).dump() << '\n';
                     continue;
                 }
                 if (action!="file") {

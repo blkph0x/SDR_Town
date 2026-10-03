@@ -1,5 +1,18 @@
 # Issues (canonical)
 
+## ISS-0058 - DTMF confidence, short bursts and input-watch gaps (2026-10-03, REPAIRED IN SOURCE)
+
+Raw Goertzel squared magnitude has N-squared units but is divided by N-unit
+sample energy, saturating reported purity. Input-watch intentionally discards
+three of four IQ blocks and resets its detector on the resulting gaps. EOF
+adds only 200 ms despite the 300 ms sequence timeout. Pending-event writers
+do not take the mutex used by their reader. No short burst/inversion fixtures
+or field recordings qualified these paths. T-0099 / DEC-0168 repairs the known
+defects with executable regression, fast/inverted, GUI/file and synthetic dual
+RF evidence. All-key 20 ms burst and 40 ms conservative fixtures pass. Field
+recording acceptance and a speech talk-off corpus remain open; no arbitrary
+scrambling or encryption recovery is claimed. See DTMF_ANALYSIS.md.
+
 ## ISS-0054 - HF poisoned input and identity correction resets (2026-10-03, REPAIRED IN SOURCE)
 
 T-0098 / DEC-0167. Two new executable tests failed on badcba4: NaN IQ was

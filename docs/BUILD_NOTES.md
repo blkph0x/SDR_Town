@@ -1,5 +1,35 @@
 # Build notes
 
+## 2026-10-03 - T-0099 reproduction and development gates
+
+Baseline ab21a4f; Windows/MSVC 17.14, existing Qt/vcpkg build. New executable
+regression cases first FAILED: weak pair in white noise reported purity=1;
+23 ms transient confirmed one digit. After DEC-0168 correction both PASS.
+Initial expanded DTMF suite: 14 cases / 4691 assertions PASS, including five
+sample rates, all 16 keys, fast/inverted/polarity and chunk/epoch tests.
+Workspace DTMF tests: 2 cases / 20 assertions PASS (real generated mono WAV,
+Unicode path, GUI/direct sample timestamp parity, EOF, cancellation/error,
+profile application and inactive source). Further RF/negative/release gates
+remain in progress; no physical transmitter or field acceptance claimed.
+
+Expanded core gate now 18 cases / 5943 assertions PASS, including all-key
+40 ms +/-1.5 percent fixtures, arbitrary tone phase, bounded overflow and dual
+RF. Dual NFM simulation: 0.30 s at 2.4 Msps, 0.1185 s synthesis+DSP wall time;
+"11" output and "55" input, one epoch each, no cross-channel digits. CLI
+short/repeated/polarity/inverted/shifted/EOF/Unicode/invalid-option smoke PASS.
+Incremental full rebuild hit LNK1104 on SDR_Town.exe while the CLI smoke was
+using it; stop overlapping EXE tests with link, retry after tests finish. This
+is a build coordination failure, not a decoder assertion. Full gate follows.
+
+Final complete build PASS (`build/dtmf-build-verified.log`); final CTest 16/16
+PASS in 72.97 s (`build/dtmf-ctest-final.log`). DTMF CLI and unchanged RDS smoke
+PASS against rebuilt EXE. Exact P25 guard positive/negative mutation tests PASS.
+GUI actual-file tests pass; rendered 820x520 and compact 540x480 windows checked,
+minimum table height corrected after the first compact render clipped its row.
+The native desktop capture helper timed out twice despite a responsive process;
+do not represent the offscreen/widget renders as a successful native mouse test.
+Publication/anonymous shipped-asset verification is pending below.
+
 ## 2026-10-03 - T-0098 public release verified
 
 Source 1d5b65a4b189bcb6ad039e1e183fbede8ed98264. Windows master/release runs

@@ -1266,12 +1266,10 @@ void MainWindow::startP25LiveDecodePipeline()
                             }
 
                             // Silent input-leg DDC when dual-watch is active (no speaker audio).
-                            // Rate-limit to every 4th block so NFM audio stays realtime; DTMF still
-                            // catches keypad bursts which last tens of ms.
+                            // DEC-0168: tone timing needs every chronological IQ block.
+                            // Skipping blocks here loses bursts and resets all input-leg decoders.
                             if (repEnabled && dualActive && decodeTones && !rdsSourceGap) {
-                                ++rx.inputWatchSkipCounter;
-                                const bool runInputWatch = (rx.inputWatchSkipCounter % 4u) == 1u;
-                                if (runInputWatch) {
+                                {
                                     FmMultiplexBlock inMpx;
                                     const bool inGap = rx.inputWatchIqEpoch != rdsStreamEpoch ||
                                         rx.inputWatchNextIq != rdsIqStart;

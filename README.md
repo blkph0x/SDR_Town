@@ -1,5 +1,11 @@
 # SDR Town
 
+0.2.122 adds **Tools > DTMF Analysis**: short-burst decoding, explicit frequency
+inversion/shift/scale, sample-indexed evidence and local diagnostic export.
+Repairs confidence normalization and discontinuous repeater input dual-watch.
+See [DTMF guide](docs/DTMF_ANALYSIS.md) and [release notes](docs/RELEASE_0.2.122.md).
+Fast mode is experimental; this does not recover arbitrary scrambling/encryption.
+
 0.2.121 adds **Tools > CW / Morse Decoder** for live analog reception and audio
 recordings, plus tested HF input/continuity hardening. P25 and FM DSP stay unchanged.
 See [Morse guide](docs/CW_RECEIVE.md), [receive-chain audit](docs/RECEIVE_CHAIN_AUDIT_20261003.md)

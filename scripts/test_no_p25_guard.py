@@ -30,6 +30,20 @@ def main() -> int:
     path="src/MainWindow.cpp"
     before=subprocess.check_output(["git","show","127469d:"+path],cwd=ROOT,text=True,encoding="utf-8")
     after=(ROOT/path).read_text(encoding="utf-8")
+    before_dtmf = MODULE.without_dtmf_menu(after)
+    assert MODULE.dtmf_text_allowed(path, before_dtmf, after)
+    assert not MODULE.dtmf_text_allowed(path, before_dtmf, after+"\nchange")
+    assert not MODULE.dtmf_text_allowed(path, before_dtmf, after.replace("receiver = receivers.front()", "receiver = receivers.back()"))
+    assert not MODULE.dtmf_text_allowed("src/P25LiveDecoder.cpp", before_dtmf, after)
+    assert not MODULE.dtmf_text_allowed(path, after, before_dtmf)
+    orchestration="src/MainWindowP25Orchestration.cpp"
+    old=subprocess.check_output(["git","show","ab21a4f:"+orchestration],cwd=ROOT,text=True,encoding="utf-8")
+    new=(ROOT/orchestration).read_text(encoding="utf-8")
+    assert MODULE.dtmf_text_allowed(orchestration,old,new)
+    assert not MODULE.dtmf_text_allowed(orchestration,old,new+"\nchange")
+    assert not MODULE.dtmf_text_allowed(orchestration,old,new.replace("repEnabled && dualActive", "repEnabled || dualActive"))
+    assert not MODULE.dtmf_text_allowed(orchestration,new,old)
+    after = before_dtmf
     before_cw = after.replace(MODULE.CW_INCLUDES, "", 1).replace(MODULE.CW_MENU, "", 1)
     assert MODULE.cw_window_text_allowed(path, before_cw, after)
     assert not MODULE.cw_window_text_allowed(path, before_cw, after + "\nchange")

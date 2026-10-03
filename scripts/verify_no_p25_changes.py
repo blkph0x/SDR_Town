@@ -66,6 +66,51 @@ WORKSPACE_UI_BLOCK = '''        // DEC-0166: reparent presentation only; keep th
 
 
 CW_INCLUDES = '#include "CwWindow.h"\n#include "CwRfSession.h"\n'
+DTMF_INCLUDE = '#include "DtmfWindow.h"\n'
+DTMF_MENU = '''        // DEC-0168: DTMF observer settings only; no tuning or audio controls.
+        toolsMenu->addAction("DTMF Analysis...", this, [this] {
+            auto* window = findChild<DtmfWindow*>("dtmfWindow");
+            if (!window) window = new DtmfWindow([this](bool input) -> std::shared_ptr<DtmfDecoder> {
+                std::lock_guard lock(receiversMutex);
+                if (receivers.empty()) return {};
+                auto receiver = receivers.front();
+                return {receiver, input ? &receiver->inputWatchDtmf : &receiver->dtmf};
+            }, this);
+            window->show(); window->raise(); window->activateWindow();
+        });
+'''
+DTMF_SKIP_BEFORE = '''                            // Rate-limit to every 4th block so NFM audio stays realtime; DTMF still
+                            // catches keypad bursts which last tens of ms.
+'''
+DTMF_SKIP_AFTER = '''                            // DEC-0168: tone timing needs every chronological IQ block.
+                            // Skipping blocks here loses bursts and resets all input-leg decoders.
+'''
+DTMF_CONDITION_BEFORE = '''                                ++rx.inputWatchSkipCounter;
+                                const bool runInputWatch = (rx.inputWatchSkipCounter % 4u) == 1u;
+                                if (runInputWatch) {
+'''
+
+
+def dtmf_text_allowed(path: str, before: str, after: str) -> bool:
+    if path == "src/MainWindow.cpp":
+        include = '#include "SstvWindow.h"\n'
+        menu = '        QMenu* toolsMenu = menuBar()->addMenu("&Tools");\n'
+        return (before.count(include) == 1 and before.count(menu) == 1
+                and DTMF_INCLUDE not in before and DTMF_MENU not in before
+                and after == before.replace(include, include + DTMF_INCLUDE, 1).replace(menu, menu + DTMF_MENU, 1))
+    if path == "src/MainWindowP25Orchestration.cpp":
+        return (before.count(DTMF_SKIP_BEFORE) == 1 and before.count(DTMF_CONDITION_BEFORE) == 1
+                and after == before.replace(DTMF_SKIP_BEFORE, DTMF_SKIP_AFTER, 1)
+                .replace(DTMF_CONDITION_BEFORE, "                                {\n", 1))
+    return False
+
+
+def without_dtmf_menu(text: str) -> str:
+    if text.count(DTMF_INCLUDE) == 1 and text.count(DTMF_MENU) == 1:
+        return text.replace(DTMF_INCLUDE, "", 1).replace(DTMF_MENU, "", 1)
+    return text
+
+
 CW_MENU = '''        // DEC-0167: read-only Morse observer; no radio/speaker state changes.
         toolsMenu->addAction("CW / Morse Decoder...", this, [this] {
             auto* window = findChild<CwWindow*>("cwWindow");
@@ -95,6 +140,7 @@ def workspace_ui_text_allowed(path: str, before: str, after: str) -> bool:
 
 
 def diagnostics_text_allowed(path: str, before: str, after: str) -> bool:
+    after = without_dtmf_menu(after)
     # Historical exact patch remains testable after independently reviewed CW UI.
     if after.count(CW_INCLUDES) == 1 and after.count(CW_MENU) == 1:
         after = after.replace(CW_INCLUDES, "", 1).replace(CW_MENU, "", 1)
@@ -482,6 +528,10 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
+        if args.paths is None and path in ("src/MainWindow.cpp", "src/MainWindowP25Orchestration.cpp"):
+            if dtmf_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
+                print(f"P25 guard: accepted exact DEC-0168 DTMF observer-only edit: {path}")
+                continue
         if path == "src/MainWindow.cpp" and args.paths is None:
             if cw_window_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
                 print(f"P25 guard: accepted exact DEC-0167 read-only Morse window hook: {path}")

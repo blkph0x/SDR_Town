@@ -1,5 +1,14 @@
 # Code notes (tree map)
 
+T-0099 / DEC-0168: DtmfDecoder owns per-stream analysis and sample-time debounce;
+queued options, bounded events and published history share a mutex. DtmfReport
+is the bounded JSON contract used by CLI and local GUI export. DtmfWindow owns
+only observer settings/snapshots and a cancellable file worker. The MainWindow
+menu hook aliases the existing receiver-owned decoders without controlling RF.
+The exact orchestration edit removes skipped input-watch blocks only inside
+opt-in NFM dual-watch. RepeaterControlHooks preserves each event's original RF
+identity when reset completes a sequence. No changes to Demod/P25/AudioEngine.
+
 T-0098 / DEC-0167: HfDemod owns invalid-input rejection, identity-aware NCO
 continuity and per-owner numeric diagnostics; existing filter/AGC constants
 remain. CwDecoder validates bounded audio, filtered-resamples to4 kHz and owns

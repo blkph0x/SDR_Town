@@ -287,6 +287,9 @@ jobs:
           python scripts/test_rds_cli.py --exe $exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+          python scripts/test_dtmf_cli.py --exe $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Create portable ZIP and checksum
         shell: pwsh
         run: |
@@ -443,5 +446,7 @@ jobs:
             throw "published executable lacks expected RTL bias-T command"
           }
           python scripts/test_rds_cli.py --exe $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/test_dtmf_cli.py --exe $exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Add-Content $env:GITHUB_STEP_SUMMARY "Public download, checksum, provenance and CLI smoke test: PASS"

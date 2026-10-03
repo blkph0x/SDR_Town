@@ -1,5 +1,17 @@
 # Development log
 
+## 2026-10-03 - T-0099 DTMF burst detector and evidence window
+
+DEC-0168. Reproduced and fixed energy normalization and short-transient acceptance;
+added fast-burst and explicit known inversion/scale/shift profiles, sample timing,
+thread-safe bounded evidence and EOF completion. NFM input dual-watch now consumes
+every block; completed sequences retain their original RF identity. New window,
+CLI options, manual JSON export and independent synthetic/GUI/packaged CLI tests.
+Core DTMF 18 cases / 5943 assertions, GUI 2 cases, full CTest 16/16 PASS. P25
+DSP/security/audio unchanged; only exact approved NFM input scheduling and menu
+edits in shared files. Field recordings, unknown scrambling and universal speech
+talk-off are not qualified. Publication is the remaining T-0099 delivery gate.
+
 ## 2026-10-03 - T-0098 published and qualified
 
 0.2.121-experimental published from 1d5b65a by Actions 37089361330; master and
