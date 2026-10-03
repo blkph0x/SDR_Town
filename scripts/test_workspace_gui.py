@@ -18,7 +18,7 @@ def main():
         stem = args.output.resolve() / preset
         image = stem.with_suffix(".png")
         report = stem.with_suffix(".json")
-        command = [str(args.exe.resolve()), "--allow-multiple", "--no-control-server",
+        command = [str(args.exe.resolve()), "--allow-multiple", "--no-control-server", "--no-remote-diagnostics",
                    "--gui-dry-run", "--gui-workspace", preset,
                    "--gui-bandplan", profile,
                    "--gui-window-size", f"{width}x{height}",

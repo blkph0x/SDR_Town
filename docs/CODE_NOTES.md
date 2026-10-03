@@ -1,5 +1,16 @@
 # Code notes (tree map)
 
+T-0104 / DEC-0174: cmake/StageRuntime.cmake declares current target/module and
+configured dependency/tool paths in runtime-inputs-Release.json. stage_runtime.py
+validates all inputs before bounded staging cleanup, copies only declared or
+recognized dependencies, and owns common Qt/MSVC deployment plus runtime hashes.
+build_rtl_module.ps1 and build_sdrplay_module.ps1 build pinned sources without
+overwriting local edits. CI and release.ps1 use the same path; CPack never falls
+back to bin/Release. package_inventory.py requires matching runtime evidence.
+test_stage_runtime.py covers failed-input preservation, destination bounds,
+stale-file isolation, linked paths and configured tools; GUI smoke opts out of
+remote diagnostics. No receive, decoder, control, vocoder or audio-source edits.
+
 T-0106 / DEC-0173: SdrTownControlServer dispatches readyRead and prebuffered
 requests through guarded queued callbacks on its own Qt thread. Application
 handlers can stop/delete clients without destroying a socket inside its native

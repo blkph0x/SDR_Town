@@ -1,24 +1,34 @@
-if(NOT IS_DIRECTORY "${SOURCE}" OR NOT IS_DIRECTORY "${DESTINATION}")
-    message(FATAL_ERROR "StageRuntime requires existing SOURCE and DESTINATION directories")
-endif()
-
-# Never publish local replay audio, logs, captures, or old executables.
-# Skip leftover versioned control DLLs (SdrTownControl-0.2.N-win64.dll) from prior
-# local builds; testers need SdrTownControl.dll only.
-file(GLOB RUNTIME_DLLS "${SOURCE}/*.dll")
-foreach(DLL ${RUNTIME_DLLS})
-    get_filename_component(DLL_NAME "${DLL}" NAME)
-    if(DLL_NAME MATCHES "^SdrTownControl-.+-win64\\.dll$")
-        continue()
-    endif()
-    file(COPY "${DLL}" DESTINATION "${DESTINATION}")
+# DEC-0174: generated paths bind packaging to this configuration's build inputs.
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+set(RUNTIME_CONFIG "${CMAKE_BINARY_DIR}/runtime-inputs-$<CONFIG>.json")
+set(_runtime_files "{}")
+foreach(_pair
+    "SDR_Town.exe|$<TARGET_FILE:SDR_Town>"
+    "SdrTownControl.dll|$<TARGET_FILE:sdrtown_control_client>"
+    "sdr_aero_codec.dll|$<TARGET_FILE:sdr_aero_codec>"
+    "SoapyRTLSDR.dll|${CMAKE_BINARY_DIR}/rtl-driver-build/Release/rtlsdrSupport.dll"
+    "sdrPlaySupport.dll|${CMAKE_BINARY_DIR}/sdrplay-driver-build/Release/sdrPlaySupport.dll")
+    string(REPLACE "|" ";" _parts "${_pair}")
+    list(GET _parts 0 _name)
+    list(GET _parts 1 _path)
+    string(JSON _runtime_files SET "${_runtime_files}" "${_name}" "\"${_path}\"")
 endforeach()
-if(EXISTS "${SOURCE}/qt.conf")
-    file(COPY "${SOURCE}/qt.conf" DESTINATION "${DESTINATION}")
+if(SDR_TOWN_BUILD_RDS_DSP)
+    string(JSON _runtime_files SET "${_runtime_files}" sdrtown_rds_dsp.dll
+        "\"${CMAKE_BINARY_DIR}/rds-dsp-runtime/sdrtown_rds_dsp.dll\"")
 endif()
-foreach(PLUGIN_DIR generic iconengines imageformats networkinformation platforms styles tls translations)
-    if(IS_DIRECTORY "${SOURCE}/${PLUGIN_DIR}")
-        file(COPY "${SOURCE}/${PLUGIN_DIR}" DESTINATION "${DESTINATION}"
-             FILES_MATCHING PATTERN "*.dll" PATTERN "*.qm")
-    endif()
-endforeach()
+file(GENERATE OUTPUT "${RUNTIME_CONFIG}" CONTENT "{
+  \"schema\": 1,
+  \"configuration\": \"$<CONFIG>\",
+  \"buildRoot\": \"${CMAKE_BINARY_DIR}\",
+  \"vcpkgBin\": \"${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin\",
+  \"qtBin\": \"$<TARGET_FILE_DIR:Qt6::Core>\",
+  \"qtVersion\": \"${Qt6_VERSION}\",
+  \"compiler\": \"${CMAKE_CXX_COMPILER}\",
+  \"builtFiles\": ${_runtime_files},
+  \"moduleNotices\": {
+    \"licenses/SoapyRTLSDR-LICENSE.txt\": \"${CMAKE_BINARY_DIR}/rtl-driver-source/LICENSE.txt\",
+    \"licenses/SoapySDRPlay3-LICENSE.txt\": \"${CMAKE_BINARY_DIR}/sdrplay-driver-source/LICENSE.txt\"
+  }
+}
+")

@@ -10,6 +10,8 @@ if (-not (Test-Path $source)) {
     git clone https://github.com/pothosware/SoapySDRPlay3.git $source
     if ($LASTEXITCODE -ne 0) { throw 'SoapySDRPlay3 clone failed' }
 }
+$dirty = git -C $source status --porcelain --untracked-files=normal
+if ($LASTEXITCODE -ne 0 -or $dirty) { throw 'SDRplay source has local changes; not replacing them' }
 git -C $source checkout --detach $revision
 if ($LASTEXITCODE -ne 0) { throw 'Pinned SDRplay checkout failed' }
 if (-not $ApiRoot) {

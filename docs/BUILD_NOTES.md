@@ -1,5 +1,53 @@
 # Build notes
 
+## 2026-10-04 - T-0104 declared runtime staging and local package qualification
+
+Baseline92ab955; Windows/MSVC17.14/Qt6.11.1, existing configured vcpkg inputs.
+Actual bin/Release contains pkgconf-7.dll, pthreadVC2.dll, D3Dcompiler_47.dll,
+dxcompiler.dll, dxil.dll and opengl32sw.dll from previous builds. Declared staging
+does not copy them; original developer files remain untouched. No device opened,
+TX performed or radio/audio source changed. No new binary version.
+
+CMake configure and `cmake --build build --config Release --target deploy -j4`
+PASS. Pinned RTL helper builds successfully and requires bias-T API support.
+Shared `stage_runtime.py qt` PASS: configured Qt6.11.1 and app-local CRT from
+MSVC redist14.44.35112. Qt warns DXC is absent (needed only for D3D12 features);
+this pass does not qualify optional D3D12 rendering. No graphics allowlist
+expansion based on that warning. Runtime evidence contains hashes/versions,
+not host paths, and does not clear source/notice obligations.
+
+`test_stage_runtime.py`:9 PASS, including real symlink rejection on this host,
+Unicode/space paths, pre-clean validation, input-inside-stage rejection including
+dot-dot alias, stale output preservation, configured-tool and failure fixtures.
+`test_package_inventory.py`:16 PASS. First run exposed3 diagnostic-text assertions
+because runtime hash checking now fails earlier; aligned the specific inventory
+error text without weakening checks. `test_verify_release.py`:17 PASS;
+`test_diagnostics_packaging.py`:1 PASS.
+Full `ctest --test-dir build -C Release --output-on-failure`:16/16 PASS,82.28s.
+
+Staged RTL/module isolated-loader positive and missing-libusb negative cases PASS.
+Staged DTMF/RDS smoke PASS both normally and with PATH restricted to Windows and
+System32 and Qt plugin overrides removed. Four staged GUI profiles PASS at
+960x720,1280x900,800x700,1600x900; listening screenshot inspected, no RX active.
+GUI harness now uses --no-remote-diagnostics to avoid sending test telemetry.
+The same four GUI profiles also PASS with PATH restricted to Windows/System32
+and Qt plugin overrides removed. Both pinned module helpers build successfully;
+upstream SDRplay format/conversion warnings remain unchanged and are not a
+claim of full driver qualification. PowerShell syntax, workflow validation,
+frozen-P25 guard and its self-tests PASS. Release helper now explicitly builds
+the remote-diagnostics/antenna test executables before full CTest, matching CI.
+
+Local124-file inventory generation and actual ZIP verification PASS. Direct
+VerifyPackageGate.cmake correctly FAILS only on the same five ISS-0060 source/
+notice blockers, not old unknown runtime DLLs. Local build-info is explicitly
+a test fixture at baseline SHA, not final committed release provenance.
+Clean exact-commit CI is pending publication of this change. No public asset
+may be published until the independent source/notice requirements are resolved.
+
+Previous repair acceptance:92ab955 Windows37120041634/YAML37120041639 PASS;
+downloaded122-file evidence checked. Final record:
+https://github.com/blkph0x/SDR_Town/commit/92ab9557a48ab72fdf5e9ea820d54a374a4ee07c#commitcomment-203265356
+
 ## 2026-10-03 - T-0106 control cancellation baseline and repair evidence
 
 Documentation-only c53b583 exposed an intermittent application failure in

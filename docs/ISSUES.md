@@ -1,6 +1,6 @@
 # Issues (canonical)
 
-## ISS-0065 - Control cancellation deletes active notification objects (2026-10-03, REPAIRED LOCALLY)
+## ISS-0065 - Control cancellation deletes active notification objects (2026-10-03, SOURCE VERIFIED)
 
 CI37117769454 remote diagnostics/control test segfaults in cancellation/throw.
 Unchanged code locally fails iteration31/100; CDB reports modified-after-free
@@ -10,7 +10,8 @@ read notification unwinds. DEC-0173 adds ordering regression and queued weak-
 socket dispatch. Ordering fails before repair; 100 independent control-suite
 processes pass after it. CDB cancellation exits without the freed-heap warning;
 full local16/16 suites and final strengthened59-assertion control suite PASS.
-Clean repair CI remains the source-publication gate. This is not a P25 or
+Repair92ab955 passed Windows37120041634/YAML37120041639 and ten additional
+CDB runs of the final59-assertion suite. This is not a P25 or
 packaging dependency regression. Persistent full-pageheap setup was denied;
 gflags confirms no process setting remains. See BUILD_NOTES for exact limits.
 
@@ -25,7 +26,7 @@ as expected without hardware I/O. Clean CI37116308564 at929cb11 passes the
 same isolated loader, packaging and native/GUI regression gates;
 no public binary while ISS-0060 is open. See PACKAGE_HARDENING_20261003.md.
 
-## ISS-0064 - Local runtime staging imports unexplained old/tooling DLLs (2026-10-03, OPEN)
+## ISS-0064 - Local runtime staging imports unexplained old/tooling DLLs (2026-10-03, LOCALLY REPAIRED)
 
 StageRuntime.cmake blindly copies root DLLs from the long-lived Release tree.
 Actual local staging includes pkgconf-7.dll, pthreadVC2.dll, graphics runtimes
@@ -33,6 +34,13 @@ and translations outside the clean CI inventory. New inventory rejects them.
 Do not delete user build files or declare optional graphics DLLs unused based
 only on static imports. Define a clean input/dependency closure and qualify
 the actual package on an isolated loader/GUI before local release parity.
+DEC-0174 replaces the sweep and raw-tree CPack fallback with declared build
+outputs, configured dependency inputs and one shared Qt/MSVC deployment path.
+Old developer files survive unchanged. Nine staging fixtures,16 inventory tests,
+isolated loader/CLI and staged GUI checks PASS; actual local ZIP inventories124
+files with only the five source/notice blockers. Configured Qt/MSVC hashes and
+versions ship as evidence, not as a complete source kit. Clean exact-commit CI
+remains to be verified; optional D3D12 functionality has not been qualified.
 
 ## ISS-0061 - Diagnostics lifecycle and bounded status transport (2026-10-03, REPAIRED IN SOURCE)
 

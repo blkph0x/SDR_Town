@@ -1,6 +1,6 @@
 # Package hardening and source-kit ledger
 
-T-0104 / DEC-0172; baseline e4d767e, version remains 0.2.122.
+T-0104 / DEC-0172/0174; baseline e4d767e, version remains 0.2.122.
 No RX, demodulator, P25, vocoder, speaker or consent code changes.
 
 ## Confirmed defects and repairs
@@ -49,14 +49,25 @@ complete transitive SBOM, independent provenance proof, code-signing signature
 or legal certification. The existing signature/checksum gates remain. It does
 not establish live hardware reception or fix a demodulation issue.
 
-The local long-lived Release tree also contains `pkgconf-7.dll`, an old
-`pthreadVC2.dll`, graphics runtimes and translations outside the current CI
-inventory. `StageRuntime.cmake` copies all root DLLs. These are now rejected
-instead of silently entering a release. Files were not deleted or relabelled.
-Dumpbin on local RTL/Soapy/QtGui confirms direct imports but does not exclude
-dynamic plugin loads; do not remove graphics support based on that alone.
-Qualify a clean dependency-closure staging path before claiming local portable
-parity with the clean CI runner. Tracked as ISS-0064.
+The initial local test exposed `pkgconf-7.dll`, old `pthreadVC2.dll`, graphics
+runtimes and translations being swept from the long-lived Release tree.
+DEC-0174 replaces that sweep with declared target/module outputs and recognized
+runtimes from the configured dependency directory. Qt is deployed by the
+configured Qt tool directly into staging, identically in local and CI scripts;
+app-local MSVC CRT comes from the configured compiler's installation.
+`licenses/runtime-deployment.json` binds their versions and file hashes to the
+inventory. Pinned module helpers refuse dirty upstream sources. CPack cannot
+fall back to the developer folder; no developer files are deleted or relabelled.
+
+Local actual staging, isolated RTL positive/negative loader, DTMF/RDS and four
+GUI profiles PASS; ZIP verification inventories124 files with only the five
+known publication blockers. Nine staging tests cover stale inputs, missing
+dependencies, safe cleanup, Unicode/spaces, collisions, links, configuration
+bounds and configured Qt deployment/failure. Sixteen inventory tests PASS.
+ISS-0064 is locally repaired; exact-commit clean CI remains the source acceptance
+gate for this change. This is an allowlisted configured runtime set, not proof
+of a minimal dynamic dependency closure. Optional D3D12 rendering remains
+unqualified; the Qt deploy warning is recorded in BUILD_NOTES.
 
 ## Remaining materials before release
 
@@ -82,8 +93,12 @@ qualified review rather than an invented all-clear.
 
 ```text
 python scripts/test_package_inventory.py
+python scripts/test_stage_runtime.py
 python scripts/test_verify_release.py
+./scripts/build_rtl_module.ps1
+./scripts/build_sdrplay_module.ps1
 cmake --build build --config Release --target deploy -j 4
+python scripts/stage_runtime.py qt --config build/runtime-inputs-Release.json --stage build/deploy_staging
 python scripts/test_rtl_runtime_package.py --stage build/deploy_staging
 python scripts/package_inventory.py generate --stage build/deploy_staging
 python scripts/package_inventory.py verify --zip <portable.zip>

@@ -44,6 +44,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/test_package_inventory.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/test_stage_runtime.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/test_remote_diag_server.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/test_diagnostics_packaging.py
@@ -146,17 +148,7 @@ jobs:
 
       - name: Build RTL-SDR driver with bias-T support
         shell: pwsh
-        run: |
-          cmake -S build/rtl-driver-source -B build/rtl-driver-build -G "Visual Studio 17 2022" -A x64 `
-            "-DCMAKE_PREFIX_PATH=$env:GITHUB_WORKSPACE/build/vcpkg_installed/x64-windows"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (-not (Select-String build/rtl-driver-build/CMakeCache.txt -Pattern '^HAS_RTLSDR_SET_BIAS_TEE:INTERNAL=1$')) {
-            throw "RTL-SDR module must compile with bias-T API support"
-          }
-          cmake --build build/rtl-driver-build --config Release --target rtlsdrSupport -j 4
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          New-Item -ItemType Directory -Path build/bin/Release -Force | Out-Null
-          Copy-Item build/rtl-driver-build/Release/rtlsdrSupport.dll build/bin/Release/SoapyRTLSDR.dll
+        run: ./scripts/build_rtl_module.ps1
 
       - name: Build matched SDRplay module
         shell: pwsh
@@ -253,32 +245,12 @@ jobs:
             throw "portable staging is missing required SSTV notices"
           }
 
-          $windeployqt = Join-Path $env:QT_ROOT_DIR "bin/windeployqt.exe"
-          if (-not (Test-Path $windeployqt)) { throw "windeployqt.exe not found" }
-          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
-          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ($LASTEXITCODE -ne 0 -or -not $vs) { throw "MSVC redistributable location unavailable" }
-          $env:VCINSTALLDIR = Join-Path $vs 'VC/'
-          & $windeployqt `
-            --release `
-            --dir $stage `
-            --no-translations `
-            --no-system-d3d-compiler `
-            --no-opengl-sw `
-            $exe
+          python scripts/stage_runtime.py qt --config build/runtime-inputs-Release.json --stage $stage
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           if (-not (Test-Path (Join-Path $stage "Qt6Core.dll"))) {
             throw "portable staging is missing Qt6Core.dll"
           }
-          $redist = Get-ChildItem (Join-Path $vs 'VC/Redist/MSVC') -Directory |
-            Where-Object { $_.Name -match '^\d+\.' } | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
-          if (-not $redist) { throw "MSVC runtime redistributables unavailable" }
-          $crt = Get-ChildItem (Join-Path $redist.FullName 'x64') -Directory -Filter 'Microsoft.VC*.CRT' | Select-Object -First 1
-          if (-not $crt) { throw "x64 MSVC CRT directory unavailable" }
-          Copy-Item (Join-Path $crt.FullName '*.dll') $stage
-          Copy-Item build/rtl-driver-source/LICENSE.txt (Join-Path $stage 'licenses/SoapyRTLSDR-LICENSE.txt')
-          Copy-Item build/sdrplay-driver-source/LICENSE.txt (Join-Path $stage 'licenses/SoapySDRPlay3-LICENSE.txt')
           if (-not (Test-Path (Join-Path $stage 'sdrPlaySupport.dll'))) { throw 'Missing matched SDRplay module' }
           if (Test-Path (Join-Path $stage 'sdrplay_api.dll')) { throw 'Do not bundle proprietary SDRplay API DLL' }
           python scripts/test_inmarsat_bandplans.py --data-dir "$stage/data/inmarsat"

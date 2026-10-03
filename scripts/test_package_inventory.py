@@ -35,6 +35,11 @@ class InventoryTests(unittest.TestCase):
         self.write(inventory.INPUTS, inventory.json_bytes(self.inputs))
         self.write('build-info.json', inventory.json_bytes({
             'sourceCommit': self.sha, 'executableSha256': inventory.sha256(self.stage / 'SDR_Town.exe')}))
+        self.runtime = {'schema': 1, 'qtVersion': '6.7.3', 'windeployqtSha256': 'a' * 64,
+                        'msvcRedistVersion': '14.44.35112',
+                        'runtimeSha256': {n: inventory.sha256(self.stage / n)
+                                          for n in ('Qt6Core.dll', 'vcruntime140.dll')}}
+        self.write(inventory.RUNTIME_INPUTS, inventory.json_bytes(self.runtime))
 
     def write(self, name, data):
         p = self.stage / name
@@ -111,6 +116,20 @@ class InventoryTests(unittest.TestCase):
     def test_runtime_must_match_configured_vcpkg_input(self):
         self.write('rtlsdr.dll', b'old DLL from another build')
         with self.assertRaisesRegex(ValueError, 'differs from installed'):
+            inventory.generate(self.stage)
+
+    def test_runtime_deployment_identity_and_hashes(self):
+        for key, value, match in (('qtVersion', '6.11.1', 'Qt identity mismatch'),
+                                  ('msvcRedistVersion', '', 'Invalid runtime'),
+                                  ('windeployqtSha256', 'unknown', 'Invalid runtime'),
+                                  ('runtimeSha256', {}, 'deployment inventory mismatch')):
+            with self.subTest(key=key):
+                self.write(inventory.RUNTIME_INPUTS, inventory.json_bytes(dict(self.runtime, **{key: value})))
+                with self.assertRaisesRegex(ValueError, match):
+                    inventory.generate(self.stage)
+        self.write(inventory.RUNTIME_INPUTS, inventory.json_bytes(self.runtime))
+        self.write('Qt6Core.dll', b'stale Qt DLL')
+        with self.assertRaisesRegex(ValueError, 'deployment inventory mismatch'):
             inventory.generate(self.stage)
 
     def test_rtl_requires_transitive_usb_runtime(self):

@@ -9,6 +9,9 @@ coverage remains a release blocker (ISS-0060). P25/FM DSP is unchanged.
 T-0104 adds missing RTL USB-runtime staging, isolated package-loader tests and
 [exact-file inventory/publication gates](docs/PACKAGE_HARDENING_20261003.md).
 Dependency source/notice work remains open; CI uploads evidence only while blocked.
+Local and CI packaging now share declared runtime inputs and configured Qt/MSVC
+deployment. Old DLLs in a developer's build folder are neither copied into the
+package nor deleted. Runtime hashes/version evidence is included in the inventory.
 
 0.2.122 adds **Tools > DTMF Analysis**: short-burst decoding, explicit frequency
 inversion/shift/scale, sample-indexed evidence and local diagnostic export.
@@ -722,13 +725,22 @@ cmake --build build --config Release -j
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-Deploy Qt:
+Create a clean runnable stage (full-feature Windows build):
 
 ```powershell
-cd build\bin\Release
-C:\Qt\6.11.1\msvc2022_64\bin\windeployqt.exe SDR_Town.exe --no-compiler-runtime --no-system-d3d-compiler
-.\SDR_Town.exe
+./scripts/build_rtl_module.ps1
+./scripts/build_sdrplay_module.ps1
+cmake --build build --config Release --target deploy -j 4
+python scripts/stage_runtime.py qt --config build/runtime-inputs-Release.json --stage build/deploy_staging
+./build/deploy_staging/SDR_Town.exe
 ```
+
+The module helpers use pinned upstream sources; SDRplay's vendor API/service
+must still be installed by the operator. Staging uses the Qt installation and
+MSVC compiler selected by CMake, not whatever DLLs remain in `bin/Release`.
+Re-running `deploy` replaces only `build/deploy_staging`; run the Qt step again
+afterwards. A runnable stage is not a publication approval: see
+[release gates](docs/RELEASING.md) for the outstanding source/notice kit.
 
 ---
 

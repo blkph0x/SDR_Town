@@ -76,8 +76,11 @@ the pinned licensed subset and short reference fixtures are committed.
 
 ## Gates
 
-The helper checks native exit codes, builds deploy and both test targets, runs
-CTest, deploys Qt, rebuilds staging, creates NSIS/ZIP assets, signs and verifies.
+The helper checks native exit codes, builds the pinned SDR modules, deploy and
+all native test targets, runs CTest, then deploys configured Qt/MSVC runtimes
+directly into the clean stage. It creates NSIS/ZIP assets, signs and verifies
+only after the publication gate passes. It does not deploy Qt into the developer
+output folder or recopy that folder into staging.
 `python scripts/verify_release.py --version X.Y.Z --installer <setup.exe>` checks
 installer size/hash/URL, all three asset checksums, detached Ed25519 signature
 against the embedded public key, required ZIP runtimes, staging equality and
@@ -88,6 +91,35 @@ Before publication also run RDS/tone/registry CLI tests and GUI layout smoke
 tests. Hardware acceptance is separate: live RDS station identity/parity and
 GUI shutdown under CDB are documented in NATIVE_RUNTIME_QA.md. Do not label
 stub-device or synthetic tests as successful RF reception.
+
+### Common runtime staging
+
+`cmake/StageRuntime.cmake` generates `build/runtime-inputs-Release.json` from
+configured targets and dependency paths. Both Actions and the local helper use
+`scripts/stage_runtime.py`. For a local runtime-only qualification after CMake
+configuration and compilation:
+
+```powershell
+./scripts/build_rtl_module.ps1
+./scripts/build_sdrplay_module.ps1
+cmake --build build --config Release --target deploy -j 4
+python scripts/stage_runtime.py qt --config build/runtime-inputs-Release.json --stage build/deploy_staging
+python scripts/test_rtl_runtime_package.py --stage build/deploy_staging
+python scripts/test_workspace_gui.py --exe build/deploy_staging/SDR_Town.exe --output build/package-workspace
+```
+
+Missing inputs are rejected before the old stage is removed. Linked or ambiguous
+paths are rejected. Only the exact configured `build/deploy_staging` directory
+may be recreated; developer binaries/captures are left alone. Re-running deploy
+requires re-running the Qt step, provenance creation and inventory generation.
+There is no raw `bin/Release` CPack fallback.
+
+`licenses/runtime-deployment.json` records configured Qt identity, deployment-tool
+hash, MSVC redistributable version and exact Qt/MSVC file hashes, without host
+paths. App-local CRT DLLs are included; a separate `vc_redist` installer is not.
+This evidence does not replace the source/build/replacement instructions or
+redistribution terms still required by ISS-0060. Optional D3D12/graphics backends
+are not qualified by the QWidget smoke tests.
 
 ## Signed installer channel
 

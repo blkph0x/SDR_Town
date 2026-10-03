@@ -1,5 +1,19 @@
 # Development log
 
+## 2026-10-04 - T-0104 stop importing stale developer runtimes
+
+Continued packaging qualification without touching receive/P25/audio behavior.
+Replaced Release-folder DLL/plugin sweeps and CPack fallback with declared
+build/dependency inputs and common configured Qt/MSVC deployment. Pinned module
+helpers protect local source edits. Runtime hashes/versions strengthen existing
+inventory evidence; GUI smoke explicitly disables remote diagnostic uploads.
+Local build,16/16 native suites,9 staging/16 inventory/17 release tests, isolated
+loader/CLI and staged GUI checks PASS. Actual124-file ZIP verifies, with the same
+five source/notice blockers. Developer stale DLLs and captures are not removed.
+README/release instructions and trackers describe the common path and limits.
+Source CI must finish after push; no binary or full source-kit claim. T-0104
+remains in progress for the missing materials/review; ISS-0064 locally repaired.
+
 ## 2026-10-03 - T-0106 repair reproduced control cancellation crash
 
 Final documentation-commit CI exposed an intermittent existing control-server

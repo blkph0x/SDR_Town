@@ -1,5 +1,24 @@
 # Decisions
 
+## DEC-0174 - Build-input runtime staging, never a developer-folder sweep (2026-10-04)
+
+ISS-0064 is reproduced by StageRuntime.cmake's root DLL/plugin globs and the
+CPack fallback to bin/Release. Replace both with declared current build outputs,
+configured vcpkg inputs, separately built pinned Soapy modules, and the configured
+Qt installation's deployment tool. Use the same Qt/MSVC deployment helper in
+CI and local release. Preserve existing deployment flags, discover additional
+Qt runtime outputs from that tool, and retain the strict inventory checks.
+Do not infer optional graphics DLLs are unnecessary from static imports.
+
+Tests must seed unrelated/obsolete files, validate that they are excluded but
+unchanged, reject missing/colliding/linked inputs before writes, and reject a
+staging destination outside the exact build/deploy_staging directory before
+cleanup. Direct CPack must never fall back to the raw build folder. Keep source
+kit/notice publication blockers closed until their independent evidence exists.
+No radio, P25, decoder or audio edits. Qt tool and target paths come from CMake,
+not a hard-coded local Qt version. Primary deployment behavior:
+https://doc.qt.io/qt-6/windows-deployment.html .
+
 ## DEC-0173 - Dispatch control commands outside native socket notifications (2026-10-03)
 
 CI37117769454 failed with access violation in the cancellation/throw test on

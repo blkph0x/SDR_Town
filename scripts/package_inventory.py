@@ -13,7 +13,8 @@ import zipfile
 
 INVENTORY = 'package-inventory.json'
 INPUTS = 'licenses/build-inputs.json'
-POLICY = 'T-0104-notices-1'
+RUNTIME_INPUTS = 'licenses/runtime-deployment.json'
+POLICY = 'T-0104-notices-2'
 MAX_FILES = 10000
 MAX_BYTES = 512 * 1024 * 1024
 MAX_JSON = 8 * 1024 * 1024
@@ -63,7 +64,7 @@ STATIC_NOTICES = (
     'licenses/aero/NaturalEarth.txt',
 )
 KNOWN_NOTICES = {
-    *STATIC_NOTICES, INPUTS,
+    *STATIC_NOTICES, INPUTS, RUNTIME_INPUTS,
     'licenses/SoapyRTLSDR-LICENSE.txt', 'licenses/SoapySDRPlay3-LICENSE.txt',
     'licenses/rtlsdr-COPYRIGHT.txt', 'licenses/liquid-dsp-LICENSE.txt',
     'licenses/redsea-block/LICENSE', 'licenses/redsea-block/UPSTREAM.md',
@@ -189,6 +190,8 @@ def required_notices(names):
     }
     for name in names:
         required.update(by_component.get(component(name), ()))
+    if any(component(n) in ('qt', 'msvc-runtime') for n in names):
+        required.add(RUNTIME_INPUTS)
     return required
 
 
@@ -277,6 +280,15 @@ def make_document(entries, read):
         if name.lower() in VCPKG_DLLS:
             require(inputs.get('vcpkgBinarySha256', {}).get(name.lower()) == entry['sha256'],
                     f'Runtime differs from installed build dependency: {name}')
+    deployed = {n: e['sha256'] for n, e in entries.items() if e['component'] in ('qt', 'msvc-runtime')}
+    if deployed:
+        runtime = parse_json(read(RUNTIME_INPUTS))
+        require(runtime.get('schema') == 1 and runtime.get('qtVersion') == inputs['qtVersion'],
+                'Runtime deployment Qt identity mismatch')
+        require(re.fullmatch(r'[0-9a-f]{64}', runtime.get('windeployqtSha256', '')) is not None and
+                re.fullmatch(r'\d+\.\d+\.\d+', runtime.get('msvcRedistVersion', '')) is not None,
+                'Invalid runtime deployment identity')
+        require(runtime.get('runtimeSha256') == deployed, 'Runtime deployment inventory mismatch: hashes')
     return {'schema': 1, 'policy': POLICY, 'sourceCommit': inputs['sourceCommit'],
             'scope': 'Exact files and known build inputs; NOT full transitive license clearance',
             'releaseBlockers': blockers(entries), 'files': entries}
