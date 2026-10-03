@@ -1,10 +1,13 @@
 # Task list (canonical)
 
-T-0099 | in progress | Bounded fast-burst and transformed DTMF analysis |
+T-0099 | done (bounded scope; field qualification open) | Bounded fast-burst and transformed DTMF analysis |
 DEC-0168. Reproduce confidence normalization and short-burst/EOF defects;
 qualify polarity-independent detection, explicit fast and frequency-inverted
 profiles, thread-safe events and chronological dual-watch input. Add operator
 controls, negative fixtures and sample-time diagnostics. Preserve P25/audio.
+Published 0.2.122-experimental from 60258a7. Source/release Actions and YAML
+checks passed. Anonymous public ZIP/hash/provenance and shipped DTMF/RDS smoke
+verified. No arbitrary scrambling recovery or field talk-off acceptance claim.
 
 T-0098 | done (bounded HF/CW scope; hardware acceptance open) | Receive-chain audit, HF integrity and Morse window |
 DEC-0167. Validate the supplied audit against badcba4, record confirmed and

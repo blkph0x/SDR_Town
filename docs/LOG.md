@@ -1,5 +1,14 @@
 # Development log
 
+## 2026-10-03 - T-0099 published and downloaded asset qualified
+
+0.2.122-experimental published from 60258a7 by Actions 37097604489. Source
+Windows/YAML and release Windows/YAML all PASS. Anonymous ZIP checksum,
+source/version/workflow, EXE/SDRplay hashes and consent defaults verified;
+downloaded DTMF and RDS CLI suites PASS. BUILD_NOTES contains exact evidence.
+Known transforms and synthetic short bursts are qualified; unknown scrambling,
+speech talk-off and physical RF acceptance are not implied by this release.
+
 ## 2026-10-03 - T-0099 DTMF burst detector and evidence window
 
 DEC-0168. Reproduced and fixed energy normalization and short-transient acceptance;

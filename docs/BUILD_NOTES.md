@@ -1,5 +1,21 @@
 # Build notes
 
+## 2026-10-03 - T-0099 public release verified
+
+Source 60258a7f63f16e48247f1b106e73f6ffc4dbf0d6. Windows master/release runs
+37097604524 / 37097604489 PASS; YAML 37097604525 / 37097604488 PASS.
+Public non-draft prerelease:
+https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.122-experimental
+Anonymous ZIP SHA256:
+4f83076f02398865eadde5babc05f96a533e1d27cfb24709898f415c67161549
+Verified source/version/workflow provenance, EXE/SDRplay hashes, Morse license
+and authenticated HTTPS collector configuration with opt-in OFF (no token
+printed). Downloaded EXE passed the DTMF short/repeated/polarity/inverted/
+shifted/EOF/Unicode/invalid-option suite and RDS reference/parity/negative tests.
+Actions independently verified the public asset and these same CLI gates.
+Local final build and 16/16 CTest passed; field RF and speech talk-off remain
+unqualified. No capture or decoded tone sequence was uploaded by this task.
+
 ## 2026-10-03 - T-0099 reproduction and development gates
 
 Baseline ab21a4f; Windows/MSVC 17.14, existing Qt/vcpkg build. New executable
@@ -28,7 +44,7 @@ GUI actual-file tests pass; rendered 820x520 and compact 540x480 windows checked
 minimum table height corrected after the first compact render clipped its row.
 The native desktop capture helper timed out twice despite a responsive process;
 do not represent the offscreen/widget renders as a successful native mouse test.
-Publication/anonymous shipped-asset verification is pending below.
+Publication/anonymous shipped-asset verification completed in the entry above.
 
 ## 2026-10-03 - T-0098 public release verified
 
