@@ -121,6 +121,31 @@ This evidence does not replace the source/build/replacement instructions or
 redistribution terms still required by ISS-0060. Optional D3D12/graphics backends
 are not qualified by the QWidget smoke tests.
 
+## Exact vcpkg source materials
+
+The deploy target runs `scripts/vcpkg_sources.py` using the vcpkg root derived
+from the configured toolchain. It requires the matching `ports` recipes and
+`downloads` archives; a directory with only installed binaries is insufficient.
+If relocating a local toolchain, reconfigure explicitly rather than changing
+unrelated applications' global environment. Custom download caches can be passed
+to the exporter with `--downloads`; normal CI uses the configured root's cache.
+CI disables vcpkg binary-cache retrieval during dependency configuration to
+retain the exact source downloads. It does not fetch newer sources as a fallback.
+
+`licenses/vcpkg/source-materials.zip` contains exact upstream archive bytes,
+port recipes/patches, notices and SPDX receipts. Recipe SHA256, upstream SHA512
+and installed DLL SHA256 must match those receipts. Export is bounded/atomic;
+verification checks nested ZIP paths, membership and hashes without extracting
+or executing upstream code. Unsupported/missing materials fail packaging.
+The inventory exposes sourceMaterials counts; eleven source-kit negative tests
+and nested-tamper/DLL-receipt inventory tests run in CI. Full vcpkg tooling,
+independent rebuild, Qt and other component requirements remain open in ISS-0060.
+
+GUI package QA runs with dry-run and diagnostics disabled. Saved satellite
+auto-capture is suppressed for that process without rewriting preferences;
+the smoke gate rejects transient RX startup as well as a streaming end state.
+Device enumeration and audio prewarm still occur: this is not a hardware sandbox.
+
 ## Signed installer channel
 
 The legacy helper's direct upload mode is not a substitute for the mandatory

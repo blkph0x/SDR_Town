@@ -1,5 +1,46 @@
 # Decisions
 
+## DEC-0176 - Suppress satellite auto-capture during GUI dry-run (2026-10-04)
+
+T-0107 / ISS-0066 interrupts packaging acceptance. The unchanged Release EXE
+opened RTL RX during test_workspace_gui.py despite parsed dryRun=true. Local
+satcom_20261004.log records a 145800000 Hz pass arm and recording, while the
+saved satellite autoCapture option is true. SatcomHubWidget's independent timer
+does not consult GUI startup configuration. Do not clear the user's settings
+or weaken the no-RX test. Publish the parsed dry-run flag as a process-local
+Qt application property before constructing any widgets. The satellite hub
+must neither start its automatic timer nor process automatic ticks in that
+session; log the suppression once. Normal satellite operation is unchanged.
+Strengthen actual packaged-GUI tests to require suppression evidence and reject
+even transient RX starts. This is not a global hardware sandbox: enumeration,
+audio prewarm and explicit interactive actions remain outside this repair.
+No frozen P25/DSP files need to change.
+
+## DEC-0175 - Ship hash-verified vcpkg source materials (2026-10-04)
+
+T-0104 / ISS-0060. Installed SPDX receipts describe exact port-file SHA256 and
+upstream archive SHA512. All48 recipe files for ten runtime/header dependencies
+match C:/vcpkg/ports on this host; the ten upstream archives exist in its cache.
+Collect those exact bytes, patches and receipts in a bounded deterministic ZIP.
+Verify the bundle independently against the packaged receipts, including the
+runtime DLL checksums in those receipts. A similarly named archive or current
+upstream branch is not equivalent. Do not extract or execute downloaded code.
+
+Exporter uses explicit local inputs, no network or recursive source-tree sweep.
+Reject links, unsafe/duplicate paths, missing/changed recipes, resources or DLLs
+before atomically replacing a prior bundle. Package verification checks its
+internal membership and hashes as well as the enclosing ZIP inventory. Capture
+only named source materials, never local captures, tokens or arbitrary files.
+CI must build dependencies without the binary cache so its source downloads
+exist. Missing materials fail packaging; there is no optional bypass.
+
+This collects sources/patches, not the complete compiler/tooling/Qt kit or proof
+of an independent rebuild. Keep the remaining publication requirements explicit;
+do not turn source receipt matching into legal clearance. No radio/audio changes.
+Microsoft documents SPDX resource origins as heuristic; unsupported/missing
+resource checksums must fail, never be invented:
+https://learn.microsoft.com/en-us/vcpkg/reference/software-bill-of-materials .
+
 ## DEC-0174 - Build-input runtime staging, never a developer-folder sweep (2026-10-04)
 
 ISS-0064 is reproduced by StageRuntime.cmake's root DLL/plugin globs and the

@@ -8,6 +8,9 @@
 #include "AircraftMapWidget.h"
 
 #include <QDateTime>
+#include <QCoreApplication>
+#include <QVariant>
+#include <spdlog/spdlog.h>
 #include <QHideEvent>
 #include <QShowEvent>
 #include <QTabWidget>
@@ -44,7 +47,10 @@ SatcomHubWidget::SatcomHubWidget(QWidget* parent)
     autoCaptureTimer_ = new QTimer(this);
     autoCaptureTimer_->setInterval(1000);
     connect(autoCaptureTimer_, &QTimer::timeout, this, &SatcomHubWidget::autoCaptureTick);
-    autoCaptureTimer_->start();
+    // DEC-0176: a saved satellite pass must not open RF during scripted dry-run.
+    automaticCaptureAllowed_ = !QCoreApplication::instance()->property("sdrtown.guiDryRun").toBool();
+    if (automaticCaptureAllowed_) autoCaptureTimer_->start();
+    else spdlog::info("Satellite automatic capture suppressed for GUI dry-run.");
 }
 
 void SatcomHubWidget::ensureTabs() {
@@ -104,6 +110,7 @@ void SatcomHubWidget::stopAutoCapture(bool keepHandledKey) {
 }
 
 void SatcomHubWidget::autoCaptureTick() {
+    if (!automaticCaptureAllowed_) return;
     auto& engine = SatcomScannerEngine::instance();
     if (!engine.autoCaptureEnabled()) {
         if (autoCaptureOwned_) stopAutoCapture(false);

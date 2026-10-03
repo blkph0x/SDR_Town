@@ -95,6 +95,8 @@ int main(int argc, char *argv[])
         app.setApplicationName("SDR Town");
         app.setOrganizationName("SDR_Town");
         app.setApplicationVersion(SDR_TOWN_VERSION);
+        // DEC-0176: background widget automation must honor the parsed dry-run too.
+        app.setProperty("sdrtown.guiDryRun", guiConfig.dryRun);
         remoteDiagnosticsConfigureFromProcess(argc, argv, &app, "gui");
 
         setupLogging();

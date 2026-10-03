@@ -46,6 +46,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/test_stage_runtime.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/test_vcpkg_sources.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/test_remote_diag_server.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/test_diagnostics_packaging.py
@@ -108,6 +110,9 @@ jobs:
 
       - name: Configure CMake (VS 2022 + vcpkg manifest)
         shell: pwsh
+        env:
+          # DEC-0175: retain exact source downloads, not only cached binaries.
+          VCPKG_BINARY_SOURCES: clear
         run: |
           # DEC-0130: publish the RDS backend too, not a reduced CI-only build.
           $candidates = @('C:\mingw64\bin\gcc.exe', 'C:\msys64\mingw64\bin\gcc.exe')

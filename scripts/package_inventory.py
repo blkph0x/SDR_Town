@@ -14,7 +14,8 @@ import zipfile
 INVENTORY = 'package-inventory.json'
 INPUTS = 'licenses/build-inputs.json'
 RUNTIME_INPUTS = 'licenses/runtime-deployment.json'
-POLICY = 'T-0104-notices-2'
+SOURCE_KIT = 'licenses/vcpkg/source-materials.zip'
+POLICY = 'T-0104-notices-3'
 MAX_FILES = 10000
 MAX_BYTES = 512 * 1024 * 1024
 MAX_JSON = 8 * 1024 * 1024
@@ -64,7 +65,7 @@ STATIC_NOTICES = (
     'licenses/aero/NaturalEarth.txt',
 )
 KNOWN_NOTICES = {
-    *STATIC_NOTICES, INPUTS, RUNTIME_INPUTS,
+    *STATIC_NOTICES, INPUTS, RUNTIME_INPUTS, SOURCE_KIT,
     'licenses/SoapyRTLSDR-LICENSE.txt', 'licenses/SoapySDRPlay3-LICENSE.txt',
     'licenses/rtlsdr-COPYRIGHT.txt', 'licenses/liquid-dsp-LICENSE.txt',
     'licenses/redsea-block/LICENSE', 'licenses/redsea-block/UPSTREAM.md',
@@ -178,7 +179,7 @@ def component(name):
 
 
 def required_notices(names):
-    required = {*ROOT_NOTICES, INPUTS, *STATIC_NOTICES}
+    required = {*ROOT_NOTICES, INPUTS, SOURCE_KIT, *STATIC_NOTICES}
     for port in PORTS:
         required.update((f'licenses/vcpkg/{port}/copyright', f'licenses/vcpkg/{port}/vcpkg.spdx.json'))
     by_component = {
@@ -202,7 +203,7 @@ def blockers(names):
     if 'qt' in components:
         result.append('ISS-0060: exact Qt source/build/replacement kit and third-party notices missing')
     if 'rtlsdr' in components:
-        result.append('ISS-0060: exact RTL-SDR/libusb/pthreads source and patched build recipes missing')
+        result.append('ISS-0060: RTL-SDR/libusb/pthreads full tooling/rebuild and distribution review incomplete')
     if 'rds-mingw' in components:
         result.append('ISS-0060: static MinGW runtime version, notices and exception evidence incomplete')
     if 'msvc-runtime' in components:
@@ -217,6 +218,8 @@ def git(repo, *args):
 
 def port_info(data, name):
     doc = parse_json(data)
+    require(isinstance(doc, dict) and isinstance(doc.get('packages'), list) and
+            all(isinstance(p, dict) for p in doc['packages']), 'Invalid SPDX package schema')
     matches = [p for p in doc.get('packages', []) if p.get('SPDXID') == 'SPDXRef-port' and p.get('name') == name]
     require(len(matches) == 1 and matches[0].get('versionInfo'), f'Invalid SPDX identity: {name}')
     p = matches[0]
@@ -260,6 +263,9 @@ def stage_notices(repo, stage, vcpkg, qt_version):
 
 
 def make_document(entries, read):
+    # Import at verification time: the source exporter reuses the bounded JSON
+    # and package path rules above; ordinary runtime staging does not need it.
+    from vcpkg_sources import MAX_KIT, checksum, verify_kit
     for name in required_notices(entries):
         require(name in entries and entries[name]['size'] > 0, f'Missing/empty required notice: {name}')
     require('SDR_Town.exe' in entries and 'build-info.json' in entries, 'Missing application/provenance')
@@ -273,13 +279,22 @@ def make_document(entries, read):
     require(info.get('sourceCommit') == inputs['sourceCommit'], 'Build-input source commit mismatch')
     require(info.get('executableSha256') == entries['SDR_Town.exe']['sha256'], 'Executable provenance mismatch')
     require(re.fullmatch(r'\d+\.\d+\.\d+', inputs.get('qtVersion', '')) is not None, 'Invalid Qt input version')
+    receipts = {}
     for port in PORTS:
-        actual = port_info(read(f'licenses/vcpkg/{port}/vcpkg.spdx.json'), port)
+        receipts[port] = (read(f'licenses/vcpkg/{port}/vcpkg.spdx.json'),
+                          read(f'licenses/vcpkg/{port}/copyright'))
+        actual = port_info(receipts[port][0], port)
         require(inputs.get('vcpkg', {}).get(port) == actual, f'Dependency metadata mismatch: {port}')
     for name, entry in entries.items():
         if name.lower() in VCPKG_DLLS:
             require(inputs.get('vcpkgBinarySha256', {}).get(name.lower()) == entry['sha256'],
                     f'Runtime differs from installed build dependency: {name}')
+            doc = parse_json(receipts[VCPKG_DLLS[name.lower()]][0])
+            binary = [f for f in doc.get('files', [])
+                      if f.get('SPDXID', '').startswith('SPDXRef-binary-file-') and
+                      f.get('fileName', '').lower() == './bin/' + name.lower()]
+            require(len(binary) == 1 and checksum(binary[0], 'sha256') == entry['sha256'],
+                    f'Runtime differs from source receipt: {name}')
     deployed = {n: e['sha256'] for n, e in entries.items() if e['component'] in ('qt', 'msvc-runtime')}
     if deployed:
         runtime = parse_json(read(RUNTIME_INPUTS))
@@ -289,9 +304,10 @@ def make_document(entries, read):
                 re.fullmatch(r'\d+\.\d+\.\d+', runtime.get('msvcRedistVersion', '')) is not None,
                 'Invalid runtime deployment identity')
         require(runtime.get('runtimeSha256') == deployed, 'Runtime deployment inventory mismatch: hashes')
+    sources = verify_kit(read(SOURCE_KIT, MAX_KIT), receipts, inputs['sourceCommit'])
     return {'schema': 1, 'policy': POLICY, 'sourceCommit': inputs['sourceCommit'],
             'scope': 'Exact files and known build inputs; NOT full transitive license clearance',
-            'releaseBlockers': blockers(entries), 'files': entries}
+            'releaseBlockers': blockers(entries), 'sourceMaterials': sources, 'files': entries}
 
 
 def generate(stage):
@@ -299,8 +315,8 @@ def generate(stage):
     files.pop(INVENTORY, None)
     entries = {n: {'sha256': sha256(p), 'size': p.stat().st_size, 'component': component(n)}
                for n, p in sorted(files.items())}
-    def bounded_read(name):
-        require(files[name].stat().st_size <= MAX_JSON, 'Metadata size limit exceeded')
+    def bounded_read(name, maximum=MAX_JSON):
+        require(files[name].stat().st_size <= maximum, 'Metadata size limit exceeded')
         return files[name].read_bytes()
 
     doc = make_document(entries, bounded_read)
@@ -346,8 +362,8 @@ def verify_zip(path, require_publishable=False):
                     h.update(block)
             entries[name] = {'sha256': h.hexdigest(), 'size': info.file_size, 'component': component(name)}
 
-        def bounded_read(name):
-            require(files[name].file_size <= MAX_JSON, 'Metadata size limit exceeded')
+        def bounded_read(name, maximum=MAX_JSON):
+            require(files[name].file_size <= maximum, 'Metadata size limit exceeded')
             return archive.read(name)
 
         actual = make_document(entries, bounded_read)

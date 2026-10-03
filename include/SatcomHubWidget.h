@@ -46,6 +46,7 @@ private:
 
     QTabWidget* tabs_ = nullptr;
     QTimer* autoCaptureTimer_ = nullptr;
+    bool automaticCaptureAllowed_ = true;
     SatcomScannerWidget* satcom_ = nullptr;
     InmarsatWidget* inmarsat_ = nullptr;
     AircraftMapWidget* aircraft_ = nullptr;

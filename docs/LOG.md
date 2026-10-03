@@ -1,5 +1,19 @@
 # Development log
 
+## 2026-10-04 - T-0104 verified source materials; T-0107 dry-run repair
+
+Added deterministic, receipt-verified vcpkg source/patch/archive export and
+nested package validation, including installed DLL-to-source receipt hashes.
+Local ten-archive/48-recipe kit passes; no source execution or network fallback.
+Corrected this project's obsolete local toolchain path without changing global
+settings. Local package still has five independent publication requirements.
+Actual GUI QA exposed saved satellite auto-capture starting real RX during
+dry-run. Recorded evidence/DEC-0176 and isolated that automatic timer without
+changing normal receiver paths or user preferences. Four actual GUI profiles
+now pass with no RX start; full16/16 suites pass. No P25/DSP edits. Tests and
+README/release/engineering trackers updated together. Source CI remains required
+after push; no public binary until ISS-0060's complete materials/rebuild gate.
+
 ## 2026-10-04 - T-0104 stop importing stale developer runtimes
 
 Continued packaging qualification without touching receive/P25/audio behavior.

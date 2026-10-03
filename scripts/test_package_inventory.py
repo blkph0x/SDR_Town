@@ -8,6 +8,8 @@ from unittest.mock import patch
 import zipfile
 
 import package_inventory as inventory
+import vcpkg_sources as sources
+from test_vcpkg_sources import fixture
 
 
 class InventoryTests(unittest.TestCase):
@@ -15,20 +17,16 @@ class InventoryTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.stage = self.root / 'stage'
-        self.stage.mkdir()
+        self.stage = self.root / 'build/deploy_staging'
+        self.stage.mkdir(parents=True)
         self.archive = self.root / 'package.zip'
         self.sha = '1' * 40
         self.payloads = ('SDR_Town.exe', 'rtlsdr.dll', 'libusb-1.0.dll', 'Qt6Core.dll', 'sdrtown_rds_dsp.dll',
                          'sdrtown_sstv.exe', 'vcruntime140.dll', 'SoapyRTLSDR.dll', 'sdrPlaySupport.dll')
         for name in (*self.payloads, *inventory.required_notices(self.payloads)):
             self.write(name, b'fixture')
-        ports = {}
-        for port in inventory.PORTS:
-            data = {'packages': [{'SPDXID': 'SPDXRef-port', 'name': port,
-                                 'versionInfo': '1.2.3', 'licenseConcluded': 'NOASSERTION'}]}
-            self.write(f'licenses/vcpkg/{port}/vcpkg.spdx.json', inventory.json_bytes(data))
-            ports[port] = inventory.port_info(inventory.json_bytes(data), port)
+        self.source_doc, _, receipts, _ = fixture(self.root, {n: b'fixture' for n in self.payloads})
+        ports = {p: inventory.port_info(receipts[p][0], p) for p in inventory.PORTS}
         self.inputs = {'schema': 1, 'sourceCommit': self.sha, 'qtVersion': '6.7.3', 'vcpkg': ports,
                        'vcpkgBinarySha256': {n: inventory.sha256(self.stage / n)
                                             for n in ('rtlsdr.dll', 'libusb-1.0.dll')}}
@@ -40,6 +38,8 @@ class InventoryTests(unittest.TestCase):
                         'runtimeSha256': {n: inventory.sha256(self.stage / n)
                                           for n in ('Qt6Core.dll', 'vcruntime140.dll')}}
         self.write(inventory.RUNTIME_INPUTS, inventory.json_bytes(self.runtime))
+        with patch('builtins.print'):
+            sources.export_kit(self.source_doc, self.stage)
 
     def write(self, name, data):
         p = self.stage / name
@@ -117,6 +117,26 @@ class InventoryTests(unittest.TestCase):
         self.write('rtlsdr.dll', b'old DLL from another build')
         with self.assertRaisesRegex(ValueError, 'differs from installed'):
             inventory.generate(self.stage)
+
+    def test_matching_local_hash_cannot_disguise_wrong_source_receipt(self):
+        self.write('rtlsdr.dll', b'wrong binary but locally rehashed')
+        self.inputs['vcpkgBinarySha256']['rtlsdr.dll'] = inventory.sha256(self.stage / 'rtlsdr.dll')
+        self.write(inventory.INPUTS, inventory.json_bytes(self.inputs))
+        with self.assertRaisesRegex(ValueError, 'differs from source receipt'):
+            inventory.generate(self.stage)
+
+    def test_source_kit_is_checked_inside_outer_zip(self):
+        inventory.generate(self.stage)
+        kit = self.stage / sources.KIT
+        with zipfile.ZipFile(kit) as old:
+            contents = {n: old.read(n) for n in old.namelist()}
+        contents['ports/fmt/portfile.cmake'] += b'tampered'
+        with zipfile.ZipFile(kit, 'w') as modified:
+            for name, data in contents.items():
+                modified.writestr(name, data)
+        self.pack()
+        with self.assertRaisesRegex(ValueError, 'Source checksum mismatch'):
+            inventory.verify_zip(self.archive)
 
     def test_runtime_deployment_identity_and_hashes(self):
         for key, value, match in (('qtVersion', '6.11.1', 'Qt identity mismatch'),

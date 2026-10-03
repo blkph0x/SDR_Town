@@ -1,5 +1,21 @@
 # Code notes (tree map)
 
+T-0104 / DEC-0175: vcpkg_sources.py collects only installed-receipt-named port
+files and SHA512-matching local archives; deterministic bounded ZIP, atomic
+replacement, no network/extraction/execution. package_inventory.py independently
+validates nested membership/hashes and installed binary receipts. Runtime CMake
+config carries the explicit vcpkg root. CI disables dependency binary-cache
+reuse so exact sources are available. Tests cover tamper, missing/unsafe/linked
+inputs, failed replacement and binary/receipt mismatch. This is not full rebuild
+or transitive-license clearance.
+
+T-0107 / DEC-0176: main.cpp publishes parsed dryRun as the process-local
+sdrtown.guiDryRun Qt property before constructing widgets. SatcomHubWidget
+snapshots it, suppresses automatic timer startup/ticks and logs once. Saved
+auto-capture settings and normal operation are unchanged. Actual GUI harness
+tests both flag spellings, suppression evidence and absence of transient RX.
+No MainWindow/P25/DeviceManager/DSP source or guard exception changed.
+
 T-0104 / DEC-0174: cmake/StageRuntime.cmake declares current target/module and
 configured dependency/tool paths in runtime-inputs-Release.json. stage_runtime.py
 validates all inputs before bounded staging cleanup, copies only declared or

@@ -52,6 +52,7 @@ if ($cmakeText -notmatch "project\(SDR_Town VERSION\s+$escapedVersion\s+LANGUAGE
 Invoke-Checked python @('scripts/test_verify_release.py')
 Invoke-Checked python @('scripts/test_package_inventory.py')
 Invoke-Checked python @('scripts/test_stage_runtime.py')
+Invoke-Checked python @('scripts/test_vcpkg_sources.py')
 
 # 1. Ensure clean branded build
 Write-Host "`n[1/6] Running clean deploy + windeployqt + cpack..." -ForegroundColor Yellow

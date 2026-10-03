@@ -1,5 +1,16 @@
 # Issues (canonical)
 
+## ISS-0066 - Satellite auto-capture bypasses GUI dry-run (2026-10-04, LOCALLY REPAIRED)
+
+T-0107 / DEC-0176. Packaged GUI listening smoke failed no-RX assertion at
+06:24 local: dryRun=true/startDevice=false, but live RTL RX opened. Satellite
+log confirms automatic ISS 145.800 MHz pass capture from saved autoCapture=true.
+This occurs in the unchanged ffd3ef98 application binary, not the source-kit
+exporter. Suppress the independent hub timer for that process only; retain
+saved settings, normal auto-capture and strict layout QA expectations.
+DEC-0176 implemented: four packaged GUI profiles PASS with suppression evidence
+and no RX starts;16/16 native suites PASS. Source CI remains required after push.
+
 ## ISS-0065 - Control cancellation deletes active notification objects (2026-10-03, SOURCE VERIFIED)
 
 CI37117769454 remote diagnostics/control test segfaults in cancellation/throw.
@@ -26,7 +37,7 @@ as expected without hardware I/O. Clean CI37116308564 at929cb11 passes the
 same isolated loader, packaging and native/GUI regression gates;
 no public binary while ISS-0060 is open. See PACKAGE_HARDENING_20261003.md.
 
-## ISS-0064 - Local runtime staging imports unexplained old/tooling DLLs (2026-10-03, LOCALLY REPAIRED)
+## ISS-0064 - Local runtime staging imports unexplained old/tooling DLLs (2026-10-03, SOURCE VERIFIED)
 
 StageRuntime.cmake blindly copies root DLLs from the long-lived Release tree.
 Actual local staging includes pkgconf-7.dll, pthreadVC2.dll, graphics runtimes
@@ -39,8 +50,9 @@ outputs, configured dependency inputs and one shared Qt/MSVC deployment path.
 Old developer files survive unchanged. Nine staging fixtures,16 inventory tests,
 isolated loader/CLI and staged GUI checks PASS; actual local ZIP inventories124
 files with only the five source/notice blockers. Configured Qt/MSVC hashes and
-versions ship as evidence, not as a complete source kit. Clean exact-commit CI
-remains to be verified; optional D3D12 functionality has not been qualified.
+versions ship as evidence, not as a complete source kit. c2231bf passed clean
+Windows37139041871/YAML37139041873; downloaded inventory and acceptance recorded
+in commit comment203291204. Optional D3D12 functionality remains unqualified.
 
 ## ISS-0061 - Diagnostics lifecycle and bounded status transport (2026-10-03, REPAIRED IN SOURCE)
 

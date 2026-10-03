@@ -1,6 +1,8 @@
 # DEC-0174: generated paths bind packaging to this configuration's build inputs.
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 set(RUNTIME_CONFIG "${CMAKE_BINARY_DIR}/runtime-inputs-$<CONFIG>.json")
+get_filename_component(_runtime_vcpkg_root "${CMAKE_TOOLCHAIN_FILE}" DIRECTORY)
+get_filename_component(_runtime_vcpkg_root "${_runtime_vcpkg_root}/../.." ABSOLUTE)
 set(_runtime_files "{}")
 foreach(_pair
     "SDR_Town.exe|$<TARGET_FILE:SDR_Town>"
@@ -22,6 +24,7 @@ file(GENERATE OUTPUT "${RUNTIME_CONFIG}" CONTENT "{
   \"configuration\": \"$<CONFIG>\",
   \"buildRoot\": \"${CMAKE_BINARY_DIR}\",
   \"vcpkgBin\": \"${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin\",
+  \"vcpkgRoot\": \"${_runtime_vcpkg_root}\",
   \"qtBin\": \"$<TARGET_FILE_DIR:Qt6::Core>\",
   \"qtVersion\": \"${Qt6_VERSION}\",
   \"compiler\": \"${CMAKE_CXX_COMPILER}\",

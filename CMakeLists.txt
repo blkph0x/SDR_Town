@@ -800,6 +800,8 @@ add_custom_command(TARGET deploy POST_BUILD
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/package_inventory.py" stage-notices
         --repo "${CMAKE_SOURCE_DIR}" --stage "${DEPLOY_STAGING}"
         --vcpkg "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}" --qt-version "${Qt6_VERSION}"
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/vcpkg_sources.py"
+        --config "${RUNTIME_CONFIG}" --stage "${DEPLOY_STAGING}"
     VERBATIM)
 configure_file(cmake/VerifyPackageGate.cmake.in "${CMAKE_BINARY_DIR}/VerifyPackageGate.cmake" @ONLY)
 set(CPACK_PRE_BUILD_SCRIPTS "${CMAKE_BINARY_DIR}/VerifyPackageGate.cmake")

@@ -19,7 +19,8 @@ def main():
         image = stem.with_suffix(".png")
         report = stem.with_suffix(".json")
         command = [str(args.exe.resolve()), "--allow-multiple", "--no-control-server", "--no-remote-diagnostics",
-                   "--gui-dry-run", "--gui-workspace", preset,
+                   "--gui-dry-run" if preset in ("listening", "hf") else "--gui-startup-dry-run",
+                   "--gui-workspace", preset,
                    "--gui-bandplan", profile,
                    "--gui-window-size", f"{width}x{height}",
                    "--gui-screenshot", str(image), "--gui-self-test", str(report),
@@ -29,6 +30,11 @@ def main():
         result = json.loads(report.read_text(encoding="utf-8"))
         assert result["ok"] and not result["errors"] and not result["warnings"], result
         assert not result["device"]["streaming"], "Layout QA must not start hardware RX"
+        output = stem.with_suffix(".log").read_text(encoding="utf-8", errors="replace")
+        assert "Satellite automatic capture suppressed for GUI dry-run." in output, output
+        for forbidden in ("Background: Attempting Soapy make", "Started real Soapy streaming",
+                          "STUB/no-hardware IQ mode"):
+            assert forbidden not in output, f"Layout QA started RX: {forbidden}"
         assert result["bandPlan"]["id"] == profile, result["bandPlan"]
         header = image.read_bytes()[:24]
         assert header[:8] == b"\x89PNG\r\n\x1a\n", image

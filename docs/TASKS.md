@@ -1,5 +1,13 @@
 # Task list (canonical)
 
+T-0107 | locally repaired / source CI pending | GUI dry-run satellite auto-capture isolation |
+DEC-0176 / ISS-0066. Reproduced while qualifying T-0104's actual package.
+Prevent saved automatic pass capture from opening RX during layout QA; preserve
+normal hardware operation and settings. Gate: packaged four-profile GUI smoke
+with suppression evidence and no transient RX, native suites and source CI.
+Four packaged GUI profiles and16/16 native suites PASS after repair. No frozen
+pipeline edits; T-0104 resumes. Exact-commit Actions remains required.
+
 T-0106 | source verified / binary gate independent | Control shutdown crash exposed by final source CI |
 DEC-0173 / ISS-0065. CI37117769454 and local repeat/CDB reproduce a socket
 lifetime failure during reentrant cancellation on unchanged application code.
@@ -56,13 +64,19 @@ distribution questions. No RX/DSP or live server changes in this pass.
 - [X] Missing RTL USB runtime repair and isolated loader positive/negative gates.
 - [X] Enforce remaining source/notice block in CI, local helper and direct CPack.
 - [ ] Complete Qt/RTL/libusb/compiler-runtime source/notice/rebuild materials.
-- [ ] Qualify clean local staging without old/tooling DLLs (ISS-0064).
+- [X] Qualify clean local staging without old/tooling DLLs (ISS-0064).
   DEC-0174: declared runtime inputs, shared configured Qt/MSVC deployment,
   bounded clean destination and no raw-tree CPack fallback; negative fixtures
   and staged executable/loader/GUI checks before source CI.
   Local9 staging/16 inventory/17 release tests,16/16 native suites, isolated
   loader/CLI and four staged GUI profiles PASS. Actual124-file ZIP verifies;
-  clean exact-commit CI remains. Five source/notice blockers are unchanged.
+  c2231bf Windows37139041871/YAML37139041873 PASS; downloaded125-file inventory
+  checked, final acceptance comment203291204. Five source/notice blockers remain.
+- [X] DEC-0175: collect and independently verify exact vcpkg upstream archives,
+  port recipes/patches and installed receipts; add hostile/missing-input tests.
+  No source replacement, decoder changes or inferred publication clearance.
+  Local10 archives/48 recipes,11 exporter and18 inventory tests PASS; full16/16
+  suites pass. Exact-commit source CI remains required after push.
 - [ ] Full transitive/combined-distribution review, then public asset verification.
 15 new inventory tests, 17 release-verifier tests and 16/16 native suites pass
 locally. Source929cb11 Windows CI37116308564 and YAML37116308593 PASS; clean

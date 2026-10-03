@@ -10,6 +10,10 @@ UNRELEASED SOURCE: T-0102 infrastructure repairs; local 16/16 gates pass,
                   exact-package verification; full source kit still pending.
                   DEC-0174 removes local runtime sweeps; configured staging,
                   Qt/MSVC evidence and local package/GUI gates pass.
+                  DEC-0175 adds exact vcpkg source archives/recipes/receipts;
+                  independent rebuild and remaining component kit still open.
+                  DEC-0176 prevents saved satellite auto-capture during GUI
+                  dry-run; local four-profile no-RX gate passes.
                   T-0106 repairs reproduced control cancellation lifetime
                   failure; local stress/debugger/16-suite gates and92ab955 CI pass.
 ACTIVE PHASE: Receive decoder expansion; P25 acceptance remains open, work deferred by user

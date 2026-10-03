@@ -1,5 +1,48 @@
 # Build notes
 
+## 2026-10-04 - T-0104 exact sources and T-0107 dry-run isolation
+
+Baseline c2231bf; Windows/MSVC17.14, Qt6.11.1. Local configured toolchain pointed
+to a removed SolaceBrochureStudio folder. Reconfigured only this build cache to
+C:/vcpkg/scripts/buildsystems/vcpkg.cmake with VCPKG_MANIFEST_INSTALL=OFF; no global
+environment or installed dependency change. That tree's read-only HEAD is
+eb35a05cc21c69ec1399f7532b7dd61d271ac0d1. All48 installed recipe hashes and ten
+source archive SHA512 values match. All11 installed runtime DLL receipt hashes
+match too. No upstream files or user captures edited.
+
+Release deploy PASS. Source bundle10 ports/10 archives/48 recipe files,
+16691222 bytes, SHA256
+0dcfade104b62be01cb440ee1b033ca8843726d32a449365b0dafd5ceabaa4fd.
+Configured Qt/MSVC deployment PASS (same optional DXC warning as previous pass).
+Package policy T-0104-notices-3; local inventory125 files, five explicit blockers.
+build-info is a local uncommitted test fixture, not public release provenance.
+Exact complete tooling/Qt/other materials and independent rebuild remain open.
+
+First restricted-PATH GUI smoke FAIL: "Layout QA must not start hardware RX".
+At06:24:35 live RTL RX opened despite dryRun=true; satcom log confirms automatic
+145.800 MHz pass capture/recording. Existing autoCapture=true was preserved.
+EXE hash ffd3ef98 was unchanged from the preceding pass, proving this was exposed
+by qualification rather than source-material export. Stream stopped at06:24:39.
+DEC-0176 gates only the satellite automatic timer on parsed process dry-run.
+Final EXE SHA256
+57419c97bce700ddbf65fc7007f216b18ef6ee2e6c1ef57a632ee2a75dd5ffe7.
+Four restricted-PATH GUI profiles PASS, suppression logged and no RX start:
+960x720,1280x900,800x700,1600x900. Device enumeration/audio prewarm still occur.
+No P25/DSP/vocoder/DeviceManager/MainWindow edits and no RF TX.
+
+Source tests11 PASS, inventory18 PASS, staging9 PASS, release verifier17 PASS.
+Full16/16 CTest PASS75.43s after GUI repair. P25 guard selftests and workflow
+validation PASS. Staged RTL isolated-loader positive/missing-USB negative gate
+and DTMF/RDS smoke passed earlier in this pass; final package gates are repeated
+before commit. Exact-commit Actions acceptance is recorded after push. No binary
+publication or version bump while ISS-0060 remains unresolved.
+Final isolated RTL/DTMF/RDS and both dry-run flag spellings across four GUI
+profiles PASS. Listening screenshot inspected. Actual125-file ZIP verification
+PASS; --require-publishable correctly FAILS on the five named remaining blockers.
+PowerShell syntax, workflow validation, diff whitespace and frozen-path guard
+PASS (zero protected source edits). Source exporter uses bounded reads even if
+an input grows after its size check; malformed-receipt fixture passes.
+
 ## 2026-10-04 - T-0104 declared runtime staging and local package qualification
 
 Baseline92ab955; Windows/MSVC17.14/Qt6.11.1, existing configured vcpkg inputs.

@@ -73,9 +73,11 @@ unqualified; the Qt deploy warning is recorded in BUILD_NOTES.
 
 - Exact Qt 6.7.3 CI source/build configuration, LGPL replacement instructions
   and bundled third-party notices. Local Qt 6.11.1 is a different build input.
-- Exact RTL-SDR/libusb sources and vcpkg patched build recipes, plus applicable
-  dependency materials. Installed SPDX resource URLs/checksums are evidence,
-  not delivery of those source archives. Record any combined-work review.
+- DEC-0175 now stages/verifies exact source archives and patched port recipes
+  for ten configured vcpkg dependencies (local: ten archives,48 recipe files).
+  Full vcpkg tooling/triplets/compiler reproduction, independent rebuild and
+  combined-distribution review remain required. Matching receipts are evidence,
+  not completion of those remaining obligations.
 - MinGW static runtime versions, applicable notices and exception evidence for
   the RDS DLL; Microsoft redistributable exact versions and applicable terms.
 - Remaining embedded/static/data notice coverage, including ASN.1 runtime

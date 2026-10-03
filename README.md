@@ -9,6 +9,10 @@ coverage remains a release blocker (ISS-0060). P25/FM DSP is unchanged.
 T-0104 adds missing RTL USB-runtime staging, isolated package-loader tests and
 [exact-file inventory/publication gates](docs/PACKAGE_HARDENING_20261003.md).
 Dependency source/notice work remains open; CI uploads evidence only while blocked.
+DEC-0175 adds a hash-verified bundle of exact vcpkg source archives, recipes,
+patches and installed receipts. This is not yet a complete rebuild/distribution
+kit. GUI dry-run now suppresses saved satellite auto-capture (ISS-0066), so layout
+tests cannot silently start an automatic pass; normal pass settings are retained.
 Local and CI packaging now share declared runtime inputs and configured Qt/MSVC
 deployment. Old DLLs in a developer's build folder are neither copied into the
 package nor deleted. Runtime hashes/version evidence is included in the inventory.
