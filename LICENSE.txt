@@ -1,12 +1,21 @@
-SDR Town
-Copyright (c) 2026
+MIT License
 
-This software is for receiving only. You are solely responsible for compliance with all applicable laws in your jurisdiction regarding radio reception, recording, and use of data.
+Copyright (c) 2026 SDR Town contributors
 
-IMPORTANT: All decoding and analysis features are intended exclusively for unencrypted / clear signals. No decryption, cryptoanalysis, or attempts to access encrypted communications are implemented or supported. If a signal is encrypted, the output will be unintelligible or random.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-Use responsibly and lawfully only.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-See the source code and DESIGN.md for architecture, legal notes, and full details.
-
-(The full text of applicable open-source licenses for bundled components such as Qt, SoapySDR, miniaudio, spdlog, nlohmann-json, Catch2, etc. are included in the deployed package or available from their respective upstream projects.)
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

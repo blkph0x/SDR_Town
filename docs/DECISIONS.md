@@ -1,5 +1,33 @@
 # Decisions
 
+## DEC-0169 - MIT for original work, explicit upstream scope (2026-10-03)
+
+T-0100; baseline 2ab78d7. The user explicitly authorizes MIT licensing. The
+existing LICENSE.txt contains reception guidance but no copyright permission
+grant. Replace it with the unmodified standard MIT terms, retaining 2026 and
+crediting SDR Town contributors. Put operational guidance outside the license;
+do not attach receive-only or noncommercial restrictions to MIT.
+Primary text: https://opensource.org/license/mit .
+
+The grant covers original contributions, not third-party rights. Keep upstream
+notices, submodule licenses and per-file copyrights untouched. Separate the
+dependency/license inventory from reference-project and tool acknowledgements.
+Reference, integration, compatibility and inspiration are not interchangeable.
+No blanket license metadata or MIT-only binary claim is appropriate here.
+
+Confirmed exception needing review: include/P25SdrtrunkTune.h explicitly says
+its tuning implementation was copied from SDRTrunk; the corresponding
+CenterFrequencyCalculator.java carries Dennis Sheirer's GPL-3.0-or-later
+notice, and the branch structure matches. It is excluded from the MIT grant
+over original work, not silently relabeled. Audit other P25 derivations before
+deciding the complete combined-work distribution terms (ISS-0059). Do not
+change frozen P25 behavior to resolve a documentation task.
+
+The downloaded v0.2.122 ZIP also lacks several top-level/component notices
+(ISS-0060). Documentation must not claim all notices already ship. Publish
+this source/documentation correction without a new version or binary release;
+track exact-artifact license/source compliance as a separate release gate.
+
 ## DEC-0168 - Receive-only DTMF burst and transformation profiles (2026-10-03)
 
 T-0099 / ISS-0058, baseline ab21a4f. Keep the existing Goertzel detector rather

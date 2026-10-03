@@ -1,5 +1,32 @@
 # Issues (canonical)
 
+## ISS-0059 - Upstream-derived P25 licensing scope (2026-10-03, OPEN)
+
+T-0100 / DEC-0169. include/P25SdrtrunkTune.h:8 names copied SDRTrunk tuning
+logic; the corresponding upstream CenterFrequencyCalculator.java is
+GPL-3.0-or-later, Copyright (C) 2014-2023 Dennis Sheirer. Matching branching
+and adjustment logic are visible in both implementations. A root MIT grant
+cannot relicense that upstream work. Exclude it and any other upstream-derived
+material from the original-work MIT claim. Review the complete P25 provenance
+and linked distribution before claiming an MIT-only deliverable. Resolution
+requires appropriate upstream permission, compliant combined-work licensing,
+or a genuinely independent replacement with non-regression evidence; an
+acknowledgement alone does not resolve it. No DSP edits in this task.
+
+## ISS-0060 - Binary license/source notice inventory incomplete (2026-10-03, OPEN)
+
+The independently downloaded public v0.2.122 portable ZIP has licenses for
+ACARS/Aero, GGMorse, redsea/liquid-dsp, SGP4, SSTV and RTL/SDRplay modules, but
+no root LICENSE.txt or mbelib, miniaudio, Qt, SoapySDR, spdlog/fmt,
+nlohmann-json or libsodium notice files. Existing CMake staging does not
+establish complete notice coverage. Before another binary release, generate
+and test an exact-artifact notice/source inventory, include project licensing
+and credits, retain vendor/runtime terms, and resolve ISS-0059. Check Qt and
+librtlsdr/libusb source/relink/distribution obligations against the versions
+actually shipped. Upstream URLs alone and acknowledgements are not a complete
+compliance package. This task changes source documentation only; published
+assets are not replaced or retrospectively certified.
+
 ## ISS-0058 - DTMF confidence, short bursts and input-watch gaps (2026-10-03, REPAIRED IN SOURCE)
 
 Raw Goertzel squared magnitude has N-squared units but is divided by N-unit

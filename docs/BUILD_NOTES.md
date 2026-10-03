@@ -1,5 +1,24 @@
 # Build notes
 
+## 2026-10-03 - T-0100 licensing/documentation checks
+
+Baseline 2ab78d7; no application, build, dependency, version or workflow edits.
+LICENSE.txt grant body matches the retained SSTV standard MIT text after
+whitespace normalization (holder/title independently checked); OSI primary
+text also reviewed. 146 local Markdown links across the credits, scope,
+README and release documentation resolve. `git diff --check` PASS. Existing
+`python scripts/test_no_p25_guard.py` positive/negative self-tests PASS.
+CI remains the source-publication gate; this entry does not predeclare its
+result. No new binary or live RF test is warranted for documentation changes.
+
+Compared source inventory with the previously verified anonymous v0.2.122 ZIP
+(SHA256 4f83076f02398865eadde5babc05f96a533e1d27cfb24709898f415c67161549).
+Confirmed incomplete notices (ISS-0060), and compared P25SdrtrunkTune against
+upstream GPL CenterFrequencyCalculator (ISS-0059). Scope explicitly excludes
+third-party/adapted rights; no claim of MIT-only binary compliance. Existing
+assets and all upstream notices/submodules remain unchanged. Remediation is
+now a documented precondition for the next binary publication.
+
 ## 2026-10-03 - T-0099 public release verified
 
 Source 60258a7f63f16e48247f1b106e73f6ffc4dbf0d6. Windows master/release runs

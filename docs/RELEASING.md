@@ -5,6 +5,17 @@ application assets through Actions, wait for successful checks, download and
 verify the public assets and smoke-test the shipped executable. Failures block
 completion. No RF/hardware qualification is implied by a successful build.
 
+## Licensing gate (2026-10-03)
+
+Original SDR Town contributions now have a standard MIT grant, but that does
+not relicense upstream-derived code or the combined binary. Before another
+binary publication, resolve the P25 provenance/distribution scope in ISS-0059
+and the exact-artifact notice/source coverage in ISS-0060. Follow
+[LICENSING.md](../LICENSING.md#binary-release-gate). A green build is not license
+clearance; credits or repository URLs alone do not satisfy all obligations.
+Do not overwrite existing public assets. Documentation-only corrections may
+be pushed and checked without a version bump or new binary release.
+
 ## Mandatory CI portable release
 
 For 0.2.98 the user requested a regular Releases entry: use `release/v0.2.98`.

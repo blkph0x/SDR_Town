@@ -1,5 +1,16 @@
 # Development log
 
+## 2026-10-03 - T-0100 original-work MIT grant and credits
+
+User authorizes MIT licensing. Replaced the prior non-license usage notice with
+standard MIT terms; moved policy/scope out of the grant. Added LICENSING.md and
+ACKNOWLEDGEMENTS.md with evidence-based component, reference, data and tool
+credits; README no longer says MIT formalization is pending. No radio or DSP
+changes. Found upstream-derived P25 scope and incomplete binary notice coverage,
+recorded ISS-0059/0060 and a pre-publication licensing gate instead of claiming
+all third-party code became MIT. Local documentation/guard checks PASS;
+publish source docs through normal CI with no version bump or asset replacement.
+
 ## 2026-10-03 - T-0099 published and downloaded asset qualified
 
 0.2.122-experimental published from 60258a7 by Actions 37097604489. Source

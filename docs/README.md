@@ -1,5 +1,9 @@
 # SDR Town tracking desk
 
+Project licensing: [MIT grant](../LICENSE.txt),
+[scope and outstanding distribution/provenance gates](../LICENSING.md), and
+[acknowledgements](../ACKNOWLEDGEMENTS.md).
+
 P25 regression diagnosis: [2026-09-27 missed-grant / stale-allocation audit](P25_REGRESSION_AUDIT_20260927.md).
 Fresh live GUI capture, paired same-IQ tests and the next repair plan. No decoder
 changes in this diagnostic pass; ISS-0042..0044 remain open.

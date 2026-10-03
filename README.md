@@ -139,13 +139,13 @@ Development has been active since the
 [first repository commit on 5 June 2026](https://github.com/blkph0x/SDR_Town/commit/01daa06308abed7af3d63bce6077223e43ac9c1b):
 112 days, or nearly four months, as of 25 September 2026.
 
-**Our commitment is to keep SDR Town free and open source.** The maintainer's
-intended licence for original project code is MIT; formalisation of that licence
-is pending, and the current [licence file](LICENSE.txt) must not be mistaken for
-an MIT grant. Personal shout-outs are not the goal: use the work, learn from it
-and build something better. MIT's copyright/licence notices and all applicable
-third-party licence requirements must still be respected; this is not a waiver
-of other contributors' rights.
+**Our commitment is to keep SDR Town free and open source.** Original SDR Town
+contributions are licensed under the [MIT License](LICENSE.txt). Third-party
+and upstream-derived code retain their own terms; this is not an MIT-only
+licence claim for the combined application. Read the
+[licensing scope and open provenance/distribution issues](LICENSING.md).
+Personal shout-outs are optional: use the work, learn from it and build
+something better. Required copyright/licence notices must still be retained.
 
 We are not claiming to have invented the underlying radio ideas or protocols.
 They are documented and implemented throughout the community. Respect and thanks
@@ -155,6 +155,9 @@ shape the wider radio-software landscape. Thanks also to the **mbelib, SoapySDR,
 liquid-dsp, Qt and miniaudio** communities and the other projects behind our
 dependencies. Acknowledgement does not imply affiliation or endorsement, and
 each project's code retains its own licence.
+
+The full maintained [acknowledgements](ACKNOWLEDGEMENTS.md) distinguish bundled
+components, reference implementations, data sources and development/AI tools.
 
 ---
 
@@ -202,7 +205,7 @@ status are visible. See [tone/no-voice troubleshooting](docs/INMARSAT.md#tone-or
 | **Current version** | **0.2.102** portable testing release; **0.2.96** signed updater |
 | **Platform** | Windows 10/11 x64 |
 | **UI** | Qt 6 GUI + interactive CLI |
-| **License** | See `LICENSE.txt` |
+| **License** | [MIT for original contributions](LICENSE.txt); [third-party scope and release caveats](LICENSING.md) |
 | **Releases** | https://github.com/Blkph0x/SDR_Town/releases |
 | **Repo** | https://github.com/Blkph0x/SDR_Town |
 | **Pairs with** | [FUBAR](https://github.com/blkph0x/FUBAR) (VOX capture, public live website, optional remote tune) |
@@ -809,7 +812,10 @@ Single-instance lock by default (device contention). CLI and GUI share the same 
 
 Receive-only software. You must comply with laws in your jurisdiction for reception, recording, and use of radio traffic. Do not intercept private communications where prohibited. **Encrypted traffic is not decrypted**; encrypted calls are skipped or muted.
 
-See `LICENSE.txt`.
+Original contributions: [MIT License](LICENSE.txt). Third-party and
+upstream-derived material: [licensing scope](LICENSING.md). Credits:
+[acknowledgements](ACKNOWLEDGEMENTS.md). Existing binary releases are not
+retrospectively certified or relicensed by this documentation change.
 
 ---
 

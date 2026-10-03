@@ -1,5 +1,15 @@
 # Task list (canonical)
 
+T-0100 | done (source documentation; binary licensing remediation open) | MIT grant and evidence-based acknowledgements |
+DEC-0169. Replace the non-license root notice with standard MIT terms for
+original SDR Town contributions; retain separate third-party terms. Inventory
+bundled components, references, data sources and development tools. Do not
+claim the combined binary or upstream-derived code is MIT-only. Document
+provenance/distribution gaps, preserve all DSP and publish documentation only.
+Standard grant/local-link checks and P25 guard self-tests pass. Source CI is
+the publication gate; no version/asset change. ISS-0059/0060 remain open and
+block another binary publication, not this original-work grant or credits.
+
 T-0099 | done (bounded scope; field qualification open) | Bounded fast-burst and transformed DTMF analysis |
 DEC-0168. Reproduce confidence normalization and short-burst/EOF defects;
 qualify polarity-independent detection, explicit fast and frequency-inverted
