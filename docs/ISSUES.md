@@ -1,5 +1,19 @@
 # Issues (canonical)
 
+## ISS-0065 - Control cancellation deletes active notification objects (2026-10-03, REPAIRED LOCALLY)
+
+CI37117769454 remote diagnostics/control test segfaults in cancellation/throw.
+Unchanged code locally fails iteration31/100; CDB reports modified-after-free
+heap blocks detected in Qt Windows event dispatcher teardown. Source readyRead
+dispatch is direct; a handler stops/flushes deferred deletion before the native
+read notification unwinds. DEC-0173 adds ordering regression and queued weak-
+socket dispatch. Ordering fails before repair; 100 independent control-suite
+processes pass after it. CDB cancellation exits without the freed-heap warning;
+full local16/16 suites and final strengthened59-assertion control suite PASS.
+Clean repair CI remains the source-publication gate. This is not a P25 or
+packaging dependency regression. Persistent full-pageheap setup was denied;
+gflags confirms no process setting remains. See BUILD_NOTES for exact limits.
+
 ## ISS-0063 - Portable RTL runtime missing its USB dependency (2026-10-03, REPAIRED IN SOURCE)
 
 T-0104 / DEC-0172. Independently downloaded CI 37111782581 ZIP contains

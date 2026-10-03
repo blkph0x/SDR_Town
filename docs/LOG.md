@@ -1,5 +1,18 @@
 # Development log
 
+## 2026-10-03 - T-0106 repair reproduced control cancellation crash
+
+Final documentation-commit CI exposed an intermittent existing control-server
+use-after-free. Reproduced locally at iteration31 and under CDB, then proved
+notification/handler ordering with a failing deterministic fixture. Dispatch
+now queues guarded callbacks outside native socket notifications. Retired or
+deleted clients cannot execute old requests after restart. No retries, new
+timing thresholds, DSP edits or test weakening.100 independent control-suite
+processes and CDB cancellation pass; final tests use buffered real requests.
+16/16 regression suites, DTMF/RDS smoke and package/signature-verifier tests
+pass locally. Source CI for this repair must finish before acceptance; binary
+publication remains blocked by source/notice requirements, not by P25 changes.
+
 ## 2026-10-03 - T-0104 clean Actions package evidence
 
 Pushed929cb11; Windows37116308564/YAML37116308593 PASS. Clean runner verifies

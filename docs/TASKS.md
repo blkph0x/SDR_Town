@@ -1,5 +1,17 @@
 # Task list (canonical)
 
+T-0106 | locally verified / source CI pending | Control shutdown crash exposed by final source CI |
+DEC-0173 / ISS-0065. CI37117769454 and local repeat/CDB reproduce a socket
+lifetime failure during reentrant cancellation on unchanged application code.
+The deterministic ordering fixture fails before production changes. Queue
+guarded dispatch outside native read notifications, test retired/deleted sockets
+across restart, then stress/debug-heap and full local/CI gates. This confirmed
+CI blocker interrupts T-0104; do not weaken tests or change receive/audio code.
+Ordering fixture FAILS before repair and passes after.100 independent control
+suite processes/CDB check and full16/16 local suites PASS. Final buffered-request
+retirement fixture passes59 assertions. Track exact pushed commit CI before
+claiming source acceptance. Binary gate ISS-0060 remains independent.
+
 T-0102 | source repairs verified; binary publication blocked | Shared infrastructure hardening and diagnostic evidence |
 DEC-0171; baseline d47f000 / 0.2.122. User authorizes the review follow-up and
 requires tracked progress. Preserve P25/FM DSP, vocoders, speaker gates and
@@ -31,7 +43,7 @@ make/read/stop, stub handoff and destruction. Do not simply remove the global
 driver mutex or block the GUI on an unbounded join. P25 callers require a new
 reviewed change and capture/field acceptance, not this pass's guard exception.
 
-T-0104 | in_progress / release blocker | Exact binary dependency notice/source kit |
+T-0104 | source mechanisms verified / release blocker | Exact binary dependency notice/source kit |
 DEC-0172: first implement exact-file inventory, staged original/vcpkg notices,
 binary-to-build-input checks and negative ZIP tests. Do not label mechanical
 coverage as complete transitive licensing or silently clear source/runtime

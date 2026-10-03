@@ -107,3 +107,58 @@ TEST_CASE("Control handler cancellation remains safe when it throws", "[control]
     CHECK(server.statistics()["activeConnections"].toInt() == 0);
     CHECK(server.statistics()["handlerErrors"].toInt() == 1);
 }
+
+TEST_CASE("Control handlers run after native read notification observers", "[control]") {
+    SdrTownControlServer server; SdrTownControlServer::Config cfg;
+    cfg.port = 0; cfg.token = "fixture"; cfg.allowUnauthenticated = false;
+    REQUIRE(server.start(cfg));
+    bool observed = false;
+    int commands = 0;
+    server.setRequestHandler([&](const auto&, const auto&, const auto&) {
+        CHECK(observed);
+        ++commands;
+        return QJsonObject{{"ok", true}};
+    });
+    QTcpSocket socket;
+    socket.connectToHost(QHostAddress::LocalHost, server.port());
+    REQUIRE(until([&] { return !server.findChildren<QTcpSocket*>().isEmpty(); }));
+    auto* accepted = server.findChildren<QTcpSocket*>().front();
+    QObject::connect(accepted, &QTcpSocket::readyRead, &server,
+                     [&] { observed = true; }, Qt::DirectConnection);
+    socket.write("GET /v1/state HTTP/1.1\r\nAuthorization: Bearer fixture\r\n\r\n");
+    REQUIRE(until([&] { return commands == 1; }));
+    CHECK(observed);
+}
+
+TEST_CASE("Control queued requests cannot survive connection retirement", "[control]") {
+    SdrTownControlServer server; SdrTownControlServer::Config cfg;
+    cfg.port = 0; cfg.token = "fixture"; cfg.allowUnauthenticated = false;
+    REQUIRE(server.start(cfg));
+    int commands = 0;
+    server.setRequestHandler([&](const auto&, const auto&, const auto&) {
+        ++commands; return QJsonObject{{"ok", true}};
+    });
+    QTcpSocket socket;
+    socket.connectToHost(QHostAddress::LocalHost, server.port());
+    REQUIRE(until([&] { return !server.findChildren<QTcpSocket*>().isEmpty(); }));
+    auto* accepted = server.findChildren<QTcpSocket*>().front();
+    // Buffer a real request and queue dispatch without pumping posted events.
+    socket.write("GET /v1/state HTTP/1.1\r\nAuthorization: Bearer fixture\r\n\r\n");
+    REQUIRE(socket.flush());
+    REQUIRE(accepted->waitForReadyRead(2000));
+    REQUIRE(accepted->bytesAvailable() > 0);
+    CHECK(commands == 0);
+    server.stop();
+    REQUIRE(server.start(cfg));
+    SECTION("retired socket still awaiting deletion") {
+        QCoreApplication::sendPostedEvents(&server, QEvent::MetaCall);
+    }
+    SECTION("retired socket already deleted") {
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::sendPostedEvents(&server, QEvent::MetaCall);
+    }
+    CHECK(commands == 0);
+    const auto response = exchange(server, "GET /v1/state HTTP/1.1\r\nAuthorization: Bearer fixture\r\n\r\n");
+    CHECK(response.startsWith("HTTP/1.1 200"));
+    CHECK(commands == 1);
+}

@@ -124,13 +124,16 @@ void SdrTownControlServer::handleIncomingConnection()
                 ++m_timeouts; socket->setProperty("handled", true); socket->abort();
             }
         });
-        connect(socket, &QTcpSocket::readyRead, this, [this, socket]() {
-            handleSocketReadyRead(socket);
-        });
+        // DEC-0173: handlers may stop the server and flush deferred deletion.
+        // Leave Qt's native read notification before invoking application code.
+        const auto dispatch = [this, alive = QPointer<QTcpSocket>(socket)] {
+            if (alive) handleSocketReadyRead(alive.data());
+        };
+        connect(socket, &QTcpSocket::readyRead, this, dispatch, Qt::QueuedConnection);
         connect(socket, &QTcpSocket::disconnected, this, [this, socket] {
             m_clients.remove(socket); socket->deleteLater();
         });
-        if (socket->bytesAvailable()) handleSocketReadyRead(socket);
+        if (socket->bytesAvailable()) QMetaObject::invokeMethod(this, dispatch, Qt::QueuedConnection);
     }
 }
 

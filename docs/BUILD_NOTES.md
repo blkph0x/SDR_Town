@@ -1,5 +1,39 @@
 # Build notes
 
+## 2026-10-03 - T-0106 control cancellation baseline and repair evidence
+
+Documentation-only c53b583 exposed an intermittent application failure in
+Windows CI37117769454 (Qt6.7.3): RemoteDiagnostics SIGSEGV in "Control handler
+cancellation remains safe when it throws", seed4071677816. YAML37117769400
+passed. This does not invalidate the earlier929cb11 successful run, but its
+one-shot pass did not establish cancellation stability.
+
+Unchanged local Windows/MSVC17.14/Qt6.11.1 executable reproduced access
+violation on process31 of100. CDB reports freed heap modified, detected later
+in Qt Windows event-dispatcher teardown. Export-only stack names are not a
+source-line trace. Before changing production, the new ordering fixture
+deterministically FAILS at CHECK(observed): handler runs before direct native
+notification observers. No timing, test expectation or exception path relaxed.
+
+Guarded queued dispatch then passes ordering/cancellation/retirement fixtures.
+Same CDB cancellation run exits cleanly with all four assertions passing and
+no modified-after-free warning. The debugger prints page-heap enabled, but the
+attempt to install persistent full pageheap with gflags was denied; gflags /p
+shows no persistent entry. Do not claim a configured full-pageheap campaign.
+Evidence logs remain under ignored build/control-cancel-cdb*.log.
+
+App and diagnostics Release builds PASS. One intermediate diagnostics relink
+failed LNK1104 because our stress test still held the executable open; retry
+only after that stress process finishes. No user app was terminated.
+15 inventory,17 release-verifier and frozen-P25 guard self-tests PASS again.
+Final local qualification: 100 independent control-suite processes PASS
+(600 cases/5300 assertions before strengthening the retirement fixture to use
+a buffered real HTTP request). Final strengthened suite:6 cases/59 assertions
+PASS; full CTest:16/16 PASS in75.37s. Relink succeeded after stress exited.
+DTMF and RDS executable smoke PASS. Same production repair in both test rounds.
+Clean GitHub CI for this repair is the remaining source publication gate;
+ISS-0060 still independently blocks binary publication.
+
 ## 2026-10-03 - T-0104 clean source CI and downloaded inventory verified
 
 Source `929cb1101b521d58f3b05debbae1232cb76e99b8` passed Windows CI in23m56s:

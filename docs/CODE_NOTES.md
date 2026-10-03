@@ -1,5 +1,13 @@
 # Code notes (tree map)
 
+T-0106 / DEC-0173: SdrTownControlServer dispatches readyRead and prebuffered
+requests through guarded queued callbacks on its own Qt thread. Application
+handlers can stop/delete clients without destroying a socket inside its native
+read notification. Existing handled flag retires queued work across restart;
+QPointer also covers already-deleted clients. test_control_server covers native
+notification ordering, reentrant cancellation/throw and both retirement cases.
+No new thread, deadline, decoder or audio-path change.
+
 T-0104 / DEC-0172: scripts/package_inventory.py stages notices/input identity,
 builds the exact-file record and verifies bounded ZIP contents without extraction.
 Publication blockers are recomputed, not trusted from generated metadata.

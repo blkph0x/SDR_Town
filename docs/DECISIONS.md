@@ -1,5 +1,23 @@
 # Decisions
 
+## DEC-0173 - Dispatch control commands outside native socket notifications (2026-10-03)
+
+CI37117769454 failed with access violation in the cancellation/throw test on
+unchanged application code. Baseline local repeat reproduces at iteration31;
+CDB debug heap reports a freed block modified, with later detection in Qt's
+Windows event dispatcher. A handler can stop the server and flush deferred
+deletion while a direct readyRead/native notification is still on the stack.
+A QPointer after the handler protects our response, not Qt's active emitter.
+
+Add a deterministic ordering fixture before repair: a direct readyRead observer
+installed after server acceptance must run before the application handler.
+Queue guarded request dispatch on the existing server thread, including the
+already-buffered acceptance case. Retired sockets must not dispatch; preserve
+single-command framing, limits and response semantics. Do not add worker threads,
+timeouts, retries or weaken cancellation tests. Re-run stress and CDB heap checks.
+Qt warns against deleting QObjects while their events are active:
+https://doc.qt.io/qt-6/qobject.html#dtor.QObject .
+
 ## DEC-0172 - Auditable package contents before publication (2026-10-03)
 
 Runtime follow-up: dumpbin on the independently downloaded CI 37111782581
