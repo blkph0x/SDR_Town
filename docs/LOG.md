@@ -1,5 +1,14 @@
 # Development log
 
+## 2026-10-03 - T-0098 published and qualified
+
+0.2.121-experimental published from 1d5b65a by Actions 37089361330; master and
+release checks PASS. Public checksum/provenance, licenses and shipped CLI/RDS
+smoke verified locally. BUILD_NOTES records exact hashes, tests and limits.
+CW is experimental; synthetic six-demod/WAV evidence is not live RF acceptance.
+The audit's device, overflow, TX and WFM gaps remain open and explicitly scoped
+for follow-up. No P25 receive/voice, shared device, FM or speaker-path change.
+
 ## 2026-10-03 - T-0098 audit, HF integrity and Morse window
 
 Audited the submitted receive-chain claims against badcba4. Confirmed device

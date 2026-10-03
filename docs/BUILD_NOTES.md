@@ -1,5 +1,24 @@
 # Build notes
 
+## 2026-10-03 - T-0098 public release verified
+
+Source 1d5b65a4b189bcb6ad039e1e183fbede8ed98264. Windows master/release runs
+37089361295 / 37089361330 PASS; YAML 37089361178 / 37089361430 PASS.
+Public non-draft prerelease:
+https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.121-experimental
+Anonymous ZIP SHA256:
+395d4b0915b264ce618dbaf8afa233d2b8129561854700882801131849b0407a
+Embedded version/source/workflow and EXE/SDRplay DLL hashes verified. Morse MIT
+notice present. Authenticated HTTPS collector defaults present, opt-in OFF;
+no credential printed. Shipped CLI help/bias-T and RDS reference/parity/negative
+file tests PASS on this PC. Actions also passed core/GUI/device tests, replay
+parity, SSTV, packaging and its independent public asset smoke.
+Final local CTest rerun 16/16 PASS (71.50 s): core 476 passed/2 skipped, workspace
+43 passed/6 skipped; hardware/fixture skips do not establish field acceptance.
+Native default-size Morse window and exact WAV transcript visually checked.
+Pointer resize did not change its size, so compact native layout is unverified.
+No physical RF transmit, live CW, AM fading or P25 audio acceptance was claimed.
+
 ## 2026-10-03 - T-0098 full local qualification
 
 Windows/MSVC 17.14 Release full build PASS; CTest 16/16 PASS (77.72 s).

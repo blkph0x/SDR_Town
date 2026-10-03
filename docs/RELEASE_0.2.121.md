@@ -15,4 +15,5 @@ before starting the live observer. No P25, FM DSP, driver, audio-engine, network
 permission or updater-policy change. This is a portable experimental prerelease,
 not a replacement for the last signed installer update.
 
-Guides: [Morse](CW_RECEIVE.md), [audit](RECEIVE_CHAIN_AUDIT_20261003.md).
+Guides: [Morse](https://github.com/blkph0x/SDR_Town/blob/v0.2.121-experimental/docs/CW_RECEIVE.md),
+[audit](https://github.com/blkph0x/SDR_Town/blob/v0.2.121-experimental/docs/RECEIVE_CHAIN_AUDIT_20261003.md).

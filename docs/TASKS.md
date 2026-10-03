@@ -1,12 +1,15 @@
 # Task list (canonical)
 
-T-0098 | in progress | Receive-chain audit, HF integrity and Morse window |
+T-0098 | done (bounded HF/CW scope; hardware acceptance open) | Receive-chain audit, HF integrity and Morse window |
 DEC-0167. Validate the supplied audit against badcba4, record confirmed and
 unsupported claims. Reproduce HF invalid-input and same-station correction
 resets, add bounded diagnostics and tests, integrate a pinned Morse backend in
 an independent receive-only window. Preserve P25/FM production paths; qualify
 synthetic RF/audio, GUI lifecycle and published Actions assets. Hardware CW,
 fading AM/SSB and broader device ownership remain separate acceptance gates.
+Published 0.2.121-experimental from 1d5b65a. Source/release Actions passed;
+anonymous ZIP checksum/provenance, Morse license, opt-in collector config and
+shipped CLI/RDS smoke verified. Detailed evidence is in BUILD_NOTES.
 
 T-0097 | done (UI scope; hardware acceptance limits documented) | Desktop and companion usability qualification |
 DEC-0166. Run both shipped apps and web workflows; improve workspace navigation,
