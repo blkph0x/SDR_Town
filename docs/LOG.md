@@ -1,5 +1,17 @@
 # Development log
 
+## 2026-10-03 - T-0097 published and public packages verified
+
+Town 0.2.120-experimental (6dc66fa), FUBAR 1.1.44 (d9bcb0a) published by Actions.
+All relevant source/release CI passed. Anonymous ZIP/checksum, embedded provenance,
+matched control DLL and shipped CLI/RDS/FUBAR self-tests PASS; exact evidence in
+BUILD_NOTES. Browser keyboard/tabs, lease/drafts, validation, map bridge, playback
+pause/resume and desktop/mobile layouts verified. Native workspace navigation
+and keyboard focus verified. P25/DSP/audio unchanged; unrelated local files kept.
+Remaining limits: public station directory unreachable, intended live audio
+routing needs operator selection, physical short-height FUBAR scroll unverified,
+and no new physical decoder/hardware acceptance. Both apps left running.
+
 ## 2026-10-03 - T-0097 paired UI usability and contract repairs
 
 Ran both native apps and local web interface. Added direct workspace selection,

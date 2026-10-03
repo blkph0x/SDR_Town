@@ -1,5 +1,35 @@
 # Build notes
 
+## 2026-10-03 - T-0097 public paired release verification
+
+Town source 6dc66fa08f8554ce14cd7e438a0a7e657c77e76d: Windows master/release
+37079654049 / 37079654265 and YAML 37079654043 / 37079654239 PASS.
+Public non-draft prerelease:
+https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.120-experimental
+Anonymous downloaded ZIP SHA256:
+16fe68dfebe3db8bfcbd437c5f5fffd3764de724da57bf1d939ce498f874733f
+Embedded version/source/workflow and EXE/SDRplay module hashes verified.
+Shipped CLI help/bias-T and RDS reference/parity/negative checks PASS.
+
+FUBAR source d9bcb0a0e819912db5be84a1f7d9ec46077d655c: main/tag builds
+37081402863 / 37081405864 and release 37081407222 PASS.
+https://github.com/blkph0x/FUBAR/releases/tag/v1.1.44
+Anonymous downloaded ZIP SHA256:
+1a52483abacee08a8435072e4f2592c8d5495736113a9a8d7602281dd2bab6af
+Source/version/workflow/EXE hashes verified; control DLL equals Town's shipped
+DLL (c634ef3e4df2746283062b08a808f6b95011a7cd804a5dfdd64a60cee2e1c50e).
+Shipped FUBAR CLI/WAV/website/live-stream/listener-slot self-test PASS.
+
+Manual browser playback now resumes at 9.65 s from a 9.57 s pause, not zero;
+invalid tune input leaves RF unchanged and error visible across workspace tabs.
+Both native apps remain running, browser returns to Radio with no active lease.
+No new RF/voice quality claims. Town outputs to speakers, FUBAR captures VB-CABLE:
+live audio routing must be paired intentionally. Public community directory
+GET timed out at 15 s, consistent with native HTTPS announce failed; local web
+and bridge remain functional. No network/privacy configuration was changed.
+Native compact-height FUBAR pointer resize was blocked by a Windows picker
+overlay; physical scrolling acceptance remains open. Qt compact-layout tests pass.
+
 ## 2026-10-03 - T-0097 desktop and companion usability
 
 Windows/MSVC Release local build passed; initial full CTest 16/16 passed.

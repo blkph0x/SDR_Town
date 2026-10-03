@@ -1,10 +1,14 @@
 # Task list (canonical)
 
-T-0097 | in progress | Desktop and companion usability qualification |
+T-0097 | done (UI scope; hardware acceptance limits documented) | Desktop and companion usability qualification |
 DEC-0166. Run both shipped apps and web workflows; improve workspace navigation,
 main receiver space, keyboard access, mobile layout and visible command feedback.
 Reproduce polling/draft defects; preserve DSP, leases and privacy boundaries.
 Qualify local builds, browser/Qt tests and matched public Actions releases.
+Published 0.2.120-experimental / FUBAR 1.1.44 from 6dc66fa / d9bcb0a.
+All source/release Actions passed; anonymous public ZIP hashes, source provenance,
+matching control DLL and shipped CLI/RDS/self-tests verified. BUILD_NOTES records
+evidence and remaining external directory/routing/physical UI test limits.
 
 T-0096 | done (source) | Requalify FUBAR web workspace against current Town |
 DEC-0165. Inventory native/control/DLL/web differences; expose shared map snapshots

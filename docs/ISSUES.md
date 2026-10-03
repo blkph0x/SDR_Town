@@ -1,15 +1,26 @@
 # Issues (canonical)
 
-## ISS-0052 - Companion usability and map success contract (2026-10-03)
+## ISS-0052 - Companion usability and map success contract (2026-10-03, RESOLVED)
 
 T-0097 / DEC-0166. Reproduced mode draft overwritten by status polling, hidden
 command errors, lease-less enabled decoder controls, oversized mobile player,
 and inaccessible desktop workspace selection. Repaired in FUBAR 1.1.44 and
 Town 0.2.120. Actual loopback map GET exposed an additional failure: webReport
 omitted `ok:true`, so the control DLL rejected a valid map snapshot as an error.
-Added an empty-map GUI regression test and verify through DLL/web after rebuild.
+Added an empty-map GUI regression test and verified through DLL/web after rebuild.
 Desktop satellite styles now inherit the native palette. Field RF/audio
 acceptance and physical rotor/SDRplay testing are not claimed by this UI pass.
+Town 6dc66fa and FUBAR d9bcb0a publicly qualified; Actions and download evidence
+in BUILD_NOTES. Broader field acceptance remains separate.
+
+## ISS-0053 - External directory and physical UI acceptance (2026-10-03, OPEN)
+
+FUBAR's existing community directory HTTPS endpoint did not answer within 15 s;
+native public announcement reports failure. Local website/control/map work.
+Do not change reverse proxies, privacy or public exposure to conceal this.
+Requires server/network diagnosis outside the interface pass. Native compact
+window resize automation was obstructed by Windows PickerHost, so scrolling at
+short physical window heights needs human or unobstructed automation acceptance.
 
 ## ISS-0051 - FUBAR contract drift and missing satellite map (2026-09-30, RESOLVED IN SOURCE)
 
