@@ -71,15 +71,21 @@ unqualified; the Qt deploy warning is recorded in BUILD_NOTES.
 
 ## Remaining materials before release
 
-- Exact Qt 6.7.3 CI source/build configuration, LGPL replacement instructions
-  and bundled third-party notices. Local Qt 6.11.1 is a different build input.
+- DEC-0178 now provides exact Qt6.7.3/6.11.1 qtbase/qtsvg/qttools archives,
+  verified against official SHA256 pins, source license/attribution catalogs,
+  six SDK feature files and rebuild/replacement instructions. A source-built
+  QtSvg replacement passes pixel/plugin/application tests. Full independent
+  Qtbase rebuild/configuration reproduction and linked third-party review
+  remain open. A broad source catalog is not a linked-component SBOM.
 - DEC-0175 now stages/verifies exact source archives and patched port recipes
   for ten configured vcpkg dependencies (local: ten archives,48 recipe files).
   Full vcpkg tooling/triplets/compiler reproduction, independent rebuild and
   combined-distribution review remain required. Matching receipts are evidence,
   not completion of those remaining obligations.
 - MinGW static runtime versions, applicable notices and exception evidence for
-  the RDS DLL; Microsoft redistributable exact versions and applicable terms.
+  the RDS DLL. Microsoft exact DLL/bundle versions, signed original installer
+  and embedded end-user terms now ship. Publisher redistribution entitlement
+  is separate and still requires review; no unsupported license clearance.
 - DEC-0177 now preserves ASN.1 per-file notices, including explicit accounting
   for3 upstream headerless files;488 C/headers are hashed. Pinned ICAO CC0 and
   provenance ship, with map/country inputs and channel-list copy verification.
@@ -97,13 +103,17 @@ qualified review rather than an invented all-clear.
 
 ```text
 python scripts/test_embedded_notices.py
+python scripts/test_qt_sources.py
+python scripts/test_msvc_materials.py
 python scripts/test_package_inventory.py
 python scripts/test_stage_runtime.py
 python scripts/test_verify_release.py
 ./scripts/build_rtl_module.ps1
 ./scripts/build_sdrplay_module.ps1
 cmake --build build --config Release --target deploy -j 4
+python scripts/qt_sources.py --config build/runtime-inputs-Release.json --cache build/release-materials/qt --fetch
 python scripts/stage_runtime.py qt --config build/runtime-inputs-Release.json --stage build/deploy_staging
+python scripts/test_qt_replacement.py --config build/runtime-inputs-Release.json --stage build/deploy_staging --output build/qt-replacement-qa
 python scripts/test_rtl_runtime_package.py --stage build/deploy_staging
 python scripts/package_inventory.py generate --stage build/deploy_staging
 python scripts/package_inventory.py verify --zip <portable.zip>
@@ -126,3 +136,14 @@ It is not a replacement for the release helper or workflow. `verify` validates
 the bounded archive without extracting it. `--require-publishable` must fail
 until the remaining materials above are implemented and reviewed; no override
 flag exists. Test/build results belong in BUILD_NOTES and LOG.
+
+DEC-0178 policy T-0104-notices-5 verifies Qt source pins and recomputes notice
+catalogs inside the bounded nested ZIP. New mandatory Microsoft receipts tie
+the embedded license and actual DLL versions to the signed original installer.
+`msvcRedistVersion` is retained as the old directory label for compatibility;
+`msvcRuntimeVersion` is the actual binary version. Local label14.44.35112 versus
+binary14.44.35211.0 demonstrates why they cannot be conflated. The collector
+executes only trusted tooling, never the redistributable installer. No source
+archive is executed during inventory verification. CI runs the source-built
+QtSvg replacement test and uploads its compact result alongside the inventory,
+without uploading binaries while publication is blocked.

@@ -14,6 +14,10 @@ UNRELEASED SOURCE: T-0102 infrastructure repairs; local 16/16 gates pass,
                   independent rebuild and remaining component kit still open.
                   DEC-0177 preserves ASN.1 per-file/data notices and verifies
                   packaged channel-list inputs; local packaging/native gates pass.
+                  8eaedb8 exact source CI/inventory accepted (comment203310141).
+                  DEC-0178 stages pinned Qt sources/notices/SDK settings and
+                  exact signed Microsoft runtime/license evidence. Local QtSvg
+                  source rebuild/replacement passes; full toolchain kit remains open.
                   DEC-0176 prevents saved satellite auto-capture during GUI
                   dry-run; local four-profile no-RX gate passes.
                   T-0106 repairs reproduced control cancellation lifetime

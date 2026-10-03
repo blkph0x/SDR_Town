@@ -50,6 +50,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/test_embedded_notices.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/test_qt_sources.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/test_msvc_materials.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/test_remote_diag_server.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/test_diagnostics_packaging.py
@@ -155,6 +159,8 @@ jobs:
             --vcpkg build/vcpkg_installed/x64-windows --qt-version $runtime.qtVersion
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/vcpkg_sources.py --config build/runtime-inputs-Release.json --stage build/deploy_staging
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/qt_sources.py --config build/runtime-inputs-Release.json --cache build/release-materials/qt --fetch --stage build/deploy_staging
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Checkout pinned RTL-SDR driver module
@@ -286,6 +292,13 @@ jobs:
           python scripts/test_rtl_runtime_package.py --stage $stage
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Rebuild and test replaceable QtSvg runtime
+        shell: pwsh
+        run: |
+          python scripts/test_qt_replacement.py --config build/runtime-inputs-Release.json `
+            --stage build/deploy_staging --output build/qt-replacement-qa
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Create portable ZIP and checksum
         shell: pwsh
         run: |
@@ -370,7 +383,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: package-inventory-${{ github.run_number }}-${{ github.sha }}
-          path: build/package-inventory.json
+          path: |
+            build/package-inventory.json
+            build/qt-replacement-qa/result.json
           if-no-files-found: ignore
           retention-days: 90
 

@@ -5,6 +5,9 @@ import unittest
 from unittest.mock import patch
 
 import stage_runtime as runtime
+import msvc_materials
+import qt_sources
+from test_msvc_materials import fixture as msvc_fixture
 
 
 class StagingTests(unittest.TestCase):
@@ -138,6 +141,9 @@ class StagingTests(unittest.TestCase):
         for name in ('vcruntime140.dll', 'msvcp140.dll'):
             (crt / name).write_bytes(b'current CRT')
         self.doc.update(qtBin=str(qtbin), compiler=str(compiler), qtVersion='6.7.3')
+        installer = crt.parent.parent / 'vc_redist.x64.exe'
+        installer.write_bytes(b'installer fixture')
+        materials = msvc_fixture(crt)
 
         def deploy(command, **kwargs):
             self.assertEqual(command[0], str(qtbin / 'windeployqt.exe'))
@@ -149,14 +155,18 @@ class StagingTests(unittest.TestCase):
             (self.stage / 'platforms/qwindows.dll').write_bytes(b'Qt plugin')
             (self.stage / 'Qt6Core.dll').write_bytes(b'Qt core')
 
-        with patch.object(runtime.subprocess, 'run', side_effect=deploy):
-            runtime.deploy_qt(self.doc, self.stage)
+        with patch.object(msvc_materials, 'collect', return_value=(installer, materials)), \
+                patch.object(qt_sources, 'export') as export:
+            with patch.object(runtime.subprocess, 'run', side_effect=deploy):
+                runtime.deploy_qt(self.doc, self.stage)
+            export.assert_called_once()
+            with patch.object(runtime.subprocess, 'run', side_effect=RuntimeError('Qt failed')):
+                with self.assertRaisesRegex(RuntimeError, 'Qt failed'):
+                    runtime.deploy_qt(self.doc, self.stage)
         evidence = (self.stage / 'licenses/runtime-deployment.json').read_bytes()
         self.assertNotIn(str(self.root).encode(), evidence)
         self.assertEqual(runtime.parse_json(evidence)['msvcRedistVersion'], '14.44.35112')
-        with patch.object(runtime.subprocess, 'run', side_effect=RuntimeError('Qt failed')):
-            with self.assertRaisesRegex(RuntimeError, 'Qt failed'):
-                runtime.deploy_qt(self.doc, self.stage)
+        self.assertEqual(runtime.parse_json(evidence)['msvcRuntimeVersion'], '14.44.35211.0')
 
 
 if __name__ == '__main__':

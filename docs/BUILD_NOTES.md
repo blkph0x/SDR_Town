@@ -1,5 +1,51 @@
 # Build notes
 
+## 2026-10-04 - T-0104 Qt sources, source replacement and exact MSVC evidence
+
+DEC-0178; baseline8eaedb8, application code/version unchanged. Official SHA256
+pins verified for qtbase/qtsvg/qttools6.7.3 and6.11.1. Local Qt6.11.1 kit has
+3 archives,225 notice entries and6 selected SDK configuration files. Nested
+kit SHA2568bd41e2a178b0977c4f82e3cd4d10bda76088e3bff07bed52ed19fb5640f33e3.
+Actual package generation accepts134 files under T-0104-notices-5.
+build/package-qt-msvc-20261004.zip verifies all134 files; publishable-mode
+verification rejects the five outstanding gates as intended. Isolated RTL
+loader and missing-libusb negative fixture also PASS, without hardware I/O.
+
+MSVC folder14.44.35112 contains10 DLLs and installer VERSIONINFO14.44.35211.0.
+Authenticode validates Microsoft certificate8F985BE8FD256085C90A95D3C74580511A1DB975;
+the Burn manifest independently agrees with that version. Its9235-byte RTF
+matches the embedded SHA1 receipt; our record also uses SHA256. The unmodified
+installer and end-user terms now accompany exact DLL hashes. This does not
+establish publisher entitlement or turn Microsoft code into MIT.
+
+Replacement test initially exposed SDK-forced RelWithDebInfo/Debug configuration
+and an ambient MinGW selection. Fixed the test to use Ninja with explicit MSVC
+and its x64 environment, and prevent install-prefix override. A packaged runtime
+does not contain qoffscreen: the raster probe now uses shipped qwindows without
+showing a window, with bounded30s runtime timeout. No application/DSP fix was
+made to conceal a test failure. Source-built QtSvg6.11.1 and both plugins render
+the expected pixels, Windows reports them loaded from the disposable package,
+and SDR Town CLI help passes. Original staged file hashes remain unchanged.
+Report: build/qt-replacement-qa/result.json; full Qtbase rebuild is NOT asserted.
+
+PASS: Qt source8, Microsoft material4, inventory20, staging9, vcpkg source12,
+embedded11, release17 tests; frozen-P25 negative fixtures and3 workflow checks.
+Full native Release16/16 PASS76.24s. Application SHA256 remains
+57419c97bce700ddbf65fc7007f216b18ef6ee2e6c1ef57a632ee2a75dd5ffe7.
+Local packaging fixture is explicitly not clean-release provenance. No RF TX,
+private recording upload, SDK replacement, version bump or public binary.
+Exact final-commit source Actions and inventory/replacement download remain
+required after push. Five narrowed full-release requirements remain enforced.
+
+Prior-pass final acceptance:8eaedb80c40329068180899bbd81252e59655f6d passed
+Windows37154345677 (24m46s) and YAML37154345681. Downloaded evidence artifact
+11285292652 inventories130 files; policy T-0104-notices-4, source commit exact.
+Inventory SHA256b9d7705a7faf147b293270249646f885d046c585751dbaed2396c99be9065dbd.
+Source kit10 archives/3 downloaded patches/48 recipes,16762216 bytes,
+SHA256b7ec5b93cdc89166b62e79cd8aea5c08300a2862e0da88e33794e3ab8fe89363.
+Only inventory was published; five blockers were not bypassed. Final evidence:
+https://github.com/blkph0x/SDR_Town/commit/8eaedb80c40329068180899bbd81252e59655f6d#commitcomment-203310141 .
+
 ## 2026-10-04 - T-0104 embedded ASN.1/data notice evidence
 
 Baseline8c8b529; Windows/MSVC17.14, Qt6.11.1, existing pinned product inputs.

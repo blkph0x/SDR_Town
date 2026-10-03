@@ -125,6 +125,14 @@ Pinned ICAO CC0/provenance and hashes for map/country/channel inputs now stage;
 changed bandplans fail against input evidence. Local11 notice and19 inventory
 tests,129-file ZIP and16/16 native suites PASS. Other static components, full
 source/rebuild/runtime kit and combined-work review remain open, not certified.
+DEC-0178 adds version-pinned qtbase/qtsvg/qttools sources (CI6.7.3/local6.11.1),
+source notice catalogs and selected SDK settings, independently verified inside
+the package. Local source-built QtSvg/plugin rendering and actual CLI pass.
+Corrected Microsoft provenance: directory14.44.35112 contains actual version
+14.44.35211.0. Signed installer and exact embedded RTF now ship; publisher
+entitlement remains a separate review. Full Qtbase, vcpkg tooling/independent
+rebuild, MinGW static-runtime evidence and remaining static distribution work
+are still open. Existing public0.2.122 is not replaced or retrospectively certified.
 
 ## ISS-0058 - DTMF confidence, short bursts and input-watch gaps (2026-10-03, REPAIRED IN SOURCE)
 

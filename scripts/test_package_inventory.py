@@ -12,6 +12,9 @@ import vcpkg_sources as sources
 import embedded_notices as embedded
 from test_embedded_notices import seed
 from test_vcpkg_sources import fixture
+import qt_sources as qt
+from test_qt_sources import fixture as qt_fixture
+from test_msvc_materials import fixture as msvc_fixture
 
 
 class InventoryTests(unittest.TestCase):
@@ -25,7 +28,8 @@ class InventoryTests(unittest.TestCase):
         self.archive = self.root / 'package.zip'
         self.sha = '1' * 40
         self.payloads = ('SDR_Town.exe', 'rtlsdr.dll', 'libusb-1.0.dll', 'Qt6Core.dll', 'sdrtown_rds_dsp.dll',
-                         'sdrtown_sstv.exe', 'vcruntime140.dll', 'SoapyRTLSDR.dll', 'sdrPlaySupport.dll')
+                         'sdrtown_sstv.exe', 'vcruntime140.dll', 'vc_redist.x64.exe',
+                         'SoapyRTLSDR.dll', 'sdrPlaySupport.dll')
         for name in (*self.payloads, *inventory.required_notices(self.payloads)):
             self.write(name, b'fixture')
         self.source_doc, _, receipts, _ = fixture(self.root, {n: b'fixture' for n in self.payloads})
@@ -38,9 +42,18 @@ class InventoryTests(unittest.TestCase):
             'sourceCommit': self.sha, 'executableSha256': inventory.sha256(self.stage / 'SDR_Town.exe')}))
         self.runtime = {'schema': 1, 'qtVersion': '6.7.3', 'windeployqtSha256': 'a' * 64,
                         'msvcRedistVersion': '14.44.35112',
+                        'msvcRuntimeVersion': '14.44.35211.0',
                         'runtimeSha256': {n: inventory.sha256(self.stage / n)
-                                          for n in ('Qt6Core.dll', 'vcruntime140.dll')}}
+                                          for n in ('Qt6Core.dll', 'vcruntime140.dll', 'vc_redist.x64.exe')}}
         self.write(inventory.RUNTIME_INPUTS, inventory.json_bytes(self.runtime))
+        qt_doc, qt_cache, qt_pins = qt_fixture(self.root)
+        patcher = patch.object(qt, 'PINS', qt_pins)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        with patch('builtins.print'):
+            qt.export(qt_doc, self.stage, qt_cache)
+        for name, data in msvc_fixture(self.stage).items():
+            self.write(name, data)
         with patch('builtins.print'):
             sources.export_kit(self.source_doc, self.stage)
         self.embedded_repo = self.root / 'embedded'
@@ -144,6 +157,18 @@ class InventoryTests(unittest.TestCase):
         self.pack()
         with self.assertRaisesRegex(ValueError, 'Source checksum mismatch'):
             inventory.verify_zip(self.archive)
+
+    def test_qt_and_microsoft_materials_are_checked_inside_outer_zip(self):
+        for name in (qt.KIT, 'licenses/msvc/license.rtf'):
+            with self.subTest(name=name):
+                inventory.generate(self.stage)
+                path = self.stage / name
+                original = path.read_bytes()
+                path.write_bytes(b'corrupt' if name == qt.KIT else original + b'tamper')
+                self.pack()
+                with self.assertRaises((ValueError, zipfile.BadZipFile)):
+                    inventory.verify_zip(self.archive)
+                path.write_bytes(original)
 
     def test_runtime_deployment_identity_and_hashes(self):
         for key, value, match in (('qtVersion', '6.11.1', 'Qt identity mismatch'),

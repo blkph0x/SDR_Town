@@ -62,6 +62,7 @@ Invoke-Checked cmake @('-S', '.', '-B', 'build', '-DSDR_TOWN_ENABLE_SSTV_IMAGES=
 Invoke-Checked cmake @('--build', 'build', '--config', 'Release', '--target', 'deploy', 'sdr_town_tests', 'sdr_town_workspace_tests', 'inmarsat_live_gui_tests', 'remote_diagnostics_tests', 'antenna_control_tests', '-j', '4')
 Invoke-Checked ctest @('--test-dir', 'build', '-C', 'Release', '--output-on-failure')
 
+Invoke-Checked python @('scripts/qt_sources.py', '--config', 'build/runtime-inputs-Release.json', '--cache', 'build/release-materials/qt', '--fetch')
 Invoke-Checked python @('scripts/stage_runtime.py', 'qt', '--config', 'build/runtime-inputs-Release.json', '--stage', 'build/deploy_staging')
 
 # Record the reviewed source commit, not the later asset-metadata commit.

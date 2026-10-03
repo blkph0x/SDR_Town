@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.21)
+project(QtReplacementProbe LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Svg)
+add_executable(qt_replacement_probe main.cpp)
+target_link_libraries(qt_replacement_probe PRIVATE Qt6::Core Qt6::Gui Qt6::Svg)

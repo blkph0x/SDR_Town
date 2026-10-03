@@ -1,5 +1,18 @@
 # Development log
 
+## 2026-10-04 - T-0104 exact Qt sources and runtime replacement evidence
+
+DEC-0178 continues release-material work; no application or receive/audio
+changes. Official source pins verified for Qt6.7.3 and6.11.1. Local source kit
+contains3 module archives and225 notice entries; configured SDK settings and
+replacement instructions accompany them. Captured exact Microsoft signed
+installer terms and corrected folder-label versus DLL-version provenance.
+New tamper/bounds/version fixtures and the source-built QtSvg pixel/plugin/CLI
+replacement check pass locally. Full native16/16 suites PASS76.24s. Prior
+source8eaedb8 CI/inventory acceptance is rolled forward into BUILD_NOTES.
+Full Qt/toolchain/combined-distribution requirements remain open; no version
+bump or binary publication. Exact pushed-source Actions still required.
+
 ## 2026-10-04 - T-0104 exact embedded notices without receiver changes
 
 Rolled forward previous-pass8c8b529 successful CI/evidence and T-0107 source

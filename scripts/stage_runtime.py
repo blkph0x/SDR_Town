@@ -93,6 +93,8 @@ def version_key(path):
 
 
 def deploy_qt(doc, stage):
+    from msvc_materials import collect, EVIDENCE
+    from qt_sources import export
     stage = destination(doc['buildRoot'], stage)
     require(stage.is_dir(), 'Missing staging directory')
     exe = plain(stage / 'SDR_Town.exe')
@@ -110,6 +112,8 @@ def deploy_qt(doc, stage):
     runtime = {p.name: plain(p) for p in crt.iterdir() if p.suffix.lower() == '.dll'}
     require({'msvcp140.dll', 'vcruntime140.dll'} <= runtime.keys(), 'Incomplete MSVC runtime')
     require(all(n.lower() in MSVC_FILES for n in runtime), 'Unreviewed MSVC runtime')
+    installer, materials = collect(redist, runtime)
+    export(doc, stage, Path(doc['buildRoot']) / 'release-materials/qt')
     env = dict(os.environ, PATH=str(qtbin) + os.pathsep + os.environ.get('PATH', ''),
                VCINSTALLDIR=str(vc) + os.sep)
     # Same configured-tool flags on CI and local releases. Never run in bin/Release.
@@ -118,7 +122,13 @@ def deploy_qt(doc, stage):
                     '--no-compiler-runtime', str(exe)], env=env, check=True, timeout=180)
     for name, source in runtime.items():
         shutil.copyfile(source, stage / name)
+    shutil.copyfile(installer, stage / installer.name)
+    for name, data in materials.items():
+        target = stage / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
     files = tree_files(stage)
+    files.pop('package-inventory.json', None)  # Regenerated after deployment.
     for name in files:
         component(name)
     require('platforms/qwindows.dll' in files and 'Qt6Core.dll' in files, 'Incomplete Qt deployment')
@@ -126,12 +136,13 @@ def deploy_qt(doc, stage):
     # gate remains open; runtime file hashes alone do not satisfy it.
     evidence = {'schema': 1, 'qtVersion': doc['qtVersion'],
                 'windeployqtSha256': sha256(tool), 'msvcRedistVersion': redist.name,
+                'msvcRuntimeVersion': parse_json(materials[EVIDENCE])['runtimeVersion'],
                 'runtimeSha256': {n: sha256(p) for n, p in sorted(files.items())
                                   if component(n) in ('qt', 'msvc-runtime')}}
     evidence_path = stage / 'licenses/runtime-deployment.json'
     evidence_path.parent.mkdir(parents=True, exist_ok=True)
     evidence_path.write_bytes(json_bytes(evidence))
-    print(f'PASS: configured Qt {doc["qtVersion"]}; MSVC {redist.name}; runtime evidence staged')
+    print(f'PASS: configured Qt {doc["qtVersion"]}; MSVC {evidence["msvcRuntimeVersion"]}; runtime evidence staged')
 
 
 if __name__ == '__main__':

@@ -1,5 +1,29 @@
 # Decisions
 
+## DEC-0178 - Version-bound Qt sources and Microsoft runtime evidence (2026-10-04)
+
+Continue T-0104 / ISS-0060 without radio/audio changes. CI uses Qt6.7.3;
+local builds use6.11.1. Bundle original qtbase/qtsvg/qttools source archives
+verified against reviewed official SHA256 pins, preserve their license and
+attribution files, and capture selected SDK configuration headers. Do not
+substitute one version's source for another or equate a source archive with
+a successfully rebuilt full Qt distribution. Provide replacement instructions
+and exercise a source-built QtSvg against a disposable runtime, not the SDK.
+
+The local VC/Redist directory label14.44.35112 contains DLLs and a signed
+installer reporting14.44.35211.0. Record actual file versions separately;
+preserve the matching installer's embedded license without executing it.
+Its end-user license is not publisher redistribution permission. Keep that
+distinction and unresolved distribution/toolchain requirements explicit.
+Collection is bounded, explicit-path, hash-checked and rejects unknown
+versions, hostile archive paths, missing inputs and inconsistent receipts.
+Package verification must validate nested materials, not trust an approval
+flag or merely the outer archive's regenerated hashes.
+
+Primary sources: https://www.qt.io/development/open-source-lgpl-obligations,
+https://download.qt.io/archive/qt/, and
+https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution.
+
 ## DEC-0177 - Preserve embedded ASN.1 notices and data provenance (2026-10-04)
 
 T-0104 / ISS-0060. The actual libacars ASN.1 tree has242 C and246 header

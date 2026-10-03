@@ -15,7 +15,7 @@ INVENTORY = 'package-inventory.json'
 INPUTS = 'licenses/build-inputs.json'
 RUNTIME_INPUTS = 'licenses/runtime-deployment.json'
 SOURCE_KIT = 'licenses/vcpkg/source-materials.zip'
-POLICY = 'T-0104-notices-4'
+POLICY = 'T-0104-notices-5'
 MAX_FILES = 10000
 MAX_BYTES = 512 * 1024 * 1024
 MAX_JSON = 8 * 1024 * 1024
@@ -66,6 +66,8 @@ STATIC_NOTICES = (
 )
 KNOWN_NOTICES = {
     *STATIC_NOTICES, INPUTS, RUNTIME_INPUTS, SOURCE_KIT,
+    'licenses/qt/source-materials.zip', 'licenses/msvc/runtime-materials.json',
+    'licenses/msvc/license.rtf', 'licenses/msvc/README.txt',
     'licenses/embedded-inputs.json', 'licenses/acars/ASN1-NOTICES.txt',
     'licenses/icao/LICENSE-CC0.txt', 'licenses/icao/README.md',
     'licenses/SoapyRTLSDR-LICENSE.txt', 'licenses/SoapySDRPlay3-LICENSE.txt',
@@ -197,6 +199,11 @@ def required_notices(names):
         required.update(by_component.get(component(name), ()))
     if any(component(n) in ('qt', 'msvc-runtime') for n in names):
         required.add(RUNTIME_INPUTS)
+    if any(component(n) == 'qt' for n in names):
+        required.add('licenses/qt/source-materials.zip')
+    if any(component(n) == 'msvc-runtime' for n in names):
+        required.update(('licenses/msvc/runtime-materials.json', 'licenses/msvc/license.rtf',
+                         'licenses/msvc/README.txt', 'vc_redist.x64.exe'))
     return required
 
 
@@ -205,13 +212,13 @@ def blockers(names):
     components = {component(n) for n in names}
     result = ['ISS-0060: transitive static/source/data notice inventory and combined-distribution review incomplete']
     if 'qt' in components:
-        result.append('ISS-0060: exact Qt source/build/replacement kit and third-party notices missing')
+        result.append('ISS-0060: full Qt rebuild and linked third-party distribution review incomplete')
     if 'rtlsdr' in components:
         result.append('ISS-0060: RTL-SDR/libusb/pthreads full tooling/rebuild and distribution review incomplete')
     if 'rds-mingw' in components:
         result.append('ISS-0060: static MinGW runtime version, notices and exception evidence incomplete')
     if 'msvc-runtime' in components:
-        result.append('ISS-0060: exact Microsoft redistributable version/terms inventory incomplete')
+        result.append('ISS-0060: Microsoft publisher redistribution entitlement review incomplete')
     return result
 
 
@@ -307,6 +314,7 @@ def make_document(entries, read):
             require(len(binary) == 1 and checksum(binary[0], 'sha256') == entry['sha256'],
                     f'Runtime differs from source receipt: {name}')
     deployed = {n: e['sha256'] for n, e in entries.items() if e['component'] in ('qt', 'msvc-runtime')}
+    qt_materials, microsoft_materials = None, None
     if deployed:
         runtime = parse_json(read(RUNTIME_INPUTS))
         require(runtime.get('schema') == 1 and runtime.get('qtVersion') == inputs['qtVersion'],
@@ -315,12 +323,19 @@ def make_document(entries, read):
                 re.fullmatch(r'\d+\.\d+\.\d+', runtime.get('msvcRedistVersion', '')) is not None,
                 'Invalid runtime deployment identity')
         require(runtime.get('runtimeSha256') == deployed, 'Runtime deployment inventory mismatch: hashes')
+        if any(e['component'] == 'qt' for e in entries.values()):
+            from qt_sources import KIT as QT_KIT, MAX_KIT as QT_MAX, verify as verify_qt
+            qt_materials = verify_qt(read(QT_KIT, QT_MAX), inputs['qtVersion'])
+        if any(e['component'] == 'msvc-runtime' for e in entries.values()):
+            from msvc_materials import verify as verify_msvc
+            microsoft_materials = verify_msvc(read, entries, runtime)
     sources = verify_kit(read(SOURCE_KIT, MAX_KIT), receipts, inputs['sourceCommit'])
     embedded = verify_embedded(read(EVIDENCE), read(NOTICES), inputs['sourceCommit'], entries)
     return {'schema': 1, 'policy': POLICY, 'sourceCommit': inputs['sourceCommit'],
             'scope': 'Exact files and known build inputs; NOT full transitive license clearance',
             'releaseBlockers': blockers(entries), 'sourceMaterials': sources,
-            'embeddedMaterials': embedded, 'files': entries}
+            'embeddedMaterials': embedded, 'qtMaterials': qt_materials,
+            'microsoftMaterials': microsoft_materials, 'files': entries}
 
 
 def generate(stage):

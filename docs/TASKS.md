@@ -84,7 +84,16 @@ distribution questions. No RX/DSP or live server changes in this pass.
   dedication/provenance; verify exact bandplan copies and negative fixtures.
   Local11 notice/19 inventory/12 source/9 staging/17 release tests PASS;
   deploy,16/16 native suites, isolated RTL loader and129-file ZIP verify PASS.
-  Exact-commit source CI remains required. Five full-release gates stay open.
+  8eaedb8 Windows37154345677/YAML37154345681 PASS. Downloaded130-file
+  inventory verified; exact acceptance comment203310141. Five full-release
+  gates stay open; no new binary published.
+- [X] DEC-0178: pinned Qt6.7.3/6.11.1 module source kits, source notice catalogs,
+  SDK feature headers and replacement instructions; verified inside the ZIP.
+- [X] Exact Microsoft runtime file/bundle versions, signed original installer
+  and embedded end-user license; distinguish publisher redistribution rights.
+- [X] Local source-built QtSvg library/plugins, pixel checks and application
+  CLI replacement test; original SDK/package unchanged. Full Qtbase rebuild
+  and distribution review remain open. Exact pushed-source CI still required.
 - [ ] Full transitive/combined-distribution review, then public asset verification.
 15 new inventory tests, 17 release-verifier tests and 16/16 native suites pass
 locally. Source929cb11 Windows CI37116308564 and YAML37116308593 PASS; clean

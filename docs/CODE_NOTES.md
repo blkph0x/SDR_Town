@@ -1,5 +1,25 @@
 # Code notes (tree map)
 
+T-0104 / DEC-0178: qt_sources.py explicitly fetches only reviewed SHA256-pinned
+Qt module archives, preserves complete sources, catalogs license/attribution
+files and records six SDK configuration files. Streaming tar inspection has
+entry/expanded-byte bounds and never extracts during verification. A nested
+stored ZIP is rechecked against pins/catalogs, not just its own hash manifest.
+msvc_materials.py reads native VERSIONINFO, validates Authenticode through a
+fixed PowerShell helper and reads the signed Burn manifest/license with bounded
+7-Zip stdout; it never executes the installer. Version mismatch fails closed.
+runtime_signature.ps1 explicitly loads its own PowerShell Security module to
+avoid inherited PowerShell7/Windows PowerShell module-path incompatibility.
+
+test_qt_replacement.py uses the configured x64 MSVC environment and Ninja,
+rebuilds only pinned QtSvg, installs into a validated temporary directory,
+replaces three files in a disposable portable copy, checks renderer/image/icon
+pixels and actual DLL load paths, then runs SDR Town CLI help. The Qt SDK and
+original package are not changed; temporary paths are checked before cleanup.
+Full Qtbase rebuild is explicitly false, not inferred from this smoke test.
+Policy T-0104-notices-5 requires both new material sets whenever those runtimes
+are shipped. Remaining publication blockers are narrowed, not bypassed.
+
 T-0104 / DEC-0177: scripts/embedded_notices.py inspects the explicit libacars
 ASN.1 source subtree, preserves leading copyright headers, accounts for generated
 files and three hash-reviewed upstream headerless files, and records selected
