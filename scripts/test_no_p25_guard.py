@@ -39,6 +39,14 @@ def main() -> int:
         # Detect even a single substituted literal inside otherwise approved text.
         assert "false" in after
         assert not MODULE.infrastructure_text_allowed(path, before, after.replace("false", "true", 1))
+    path = "src/DeviceManager.cpp"
+    before = subprocess.check_output(["git", "show", "90edc4a:" + path], cwd=ROOT, text=True, encoding="utf-8")
+    after = (ROOT / path).read_text(encoding="utf-8")
+    assert MODULE.infrastructure_text_allowed(path, before, after)
+    assert not MODULE.infrastructure_text_allowed(path, before, after + "\nchange")
+    assert not MODULE.infrastructure_text_allowed(path, after, before)
+    assert not MODULE.infrastructure_text_allowed("src/P25LiveDecoder.cpp", before, after)
+    assert not MODULE.infrastructure_text_allowed(path, before, after.replace("available == 0", "available == 1", 1))
     path="src/MainWindow.cpp"
     before=subprocess.check_output(["git","show","127469d:"+path],cwd=ROOT,text=True,encoding="utf-8")
     # Historical exact-patch fixtures must not inherit later infrastructure work.

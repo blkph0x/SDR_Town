@@ -1,5 +1,12 @@
 # Decisions
 
+DEC-0171 follow-up, 2026-10-03: an added empty-poll fixture fails at 90edc4a:
+getNewIQWindowForReceiver acknowledges epoch 4 while returning no samples,
+so HF's pre-read epoch comparison has lost the reset when samples arrive.
+Publish the consumer acknowledgement only with a nonempty delivery. Keep the
+producer epoch visible on empty windows, existing retune anchoring and P25
+reset logic unchanged. Test both polling during the gap and reading after it.
+
 ## DEC-0171 - Evidence-first shared infrastructure hardening (2026-10-03)
 
 T-0102, baseline d47f000. The follow-up review found startup-only health-monitor

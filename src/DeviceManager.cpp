@@ -2361,7 +2361,6 @@ DeviceManager::RecentIQWindow DeviceManager::getNewIQWindowForReceiver(size_t de
             myLast = retuneFloor;
         }
         rx.lastConsumedAbsolute.store(myLast, std::memory_order_release);
-        rx.lastSeenStreamEpoch.store(epoch, std::memory_order_release);
     } else if (retuneFloor > 0 && myLast < retuneFloor) {
         myLast = retuneFloor;
         rx.lastConsumedAbsolute.store(myLast, std::memory_order_release);
@@ -2414,6 +2413,10 @@ DeviceManager::RecentIQWindow DeviceManager::getNewIQWindowForReceiver(size_t de
     }
 
     if (available == 0) return outWindow;
+
+    // DEC-0171: acknowledge a new epoch only when delivering samples. HF and
+    // other sample-driven consumers must not lose the reset on an empty poll.
+    rx.lastSeenStreamEpoch.store(epoch, std::memory_order_release);
 
     // If we are way behind the ring (data was overwritten), skip forward.
     // Log once per big drop and advance cursor. Return a short zero block so demod can ramp/squelch naturally (fade).

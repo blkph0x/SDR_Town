@@ -53,6 +53,12 @@ TEST_CASE("Hardware overflow creates an epoch boundary without mixing pre-loss I
     CHECK(awaitLossFixture([&] { return manager.getRecentIQWindowWithCursor(index, 4096).streamEpoch > before.streamEpoch; }));
     const auto gap = manager.getRecentIQWindowWithCursor(index, 4096);
     CHECK(gap.samples.empty());
+    const auto emptyPoll = manager.getNewIQWindowForReceiver(index, receiver, 4096);
+    REQUIRE(emptyPoll.samples.empty());
+    CHECK(emptyPoll.streamEpoch > before.streamEpoch);
+    // HF compares the receiver's acknowledged epoch before each read and
+    // processes resets only with samples. An empty poll cannot consume it.
+    CHECK(receiver.lastSeenStreamEpoch.load() == before.streamEpoch);
     LossFixture::command = 2;
     REQUIRE(awaitLossFixture([&] { return manager.getRecentIQWindowWithCursor(index, 4096).endAbsolute > before.endAbsolute; }));
     const auto after = manager.getRecentIQWindowWithCursor(index, 4096);
@@ -63,6 +69,7 @@ TEST_CASE("Hardware overflow creates an epoch boundary without mixing pre-loss I
     const auto chronological = manager.getNewIQWindowForReceiver(index, receiver, 4096);
     CHECK(chronological.streamEpoch == after.streamEpoch);
     CHECK(chronological.samples == after.samples);
+    CHECK(receiver.lastSeenStreamEpoch.load() == after.streamEpoch);
     const auto second = manager.getNewIQWindowForReceiver(index, secondReceiver, 4096);
     CHECK(second.streamEpoch == after.streamEpoch);
     CHECK(second.samples == after.samples);

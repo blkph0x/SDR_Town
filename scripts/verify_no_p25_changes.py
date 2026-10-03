@@ -55,7 +55,7 @@ SATCOM_MAINWINDOW_PATH = "src/MainWindow.cpp"
 INFRASTRUCTURE_DIGESTS = {
     "src/DeviceManager.cpp": (
         "568056eeb297ff32786255c78c51723c553ba11d1dd4940104d05a4bd3a77fd3",
-        "2d24a948dfdd1bf57ef0a77d522c2f31d7b13b354e26635891a593ecec1887e8"),
+        "78c94d69c87650c4e3b1469f826e3b0d4d309d5daec340da187533121ea01112"),
     "include/DeviceManager.h": (
         "e581e7d2f1103c5fc456576fc73d8df5d306889295013abecf8430f03c64e302",
         "1444bb34ee7da5d7bdaea0dd1d4de77d8491787704e1cbb65f92e46aaadac33b"),
@@ -67,13 +67,20 @@ INFRASTRUCTURE_DIGESTS = {
         "e1b4224b500f961de282d6e0cfe779551a5e6a44ab3bf19e6320ff97d5439019"),
 }
 
+LOSS_ACK_DIGESTS = {
+    # DEC-0171 follow-up: retain epoch notification across an empty consumer poll.
+    "src/DeviceManager.cpp": (
+        "2d24a948dfdd1bf57ef0a77d522c2f31d7b13b354e26635891a593ecec1887e8",
+        "78c94d69c87650c4e3b1469f826e3b0d4d309d5daec340da187533121ea01112"),
+}
+
 
 def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
-    pair = INFRASTRUCTURE_DIGESTS.get(path)
-    return pair is not None and pair == (
+    actual = (
         hashlib.sha256(before.encode("utf-8")).hexdigest(),
         hashlib.sha256(after.encode("utf-8")).hexdigest(),
     )
+    return actual in (INFRASTRUCTURE_DIGESTS.get(path), LOSS_ACK_DIGESTS.get(path))
 
 
 # DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.

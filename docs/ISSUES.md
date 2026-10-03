@@ -89,6 +89,9 @@ the injected test failed five assertions before repair and passes repeated
 loss/two-consumer checks afterwards. Ordinary timeout remains distinct. Global
 ownership and detached-worker recovery are still open; queue-only consumers
 still need a typed discontinuity contract. See the infrastructure ledger.
+An additional failing empty-poll test at 90edc4a is now repaired: consumer
+epoch acknowledgement waits for a nonempty delivery, so sample-driven HF
+reset detection survives polling during the loss interval.
 
 ## ISS-0056 - Test-tone hardware TX and control hardening (2026-10-03, OPEN)
 

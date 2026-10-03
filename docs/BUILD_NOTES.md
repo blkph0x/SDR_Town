@@ -1,5 +1,22 @@
 # Build notes
 
+## 2026-10-03 - T-0102 empty-poll follow-up
+
+After source push `90edc4a`, tracing the HF read/reset contract exposed a missed
+edge: an empty post-overflow read set lastSeenStreamEpoch before any samples
+arrived. Added fixture fails one assertion (epoch 4 acknowledged instead of
+remaining at 3). Moved acknowledgement after the empty-return check; retains
+existing producer epoch and retune anchoring. Rebuilt app, core tests and
+Inmarsat GUI target. All **16/16 CTest suites PASS**, 71.21 s; core **240879
+assertions PASS**; dedicated loss fixture has 34 assertions. Same optional
+external-fixture skips as the previous run. Guard mutation tests pass again.
+DTMF CLI and RDS CLI reference/parity/malformed-file smoke also passed after
+the first full build. No RF transmission or new field-voice claim.
+
+The first source run 37111242368 was still building when the additional
+reproduced fix was prepared; qualification must use the final source commit,
+not describe the superseded run as a successful final gate.
+
 ## 2026-10-03 - T-0102 local hardening regression
 
 Host: Windows/MSVC 17.14, Qt 6.11.1, existing vcpkg/Soapy/mbelib toolchain.

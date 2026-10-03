@@ -2,6 +2,10 @@
 
 ## 2026-10-03 - T-0102 evidence-led infrastructure repairs
 
+Follow-up after initial source push: proved and repaired empty-read epoch
+acknowledgement; final local 16/16 run passes in 71.21 s. Device loss fixture
+now exercises 34 assertions including the HF caller's empty-poll contract.
+
 Reproduced control framing/shutdown, diagnostic reply bounds/cancellation and
 hardware loss defects before repairing them. Added monotonic late-opt-in health
 scheduling, bounded one-shot control/status requests, fail-closed hardware tone

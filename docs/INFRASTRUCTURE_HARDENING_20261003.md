@@ -68,10 +68,16 @@ slot/ESS, vocoder, speaker gate, FM filter or AudioEngine changes were made.
 ## Evidence and remaining work
 
 Local Release build: app plus all six native test targets passed on MSVC 17.14,
-Qt 6.11.1. All 16 CTest suites pass (73.04 seconds); 240875 core assertions and
+Qt 6.11.1. All 16 CTest suites pass (71.21 seconds after the follow-up); 240879 core assertions and
 184 remote-diagnostics/control assertions pass. Optional external recordings
 and private alias fixtures skipped in the generic test invocation are not
 claimed as tested. CI uses Qt 6.7.3 and must pass independently.
+
+Follow-up test at `90edc4a` exposed premature consumer epoch acknowledgement
+on an empty post-overflow poll (one failed assertion). Acknowledgement now
+waits for a nonempty delivery, preserving the HF consumer's reset comparison.
+Producer epoch remains visible immediately; retune anchoring and P25 DSP do
+not change. The 34-assertion hardware-loss fixture and full suite pass again.
 
 The P25 guard accepts only exact reviewed before/after digests for the four
 shared files. Mutation, wrong-path and reverse-patch tests preserve rejection
