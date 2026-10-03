@@ -2,6 +2,17 @@
 
 ## 2026-10-04 - T-0104 exact sources and T-0107 dry-run isolation
 
+First source CI c93fa48 / Windows37148789176 FAILS before compilation: all18
+inventory fixtures reject "Destination must be exactly build/deploy_staging".
+Inventory fixture used unresolved TemporaryDirectory path, unlike existing
+staging/source tests; production resolves buildRoot before comparison. Resolve
+the fixture root once (same existing test convention), retaining strict staging
+path checks. YAML37148789256 PASS. Re-run inventory locally and full exact-commit
+CI after this test-only portability correction; do not retry the failing SHA.
+Local18/18 inventory tests PASS. Additional GetShortPathName-based test run
+also passes, but this host returns the same temp spelling, so it does not
+independently reproduce the runner's path alias. Clean CI is the remaining gate.
+
 Baseline c2231bf; Windows/MSVC17.14, Qt6.11.1. Local configured toolchain pointed
 to a removed SolaceBrochureStudio folder. Reconfigured only this build cache to
 C:/vcpkg/scripts/buildsystems/vcpkg.cmake with VCPKG_MANIFEST_INSTALL=OFF; no global

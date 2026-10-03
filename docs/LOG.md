@@ -2,6 +2,10 @@
 
 ## 2026-10-04 - T-0104 verified source materials; T-0107 dry-run repair
 
+Initial GitHub run37148789176 exposed the inventory fixture's noncanonical
+Windows temporary path before compiling. Aligned it with existing resolved-root
+fixtures; no production destination guard changed. Follow-up source CI required.
+
 Added deterministic, receipt-verified vcpkg source/patch/archive export and
 nested package validation, including installed DLL-to-source receipt hashes.
 Local ten-archive/48-recipe kit passes; no source execution or network fallback.

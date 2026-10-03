@@ -16,7 +16,8 @@ class InventoryTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        # Canonical Windows temp path, matching the staging/source fixtures.
+        self.root = Path(self.temp.name).resolve()
         self.stage = self.root / 'build/deploy_staging'
         self.stage.mkdir(parents=True)
         self.archive = self.root / 'package.zip'
