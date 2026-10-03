@@ -1,5 +1,9 @@
 # SDR Town tracking desk
 
+Current package work: [exact-file inventory and RTL dependency repair](PACKAGE_HARDENING_20261003.md).
+Remaining source/notice materials block new binary publication; source CI uploads
+the hash-based evidence report only until those requirements are resolved.
+
 Current repair ledger: [shared infrastructure hardening](INFRASTRUCTURE_HARDENING_20261003.md)
 tracks reproduced defects, local gates, diagnostic contracts and still-open work.
 

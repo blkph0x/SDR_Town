@@ -6,6 +6,9 @@ health monitoring and numeric RX/HF diagnostics. See the
 [repair ledger and remaining gates](docs/INFRASTRUCTURE_HARDENING_20261003.md).
 These changes are not yet a public binary release; dependency notice/source
 coverage remains a release blocker (ISS-0060). P25/FM DSP is unchanged.
+T-0104 adds missing RTL USB-runtime staging, isolated package-loader tests and
+[exact-file inventory/publication gates](docs/PACKAGE_HARDENING_20261003.md).
+Dependency source/notice work remains open; CI uploads evidence only while blocked.
 
 0.2.122 adds **Tools > DTMF Analysis**: short-burst decoding, explicit frequency
 inversion/shift/scale, sample-indexed evidence and local diagnostic export.

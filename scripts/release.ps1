@@ -50,6 +50,7 @@ if ($cmakeText -notmatch "project\(SDR_Town VERSION\s+$escapedVersion\s+LANGUAGE
 
 # DEC-0118: exercise the same packaging-contract gate as CI before building.
 Invoke-Checked python @('scripts/test_verify_release.py')
+Invoke-Checked python @('scripts/test_package_inventory.py')
 
 # 1. Ensure clean branded build
 Write-Host "`n[1/6] Running clean deploy + windeployqt + cpack..." -ForegroundColor Yellow
@@ -111,6 +112,8 @@ if (-not [string]::IsNullOrWhiteSpace($RemoteDiagnosticsUrl)) {
     Write-Host "  Injected packaged remote diagnostics config: $RemoteDiagnosticsUrl"
 }
 
+Invoke-Checked python @('scripts/test_rtl_runtime_package.py', '--stage', 'build/deploy_staging')
+Invoke-Checked python @('scripts/package_inventory.py', 'generate', '--stage', 'build/deploy_staging', '--require-publishable')
 Invoke-Checked cpack @('-G', 'NSIS', '-C', 'Release', '--config', 'build/CPackConfig.cmake')
 
 $setupName = "SDR_Town-$Version-win64-setup.exe"

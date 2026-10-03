@@ -1,5 +1,17 @@
 # Development log
 
+## 2026-10-03 - T-0104 exact-package evidence and RTL dependency repair
+
+Confirmed CI RTL DLL cannot load because the ZIP omitted libusb. Added explicit
+configured runtime staging and isolated positive/missing-dependency loader tests.
+Missing project/codec/vcpkg notices now stage from actual inputs; per-file hashes,
+source/version evidence and strict ZIP tests run before publication. Windows ZIP
+filename normalization is covered. CI/local/CPack release routes fail closed on
+remaining source/notice blockers; source CI uploads evidence only while blocked.
+Local deploy, 16/16 native suites, 15 inventory and 17 release tests plus RDS/DTMF
+smoke pass. Unexplained old/local runtime files are now visible under ISS-0064.
+No public release or complete compliance claim; T-0104 remains in progress.
+
 ## 2026-10-03 - T-0102 publication evidence and explicit remaining gates
 
 Both source repair commits pushed to master; 65e3da3 passed Windows CI

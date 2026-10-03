@@ -6,6 +6,8 @@ PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
 CURRENT VERSION IN TREE: 0.2.122 (DTMF burst analysis; public experimental asset verified)
 UNRELEASED SOURCE: T-0102 infrastructure repairs; local 16/16 gates pass,
                   65e3da3 source CI passed; binary notice/source gate ISS-0060 open.
+                  T-0104 stages missing RTL USB runtime/notices and enforces
+                  exact-package verification; full source kit still pending.
 ACTIVE PHASE: Receive decoder expansion; P25 acceptance remains open, work deferred by user
 METHOD: Athanor / SovereignFoundry process (never guess, evidence, trackers).
          This tree is NOT Athanor. Qt, SoapySDR, mbelib, miniaudio stay.

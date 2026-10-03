@@ -1,5 +1,33 @@
 # Build notes
 
+## 2026-10-03 - T-0104 local package hardening and missing USB proof
+
+Baseline e4d767e; Windows/MSVC17.14/Qt6.11.1, existing vcpkg inputs. `deploy`
+build PASS, including staged exact project/miniaudio/mbelib/Aero patent-warning
+and ten vcpkg copyright/SPDX files. `test_package_inventory.py`: **15 cases PASS**;
+`test_verify_release.py`: **17 PASS**; diagnostics-packaging and frozen-P25 guard
+self-tests PASS. First hostile backslash ZIP test exposed Windows reader
+normalization; validating orig_filename repaired it. First missing-USB loader
+fixture used an overly narrow OSError-text test; explicit child OS-loader exit
+code repaired the fixture (FileNotFoundError is an OSError subclass).
+
+`ctest --test-dir build -C Release --output-on-failure`: **16/16 PASS**, 71.70s.
+DTMF/RDS CLI smoke PASS. Optional external fixtures retain existing skips.
+No radio/DSP source changes, live receiver opens, RF TX or field audio claims.
+
+MSVC dumpbin on downloaded CI 37111782581 confirms rtlsdr.dll imports
+libusb-1.0.dll, absent from the ZIP. Both explicit required-file and isolated
+OS-loader probes FAIL before the repair. Local staged complete RTL/module
+loads; isolated duplicate with only libusb withheld FAILS as expected. No
+PATH or developer dependency directories are searched; no device API called.
+Configured libusb is now staged explicitly beside configured RTL.
+
+Actual local inventory/CPack prebuild check intentionally FAILS on untracked
+package D3Dcompiler_47.dll. Further unexplained local entries include pkgconf-7,
+pthreadVC2, graphics DLLs and translations (ISS-0064). They are not deleted or
+silently accepted. This gate is not a passing local portable-release claim.
+Full source CI and clean runner ZIP verification remain pending publication.
+
 ## 2026-10-03 - T-0102 source CI and downloaded CI package verified
 
 Source: `65e3da36e17d1615dc9d148625e70506c20f1d67` (with initial repairs in

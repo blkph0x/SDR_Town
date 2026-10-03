@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
+from package_inventory import verify_zip as verify_inventory_zip
 
 
 def digest(path):
@@ -82,6 +83,7 @@ def verify(root, version, installer):
         require(archive.read('rtlsdr.dll') ==
                 (root / 'build/vcpkg_installed/x64-windows/bin/rtlsdr.dll').read_bytes(),
                 'RTL runtime differs from configured dependency')
+    verify_inventory_zip(portable, require_publishable=True)
     key_text = (root / 'resources/update_manifest_ed25519_pub.inc').read_text()
     match = re.search(r'"([0-9a-fA-F]{64})"', key_text)
     require(match is not None, 'Embedded signing key missing')

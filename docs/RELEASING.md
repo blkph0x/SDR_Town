@@ -17,6 +17,16 @@ clearance; credits or repository URLs alone do not satisfy all obligations.
 Do not overwrite existing public assets. Documentation-only corrections may
 be pushed and checked without a version bump or new binary release.
 
+DEC-0172 enforces this gate: `package_inventory.py` stages notices and hashes
+the final contents, then verifies the compressed ZIP. While source/notice
+requirements remain open, master CI builds/tests in the runner but uploads only
+`package-inventory.json`; binary artifact upload is disabled. Release branches,
+the local helper, direct CPack and signed verifier fail closed. No metadata
+boolean can approve an unresolved component. See
+[package ledger](PACKAGE_HARDENING_20261003.md) for the remaining source kit.
+CI also loads the staged RTL/Soapy module in isolated Windows processes and
+proves that withholding libusb fails, without opening hardware.
+
 ## Mandatory CI portable release
 
 For 0.2.98 the user requested a regular Releases entry: use `release/v0.2.98`.

@@ -88,6 +88,12 @@ upstream notices but does **not** contain a complete license inventory or the
 root project license. This document does not retrospectively certify that ZIP.
 See [ISS-0060](docs/ISSUES.md#iss-0060---binary-licensesource-notice-inventory-incomplete-2026-10-03-open).
 
+T-0104 now stages project, codec and configured vcpkg notices and generates an
+exact-file/hash inventory. This does not complete transitive/source/relink
+coverage. Publication is mechanically blocked while that work remains; source
+CI uploads inventory evidence rather than another incomplete binary package.
+See the [package ledger](docs/PACKAGE_HARDENING_20261003.md).
+
 Before publishing another binary:
 
 1. Distinguish original implementations of reference ideas from actual source

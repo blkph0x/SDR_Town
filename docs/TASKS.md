@@ -31,7 +31,21 @@ make/read/stop, stub handoff and destruction. Do not simply remove the global
 driver mutex or block the GUI on an unbounded join. P25 callers require a new
 reviewed change and capture/field acceptance, not this pass's guard exception.
 
-T-0104 | queued / release blocker | Exact binary dependency notice/source kit |
+T-0104 | in_progress / release blocker | Exact binary dependency notice/source kit |
+DEC-0172: first implement exact-file inventory, staged original/vcpkg notices,
+binary-to-build-input checks and negative ZIP tests. Do not label mechanical
+coverage as complete transitive licensing or silently clear source/runtime
+distribution questions. No RX/DSP or live server changes in this pass.
+- [X] Project/codec/configured-vcpkg notices and exact input metadata staging.
+- [X] Deterministic inventory, archive integrity and malicious/missing input tests.
+- [X] Missing RTL USB runtime repair and isolated loader positive/negative gates.
+- [X] Enforce remaining source/notice block in CI, local helper and direct CPack.
+- [ ] Complete Qt/RTL/libusb/compiler-runtime source/notice/rebuild materials.
+- [ ] Qualify clean local staging without old/tooling DLLs (ISS-0064).
+- [ ] Full transitive/combined-distribution review, then public asset verification.
+15 new inventory tests, 17 release-verifier tests and 16/16 native suites pass
+locally; source CI remains the next gate. PACKAGE_HARDENING_20261003.md records
+coverage and limits. No new binary/version, no P25/DSP changes.
 ISS-0060. Inventory actual staged runtime/plugin/helper/data files and versions;
 include root license/scope/credits plus all upstream notices and required
 corresponding source/build/relink materials. Test missing/mismatched inventory,

@@ -1,5 +1,24 @@
 # Issues (canonical)
 
+## ISS-0063 - Portable RTL runtime missing its USB dependency (2026-10-03, REPAIRED IN SOURCE)
+
+T-0104 / DEC-0172. Independently downloaded CI 37111782581 ZIP contains
+rtlsdr.dll importing libusb-1.0.dll, with no libusb file in the archive.
+Fresh restricted Windows loader fails; ordinary help/DTMF/RDS tests did not
+exercise device-driver loading. Configured libusb now stages beside RTL and
+the inventory requires it. Complete and missing-USB loader fixtures pass/fail
+as expected without hardware I/O. New CI qualification remains required;
+no public binary while ISS-0060 is open. See PACKAGE_HARDENING_20261003.md.
+
+## ISS-0064 - Local runtime staging imports unexplained old/tooling DLLs (2026-10-03, OPEN)
+
+StageRuntime.cmake blindly copies root DLLs from the long-lived Release tree.
+Actual local staging includes pkgconf-7.dll, pthreadVC2.dll, graphics runtimes
+and translations outside the clean CI inventory. New inventory rejects them.
+Do not delete user build files or declare optional graphics DLLs unused based
+only on static imports. Define a clean input/dependency closure and qualify
+the actual package on an isolated loader/GUI before local release parity.
+
 ## ISS-0061 - Diagnostics lifecycle and bounded status transport (2026-10-03, REPAIRED IN SOURCE)
 
 T-0102 / DEC-0171. MainWindow starts health monitors once after startup and
@@ -58,6 +77,10 @@ assets are not replaced or retrospectively certified.
 T-0102 verification: the CI 37111782581 artifact for 65e3da3 also lacks the
 root LICENSE.txt, LICENSING.md and ACKNOWLEDGEMENTS.md. Build/smoke/provenance
 passed, but no public release was attempted. T-0104 retains this blocker.
+T-0104 / DEC-0172 stages original, codec and configured vcpkg notices; adds
+exact-file inventory and enforceable publication checks. Qt/source/relink,
+MinGW/Microsoft runtime and remaining static/data coverage are not closed.
+Source CI now uploads only evidence while blocked, not another binary ZIP.
 
 ## ISS-0058 - DTMF confidence, short bursts and input-watch gaps (2026-10-03, REPAIRED IN SOURCE)
 

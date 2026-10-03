@@ -1,5 +1,44 @@
 # Decisions
 
+## DEC-0172 - Auditable package contents before publication (2026-10-03)
+
+Runtime follow-up: dumpbin on the independently downloaded CI 37111782581
+rtlsdr.dll proves a direct libusb-1.0.dll import, but that DLL is absent from
+the ZIP. Stage the configured libusb DLL alongside the configured RTL DLL,
+then use an isolated Windows loader process with DLL-directory/System32-only
+search and a deliberately missing-libUSB negative fixture. This is a package
+closure repair, not a driver/DSP change or live-hardware acceptance claim.
+
+T-0104 / ISS-0060; baseline e4d767e. The independently downloaded 65e3da3
+CI ZIP lacks LICENSE.txt, LICENSING.md, ACKNOWLEDGEMENTS.md and several actual
+linked library notices. Stage the missing original and dependency notices from
+the checked-out/build inputs, preserving vcpkg SPDX evidence and actual source
+revisions. Do not infer a binary's source version from its filename alone.
+
+Generate a deterministic file inventory after deployment/build-info, before
+compression. Account for every staged file, reject unknown runtime files,
+unsafe paths, symlinks/reparse points and case collisions; verify inventory
+hashes and notices again inside the ZIP and after public download. Hashes here
+detect packaging errors, not malicious publisher authenticity. Keep existing
+signature/checksum/provenance verification. No token/config content is logged.
+
+Source CI builds/verifies the ZIP in the runner but uploads only the hash-based
+inventory report while blocked, not another incomplete binary package.
+Both Actions publication and the local installer
+helper must fail closed while that report has unresolved release requirements.
+A boolean in a generated manifest cannot clear the gate: verification recomputes
+policy from the shipped files. Do not publish a new version just to ship partial
+license work or alter original MIT terms/third-party notices.
+
+Qt's primary guidance requires corresponding library source (or an applicable
+offer), notices and the ability to replace/relink the library; an upstream URL
+is not this project's delivered source kit:
+https://www.qt.io/development/open-source-lgpl-obligations . Version-specific
+Qt, RTL/libusb, MinGW runtime and Microsoft redistributable coverage remain
+explicit evidence gates, not legal conclusions inferred from dynamic linking.
+Record materials still missing and require qualified review for unresolved
+combined-distribution questions. Radio/DSP and diagnostics consent stay frozen.
+
 DEC-0171 follow-up, 2026-10-03: an added empty-poll fixture fails at 90edc4a:
 getNewIQWindowForReceiver acknowledges epoch 4 while returning no samples,
 so HF's pre-read epoch comparison has lost the reset when samples arrive.

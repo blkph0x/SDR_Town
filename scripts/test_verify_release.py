@@ -13,6 +13,12 @@ from verify_release import digest, verify
 
 class ReleaseTests(unittest.TestCase):
     def setUp(self):
+        # Inventory policy has its own real ZIP positive/negative suite. These
+        # fixtures isolate the existing signature/runtime contract; production
+        # verify() must still invoke the independent publication gate.
+        gate = patch('verify_release.verify_inventory_zip', return_value={})
+        self.inventory_gate = gate.start()
+        self.addCleanup(gate.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -85,6 +91,14 @@ class ReleaseTests(unittest.TestCase):
         run.assert_called_once()
         self.assertIn('-verify', run.call_args.args[0])
         self.assertTrue(run.call_args.kwargs['check'])
+        self.inventory_gate.assert_called_once_with(self.portable, require_publishable=True)
+
+    @patch('verify_release.subprocess.run')
+    def test_inventory_failure_blocks_signature_and_publication(self, run):
+        self.inventory_gate.side_effect = ValueError('Publication blocked: test source kit missing')
+        with self.assertRaisesRegex(ValueError, 'Publication blocked'):
+            self.run_verify()
+        run.assert_not_called()
 
     @patch('verify_release.subprocess.run')
     def test_bom_build_info_is_accepted(self, run):

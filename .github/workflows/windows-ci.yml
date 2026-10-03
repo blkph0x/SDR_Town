@@ -42,6 +42,8 @@ jobs:
         run: |
           python scripts/test_verify_release.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/test_package_inventory.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/test_remote_diag_server.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/test_diagnostics_packaging.py
@@ -290,6 +292,9 @@ jobs:
           python scripts/test_dtmf_cli.py --exe $exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+          python scripts/test_rtl_runtime_package.py --stage $stage
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Create portable ZIP and checksum
         shell: pwsh
         run: |
@@ -331,10 +336,24 @@ jobs:
           $buildInfo | ConvertTo-Json | Set-Content `
             (Join-Path $stage "build-info.json") -Encoding utf8
 
+          python scripts/package_inventory.py generate --stage $stage
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item (Join-Path $stage 'package-inventory.json') build/package-inventory.json
+          $inventory = Get-Content build/package-inventory.json -Raw | ConvertFrom-Json
+          $publishable = @($inventory.releaseBlockers).Count -eq 0
+          "PACKAGE_PUBLISHABLE=$($publishable.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
           $assetName = "SDR_Town-$label-win64.zip"
           $assetPath = Join-Path $env:GITHUB_WORKSPACE "build/$assetName"
           if (Test-Path $assetPath) { Remove-Item $assetPath -Force }
           Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $assetPath -Force
+
+          python scripts/package_inventory.py verify --zip $assetPath
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($refName.StartsWith('release/')) {
+            python scripts/package_inventory.py verify --zip $assetPath --require-publishable
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
 
           $hash = (Get-FileHash $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
           $shaName = "$assetName.sha256"
@@ -352,8 +371,20 @@ jobs:
           Add-Content $env:GITHUB_STEP_SUMMARY "- Commit: ``$env:GITHUB_SHA``"
           Add-Content $env:GITHUB_STEP_SUMMARY "- SSTV backend: required and packaged"
           Add-Content $env:GITHUB_STEP_SUMMARY "- P25 pipeline guard: passed"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Publication eligible: $publishable"
+          foreach ($blocker in $inventory.releaseBlockers) { Add-Content $env:GITHUB_STEP_SUMMARY "- $blocker" }
+
+      - name: Upload package inventory evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-inventory-${{ github.run_number }}-${{ github.sha }}
+          path: build/package-inventory.json
+          if-no-files-found: ignore
+          retention-days: 90
 
       - name: Upload tested portable build
+        if: env.PACKAGE_PUBLISHABLE == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: SDR_Town-${{ github.run_number }}-${{ github.sha }}
@@ -425,6 +456,8 @@ jobs:
           $actual = (Get-FileHash $download -Algorithm SHA256).Hash.ToLowerInvariant()
           $built = (Get-FileHash "build/$env:PACKAGE_ASSET" -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $expected -or $actual -ne $built) { throw "public asset checksum mismatch" }
+          python scripts/package_inventory.py verify --zip $download --require-publishable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Expand-Archive -LiteralPath $download -DestinationPath (Join-Path $out "extracted")
           $info = Get-Content (Join-Path $out "extracted/build-info.json") -Raw | ConvertFrom-Json
           if ($info.sourceCommit -ne $env:GITHUB_SHA -or $info.workflowRun -ne $env:GITHUB_RUN_ID) {
@@ -450,3 +483,5 @@ jobs:
           python scripts/test_dtmf_cli.py --exe $exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Add-Content $env:GITHUB_STEP_SUMMARY "Public download, checksum, provenance and CLI smoke test: PASS"
+          python scripts/test_rtl_runtime_package.py --stage "$out/extracted"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

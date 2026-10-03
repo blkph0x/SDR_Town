@@ -1,5 +1,14 @@
 # Code notes (tree map)
 
+T-0104 / DEC-0172: scripts/package_inventory.py stages notices/input identity,
+builds the exact-file record and verifies bounded ZIP contents without extraction.
+Publication blockers are recomputed, not trusted from generated metadata.
+CMake stage_rtl_runtime copies configured RTL plus libusb. test_rtl_runtime_package.py
+uses fresh restricted Windows loader children and a missing-USB negative fixture,
+never hardware enumeration. Windows CI, release.ps1, VerifyPackageGate.cmake and
+verify_release.py enforce publication; blocked CI publishes the inventory only.
+This is not a complete source kit/transitive SBOM. No src/include DSP edits.
+
 T-0102 / DEC-0171: DiagnosticsHealthMonitor owns GUI monotonic/session-aware
 health scheduling; RemoteDiagnostics owns bounded status transport and atomic
 callback epochs. SdrTownControlServer owns accepted-client lifetimes, strict

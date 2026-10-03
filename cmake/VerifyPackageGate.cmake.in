@@ -1,0 +1,8 @@
+# DEC-0172: direct CPack invocation must not bypass the source/notice release gate.
+execute_process(
+    COMMAND "@Python3_EXECUTABLE@" "@CMAKE_SOURCE_DIR@/scripts/package_inventory.py"
+        generate --stage "@DEPLOY_STAGING@" --require-publishable
+    RESULT_VARIABLE gate_result)
+if(NOT gate_result EQUAL 0)
+    message(FATAL_ERROR "Package inventory/source gate failed; no installer may be published")
+endif()

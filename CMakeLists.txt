@@ -381,6 +381,10 @@ if(WIN32 AND (SoapySDR_FOUND OR SOAPY_FOUND))
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:rtlsdr::rtlsdr>" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>/rtlsdr.dll"
+        # DEC-0172: RTL is a plugin dependency, invisible to app-only Qt deploy.
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE_DIR:rtlsdr::rtlsdr>/libusb-1.0.dll"
+            "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>/libusb-1.0.dll"
         COMMENT "Staging configured RTL-SDR runtime"
         VERBATIM)
     add_dependencies(SDR_Town stage_rtl_runtime)
@@ -834,6 +838,16 @@ endif()
 
 # MUST run the deploy target first for a pristine tree (no Maul*, no *test* exes, only SDR_Town + windeployqt).
 include(cmake/SstvBackend.cmake)
+# DEC-0172: packaging evidence comes from the configured dependencies, never a
+# manually maintained collection of license labels detached from this build.
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_custom_command(TARGET deploy POST_BUILD
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/package_inventory.py" stage-notices
+        --repo "${CMAKE_SOURCE_DIR}" --stage "${DEPLOY_STAGING}"
+        --vcpkg "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}" --qt-version "${Qt6_VERSION}"
+    VERBATIM)
+configure_file(cmake/VerifyPackageGate.cmake.in "${CMAKE_BINARY_DIR}/VerifyPackageGate.cmake" @ONLY)
+set(CPACK_PRE_BUILD_SCRIPTS "${CMAKE_BINARY_DIR}/VerifyPackageGate.cmake")
 #   cmake --build build --config Release --target deploy
 #   then (in build/bin/Release) windeployqt ... then re-run deploy target, then cpack.
 if(EXISTS "${DEPLOY_STAGING}/SDR_Town.exe")
