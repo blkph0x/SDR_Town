@@ -7,7 +7,8 @@ rtlsdr.dll importing libusb-1.0.dll, with no libusb file in the archive.
 Fresh restricted Windows loader fails; ordinary help/DTMF/RDS tests did not
 exercise device-driver loading. Configured libusb now stages beside RTL and
 the inventory requires it. Complete and missing-USB loader fixtures pass/fail
-as expected without hardware I/O. New CI qualification remains required;
+as expected without hardware I/O. Clean CI37116308564 at929cb11 passes the
+same isolated loader, packaging and native/GUI regression gates;
 no public binary while ISS-0060 is open. See PACKAGE_HARDENING_20261003.md.
 
 ## ISS-0064 - Local runtime staging imports unexplained old/tooling DLLs (2026-10-03, OPEN)

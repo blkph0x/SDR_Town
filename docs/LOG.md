@@ -1,5 +1,15 @@
 # Development log
 
+## 2026-10-03 - T-0104 clean Actions package evidence
+
+Pushed929cb11; Windows37116308564/YAML37116308593 PASS. Clean runner verifies
+RTL plus the formerly missing libusb and rejects the missing-USB fixture.
+Native/GUI/replay/SSTV and smoke pass;122-file inventory and ZIP hashes pass.
+Downloaded and checked the sole inventory artifact; no binary upload or new
+release occurred because the five source/notice requirements remain unresolved.
+BUILD_NOTES records hashes and run URLs. Source repair is verified; T-0104's
+complete source-kit/release work and ISS-0064 local staging cleanup remain open.
+
 ## 2026-10-03 - T-0104 exact-package evidence and RTL dependency repair
 
 Confirmed CI RTL DLL cannot load because the ZIP omitted libusb. Added explicit

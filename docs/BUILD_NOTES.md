@@ -1,5 +1,27 @@
 # Build notes
 
+## 2026-10-03 - T-0104 clean source CI and downloaded inventory verified
+
+Source `929cb1101b521d58f3b05debbae1232cb76e99b8` passed Windows CI in23m56s:
+https://github.com/blkph0x/SDR_Town/actions/runs/37116308564
+YAML validation also PASS:
+https://github.com/blkph0x/SDR_Town/actions/runs/37116308593
+Clean driver/app/native/GUI/replay/SSTV gates, DTMF/RDS smoke and the isolated
+RTL/module loader positive/missing-USB negative fixture PASS. Zero frozen P25
+paths changed. Inventory generation and compressed-ZIP verification both PASS:
+**122 files**, **five explicitly unresolved publication requirements**.
+
+Downloaded the sole Actions artifact, the hash-only inventory report (not a
+binary archive): `package-inventory-517-929cb1101b521d58f3b05debbae1232cb76e99b8`.
+Report SHA256 `8488f9f675fb39c916b66d76a5b213932a18a67018eb0dabbfa5d9014bdd738e`.
+It binds source929cb11 and includes root LICENSE plus configured libusb:
+libusb SHA256 `29e444ecae2549bb21f66a0034adef71da1c7f90ad3ee33ff46f659bb8479840`.
+GitHub artifact API confirms only that inventory was uploaded. Binary artifact
+upload/public release/public download steps were skipped as required, not
+failed or silently represented as a release. No tag/version bump occurred.
+Unresolved source/notice materials and local staging drift remain T-0104 /
+ISS-0060/0064; no live RF qualification or full compliance claim.
+
 ## 2026-10-03 - T-0104 local package hardening and missing USB proof
 
 Baseline e4d767e; Windows/MSVC17.14/Qt6.11.1, existing vcpkg inputs. `deploy`

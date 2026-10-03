@@ -44,7 +44,9 @@ distribution questions. No RX/DSP or live server changes in this pass.
 - [ ] Qualify clean local staging without old/tooling DLLs (ISS-0064).
 - [ ] Full transitive/combined-distribution review, then public asset verification.
 15 new inventory tests, 17 release-verifier tests and 16/16 native suites pass
-locally; source CI remains the next gate. PACKAGE_HARDENING_20261003.md records
+locally. Source929cb11 Windows CI37116308564 and YAML37116308593 PASS; clean
+ZIP/loader gates PASS and downloaded122-file inventory verified. Evidence-only
+artifact upload confirmed. PACKAGE_HARDENING_20261003.md records
 coverage and limits. No new binary/version, no P25/DSP changes.
 ISS-0060. Inventory actual staged runtime/plugin/helper/data files and versions;
 include root license/scope/credits plus all upstream notices and required

@@ -33,6 +33,11 @@ No RX, demodulator, P25, vocoder, speaker or consent code changes.
 
 ## Evidence semantics
 
+Source929cb11 passed Windows CI37116308564 and YAML37116308593. Clean runner
+loader/native/GUI/replay/smoke and ZIP verification PASS;122 files inventoried.
+Downloaded inventory verified, with no binary uploaded while the five source/
+notice requirements remain open. Exact hashes and run URLs are in BUILD_NOTES.
+
 `licenses/build-inputs.json` records the source commit, configured Qt version,
 actual pinned submodule commits, vcpkg versions/license declarations and known
 vcpkg DLL hashes. Full vcpkg SPDX records are retained beside their notices.
