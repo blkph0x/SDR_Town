@@ -249,6 +249,7 @@ RemoteDiagnosticsClient::RemoteDiagnosticsClient(QObject* parent)
 
 void RemoteDiagnosticsClient::configure(const RemoteDiagnosticsConfig& cfg)
 {
+    stopWithoutSending(); // Old replies must never cross a consent/configuration epoch.
     if (!m_network) m_network = new QNetworkAccessManager(this);
     if (!m_timer) {
         m_timer = new QTimer(this);
@@ -284,7 +285,8 @@ QJsonObject RemoteDiagnosticsClient::deliveryStatistics() const {
         {"queueDropped",double(m_queueDropped)},{"budgetDeferred",double(m_budgetDropped)},
         {"oversizeDropped",double(m_oversizeDropped)},{"queued",m_queue.size()},
         {"coalesced",double(m_coalesced)},{"ingressDropped",double(m_inputDropped.load())},
-        {"inFlight",m_inFlight},{"lastHttpStatus",m_lastHttpStatus}};
+        {"inFlight",m_inFlight},{"lastHttpStatus",m_lastHttpStatus},
+        {"statusInFlight",!m_statusReply.isNull()},{"statusFailures",double(m_statusFailures)}};
 }
 
 bool RemoteDiagnosticsClient::enabled() const
@@ -348,6 +350,8 @@ void RemoteDiagnosticsClient::submit(QString type, QString severity, QJsonObject
     }
     submitOnOwnerThread(std::move(type), std::move(severity), std::move(payload));
 }
+
+RemoteDiagnosticsClient::~RemoteDiagnosticsClient() { stopWithoutSending(); }
 
 void RemoteDiagnosticsClient::drainInput() {
     QList<InputEvent> input;
@@ -416,7 +420,6 @@ void RemoteDiagnosticsClient::submitOnOwnerThread(QString type, QString severity
 
 void RemoteDiagnosticsClient::checkClientStatus(QObject* context, std::function<void(const QJsonObject&)> callback)
 {
-    if (!enabled() || m_clientId.isEmpty() || !callback) return;
     if (QThread::currentThread() != thread()) {
         const QPointer<RemoteDiagnosticsClient> self(this);
         QPointer<QObject> ctx(context);
@@ -425,7 +428,21 @@ void RemoteDiagnosticsClient::checkClientStatus(QObject* context, std::function<
         }, Qt::QueuedConnection);
         return;
     }
+    if (!enabled() || m_clientId.isEmpty() || !callback) return;
 
+    const auto epoch = m_transportGeneration;
+    const auto generation = epoch->load(std::memory_order_acquire);
+    const QPointer<RemoteDiagnosticsClient> self(this);
+    QPointer<QObject> ctx(context);
+    const auto deliver = [self, ctx, epoch, generation, callback = std::move(callback)](const QJsonObject& result) {
+        if (!ctx || !self || !self->enabled() || epoch->load(std::memory_order_acquire) != generation) return;
+        QMetaObject::invokeMethod(ctx, [epoch, generation, callback, result] {
+            // The callback can outlive the finished signal in the GUI queue.
+            // Session validity is published atomically for this cross-thread check.
+            if (epoch->load(std::memory_order_acquire) == generation) callback(result);
+        }, Qt::QueuedConnection);
+    };
+    if (m_statusReply) { deliver({{"ok", false}, {"error", "status-request-in-progress"}}); return; }
     QNetworkRequest request(clientStatusUrlForEndpoint(m_cfg.endpoint, m_clientId));
     request.setTransferTimeout(m_cfg.requestTimeoutMs);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,QNetworkRequest::ManualRedirectPolicy);
@@ -435,12 +452,24 @@ void RemoteDiagnosticsClient::checkClientStatus(QObject* context, std::function<
         request.setRawHeader("Authorization", QByteArray("Bearer ") + m_cfg.bearerToken.toUtf8());
     }
 
-    QPointer<QObject> ctx(context);
     QNetworkReply* reply = m_network->get(request);
-    connect(reply, &QNetworkReply::finished, this, [reply, ctx, callback = std::move(callback)]() mutable {
+    m_statusReply = reply;
+    // DEC-0171: bound decompressed bytes and absolute lifetime, not just idle time.
+    constexpr qint64 maxStatusBytes = 128 * 1024;
+    reply->setReadBufferSize(maxStatusBytes + 1);
+    QTimer::singleShot(m_cfg.requestTimeoutMs, reply, [reply] { if (!reply->isFinished()) reply->abort(); });
+    connect(reply, &QNetworkReply::readyRead, reply, [reply] {
+        if (reply->bytesAvailable() > maxStatusBytes) reply->abort();
+    });
+    connect(reply, &QNetworkReply::finished, this, [this, reply, generation, deliver]() {
+        reply->deleteLater();
+        if (generation != m_transportGeneration->load(std::memory_order_acquire)) return;
+        m_statusReply.clear();
         QJsonObject result;
         result["ok"] = false;
-        if (reply->error() == QNetworkReply::NoError) {
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (reply->error() == QNetworkReply::NoError && status >= 200 && status < 300 &&
+            reply->bytesAvailable() <= maxStatusBytes) {
             QJsonParseError err{};
             const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll(), &err);
             if (err.error == QJsonParseError::NoError && doc.isObject()) {
@@ -449,14 +478,10 @@ void RemoteDiagnosticsClient::checkClientStatus(QObject* context, std::function<
                 result["error"] = "invalid-json";
             }
         } else {
-            result["error"] = reply->errorString();
+            result["error"] = "status-transport-failed";
         }
-        reply->deleteLater();
-        if (ctx) {
-            QMetaObject::invokeMethod(ctx, [callback = std::move(callback), result]() mutable {
-                callback(result);
-            }, Qt::QueuedConnection);
-        }
+        if (!result["ok"].toBool()) ++m_statusFailures;
+        deliver(result);
     });
 }
 
@@ -534,13 +559,15 @@ void RemoteDiagnosticsClient::pump()
     connect(reply, &QNetworkReply::readyRead, reply, [reply]() {
         if (reply->bytesAvailable() > 4096) reply->abort();
     });
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    const auto generation = m_transportGeneration->load(std::memory_order_acquire);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, generation]() {
+        reply->deleteLater();
+        if (generation != m_transportGeneration->load(std::memory_order_acquire)) return;
         m_lastHttpStatus=reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const auto ack=QJsonDocument::fromJson(reply->readAll()).object();
         if (reply->error()!=QNetworkReply::NoError || m_lastHttpStatus<200 || m_lastHttpStatus>=300 ||
             !ack.value("ok").toBool(false)) ++m_networkDropped;
         else ++m_acknowledged;
-        reply->deleteLater();
         m_inFlight = false;
         if (!m_queue.isEmpty()) schedulePump(m_cfg.minIntervalMs);
     });
@@ -712,6 +739,7 @@ QString remoteDiagnosticsClientId()
 void RemoteDiagnosticsClient::stopWithoutSending()
 {
     m_accepting.store(false,std::memory_order_release);
+    m_transportGeneration->fetch_add(1, std::memory_order_acq_rel);
     {std::lock_guard<std::mutex> lock(m_inputMutex);m_input.clear();}
     m_cfg.enabled = false;
     m_queue.clear();
@@ -720,6 +748,8 @@ void RemoteDiagnosticsClient::stopWithoutSending()
     if (m_network) {
         for (auto* reply : m_network->findChildren<QNetworkReply*>()) reply->abort();
     }
+    m_statusReply.clear();
+    m_inFlight = false;
 }
 
 void remoteDiagnosticsShutdown(bool flushPending)

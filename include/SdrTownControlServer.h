@@ -5,6 +5,7 @@
 #include <QObject>
 #include <QString>
 #include <QTcpServer>
+#include <QSet>
 
 #include <functional>
 
@@ -17,6 +18,9 @@ public:
         quint16 port = 8765;
         QString token;
         bool allowUnauthenticated = true;
+        // DEC-0171: loopback resource limits, independent of radio timing.
+        int maxConnections = 16;
+        int requestTimeoutMs = 10000;
     };
 
     using RequestHandler = std::function<QJsonObject(const QString& method,
@@ -24,6 +28,7 @@ public:
                                                      const QJsonObject& body)>;
 
     explicit SdrTownControlServer(QObject* parent = nullptr);
+    ~SdrTownControlServer() override;
 
     bool start(const Config& config, QString* error = nullptr);
     void stop();
@@ -32,6 +37,7 @@ public:
     quint16 port() const noexcept;
 
     void setRequestHandler(RequestHandler handler);
+    QJsonObject statistics() const;
 
 private:
     void handleIncomingConnection();
@@ -46,4 +52,7 @@ private:
     QTcpServer m_server;
     Config m_config;
     RequestHandler m_handler;
+    QSet<QTcpSocket*> m_clients;
+    quint64 m_accepted = 0, m_rejected = 0, m_timeouts = 0;
+    quint64 m_dispatched = 0, m_handlerErrors = 0;
 };

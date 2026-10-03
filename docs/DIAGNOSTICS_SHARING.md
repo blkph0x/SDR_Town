@@ -1,5 +1,10 @@
 # Diagnostics sharing (0.2.115)
 
+Unreleased T-0102 adds session-correct late opt-in monitoring, bounded status
+lookups, RX overflow/read/driver-lock counters, nonblocking HF snapshots and
+local-control health. These are numeric health metadata, not raw recordings.
+See [repair ledger and limits](INFRASTRUCTURE_HARDENING_20261003.md).
+
 ## Automatic session evidence
 
 Once **Help > Share Diagnostic Reports** is enabled, each launch reports PC

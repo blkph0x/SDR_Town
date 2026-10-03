@@ -1,5 +1,43 @@
 # Build notes
 
+## 2026-10-03 - T-0102 local hardening regression
+
+Host: Windows/MSVC 17.14, Qt 6.11.1, existing vcpkg/Soapy/mbelib toolchain.
+Built Release SDR_Town, sdr_town_tests, sdr_town_workspace_tests,
+inmarsat_live_gui_tests, remote_diagnostics_tests and antenna_control_tests.
+`ctest --test-dir build -C Release --output-on-failure`: **16/16 PASS**, 73.04 s.
+Core: 491 passed / 2 external-fixture skips; **240875 assertions PASS**.
+Workspace: 45 passed / 6 optional recording/private-alias skips; 956 assertions.
+Diagnostics/control: **184 assertions / 16 cases PASS**. Fake-driver lifecycle,
+Inmarsat GUI, aircraft, rotor and SSTV helper suites pass. No on-air TX or new
+live P25 acceptance is claimed; existing live receive sessions were not opened.
+
+Hardware-loss fixture first reproduced five failures against the old path:
+no epoch advance, old samples still exposed, 2048-sample mixed window and wrong
+start index. Repair passes initial and repeated loss/two-cursor tests; timeouts
+do not increment epoch. Tone mock rejects unauthorized and failed configuration
+with no activation/writes and no leaked fake handles; accepted mock path writes.
+`python scripts/test_no_p25_guard.py`: PASS, including DEC-0171 exact-patch
+allowance and negative mutations/wrong path/reverse patch. Shared RX is changed
+only at proven overflow; P25/FM/vocoder/audio engine implementations unchanged.
+
+Binary publication remains blocked by ISS-0060 exact-artifact notice/source
+coverage. Source Actions result will be recorded after push; no release claimed.
+
+## 2026-10-03 - T-0102 regression-first infrastructure hardening
+
+Baseline d47f000; Windows/MSVC17.14, Qt6.11.1, existing vcpkg build. Before edits,
+all16 existing CTest suites PASS in71.13s. New production-control-server fixtures
+first FAIL8 assertions: stop retains accepted socket, invalid/duplicate lengths
+and chunked framing dispatch commands, JSON precedes auth, exception leaks.
+After bounded control repair all of those plus client-cap/deadline/restart/
+single-dispatch tests PASS. Status HTTP fixtures first FAIL3 assertions:
+oversize JSON accepted, trickled response outlives deadline, callback after
+opt-out. Bounded reply+epoch cancellation repairs them. RemoteDiagnostics now
+PASS in1.57s including late-opt-in/session-reset health scheduler tests.
+No real network service or RF transmitter was used. Full-build and release
+gates remain pending; these results do not qualify hardware or P25 audio.
+
 ## 2026-10-03 - T-0101 reference attribution correction
 
 Baseline d0443b4. Rechecked `git log --follow -- include/P25SdrtrunkTune.h`,

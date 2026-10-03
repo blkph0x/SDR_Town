@@ -28,6 +28,7 @@
 
 #ifdef HAVE_SOAPYSDR
 #include <SoapySDR/Logger.hpp>
+#include <SoapySDR/Errors.hpp>
 #endif
 
 #ifdef HAVE_SOAPYSDR
@@ -811,6 +812,7 @@ void DeviceManager::resetStreamBuffers(StreamState& st) {
         st.ringWriteIdx.store(0, std::memory_order_release);
         st.totalSamplesWritten.store(0, std::memory_order_release);
         st.retuneValidFromAbsolute.store(0, std::memory_order_release);
+        st.hardwareLossFloor.store(0, std::memory_order_release);
         st.streamEpoch.fetch_add(1, std::memory_order_acq_rel);
     }
 }
@@ -2293,7 +2295,8 @@ DeviceManager::RecentIQWindow DeviceManager::getRecentIQWindowWithCursor(size_t 
     const uint64_t total = st.totalSamplesWritten.load(std::memory_order_acquire);
     if (cap == 0 || st.iqRing.empty() || total == 0) return outWindow;
 
-    const uint64_t available = std::min<uint64_t>(total, static_cast<uint64_t>(cap));
+    const uint64_t floor = std::min(total, st.hardwareLossFloor.load(std::memory_order_acquire));
+    const uint64_t available = std::min<uint64_t>(total - floor, static_cast<uint64_t>(cap));
     const size_t toRead = static_cast<size_t>(std::min<uint64_t>(available, static_cast<uint64_t>(maxSamples)));
     // Return the newest contiguous ring window in chronological order.
     // Fast bulk copy (1-2 segments) to minimize time holding ringMutex.
@@ -2639,6 +2642,15 @@ void DeviceManager::setupSoapyForSDRplay() {
     for (const auto& error : runtime.errors) spdlog::warn("SDRplay runtime: {}", error);
     sdrplaySetupStatus_ = runtime.description();
     spdlog::info("{}", sdrplaySetupStatus_);
+}
+
+DeviceManager::RxHealthSnapshot DeviceManager::getRxHealth(size_t index) const {
+    auto* st = streamState(index);
+    if (!st) return {};
+    return {st->rxReads.load(std::memory_order_relaxed), st->rxTimeouts.load(std::memory_order_relaxed),
+        st->rxErrors.load(std::memory_order_relaxed), st->rxOverflows.load(std::memory_order_relaxed),
+        st->rxLiveIoWaitUs.load(std::memory_order_relaxed), st->rxReadUs.load(std::memory_order_relaxed),
+        st->hardwareLossFloor.load(std::memory_order_acquire)};
 }
 
 uint64_t DeviceManager::setCenterFreq(size_t index, double freqHz) {
@@ -2995,8 +3007,26 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                 void* buffs[] = { buff.data() };
                 int numElems = 0;
                 {
+                    const auto waiting = std::chrono::steady_clock::now();
                     std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+                    const auto reading = std::chrono::steady_clock::now();
+                    st.rxLiveIoWaitUs.fetch_add(std::chrono::duration_cast<std::chrono::microseconds>(reading - waiting).count(), std::memory_order_relaxed);
+                    st.rxReads.fetch_add(1, std::memory_order_relaxed);
                     numElems = dev->readStream(stream, buffs, blockSize, flags, timeNs, 100000);
+                    st.rxReadUs.fetch_add(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - reading).count(), std::memory_order_relaxed);
+                    if (numElems == SOAPY_SDR_OVERFLOW) {
+                        // DEC-0171: loss is known, its sample count is not. Publish
+                        // the boundary before any post-loss IQ without resetting
+                        // the absolute received-sample clock or fabricating PCM.
+                        std::scoped_lock lossLock(st.ringMutex, st.queueMutex);
+                        const auto total = st.totalSamplesWritten.load(std::memory_order_acquire);
+                        st.hardwareLossFloor.store(total, std::memory_order_release);
+                        st.retuneValidFromAbsolute.store(total, std::memory_order_release);
+                        st.streamEpoch.fetch_add(1, std::memory_order_acq_rel);
+                        st.rxOverflows.fetch_add(1, std::memory_order_relaxed);
+                        st.iqQueue.clear();
+                        st.frontBlockReadOffset = 0;
+                    }
                     // A mode switch holds the same lock and invalidates the ring.
                     // Publish before releasing it so pre-switch IQ cannot enter
                     // the new epoch after resetStreamBuffers().
@@ -3011,6 +3041,7 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                     const auto msSinceReadErrorLog = std::chrono::duration_cast<std::chrono::milliseconds>(
                         errorNow - lastReadErrorLogTime).count();
                     if (numElems == -1) { // SOAPY_SDR_TIMEOUT: common during retune/stop or USB stalls.
+                        st.rxTimeouts.fetch_add(1, std::memory_order_relaxed);
                         ++consecutiveReadTimeouts;
                         if (consecutiveReadTimeouts == 1 || msSinceReadErrorLog >= 5000) {
                             lastReadErrorLogTime = errorNow;
@@ -3021,6 +3052,7 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                             }
                         }
                     } else {
+                        st.rxErrors.fetch_add(1, std::memory_order_relaxed);
                         consecutiveReadTimeouts = 0;
                         if (consecutiveReadErrors == 1 || msSinceReadErrorLog >= 1000) {
                             lastReadErrorLogTime = errorNow;
@@ -3028,9 +3060,9 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                         }
                     }
                     if (numElems == -4) { // SOAPY_SDR_OVERFLOW - samples were dropped before we read
-                        static std::atomic<int> overflowCount{0};
-                        int c = ++overflowCount;
-                        if (c % 50 == 1) spdlog::warn("OVERFLOW (-4) - IQ samples lost (count={}). Larger blocks + lean RX thread help.", c);
+                        const auto c = st.rxOverflows.load(std::memory_order_relaxed);
+                        if (c % 50 == 1) spdlog::warn("Device {} IQ hardware loss: overflows={} epoch={} floor={} (lost sample count unknown)",
+                            index, c, st.streamEpoch.load(), st.hardwareLossFloor.load());
                     }
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
                     continue;
@@ -3242,8 +3274,17 @@ bool DeviceManager::startToneTx(size_t index, const TxParams& params)
     }
 
     TxParams p = params;
+    if (p.attemptHardware && (!p.hardwareAuthorized ||
+        !std::isfinite(p.centerHz) || p.centerHz <= 0 ||
+        !std::isfinite(p.sampleRate) || p.sampleRate < 1e5 ||
+        !std::isfinite(p.gainDb) || !std::isfinite(p.toneHz) ||
+        std::abs(p.toneHz) >= p.sampleRate / 2 ||
+        !std::isfinite(p.amplitude) || p.amplitude <= 0 || p.amplitude > 1)) {
+        spdlog::error("Hardware tone TX rejected: explicit authorization and valid parameters required");
+        return false;
+    }
     if (!std::isfinite(p.sampleRate) || p.sampleRate < 1e5) p.sampleRate = 2.0e6;
-    if (!std::isfinite(p.toneHz) || p.toneHz < 0.0) p.toneHz = 1000.0;
+    if (!std::isfinite(p.toneHz)) p.toneHz = 1000.0;
     if (!std::isfinite(p.amplitude) || p.amplitude <= 0.0) p.amplitude = 0.25;
     p.amplitude = std::min(1.0, std::max(0.01, p.amplitude));
     if (!std::isfinite(p.centerHz) || p.centerHz <= 0.0) {
@@ -3255,20 +3296,6 @@ bool DeviceManager::startToneTx(size_t index, const TxParams& params)
     }
 
     const bool wantDump = !p.dumpPath.empty();
-    bool deviceCanTx = false;
-    std::string driver;
-    {
-        std::lock_guard<std::mutex> lk(devicesMutex);
-        if (index < devices.size()) {
-            deviceCanTx = devices[index].canTx;
-            driver = devices[index].driver;
-            if (driver == "hackrf" || driver == "plutosdr" || driver == "lime" ||
-                driver == "uhd" || driver == "bladerf") {
-                deviceCanTx = true;
-            }
-            if (driver == "rtlsdr") deviceCanTx = false;
-        }
-    }
 
     stopTx(index);
     ensureTxStreamSlot(index);
@@ -3285,7 +3312,21 @@ bool DeviceManager::startToneTx(size_t index, const TxParams& params)
 
     bool hardwareOk = false;
 #ifdef HAVE_SOAPYSDR
-    if (p.attemptHardware && deviceCanTx) {
+    if (p.attemptHardware) {
+        SoapySDR::Device* localDev = nullptr;
+        SoapySDR::Stream* localStream = nullptr;
+        std::unique_lock<std::mutex> soapyLiveLock(gSoapyLiveIoMutex, std::defer_lock);
+        const auto discardFailedOpen = [&] {
+            if (localDev && localStream) {
+                try { localDev->deactivateStream(localStream); } catch (...) {}
+                try { localDev->closeStream(localStream); } catch (...) {}
+            }
+            if (localDev) { try { SoapySDR::Device::unmake(localDev); } catch (...) {} }
+            hardwareOk = false;
+            tx.soapyDev = nullptr;
+            tx.txStream = nullptr;
+            tx.hardwareActive.store(false, std::memory_order_release);
+        };
         try {
             std::map<std::string, std::string> args;
             {
@@ -3295,42 +3336,48 @@ bool DeviceManager::startToneTx(size_t index, const TxParams& params)
                     if (!devices[index].serial.empty()) args["serial"] = devices[index].serial;
                 }
             }
-            std::lock_guard<std::mutex> soapyLiveLock(gSoapyLiveIoMutex);
+            soapyLiveLock.lock();
             SoapySDR::Device* dev = SoapySDR::Device::make(args);
             if (!dev) throw std::runtime_error("Soapy Device::make returned null for TX");
+            localDev = dev;
+            if (dev->getNumChannels(SOAPY_SDR_TX) == 0)
+                throw std::runtime_error("opened device has no TX channel");
 
             const double useRate = p.sampleRate;
-            try { dev->setSampleRate(SOAPY_SDR_TX, 0, useRate); } catch (...) {}
-            if (p.centerHz > 0.0) {
-                try { dev->setFrequency(SOAPY_SDR_TX, 0, p.centerHz); } catch (const std::exception& ex) {
-                    spdlog::warn("TX setFrequency failed: {}", ex.what());
-                }
-            }
-            try {
-                if (!devices.empty()) {
-                    // Prefer TX antenna when listed
-                    auto ants = dev->listAntennas(SOAPY_SDR_TX, 0);
-                    if (!ants.empty()) {
-                        try { dev->setAntenna(SOAPY_SDR_TX, 0, ants.front()); } catch (...) {}
-                    }
-                }
-            } catch (...) {}
-            try {
+            const auto within = [](const SoapySDR::RangeList& ranges, double value) {
+                return std::any_of(ranges.begin(), ranges.end(), [value](const auto& r) {
+                    return value >= r.minimum() && value <= r.maximum();
+                });
+            };
+            if (!within(dev->getSampleRateRange(SOAPY_SDR_TX, 0), useRate) ||
+                !within(dev->getFrequencyRange(SOAPY_SDR_TX, 0), p.centerHz) ||
+                !within(dev->getFrequencyRange(SOAPY_SDR_TX, 0), p.centerHz + p.toneHz))
+                throw std::runtime_error("TX frequency or rate outside driver limits");
+            const auto gainRange = dev->getGainRange(SOAPY_SDR_TX, 0);
+            if (!(p.gainDb >= gainRange.minimum() && p.gainDb <= gainRange.maximum()))
+                throw std::runtime_error("TX gain outside driver limits");
+            dev->setSampleRate(SOAPY_SDR_TX, 0, useRate);
+            dev->setFrequency(SOAPY_SDR_TX, 0, p.centerHz);
+            auto ants = dev->listAntennas(SOAPY_SDR_TX, 0);
+            if (!ants.empty()) dev->setAntenna(SOAPY_SDR_TX, 0, ants.front());
+            if (dev->hasGainMode(SOAPY_SDR_TX, 0)) {
                 dev->setGainMode(SOAPY_SDR_TX, 0, false);
-                dev->setGain(SOAPY_SDR_TX, 0, p.gainDb);
-            } catch (...) {
-                try { dev->setGain(SOAPY_SDR_TX, 0, p.gainDb); } catch (...) {}
+                if (dev->getGainMode(SOAPY_SDR_TX, 0)) throw std::runtime_error("TX automatic gain remains enabled");
             }
+            dev->setGain(SOAPY_SDR_TX, 0, p.gainDb);
+            // DEC-0171: confirm settings before activation; readback is not RF calibration.
+            if (!(std::abs(dev->getSampleRate(SOAPY_SDR_TX, 0) - useRate) <= 1.0) ||
+                !(std::abs(dev->getFrequency(SOAPY_SDR_TX, 0) - p.centerHz) <= 1.0) ||
+                !(std::abs(dev->getGain(SOAPY_SDR_TX, 0) - p.gainDb) <= 0.01))
+                throw std::runtime_error("TX configuration readback mismatch");
 
             SoapySDR::Stream* stream = dev->setupStream(SOAPY_SDR_TX, "CF32");
+            localStream = stream;
             if (!stream) {
-                SoapySDR::Device::unmake(dev);
                 throw std::runtime_error("setupStream(TX) returned null");
             }
             const int act = dev->activateStream(stream);
             if (act != 0) {
-                dev->closeStream(stream);
-                SoapySDR::Device::unmake(dev);
                 throw std::runtime_error("activateStream(TX) failed code=" + std::to_string(act));
             }
             tx.soapyDev = dev;
@@ -3341,16 +3388,18 @@ bool DeviceManager::startToneTx(size_t index, const TxParams& params)
                          index, p.centerHz / 1e6, useRate / 1e6, p.gainDb, p.toneHz);
         } catch (const std::exception& ex) {
             spdlog::warn("startToneTx hardware path failed on device {}: {}", index, ex.what());
-            hardwareOk = false;
-            tx.soapyDev = nullptr;
-            tx.txStream = nullptr;
-            tx.hardwareActive.store(false, std::memory_order_release);
+            discardFailedOpen();
+        } catch (...) {
+            spdlog::warn("startToneTx hardware path failed on device {}: unknown driver exception", index);
+            discardFailedOpen();
         }
     }
-#else
-    (void)deviceCanTx;
-    (void)driver;
 #endif
+
+    if (p.attemptHardware && !hardwareOk) {
+        tx.runtimeState = "hardware-rejected";
+        return false;
+    }
 
     if (!hardwareOk && !wantDump && !p.allowFileOnlyFallback) {
         tx.runtimeState = "failed";

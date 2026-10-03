@@ -20,6 +20,8 @@ struct Diagnostics {
 };
 enum ResetReason : uint32_t { Start = 1, Explicit = 2, Configuration = 4, Identity = 8, InvalidInput = 16 };
 Diagnostics diagnostics(const void* owner);
+// UI/telemetry must skip a busy DSP block, never wait for it or create state.
+bool tryDiagnostics(const void* owner, Diagnostics& out);
 
 // Returns true only for the analogue HF modes owned by this isolated path.
 bool supports(DemodMode mode) noexcept;

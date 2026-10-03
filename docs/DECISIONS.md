@@ -1,5 +1,58 @@
 # Decisions
 
+## DEC-0171 - Evidence-first shared infrastructure hardening (2026-10-03)
+
+T-0102, baseline d47f000. The follow-up review found startup-only health-monitor
+activation, unbounded diagnostic status replies and control socket lifetime,
+alongside ISS-0055/0056/0060. Repair independently of working P25/audio DSP.
+Keep the health scheduler available after startup with no snapshots or uploads
+while consent is absent. Measure elapsed time monotonically; a consent/session
+transition resets heartbeat/rate-limit history, never reports an opt-out gap.
+Existing 8-second stall and 60-second report limits remain telemetry policy,
+not decoder timing. Test transitions with an injected monotonic time source.
+
+Control resource policy: at most 16 accepted connections, 64 KiB total request,
+10-second absolute request/response lifetime (configurable for local tests).
+These are bounded loopback HTTP resource budgets, not RF tuning constants.
+Reject ambiguous/invalid lengths and unsupported transfer encoding, authenticate
+before parsing JSON, never echo handler exception details. Stop aborts accepted
+clients; each socket can dispatch at most one command. Keep all existing route,
+token and FUBAR response semantics for valid requests.
+
+Status lookup uses the configured absolute transport deadline, a 128 KiB reply
+budget and one in-flight lookup per client. Opt-out aborts and discards replies.
+Do not download RF content or change consent through these endpoints. Regression
+tests use loopback fake peers only and exercise success, overflow, slow/stalled
+peers, cancellation and reconfiguration, not a real diagnostics service.
+
+Shared hardware changes require separate fault-injection tests and retained
+replay baselines. Do not mechanically remove the process-wide Soapy mutex or
+replace a driver hang with an unbounded GUI-thread join. Record unresolved
+hardware acceptance explicitly; successful unit tests are not live RF proof.
+
+Tone TX safety: hardware is off by default. The explicit CLI parameter rf=on
+authorizes only that command, never persisted, and is separate from GUI P25
+arming. Query the opened driver's actual TX channel/rate/frequency/gain ranges;
+reject invalid/unverifiable values before stream activation. Configuration
+exceptions or readback mismatch fail the request, never silently fall back to
+file output after a requested hardware operation. Readback tolerance is 1 Hz
+for rate/frequency and 0.01 dB for gain: a strict configuration confirmation
+policy, not a calibration assertion. File-only tone generation stays available.
+Hardware CLI tone duration is bounded to 60 seconds and must be positive and
+finite. No RF emitted during tests; fake drivers exercise all rejection paths.
+
+Hardware overflow evidence: the fake Soapy readStream emits 1024 samples, -4,
+then1024 distinguishable samples. Baseline fails5 assertions: epoch unchanged,
+old IQ remains available during the gap and recent windows join both sides.
+On SOAPY_SDR_OVERFLOW, publish a loss floor and new epoch under ringMutex
+while retaining the shared live-I/O lock. Clear consuming-queue backlog. Keep
+absolute received-sample counters monotonic; the missing RF sample count is
+unknown and must not be invented. Recent windows cannot cross the loss floor;
+chronological cursors use the existing epoch/floor contract. Do not change
+normal timeout semantics or normal/retune/P25 filter/audio behavior. Publish
+per-device read/loss/timing counters off the RX loop, not per-sample log text.
+
+
 ## DEC-0170 - Ideas are not code provenance findings (2026-10-03)
 
 T-0101, baseline d0443b4. The maintainer clarifies that the P25 implementation

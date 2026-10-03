@@ -6,11 +6,13 @@
 #include <QObject>
 #include <QString>
 #include <QUrl>
+#include <QPointer>
 #include "ProcessPerformance.h"
 
 #include <functional>
 #include <mutex>
 #include <atomic>
+#include <memory>
 
 struct RemoteDiagnosticsConfig {
     bool enabled = false;
@@ -29,6 +31,7 @@ struct RemoteDiagnosticsConfig {
 class RemoteDiagnosticsClient : public QObject {
 public:
     explicit RemoteDiagnosticsClient(QObject* parent = nullptr);
+    ~RemoteDiagnosticsClient() override;
 
     void configure(const RemoteDiagnosticsConfig& cfg);
     bool enabled() const;
@@ -65,6 +68,9 @@ private:
 
     RemoteDiagnosticsConfig m_cfg;
     class QNetworkAccessManager* m_network = nullptr;
+    QPointer<class QNetworkReply> m_statusReply;
+    std::shared_ptr<std::atomic<quint64>> m_transportGeneration = std::make_shared<std::atomic<quint64>>(0);
+    quint64 m_statusFailures = 0;
     class QTimer* m_timer = nullptr;
     class QTimer* m_performanceTimer = nullptr;
     ProcessPerformance m_performance;

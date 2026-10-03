@@ -477,3 +477,15 @@ TEST_CASE("HF rate conversion rejects aliases from multi-megasample SDR streams"
                 std::max(1.0e-9, tailRms(aliased)) * 20.0);
     }
 }
+TEST_CASE("HF telemetry is per-owner and never creates decoder state", "[hf][diagnostics]") {
+    int owner = 0; HfDemod::Diagnostics d;
+    CHECK_FALSE(HfDemod::tryDiagnostics(&owner, d));
+    double rms = 0;
+    const std::vector<std::complex<float>> iq(4800, {0.1f, 0.0f});
+    HfDemod::demodulate(&owner, iq, 48000, 7e6, 7e6, DemodMode::AM, rms);
+    REQUIRE(HfDemod::tryDiagnostics(&owner, d));
+    CHECK(d.blocks == 1); CHECK(d.inputSamples == iq.size());
+    CHECK(d.effectiveBandwidthHz > 0);
+    HfDemod::release(&owner);
+    CHECK_FALSE(HfDemod::tryDiagnostics(&owner, d));
+}

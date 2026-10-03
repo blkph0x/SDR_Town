@@ -158,6 +158,11 @@ public:
         bool cursorDiscontinuity = false;
     };
     RecentIQWindow getRecentIQWindowWithCursor(size_t index, size_t maxSamples);
+    struct RxHealthSnapshot {
+        uint64_t reads = 0, timeouts = 0, errors = 0, overflows = 0;
+        uint64_t liveIoWaitUs = 0, readUs = 0, lastLossAbsolute = 0;
+    };
+    RxHealthSnapshot getRxHealth(size_t index) const;
 
     // S0 / audit-followup-2 (P0): proper cursor-based consumption.
     // The receiver's lastConsumedAbsolute is updated. Returns only *new* samples in chronological order.
@@ -243,7 +248,8 @@ public:
         double toneHz = 1000.0;     // baseband complex LO offset tone
         double amplitude = 0.25;    // peak |I|/|Q| scale (0..1)
         std::string dumpPath;       // optional host-endian CF32 dump (always written if set)
-        bool attemptHardware = true;
+        bool attemptHardware = false;
+        bool hardwareAuthorized = false; // DEC-0171: per-command, never persisted.
         // If true and hardware open fails, still run dump/null sink (default).
         bool allowFileOnlyFallback = true;
     };
@@ -320,6 +326,9 @@ private:
         std::atomic<size_t> ringWriteIdx{0};       // wrapped write position
         std::atomic<uint64_t> totalSamplesWritten{0};
         std::atomic<uint64_t> streamEpoch{1};      // bumped whenever the ring/cursor epoch is reset
+        std::atomic<uint64_t> hardwareLossFloor{0}; // no window may bridge proven hardware loss
+        std::atomic<uint64_t> rxReads{0}, rxTimeouts{0}, rxErrors{0}, rxOverflows{0};
+        std::atomic<uint64_t> rxLiveIoWaitUs{0}, rxReadUs{0};
         // Absolute sample index of the first IQ block captured after a MHz-scale retune.
         // Receivers must not pre-roll before this point or they decode stale pre-retune RF.
         std::atomic<uint64_t> retuneValidFromAbsolute{0};

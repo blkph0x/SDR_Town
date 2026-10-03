@@ -49,6 +49,33 @@ PROTECTED_PATTERNS: tuple[str, ...] = (
 )
 
 SATCOM_MAINWINDOW_PATH = "src/MainWindow.cpp"
+# DEC-0171 / T-0102: reviewed RX hardware-loss boundary and numeric counters,
+# explicit fail-closed tone TX, and opt-in health observers only. No P25 DSP,
+# vocoder, slot/security gate or AudioEngine changes are accepted by this pair.
+INFRASTRUCTURE_DIGESTS = {
+    "src/DeviceManager.cpp": (
+        "568056eeb297ff32786255c78c51723c553ba11d1dd4940104d05a4bd3a77fd3",
+        "2d24a948dfdd1bf57ef0a77d522c2f31d7b13b354e26635891a593ecec1887e8"),
+    "include/DeviceManager.h": (
+        "e581e7d2f1103c5fc456576fc73d8df5d306889295013abecf8430f03c64e302",
+        "1444bb34ee7da5d7bdaea0dd1d4de77d8491787704e1cbb65f92e46aaadac33b"),
+    "src/MainWindow.cpp": (
+        "fb2a5565a37718fad24a7f245ae31287d8906ebc10a3da3df1998a3176f36aa9",
+        "7354c636fb731ac250c0aa9aa1a900cadc78baa465ff9e617d43d5d97f97b40d"),
+    "include/MainWindow.h": (
+        "5d8a753ed52b64ec793a51e0eca949158f3ce029a24fb14b6f1788b4d1c7439b",
+        "e1b4224b500f961de282d6e0cfe779551a5e6a44ab3bf19e6320ff97d5439019"),
+}
+
+
+def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
+    pair = INFRASTRUCTURE_DIGESTS.get(path)
+    return pair is not None and pair == (
+        hashlib.sha256(before.encode("utf-8")).hexdigest(),
+        hashlib.sha256(after.encode("utf-8")).hexdigest(),
+    )
+
+
 # DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.
 DIAGNOSTICS_DIGESTS = {
     "src/MainWindow.cpp": (
@@ -528,6 +555,10 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
+        if args.paths is None and path in INFRASTRUCTURE_DIGESTS:
+            if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
+                print(f"P25 guard: accepted exact DEC-0171 infrastructure repair: {path}")
+                continue
         if args.paths is None and path in ("src/MainWindow.cpp", "src/MainWindowP25Orchestration.cpp"):
             if dtmf_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
                 print(f"P25 guard: accepted exact DEC-0168 DTMF observer-only edit: {path}")

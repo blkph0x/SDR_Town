@@ -1609,7 +1609,7 @@ int runCLI(int argc, char* argv[]) {
                       << "  p25 voicetest <sigmf|dir> <voice_mhz> [ms] [skip=<ms>] [slot=0|1] [tg=] [nac= wacn= system=] [clear|enc] [stream|legacy] [probe|noprobe] [windowms=720] [hopms=0|auto] [wav=out.wav] [oppwav=companion.wav] [minframes=N] [minaudio=S] - continuous Phase 2 voice replay + automation gates\n"
                       << "  p25 voice               - show P25 voice backend status + Phase 2 validation-log path\n"
                       << "  tx status|arm|disarm|config|ptt on|ptt off - P25 clear TX shell\n"
-                      << "  tx tone <dev> <mhz> [hz=1000] [sec=2] [gain=20] [dump=path.cf32] - Sprint 1 tone TX / IQ dump\n"
+                      << "  tx tone <dev> <mhz> [hz=1000] [sec=2, max 60] [gain=20] [dump=path.cf32] [rf=on] - file-only unless RF explicitly authorized\n"
                       << "  tx stop [dev]           - stop tone/TX on device (or all)\n"
                       << "  tx encode [sec=2] [backend=energy|silence] [mic=i] - Sprint 3 mic→AMBE placeholder + dibit skeleton dump\n"
                       << "  audio list              - list playback devices\n"
@@ -2438,6 +2438,7 @@ int runCLI(int argc, char* argv[]) {
                 double toneHz = 1000.0;
                 double seconds = 2.0;
                 double gainDb = 20.0;
+                bool authorizeRf = false;
                 std::string dumpPath;
                 std::string tok;
                 while (iss >> tok) {
@@ -2450,9 +2451,12 @@ int runCLI(int argc, char* argv[]) {
                     else if (k == "sec" || k == "seconds") seconds = std::strtod(v.c_str(), nullptr);
                     else if (k == "gain") gainDb = std::strtod(v.c_str(), nullptr);
                     else if (k == "dump" || k == "file") dumpPath = v;
+                    else if (k == "rf") authorizeRf = v == "on";
                 }
-                if (mhz <= 0.0) {
-                    std::cout << "tx tone <dev> <mhz> [hz=1000] [sec=2] [gain=20] [dump=path.cf32]\n";
+                if (!std::isfinite(mhz) || mhz <= 0.0 || dev < 0 || !std::isfinite(seconds) ||
+                    seconds <= 0 || seconds > 60) {
+                    std::cout << "tx tone <dev> <mhz> [hz=1000] [sec=2, max 60] [gain=20] [dump=path.cf32] [rf=on]\n"
+                              << "File-only by default. rf=on explicitly authorizes hardware transmission.\n";
                 } else {
                     if (dumpPath.empty()) {
                         const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -2465,8 +2469,9 @@ int runCLI(int argc, char* argv[]) {
                     tp.toneHz = toneHz;
                     tp.gainDb = gainDb;
                     tp.dumpPath = dumpPath;
-                    tp.attemptHardware = true;
-                    tp.allowFileOnlyFallback = true;
+                    tp.attemptHardware = authorizeRf;
+                    tp.hardwareAuthorized = authorizeRf;
+                    tp.allowFileOnlyFallback = !authorizeRf;
                     {
                         auto* di = mgr.getDevice(static_cast<size_t>(dev));
                         if (di && di->sampleRate > 1e5) tp.sampleRate = di->sampleRate;

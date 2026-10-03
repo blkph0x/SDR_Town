@@ -254,6 +254,12 @@ QJsonArray diagnosticsDeviceInventory(bool includeRuntimeState)
                 const auto cursor=mgr.getRecentIQWindowWithCursor(i,1);
                 row["iqWritten"] = QString::number(cursor.endAbsolute);
                 row["streamEpoch"] = QString::number(cursor.streamEpoch);
+                const auto health = mgr.getRxHealth(i);
+                row["rxHealth"] = QJsonObject{{"reads", QString::number(health.reads)},
+                    {"timeouts", QString::number(health.timeouts)}, {"errors", QString::number(health.errors)},
+                    {"overflows", QString::number(health.overflows)}, {"liveIoWaitUs", QString::number(health.liveIoWaitUs)},
+                    {"readUs", QString::number(health.readUs)}, {"lastLossAbsolute", QString::number(health.lastLossAbsolute)},
+                    {"semantics", "lifetime counters; missing RF sample count unknown"}};
             }
             rows.append(row);
         }

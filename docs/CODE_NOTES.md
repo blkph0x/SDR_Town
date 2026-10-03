@@ -1,5 +1,18 @@
 # Code notes (tree map)
 
+T-0102 / DEC-0171: DiagnosticsHealthMonitor owns GUI monotonic/session-aware
+health scheduling; RemoteDiagnostics owns bounded status transport and atomic
+callback epochs. SdrTownControlServer owns accepted-client lifetimes, strict
+single-request framing, error redaction and numeric counters. DeviceManager
+publishes hardware-overflow epoch/floor before new samples and owns cumulative
+driver wait/read/error counters; no per-sample logging. startToneTx validates
+explicit authorization and real driver configuration before activation; CLI
+defaults to file-only. HfDemod::tryDiagnostics never creates state or blocks DSP;
+MainWindow/AppBootstrap publish bounded numeric snapshots under existing consent.
+Tests: test_control_server, test_remote_diagnostics, test_hardware_loss,
+test_tx_safety and test_hf_demod. Shared-file P25 guard is exact-digest only.
+Global device leasing, driver-hang recovery and binary inventory are still open.
+
 T-0099 / DEC-0168: DtmfDecoder owns per-stream analysis and sample-time debounce;
 queued options, bounded events and published history share a mutex. DtmfReport
 is the bounded JSON contract used by CLI and local GUI export. DtmfWindow owns

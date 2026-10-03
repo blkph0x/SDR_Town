@@ -463,11 +463,7 @@ private:
     std::unique_ptr<P25TxVoicePacketizer> p25TxPacketizer;
     std::vector<P25AmbeEncodedFrame> p25TxAmbeSession;
     qint64 p25TxLastEncodeLogMs = 0;
-    QTimer* diagnosticsHeartbeatTimer = nullptr;
-    QTimer* diagnosticsResourceTimer = nullptr;
-    qint64 diagnosticsLastHeartbeatMs = 0;
-    qint64 diagnosticsLastUiStallReportMs = 0;
-    qint64 diagnosticsLastResourceReportMs = 0;
+    class DiagnosticsHealthMonitor* diagnosticsHealthMonitor = nullptr;
     QStringList p25LogLines;
     QStringList p25VisibleLogPending;
     bool p25VisibleLogFlushQueued = false;

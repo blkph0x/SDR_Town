@@ -1,5 +1,47 @@
 # Task list (canonical)
 
+T-0102 | in progress | Shared infrastructure hardening and diagnostic evidence |
+DEC-0171; baseline d47f000 / 0.2.122. User authorizes the review follow-up and
+requires tracked progress. Preserve P25/FM DSP, vocoders, speaker gates and
+recording consent. Complete independent testable repairs before shared RX work.
+- [X] Diagnostics opt-in lifecycle, monotonic heartbeat and bounded status GET (local tests pass).
+- [X] Loopback control request bounds, shutdown, parsing and error redaction (local tests pass).
+- [X] Explicit fail-closed hardware tone-TX configuration and authorization (mock-driver tests; no RF TX).
+- [ ] Binary dependency notices/source inventory and release packaging gate.
+- [X] Hardware-loss publication with executable overflow/epoch tests (live field acceptance still open).
+- [ ] Physical-device ownership tokens and worker-lifecycle fault tests.
+- [X] Per-stream read/wait/error counters and nonblocking HF diagnostic publication.
+- [ ] Per-stream latency histograms, operation correlation and independent hang watchdog.
+- [X] Local Release build and 16/16 regression suites; exact-patch guard negative tests.
+- [ ] Source CI, Actions release and downloaded-asset verification (binary gate ISS-0060).
+RF qualification, physical two-SDR arbitration and full driver-hang recovery
+must remain open unless their acceptance evidence is actually obtained.
+Repair details and follow-up order: INFRASTRUCTURE_HARDENING_20261003.md.
+
+T-0103 | queued | Device ownership and worker lifecycle qualification |
+Depends on T-0102 loss-boundary/source regression evidence; ISS-0055. Define
+stable physical identity and generation-bound consumer tokens, including shared
+SDRplay tuner domains and ambiguous duplicate serials. Inventory every raw tune/
+release caller before migration. Gates: two independent devices, two consumers
+of one device, stale token after reopen, forced takeover, unplug, slow/stuck
+make/read/stop, stub handoff and destruction. Do not simply remove the global
+driver mutex or block the GUI on an unbounded join. P25 callers require a new
+reviewed change and capture/field acceptance, not this pass's guard exception.
+
+T-0104 | queued / release blocker | Exact binary dependency notice/source kit |
+ISS-0060. Inventory actual staged runtime/plugin/helper/data files and versions;
+include root license/scope/credits plus all upstream notices and required
+corresponding source/build/relink materials. Test missing/mismatched inventory,
+download the eventual public asset and verify it. Do not treat dependency URLs,
+upstream acknowledgements or a green compiler run as completion of this gate.
+
+T-0105 | queued | Diagnostic timing and field-quality expansion |
+Bounded per-stream latency histograms and operation IDs; independent GUI/worker
+hang detection with opt-in privacy and rate limits. Then measured WFM blocker/
+RDS/CPU sweeps, fading AM/weak adjacent SSB and hand-keyed Morse/DTMF corpora.
+Existing clear NFM/WFM/P25 receive behavior remains the regression baseline.
+
+
 T-0101 | done (documentation correction) | Correct reference-versus-code licensing attribution |
 DEC-0170. User clarifies SDRTrunk was used for principles, not copied code.
 Recheck helper history and technical decisions; retract the unsupported

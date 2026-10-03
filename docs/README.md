@@ -1,5 +1,8 @@
 # SDR Town tracking desk
 
+Current repair ledger: [shared infrastructure hardening](INFRASTRUCTURE_HARDENING_20261003.md)
+tracks reproduced defects, local gates, diagnostic contracts and still-open work.
+
 Project licensing: [MIT grant](../LICENSE.txt),
 [scope, reference distinction and distribution gate](../LICENSING.md), and
 [acknowledgements](../ACKNOWLEDGEMENTS.md).

@@ -2,6 +2,7 @@
 #include "FmDiagnosticsLog.h"
 #include "DiagnosticsMenu.h"
 #include "DiagnosticsObserver.h"
+#include "DiagnosticsHealthMonitor.h"
 #include <QPushButton>
 #include <QLineEdit>
 #include <QDoubleSpinBox>
@@ -192,6 +193,98 @@ TEST_CASE("Diagnostics menu cancellation and opt-out preserve explicit consent")
     action->setChecked(true);action->trigger();
     CHECK_FALSE(action->isChecked());CHECK_FALSE(settings.value("remoteDiagnostics/consent").toBool());
     settings.remove("remoteDiagnostics/consent");
+}
+
+TEST_CASE("Health monitoring follows late opt-in and resets session timing", "[health]") {
+    QObject owner; QString session;
+    int starts = 0, stalls = 0, pressure = 0; qint64 lastStall = 0;
+    DiagnosticsHealthMonitor monitor(&owner, [&] { return session; }, [&] { ++starts; },
+        [&](qint64 ms) { ++stalls; lastStall = ms; }, [&] { ++pressure; return true; });
+    monitor.poll(0); monitor.poll(600000);
+    CHECK(starts == 0); CHECK(stalls == 0); CHECK(pressure == 0);
+    session = "first"; monitor.poll(700000); CHECK(starts == 1);
+    monitor.poll(701000); CHECK(stalls == 0);
+    monitor.poll(710000); CHECK(stalls == 1); CHECK(lastStall == 9000);
+    monitor.poll(720000); CHECK(stalls == 1);
+    monitor.poll(760000); CHECK(pressure == 1);
+    session.clear(); monitor.poll(2000000);
+    CHECK(pressure == 1); CHECK(stalls == 1);
+    session = "second"; monitor.poll(3000000); CHECK(starts == 2);
+    monitor.poll(3001000); CHECK(stalls == 1); CHECK(pressure == 1);
+    monitor.poll(3060000); CHECK(stalls == 2); CHECK(pressure == 2);
+}
+
+TEST_CASE("Diagnostic status replies are bounded and consent cancellation discards callbacks", "[status]") {
+    QTcpServer server; REQUIRE(server.listen(QHostAddress::LocalHost));
+    QByteArray body = "{\"ok\":true}";
+    bool trickle = false;
+    QObject::connect(&server, &QTcpServer::newConnection, &server, [&] {
+        while (auto* socket = server.nextPendingConnection()) {
+            QObject::connect(socket, &QTcpSocket::readyRead, socket, [&, socket] {
+                socket->readAll();
+                if (socket->property("answered").toBool()) return;
+                socket->setProperty("answered", true);
+                if (trickle) {
+                    socket->write("HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\n\r\n");
+                    auto* timer = new QTimer(socket);
+                    QObject::connect(timer, &QTimer::timeout, socket, [socket] { socket->write(" "); });
+                    timer->start(20);
+                } else {
+                    socket->write("HTTP/1.1 200 OK\r\nContent-Length: " + QByteArray::number(body.size()) + "\r\n\r\n" + body);
+                    socket->disconnectFromHost();
+                }
+            });
+        }
+    });
+    RemoteDiagnosticsConfig cfg; cfg.enabled = true; cfg.requestTimeoutMs = 150;
+    cfg.endpoint = QUrl("http://127.0.0.1:" + QString::number(server.serverPort()) + "/ingest");
+    RemoteDiagnosticsClient client; client.configure(cfg);
+    QObject context; int replies = 0; QJsonObject result;
+    const auto callback = [&](const QJsonObject& value) { result = value; ++replies; };
+    SECTION("valid status") {
+        client.checkClientStatus(&context, callback);
+        REQUIRE(waitFor([&] { return replies == 1; })); CHECK(result["ok"].toBool());
+    }
+    SECTION("oversize valid JSON must not pass") {
+        body = "{\"ok\":true,\"padding\":\"" + QByteArray(256 * 1024, 'x') + "\"}";
+        client.checkClientStatus(&context, callback);
+        REQUIRE(waitFor([&] { return replies == 1; })); CHECK_FALSE(result["ok"].toBool());
+    }
+    SECTION("trickled bytes cannot extend the absolute deadline") {
+        trickle = true;
+        client.checkClientStatus(&context, callback);
+        REQUIRE(waitFor([&] { return replies == 1; })); CHECK_FALSE(result["ok"].toBool());
+    }
+    SECTION("opt-out discards a pending status") {
+        client.checkClientStatus(&context, callback);
+        client.stopWithoutSending();
+        QCoreApplication::processEvents(); QCoreApplication::processEvents();
+        CHECK(replies == 0);
+    }
+    SECTION("one status request at a time and reconfiguration invalidates old replies") {
+        trickle = true;
+        int retiredReplies = 0;
+        client.checkClientStatus(&context, [&](const auto&) { ++retiredReplies; });
+        client.checkClientStatus(&context, callback);
+        REQUIRE(waitFor([&] { return replies == 1; }));
+        CHECK(result["error"].toString() == "status-request-in-progress");
+        client.configure(cfg);
+        CHECK_FALSE(client.deliveryStatistics()["statusInFlight"].toBool());
+        trickle = false;
+        client.checkClientStatus(&context, callback);
+        REQUIRE(waitFor([&] { return replies == 2; }));
+        CHECK(result["ok"].toBool());
+        CHECK(retiredReplies == 0);
+        CHECK(client.deliveryStatistics()["statusFailures"].toInt() == 0);
+    }
+    SECTION("client destruction discards pending callbacks") {
+        auto temporary = std::make_unique<RemoteDiagnosticsClient>();
+        temporary->configure(cfg);
+        temporary->checkClientStatus(&context, callback);
+        temporary.reset();
+        QCoreApplication::processEvents(); QCoreApplication::processEvents();
+        CHECK(replies == 0);
+    }
 }
 
 TEST_CASE("Opted-in GUI actions are bounded private and session scoped") {

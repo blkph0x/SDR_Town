@@ -727,6 +727,21 @@ Diagnostics diagnostics(const void* owner) {
     return state->diagnostics;
 }
 
+bool tryDiagnostics(const void* owner, Diagnostics& out) {
+    std::shared_ptr<State> state;
+    {
+        std::unique_lock lock(registryMutex(), std::try_to_lock);
+        if (!lock.owns_lock()) return false;
+        const auto found = registry().find(owner);
+        if (found == registry().end()) return false;
+        state = found->second;
+    }
+    std::unique_lock lock(state->mutex, std::try_to_lock);
+    if (!lock.owns_lock()) return false;
+    out = state->diagnostics;
+    return true;
+}
+
 void release(const void* owner) noexcept {
     if (!owner) return;
     std::lock_guard<std::mutex> lock(registryMutex());

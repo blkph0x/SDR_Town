@@ -241,6 +241,7 @@ set(SDR_TOWN_SOURCES
     include/P25TrafficChannelProcessor.h
     src/Receiver.cpp
     src/SdrTownControlServer.cpp
+    src/DiagnosticsHealthMonitor.cpp
     include/SdrTownControlServer.h
     src/RemoteDiagnostics.cpp
     src/FmDiagnosticsLog.cpp
@@ -450,6 +451,8 @@ if(BUILD_TESTS)
     tests/test_sstv_live_input.cpp
     tests/test_sstv_rate_converter.cpp
     tests/test_devicemanager.cpp
+    tests/test_tx_safety.cpp
+    tests/test_hardware_loss.cpp
     tests/test_sdrplay_profile.cpp
     tests/test_sdrplay_controls.cpp
     tests/test_rtl_bias_t.cpp
@@ -686,6 +689,8 @@ if(BUILD_TESTS)
   set_tests_properties(AntennaControl PROPERTIES TIMEOUT 40
       ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QWindowsIntegrationPlugin>")
   add_executable(remote_diagnostics_tests tests/test_remote_diagnostics.cpp
+      src/DiagnosticsHealthMonitor.cpp
+      tests/test_control_server.cpp src/SdrTownControlServer.cpp
       src/RemoteDiagnostics.cpp src/ProcessPerformance.cpp src/DiagnosticsMenu.cpp src/DiagnosticsObserver.cpp src/FmDiagnosticsLog.cpp)
   target_include_directories(remote_diagnostics_tests PRIVATE include)
   target_link_libraries(remote_diagnostics_tests PRIVATE Catch2::Catch2 Qt6::Widgets Qt6::Network)

@@ -1,5 +1,22 @@
 # Development log
 
+## 2026-10-03 - T-0102 evidence-led infrastructure repairs
+
+Reproduced control framing/shutdown, diagnostic reply bounds/cancellation and
+hardware loss defects before repairing them. Added monotonic late-opt-in health
+scheduling, bounded one-shot control/status requests, fail-closed hardware tone
+TX and numeric RX/HF/control instrumentation. Fake drivers validate rejection,
+cleanup and overflow boundaries without transmitting RF. P25/FM DSP, security/
+slot rules, mbelib and AudioEngine are unchanged. Existing recording consent
+and review/send are unchanged. All 16 local suites passed; detailed evidence,
+optional-fixture skips and limits are in BUILD_NOTES and the hardening ledger.
+
+The broader audit is not marked done: per-physical-device ownership tokens,
+stuck-driver lifecycle, full latency/correlation instrumentation, live recovery
+acceptance and ISS-0060 binary source/notice inventory remain. No binary release
+is permitted while that inventory gate is unresolved. Source publication/CI
+will be recorded after push, without replacing an existing public asset.
+
 ## 2026-10-03 - T-0101 correct the reference/code distinction
 
 Maintainer states that the P25 work uses principles, not copied code. Rechecked

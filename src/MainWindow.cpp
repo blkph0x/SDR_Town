@@ -1,4 +1,6 @@
 #include "MainWindow.h"
+#include "DiagnosticsHealthMonitor.h"
+#include "HfDemod.h"
 #include "SstvWindow.h"
 #include "DtmfWindow.h"
 #include "CwWindow.h"
@@ -7285,7 +7287,6 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             maybeShowAlphaDiagnosticsDisclosure();
         });
         QTimer::singleShot(2500, this, [this]() {
-            submitDiagnosticsStartupSnapshot();
             startDiagnosticsHealthMonitors();
         });
 
@@ -7444,6 +7445,29 @@ QJsonObject MainWindow::diagnosticsRuntimeSnapshot(const QString& reason)
             audio["underruns"] = eng->getUnderrunCount();
         }
         payload["audio"] = audio;
+        if (m_controlServer) payload["controlServer"] = m_controlServer->statistics();
+        // DEC-0171: copy receiver lifetimes, then take only nonblocking numeric
+        // snapshots. Telemetry must not wait for the HF DSP to finish a block.
+        std::vector<std::shared_ptr<Receiver>> observed;
+        {
+            std::unique_lock lock(receiversMutex, std::try_to_lock);
+            payload["receiverSnapshotBusy"] = !lock.owns_lock();
+            if (lock.owns_lock())
+                observed.assign(receivers.begin(), receivers.begin() + std::min<size_t>(receivers.size(), 8));
+        }
+        QJsonArray hf;
+        for (size_t i = 0; i < observed.size(); ++i) {
+            HfDemod::Diagnostics d;
+            if (observed[i] && HfDemod::tryDiagnostics(&observed[i]->demod, d)) {
+                hf.append(QJsonObject{{"receiverIndex", int(i)}, {"blocks", QString::number(d.blocks)},
+                    {"inputSamples", QString::number(d.inputSamples)}, {"resets", QString::number(d.resets)},
+                    {"rejectedBlocks", QString::number(d.rejectedBlocks)},
+                    {"continuousCorrections", QString::number(d.continuousCorrections)},
+                    {"effectiveBandwidthHz", d.effectiveBandwidthHz}, {"effectiveLowPassHz", d.effectiveLowPassHz},
+                    {"lastResetReasons", int(d.lastResetReasons)}});
+            }
+        }
+        payload["hf"] = hf;
         return payload;
     }
 
@@ -7504,49 +7528,31 @@ void MainWindow::submitDiagnosticsStartupSnapshot()
 
 void MainWindow::startDiagnosticsHealthMonitors()
 {
-        if (!remoteDiagnosticsEnabled()) return;
-        if (!diagnosticsHeartbeatTimer) {
-            diagnosticsLastHeartbeatMs = QDateTime::currentMSecsSinceEpoch();
-            diagnosticsHeartbeatTimer = new QTimer(this);
-            diagnosticsHeartbeatTimer->setInterval(1000);
-            connect(diagnosticsHeartbeatTimer, &QTimer::timeout, this, [this]() {
-                if (!remoteDiagnosticsEnabled()) return;
-                const qint64 now = QDateTime::currentMSecsSinceEpoch();
-                const qint64 drift = diagnosticsLastHeartbeatMs > 0 ? now - diagnosticsLastHeartbeatMs : 1000;
-                diagnosticsLastHeartbeatMs = now;
-                if (drift < 8000) return;
-                if (now - diagnosticsLastUiStallReportMs < 60000) return;
-                diagnosticsLastUiStallReportMs = now;
+        if (diagnosticsHealthMonitor) return;
+        diagnosticsHealthMonitor = new DiagnosticsHealthMonitor(this,
+            [] { return remoteDiagnosticsEnabled() ? remoteDiagnosticsSessionId() : QString(); },
+            [this] { submitDiagnosticsStartupSnapshot(); },
+            [this](qint64 drift) {
                 QJsonObject payload = diagnosticsRuntimeSnapshot("ui-stall");
                 payload["stage"] = "gui-heartbeat";
-                payload["stallMs"] = static_cast<int>(std::min<qint64>(drift, 600000));
+                payload["stallMs"] = static_cast<int>(drift);
                 remoteDiagnosticsSubmit("app.performance.ui_stall", "warn", payload);
-            });
-            diagnosticsHeartbeatTimer->start();
-        }
-        if (!diagnosticsResourceTimer) {
-            diagnosticsResourceTimer = new QTimer(this);
-            diagnosticsResourceTimer->setInterval(60000);
-            connect(diagnosticsResourceTimer, &QTimer::timeout, this, [this]() {
-                if (!remoteDiagnosticsEnabled()) return;
-                const qint64 now = QDateTime::currentMSecsSinceEpoch();
-                if (now - diagnosticsLastResourceReportMs < 300000) return;
+            },
+            [this] {
                 QJsonObject system = diagnosticsSystemHealthPayload();
                 const QJsonArray pressureReasons = diagnosticsSystemHealthPressureReasons(system);
-                if (pressureReasons.isEmpty()) return;
+                if (pressureReasons.isEmpty()) return false;
                 const QString pressureSummary = diagnosticsSystemHealthPressureSummary(pressureReasons);
                 system["pressureReasons"] = pressureReasons;
                 system["pressureSummary"] = pressureSummary;
-                diagnosticsLastResourceReportMs = now;
                 QJsonObject payload = diagnosticsRuntimeSnapshot("resource-pressure");
                 payload["stage"] = "resource-monitor";
                 payload["pressureReasons"] = pressureReasons;
                 payload["pressureSummary"] = pressureSummary;
                 payload["system"] = system;
                 remoteDiagnosticsSubmit("app.performance.resource_pressure", "warn", payload);
+                return true;
             });
-            diagnosticsResourceTimer->start();
-        }
     }
 
 void MainWindow::showDiagnosticsReportDialog()

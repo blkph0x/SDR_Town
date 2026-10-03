@@ -1,5 +1,29 @@
 # Issues (canonical)
 
+## ISS-0061 - Diagnostics lifecycle and bounded status transport (2026-10-03, REPAIRED IN SOURCE)
+
+T-0102 / DEC-0171. MainWindow starts health monitors once after startup and
+returns if sharing is disabled; later menu opt-in does not start them. Existing
+timers can count opt-out time as a GUI stall on re-enable. Status GET has no
+absolute deadline or reply-size budget unlike event POST. Add consent/session
+transition tests, numeric-only monitoring and bounded/cancelled HTTP fixtures.
+DEC-0171 now implements these repairs. Pre-fix status tests failed three
+assertions; post-fix diagnostics/control suite passes 184 assertions, including
+reconfiguration/destruction and late-opt-in tests. Binary publication remains
+blocked by ISS-0060; no independent hung-GUI detection is claimed.
+
+## ISS-0062 - Loopback control connection lifecycle (2026-10-03, REPAIRED IN SOURCE)
+
+T-0102 / DEC-0171. Accepted sockets have no active-client cap or deadline;
+stop only closes the listener. Content-Length is clamped instead of validated,
+JSON is parsed before authentication and handler exceptions are echoed. Bind
+remains loopback. Repair with API-level positive/negative tests and preserve
+valid FUBAR command semantics; no claim of internet exposure is made.
+DEC-0171 repairs these paths; eight pre-fix assertions reproduced the defects.
+Positive commands, bounded connections, stop/restart and stop-then-throw handler
+tests pass. Normal token comparison remains separate defense-in-depth work.
+
+
 ## ISS-0059 - P25 reference provenance
 
 2026-10-03: attribution conclusion corrected, DEC-0170 / T-0101. The earlier
@@ -60,6 +84,11 @@ epoch advance, detached-worker recovery paths. Existing downstream epoch/gap
 handling is real; the missing hardware-loss publication is distinct. See
 RECEIVE_CHAIN_AUDIT_20261003.md for evidence, caveats and qualification order.
 Shared RF/P25 changes deferred until fault-injection and non-regression gates.
+T-0102 update: real driver overflow now publishes an epoch and loss floor;
+the injected test failed five assertions before repair and passes repeated
+loss/two-consumer checks afterwards. Ordinary timeout remains distinct. Global
+ownership and detached-worker recovery are still open; queue-only consumers
+still need a typed discontinuity contract. See the infrastructure ledger.
 
 ## ISS-0056 - Test-tone hardware TX and control hardening (2026-10-03, OPEN)
 
@@ -68,6 +97,12 @@ configuration errors can be ignored before activation. No RF test performed.
 Control server does reject empty token on startup; normal string comparison,
 exception details and unbounded idle socket lifetime remain defense-in-depth
 work. Do not confuse the GUI stub TX state machine with hardware tone output.
+T-0102 update: tone output is now file-only by default, hardware requires
+explicit authorization plus capability/range/readback verification. Driver
+failure fixtures prove rejection before activation and cleanup, including
+nonstandard exceptions. Control lifecycle/error disclosure is repaired under
+ISS-0062. Physical RF/power validation and constant-time token hardening remain
+unqualified; this issue is not a claim of regulatory enforcement.
 
 ## ISS-0057 - Morse and analog RF field qualification (2026-10-03, OPEN)
 
