@@ -12,18 +12,24 @@ retaining required copyright and permission notices is not. The project intends
 to remain free and open source. The standard MIT text is not supplemented with
 a receive-only, noncommercial or attribution-waiver clause.
 
-## Scope and known exceptions
+## Scope and references
 
 - `external/`, the SSTV vendor tree, reference submodules and upstream-derived
   portions keep their own licenses and original copyright holders. A directory
   name is not the test of ownership: per-file notices and provenance matter.
-- `include/P25SdrtrunkTune.h` identifies its tuning implementation as copied
-  from SDRTrunk. The corresponding upstream
-  [CenterFrequencyCalculator.java](https://github.com/DSheirer/sdrtrunk/blob/master/src/main/java/io/github/dsheirer/source/tuner/manager/CenterFrequencyCalculator.java)
-  is GPL-3.0-or-later, Copyright (C) 2014-2023 Dennis Sheirer. This upstream-derived
-  material is **not relicensed as MIT** by this change. The full P25 provenance
-  and resulting combined-work distribution obligations need review before any
-  MIT-only claim. See [ISS-0059](docs/ISSUES.md#iss-0059---upstream-derived-p25-licensing-scope-2026-10-03-open).
+- SDRTrunk and OP25 are credited as technical references. The maintainer
+  clarifies that the P25 implementation uses reference principles rather than
+  copied code. Implementing the same mathematical ideas or methods does not,
+  by itself, import a reference project's software license. See
+  [WIPO's idea/expression distinction](https://www.wipo.int/en/web/copyright/protection).
+- An earlier version of this document called `include/P25SdrtrunkTune.h` a
+  confirmed GPL-derived exception. That conclusion is withdrawn: its historical
+  "copied" comment and similar algorithm/control flow warranted investigation
+  but did not establish copying of protected expression. The maintainer's
+  clarification is recorded in
+  [ISS-0059](docs/ISSUES.md#iss-0059---p25-reference-provenance). This correction
+  is not an independent certification of the entire source history. Actual
+  source adaptation, if established, must still be handled under its terms.
 - Third-party rights cannot be waived by crediting the project, translating
   its code, linking to its repository, or adding this MIT license.
 - User captures, imported alias lists and downloaded provider data are not
@@ -84,8 +90,9 @@ See [ISS-0060](docs/ISSUES.md#iss-0060---binary-licensesource-notice-inventory-i
 
 Before publishing another binary:
 
-1. Resolve the upstream-derived code scope in ISS-0059. Record the applicable
-   combined-work terms, permission or independently reviewed replacement.
+1. Distinguish original implementations of reference ideas from actual source
+   reuse. Record the latter's provenance and applicable terms; do not infer
+   derivation or license obligations from mathematical similarity alone.
 2. Inventory the exact executable, libraries, plugins, helpers, runtime files,
    models and data. Preserve upstream notices and identify exact source versions.
 3. Ship this project's license/scope/credits and all required third-party texts.

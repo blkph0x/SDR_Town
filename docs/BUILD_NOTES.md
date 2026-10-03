@@ -1,5 +1,18 @@
 # Build notes
 
+## 2026-10-03 - T-0101 reference attribution correction
+
+Baseline d0443b4. Rechecked `git log --follow -- include/P25SdrtrunkTune.h`,
+the added file at 3e9573f, and DEC-0015/0016. The comment/reference math are
+evidence, but the previous confirmed-code-derivation conclusion was not proven.
+Recorded maintainer clarification; no certification of the full source history.
+WIPO and US Copyright Office primary guidance confirms the idea/expression
+distinction. 146 local Markdown links resolve; only Markdown files changed;
+LICENSE.txt and all application/upstream files are unchanged. P25 guard
+self-tests PASS. CI is still required for publication; no binary/version bump.
+Prior documentation commit d0443b4 passed Windows 37101326431 and YAML
+37101326413. Those green builds did not prove its copyright attribution.
+
 ## 2026-10-03 - T-0100 licensing/documentation checks
 
 Baseline 2ab78d7; no application, build, dependency, version or workflow edits.
@@ -14,10 +27,10 @@ result. No new binary or live RF test is warranted for documentation changes.
 Compared source inventory with the previously verified anonymous v0.2.122 ZIP
 (SHA256 4f83076f02398865eadde5babc05f96a533e1d27cfb24709898f415c67161549).
 Confirmed incomplete notices (ISS-0060), and compared P25SdrtrunkTune against
-upstream GPL CenterFrequencyCalculator (ISS-0059). Scope explicitly excludes
-third-party/adapted rights; no claim of MIT-only binary compliance. Existing
-assets and all upstream notices/submodules remain unchanged. Remediation is
-now a documented precondition for the next binary publication.
+upstream GPL CenterFrequencyCalculator (ISS-0059). Correction under DEC-0170:
+that comparison did not prove copying of protected expression; the P25-specific
+exception/block was withdrawn. Actual third-party terms and notice remediation
+remain applicable. Existing assets/notices/submodules are unchanged.
 
 ## 2026-10-03 - T-0099 public release verified
 

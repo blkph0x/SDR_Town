@@ -1,5 +1,30 @@
 # Decisions
 
+## DEC-0170 - Ideas are not code provenance findings (2026-10-03)
+
+T-0101, baseline d0443b4. The maintainer clarifies that the P25 implementation
+uses principal ideas from SDRTrunk, not copied code. Rechecked the sole helper
+history entry (3e9573f), its original header and DEC-0015/0016. They establish
+reference formulas/constants and a historical comment saying "copied". The
+source also has similar control flow. This is reason to examine provenance,
+not enough for this review to establish copying of protected expression or
+declare a GPL-derived work. Conversely, the clarification is a maintainer
+statement, not an independent certification of all source provenance.
+
+Copyright distinguishes expression from ideas, methods and mathematics:
+https://www.wipo.int/en/web/copyright/protection
+https://www.copyright.gov/help/faq/faq-protect.html
+Using the same principles alone does not import a reference implementation's
+license. Actual source reuse/adaptation and linked/bundled libraries remain
+separate cases, with their own terms. Translation is not automatically an
+independent implementation; avoid either blanket legal conclusion.
+
+Retract DEC-0169's asserted P25 exception and related release block. Record
+ISS-0059 as a corrected attribution conclusion, retain the historical evidence
+and maintainer clarification, and do not modify frozen P25 code or its history
+to make a licensing claim. MIT remains the original-work grant; actual
+dependency notices/packaging obligations in ISS-0060 remain unchanged.
+
 ## DEC-0169 - MIT for original work, explicit upstream scope (2026-10-03)
 
 T-0100; baseline 2ab78d7. The user explicitly authorizes MIT licensing. The
@@ -15,13 +40,12 @@ dependency/license inventory from reference-project and tool acknowledgements.
 Reference, integration, compatibility and inspiration are not interchangeable.
 No blanket license metadata or MIT-only binary claim is appropriate here.
 
-Confirmed exception needing review: include/P25SdrtrunkTune.h explicitly says
-its tuning implementation was copied from SDRTrunk; the corresponding
-CenterFrequencyCalculator.java carries Dennis Sheirer's GPL-3.0-or-later
-notice, and the branch structure matches. It is excluded from the MIT grant
-over original work, not silently relabeled. Audit other P25 derivations before
-deciding the complete combined-work distribution terms (ISS-0059). Do not
-change frozen P25 behavior to resolve a documentation task.
+Correction (DEC-0170): the original version of this decision called the P25
+tuning helper a confirmed upstream-derived exception. That conclusion is
+withdrawn. The header's "copied" wording and similar branching did not establish
+copying of protected expression. The maintainer states that only the principles
+were used. Record reference provenance without declaring GPL derivation or a
+complete clean-room audit. Do not change frozen P25 behavior for this task.
 
 The downloaded v0.2.122 ZIP also lacks several top-level/component notices
 (ISS-0060). Documentation must not claim all notices already ship. Publish

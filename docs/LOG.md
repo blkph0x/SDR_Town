@@ -1,14 +1,25 @@
 # Development log
 
+## 2026-10-03 - T-0101 correct the reference/code distinction
+
+Maintainer states that the P25 work uses principles, not copied code. Rechecked
+helper history and technical decisions. Retracted the unsupported confirmed
+GPL-derivation assertion and associated P25 release block, while retaining the
+historical comment/evidence and acknowledging the limit of this review. Credits
+now distinguish ideas from actual bundled components. MIT and all runtime/code
+files unchanged; binary notice gap ISS-0060 remains. Local link/scope/guard
+checks PASS; normal source CI is the publication gate. See DEC-0170.
+
 ## 2026-10-03 - T-0100 original-work MIT grant and credits
 
 User authorizes MIT licensing. Replaced the prior non-license usage notice with
 standard MIT terms; moved policy/scope out of the grant. Added LICENSING.md and
 ACKNOWLEDGEMENTS.md with evidence-based component, reference, data and tool
 credits; README no longer says MIT formalization is pending. No radio or DSP
-changes. Found upstream-derived P25 scope and incomplete binary notice coverage,
-recorded ISS-0059/0060 and a pre-publication licensing gate instead of claiming
-all third-party code became MIT. Local documentation/guard checks PASS;
+changes. Initially asserted upstream-derived P25 scope (withdrawn by DEC-0170)
+and identified incomplete binary notice coverage. ISS-0059 records the corrected
+attribution; ISS-0060 retains the actual notice gate. No claim that third-party
+code became MIT. Local documentation/guard checks PASS;
 publish source docs through normal CI with no version bump or asset replacement.
 
 ## 2026-10-03 - T-0099 published and downloaded asset qualified

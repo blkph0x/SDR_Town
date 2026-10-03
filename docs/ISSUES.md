@@ -1,17 +1,22 @@
 # Issues (canonical)
 
-## ISS-0059 - Upstream-derived P25 licensing scope (2026-10-03, OPEN)
+## ISS-0059 - P25 reference provenance
 
-T-0100 / DEC-0169. include/P25SdrtrunkTune.h:8 names copied SDRTrunk tuning
-logic; the corresponding upstream CenterFrequencyCalculator.java is
-GPL-3.0-or-later, Copyright (C) 2014-2023 Dennis Sheirer. Matching branching
-and adjustment logic are visible in both implementations. A root MIT grant
-cannot relicense that upstream work. Exclude it and any other upstream-derived
-material from the original-work MIT claim. Review the complete P25 provenance
-and linked distribution before claiming an MIT-only deliverable. Resolution
-requires appropriate upstream permission, compliant combined-work licensing,
-or a genuinely independent replacement with non-regression evidence; an
-acknowledgement alone does not resolve it. No DSP edits in this task.
+2026-10-03: attribution conclusion corrected, DEC-0170 / T-0101. The earlier
+T-0100 wording asserted confirmed GPL derivation and excluded the tuning helper
+from the MIT original-work grant. That conclusion is withdrawn. The maintainer
+clarifies that reference principles were used, not copied code.
+
+Evidence retained: include/P25SdrtrunkTune.h:8 says "copied"; its sole history
+entry is 3e9573f. DEC-0015/0016 cite formulas/constants and tuning behavior.
+Upstream CenterFrequencyCalculator.java carries Dennis Sheirer's GPL notice,
+and similar algorithm/control flow is visible. These facts justify a provenance
+question but this review did not establish copying of protected expression.
+Do not turn the maintainer's clarification into a claim of independently proven
+clean-room provenance either. Reopen on concrete source-reuse evidence; no
+P25-specific release block follows solely from implementing the same ideas.
+Actual bundled/dependency licensing and ISS-0060 remain separate. No source
+comments, code, upstream notices or Git history were changed to mask evidence.
 
 ## ISS-0060 - Binary license/source notice inventory incomplete (2026-10-03, OPEN)
 
@@ -21,7 +26,7 @@ no root LICENSE.txt or mbelib, miniaudio, Qt, SoapySDR, spdlog/fmt,
 nlohmann-json or libsodium notice files. Existing CMake staging does not
 establish complete notice coverage. Before another binary release, generate
 and test an exact-artifact notice/source inventory, include project licensing
-and credits, retain vendor/runtime terms, and resolve ISS-0059. Check Qt and
+and credits, retain vendor/runtime terms. Check Qt and
 librtlsdr/libusb source/relink/distribution obligations against the versions
 actually shipped. Upstream URLs alone and acknowledgements are not a complete
 compliance package. This task changes source documentation only; published

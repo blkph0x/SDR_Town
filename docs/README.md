@@ -1,7 +1,7 @@
 # SDR Town tracking desk
 
 Project licensing: [MIT grant](../LICENSE.txt),
-[scope and outstanding distribution/provenance gates](../LICENSING.md), and
+[scope, reference distinction and distribution gate](../LICENSING.md), and
 [acknowledgements](../ACKNOWLEDGEMENTS.md).
 
 P25 regression diagnosis: [2026-09-27 missed-grant / stale-allocation audit](P25_REGRESSION_AUDIT_20260927.md).

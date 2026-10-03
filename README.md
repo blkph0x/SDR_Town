@@ -143,7 +143,7 @@ Development has been active since the
 contributions are licensed under the [MIT License](LICENSE.txt). Third-party
 and upstream-derived code retain their own terms; this is not an MIT-only
 licence claim for the combined application. Read the
-[licensing scope and open provenance/distribution issues](LICENSING.md).
+[licensing scope, reference distinction and distribution notes](LICENSING.md).
 Personal shout-outs are optional: use the work, learn from it and build
 something better. Required copyright/licence notices must still be retained.
 
@@ -158,6 +158,8 @@ each project's code retains its own licence.
 
 The full maintained [acknowledgements](ACKNOWLEDGEMENTS.md) distinguish bundled
 components, reference implementations, data sources and development/AI tools.
+Learning from another project's principles or mathematical methods is not a
+claim of copying its code; actual bundled/reused code keeps its own licence.
 
 ---
 

@@ -11,7 +11,7 @@ development decisions and documented development tools as of 3 October 2026.
 It is not a claim that every named project is bundled, that every proposed
 tool was used, or that the list is an exhaustive history of every conversation.
 References do not imply affiliation, endorsement or permission to relicense.
-For licensing scope and unresolved provenance, read [LICENSING.md](LICENSING.md).
+For licensing scope and the reference/reuse distinction, read [LICENSING.md](LICENSING.md).
 
 ## Components used in the application
 
@@ -43,12 +43,16 @@ Exact notices and component scope are in the [license inventory](LICENSING.md#co
 ## Implementations and workflows studied
 
 These projects helped with understanding, comparison, fixtures or workflow
-design. This section is not a blanket assertion that no code was adapted:
-the SDRTrunk-derived tuning helper is explicitly identified in LICENSING.md.
+design. The maintainer clarifies that the P25 implementation follows reference
+principles, rather than copying source code. Matching a protocol, mathematical
+method or workflow is distinct from reusing an implementation. Actual bundled
+components are listed separately above with their own licenses.
 
 - [SDRTrunk / Dennis Sheirer and contributors](https://github.com/DSheirer/sdrtrunk):
   P25 framing, channel tuning, call/slot lifecycle, audio ordering and aliases.
-  The tuning-helper provenance requires the separate licensing review above.
+  Credit here recognises technical understanding; it does not assert that
+  SDR Town copied SDRTrunk source. The earlier attribution overstatement is
+  corrected in LICENSING.md and DEC-0170.
 - [OP25, including boatbod's fork](https://github.com/boatbod/op25): P25 DSP,
   synchronization, framing, voice-codeword and decoding cross-checks.
 - [InmarScope / SarahRoseLives and contributors](https://github.com/SarahRoseLives/InmarScope):

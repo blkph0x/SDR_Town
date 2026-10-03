@@ -1,5 +1,13 @@
 # Task list (canonical)
 
+T-0101 | done (documentation correction) | Correct reference-versus-code licensing attribution |
+DEC-0170. User clarifies SDRTrunk was used for principles, not copied code.
+Recheck helper history and technical decisions; retract the unsupported
+confirmed-GPL-derivation conclusion without claiming a complete provenance
+audit. Preserve actual third-party notices and binary notice work. Docs only.
+146 local links and P25 guard self-tests PASS; source CI remains the
+publication check, with no new application version or binary release.
+
 T-0100 | done (source documentation; binary licensing remediation open) | MIT grant and evidence-based acknowledgements |
 DEC-0169. Replace the non-license root notice with standard MIT terms for
 original SDR Town contributions; retain separate third-party terms. Inventory
@@ -7,8 +15,9 @@ bundled components, references, data sources and development tools. Do not
 claim the combined binary or upstream-derived code is MIT-only. Document
 provenance/distribution gaps, preserve all DSP and publish documentation only.
 Standard grant/local-link checks and P25 guard self-tests pass. Source CI is
-the publication gate; no version/asset change. ISS-0059/0060 remain open and
-block another binary publication, not this original-work grant or credits.
+the publication gate; no version/asset change. T-0101 / DEC-0170 corrects the
+unsupported confirmed-derivation conclusion in ISS-0059. Actual binary notice
+coverage (ISS-0060) remains open, separate from reference ideas or the MIT grant.
 
 T-0099 | done (bounded scope; field qualification open) | Bounded fast-burst and transformed DTMF analysis |
 DEC-0168. Reproduce confidence normalization and short-burst/EOF defects;
