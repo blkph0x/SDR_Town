@@ -4,10 +4,16 @@ SDR TOWN — SOURCE OF TRUTH (SoT)
 VERSION: 1.0.0
 PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
 CURRENT VERSION IN TREE: 0.2.122 (DTMF burst analysis; public experimental asset verified)
-LATEST UNRELEASED: DEC-0187 adds independent named Inmarsat GUI/API engines,
+LATEST UNRELEASED: DEC-0189 adds named Satcom/Aircraft GUI/API controllers,
+                  independent planners/tracks/settings and joined lifecycle;
+                  mock-radio and native GUI gates pass, physical RF open.
+                  P25 per-system controller extraction remains incomplete.
+                  DEC-0190 fixes measured live-driver lock starvation with
+                  FIFO admission; critical sections/timeouts unchanged.
+                  DEC-0187 adds independent named Inmarsat GUI/API engines,
                   source/watch settings and maps; P25 DSP/audio unchanged.
                   DEC-0188 packages receipt-verified vcpkg build tooling.
-                  Remaining repeated controllers and ISS-0060 remain open.
+                  Repeated P25 controllers and ISS-0060 remain open.
 UNRELEASED SOURCE: T-0102 infrastructure repairs; local 16/16 gates pass,
                   65e3da3 source CI passed; binary notice/source gate ISS-0060 open.
                   T-0104 stages missing RTL USB runtime/notices and enforces

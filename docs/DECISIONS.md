@@ -1,5 +1,51 @@
 # Decisions
 
+## DEC-0190 - FIFO admission to the existing live-driver lock (2026-10-05)
+
+T-0103 / ISS-0072: the new four-controller mixed workflow fixture fails while
+the fourth radio opens. In controllers-isolation-stress.log, gain completes at
+09:20:16.642 but PPM/ready waits until09:20:30.425; another queued tune waits
+13519ms. All live read/control calls contend on gSoapyLiveIoMutex, a non-fair
+std::mutex. Active read loops can repeatedly reacquire it ahead of startup.
+Preserve the existing serialization and critical sections (including IQ epoch
+publication), but admit waiters FIFO using a mutex/condition-variable ticket
+queue. Do not increase startup timeouts, remove the mixed test, move driver
+calls outside the lock or change P25 DSP/gates. Record exact DeviceManager
+type-only lock replacement in the frozen-path guard and reject mutated bodies.
+Test deterministic admission order, the previously failing mixed controllers,
+driver lifecycle regressions and full suites. This prevents waiter starvation,
+not a permanently wedged driver; per-physical-device parallel I/O remains a
+separate qualification task. No new dependency is introduced.
+
+## DEC-0189 - Repeatable satellite and aircraft controllers (2026-10-05)
+
+T-0103 continuation from26716b3. Satcom scanner/pass planner and Aircraft
+track store/settings are shared singletons; Aircraft hide also stops local RX.
+Named Satcom sessions must own a planner, scanner, decoder histories, output
+queue and persisted configuration. Named Aircraft sessions must own their track
+store/CPR state and radio worker, with separate source/network settings. Preserve
+the default engines and public legacy routes. A tab switch never stops RF.
+Explicit Stop/Close/application shutdown joins only the addressed workers before
+destroying shared services. Async TLE completion must be lifetime-bound, not a
+raw pointer into a closed session. Newly opened/saved sessions stay idle and
+cannot auto-select another session's radio; named auto-capture is explicitly
+armed in the current run. Named audio must not append to the primary/P25 queue.
+Expose named controls through the satellite workspace and authenticated API,
+using the existing 16-session-per-workflow resource budget and dry-run RF gate.
+Validate real independent workers on mock hardware, settings/state isolation,
+closed/invalid IDs, hide/stop/reopen and legacy endpoints. No RF quality claim
+comes from mocked IQ. P25 controller extraction needs its separate dependency
+inventory; do not duplicate MainWindow or claim a pool decodes concurrent calls.
+
+Inspection also finds SatcomAsyncLog's UI and worker publish concurrently into
+an SPSC overwrite ring, while its directory string is mutated without a lock.
+Serialize only the bounded POD queue operation with try-lock producer admission;
+count contention/overflow and format/write on the writer. Synchronize directory
+snapshots separately. Shutdown drains retained events. Concurrent producers must
+account exactly for consumed plus dropped events, with no torn payloads. This
+does not put logging I/O or waits into the radio/audio path.
+
+
 ## DEC-0188 - Include the dependency build-tool sources (2026-10-05)
 
 T-0104: the existing dependency archive contains upstream sources and port

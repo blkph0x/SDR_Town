@@ -2,6 +2,7 @@
 
 #include <QString>
 #include <QWidget>
+#include <memory>
 
 class SpectrumWidget;
 class QDoubleSpinBox;
@@ -18,12 +19,16 @@ class QShowEvent;
 class QHideEvent;
 class ObserverMapWidget;
 struct SatPassPlannerSnapshot;
+class SatcomScannerEngine;
 
 class SatcomScannerWidget : public QWidget {
     Q_OBJECT
 public:
-    explicit SatcomScannerWidget(QWidget* parent = nullptr);
+    explicit SatcomScannerWidget(QWidget* parent = nullptr, const QString& sessionId = {});
     ~SatcomScannerWidget() override;
+    SatcomScannerEngine& engine() { return engine_; }
+    void reloadSessionControls();
+    void stopSession() { onStop(); }
 
 signals:
     void requestOpenSstvLive();
@@ -47,6 +52,8 @@ private slots:
     void onArmSstv();
 
 private:
+    std::unique_ptr<SatcomScannerEngine> ownedEngine_;
+    SatcomScannerEngine& engine_;
     void buildUi();
     void refreshPassesTable();
     void updateAutoCapture(const SatPassPlannerSnapshot& plan);
@@ -75,6 +82,7 @@ private:
     QPlainTextEdit* logView_ = nullptr;
     QTimer* refreshTimer_ = nullptr;
     bool recordingUi_ = false;
+    int passTableThrottle_ = 0;
 
     QLineEdit* latEdit_ = nullptr;
     QLineEdit* lonEdit_ = nullptr;

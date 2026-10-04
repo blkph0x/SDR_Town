@@ -1,5 +1,51 @@
 # Build notes
 
+## 2026-10-05 - Independent Satcom and Aircraft controllers
+
+Final mixed-workflow expansion reproduced ISS-0072 before repair: startup of
+Inmarsat on a fourth radio failed with another tune waiting13519ms. DEC-0190
+changes only admission order to the existing driver lock; no critical section
+or timeout changes. Application/native/GUI builds PASS. The same mixed worker
+fixture and GUI suite pass five repetitions each (controllers-fifo-stress,
+30.16s); all four radios start and stopping one leaves the others running.
+FIFO order and concurrent distinct-payload log accounting PASS271 assertions/
+3 cases. Exact-patch negative tests enforce all23 lock type substitutions and
+unchanged read timeout. The prior full recheck passed17/17 in88.98s before this
+additional reproduced repair; final full/CI acceptance is required below.
+Final rebuilt application/native/GUI targets PASS; full17/17 CTest PASS84.23s
+(controllers-fifo-ctest.log), actual three-workflow GUI/API lifecycle PASS
+(controllers-api-fifo/result.json), exact guard negative tests PASS. CI for the
+pushed source remains the next acceptance gate.
+
+DEC-0189 / baseline26716b3; Windows/MSVC14.44/Qt6.11.1.
+Initial application build failed for missing `this` captures after binding
+Satcom callbacks to the owning engine; corrected. Native fixture then required
+Qt Widgets and SatcomScannerEngine linkage; added explicit target sources/libs.
+The first GUI missing-radio assertion expected only "unavailable", but zero
+devices correctly reports "No SDR devices"; fixture now accepts both failures.
+Actual API testing found that signal-blocked source selection did not save its
+key; explicit settings persistence fixes it. The automation exit wait was30s
+while its requested process lifetime was35s; corrected wait45s, no application
+timeout change. All three Release targets subsequently build successfully.
+
+Native17/17 PASS86.44s (controllers-ctest.log); subsequent observer-isolation
+run had one live CelesTrak refresh assertion failure (controllers-ctest-final),
+with all16 other suites passing. Same code/network test passed on recheck;
+no decoder behavior, test assertions or thresholds were weakened.
+Actual GUI/API automation PASS for Inmarsat/Satcom/Aircraft and SSTV: open,
+configure, stale/type errors, missing radio, isolated stop/close and persistence.
+Dry-run logs confirm no hardware RX from these GUI automation runs.
+Aircraft/Satcom GUI fixture PASS101 assertions/5 cases. Saved/reviewed native
+screenshots in build/controllers-visual cover named tabs/source and compact/
+desktop Aircraft controls. Four actual workspace launches PASS at960x720,
+1280x900,800x700,1600x900. Exact frozen-pipeline negative tests PASS.
+Mock hardware qualification uses actual Inmarsat/Satcom/Aircraft workers, not
+just an ownership-policy model. This does not qualify physical concurrent RF
+or audible output. Final log stress uses distinct producer payload/frequency
+pairs and exact consumed+dropped accounting (15000 events).
+CI acceptance and unchanged ISS-0060 publication blockers will be recorded on
+the exact pushed commit; a private package is not a public release.
+
 ## 2026-10-05 - Independent Inmarsat engines and dependency tooling
 
 Baseline63acf32; Windows/MSVC14.44/Qt6.11.1. Initial build invocation used the

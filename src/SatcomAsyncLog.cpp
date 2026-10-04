@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <mutex>
 #include <sstream>
+#include <algorithm>
 
 namespace SatcomLog {
 namespace {
@@ -39,7 +40,10 @@ AsyncLog::AsyncLog(size_t capacity)
 
 AsyncLog::~AsyncLog() { stop(); }
 
-void AsyncLog::setLogDirectory(const std::string& dir) { logDir_ = dir; }
+void AsyncLog::setLogDirectory(const std::string& dir) {
+    std::lock_guard lock(directoryMutex_);
+    logDir_ = dir;
+}
 
 void AsyncLog::start() {
     if (run_.exchange(true)) return;
@@ -52,6 +56,8 @@ void AsyncLog::stop() {
 }
 
 bool AsyncLog::tryPush(EventType type, double freqHz, const char* text) {
+    std::unique_lock lock(ringMutex_, std::try_to_lock);
+    if (!lock.owns_lock()) { dropped_.fetch_add(1, std::memory_order_relaxed); return false; }
     Event ev;
     ev.type = type;
     ev.seq = seq_.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -71,7 +77,6 @@ bool AsyncLog::tryPush(EventType type, double freqHz, const char* text) {
     }
     ring_[head % capacity_] = ev;
     head_.store(next, std::memory_order_release);
-    appendUiLine(ev);
     return true;
 }
 
@@ -98,9 +103,11 @@ void AsyncLog::writerLoop() {
     std::ofstream out;
     std::string openPath;
     auto ensureFile = [&]() {
-        if (logDir_.empty()) return;
+        std::string directory;
+        { std::lock_guard lock(directoryMutex_); directory = logDir_; }
+        if (directory.empty()) return;
         std::error_code ec;
-        fs::create_directories(logDir_, ec);
+        fs::create_directories(directory, ec);
         const auto now = std::chrono::system_clock::now();
         const std::time_t tt = std::chrono::system_clock::to_time_t(now);
         std::tm tm{};
@@ -112,7 +119,7 @@ void AsyncLog::writerLoop() {
         char name[64];
         std::snprintf(name, sizeof(name), "satcom_%04d%02d%02d.log",
                       tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
-        const std::string path = (fs::path(logDir_) / name).string();
+        const std::string path = (fs::path(directory) / name).string();
         if (path != openPath || !out.is_open()) {
             out.close();
             out.open(path, std::ios::app | std::ios::binary);
@@ -120,31 +127,39 @@ void AsyncLog::writerLoop() {
         }
     };
 
-    while (run_.load(std::memory_order_acquire)) {
-        uint32_t tail = tail_.load(std::memory_order_relaxed);
-        uint32_t head = head_.load(std::memory_order_acquire);
-        if (tail == head) {
+    for (;;) {
+        Event ev;
+        bool available = false;
+        {
+            std::lock_guard lock(ringMutex_);
+            const auto tail = tail_.load(std::memory_order_relaxed);
+            if (tail != head_.load(std::memory_order_relaxed)) {
+                ev = ring_[tail];
+                tail_.store((tail + 1) % static_cast<uint32_t>(capacity_), std::memory_order_relaxed);
+                available = true;
+            }
+        }
+        if (!available) {
+            if (!run_.load(std::memory_order_acquire)) break;
+            if (out.is_open()) out.flush();
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             continue;
         }
         ensureFile();
-        while (tail != head) {
-            const Event& ev = ring_[tail % capacity_];
+        {
+            appendUiLine(ev);
             if (out.is_open()) {
                 char line[256];
                 const int n = std::snprintf(line, sizeof(line), "%u %s %.0f %s\n",
                                             ev.seq, typeName(ev.type), ev.freqHz, ev.text);
                 if (n > 0) {
-                    out.write(line, n);
-                    bytesOnDisk_.fetch_add(static_cast<uint64_t>(n), std::memory_order_relaxed);
+                    const auto count = std::min(n, static_cast<int>(sizeof(line) - 1));
+                    out.write(line, count);
+                    bytesOnDisk_.fetch_add(static_cast<uint64_t>(count), std::memory_order_relaxed);
                 }
             }
             written_.fetch_add(1, std::memory_order_relaxed);
-            tail = (tail + 1) % static_cast<uint32_t>(capacity_);
-            head = head_.load(std::memory_order_acquire);
         }
-        tail_.store(tail, std::memory_order_release);
-        if (out.is_open()) out.flush();
     }
     if (out.is_open()) out.close();
 }

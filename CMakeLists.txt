@@ -655,10 +655,15 @@ if(BUILD_TESTS)
   endif()
 
   # DEC-0123: real widget/engine with a hardware-free DeviceManager backend.
-  target_sources(sdr_town_tests PRIVATE src/WorkflowRadioSession.cpp tests/test_workflow_radio_session.cpp)
+  target_sources(sdr_town_tests PRIVATE src/WorkflowRadioSession.cpp tests/test_workflow_radio_session.cpp
+      src/SatcomScannerEngine.cpp)
   if(TARGET SoapySDR)
     add_test(NAME WorkflowRadioLifecycle COMMAND sdr_town_tests "[.ownership-live]")
     set_tests_properties(WorkflowRadioLifecycle PROPERTIES TIMEOUT 60)
+    if(TARGET Qt6::QWindowsIntegrationPlugin)
+      set_tests_properties(WorkflowRadioLifecycle PROPERTIES
+          ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QWindowsIntegrationPlugin>")
+    endif()
   endif()
   # Reuse core build inputs, not copies/stubs of the selection/receiver logic.
   get_target_property(inmarsat_gui_sources sdr_town_tests SOURCES)
@@ -672,6 +677,11 @@ if(BUILD_TESTS)
       src/InmarsatTrackingPanel.cpp tests/test_inmarsat_tracking_gui.cpp
       src/InmarsatWatchUi.cpp src/InmarsatWatchSpectrum.cpp include/InmarsatWatchSpectrum.h
       tests/test_aircraft_gui.cpp src/AircraftMapWidget.cpp include/AircraftMapWidget.h
+      src/SatcomHubWidget.cpp include/SatcomHubWidget.h
+      src/SatcomScannerWidget.cpp include/SatcomScannerWidget.h
+      src/SatCatalogueDialog.cpp include/SatCatalogueDialog.h
+      src/ObserverMapWidget.cpp include/ObserverMapWidget.h
+      src/SpectrumWidget.cpp include/SpectrumWidget.h
       src/InmarsatReplayDialog.cpp)
   foreach(property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS)
     get_target_property(value sdr_town_tests ${property})
@@ -688,6 +698,10 @@ if(BUILD_TESTS)
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test-fixtures/inmarsat-gui")
   add_test(NAME InmarsatLiveGui COMMAND inmarsat_live_gui_tests "[inmarsat][gui]")
   add_test(NAME AircraftGui COMMAND inmarsat_live_gui_tests "[aircraft][gui]")
+  # DEC-0189: run real Aircraft GUI-owned radio workers against mock Soapy
+  # devices in the native lifecycle suite (GUI-only fixture disables Soapy).
+  target_sources(sdr_town_tests PRIVATE src/AircraftMapWidget.cpp include/AircraftMapWidget.h)
+  target_link_libraries(sdr_town_tests PRIVATE Qt6::Widgets)
   add_test(NAME InmarsatHostLifecycle COMMAND inmarsat_live_gui_tests "[.inmarsat-host]")
   set_tests_properties(InmarsatLiveGui InmarsatHostLifecycle AircraftGui PROPERTIES TIMEOUT 60
       ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QWindowsIntegrationPlugin>"

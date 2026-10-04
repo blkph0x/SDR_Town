@@ -32,6 +32,8 @@ public:
     void showAircraftTab();
     InmarsatWidget* openInmarsatSession(const QString& sessionId);
     QJsonObject controlInmarsatSessions(const QString& method, const QJsonObject& body);
+    QWidget* openReceiverSession(const QString& workflow, const QString& sessionId);
+    QJsonObject controlReceiverSessions(const QString& workflow, const QString& method, const QJsonObject& body);
 
 signals:
     void requestOpenSstvLive();
@@ -46,6 +48,7 @@ private slots:
 private:
     void ensureTabs();
     void saveInmarsatSessions();
+    void saveReceiverSessions();
     void stopAutoCapture(bool keepHandledKey);
 
     QTabWidget* tabs_ = nullptr;

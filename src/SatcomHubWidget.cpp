@@ -6,6 +6,8 @@
 #include "InmarsatWidget.h"
 #include "InmarsatEngine.h"
 #include "AircraftMapWidget.h"
+#include "WorkflowSessionId.h"
+#include <QMenu>
 
 #include <QDateTime>
 #include <QCoreApplication>
@@ -56,20 +58,28 @@ SatcomHubWidget::SatcomHubWidget(QWidget* parent)
     add->setToolTip("Open an Inmarsat receiver session");
     add->setAccessibleName("Add Inmarsat session");
     tabs_->setCornerWidget(add);
-    connect(add, &QToolButton::clicked, this, [this] {
-        bool ok = false;
-        const auto id = QInputDialog::getText(this, "Inmarsat session", "Session name:",
-            QLineEdit::Normal, {}, &ok).trimmed();
-        if (!ok || id.isEmpty()) return;
-        try { openInmarsatSession(id); }
-        catch (const std::exception& e) { QMessageBox::warning(this, "Inmarsat session", QString::fromUtf8(e.what())); }
-    });
+    auto* menu = new QMenu(add);
+    for (const auto& workflow : {QString("inmarsat"), QString("satcom"), QString("aircraft")}) {
+        auto* action = menu->addAction("Add " + workflow + " session");
+        connect(action, &QAction::triggered, this, [this, workflow] {
+            bool ok = false;
+            const auto id = QInputDialog::getText(this, "Receiver session", "Session name:", QLineEdit::Normal, {}, &ok).trimmed();
+            if (!ok || id.isEmpty()) return;
+            try { openReceiverSession(workflow, id); }
+            catch (const std::exception& e) { QMessageBox::warning(this, "Receiver session", QString::fromUtf8(e.what())); }
+        });
+    }
+    add->setMenu(menu);
+    add->setPopupMode(QToolButton::InstantPopup);
+    add->setToolTip("Add receiver session");
+    add->setAccessibleName("Add receiver session");
     connect(tabs_, &QTabWidget::tabCloseRequested, this, [this](int index) {
-        auto* widget = qobject_cast<InmarsatWidget*>(tabs_->widget(index));
-        if (!widget || widget == inmarsat_) return;
+        auto* widget = tabs_->widget(index);
+        if (!widget || index < 3) return;
         tabs_->removeTab(index);
         delete widget; // Joins this engine before releasing its radio and settings.
         saveInmarsatSessions();
+        saveReceiverSessions();
     });
     root->addWidget(tabs_);
 
@@ -109,6 +119,13 @@ void SatcomHubWidget::ensureTabs() {
         try { openInmarsatSession(id); }
         catch (const std::exception& e) { spdlog::warn("Inmarsat saved session: {}", e.what()); }
     }
+    for (const auto& workflow : {QString("satcom"), QString("aircraft")}) {
+        const auto saved = QSettings().value(workflow + "/openSessions").toStringList();
+        for (const auto& id : saved.mid(0, 16)) {
+            try { openReceiverSession(workflow, id); }
+            catch (const std::exception& e) { spdlog::warn("{} saved session: {}", workflow.toStdString(), e.what()); }
+        }
+    }
 }
 
 InmarsatWidget* SatcomHubWidget::openInmarsatSession(const QString& name) {
@@ -122,7 +139,9 @@ InmarsatWidget* SatcomHubWidget::openInmarsatSession(const QString& name) {
         }
     }
     // DEC-0187: UI/worker resource budget, not a radio or channel limit.
-    if (tabs_->count() >= 19) throw std::runtime_error("Close an Inmarsat session before opening another (16-session limit)");
+    int count = 0;
+    for (int i = 3; i < tabs_->count(); ++i) if (qobject_cast<InmarsatWidget*>(tabs_->widget(i))) ++count;
+    if (count >= 16) throw std::runtime_error("Close an Inmarsat session before opening another (16-session limit)");
     auto* widget = new InmarsatWidget(tabs_, id);
     tabs_->addTab(widget, "Inmarsat: " + id);
     tabs_->setCurrentWidget(widget);
@@ -134,8 +153,127 @@ void SatcomHubWidget::saveInmarsatSessions() {
     if (QCoreApplication::instance()->property("sdrtown.guiDryRun").toBool()) return;
     QStringList ids;
     for (int i = 3; i < tabs_->count(); ++i)
-        ids.append(tabs_->widget(i)->objectName().mid(QString("inmarsatSession.").size()));
+        if (qobject_cast<InmarsatWidget*>(tabs_->widget(i)))
+            ids.append(tabs_->widget(i)->objectName().mid(QString("inmarsatSession.").size()));
     QSettings().setValue("inmarsat/openSessions", ids);
+}
+
+QWidget* SatcomHubWidget::openReceiverSession(const QString& workflow, const QString& name) {
+    if (workflow == "inmarsat") return openInmarsatSession(name);
+    if (workflow != "satcom" && workflow != "aircraft") throw std::invalid_argument("Unknown workflow");
+    ensureTabs();
+    const auto id = QString::fromStdString(normalizedWorkflowSessionId(name.toStdString()));
+    if (id.isEmpty()) throw std::invalid_argument("Named session required");
+    const auto prefix = workflow + "Session.";
+    int count = 0;
+    for (int i = 3; i < tabs_->count(); ++i) {
+        auto* widget = tabs_->widget(i);
+        if (widget->objectName() == prefix + id) { tabs_->setCurrentWidget(widget); return widget; }
+        if (widget->objectName().startsWith(prefix)) ++count;
+    }
+    if (count >= 16) throw std::runtime_error("Close a session of this workflow before opening another (16-session limit)");
+    QWidget* widget = nullptr;
+    if (workflow == "satcom") {
+        auto* scanner = new SatcomScannerWidget(tabs_, id);
+        // Named satellite SSTV runs in its engine; do not redirect to the
+        // default SSTV window/receiver tap when a named pass starts.
+        widget = scanner;
+    } else {
+        auto* aircraft = new AircraftMapWidget(tabs_, id);
+        aircraft->setEmbedded(true);
+        widget = aircraft;
+    }
+    tabs_->addTab(widget, (workflow == "satcom" ? "Satcom: " : "Aircraft: ") + id);
+    tabs_->setCurrentWidget(widget);
+    saveReceiverSessions();
+    return widget;
+}
+
+void SatcomHubWidget::saveReceiverSessions() {
+    if (QCoreApplication::instance()->property("sdrtown.guiDryRun").toBool()) return;
+    for (const auto& workflow : {QString("satcom"), QString("aircraft")}) {
+        QStringList ids;
+        const auto prefix = workflow + "Session.";
+        for (int i = 3; i < tabs_->count(); ++i)
+            if (tabs_->widget(i)->objectName().startsWith(prefix)) ids.append(tabs_->widget(i)->objectName().mid(prefix.size()));
+        QSettings().setValue(workflow + "/openSessions", ids);
+    }
+}
+
+QJsonObject SatcomHubWidget::controlReceiverSessions(const QString& workflow, const QString& method, const QJsonObject& body) {
+    if (workflow == "inmarsat") return controlInmarsatSessions(method, body);
+    ensureTabs();
+    const auto report = [this, &workflow] {
+        QJsonArray sessions;
+        for (int i = 0; i < tabs_->count(); ++i) {
+            if (workflow == "aircraft") {
+                if (auto* aircraft = qobject_cast<AircraftMapWidget*>(tabs_->widget(i))) sessions.append(aircraft->webStatus());
+            } else if (auto* sat = qobject_cast<SatcomScannerWidget*>(tabs_->widget(i))) {
+                const auto snap = sat->engine().snapshot();
+                sessions.append(QJsonObject{{"sessionId",QString::fromStdString(sat->engine().sessionId())},
+                    {"state",QString::fromStdString(sat->engine().stateName())},
+                    {"status",QString::fromStdString(snap.lastStatus)}, {"deviceConnected",snap.deviceConnected},
+                    {"config",QJsonDocument::fromJson(QByteArray::fromStdString(snap.config.toJson().dump())).object()},
+                    {"passArmed",snap.passArmed}, {"currentHz",snap.currentHz}});
+            }
+        }
+        return QJsonObject{{"ok",true},{"sessions",sessions}};
+    };
+    if (workflow != "satcom" && workflow != "aircraft") return {{"ok",false},{"status",404},{"error","Unknown workflow"}};
+    if (method == "GET") return report();
+    if (method != "POST") return {{"ok",false},{"status",405},{"error","GET or POST required"}};
+    if (!body.value("sessionId").isString() || body.value("sessionId").toString().isEmpty() ||
+        (body.contains("action") && !body.value("action").isString()))
+        return {{"ok",false},{"status",400},{"error","Named sessionId and string action required"}};
+    try {
+        const auto id = QString::fromStdString(normalizedWorkflowSessionId(body.value("sessionId").toString().toStdString()));
+        const auto action = body.value("action").toString("open");
+        if (action == "open") { openReceiverSession(workflow,id); return report(); }
+        QWidget* widget = nullptr;
+        for (int i = 3; i < tabs_->count(); ++i)
+            if (tabs_->widget(i)->objectName() == workflow + "Session." + id) widget = tabs_->widget(i);
+        if (!widget) return {{"ok",false},{"status",409},{"error","Session is not open"}};
+        if (action == "close") {
+            tabs_->removeTab(tabs_->indexOf(widget)); delete widget; saveReceiverSessions(); return report();
+        }
+        if (auto* aircraft = qobject_cast<AircraftMapWidget*>(widget)) {
+            const auto result = aircraft->webControl(body);
+            if (!result.value("ok").toBool()) return result;
+        } else if (auto* sat = qobject_cast<SatcomScannerWidget*>(widget)) {
+            auto& engine = sat->engine();
+            if (action == "stop") sat->stopSession();
+            else if (action == "start") {
+                if (QCoreApplication::instance()->property("sdrtown.guiDryRun").toBool())
+                    return {{"ok",false},{"status",409},{"error","RF disabled in GUI dry-run"}};
+                if (!engine.start()) return {{"ok",false},{"status",409},{"error",QString::fromStdString(engine.snapshot().lastStatus)}};
+            } else if (action == "configure") {
+                if (engine.snapshot().state != SatcomScannerState::Idle)
+                    return {{"ok",false},{"status",409},{"error","Stop this session before configuring it"}};
+                if (!body.value("config").isObject()) throw std::invalid_argument("config object required");
+                const auto edit = body.value("config").toObject();
+                for (auto it = edit.begin(); it != edit.end(); ++it) {
+                    const auto key = it.key();
+                    if (QStringList{"lowHz","highHz","stepHz","bandwidthHz","squelchDb"}.contains(key)) {
+                        if (!it.value().isDouble() || !std::isfinite(it.value().toDouble())) throw std::invalid_argument("Finite number required");
+                    } else if (key == "mode" || key == "deviceStableKey") {
+                        if (!it.value().isString()) throw std::invalid_argument("String required");
+                    } else if (key == "monitorAudio") {
+                        if (!it.value().isBool()) throw std::invalid_argument("Boolean required");
+                    } else throw std::invalid_argument("Unknown setting");
+                }
+                auto json = engine.config().toJson();
+                json.update(nlohmann::json::parse(QJsonDocument(edit).toJson(QJsonDocument::Compact).toStdString()));
+                const auto config = SatcomScannerConfig::fromJson(json);
+                if (config.lowHz < 100000 || config.highHz > 6e9 || config.highHz < config.lowHz ||
+                    config.stepHz < 1 || config.stepHz > 99990 || config.bandwidthHz < 1000 || config.bandwidthHz > 2e6 ||
+                    config.squelchDb < -150 || config.squelchDb > 0 ||
+                    !QStringList{"NFM","WFM","AM","USB","LSB","APT","APRS"}.contains(QString::fromStdString(config.mode)))
+                    throw std::invalid_argument("Invalid scan range or mode");
+                engine.setConfig(config); sat->reloadSessionControls();
+            } else return {{"ok",false},{"status",400},{"error","Unknown session action"}};
+        }
+        return report();
+    } catch (const std::exception&) { return {{"ok",false},{"status",400},{"error","Invalid session request"}}; }
 }
 
 QJsonObject SatcomHubWidget::controlInmarsatSessions(const QString& method, const QJsonObject& body) {

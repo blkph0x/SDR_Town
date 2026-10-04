@@ -166,6 +166,20 @@ INMARSAT_SESSION_DIGESTS = {
         "82f145c49ecdcb8582b3f2608c08f961bcf77763fa8dbabb210d67b335788c91"),
 }
 
+# DEC-0189: satellite/aircraft route forwarding and all-controller shutdown only.
+SATELLITE_SESSION_DIGESTS = {
+    "src/MainWindow.cpp": (
+        "82f145c49ecdcb8582b3f2608c08f961bcf77763fa8dbabb210d67b335788c91",
+        "b0181884f8d80d5c7370303bad751b5b812f553296d725326604881c263bc976"),
+}
+
+# DEC-0190: identical driver critical sections with FIFO mutex admission.
+DRIVER_IO_ADMISSION_DIGESTS = {
+    "src/DeviceManager.cpp": (
+        "7b8ee8f740adee826ac669bd54fa90eaced4611310b4c3c2fbed3cadc7d4660c",
+        "82b7115943eb9b015962d1bd315c0133f4e1f6b06a87e41fe660d6e32add692d"),
+}
+
 
 def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
     actual = (
@@ -175,7 +189,8 @@ def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
     return actual in (INFRASTRUCTURE_DIGESTS.get(path), LOSS_ACK_DIGESTS.get(path),
                       WORKFLOW_DIGESTS.get(path), WORKFLOW_ROUTING_DIGESTS.get(path), REPEATER_ROUTING_DIGESTS.get(path),
                       CONTROL_OWNERSHIP_DIGESTS.get(path), WORKFLOW_WINDOW_DIGESTS.get(path),
-                      WORKFLOW_SHUTDOWN_DIGESTS.get(path), INMARSAT_SESSION_DIGESTS.get(path))
+                      WORKFLOW_SHUTDOWN_DIGESTS.get(path), INMARSAT_SESSION_DIGESTS.get(path),
+                      SATELLITE_SESSION_DIGESTS.get(path), DRIVER_IO_ADMISSION_DIGESTS.get(path))
 
 
 # DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.

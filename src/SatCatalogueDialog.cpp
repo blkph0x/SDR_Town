@@ -30,7 +30,7 @@ QString roleBadges(const SatCatalogueEntry& e) {
 
 } // namespace
 
-SatCatalogueDialog::SatCatalogueDialog(QWidget* parent)
+SatCatalogueDialog::SatCatalogueDialog(QWidget* parent, SatPassPlanner* planner)
     : QDialog(parent)
 {
     setWindowTitle("Select satellites");
@@ -41,7 +41,7 @@ SatCatalogueDialog::SatCatalogueDialog(QWidget* parent)
         "Badges: Voice / Data / SSTV / APT. Bookmark-only entries cannot arm a decoder yet."));
     list_ = new QListWidget(this);
     list_->setSelectionMode(QAbstractItemView::NoSelection);
-    const auto cat = SatPassPlanner::instance().catalogue();
+    const auto cat = (planner ? *planner : SatPassPlanner::instance()).catalogue();
     for (const auto& e : cat.entries()) {
         const QString text = QString("%1  (NORAD %2)%3")
                                  .arg(QString::fromStdString(e.name))

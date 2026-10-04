@@ -1,5 +1,25 @@
 # Task list (canonical)
 
+2026-10-05 continuation: T-0103 / DEC-0189 Satcom/Aircraft controllers locally
+verified; exact source CI pending. Named planners/audio/tracks/settings, GUI/API
+controls, hidden-worker continuity, isolated stop/reopen and log concurrency
+are implemented. Native17/17 PASS86.44s; actual session APIs, four workspace
+launches and101 Aircraft/Satcom GUI assertions pass. Final verification follows
+the observer-isolation and stronger producer/hide fixtures. P25 per-system
+CC/follow controller extraction remains open; concrete shared decision state
+and required acceptance are recorded in WORKFLOW_DEVICES.md. No frozen DSP/
+audio edits, physical multi-radio qualification or public release claimed.
+Previous26716b3 exact CI passed
+(Windows37209955622, YAML37209955649; acceptance comment203373945).
+DEC-0190 additionally fixes reproduced mixed-workflow startup starvation with
+FIFO driver admission, preserving critical sections and timeouts. Five mixed
+worker and five GUI runs PASS30.16s;271 FIFO/log assertions pass. Final full
+suite and exact pushed-commit CI are required before source acceptance.
+Final DEC-0189/0190 build and full17/17 PASS84.23s; real three-workflow GUI/API
+automation PASS. Source push/Actions acceptance pending; P25 extraction and
+ISS-0060 remain open, not reported as completed by these controller gates.
+
+
 2026-10-05 active continuation: T-0103 / DEC-0187 replaces the Inmarsat
 singleton restriction with named, isolated engines, maps and GUI/API controls.
 Two real engines consume mock-radio IQ concurrently; stop/ownership conflicts

@@ -1,5 +1,37 @@
 # Issues (canonical)
 
+## ISS-0072 - Read-loop lock starvation blocks a fourth radio (2026-10-05, LOCAL VERIFIED)
+
+DEC-0190. Mixed actual Aircraft/Satcom/Inmarsat controllers on four mock radios
+reproduce a startup failure: third-device tune waited13519ms; fourth-device
+gain succeeded but PPM/start-ready could not acquire the shared live-driver
+mutex before its existing10s deadline. Keep the failing mixed fixture. Repair
+FIFO lock admission without changing serialization or timeouts; deterministic
+queue and full multi-workflow gates are required. Native driver-hang isolation
+and independent physical-domain I/O remain separately open.
+FIFO repair passes the same mixed test five times, plus five Aircraft GUI runs
+(30.16s total) and deterministic admission/log tests271 assertions. All driver
+critical sections and read/startup timeouts are unchanged; no retry relaxation.
+
+## ISS-0071 - Satcom/Aircraft singleton state and log producer race (2026-10-05, LOCAL VERIFIED)
+
+DEC-0189 / T-0103. Named Satcom controllers now own their planner, worker,
+decoder histories, audio queue and settings; named Aircraft controllers own
+their worker, tracks/CPR and settings. Hide no longer cancels local Aircraft
+RX. Stop/Close joins only the addressed controller; Stop also disarms automatic
+pass capture. Worker failure restoration is queued with the old lease identity,
+avoiding synchronous GUI callbacks while the GUI joins that worker. Named
+observer edits no longer mutate the default Aircraft map.
+SatcomAsyncLog had UI and worker producers on an SPSC overwrite ring. A bounded
+try-lock admission now protects POD copying and counts dropped events; the
+writer handles formatting/files, directory changes and final draining.
+Actual GUI/API tests exposed a blocked-signal source selection not persisting;
+explicit persistence repairs it. Two actual workers of each type operate through
+mock Soapy devices with independent stop/conflict checks. No physical RF/audio
+acceptance is claimed. P25 repeated controllers remain open: process-wide last
+speaker time and voice diagnostics still affect follow decisions, so duplicating
+the main window would not isolate systems. See WORKFLOW_DEVICES.md.
+
 ## ISS-0070 - Inmarsat windows share engine, settings and observations (2026-10-05, LOCAL VERIFIED)
 
 DEC-0187 / T-0103. InmarsatWidget, monitor popouts and map stores all referenced

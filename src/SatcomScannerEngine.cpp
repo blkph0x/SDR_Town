@@ -1,4 +1,8 @@
 #include "SatcomScannerEngine.h"
+#include "WorkflowSessionId.h"
+#include <QPointer>
+#include <QSaveFile>
+#include <map>
 #include <QUuid>
 #include "AudioEngine.h"
 #include "SatcomHostServices.h"
@@ -28,10 +32,14 @@
 
 namespace {
 
-std::string configPath() {
+std::mutex enginesMutex;
+std::map<std::string, SatcomScannerEngine*> engines;
+
+std::string configPath(const std::string& sessionId) {
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(base);
-    return (base + "/satcom_scanner.json").toStdString();
+    const auto id = normalizedWorkflowSessionId(sessionId);
+    return (base + (id.empty() ? "/satcom_scanner.json" : "/satcom_scanner_" + QString::fromStdString(id) + ".json")).toStdString();
 }
 
 DemodMode modeFromString(const std::string& mode) {
@@ -147,9 +155,9 @@ SatcomScannerConfig SatcomScannerConfig::fromJson(const nlohmann::json& json) {
     return config;
 }
 
-void SatcomScannerConfig::load() {
+void SatcomScannerConfig::load(const std::string& sessionId) {
     try {
-        std::ifstream in(configPath());
+        std::ifstream in(configPath(sessionId));
         if (!in) {
             *this = defaults();
             return;
@@ -162,12 +170,11 @@ void SatcomScannerConfig::load() {
     }
 }
 
-void SatcomScannerConfig::save() const {
-    try {
-        std::ofstream out(configPath());
-        out << toJson().dump(2);
-    } catch (...) {
-    }
+void SatcomScannerConfig::save(const std::string& sessionId) const {
+    QSaveFile file(QString::fromStdString(configPath(sessionId)));
+    const auto text = toJson().dump(2);
+    if (!file.open(QIODevice::WriteOnly) || file.write(text.data(), text.size()) != qint64(text.size()) || !file.commit())
+        spdlog::warn("Satcom session {} settings save failed", sessionId);
 }
 
 SatcomScannerEngine& SatcomScannerEngine::instance() {
@@ -175,21 +182,47 @@ SatcomScannerEngine& SatcomScannerEngine::instance() {
     return engine;
 }
 
-SatcomScannerEngine::SatcomScannerEngine() {
-    config_.load();
+SatcomScannerEngine::SatcomScannerEngine(const std::string& sessionId)
+    : sessionId_(normalizedWorkflowSessionId(sessionId)) {
+    config_.load(sessionId_);
+    if (!sessionId_.empty()) {
+        planner_ = std::make_unique<SatPassPlanner>(sessionId_);
+        // Named automatic capture requires a fresh operator arm this run.
+        config_.autoCapture = false;
+        config_.logDir = SatcomScannerConfig::defaults().logDir + "/" + sessionId_;
+    }
     ax25_ = std::make_unique<Ax25AprsDecoder>();
     apt_ = std::make_unique<AptImageDecoder>();
     demod_ = std::make_unique<Demodulator>();
     sstvFeed_ = std::make_shared<SstvReceiverFeed>();
     log_.setLogDirectory(config_.logDir);
     log_.start();
+    std::lock_guard lock(enginesMutex);
+    if (!engines.emplace(sessionId_, this).second)
+        throw std::invalid_argument("Satcom session is already open");
 }
 
 SatcomScannerEngine::~SatcomScannerEngine() {
+    setUpdateCallback({});
     stop();
     finishSstvCapture(false);
     shutdownAudioOutput();
     log_.stop();
+    std::lock_guard lock(enginesMutex);
+    engines.erase(sessionId_);
+}
+
+SatPassPlanner& SatcomScannerEngine::planner() const {
+    return planner_ ? *planner_ : SatPassPlanner::instance();
+}
+
+void SatcomScannerEngine::stopAll() {
+    std::vector<QPointer<SatcomScannerEngine>> active;
+    { std::lock_guard lock(enginesMutex); for (const auto& [id, engine] : engines) active.emplace_back(engine); }
+    for (const auto& engine : active) if (engine) {
+        { std::lock_guard lock(engine->mutex_); engine->autoCaptureSuspended_ = true; }
+        engine->stop();
+    }
 }
 
 void SatcomScannerEngine::setConfig(const SatcomScannerConfig& config) {
@@ -199,7 +232,7 @@ void SatcomScannerEngine::setConfig(const SatcomScannerConfig& config) {
         return;
     }
     config_ = config;
-    config_.save();
+    config_.save(sessionId_);
     log_.setLogDirectory(config_.logDir);
 }
 
@@ -211,12 +244,13 @@ SatcomScannerConfig SatcomScannerEngine::config() const {
 void SatcomScannerEngine::setAutoCaptureEnabled(bool enabled) {
     std::lock_guard<std::mutex> lock(mutex_);
     config_.autoCapture = enabled;
-    config_.save();
+    autoCaptureSuspended_ = false;
+    config_.save(sessionId_);
 }
 
 bool SatcomScannerEngine::autoCaptureEnabled() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    return config_.autoCapture;
+    return config_.autoCapture && !autoCaptureSuspended_;
 }
 
 size_t SatcomScannerEngine::resolveDeviceIndex(std::string* error) {
@@ -228,6 +262,10 @@ size_t SatcomScannerEngine::resolveDeviceIndex(std::string* error) {
     }
 
     SatcomScannerConfig selected = config();
+    if (!sessionId_.empty() && selected.deviceStableKey.empty()) {
+        if (error) *error = "Select a radio for this Satcom session";
+        return size_t(-1);
+    }
     const auto active = leaseToken();
     if (active && manager.ownsDevice(active)) return active.index;
     const size_t chosen = manager.resolveWorkflowDevice(DeviceOwnership::Owner::Satcom,
@@ -273,7 +311,8 @@ std::string SatcomScannerEngine::makeCaptureStem(const std::string& satId,
     const std::string timestamp = QDateTime::currentDateTimeUtc()
                                       .toString("yyyyMMdd_HHmmss_zzz")
                                       .toStdString();
-    return timestamp + "_" + safeToken(satId) + "_" + safeToken(downlinkId);
+    return timestamp + "_" + safeToken(sessionId_) + "_" + safeToken(satId) + "_" + safeToken(downlinkId) +
+        "_" + QUuid::createUuid().toString(QUuid::Id128).toStdString();
 }
 
 void SatcomScannerEngine::capturePreviousDeviceState(size_t deviceIndex) {
@@ -586,8 +625,8 @@ bool SatcomScannerEngine::ensureAudioOutput(std::string* error) {
     }
 
     std::string hostError;
-    if (AudioEngine* shared =
-            SatcomHostServices::instance().acquireAudioEngine(&hostError)) {
+    if (AudioEngine* shared = sessionId_.empty() ?
+            SatcomHostServices::instance().acquireAudioEngine(&hostError) : nullptr) {
         if (shared->activeOutputCount() == 0) {
             if (error) *error = hostError.empty()
                 ? "Configured SDR Town playback output is unavailable"
@@ -608,9 +647,9 @@ bool SatcomScannerEngine::ensureAudioOutput(std::string* error) {
         return true;
     }
 
-    // In the GUI, never open a competing miniaudio device behind MainWindow.
-    // A fallback is retained only for standalone/CLI tests where no host exists.
-    if (SatcomHostServices::instance().installed()) {
+    // DEC-0189: named sessions own separate PCM queues, never append to P25's
+    // primary output. The OS mixer combines explicitly enabled session outputs.
+    if (sessionId_.empty() && SatcomHostServices::instance().installed()) {
         if (error) *error = hostError.empty()
             ? "SDR Town playback output could not be activated"
             : hostError;
@@ -702,7 +741,9 @@ bool SatcomScannerEngine::start(bool force) {
         stop();
     }
 
-    if (worker_.joinable()) worker_.join();
+    // A failed worker can have queued its host cleanup; complete that old
+    // lease before opening a replacement session, even before Qt dispatches it.
+    if (worker_.joinable()) stop();
     if (!prepareReceiverForSatcom(selectedDevice, force, &deviceError)) return false;
 
     double firstFrequency = 0.0;
@@ -737,6 +778,8 @@ bool SatcomScannerEngine::start(bool force) {
     iqDiscontinuities_.store(0, std::memory_order_release);
     resetChronologicalInput();
     pushLog(SatcomLog::EventType::Start, firstFrequency, "scan start live hardware");
+    spdlog::info("Satcom session={} device={} key={} lease={} started frequencyHz={}",
+        sessionId_, selectedDevice, config().deviceStableKey, leaseToken().id, firstFrequency);
     worker_ = std::thread(&SatcomScannerEngine::workerLoop, this);
     notifyUpdate();
     return true;
@@ -745,6 +788,7 @@ bool SatcomScannerEngine::start(bool force) {
 void SatcomScannerEngine::stop() {
     run_.store(false, std::memory_order_release);
     if (worker_.joinable()) worker_.join();
+    if (planner_) planner_->disarm();
     finishSstvCapture(false);
     shutdownAudioOutput();
     {
@@ -827,6 +871,7 @@ void SatcomScannerEngine::writeRecordingMetadata(const std::string& path) const 
     }
     const QFileInfo info(QString::fromStdString(path));
     const nlohmann::json metadata = {
+        {"sessionId", sessionId_},
         {"format", "float32-le-mono"},
         {"sampleRate", 48000},
         {"bytes", info.size()},
@@ -874,7 +919,7 @@ bool SatcomScannerEngine::applyPreset(const std::string& name) {
             config_.bandwidthHz = preset.bandwidthHz;
             config_.mode = preset.mode;
             config_.squelchDb = preset.squelchDb;
-            config_.save();
+            config_.save(sessionId_);
             return true;
         }
     }
@@ -922,7 +967,7 @@ SatcomScannerSnapshot SatcomScannerEngine::snapshot() const {
         snapshot.activeDeviceIndex = activeDeviceIndex_;
     }
     snapshot.iqDiscontinuities = iqDiscontinuities_.load(std::memory_order_acquire);
-    const auto armed = SatPassPlanner::instance().snapshot().armed;
+    const auto armed = planner().snapshot().armed;
     snapshot.passArmed = armed.armed;
     snapshot.autoTrack = armed.autoTrack;
     snapshot.dopplerHz = armed.dopplerHz;
@@ -1015,18 +1060,18 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
         }
     }
 
-    if (!SatPassPlanner::instance().arm(satId, downlinkId, autoTrack, &failure)) {
+    if (!planner().arm(satId, downlinkId, autoTrack, &failure)) {
         if (error) *error = failure;
         return false;
     }
 
     if (!engineWasRunning && !prepareReceiverForSatcom(selectedDevice, force, &failure)) {
-        SatPassPlanner::instance().disarm();
+        planner().disarm();
         if (error) *error = failure;
         return false;
     }
 
-    const auto plan = SatPassPlanner::instance().snapshot();
+    const auto plan = planner().snapshot();
     const std::string stem = makeCaptureStem(satId, plan.armed.downlinkId);
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -1063,7 +1108,7 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
         }
         sstvOutputDir_.clear();
         lastStatus_ = "Preparing pass receiver";
-        config_.save();
+        config_.save(sessionId_);
     }
     resetChronologicalInput();
 
@@ -1076,7 +1121,7 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
             state_ = engineWasRunning ? SatcomScannerState::Scanning : SatcomScannerState::Idle;
             lastStatus_ = failure;
         }
-        SatPassPlanner::instance().disarm();
+        planner().disarm();
         if (!engineWasRunning) {
             restorePreviousDeviceState();
             endHostTakeover();
@@ -1114,7 +1159,7 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
 void SatcomScannerEngine::disarmPass() {
     stopRecording();
     finishSstvCapture(false);
-    SatPassPlanner::instance().disarm();
+    planner().disarm();
     bool stopPassOnly = false;
     const bool running = run_.load(std::memory_order_acquire);
     {
@@ -1141,13 +1186,13 @@ void SatcomScannerEngine::disarmPass() {
 }
 
 void SatcomScannerEngine::setAutoTrack(bool enabled) {
-    SatPassPlanner::instance().setAutoTrack(enabled);
+    planner().setAutoTrack(enabled);
 }
 
 void SatcomScannerEngine::tickPassTrack() {
     double tunedHz = 0.0;
-    if (!SatPassPlanner::instance().tickAutoTrack(&tunedHz)) {
-        const bool stillArmed = SatPassPlanner::instance().snapshot().armed.armed;
+    if (!planner().tickAutoTrack(&tunedHz)) {
+        const bool stillArmed = planner().snapshot().armed.armed;
         bool ended = false;
         bool stopPassOnly = false;
         {
@@ -1174,9 +1219,10 @@ void SatcomScannerEngine::tickPassTrack() {
             resetChronologicalInput();
             if (stopPassOnly) {
                 run_.store(false, std::memory_order_release);
-                shutdownAudioOutput();
-                restorePreviousDeviceState();
-                endHostTakeover();
+                const auto endedLease = leaseToken();
+                QMetaObject::invokeMethod(this, [this, endedLease] {
+                    if (!run_.load() && leaseToken().id == endedLease.id) stop();
+                }, Qt::QueuedConnection);
             }
         }
         return;
@@ -1364,7 +1410,8 @@ void SatcomScannerEngine::processLockedAudio() {
                 const QString base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
                                      "/satcom_apt";
                 QDir().mkpath(base);
-                path = QDir(base).filePath("preview.pgm").toStdString();
+                path = QDir(base).filePath(sessionId_.empty() ? "preview.pgm" :
+                    "preview_" + QString::fromStdString(sessionId_) + ".pgm").toStdString();
             }
             if (apt_->writePgm(path)) {
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -1521,13 +1568,14 @@ void SatcomScannerEngine::workerLoop() {
     }
 
     if (lostHardware) {
-        stopRecording();
-        finishSstvCapture(false);
-        SatPassPlanner::instance().disarm();
-        shutdownAudioOutput();
-        resetChronologicalInput();
-        restorePreviousDeviceState();
-        endHostTakeover();
-        notifyUpdate();
+        // Host restore may invoke GUI callbacks. Never wait on the GUI from a
+        // worker that the same GUI can be joining (DEC-0189).
+        const auto failedLease = leaseToken();
+        QMetaObject::invokeMethod(this, [this, failedLease] {
+            if (!run_.load() && leaseToken().id == failedLease.id) {
+                planner().disarm();
+                stop();
+            }
+        }, Qt::QueuedConnection);
     }
 }

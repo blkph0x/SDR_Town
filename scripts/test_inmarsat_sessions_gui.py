@@ -1,4 +1,4 @@
-"""DEC-0187: real GUI session lifecycle/control isolation, strictly no RF."""
+"""DEC-0187/0189: real GUI session lifecycle/control isolation, strictly no RF."""
 import argparse
 import json
 from pathlib import Path
@@ -39,7 +39,7 @@ def main():
     with (args.output/'gui.log').open('w', encoding='utf-8') as log:
         proc = subprocess.Popen([str(args.exe.resolve()), '--allow-multiple', '--no-remote-diagnostics',
             '--gui-dry-run', '--control-port', str(port), '--control-token', token,
-            '--control-auth-required', '--gui-exit-after-ms', '22000'],
+            '--control-auth-required', '--gui-exit-after-ms', '35000'],
             stdout=log, stderr=subprocess.STDOUT, startupinfo=startup)
         try:
             deadline = time.monotonic()+15
@@ -81,14 +81,60 @@ def main():
                        for s in request('/v1/inmarsat/sessions')['sessions'])
             assert request('/v1/inmarsat/status')['inmarsat']['config']==original
             assert command('close')['ok']; assert command('close','qa_inmarsat_b')['ok']
-            proc.wait(timeout=30); assert proc.returncode==0
+            # DEC-0189: exercise the real satellite and aircraft session routes,
+            # not just the underlying ownership policy or a mock HTTP handler.
+            for workflow in ('satcom', 'aircraft'):
+                path = f'/v1/{workflow}/sessions'
+                def operation(action, name='qa_a', **extra):
+                    return request(path, {'action':action,'sessionId':name,**extra})
+                def named_states():
+                    return {s['sessionId']:s for s in request(path)['sessions'] if s['sessionId']}
+                for name in ('qa_a','qa_b','QA_A'):
+                    assert operation('open',name)['ok']
+                for bad in ('bad\n','../escape','x'*65,12):
+                    assert operation('open',bad)['status']==400
+                for action in ('stop','close','configure'):
+                    assert operation(action,'not-open')['status']==409
+                assert operation(99)['status']==400
+                if workflow == 'satcom':
+                    for name,freq in (('qa_a',145800000),('qa_b',137100000)):
+                        assert operation('configure',name,config={'deviceStableKey':'missing-'+name,
+                            'lowHz':freq,'highHz':freq,'monitorAudio':False})['ok']
+                    initial = named_states()
+                    for config in ({'lowHz':-1},{'stepHz':0},{'lowHz':'bad'},{'mode':'invalid'}, {'unknown':True}):
+                        assert operation('configure',config=config)['status']==400
+                    assert named_states()['qa_a']['config']==initial['qa_a']['config']
+                    assert operation('start')['status']==409
+                else:
+                    for name,bw in (('qa_a',4),('qa_b',8)):
+                        assert operation('configure',name,deviceKey='missing-'+name,captureBandwidthMHz=bw)['ok']
+                    initial = named_states()
+                    for bw in (-1,'bad',1e100):
+                        assert operation('configure',captureBandwidthMHz=bw,deviceKey='must-not-apply')['status']==400
+                    assert named_states()['qa_a']['deviceKey']=='missing-qa_a'
+                    assert operation('tune')['status']==409
+                    assert operation('local',enabled=True)['ok']
+                    assert not named_states()['qa_b']['localDecodeEnabled']
+                assert operation('stop')['ok']
+                assert operation('close')['ok']
+                assert 'qa_a' not in named_states() and 'qa_b' in named_states()
+                assert operation('open')['ok']
+                reopened = named_states()['qa_a']
+                if workflow == 'satcom':
+                    assert reopened['config']['lowHz']==145800000 and not reopened['passArmed']
+                else:
+                    assert reopened['deviceKey']=='missing-qa_a' and reopened['captureBandwidthMHz']==4, reopened
+                    assert not reopened['radioBusy']
+                assert operation('close')['ok']; assert operation('close','qa_b')['ok']
+            proc.wait(timeout=45); assert proc.returncode==0
         finally:
             if proc.poll() is None: proc.kill(); proc.wait(timeout=10)
     text = (args.output/'gui.log').read_text(encoding='utf-8',errors='replace')
     for forbidden in ('Background: Attempting Soapy make','Started real Soapy streaming','STUB/no-hardware IQ mode'):
         assert forbidden not in text, forbidden
-    (args.output/'result.json').write_text(json.dumps({'ok':True,'sessions':selected},indent=2),encoding='utf-8')
-    print('PASS: independent Inmarsat GUI engines/configuration, reopen, rejected stale/invalid commands and no RF')
+    (args.output/'result.json').write_text(json.dumps({'ok':True,
+        'verifiedWorkflows':['inmarsat','satcom','aircraft'],'inmarsatSessions':selected},indent=2),encoding='utf-8')
+    print('PASS: independent Inmarsat, Satcom and Aircraft GUI controllers, reopen, rejected stale/invalid commands and no RF')
 
 
 if __name__ == '__main__': main()

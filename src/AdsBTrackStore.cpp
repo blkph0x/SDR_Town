@@ -2,6 +2,7 @@
 #include "HttpGet.h"
 #include "ModeS.h"
 #include "SatPassPlanner.h"
+#include "WorkflowSessionId.h"
 
 #include <chrono>
 #include <cmath>
@@ -23,8 +24,10 @@ AdsBTrackStore& AdsBTrackStore::instance() {
     return s;
 }
 
-AdsBTrackStore::AdsBTrackStore() {
-    networkEnabled_ = QSettings("SDR_Town", "SDR Town").value("aircraft/networkEnabled", true).toBool();
+AdsBTrackStore::AdsBTrackStore(const std::string& sessionId) {
+    const auto id = normalizedWorkflowSessionId(sessionId);
+    settingsPrefix_ = id.empty() ? "aircraft/" : "aircraft/sessions/" + id + "/";
+    networkEnabled_ = QSettings("SDR_Town", "SDR Town").value(QString::fromStdString(settingsPrefix_) + "networkEnabled", id.empty()).toBool();
     const auto obs = SatPassPlanner::instance().observer();
     centerLat_ = obs.latDeg;
     centerLon_ = obs.lonDeg;
@@ -299,7 +302,7 @@ void AdsBTrackStore::setNetworkEnabled(bool enabled) {
         networkOnline_ = false;
         networkUnix_ = 0;
         lastStatus_ = enabled ? "Internet aircraft enabled" : "Internet aircraft disabled; network tracks removed";
-        QSettings("SDR_Town", "SDR Town").setValue("aircraft/networkEnabled", enabled);
+        QSettings("SDR_Town", "SDR Town").setValue(QString::fromStdString(settingsPrefix_) + "networkEnabled", enabled);
     }
     notify();
 }

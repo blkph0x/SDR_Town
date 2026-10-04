@@ -7,6 +7,9 @@
 #include "Receiver.h"
 #include "WorkflowRadioSession.h"
 #include "WorkflowDeviceCombo.h"
+#include "WorkflowSessionId.h"
+#include <QCoreApplication>
+#include <QSet>
 
 #include <QCheckBox>
 #include <QDialog>
@@ -38,6 +41,7 @@
 #include <vector>
 
 namespace {
+QSet<AircraftMapWidget*> aircraftControllers; // GUI-thread ownership only.
 
 constexpr int kTile = 256;
 
@@ -50,9 +54,14 @@ void latLonToTileXY(double lat, double lon, int z, double* x, double* y) {
 
 } // namespace
 
-AircraftMapWidget::AircraftMapWidget(QWidget* parent)
-    : QWidget(parent)
+AircraftMapWidget::AircraftMapWidget(QWidget* parent, const QString& sessionId)
+    : QWidget(parent),
+      sessionId_(QString::fromStdString(normalizedWorkflowSessionId(sessionId.toStdString()))),
+      settingsPrefix_(sessionId_.isEmpty() ? "aircraft/" : "aircraft/sessions/" + sessionId_ + "/"),
+      ownedStore_(sessionId_.isEmpty() ? nullptr : std::make_unique<AdsBTrackStore>(sessionId_.toStdString())),
+      store_(ownedStore_ ? *ownedStore_ : AdsBTrackStore::instance())
 {
+    if (!sessionId_.isEmpty()) setObjectName("aircraftSession." + sessionId_);
     setMinimumSize(560, 360);
     setWindowTitle("Aircraft Map");
 
@@ -67,23 +76,24 @@ AircraftMapWidget::AircraftMapWidget(QWidget* parent)
     deviceCombo_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     deviceCombo_->setMinimumContentsLength(18);
     refreshWorkflowDeviceCombo(*deviceCombo_, DeviceOwnership::Owner::Aircraft,
-        QSettings().value("aircraft/deviceKey").toString());
+        QSettings().value(settingsPrefix_ + "deviceKey").toString());
     netBtn_ = new QPushButton("Refresh net", this);
     localAdsbCheck_ = new QCheckBox("Local 1090 decode", this);
+    localAdsbCheck_->setObjectName("aircraftLocalDecode");
     localAdsbCheck_->setChecked(false);
     toolbar_ = new QWidget(this);
     auto* layout = new QGridLayout(toolbar_);
     layout->setContentsMargins(6, 6, 6, 6);
     internetCheck_ = new QCheckBox("Internet aircraft", toolbar_);
     internetCheck_->setObjectName("aircraftInternetEnabled");
-    internetCheck_->setChecked(AdsBTrackStore::instance().networkEnabled());
+    internetCheck_->setChecked(store_.networkEnabled());
     internetCheck_->setToolTip("Turn off to stop aircraft lookups and remove their data. Local ADS-B/ADS-C remain; map tiles are separate.");
     captureBandwidth_ = new QDoubleSpinBox(toolbar_);
     captureBandwidth_->setObjectName("aircraftCaptureBandwidthMHz");
     captureBandwidth_->setRange(2, 20);
     captureBandwidth_->setDecimals(1);
     captureBandwidth_->setSuffix(" MHz");
-    captureBandwidth_->setValue(20);
+    captureBandwidth_->setValue(QSettings().value(settingsPrefix_ + "captureBandwidthMHz", 20).toDouble());
     captureBandwidth_->setToolTip("Requested RF capture span. Limited to the receiver's advertised sample rates; not the audio filter.");
     layout->addWidget(status_, 0, 0, 1, 4);
     status_->setWordWrap(true);
@@ -113,7 +123,10 @@ AircraftMapWidget::AircraftMapWidget(QWidget* parent)
     connect(tuneBtn_, &QPushButton::clicked, this, &AircraftMapWidget::onTune1090);
     connect(stopBtn_, &QPushButton::clicked, this, [this] { localRun_.store(false); tuneStatus_ = "Stopping aircraft radio"; refreshUi(); });
     connect(deviceCombo_, &QComboBox::currentIndexChanged, this, [this] {
-        QSettings().setValue("aircraft/deviceKey", deviceCombo_->currentData());
+        QSettings().setValue(settingsPrefix_ + "deviceKey", deviceCombo_->currentData());
+    });
+    connect(captureBandwidth_, &QDoubleSpinBox::valueChanged, this, [this](double value) {
+        QSettings().setValue(settingsPrefix_ + "captureBandwidthMHz", value);
     });
     connect(netBtn_, &QPushButton::clicked, this, &AircraftMapWidget::onRefreshNetwork);
     connect(localAdsbCheck_, &QCheckBox::toggled, this, &AircraftMapWidget::onLocalAdsbToggled);
@@ -122,14 +135,15 @@ AircraftMapWidget::AircraftMapWidget(QWidget* parent)
     const auto obs = SatPassPlanner::instance().observer();
     centerLat_ = obs.latDeg != 0 ? obs.latDeg : -33.87;
     centerLon_ = obs.lonDeg != 0 ? obs.lonDeg : 151.21;
-    AdsBTrackStore::instance().setObserver(centerLat_, centerLon_);
+    store_.setObserver(centerLat_, centerLon_);
     // UI timer reads snapshots; no callback may race QWidget destruction.
+    aircraftControllers.insert(this);
 }
 
 void AircraftMapWidget::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);
     if (uiTimer_ && !uiTimer_->isActive()) uiTimer_->start(1500);
-    if (AdsBTrackStore::instance().networkEnabled() && !netTimer_->isActive()) netTimer_->start(30000);
+    if (store_.networkEnabled() && !netTimer_->isActive()) netTimer_->start(30000);
     if (!radioBusy_.load()) refreshWorkflowDeviceCombo(*deviceCombo_, DeviceOwnership::Owner::Aircraft,
         deviceCombo_->currentData().toString());
     fetchOpenSky();
@@ -141,11 +155,16 @@ void AircraftMapWidget::hideEvent(QHideEvent* event) {
     if (uiTimer_) uiTimer_->stop();
     if (netTimer_) netTimer_->stop();
     if (aircraftReply_) aircraftReply_->abort();
-    if (!remoteLocal_) localRun_.store(false);
+    // DEC-0189: navigation pauses rendering/network only, never a radio worker.
 }
 
 AircraftMapWidget::~AircraftMapWidget() {
     stopLocalWorker();
+    aircraftControllers.remove(this);
+}
+
+void AircraftMapWidget::stopAll() {
+    for (auto* controller : aircraftControllers) controller->stopLocalWorker();
 }
 
 void AircraftMapWidget::setEmbedded(bool embedded) {
@@ -174,6 +193,7 @@ void AircraftMapWidget::startLocalWorker(const std::string& key, double rateHz, 
         WorkflowRadioSession radio(mgr, key, DeviceOwnership::Owner::Aircraft, 1090e6,
             [this] { return !localRun_.load(); }, rateHz, bandwidthHz);
         const auto i = radio.deviceIndex();
+        spdlog::info("Aircraft session={} radio={} key={} ready", sessionId_.toStdString(), i, key);
         radioReady_.store(true);
         QMetaObject::invokeMethod(this, [this, rateHz] {
             tuneStatus_ = QString("1090 MHz ready | Capture %1 MHz").arg(rateHz / 1e6, 0, 'f', 2);
@@ -208,7 +228,7 @@ void AircraftMapWidget::startLocalWorker(const std::string& key, double rateHz, 
                             std::vector<float> mag(iq.samples.size());
                             for (size_t k = 0; k < mag.size(); ++k) mag[k] = std::abs(iq.samples[k]);
                             const auto frames = decoder.process(mag, iq.startAbsolute, iq.streamEpoch, rate);
-                            for (const auto& frame : frames) AdsBTrackStore::instance().ingestModeSFrame(frame.data());
+                            for (const auto& frame : frames) store_.ingestModeSFrame(frame.data());
                             samples += mag.size(); decoded += frames.size();
                         }
                     }
@@ -254,7 +274,7 @@ void AircraftMapWidget::resizeEvent(QResizeEvent* event) {
 }
 
 void AircraftMapWidget::refreshUi() {
-    const auto snap = AdsBTrackStore::instance().snapshot();
+    const auto snap = store_.snapshot();
     { const QSignalBlocker block(internetCheck_); internetCheck_->setChecked(snap.networkEnabled); }
     netBtn_->setEnabled(snap.networkEnabled);
     if (!followIcao_.isEmpty()) {
@@ -275,10 +295,10 @@ void AircraftMapWidget::refreshUi() {
 }
 
 void AircraftMapWidget::fetchOpenSky() {
-    if (!isVisible() || !AdsBTrackStore::instance().networkEnabled() || aircraftReply_) return;
-    const auto generation = AdsBTrackStore::instance().networkGeneration();
+    if (!isVisible() || !store_.networkEnabled() || aircraftReply_) return;
+    const auto generation = store_.networkGeneration();
     double lat = centerLat_, lon = centerLon_, nm = 120.0;
-    AdsBTrackStore::instance().observer(&lat, &lon, &nm);
+    store_.observer(&lat, &lon, &nm);
     const double dlat = nm / 60.0;
     const double dlon = nm / (60.0 * std::max(0.2, std::cos(lat * 3.14159265358979323846 / 180.0)));
     const QUrl url(QString("https://opensky-network.org/api/states/all?lamin=%1&lomin=%2&lamax=%3&lomax=%4")
@@ -298,9 +318,9 @@ void AircraftMapWidget::fetchOpenSky() {
         if (aircraftReply_ == reply) aircraftReply_.clear();
         if (reply->error() != QNetworkReply::NoError) {
             if (reply->error() != QNetworkReply::OperationCanceledError)
-                AdsBTrackStore::instance().setNetworkError(reply->errorString().toStdString(), generation);
+                store_.setNetworkError(reply->errorString().toStdString(), generation);
         } else {
-            AdsBTrackStore::instance().mergeNetworkJson(reply->readAll().toStdString(), generation);
+            store_.mergeNetworkJson(reply->readAll().toStdString(), generation);
         }
         reply->deleteLater();
     });
@@ -308,7 +328,13 @@ void AircraftMapWidget::fetchOpenSky() {
 
 void AircraftMapWidget::onTune1090() {
     tuneSucceeded_=false;
+    if (QCoreApplication::instance()->property("sdrtown.guiDryRun").toBool()) {
+        tuneStatus_ = "RF disabled in GUI dry-run"; refreshUi(); return;
+    }
     if (radioBusy_.load()) { tuneStatus_ = "Stop the aircraft radio before tuning again"; refreshUi(); return; }
+    if (!sessionId_.isEmpty() && deviceCombo_->currentData().toString().isEmpty()) {
+        tuneStatus_ = "Select a radio for this Aircraft session"; refreshUi(); return;
+    }
     auto& mgr = DeviceManager::instance();
     const auto devs = mgr.getDevices();
     std::string err;
@@ -326,7 +352,7 @@ void AircraftMapWidget::onTune1090() {
     }
     if (mgr.isStreaming(idx)) { tuneStatus_ = "Selected radio is already receiving; stop its workflow or choose another SDR"; refreshUi(); return; }
     const auto key = devs[idx].stableKey;
-    QSettings().setValue("aircraft/deviceKey", QString::fromStdString(key));
+    QSettings().setValue(settingsPrefix_ + "deviceKey", QString::fromStdString(key));
     refreshWorkflowDeviceCombo(*deviceCombo_, DeviceOwnership::Owner::Aircraft, QString::fromStdString(key));
     tuneStatus_ = "Opening selected aircraft radio";
     startLocalWorker(key, plan.sampleRateHz, plan.hardwareBandwidthHz);
@@ -339,7 +365,7 @@ void AircraftMapWidget::onRefreshNetwork() {
 }
 
 void AircraftMapWidget::onInternetAircraftToggled(bool on) {
-    AdsBTrackStore::instance().setNetworkEnabled(on);
+    store_.setNetworkEnabled(on);
     netBtn_->setEnabled(on);
     if (!on) {
         netTimer_->stop();
@@ -355,9 +381,10 @@ void AircraftMapWidget::onInternetAircraftToggled(bool on) {
 
 QJsonObject AircraftMapWidget::webStatus() const {
     auto result=QJsonDocument::fromJson(QByteArray::fromStdString(
-        AdsBTrackStore::instance().statusJson().dump())).object();
+        store_.statusJson().dump())).object();
     for(const auto* key:{"centerLat","centerLon","radiusNm"})result.remove(key);
     result.insert("ok",true);result.insert("localDecodeEnabled",localAdsbCheck_->isChecked());
+    result.insert("sessionId",sessionId_);
     result.insert("localDecodeRunning",radioReady_.load() && localRun_.load() && decodeLocal_.load());
     result.insert("radioReady",radioReady_.load());
     result.insert("radioBusy",radioBusy_.load());
@@ -369,16 +396,22 @@ QJsonObject AircraftMapWidget::webStatus() const {
 
 QJsonObject AircraftMapWidget::webControl(const QJsonObject& body) {
     const auto action=body.value("action").toString();
-    if(action=="tune") {
+    if(action=="tune" || action=="configure") {
         if (radioBusy_.load()) return {{"ok",false},{"status",409},{"error","Stop the aircraft radio before changing source"}};
+        if (body.contains("captureBandwidthMHz") && !body.value("captureBandwidthMHz").isDouble())
+            return {{"ok",false},{"status",400},{"error","captureBandwidthMHz must be numeric"}};
+        const double mhz=body.value("captureBandwidthMHz").toDouble(captureBandwidth_->value());
+        if(!std::isfinite(mhz) || mhz<2 || mhz>20)
+            return {{"ok",false},{"status",400},{"error","captureBandwidthMHz must be 2..20"}};
         if (body.contains("deviceKey")) {
             if (!body.value("deviceKey").isString()) return {{"ok",false},{"status",400},{"error","deviceKey must be a string"}};
             refreshWorkflowDeviceCombo(*deviceCombo_, DeviceOwnership::Owner::Aircraft, body.value("deviceKey").toString());
+            QSettings().setValue(settingsPrefix_ + "deviceKey", deviceCombo_->currentData());
         }
-        const double mhz=body.value("captureBandwidthMHz").toDouble(20);
-        if(!std::isfinite(mhz) || mhz<2 || mhz>20)
-            return {{"ok",false},{"status",400},{"error","captureBandwidthMHz must be 2..20"}};
-        captureBandwidth_->setValue(mhz);onTune1090();
+        captureBandwidth_->setValue(mhz);
+        QSettings().setValue(settingsPrefix_ + "captureBandwidthMHz", mhz);
+        if (action == "configure") return webStatus();
+        onTune1090();
         if(!tuneSucceeded_)return {{"ok",false},{"status",409},{"error",tuneStatus_}};
     } else if(action=="stop") {
         localRun_.store(false);
@@ -391,7 +424,7 @@ QJsonObject AircraftMapWidget::webControl(const QJsonObject& body) {
         onInternetAircraftToggled(false);
     } else if(action=="refresh") {
         // Existing local privacy choice is authoritative. No web opt-in.
-        if(!AdsBTrackStore::instance().networkEnabled())
+        if(!store_.networkEnabled())
             return {{"ok",false},{"status",403},{"error","Internet aircraft disabled by local operator"}};
         onRefreshNetwork();
     } else return {{"ok",false},{"status",400},{"error","unsupported aircraft action"}};
@@ -468,7 +501,7 @@ void AircraftMapWidget::paintEvent(QPaintEvent*) {
         else p.drawPixmap(QPointF(px, py), it.value());
     }
 
-    const auto snap = AdsBTrackStore::instance().snapshot();
+    const auto snap = store_.snapshot();
     for (const auto& t : snap.tracks) {
         if (!t.positionValid) continue;
         const QPointF pt = latLonToPixel(t.latDeg, t.lonDeg);
@@ -495,8 +528,8 @@ void AircraftMapWidget::mousePressEvent(QMouseEvent* event) {
             SatObserverConfig o = SatPassPlanner::instance().observer();
             o.latDeg = lat;
             o.lonDeg = lon;
-            SatPassPlanner::instance().setObserver(o);
-            AdsBTrackStore::instance().setObserver(lat, lon);
+            if (sessionId_.isEmpty()) SatPassPlanner::instance().setObserver(o);
+            store_.setObserver(lat, lon);
             centerLat_ = lat;
             centerLon_ = lon;
             status_->setText(QString("Home set %1, %2 (ISS/Doppler/passes)").arg(lat, 0, 'f', 5).arg(lon, 0, 'f', 5));
@@ -511,12 +544,12 @@ void AircraftMapWidget::mousePressEvent(QMouseEvent* event) {
         pixelToLatLon(event->position(), &lat, &lon);
         centerLat_ = lat;
         centerLon_ = lon;
-        AdsBTrackStore::instance().setObserver(lat, lon);
+        store_.setObserver(lat, lon);
         ensureTiles();
         update();
         return;
     }
-    const auto snap = AdsBTrackStore::instance().snapshot();
+    const auto snap = store_.snapshot();
     QString best;
     double bestD = 20.0;
     for (const auto& t : snap.tracks) {
@@ -542,7 +575,7 @@ void AircraftMapWidget::showPopout(const QString& icaoHex) {
     bool ok = false;
     const uint32_t icao = icaoHex.toUInt(&ok, 16);
     if (!ok) return;
-    const auto t = AdsBTrackStore::instance().trackByIcao(icao);
+    const auto t = store_.trackByIcao(icao);
     auto* dlg = new QDialog(this);
     dlg->setAttribute(Qt::WA_DeleteOnClose);
     dlg->setWindowTitle(QString::fromStdString(t.callsign.empty() ? t.icaoHex : t.callsign));

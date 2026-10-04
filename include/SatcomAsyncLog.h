@@ -7,7 +7,8 @@
 #include <thread>
 #include <vector>
 
-// Fixed-capacity SPSC-style ring for satcom events. Hot path never allocates or formats.
+// Bounded multi-producer log: UI and radio worker may publish simultaneously.
+// Hot path uses try-lock admission and never formats or performs file I/O.
 namespace SatcomLog {
 
 enum class EventType : uint8_t {
@@ -43,14 +44,14 @@ public:
     void start();
     void stop();
 
-    // Hot path: copy POD into ring. Returns false if dropped (ring full → drop oldest).
+    // False on contention. A full ring accepts this event and counts the oldest as dropped.
     bool tryPush(EventType type, double freqHz, const char* text);
 
     uint64_t eventsWritten() const { return written_.load(std::memory_order_relaxed); }
     uint64_t eventsDropped() const { return dropped_.load(std::memory_order_relaxed); }
     uint64_t bytesOnDisk() const { return bytesOnDisk_.load(std::memory_order_relaxed); }
 
-    // UI snapshot: newest-first up to maxLines (allocates; call off DSP thread).
+    // UI snapshot: newest maxLines in chronological order (allocates; off DSP thread).
     std::vector<std::string> recentLines(size_t maxLines = 200) const;
 
 private:
@@ -65,6 +66,8 @@ private:
     std::atomic<bool> run_{false};
     std::thread writer_;
     std::string logDir_;
+    std::mutex directoryMutex_;
+    std::mutex ringMutex_;
     std::atomic<uint64_t> written_{0};
     std::atomic<uint64_t> dropped_{0};
     std::atomic<uint64_t> bytesOnDisk_{0};

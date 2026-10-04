@@ -4,6 +4,7 @@
 
 #include "SatcomAsyncLog.h"
 #include "SatcomIqCursor.h"
+#include <QObject>
 
 #include <atomic>
 #include <complex>
@@ -50,8 +51,8 @@ struct SatcomScannerConfig {
     static SatcomScannerConfig defaults();
     nlohmann::json toJson() const;
     static SatcomScannerConfig fromJson(const nlohmann::json& j);
-    void load();
-    void save() const;
+    void load(const std::string& sessionId = {});
+    void save(const std::string& sessionId = {}) const;
 };
 
 enum class SatcomScannerState {
@@ -98,10 +99,16 @@ class AptImageDecoder;
 class AudioEngine;
 class Demodulator;
 class SstvReceiverFeed;
+class SatPassPlanner;
 
-class SatcomScannerEngine {
+class SatcomScannerEngine : public QObject {
 public:
     static SatcomScannerEngine& instance();
+    explicit SatcomScannerEngine(const std::string& sessionId = {});
+    ~SatcomScannerEngine() override;
+    static void stopAll();
+    const std::string& sessionId() const { return sessionId_; }
+    SatPassPlanner& planner() const;
 
     void setConfig(const SatcomScannerConfig& cfg);
     SatcomScannerConfig config() const;
@@ -112,7 +119,7 @@ public:
         {
             std::lock_guard<std::mutex> lk(mutex_);
             config_.monitorAudio = on;
-            config_.save();
+            config_.save(sessionId_);
             if (!on) audioMonitoring_ = false;
         }
 
@@ -149,8 +156,8 @@ public:
     void setUpdateCallback(std::function<void()> cb);
 
 private:
-    SatcomScannerEngine();
-    ~SatcomScannerEngine();
+    const std::string sessionId_;
+    std::unique_ptr<SatPassPlanner> planner_;
 
     struct PreviousDeviceState {
         size_t deviceIndex = static_cast<size_t>(-1);
@@ -185,6 +192,7 @@ private:
 
     mutable std::mutex mutex_;
     SatcomScannerConfig config_;
+    bool autoCaptureSuspended_ = false;
     SatcomScannerState state_ = SatcomScannerState::Idle;
     double currentHz_ = 0.0;
     double lockHz_ = 0.0;

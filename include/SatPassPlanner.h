@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -81,6 +82,8 @@ struct SatPassPlannerSnapshot {
 class SatPassPlanner {
 public:
     static SatPassPlanner& instance();
+    explicit SatPassPlanner(const std::string& sessionId = {});
+    ~SatPassPlanner();
 
     void setObserver(const SatObserverConfig& obs);
     SatObserverConfig observer() const;
@@ -120,8 +123,10 @@ public:
     void setUpdateCallback(std::function<void()> cb);
 
 private:
-    SatPassPlanner();
-    ~SatPassPlanner();
+    void saveSessionLocked() const;
+    struct CompletionGate { std::mutex mutex; SatPassPlanner* owner = nullptr; };
+    std::shared_ptr<CompletionGate> completion_ = std::make_shared<CompletionGate>();
+    std::string sessionId_;
 
     void predictLocked(double hoursAhead);
     std::vector<SatCurrentPosition> currentPositionsLocked(double unixSec) const;

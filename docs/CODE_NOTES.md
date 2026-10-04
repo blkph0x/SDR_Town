@@ -1,5 +1,26 @@
 # Code notes (tree map)
 
+DEC-0190: DriverIoMutex is a FIFO BasicLockable ticket queue using standard
+mutex/condition_variable. DeviceManager retains every existing live-driver
+critical section and timeout but prevents a read loop barging ahead of queued
+startup/control operations. Existing rxLiveIoWaitUs still measures that wait.
+This does not parallelize devices or recover a blocked native call. Frozen-path
+guard tests verify the exact include/global/23 lock-type changes, not a wildcard.
+
+DEC-0189: WorkflowSessionId validates normalized ASCII session keys.
+SatcomScannerEngine owns named SatPassPlanner/config/audio/log/decoder state;
+QObject-bound old-lease cleanup and stopAll join before host-service teardown.
+SatPassPlanner persists named observer/catalogue atomically and invalidates
+network completion ownership on destruction. SatcomScannerWidget controls its
+engine; hidden named pass timers continue, Stop disarms, saved sessions start
+idle. SatCatalogueDialog uses that planner. AdsBTrackStore/AircraftMapWidget
+own named tracks/CPR/network settings and worker/selected source; hide affects
+rendering only. SatcomHubWidget manages named tabs and shared GUI/API routes.
+MainWindow changes only exact route forwarding and global workflow teardown.
+SatcomAsyncLog serializes bounded POD copying, counts contention/overflow and
+formats/writes/drains off the radio producer. No protocol/DSP math changes.
+P25 extraction dependencies and next tests are in WORKFLOW_DEVICES.md.
+
 DEC-0187: InmarsatEngine is an explicitly owned QObject. Empty-ID instance()
 preserves the original API; named engines have separate config files, IQ
 cursors, decoder/watch workers, stores and lease tokens. stopAll joins the

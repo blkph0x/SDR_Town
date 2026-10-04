@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <atomic>
 #include <thread>
+#include <memory>
 
 class QTimer;
 class QLabel;
@@ -17,12 +18,16 @@ class QNetworkAccessManager;
 class QNetworkReply;
 class QDoubleSpinBox;
 class QComboBox;
+class AdsBTrackStore;
 
 class AircraftMapWidget : public QWidget {
     Q_OBJECT
 public:
-    explicit AircraftMapWidget(QWidget* parent = nullptr);
+    explicit AircraftMapWidget(QWidget* parent = nullptr, const QString& sessionId = {});
     ~AircraftMapWidget() override;
+    const QString& sessionId() const { return sessionId_; }
+    AdsBTrackStore& trackStore() { return store_; }
+    static void stopAll();
 
     // When embedded in a dock, do not force a top-level window.
     void setEmbedded(bool embedded);
@@ -45,6 +50,10 @@ protected:
     void showEvent(QShowEvent* event) override;
 
 private:
+    const QString sessionId_;
+    const QString settingsPrefix_;
+    std::unique_ptr<AdsBTrackStore> ownedStore_;
+    AdsBTrackStore& store_;
     void ensureTiles();
     void fetchOpenSky();
     void stopLocalWorker();

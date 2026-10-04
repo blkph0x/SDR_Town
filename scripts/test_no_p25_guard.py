@@ -27,9 +27,37 @@ def expect_allowed(path: str) -> None:
 
 def main() -> int:
     import subprocess
+    import re
+    for path in MODULE.DRIVER_IO_ADMISSION_DIGESTS:
+        before = subprocess.check_output(["git", "show", "26716b3:" + path], cwd=ROOT, text=True, encoding="utf-8")
+        after = (ROOT / path).read_text(encoding="utf-8")
+        expected = before.replace('#include "DeviceManager.h"', '#include "DeviceManager.h"\n#include "DriverIoMutex.h"', 1)
+        expected = expected.replace("static std::mutex gSoapyLiveIoMutex;", "static DriverIoMutex gSoapyLiveIoMutex;", 1)
+        expected, count = re.subn(r"std::(lock_guard|unique_lock)<std::mutex>(\s+\w+\(gSoapyLiveIoMutex)",
+            r"std::\1<DriverIoMutex>\2", expected)
+        assert count == 23 and after == expected
+        assert MODULE.infrastructure_text_allowed(path, before, after)
+        assert not MODULE.infrastructure_text_allowed(path, before, after.replace("timeNs, 100000)", "timeNs, 1000)"))
+        assert not MODULE.infrastructure_text_allowed(path, after, before)
+    for path in MODULE.SATELLITE_SESSION_DIGESTS:
+        before = subprocess.check_output(["git", "show", "26716b3:" + path], cwd=ROOT, text=True, encoding="utf-8")
+        after = (ROOT / path).read_text(encoding="utf-8")
+        expected = before.replace("        SatcomScannerEngine::instance().stop();", "        SatcomScannerEngine::stopAll();\n        AircraftMapWidget::stopAll();", 1)
+        route = '''        if (path == "/v1/satcom/sessions" || path == "/v1/aircraft/sessions") {
+            auto* hub = findChild<SatcomHubWidget*>(QStringLiteral("satcomHub"));
+            if (!hub) return {{"ok",false},{"status",503},{"error","Satellite workspace unavailable"}};
+            return hub->controlReceiverSessions(path == "/v1/satcom/sessions" ? "satcom" : "aircraft", method, body);
+        }
+'''
+        marker = '        if (path == "/v1/inmarsat/bandplans" && method == "GET") {'
+        assert after == expected.replace(marker, route + marker, 1)
+        assert MODULE.infrastructure_text_allowed(path, before, after)
+        assert not MODULE.infrastructure_text_allowed(path, before, after + "\nRF change")
+        assert not MODULE.infrastructure_text_allowed(path, after, before)
+        assert not MODULE.infrastructure_text_allowed("src/P25LiveDecoder.cpp", before, after)
     for path in MODULE.INMARSAT_SESSION_DIGESTS:
         before = subprocess.check_output(["git", "show", "63acf32:" + path], cwd=ROOT, text=True, encoding="utf-8")
-        after = (ROOT / path).read_text(encoding="utf-8")
+        after = subprocess.check_output(["git", "show", "26716b3:" + path], cwd=ROOT, text=True, encoding="utf-8")
         expected = before.replace("    InmarsatEngine::instance().stop();", "    InmarsatEngine::stopAll();", 1)
         route = '''        if (path == "/v1/inmarsat/sessions") {
             auto* hub = findChild<SatcomHubWidget*>(QStringLiteral("satcomHub"));

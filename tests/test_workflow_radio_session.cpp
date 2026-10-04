@@ -3,6 +3,15 @@
 #include "SdrplayControlFixture.h"
 #include "WorkflowRadioSession.h"
 #include "InmarsatEngine.h"
+#include "SatcomScannerEngine.h"
+#include "SatPassPlanner.h"
+#include "AircraftMapWidget.h"
+#include "AdsBTrackStore.h"
+#include <QCheckBox>
+#include <QApplication>
+#include <QHideEvent>
+#include <QComboBox>
+#include <QDoubleSpinBox>
 #include <SoapySDR/Registry.hpp>
 #include <QCoreApplication>
 #include <QStandardPaths>
@@ -26,7 +35,7 @@ public:
 
 TEST_CASE("Five independent RF workflows retain ownership through real manager lifecycle", "[.ownership-live]") {
     int argc=1; char name[]="workflow-tests"; char* argv[]={name,nullptr};
-    QCoreApplication app(argc,argv); QStandardPaths::setTestModeEnabled(true);
+    QApplication app(argc,argv); QStandardPaths::setTestModeEnabled(true);
     app.setOrganizationName("SDRTownTests"); app.setApplicationName("WorkflowRadioSession");
     SoapySDR::Registry registry("workflow_fixture",
         [](const SoapySDR::Kwargs&)->SoapySDR::KwargsList {
@@ -205,5 +214,75 @@ TEST_CASE("Five independent RF workflows retain ownership through real manager l
     InmarsatEngine::stopAll();
     CHECK_FALSE(manager.isStreaming(second));
     CHECK(InmarsatEngine::runningSessionCount() == 0);
+    // DEC-0189: independent satellite engines use actual manager/worker paths.
+    SatcomScannerEngine satA("worker-sat-a"), satB("worker-sat-b"), satConflict("worker-sat-conflict");
+    auto scan = SatcomScannerConfig::defaults();
+    scan.monitorAudio = false; scan.autoCapture = false;
+    scan.lowHz = scan.highHz = 145.8e6;
+    scan.deviceIndex = first; scan.deviceStableKey = devices[first].stableKey;
+    satA.setConfig(scan); satConflict.setConfig(scan);
+    scan.lowHz = scan.highHz = 137.1e6;
+    scan.deviceIndex = second; scan.deviceStableKey = devices[second].stableKey;
+    satB.setConfig(scan);
+    REQUIRE(satA.start()); REQUIRE(satB.start());
+    CHECK_FALSE(satConflict.start(true));
+    CHECK(manager.isHardwareStreaming(first)); CHECK(manager.isHardwareStreaming(second));
+    CHECK(satA.snapshot().state == SatcomScannerState::Scanning);
+    CHECK(satB.snapshot().state == SatcomScannerState::Scanning);
+    satA.stop();
+    CHECK_FALSE(manager.isStreaming(first));
+    CHECK(manager.isHardwareStreaming(second));
+    CHECK(manager.getCurrentCenterFreq(second) == 137.1e6);
+    CHECK(satB.snapshot().state == SatcomScannerState::Scanning);
+    SatcomScannerEngine::stopAll();
+    CHECK_FALSE(manager.isStreaming(second));
+    {
+        AircraftMapWidget planeA(nullptr,"worker-plane-a"), planeB(nullptr,"worker-plane-b");
+        planeA.trackStore().setNetworkEnabled(false); planeB.trackStore().setNetworkEnabled(false);
+        REQUIRE(planeA.webControl({{"action","local"},{"enabled",true}}).value("ok").toBool());
+        auto* localDecode = planeB.findChild<QCheckBox*>("aircraftLocalDecode");
+        REQUIRE(localDecode != nullptr);
+        localDecode->setChecked(true);
+        REQUIRE(planeA.webControl({{"action","tune"},{"deviceKey",QString::fromStdString(devices[first].stableKey)},
+            {"captureBandwidthMHz",2}}).value("ok").toBool());
+        REQUIRE(planeB.webControl({{"action","tune"},{"deviceKey",QString::fromStdString(devices[second].stableKey)},
+            {"captureBandwidthMHz",2}}).value("ok").toBool());
+        const auto limit = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while ((!planeA.webStatus().value("radioReady").toBool() || !planeB.webStatus().value("radioReady").toBool()) &&
+               std::chrono::steady_clock::now() < limit) {
+            QApplication::processEvents(); std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        REQUIRE(planeA.webStatus().value("radioReady").toBool());
+        REQUIRE(planeB.webStatus().value("radioReady").toBool());
+        scan.deviceIndex = indices[2]; scan.deviceStableKey = devices[indices[2]].stableKey;
+        satA.setConfig(scan); REQUIRE(satA.start());
+        aeroConfig.deviceIndex = indices[3]; aeroConfig.deviceStableKey = devices[indices[3]].stableKey;
+        REQUIRE(aeroA.setConfig(aeroConfig)); REQUIRE(aeroA.start());
+        CHECK(manager.isHardwareStreaming(indices[2]));
+        CHECK(manager.isHardwareStreaming(indices[3]));
+        // Send the actual hide event without opening a map tile network request.
+        QHideEvent hide;
+        QApplication::sendEvent(&planeB,&hide);
+        CHECK(planeB.webStatus().value("localDecodeRunning").toBool());
+        planeA.webControl({{"action","stop"}});
+        while (planeA.webStatus().value("radioBusy").toBool() && std::chrono::steady_clock::now() < limit) {
+            QApplication::processEvents(); std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        CHECK_FALSE(manager.isStreaming(first));
+        CHECK(manager.isHardwareStreaming(second));
+        CHECK(planeB.webStatus().value("localDecodeRunning").toBool());
+        CHECK(manager.isHardwareStreaming(indices[2]));
+        CHECK(manager.isHardwareStreaming(indices[3]));
+        satA.stop();
+        CHECK_FALSE(manager.isStreaming(indices[2]));
+        CHECK(manager.isHardwareStreaming(second));
+        CHECK(manager.isHardwareStreaming(indices[3]));
+        aeroA.stop();
+        CHECK_FALSE(manager.isStreaming(indices[3]));
+        CHECK(manager.isHardwareStreaming(second));
+        AircraftMapWidget::stopAll();
+        CHECK_FALSE(manager.isStreaming(second));
+        QApplication::processEvents();
+    }
 }
 #endif

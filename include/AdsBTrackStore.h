@@ -48,6 +48,8 @@ struct AircraftMapSnapshot {
 class AdsBTrackStore {
 public:
     static AdsBTrackStore& instance();
+    explicit AdsBTrackStore(const std::string& sessionId = {});
+    ~AdsBTrackStore();
 
     void setObserver(double latDeg, double lonDeg, double radiusNm = 120.0);
 
@@ -79,8 +81,7 @@ public:
     void setUpdateCallback(std::function<void()> cb);
 
 private:
-    AdsBTrackStore();
-    ~AdsBTrackStore();
+    std::string settingsPrefix_;
 
     void pruneLocked(double now);
     void notify();

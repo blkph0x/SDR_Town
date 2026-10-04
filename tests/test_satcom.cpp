@@ -1,6 +1,7 @@
 #include "AptImageDecoder.h"
 #include "Ax25AprsDecoder.h"
 #include "SatcomAsyncLog.h"
+#include "DriverIoMutex.h"
 #include "SatcomIqCursor.h"
 #include "SatcomDoppler.h"
 #include "Demod.h"
@@ -514,9 +515,47 @@ TEST_CASE("Satcom async log drops oldest under flood", "[satcom][log]")
         REQUIRE(log.tryPush(SatcomLog::EventType::Info, 145.8e6, buffer));
     }
     REQUIRE(log.eventsDropped() > 0);
+    log.start();
+    log.stop(); // Joining drains the retained POD events and formats on the writer.
+    CHECK(log.eventsWritten() + log.eventsDropped() == 200);
     const auto lines = log.recentLines(20);
     REQUIRE(lines.size() <= 20);
     REQUIRE_FALSE(lines.empty());
+}
+
+TEST_CASE("Satcom log accounts for concurrent UI and worker producers", "[satcom][log]") {
+    SatcomLog::AsyncLog log(64);
+    log.start();
+    auto producer = [&](double hz, const char* payload) {
+        for (int i = 0; i < 5000; ++i) log.tryPush(SatcomLog::EventType::Info,hz,payload);
+    };
+    std::thread a(producer,145.8e6,"producer-alpha"), b(producer,146.8e6,"producer-beta"),
+        c(producer,147.8e6,"producer-gamma");
+    a.join(); b.join(); c.join(); log.stop();
+    CHECK(log.eventsWritten() + log.eventsDropped() == 15000);
+    for (const auto& line : log.recentLines())
+        CHECK((line == "INFO 145.80000MHz producer-alpha" || line == "INFO 146.80000MHz producer-beta" ||
+            line == "INFO 147.80000MHz producer-gamma"));
+}
+
+TEST_CASE("Driver IO admission preserves queued command order", "[satcom][log][ownership]") {
+    DriverIoMutex mutex;
+    std::vector<int> order;
+    std::vector<std::thread> threads;
+    bool admitted = true;
+    mutex.lock();
+    for (int i = 0; i < 4; ++i) {
+        threads.emplace_back([&, i] { std::lock_guard lock(mutex); order.push_back(i); });
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (mutex.waiting() != static_cast<uint64_t>(i + 1) && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (mutex.waiting() != static_cast<uint64_t>(i + 1)) { admitted = false; break; }
+    }
+    mutex.unlock();
+    for (auto& thread : threads) thread.join();
+    REQUIRE(admitted);
+    CHECK(order == std::vector<int>{0,1,2,3});
+    CHECK(mutex.waiting() == 0);
 }
 
 TEST_CASE("Satcom host services forward MainWindow ownership", "[satcom][host]")

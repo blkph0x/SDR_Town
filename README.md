@@ -1,5 +1,13 @@
 # SDR Town
 
+Unreleased Satcom/Aircraft multi-radio update: the Satellite workspace's
+**Add receiver session** menu opens independent Inmarsat, Satcom or Aircraft
+tabs. Satcom has separate pass planning, recordings and audio; Aircraft has
+separate local decoding, tracks and network settings. Saved tabs reopen idle,
+and Stop/Close affects only that controller. GUI/API and mock-radio tests cover
+isolation; physical multi-radio acceptance and repeated P25 followers remain
+open. See [workflow controls](docs/WORKFLOW_DEVICES.md).
+
 Unreleased Inmarsat multi-radio update: open a named receiver using the **add
 session button in the Satellite workspace**. Each tab owns its radio, watch
 list, decoder state, messages and map. Saved tabs reopen stopped. Closing or
@@ -10,8 +18,8 @@ RF acceptance remains open. See [session controls](docs/WORKFLOW_DEVICES.md).
 Unreleased workflow update: **Tools > Additional Decoder Window** opens
 independent Morse/DTMF observers or named SSTV sessions with separate radio,
 frequency, output and cancellation. Hiding a workspace no longer stops its
-satellite receiver. GUI/API session and lifecycle tests pass; repeated P25/
-Satcom/Aircraft engine instances remain in progress. See [workflow status](docs/WORKFLOW_DEVICES.md).
+satellite receiver. GUI/API session and lifecycle tests pass; repeated P25
+controllers remain in progress. See [workflow status](docs/WORKFLOW_DEVICES.md).
 
 Unreleased development: **Devices > Workflow Assignments** saves radio
 reservations by stable identity and shows their runtime status. P25 traffic

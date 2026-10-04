@@ -1,6 +1,12 @@
 #include "SatPassPlanner.h"
 #include "Sgp4.h"
 #include "TleStore.h"
+#include "WorkflowSessionId.h"
+#include <QFile>
+#include <QSaveFile>
+#include <QDir>
+#include <QStandardPaths>
+#include <spdlog/spdlog.h>
 
 #include <algorithm>
 #include <chrono>
@@ -79,9 +85,22 @@ SatPassPlanner& SatPassPlanner::instance() {
     return p;
 }
 
-SatPassPlanner::SatPassPlanner() {
+SatPassPlanner::SatPassPlanner(const std::string& sessionId)
+    : sessionId_(normalizedWorkflowSessionId(sessionId)) {
+    completion_->owner = this;
     observer_.load();
     catalogue_.load();
+    if (!sessionId_.empty()) {
+        QFile file(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
+            "/satcom_planner_" + QString::fromStdString(sessionId_) + ".json");
+        if (file.open(QIODevice::ReadOnly)) {
+            try {
+                const auto json = nlohmann::json::parse(file.readAll().toStdString());
+                observer_ = SatObserverConfig::fromJson(json.at("observer"));
+                catalogue_ = SatCatalogue::fromJson(json.at("catalogue"));
+            } catch (const std::exception& e) { spdlog::warn("Satcom planner {}: {}", sessionId_, e.what()); }
+        }
+    }
     const bool loaded = TleStore::instance().loadCache();
     const size_t count = TleStore::instance().size();
     if (count > 0) predictLocked(24.0);
@@ -93,7 +112,21 @@ SatPassPlanner::SatPassPlanner() {
     }
 }
 
-SatPassPlanner::~SatPassPlanner() = default;
+SatPassPlanner::~SatPassPlanner() {
+    // Network I/O owns only this gate, not the planner. Drain an admitted
+    // completion, then invalidate; never wait for the network request itself.
+    std::lock_guard lock(completion_->mutex);
+    completion_->owner = nullptr;
+}
+
+void SatPassPlanner::saveSessionLocked() const {
+    const auto base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(base);
+    QSaveFile file(base + "/satcom_planner_" + QString::fromStdString(sessionId_) + ".json");
+    const auto text = nlohmann::json{{"observer", observer_.toJson()}, {"catalogue", catalogue_.toJson()}}.dump(2);
+    if (!file.open(QIODevice::WriteOnly) || file.write(text.data(), text.size()) != qint64(text.size()) || !file.commit())
+        spdlog::warn("Satcom planner {} settings save failed", sessionId_);
+}
 
 void SatPassPlanner::notify() {
     std::function<void()> cb;
@@ -113,7 +146,7 @@ void SatPassPlanner::setObserver(const SatObserverConfig& obs) {
     {
         std::lock_guard<std::mutex> lk(mutex_);
         observer_ = obs;
-        observer_.save();
+        if (sessionId_.empty()) observer_.save(); else saveSessionLocked();
         lastStatus_ = "Saving observer location";
     }
     refreshPasses(24.0);
@@ -141,7 +174,7 @@ void SatPassPlanner::setCatalogueSelection(const std::vector<std::string>& selec
         std::lock_guard<std::mutex> lk(mutex_);
         for (auto& e : catalogue_.entries()) e.selected = false;
         for (const auto& id : selectedIds) catalogue_.setSelected(id, true);
-        catalogue_.save();
+        if (sessionId_.empty()) catalogue_.save(); else saveSessionLocked();
         lastStatus_ = "Catalogue selection saved";
     }
     refreshPasses(24.0);
@@ -197,24 +230,27 @@ void SatPassPlanner::refreshTleAsync(std::function<void(bool, std::string)> done
     }
 
     TleStore::instance().refreshFromNetworkAsync(
-        [this, done = std::move(done)](bool networkOk, std::string networkError) mutable {
+        [gate = completion_, done = std::move(done)](bool networkOk, std::string networkError) mutable {
+            std::lock_guard completionLock(gate->mutex);
+            auto* self = gate->owner;
+            if (!self) return;
             const size_t count = TleStore::instance().size();
             const bool usable = networkOk || count > 0;
-            if (usable) refreshPasses(24.0);
+            if (usable) self->refreshPasses(24.0);
             {
-                std::lock_guard<std::mutex> lk(mutex_);
+                std::lock_guard<std::mutex> lk(self->mutex_);
                 if (networkOk) {
-                    lastStatus_ = "TLE refreshed: " + std::to_string(count) + " sets";
+                    self->lastStatus_ = "TLE refreshed: " + std::to_string(count) + " sets";
                 } else if (count > 0) {
-                    lastStatus_ = "TLE network refresh failed; using " +
+                    self->lastStatus_ = "TLE network refresh failed; using " +
                                   std::to_string(count) + " cached sets" +
                                   (networkError.empty() ? std::string{} : ": " + networkError);
                 } else {
-                    lastStatus_ = "TLE refresh failed" +
+                    self->lastStatus_ = "TLE refresh failed" +
                                   (networkError.empty() ? std::string{} : ": " + networkError);
                 }
             }
-            notify();
+            self->notify();
             if (done) done(usable, usable ? std::string{} : networkError);
         });
 }

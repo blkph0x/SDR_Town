@@ -1,4 +1,4 @@
-# Workflow Devices (T-0103 / DEC-0181..0187)
+# Workflow Devices (T-0103 / DEC-0181..0190)
 
 ## Universal contract
 
@@ -69,7 +69,7 @@ failure leaves it stopped. Two satellite takeovers on different radios have
 separate GUI records. Aircraft opens/closes its selected radio in its worker,
 with distinct opening/ready/stopped states and an explicit Stop control.
 
-Use the Satellite workspace's **Add Inmarsat session** button to open or reopen
+Use the Satellite workspace's **Add receiver session** menu to open or reopen
 a named receiver. Names use 1-64 ASCII letters, digits, underscores or hyphens;
 case is normalized. Each tab has its own radio, watch list, IQ cursor, decoder,
 message history, aircraft/map model and map-consent settings. Up to 16 named
@@ -89,6 +89,27 @@ retain their original default session. New FUBAR session-selection UI is not
 implemented by this backend endpoint. Diagnostic recording is unavailable while
 multiple engines are live because the current collector identifies a source by
 frequency; starting a second engine cancels an armed ambiguous recording.
+
+The same menu opens named **Satcom** and **Aircraft** tabs (up to 16 of each).
+Each Satcom tab owns its selected radio, scanner, pass planner/observer,
+catalogue selection, decoder history, recordings/log directory and audio queue.
+Named automatic pass capture must be armed again in the current run. Stop also
+disarms it, so its timer cannot reopen the radio after an explicit stop.
+Each Aircraft tab owns its selected radio, local Mode-S worker, track/CPR state
+and network setting. Internet aircraft default off for a new named session.
+Saved tabs reopen idle; missing radios never fall back to the primary. Switching
+tabs does not stop either workflow. Close and application shutdown join workers.
+
+Authenticated GET `/v1/satcom/sessions` and `/v1/aircraft/sessions` list those
+controllers; POST requires `sessionId` and `action`. Both accept `open`,
+`configure`, `stop`, `close`. Satcom also accepts `start`; configure uses a
+`config` object with `deviceStableKey`, `lowHz`, `highHz`, `stepHz`, `bandwidthHz`,
+`mode`, `squelchDb`, `monitorAudio`. Aircraft accepts `tune`, `local`,
+`network-off`, `refresh`; configure/tune take top-level `deviceKey` and
+`captureBandwidthMHz` (2-20). `local` takes boolean `enabled`.
+Invalid/stale requests cannot address the default session. RF start/tune is
+blocked in dry-run. Existing default routes/CLI remain unchanged; these new
+backend routes do not implement a corresponding FUBAR session-picker UI.
 
 The CLI uses `aircraft tune [device-index]` and `aircraft stop` for this same
 scoped radio lifecycle; CLI tune is hardware setup, not a new continuous Mode-S
@@ -118,6 +139,13 @@ an old command cannot arrive on a newly claimed session. This protects ordering,
 not responsiveness to a permanently wedged native driver. Driver isolation and
 fully asynchronous operator lifecycle remain open.
 
+DEC-0190 fixes reproduced startup starvation with FIFO admission to the existing
+live-driver lock. It does not enable parallel driver calls: a hung native call
+can still delay the other radios. The mixed fixture runs two Aircraft workers,
+one Satcom engine and one Inmarsat engine simultaneously on separate mock radios.
+Its fourth-radio startup failed before the repair and passes afterwards without
+changing the startup timeout. Physical throughput remains to be qualified.
+
 ## Migration matrix
 
 | Path | Implemented in this milestone | Still required |
@@ -127,10 +155,10 @@ fully asynchronous operator lifecycle remain open.
 | P25 | Traffic-source pool selection excludes other reservations; no decoder/audio changes | Per-system control/follow instances, simultaneous calls, explicit CC/traffic roles and RF non-regression acceptance |
 | SSTV | Multiple named image workers, isolated settings and cancellation; selected scoped radio or receiver tap; same GUI/web validation | Shared-source negotiation and physical multi-radio RF qualification |
 | Inmarsat | Independent named engine/GUI/API sessions, settings and message/map stores; exact tune/start/restore tokens and source selectors; lifetime-bound worker failure cleanup | Physical multi-radio RF qualification, fully asynchronous native-driver lifecycle, session-specific recording collector |
-| Satcom | Common source resolution; exact tune/start/restore tokens; per-radio GUI takeover and stale completion rejection; ownership-loss stop | Repeatable engine instances, fully asynchronous lifecycle and fault qualification |
-| Aircraft / 1090 | GUI/web stable-key selection, worker-scoped capture configuration/start/stop; CLI uses same session adapter | Multiple concurrent aircraft instances, cancellation/hung-driver field qualification |
+| Satcom | Named engine/planner/audio/settings and GUI/API sessions; exact tune/start/restore tokens, per-radio takeover and stale completion rejection | Fully asynchronous native-driver lifecycle and physical RF/fault qualification |
+| Aircraft / 1090 | Named GUI/API workers, independent track/CPR/network/settings, stable-key source and worker-scoped start/stop; CLI uses default adapter | Cancellation/hung-driver and physical multi-radio field qualification |
 | RDS / CTCSS / DCS / DTMF / Morse | Read-only selected logical receiver windows; existing main-strip/repeater binding preserved | Persist instance layouts, general typed sample contract and automation |
-| APRS / APT / satellite SSTV | Follow Satcom's selected radio and token lifecycle; existing DSP unchanged | Independent source/session controls outside singleton Satcom |
+| APRS / APT / satellite SSTV | Follow each named Satcom engine's selected radio, decoder state and token lifecycle; unique recording paths; DSP unchanged | Physical multi-radio/pass acceptance |
 | SDRplay diversity / dual tuner | Physical serial treated as shared domain; conflicting reservations refused | Qualified shared-control operation; dedicated composite sessions currently refused |
 
 ## Acceptance and next order
@@ -153,7 +181,25 @@ isolated stopping/settings/maps and actual no-RF GUI session API tests. It does
 not validate simultaneous physical L-band reception or signal quality.
 
 Next: finish migrating all hardware mutations to scoped commands. Replace the
-remaining P25/Satcom/Aircraft singleton controllers with instance state before
-advertising repeated instances. Add source/output controls, shared-source negotiation and automation
+remaining P25 controller with per-system state before advertising concurrent
+trunk followers. Add source/output controls, shared-source negotiation and automation
 tests across all demods. Preserve existing signal processing; P25 timing/gating
 changes require a separate measured decision, not an ownership exception.
+
+DEC-0189 tests two real Satcom engines and two Aircraft workers through mock
+hardware, including occupied-radio rejection, stop-one/keep-other-running,
+hidden local RX and global shutdown. GUI/API fixtures cover settings, malformed
+requests, stale IDs, isolated observers, reopen and stopped auto-capture.
+The bounded Satcom log is tested with concurrent producers and exact accounting.
+
+### Remaining P25 extraction boundary
+
+`gP25AudioLastSpeakerOutputMs`, global voice diagnostic fallback and trusted
+control-channel offset feed GUI/CLI follow decisions, not just display.
+MainWindow also owns the follow lifecycle and voice-job generation/queues.
+These must become per-system context before two followers can operate safely.
+Keep the existing default context compatible, extract the CC/follow controller
+and output route, then compare known-IQ replay against the unchanged baseline.
+Tests must include identical TGIDs on different systems, separate CC/traffic
+radios, encrypted/opposite-slot isolation, independent stop and PCM ordering.
+This pass does not change those frozen P25 paths or claim concurrent P25 calls.

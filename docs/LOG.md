@@ -1,5 +1,29 @@
 # Development log
 
+## 2026-10-05 - Satcom and Aircraft controller isolation
+
+The mixed four-controller test exposed read-loop starvation of hardware startup,
+not a controller ownership conflict. DEC-0190 repairs FIFO driver admission with
+unchanged critical sections and timeouts. Prefail evidence and five repeated
+passing mixed-worker/GUI tests are retained. Global native-driver serialization
+still limits aggregate throughput; driver-domain isolation remains future work.
+
+DEC-0189 removes their singleton restriction through named GUI/API controllers.
+Satcom owns its planner/settings/decoder histories/audio/logs; Aircraft owns
+tracks/CPR, selected source, worker and network settings. Hide preserves local
+reception; stop/close and global shutdown join the correct workers. Explicit
+Satcom Stop disarms automatic capture. TLE completion and failed-worker cleanup
+are lifetime/lease-bound. Fixed settings persistence and shared observer leakage
+found by testing. The Satcom log now safely accepts bounded concurrent UI/worker
+events and drains at shutdown, rather than racing an SPSC overwrite buffer.
+Native suites, real no-RF GUI/API automation, layouts and isolation fixtures
+pass; one live TLE refresh failure/recheck is retained in BUILD_NOTES.
+P25 remains a separate extraction: global last-speaker/voice evidence currently
+affects follow decisions across the main controller. No duplicate controller
+or unverifiable multi-system claim is introduced. The exact remaining work is
+in WORKFLOW_DEVICES.md. Physical RF acceptance and ISS-0060 public package
+requirements remain open. No vocoder, P25/FM DSP or speaker-gate changes.
+
 ## 2026-10-05 - Named Inmarsat receiver controllers
 
 DEC-0187/0188 advances both requested tracks. Independent engines replace

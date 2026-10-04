@@ -10,6 +10,98 @@
 #include <QComboBox>
 #include <QPushButton>
 #include <catch2/catch_test_macros.hpp>
+#include "SatcomScannerEngine.h"
+#include "SatPassPlanner.h"
+#include "WorkflowSessionId.h"
+#include "SatcomHubWidget.h"
+#include "SatcomScannerWidget.h"
+#include "ObserverMapWidget.h"
+#include <QTabWidget>
+#include <QTemporaryDir>
+
+TEST_CASE("Named satellite controllers isolate settings planner and track state", "[aircraft][gui][ownership]") {
+    CHECK_THROWS(normalizedWorkflowSessionId("../escape"));
+    CHECK_THROWS(normalizedWorkflowSessionId("bad\n"));
+    CHECK(normalizedWorkflowSessionId("Radio-A") == "radio-a");
+    {
+        SatcomScannerEngine a("qa-sat-a"), b("qa-sat-b");
+        CHECK_THROWS(SatcomScannerEngine("QA-SAT-A"));
+        auto ca = SatcomScannerConfig::defaults();
+        ca.deviceStableKey = "missing-sat-a"; ca.lowHz = 145.8e6; ca.highHz = 145.8e6;
+        ca.monitorAudio = false; a.setConfig(ca);
+        ca.deviceStableKey = "missing-sat-b"; ca.lowHz = 137.1e6; ca.highHz = 137.1e6; b.setConfig(ca);
+        a.planner().setAutoTrack(false); b.planner().setAutoTrack(true);
+        CHECK_FALSE(a.planner().snapshot().armed.autoTrack);
+        CHECK(b.planner().snapshot().armed.autoTrack);
+        auto observer = a.planner().observer(); observer.latDeg = -31; a.planner().setObserver(observer);
+        observer.latDeg = -40; b.planner().setObserver(observer);
+        CHECK(a.planner().observer().latDeg == -31);
+        CHECK(b.planner().observer().latDeg == -40);
+        CHECK_FALSE(a.start()); CHECK_FALSE(b.start());
+        const auto reason = a.snapshot().lastStatus;
+        CHECK((reason.find("unavailable") != std::string::npos || reason.find("No SDR devices") != std::string::npos));
+        CHECK(a.snapshot().activeDeviceIndex == size_t(-1));
+        a.stop(); CHECK(b.config().deviceStableKey == "missing-sat-b");
+    }
+    SatcomScannerEngine reopened("QA-SAT-A");
+    CHECK(reopened.config().deviceStableKey == "missing-sat-a");
+    CHECK(reopened.planner().observer().latDeg == -31);
+    CHECK_FALSE(reopened.autoCaptureEnabled());
+
+    AircraftMapWidget a(nullptr,"qa-plane-a"), b(nullptr,"qa-plane-b");
+    a.trackStore().setNetworkEnabled(false); b.trackStore().setNetworkEnabled(false);
+    a.trackStore().ingestAdscPosition(0xaabb01,-33,151);
+    b.trackStore().ingestAdscPosition(0xaabb02,-34,152);
+    CHECK(a.trackStore().trackByIcao(0xaabb02).icao == 0);
+    CHECK(b.trackStore().trackByIcao(0xaabb01).icao == 0);
+    REQUIRE(a.webControl({{"action","configure"},{"deviceKey","missing-aircraft-a"},{"captureBandwidthMHz",4}}).value("ok").toBool());
+    REQUIRE(b.webControl({{"action","configure"},{"deviceKey","missing-aircraft-b"},{"captureBandwidthMHz",8}}).value("ok").toBool());
+    CHECK(a.webStatus().value("deviceKey").toString() == "missing-aircraft-a");
+    CHECK(b.webStatus().value("deviceKey").toString() == "missing-aircraft-b");
+    CHECK_FALSE(a.webControl({{"action","configure"},{"deviceKey","must-not-apply"},{"captureBandwidthMHz","invalid"}}).value("ok").toBool());
+    CHECK(a.webStatus().value("deviceKey").toString() == "missing-aircraft-a");
+    CHECK_FALSE(a.webControl({{"action","tune"}}).value("ok").toBool());
+    CHECK_FALSE(b.webStatus().value("radioBusy").toBool());
+    a.hide(); CHECK(b.trackStore().trackByIcao(0xaabb02).positionValid);
+}
+
+TEST_CASE("Satellite workspace routes and restores the addressed named controller", "[aircraft][gui][ownership]") {
+    const auto previous = qApp->property("sdrtown.guiDryRun");
+    struct Restore { QVariant previous; ~Restore() { qApp->setProperty("sdrtown.guiDryRun",previous); } } restore{previous};
+    qApp->setProperty("sdrtown.guiDryRun",true);
+    SatcomHubWidget hub;
+    auto* a = qobject_cast<SatcomScannerWidget*>(hub.openReceiverSession("satcom","visual-a"));
+    auto* b = qobject_cast<SatcomScannerWidget*>(hub.openReceiverSession("satcom","visual-b"));
+    REQUIRE(a); REQUIRE(b);
+    CHECK(a != b);
+    CHECK(hub.openReceiverSession("satcom","VISUAL-A") == a);
+    const auto result = hub.controlReceiverSessions("satcom","POST",{{"sessionId","visual-a"},{"action","configure"},
+        {"config",QJsonObject{{"lowHz",145800000},{"highHz",145800000},{"deviceStableKey","missing-visual-radio"},{"monitorAudio",false}}}});
+    REQUIRE(result.value("ok").toBool());
+    CHECK(a->engine().config().lowHz == 145800000);
+    a->engine().setAutoCaptureEnabled(true);
+    REQUIRE(hub.controlReceiverSessions("satcom","POST",{{"sessionId","visual-a"},{"action","stop"}}).value("ok").toBool());
+    CHECK_FALSE(a->engine().autoCaptureEnabled());
+    CHECK(b->engine().config().deviceStableKey != "missing-visual-radio");
+    double beforeLat, beforeLon, beforeRadius;
+    AdsBTrackStore::instance().observer(&beforeLat,&beforeLon,&beforeRadius);
+    auto* observerMap = a->findChild<ObserverMapWidget*>(); REQUIRE(observerMap);
+    observerMap->locationPicked(-32.25,150.5);
+    CHECK(a->engine().planner().observer().latDeg == -32.25);
+    double afterLat, afterLon, afterRadius;
+    AdsBTrackStore::instance().observer(&afterLat,&afterLon,&afterRadius);
+    CHECK(afterLat == beforeLat); CHECK(afterLon == beforeLon); CHECK(afterRadius == beforeRadius);
+    const auto directory = qEnvironmentVariable("SDR_TOWN_TEST_VISUAL_DIR");
+    hub.resize(1280,1200); hub.show(); QApplication::processEvents();
+    auto* combo = a->findChild<QComboBox*>("satcomDevice"); REQUIRE(combo);
+    CHECK(combo->isVisible());
+    CHECK(combo->currentData().toString() == "missing-visual-radio");
+    if (!directory.isEmpty()) CHECK(hub.grab().save(directory + "/satcom-sessions.png"));
+    REQUIRE(hub.controlReceiverSessions("satcom","POST",{{"sessionId","visual-a"},{"action","close"}}).value("ok").toBool());
+    CHECK(b->engine().config().deviceStableKey != "missing-visual-radio");
+    CHECK(hub.controlReceiverSessions("satcom","POST",{{"sessionId","visual-a"},{"action","stop"}}).value("status").toInt() == 409);
+    hub.hide();
+}
 
 TEST_CASE("Aircraft internet control removes sources and persists across windows", "[aircraft][gui]") {
     auto& store = AdsBTrackStore::instance();

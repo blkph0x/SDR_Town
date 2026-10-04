@@ -28,6 +28,8 @@
 #include <QTableWidget>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QCoreApplication>
+#include <QSignalBlocker>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -45,17 +47,29 @@ int autoCapturePriority(const std::string& role) {
 
 } // namespace
 
-SatcomScannerWidget::SatcomScannerWidget(QWidget* parent)
-    : QWidget(parent)
+SatcomScannerWidget::SatcomScannerWidget(QWidget* parent, const QString& sessionId)
+    : QWidget(parent),
+      ownedEngine_(sessionId.isEmpty() ? nullptr : std::make_unique<SatcomScannerEngine>(sessionId.toStdString())),
+      engine_(ownedEngine_ ? *ownedEngine_ : SatcomScannerEngine::instance())
 {
     buildUi();
+    if (ownedEngine_) {
+        setObjectName("satcomSession." + QString::fromStdString(engine_.sessionId()));
+        auto* controller = new QTimer(this);
+        controller->setInterval(1000);
+        connect(controller, &QTimer::timeout, this, [this] {
+            if (!QCoreApplication::instance()->property("sdrtown.guiDryRun").toBool())
+                updateAutoCapture(engine_.planner().snapshot());
+        });
+        controller->start();
+    }
     refreshTimer_ = new QTimer(this);
     connect(refreshTimer_, &QTimer::timeout, this, &SatcomScannerWidget::refreshUi);
 
-    SatcomScannerEngine::instance().setUpdateCallback([this]() {
+    engine_.setUpdateCallback([this]() {
         QMetaObject::invokeMethod(this, "refreshUi", Qt::QueuedConnection);
     });
-    SatPassPlanner::instance().setUpdateCallback([this]() {
+    engine_.planner().setUpdateCallback([this]() {
         QMetaObject::invokeMethod(this, [this]() {
             refreshPassesTable();
             refreshUi();
@@ -66,7 +80,7 @@ SatcomScannerWidget::SatcomScannerWidget(QWidget* parent)
 void SatcomScannerWidget::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);
     if (refreshTimer_ && !refreshTimer_->isActive()) refreshTimer_->start(500);
-    SatPassPlanner::instance().ensureTleLoaded();
+    engine_.planner().ensureTleLoaded();
     refreshPassesTable();
     refreshUi();
 }
@@ -77,8 +91,22 @@ void SatcomScannerWidget::hideEvent(QHideEvent* event) {
 }
 
 SatcomScannerWidget::~SatcomScannerWidget() {
-    SatcomScannerEngine::instance().setUpdateCallback({});
-    SatPassPlanner::instance().setUpdateCallback({});
+    engine_.setUpdateCallback({});
+    engine_.planner().setUpdateCallback({});
+    if (ownedEngine_) engine_.stop();
+}
+
+void SatcomScannerWidget::reloadSessionControls() {
+    const auto config = engine_.config();
+    const QSignalBlocker a(lowSpin_), b(highSpin_), c(stepSpin_), d(bwSpin_), e(modeCombo_), f(squelchSpin_), g(monitorAudioCheck_);
+    lowSpin_->setValue(config.lowHz / 1e6);
+    highSpin_->setValue(config.highHz / 1e6);
+    stepSpin_->setValue(config.stepHz / 1e3);
+    bwSpin_->setValue(config.bandwidthHz / 1e3);
+    modeCombo_->setCurrentText(QString::fromStdString(config.mode));
+    squelchSpin_->setValue(config.squelchDb);
+    monitorAudioCheck_->setChecked(config.monitorAudio);
+    refreshWorkflowDeviceCombo(*deviceCombo_, DeviceOwnership::Owner::Satcom, QString::fromStdString(config.deviceStableKey));
 }
 
 
@@ -189,7 +217,7 @@ void SatcomScannerWidget::buildUi() {
     autoTrackCheck_->setChecked(true);
     armColumn->addWidget(autoTrackCheck_);
     autoCaptureCheck_ = new QCheckBox("Auto capture selected sats in range");
-    autoCaptureCheck_->setChecked(SatcomScannerEngine::instance().autoCaptureEnabled());
+    autoCaptureCheck_->setChecked(engine_.autoCaptureEnabled());
     autoCaptureCheck_->setToolTip(
         "Runs in the background: when a selected, supported satellite reaches the configured "
         "minimum elevation, SDR Town takes the selected receiver, tunes with Doppler, records "
@@ -210,20 +238,20 @@ void SatcomScannerWidget::buildUi() {
     connect(armButton, &QPushButton::clicked, this, &SatcomScannerWidget::onArmSelected);
     connect(sstvButton, &QPushButton::clicked, this, &SatcomScannerWidget::onArmSstv);
     connect(disarmButton, &QPushButton::clicked, this, &SatcomScannerWidget::onDisarm);
-    connect(autoTrackCheck_, &QCheckBox::toggled, this, [](bool enabled) {
-        SatcomScannerEngine::instance().setAutoTrack(enabled);
+    connect(autoTrackCheck_, &QCheckBox::toggled, this, [this](bool enabled) {
+        engine_.setAutoTrack(enabled);
     });
     connect(autoCaptureCheck_, &QCheckBox::toggled, this, [this](bool enabled) {
-        SatcomScannerEngine::instance().setAutoCaptureEnabled(enabled);
+        engine_.setAutoCaptureEnabled(enabled);
         if (!enabled && autoCaptureOwned_) stopAutoCapture(false);
         refreshPassesTable();
     });
     connect(deviceCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int row) {
         if (row < 0) return;
-        auto config = SatcomScannerEngine::instance().config();
+        auto config = engine_.config();
         config.deviceIndex = size_t(-1);
         config.deviceStableKey = deviceCombo_->itemData(row).toString().toStdString();
-        SatcomScannerEngine::instance().setConfig(config);
+        engine_.setConfig(config);
         if (passStatusLabel_) {
             passStatusLabel_->setText(
                 "Satcom receiver selected: " + deviceCombo_->itemText(row));
@@ -294,8 +322,8 @@ void SatcomScannerWidget::buildUi() {
     connect(stopBtn_, &QPushButton::clicked, this, &SatcomScannerWidget::onStop);
     connect(skipBtn_, &QPushButton::clicked, this, &SatcomScannerWidget::onSkip);
     connect(recordBtn_, &QPushButton::clicked, this, &SatcomScannerWidget::onRecord);
-    connect(monitorAudioCheck_, &QCheckBox::toggled, this, [](bool enabled) {
-        SatcomScannerEngine::instance().setMonitorAudioEnabled(enabled);
+    connect(monitorAudioCheck_, &QCheckBox::toggled, this, [this](bool enabled) {
+        engine_.setMonitorAudioEnabled(enabled);
     });
     connect(squelchSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double value) {
         squelchSlider_->blockSignals(true);
@@ -310,11 +338,11 @@ void SatcomScannerWidget::buildUi() {
     connect(presetCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
         const QString name = presetCombo_->currentText();
         if (name.isEmpty()) return;
-        SatcomScannerEngine::instance().applyPreset(name.toStdString());
+        engine_.applyPreset(name.toStdString());
         refreshUi();
     });
 
-    const auto observer = SatPassPlanner::instance().observer();
+    const auto observer = engine_.planner().observer();
     latEdit_->setText(QString::number(observer.latDeg, 'f', 5));
     lonEdit_->setText(QString::number(observer.lonDeg, 'f', 5));
     altSpin_->setValue(observer.altM);
@@ -328,7 +356,7 @@ void SatcomScannerWidget::buildUi() {
 }
 
 void SatcomScannerWidget::applyFieldsToConfig() {
-    auto config = SatcomScannerEngine::instance().config();
+    auto config = engine_.config();
     config.lowHz = lowSpin_->value() * 1e6;
     config.highHz = highSpin_->value() * 1e6;
     config.stepHz = stepSpin_->value() * 1e3;
@@ -340,44 +368,48 @@ void SatcomScannerWidget::applyFieldsToConfig() {
         const auto key = deviceCombo_->currentData().toString().toStdString();
         if (key != config.deviceStableKey) { config.deviceStableKey = key; config.deviceIndex = size_t(-1); }
     }
-    SatcomScannerEngine::instance().setConfig(config);
+    engine_.setConfig(config);
 }
 
 void SatcomScannerWidget::onStart() {
+    if (QCoreApplication::instance()->property("sdrtown.guiDryRun").toBool()) return;
     applyFieldsToConfig();
-    if (!SatcomScannerEngine::instance().start(true)) {
+    if (!engine_.start(true)) {
         QMessageBox::warning(
             this, "Satcom",
-            QString::fromStdString(SatcomScannerEngine::instance().snapshot().lastStatus));
+            QString::fromStdString(engine_.snapshot().lastStatus));
     }
 }
 
 void SatcomScannerWidget::onStop() {
-    if (autoCaptureOwned_) {
-        stopAutoCapture(false);
-    } else {
-        SatcomScannerEngine::instance().stopRecording();
-        SatcomScannerEngine::instance().stop();
-        SatcomScannerEngine::instance().disarmPass();
-    }
+    // Explicit Stop also disarms the scheduler; it must not reopen this radio
+    // on the next timer tick after a GUI or authenticated session command.
+    { const QSignalBlocker blocker(autoCaptureCheck_); autoCaptureCheck_->setChecked(false); }
+    engine_.setAutoCaptureEnabled(false);
+    autoCaptureOwned_ = false;
+    autoEngineWasRunning_ = false;
+    autoCapturePassKey_.clear();
+    engine_.stopRecording();
+    engine_.stop();
+    engine_.disarmPass();
     recordingUi_ = false;
 }
 
 void SatcomScannerWidget::onSkip() {
-    SatcomScannerEngine::instance().skip();
+    engine_.skip();
 }
 
 void SatcomScannerWidget::onRecord() {
     if (!recordingUi_) {
-        if (SatcomScannerEngine::instance().startRecording()) recordingUi_ = true;
+        if (engine_.startRecording()) recordingUi_ = true;
     } else {
-        SatcomScannerEngine::instance().stopRecording();
+        engine_.stopRecording();
         recordingUi_ = false;
     }
 }
 
 void SatcomScannerWidget::onApplyObserver() {
-    SatObserverConfig observer = SatPassPlanner::instance().observer();
+    SatObserverConfig observer = engine_.planner().observer();
     double latitude = 0.0;
     double longitude = 0.0;
     if (!SatObserverConfig::parseLatLonToken(latEdit_->text().toStdString(), true, &latitude) ||
@@ -391,8 +423,9 @@ void SatcomScannerWidget::onApplyObserver() {
     observer.lonDeg = longitude;
     observer.altM = altSpin_->value();
     observer.minElevationDeg = minElSpin_->value();
-    SatPassPlanner::instance().setObserver(observer);
-    AdsBTrackStore::instance().setObserver(observer.latDeg, observer.lonDeg);
+    engine_.planner().setObserver(observer);
+    if (engine_.sessionId().empty())
+        AdsBTrackStore::instance().setObserver(observer.latDeg, observer.lonDeg);
     if (observerMap_) observerMap_->setMarker(observer.latDeg, observer.lonDeg);
 
     const QString confirmation = QString("Location saved: %1, %2 — passes recalculated")
@@ -409,9 +442,9 @@ void SatcomScannerWidget::onApplyObserver() {
 }
 
 void SatcomScannerWidget::onSelectSats() {
-    SatCatalogueDialog dialog(this);
+    SatCatalogueDialog dialog(this, &engine_.planner());
     if (dialog.exec() != QDialog::Accepted) return;
-    SatPassPlanner::instance().setCatalogueSelection(dialog.selectedIds());
+    engine_.planner().setCatalogueSelection(dialog.selectedIds());
     autoCapturePassKey_.clear();
     refreshPassesTable();
 }
@@ -419,7 +452,7 @@ void SatcomScannerWidget::onSelectSats() {
 void SatcomScannerWidget::onRefreshTle() {
     if (tleBusy_) return;
 
-    auto& planner = SatPassPlanner::instance();
+    auto& planner = engine_.planner();
     planner.ensureTleLoaded();
     const auto before = planner.snapshot();
     tleBusy_ = true;
@@ -463,6 +496,7 @@ void SatcomScannerWidget::onRefreshTle() {
 }
 
 void SatcomScannerWidget::onArmSelected() {
+    if (QCoreApplication::instance()->property("sdrtown.guiDryRun").toBool()) return;
     const int row = passTable_->currentRow();
     if (row < 0) {
         QMessageBox::information(this, "Arm", "Select a pass row first.");
@@ -472,7 +506,7 @@ void SatcomScannerWidget::onArmSelected() {
     const QString downlinkId = passTable_->item(row, 2)->data(Qt::UserRole).toString();
 
     applyFieldsToConfig();
-    auto& engine = SatcomScannerEngine::instance();
+    auto& engine = engine_;
     std::string error;
     if (!engine.armPass(satId.toStdString(), downlinkId.toStdString(),
                         autoTrackCheck_->isChecked(), true, &error)) {
@@ -488,14 +522,15 @@ void SatcomScannerWidget::onDisarm() {
         stopAutoCapture(false);
         return;
     }
-    SatcomScannerEngine::instance().stopRecording();
-    SatcomScannerEngine::instance().disarmPass();
+    engine_.stopRecording();
+    engine_.disarmPass();
     recordingUi_ = false;
 }
 
 void SatcomScannerWidget::onArmSstv() {
+    if (QCoreApplication::instance()->property("sdrtown.guiDryRun").toBool()) return;
     applyFieldsToConfig();
-    auto& engine = SatcomScannerEngine::instance();
+    auto& engine = engine_;
     std::string error;
     if (!engine.armPass("iss", "iss-sstv", autoTrackCheck_->isChecked(), true, &error)) {
         QMessageBox::warning(
@@ -509,7 +544,7 @@ void SatcomScannerWidget::onArmSstv() {
 }
 
 void SatcomScannerWidget::stopAutoCapture(bool keepHandledKey) {
-    auto& engine = SatcomScannerEngine::instance();
+    auto& engine = engine_;
     engine.stopRecording();
     engine.disarmPass();
     if (autoEngineWasRunning_) engine.skip();
@@ -522,7 +557,7 @@ void SatcomScannerWidget::stopAutoCapture(bool keepHandledKey) {
 }
 
 void SatcomScannerWidget::updateAutoCapture(const SatPassPlannerSnapshot& plan) {
-    if (!autoCaptureCheck_ || !autoCaptureCheck_->isChecked()) {
+    if (!autoCaptureCheck_ || !engine_.autoCaptureEnabled()) {
         if (autoCaptureOwned_) stopAutoCapture(false);
         return;
     }
@@ -539,7 +574,7 @@ void SatcomScannerWidget::updateAutoCapture(const SatPassPlannerSnapshot& plan) 
     if (!handledStillInRange && !plan.armed.armed && !autoCaptureOwned_)
         autoCapturePassKey_.clear();
 
-    auto& engine = SatcomScannerEngine::instance();
+    auto& engine = engine_;
     if (plan.armed.armed) {
         if (!autoCaptureOwned_) return;
         const auto scan = engine.snapshot();
@@ -619,7 +654,7 @@ void SatcomScannerWidget::updateAutoCapture(const SatPassPlannerSnapshot& plan) 
 }
 
 void SatcomScannerWidget::refreshPassesTable() {
-    const auto plan = SatPassPlanner::instance().snapshot();
+    const auto plan = engine_.planner().snapshot();
     if (downlinkCombo_->count() == 0) {
         for (const auto& entry : plan.catalogue.entries()) {
             for (const auto& downlink : entry.downlinks) {
@@ -694,10 +729,9 @@ void SatcomScannerWidget::refreshPassesTable() {
 }
 
 void SatcomScannerWidget::refreshUi() {
-    const auto snapshot = SatcomScannerEngine::instance().snapshot();
+    const auto snapshot = engine_.snapshot();
     const auto& config = snapshot.config;
-    static int passTableThrottle = 0;
-    const bool refreshPasses = (++passTableThrottle % 4) == 0;
+    const bool refreshPasses = (++passTableThrottle_ % 4) == 0;
 
     refreshWorkflowDeviceCombo(*deviceCombo_, DeviceOwnership::Owner::Satcom,
         QString::fromStdString(config.deviceStableKey));
@@ -721,6 +755,7 @@ void SatcomScannerWidget::refreshUi() {
     }
 
     if (presetCombo_->count() == 0) {
+        const QSignalBlocker blocker(presetCombo_);
         for (const auto& preset : config.presets)
             presetCombo_->addItem(QString::fromStdString(preset.name));
     }
