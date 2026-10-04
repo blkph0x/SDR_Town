@@ -1003,3 +1003,17 @@ No engine call occurs until existing Tune/Start actions; restoration remains
 side-effect-free. No-match modes preserve frequency and expose a status label.
 test_inmarsat_live_gui iterates all five plans and seven mode/rate choices,
 checks preview/commit separation and preservation of an existing matching center.
+# DEC-0184 / T-0103 - Hardware command ownership
+
+`DeviceOwnership` now owns short-lived control permits as well as long-lived
+workflow leases. Permits pin an endpoint and its shared hardware domain through
+driver I/O, preventing claim/rebind while allowing the lease mutex to be released.
+`DeviceManager::ControlScope` releases the permit and wakes stop/restore waiters;
+stop invalidates the lease before draining. Public settings accept an optional
+exact token; legacy operator commands cannot borrow a named workflow's token.
+Private implementations are used only within an admitted command or the exact
+startup generation. `correctWorkflowFrequency` is the transitional legacy-P25
+adapter, not a change to its correction math or decoder/audio pipeline.
+MainWindow/CLI propagate refused controls; source selection and DSP are separate.
+`test_workflow_radio_session` includes a blocked driver call, old-token release,
+competing replacement, independent-radio claim and deferred teardown fixture.

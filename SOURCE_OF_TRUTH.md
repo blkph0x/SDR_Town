@@ -31,6 +31,8 @@ UNRELEASED SOURCE: T-0102 infrastructure repairs; local 16/16 gates pass,
                   DEC-0182 connects selected-radio satellite/aircraft controllers,
                   exact-token restoration and logical receiver observer pickers;
                   full repeated-instance and raw-mutation migration stays open.
+                  DEC-0184 fences hardware settings/start operations by physical
+                  domain and session; driver-isolation/repeated controllers stay open.
                   full toolchain/distribution and hardware gates stay separate.
                   DEC-0176 prevents saved satellite auto-capture during GUI
                   dry-run; local four-profile no-RX gate passes.

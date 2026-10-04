@@ -5,6 +5,54 @@
 using Book = DeviceOwnership;
 using Owner = Book::Owner;
 
+TEST_CASE("Radio control permits pin domains without granting another workflow access", "[ownership]") {
+    Book book;
+    book.bind({{"a", "duo"}, {"b", "duo"}, {"c", "independent"}});
+    const auto owner = book.claim(0, Owner::Inmarsat, "engine-1");
+    REQUIRE(owner);
+    CHECK(book.beginControl(0, nullptr) == 0);
+    CHECK(book.beginControl(1, nullptr) == 0);
+    auto forged = owner; ++forged.id;
+    CHECK(book.beginControl(0, &forged) == 0);
+    CHECK(book.beginControl(1, &owner) == 0);
+    const auto command = book.beginControl(0, &owner);
+    REQUIRE(command != 0);
+    CHECK(book.valid(owner));
+    CHECK_FALSE(book.allowed(0, owner.owner, owner.client));
+    CHECK_FALSE(book.setAssignments({}, nullptr));
+    CHECK_THROWS(book.bind({{"new", "new"}}));
+    REQUIRE(book.release(owner));
+    CHECK_FALSE(book.claim(0, Owner::Listen, "replacement"));
+    CHECK_FALSE(book.claim(1, Owner::Listen, "sibling"));
+    CHECK(book.claim(2, Owner::Sstv, "independent"));
+    CHECK_FALSE(book.endControl(0, command + 1));
+    CHECK(book.controlBusy(0)); CHECK(book.controlBusy(1));
+    REQUIRE(book.beginStop(0));
+    REQUIRE(book.endControl(0, command));
+    CHECK_FALSE(book.controlBusy(0));
+    CHECK(book.beginControl(0, &owner) == 0);
+    CHECK(book.beginControl(1, nullptr) == 0);
+    book.endStop(0);
+    CHECK(book.claim(0, Owner::Listen, "replacement"));
+    CHECK(book.beginControl(0, nullptr) == 0); // A named Listen instance is not the legacy operator.
+}
+
+TEST_CASE("Idle reserved radio settings and legacy Listen controls remain usable", "[ownership]") {
+    Book book; book.bind({{"a","a"}});
+    REQUIRE(book.setAssignments({{"a",Owner::Sstv}}, nullptr));
+    auto command = book.beginControl(0, nullptr);
+    REQUIRE(command != 0);
+    CHECK_FALSE(book.claim(0, Owner::Sstv, "sstv"));
+    REQUIRE(book.endControl(0, command));
+    REQUIRE(book.setAssignments({}, nullptr));
+    auto legacy = book.claim(0, Owner::Listen, "legacy-listen");
+    command = book.beginControl(0, nullptr);
+    REQUIRE(command != 0);
+    CHECK(book.valid(legacy));
+    CHECK(book.endControl(0, command));
+    CHECK_FALSE(book.endControl(0, command));
+}
+
 TEST_CASE("Independent radios and repeated workflow instances do not steal leases", "[ownership]") {
     Book book;
     book.bind({{"rtl-a", "a"}, {"rtl-b", "b"}, {"rtl-c", "c"}, {"rtl-d", "d"}, {"rsp", "e"}});

@@ -62,6 +62,15 @@ open. P25 DSP/vocoder/speaker cadence are unchanged; selectors are not proof of
 independent concurrent P25 controllers.
 DEC-0183 isolates primary repeater pair tuning/status from secondary NFM VFOs;
 this controller-only follow-up has local17/17 and exact-guard evidence.
+DEC-0184 closes legacy hardware-setting/start bypasses using per-domain control
+permits, exact-token settings and a scoped startup catch-up. Pre-repair fixture
+reproduced five unauthorized setting changes. Main gain targets the selected
+radio; GUI/CLI/web report refused controls. Slow-driver command/stop/reclaim
+tests and existing hardware control regressions are the acceptance gates.
+Local full17/17 PASS78.20s,45 lifecycle repetitions PASS80.58s and four GUI
+profiles PASS. ISS-0068 receive-control repair is locally verified; exact CI
+acceptance is recorded on the published commit rather than inferred from build.
+Repeated controllers and driver-process isolation remain distinct open work.
 Depends on T-0102 loss-boundary/source regression evidence; ISS-0055. Define
 stable physical identity and generation-bound consumer tokens, including shared
 SDRplay tuner domains and ambiguous duplicate serials. Inventory every raw tune/

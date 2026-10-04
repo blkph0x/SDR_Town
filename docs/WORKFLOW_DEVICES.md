@@ -1,4 +1,4 @@
-# Workflow Devices (T-0103 / DEC-0181 / DEC-0182)
+# Workflow Devices (T-0103 / DEC-0181..0184)
 
 ## Universal contract
 
@@ -65,11 +65,26 @@ through the assignment window. Logs record workflow, device index, lease ID,
 generation, requested frequency, confirmed startup and rejected tune reasons.
 They remain subject to existing diagnostics consent; no new recording uploads.
 
+Hardware gain, PPM, antenna, bandwidth, AGC, direct sampling and bias-T controls
+now reject changes to a radio held by another workflow, even when requested by
+an older GUI/CLI/web route. Configure it before starting that workflow, or use
+its exact session token in a controller. Idle reserved radios remain configurable.
+Main gain operates on the selected Listen radio, not always radio zero. Command
+rejection is displayed; the web status includes `controlBusy` for each radio.
+Debug logs correlate accepted commands and completion time by command ID;
+rejections include the operation and ownership reason.
+
+A radio is reported as ready only after startup controls finish. Stop retires
+the session first and drains already-admitted commands before hardware teardown;
+an old command cannot arrive on a newly claimed session. This protects ordering,
+not responsiveness to a permanently wedged native driver. Driver isolation and
+fully asynchronous operator lifecycle remain open.
+
 ## Migration matrix
 
 | Path | Implemented in this milestone | Still required |
 |---|---|---|
-| Common device layer | Per-endpoint leases, stable-key reservations, generation/client checks, scoped tune/start/stop API, shared-hardware conflicts | Migrate all legacy gain/rate/start/restore callers; fault-injected hang/unplug qualification |
+| Common device layer | Per-endpoint leases, stable-key reservations, generation/client checks, scoped tune/start/stop API; settings/start/diversity permits and stop draining across shared hardware | Remove raw mutable model access; complete per-instance controllers and nonblocking lifecycle; hang/unplug qualification |
 | Listen: NFM/WFM/AM/USB/LSB/CW/AUTO | Selected-radio Add Receiver/table/remove, in-span sharing check, main tune targets selected Listen source; DSP unchanged | Persistent editable per-instance configuration/audio, all lifecycle tokens, remove remaining device-0 assumptions |
 | P25 | Traffic-source pool selection excludes other reservations; no decoder/audio changes | Per-system control/follow instances, simultaneous calls, explicit CC/traffic roles and RF non-regression acceptance |
 | SSTV | Dedicated selected radio via common scoped session, or selected logical receiver tap; web source/frequency uses same validation | Multiple image windows/sessions and shared-source negotiation |

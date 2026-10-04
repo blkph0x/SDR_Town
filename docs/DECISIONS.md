@@ -1,5 +1,31 @@
 # Decisions
 
+## DEC-0184 - Fence hardware settings against workflow ownership (2026-10-04)
+
+T-0103 inspection at d0f1633: raw gain, PPM, antenna, RTL and SDRplay setters
+can mutate a radio claimed by another workflow. configureDeviceCapture calls
+those same unguarded setters. Main-window non-SDRplay gain still targets zero.
+Source checking only in the picker is insufficient: a command can race claim,
+release, stop or an index-rebinding rescan after that check.
+
+Add a short-lived per-physical-domain control operation to DeviceOwnership.
+Validate the exact session token, or permit legacy operator settings only on
+an unleased radio / legacy Listen session. Pin the endpoint until the command
+completes; reject competing claims/tunes and drain controls before teardown.
+Do not hold the global lease mutex across driver calls or waits. A scoped
+capture configuration invokes private implementations under a single permit.
+Startup catch-up is tied to its stream generation, not a fresh UI permission.
+P25 automatic correction retains its existing algorithm through an explicit
+legacy-P25 ownership adapter; no demodulation or speaker changes.
+
+Expose rejected controls to GUI/CLI/web callers and use the selected Listen
+radio for main gain. Keep explicit administrator stop as an invalidation
+operation, not as permission for stale workers to configure the next session.
+Test rejected model/hardware writes, stale tokens, released-while-command-active,
+same-domain conflicts, independent radios and teardown ordering with mock I/O.
+This does not complete repeated P25/satellite controllers or hung-driver recovery.
+ISS-0060 publication materials remain a separate gate, not new release work.
+
 ## DEC-0183 - Isolate primary repeater control from secondary VFOs (2026-10-04)
 
 T-0103 follow-up review of 53a518d found the analog loop in

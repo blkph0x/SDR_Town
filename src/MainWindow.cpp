@@ -2283,7 +2283,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                         : voiceHz;
                     mgr.setEnabled(i, true);
                     if (!mgr.setCenterFreq(i, trafficCenterHz, DeviceManager::DeviceLeaseOwner::P25)) continue;
-                    if (!mgr.isStreaming(i)) mgr.startStreaming(i, true);
+                    if (!mgr.isStreaming(i) && !mgr.startStreaming(i, true, DeviceManager::DeviceLeaseOwner::P25)) continue;
                     out.valid = true;
                     out.deviceIndex = i;
                     out.centerHz = trafficCenterHz;
@@ -2408,7 +2408,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             .arg(tg.lastVoiceFreqHz / 1e6, 0, 'f', 5)
                             .arg(ccHz / 1e6, 0, 'f', 5));
                     }
-                    if (!mgr.isStreaming(source.deviceIndex)) mgr.startStreaming(source.deviceIndex, true);
+                    if (!mgr.isStreaming(source.deviceIndex) && !mgr.startStreaming(source.deviceIndex, true, DeviceManager::DeviceLeaseOwner::P25)) return false;
                 } catch (const std::exception& ex) {
                     appendP25LogLine(QString("P25 one-RTL traffic source failed to retune primary tuner to %1MHz: %2")
                         .arg(tg.lastVoiceFreqHz / 1e6, 0, 'f', 5)
@@ -3834,7 +3834,8 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             sameCallFollowVoiceHz, hopSampleRateHz);
                         retuneSeq = mgr.setCenterFreq(trafficDeviceIndex, hopCenterHz, DeviceManager::DeviceLeaseOwner::P25);
                         if (!mgr.isStreaming(trafficDeviceIndex)) {
-                            mgr.startStreaming(trafficDeviceIndex, true);
+                            if (!mgr.startStreaming(trafficDeviceIndex, true, DeviceManager::DeviceLeaseOwner::P25))
+                                throw std::runtime_error("P25 radio start rejected by ownership");
                         }
                         retuned = true;
                     } catch (const std::exception& ex) {
@@ -4671,14 +4672,16 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 if (rfGainSpin) { const QSignalBlocker block(rfGainSpin); rfGainSpin->setValue(state); }
                 return;
             }
-            std::lock_guard<std::mutex> lk(monitorParamsMutex);
-            monitorRfGainDb = v;
-            syncMonitorVarsToReceiver(0);
-            auto& mgr = DeviceManager::instance();
-            if (!mgr.getDevices().empty()) {
-                // Use the new live path — this actually calls setGain on a running device when possible.
-                mgr.setLiveGain(0, v);
+            std::string error;
+            if (!manager.setLiveGain(selected, v, &error)) {
+                statusBar()->showMessage(QString::fromStdString(error), 6000);
+                if (rfGainSpin && selected < snapshot.size()) {
+                    const QSignalBlocker block(rfGainSpin); rfGainSpin->setValue(snapshot[selected].gain);
+                }
+                return;
             }
+            { std::lock_guard<std::mutex> lk(monitorParamsMutex); monitorRfGainDb = v; }
+            syncMonitorVarsToReceiver(0);
         });
 
         connect(directSamp, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, directSamp](int) {
@@ -8170,15 +8173,25 @@ void MainWindow::showDevicesDialog()
             ppm->setToolTip("Oscillator correction. Positive values compensate receivers that read high; applied live when supported.");
             table->setCellWidget(row, 7, ppm);
             ppmSpins.push_back(ppm);
-            connect(ppm, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [i](double ppmVal) {
-                DeviceManager::instance().setFrequencyCorrection(i, ppmVal);
+            connect(ppm, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this, i, ppm](double ppmVal) {
+                auto& mgr = DeviceManager::instance();
+                std::string error;
+                if (!mgr.setFrequencyCorrection(i, ppmVal, &error)) {
+                    statusBar()->showMessage(QString::fromStdString(error), 6000);
+                    const auto current = mgr.getDevices();
+                    if (i < current.size()) { const QSignalBlocker blocked(ppm); ppm->setValue(current[i].frequencyCorrectionPpm); }
+                }
             });
 
             // Make per-device gain changes in the dialog live while the device is running.
             // Previously only took effect on "Apply" + restart for many users.
-            connect(gain, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [i](double gval) {
+            connect(gain, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this, i, gain](double gval) {
                 auto& mgr = DeviceManager::instance();
-                mgr.setLiveGain(i, gval);
+                std::string error;
+                if (!mgr.setLiveGain(i, gval, &error)) {
+                    statusBar()->showMessage(QString::fromStdString(error), 6000);
+                    const QSignalBlocker blocked(gain); gain->setValue(mgr.getCurrentGain(i));
+                }
             });
 
             QComboBox* direct = new QComboBox();
@@ -8415,18 +8428,25 @@ void MainWindow::showDevicesDialog()
                         ? antCombos[i]->currentText().toStdString()
                         : antData.toStdString();
 
-                    mgr.updateDeviceParams(i, rateHz, g, ant, ppm);
-                    mgr.applyLiveSampleRate(i, rateHz);
-                    mgr.setLiveAntenna(i, ant);
-                    mgr.setDirectSampling(i, directCombos[i]->currentData().toInt());
+                    if (!mgr.updateDeviceParams(i, rateHz, g, ant, ppm, &conflict) ||
+                        !mgr.applyLiveSampleRate(i, rateHz, &conflict) ||
+                        !mgr.setLiveAntenna(i, ant, &conflict) ||
+                        !mgr.setDirectSampling(i, directCombos[i]->currentData().toInt(), &conflict)) {
+                        spdlog::warn("Device Manager Apply stopped dev={}: {}", i, conflict);
+                        ++skipped; continue;
+                    }
 
                     // Start/stop real streaming on enable. startStreaming itself is hardened (try/catch + stub fallback + thread guards)
                     // so this should not propagate, but outer try is defense-in-depth for any future native/USB fault on Apply.
                     if (en) {
-                        mgr.startStreaming(i, true /* real SDR, not stub */);
-                        mgr.setLiveGain(i, g);
-                        mgr.setFrequencyCorrection(i, ppm);
-                        mgr.setDirectSampling(i, directCombos[i]->currentData().toInt());
+                        if (!mgr.startStreaming(i, true /* real SDR, not stub */)) { ++skipped; continue; }
+                        // The selected gain/PPM/direct-sampling settings were saved
+                        // above; startup applies them inside its own generation.
+                        if (mgr.isHardwareStreaming(i) &&
+                            (!mgr.setLiveGain(i, g, &conflict) || !mgr.setFrequencyCorrection(i, ppm, &conflict))) {
+                            spdlog::warn("Device Manager live controls dev={}: {}", i, conflict);
+                            ++skipped; continue;
+                        }
                     } else {
                         mgr.stopStreaming(i);
                     }
@@ -10116,6 +10136,7 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
                 {"assignment",DeviceManager::leaseOwnerName(mgr.workflowAssignment(i))},
                 {"owner",DeviceManager::leaseOwnerName(mgr.deviceLeaseOwner(i))},
                 {"uniqueIdentity",mgr.hasUniqueDeviceIdentity(i)},
+                {"controlBusy",mgr.deviceControlBusy(i)},
                 {"runtime",QString::fromStdString(mgr.getRuntimeStateLabel(i))}});
         }
         state.insert("workflowDevices",workflowDevices);
@@ -10979,7 +11000,9 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
                     {"deviceIndex", static_cast<int>(selected)}, {"rfgrDb", rfGain}});
                 if (!result.value("ok").toBool()) return result;
             } else if (!devices.empty()) {
-                mgr.setLiveGain(selected, rfGain);
+                std::string error;
+                if (!mgr.setLiveGain(selected, rfGain, &error))
+                    return {{"ok", false}, {"status", 409}, {"error", QString::fromStdString(error)}};
             }
         }
 
@@ -11065,13 +11088,14 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             if (!std::isfinite(gain) || gain < 0.0 || gain > 120.0) {
                 return {{"ok", false}, {"status", 400}, {"error", "rfGainDb is invalid"}};
             }
+            std::string error;
+            if (!DeviceManager::instance().setLiveGain(selected, gain, &error))
+                return {{"ok", false}, {"status", 409}, {"error", QString::fromStdString(error)}};
             {
                 std::lock_guard<std::mutex> lk(monitorParamsMutex);
                 monitorRfGainDb = gain;
             }
             syncMonitorVarsToReceiver(0);
-            auto& mgr = DeviceManager::instance();
-            if (selected < devices.size()) mgr.setLiveGain(selected, gain);
             if (rfGainSpin) {
                 rfGainSpin->blockSignals(true);
                 rfGainSpin->setValue(std::clamp(gain, rfGainSpin->minimum(), rfGainSpin->maximum()));
@@ -11594,7 +11618,8 @@ bool MainWindow::startGuiRuntimeDeviceAt(double freqHz,  bool p25Defaults)
 
         try {
             mgr.setEnabled(devIndex, true);
-            const bool started = mgr.isStreaming(devIndex) || mgr.startStreaming(devIndex, true);
+            const bool started = mgr.isStreaming(devIndex) || mgr.startStreaming(devIndex, true,
+                p25Defaults ? DeviceOwnership::Owner::P25 : DeviceOwnership::Owner::Listen);
             const bool tuned = mgr.setCenterFreq(devIndex, freqHz,
                 p25Defaults ? DeviceOwnership::Owner::P25 : DeviceOwnership::Owner::Listen) != 0;
             if (!started || !tuned) { recordGuiRuntimeError("Radio start/tune request was rejected"); return false; }

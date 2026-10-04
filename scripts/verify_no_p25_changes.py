@@ -119,6 +119,26 @@ REPEATER_ROUTING_DIGESTS = {
         "f0bf8a6b2e34f57b29cd4a6e502678fd93c2fea3c2d3151ee414de16ed57e50e"),
 }
 
+# DEC-0184: exact reviewed hardware-command fencing, error propagation and
+# legacy P25 ownership adapter. No decoder, vocoder or playout changes.
+CONTROL_OWNERSHIP_DIGESTS = {
+    "include/DeviceManager.h": (
+        "5fba5178a13fe71b39e7b16eb713400d1a447f685412443a7e3d1edb0f61abcc",
+        "09be7f885a929b124d36d824fbc7376d37e271871865c8500d3e442f7a92ccb1"),
+    "src/DeviceManager.cpp": (
+        "d7affe51d89a1d5b91f78963cab65aaba71b24168e03d040c65d0599b715a45e",
+        "7b8ee8f740adee826ac669bd54fa90eaced4611310b4c3c2fbed3cadc7d4660c"),
+    "src/MainWindow.cpp": (
+        "1bee21e1adb220ea826a02927cebe045639e925e8012b0b74062a6f55a1559d8",
+        "391cc6cc0f98c48243ca7c7716199f060d4ba5e4ceb21bec6bd1e71bdff4f810"),
+    "src/CliApp.cpp": (
+        "450dbf7743e23939e1c0385fcac82fb6a542f76b19c72c270936a2565c1fccee",
+        "4e1094a11b6bf05ea974a9b0a6f250efd8aae0c28fb5af6120e357f9ec600ffb"),
+    "src/P25VoiceDecode.cpp": (
+        "e59af41048c18518a1003ec46575530d835ad8bcb5c3a35ef972ecc59b1fd2c1",
+        "0c30057dd2225e997bfbfbc45cc52c8d80dba380ac33ab33c3c84a059fca5c18"),
+}
+
 
 def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
     actual = (
@@ -126,7 +146,8 @@ def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
         hashlib.sha256(after.encode("utf-8")).hexdigest(),
     )
     return actual in (INFRASTRUCTURE_DIGESTS.get(path), LOSS_ACK_DIGESTS.get(path),
-                      WORKFLOW_DIGESTS.get(path), WORKFLOW_ROUTING_DIGESTS.get(path), REPEATER_ROUTING_DIGESTS.get(path))
+                      WORKFLOW_DIGESTS.get(path), WORKFLOW_ROUTING_DIGESTS.get(path), REPEATER_ROUTING_DIGESTS.get(path),
+                      CONTROL_OWNERSHIP_DIGESTS.get(path))
 
 
 # DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.
@@ -608,7 +629,7 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
-        if args.paths is None and path in (INFRASTRUCTURE_DIGESTS.keys() | WORKFLOW_DIGESTS.keys() | WORKFLOW_ROUTING_DIGESTS.keys() | REPEATER_ROUTING_DIGESTS.keys()):
+        if args.paths is None and path in (INFRASTRUCTURE_DIGESTS.keys() | WORKFLOW_DIGESTS.keys() | WORKFLOW_ROUTING_DIGESTS.keys() | REPEATER_ROUTING_DIGESTS.keys() | CONTROL_OWNERSHIP_DIGESTS.keys()):
             if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
                 print(f"P25 guard: accepted exact reviewed infrastructure/ownership patch: {path}")
                 continue

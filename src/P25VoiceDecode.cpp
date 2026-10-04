@@ -407,7 +407,7 @@ bool p25MaybeAutoApplyPpmFromControlAfc(size_t deviceIndex,
     const double suggested = std::clamp(currentPpm + stepped, -200.0, 200.0);
     if (std::abs(suggested - currentPpm) < kP25AutoPpmMinAbsDelta) return false;
 
-    mgr.setFrequencyCorrection(deviceIndex, suggested);
+    if (!mgr.correctWorkflowFrequency(deviceIndex, DeviceManager::DeviceLeaseOwner::P25, suggested)) return false;
     gP25LastAutoPpmApplyMs.store(nowMs, std::memory_order_relaxed);
     gP25LastAutoPpmValue.store(suggested, std::memory_order_relaxed);
     if (logLine) {

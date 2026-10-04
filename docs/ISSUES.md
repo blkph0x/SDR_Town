@@ -1,5 +1,25 @@
 # Issues (canonical)
 
+## ISS-0068 - Legacy settings bypass workflow ownership (2026-10-04, LOCAL VERIFIED)
+
+T-0103 / DEC-0184. At d0f1633 a mock Inmarsat lease still accepts unrelated
+gain, PPM, antenna and capture-parameter changes. Regression fails five
+assertions before the fix (ownership-controls-prefail-test.log). Settings,
+enable, start and diversity commands now enter a physical-domain permit;
+token-based configuration is separate from legacy operator control. A released
+lease cannot be replaced while its old USB command is still executing.
+
+The first implementation test exposed premature startup-ready publication and
+a claim waiting on a driver-held state lock under the global ownership mutex.
+The slow antenna fixture timed out; existing SDRplay controls failed four
+assertions. Fix readiness ordering and reject busy claims before any driver
+state read; retain these tests. Final qualification is recorded in BUILD_NOTES.
+Full17/17 PASS78.20s and45 repeated lifecycle runs PASS80.58s; actual GUI/CLI
+startup checks pass. This closes the reproduced receive-control bypass locally;
+source CI must still be accepted for the exact published commit.
+Unbounded native driver recovery, raw model-pointer API and full repeated
+controller migration are not closed by the command-permit milestone.
+
 ## ISS-0067 - CI GUI replacement test viewport mismatch (2026-10-04, SOURCE VERIFIED)
 
 T-0104 / DEC-0180.6d45304 CI37164667115 fully builds Qt6.7.3 and passes native

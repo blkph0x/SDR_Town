@@ -1,5 +1,39 @@
 # Build notes
 
+## 2026-10-04 - Ownership-fenced receive hardware controls (DEC-0184)
+
+Baseline d0f1633; Windows/MSVC14.44/Qt6.11.1. Pre-repair lifecycle fixture
+fails five assertions: unauthorized Inmarsat-owned gain, rate, antenna and PPM
+updates reach the model/driver. Evidence: ownership-controls-prefail-test.log.
+First repair catches two integration errors: SDRplay ready published before
+catch-up completes (four assertions), and busy claim queries a driver-held
+state lock while retaining the policy mutex (blocked fixture timeout). Fixed
+ordering/admission, preserving the assertions. A subsequent mock startup
+timeout came from its persisted special antenna triggering the fault before
+the test armed it; fault injection now requires explicit runtime arming.
+
+Full Release build2 PASS; final tests rebuilt in test-build4. Complete CTest
+17/17 PASS78.20s (ownership-controls-final-ctest.log): core501 passed/2 skipped,
+workspace48 passed/6 skipped, workflow lifecycle98 assertions. Existing SDRplay
+72 assertions and RTL bias-T51 assertions pass. Those three lifecycle suites
+each pass15 independent repeats (45 executions,80.58s). Mock tests cover five
+radios, every public receive setting rejection, exact-token success, stale
+token rejection, blocked USB control/release/stop/reclaim, independent radio,
+and legacy P25 correction/start versus a named P25 owner. No on-air voice claim.
+
+Actual no-RX GUI four profiles PASS in ownership-controls-gui-verified; listening
+screenshot inspected. First standalone launcher timed out before logging; the
+repeat with explicit configured Qt bin/plugins/font paths passes all four.
+No application workaround or relaxed timeout. Actual CLI malformed gain/ppm
+commands print usage and exit0 without RX. Frozen-pipeline exact patch plus
+negative mutation tests PASS; P25 change is only the explicit ownership adapter
+for existing automatic correction, with no DSP/security/vocoder/audio changes.
+
+GitHub source CI/inventory must be verified for the pushed commit; record its
+acceptance as a commit comment. No new public binary while ISS-0060 remains open.
+Native driver hangs/unplug, fully asynchronous commands, multiple P25/satellite
+controllers, raw model access and TX ownership remain separate open work.
+
 ## 2026-10-04 - Secondary receiver repeater isolation (DEC-0183)
 
 Final source review found global dual-watch RF tuning/status applied to every

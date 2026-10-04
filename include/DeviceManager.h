@@ -9,6 +9,8 @@
 #include <mutex>
 #include <atomic>
 #include <thread>
+#include <condition_variable>
+#include <chrono>
 #include <complex>
 
 #include "SdrplayProfile.h"
@@ -106,6 +108,7 @@ public:
     DeviceLeaseToken claimDevice(size_t index, DeviceLeaseOwner owner, const std::string& client, std::string* error,
                                  const std::string& expectedKey = {}, bool attachUnmanagedLive = false);
     bool ownsDevice(const DeviceLeaseToken& token) const;
+    bool deviceControlBusy(size_t index) const;
     bool releaseDevice(const DeviceLeaseToken& token);
     bool tuneDevice(const DeviceLeaseToken& token, double freqHz, std::string* error);
     bool startDevice(const DeviceLeaseToken& token, std::string* error, bool reuseLiveHardware = false);
@@ -123,13 +126,13 @@ public:
 
     double getCurrentCenterFreq(size_t index) const;
     double getCurrentSampleRate(size_t index) const;
-    void applyLiveSampleRate(size_t index, double sampleRateHz);
+    bool applyLiveSampleRate(size_t index, double sampleRateHz, std::string* error = nullptr);
 
     size_t preferredListenDeviceIndex() const;
     void setPreferredListenDeviceIndex(size_t index);
 
     // Activate / deactivate (for now just toggle flag + future stream start)
-    bool setEnabled(size_t index, bool enabled);
+    bool setEnabled(size_t index, bool enabled, std::string* error = nullptr, const DeviceLeaseToken* token = nullptr);
 
     DeviceInfo* getDevice(size_t index);
     std::vector<DeviceInfo> getDevices() const { 
@@ -142,14 +145,14 @@ public:
     void saveSettings() const;
 
     // Update a device's runtime params (gain, rate, antenna, oscillator correction)
-    void updateDeviceParams(size_t index, double sampleRate, double gain, const std::string& antenna, double frequencyCorrectionPpm = 0.0);
+    bool updateDeviceParams(size_t index, double sampleRate, double gain, const std::string& antenna, double frequencyCorrectionPpm = 0.0, std::string* error = nullptr);
 
     // Real streaming (PR3+)
     // attemptReal=true (default) tries the real Soapy Device::make + stream for hardware.
     // On launch/auto-start we pass false to start safe stub simulation only (prevents
     // crashes from flaky USB/driver state during ctor). User explicit "Apply" or
     // "Add/Scan" passes true (or default) and will upgrade a running stub to real if needed.
-    bool startStreaming(size_t index, bool attemptReal = true);
+    bool startStreaming(size_t index, bool attemptReal = true, DeviceLeaseOwner owner = DeviceLeaseOwner::Listen);
     void stopStreaming(size_t index);
     bool isStreaming(size_t index) const;
 
@@ -217,24 +220,25 @@ public:
     // P1: truly live hardware RF gain (separate from audioGain / displayGain).
     // If the device is currently streaming real hardware, this calls SoapySDR::setGain immediately.
     // Falls back to just updating the persisted setting if not streaming.
-    void setLiveGain(size_t index, double gainDb);
+    bool setLiveGain(size_t index, double gainDb, std::string* error = nullptr, const DeviceLeaseToken* token = nullptr);
 
     // Live oscillator correction. Uses native SoapySDR frequency correction when available,
     // otherwise tunes the hardware LO to a corrected frequency while keeping UI/logical center intact.
-    void setFrequencyCorrection(size_t index, double ppm);
+    bool setFrequencyCorrection(size_t index, double ppm, std::string* error = nullptr, const DeviceLeaseToken* token = nullptr);
+    bool correctWorkflowFrequency(size_t index, DeviceLeaseOwner owner, double ppm, std::string* error = nullptr);
 
     // RTL-SDR direct sampling (HF). mode: 0=off, 1=I-ADC, 2=Q-ADC.
     // Persisted and applied live via Soapy writeSetting("direct_samp", ...).
-    bool setDirectSampling(size_t index, int mode, std::string* error = nullptr);
+    bool setDirectSampling(size_t index, int mode, std::string* error = nullptr, const DeviceLeaseToken* token = nullptr);
     int getDirectSampling(size_t index) const;
-    bool setRtlBiasT(size_t index, bool enabled, std::string* error = nullptr);
+    bool setRtlBiasT(size_t index, bool enabled, std::string* error = nullptr, const DeviceLeaseToken* token = nullptr);
 
     // SDRplay live controls (SoapySDRPlay3). False and error on unsupported or failed writes.
-    bool setLiveAgc(size_t index, bool enabled, std::string* error = nullptr);
-    bool setLiveGainElement(size_t index, const std::string& element, double valueDb, std::string* error = nullptr);
-    bool setLiveBandwidth(size_t index, double bandwidthHz, std::string* error = nullptr);
-    bool setLiveSdrplaySetting(size_t index, const std::string& key, const std::string& value, std::string* error = nullptr);
-    bool setLiveAntenna(size_t index, const std::string& antenna, std::string* error = nullptr);
+    bool setLiveAgc(size_t index, bool enabled, std::string* error = nullptr, const DeviceLeaseToken* token = nullptr);
+    bool setLiveGainElement(size_t index, const std::string& element, double valueDb, std::string* error = nullptr, const DeviceLeaseToken* token = nullptr);
+    bool setLiveBandwidth(size_t index, double bandwidthHz, std::string* error = nullptr, const DeviceLeaseToken* token = nullptr);
+    bool setLiveSdrplaySetting(size_t index, const std::string& key, const std::string& value, std::string* error = nullptr, const DeviceLeaseToken* token = nullptr);
+    bool setLiveAntenna(size_t index, const std::string& antenna, std::string* error = nullptr, const DeviceLeaseToken* token = nullptr);
     SdrplayCapabilities getSdrplayCapabilities(size_t index) const;
     std::string getSdrplaySetupStatus() const;
 
@@ -411,10 +415,29 @@ private:
     size_t diversityCompositeIndex_ = static_cast<size_t>(-1);
     size_t preferredListenDeviceIndex_ = 0;
     mutable std::mutex leaseMutex_;
+    std::condition_variable leaseChanged_;
+    struct ControlScope {
+        DeviceManager* manager;
+        size_t index;
+        uint64_t id;
+        std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+        explicit operator bool() const { return id != 0; }
+        ControlScope(DeviceManager* m, size_t i, uint64_t n) : manager(m), index(i), id(n) {}
+        ControlScope(const ControlScope&) = delete;
+        ControlScope& operator=(const ControlScope&) = delete;
+        ~ControlScope();
+    };
+    ControlScope beginControl(size_t index, const DeviceLeaseToken* token, const char* operation, std::string* error,
+                              DeviceLeaseOwner legacyOwner = DeviceLeaseOwner::None);
+    void updateDeviceParamsImpl(size_t index, double rate, double gain, const std::string& antenna, double ppm);
+    bool setEnabledImpl(size_t index, bool enabled);
+    bool setLiveGainImpl(size_t index, double gain, std::string* error);
+    void setFrequencyCorrectionImpl(size_t index, double ppm);
     DeviceOwnership ownership_;
     bool assignmentsLoaded_ = false;
     std::string assignmentLoadError_;
     void bindWorkflowDevices();
     void stopStreamingImpl(size_t index);
+    bool startStreamingImpl(size_t index, bool attemptReal);
     uint64_t queueCenterFreq(size_t index, double freqHz);
 };

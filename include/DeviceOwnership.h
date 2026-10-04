@@ -36,7 +36,7 @@ public:
         }
     }
     void bind(std::vector<Endpoint> endpoints) {
-        if (!stopping_.empty()) throw std::logic_error("Cannot rebind devices during teardown");
+        if (!stopping_.empty() || !controls_.empty()) throw std::logic_error("Cannot rebind devices during radio operations");
         endpoints_ = std::move(endpoints);
         leases_.clear();
         ++generation_;
@@ -55,6 +55,7 @@ public:
     }
     const Assignments& assignments() const { return assignments_; }
     bool setAssignments(const Assignments& values, std::string* error) {
+        if (!controls_.empty() || !stopping_.empty()) return fail(error, "Wait for radio operations to finish before changing assignments");
         if (values.size() > 128) return fail(error, "Too many device assignments");
         for (const auto& [key, owner] : values)
             if (key.empty() || key.size() > 512 || owner < Owner::Listen || owner > Owner::Sstv)
@@ -82,6 +83,7 @@ public:
         for (auto stopping : stopping_)
             if (stopping == index || sameDomain(index, stopping)) return fail(error, "Radio is stopping; wait for it to finish");
         if (!unique(index)) return fail(error, "Device identity is missing or ambiguous; rescan or set unique serials");
+        if (controlBusy(index)) return fail(error, "Radio control operation in progress");
         const auto reserved = assignment(index);
         if (reserved != Owner::None && reserved != owner)
             return fail(error, std::string("Device reserved for ") + name(reserved));
@@ -124,6 +126,44 @@ public:
     bool beginStop(size_t index) { return index < endpoints_.size() && stopping_.insert(index).second; }
     void endStop(size_t index) { stopping_.erase(index); }
     bool stopping() const { return !stopping_.empty(); }
+    // DEC-0184: these permits pin a physical domain while the caller releases
+    // its policy lock for USB I/O. Release/invalidate may retire the lease, but
+    // no replacement can enter until the old command actually finishes.
+    uint64_t beginControl(size_t index, const Token* token, std::string* error = nullptr) {
+        if (!unique(index)) { fail(error, "Radio identity is unavailable or ambiguous"); return 0; }
+        if (controlBusy(index)) { fail(error, "Radio control operation in progress"); return 0; }
+        for (auto other : stopping_)
+            if (other == index || sameDomain(index, other)) { fail(error, "Radio is stopping"); return 0; }
+        if (token) {
+            if (token->index != index || !valid(*token) || !allowed(index, token->owner, token->client, error)) {
+                fail(error, "Device ownership expired or belongs to another session"); return 0;
+            }
+        } else {
+            for (const auto& [other, lease] : leases_) {
+                if (other == index && lease.owner == Owner::Listen && lease.client == "legacy-listen") continue;
+                if (other == index || sameDomain(index, other)) {
+                    fail(error, std::string("Stop the ") + name(lease.owner) + " workflow before changing this radio"); return 0;
+                }
+            }
+        }
+        if (error) error->clear();
+        const auto id = ++nextControlId_;
+        controls_[index] = id;
+        return id;
+    }
+    bool endControl(size_t index, uint64_t id) {
+        const auto it = controls_.find(index);
+        if (it == controls_.end() || it->second != id) return false;
+        controls_.erase(it);
+        return true;
+    }
+    bool controlBusy(size_t index) const {
+        if (index >= endpoints_.size()) return false;
+        for (const auto& [other, id] : controls_)
+            if (other == index || sameDomain(index, other)) return true;
+        return false;
+    }
+    bool controlling() const { return !controls_.empty(); }
     Token current(size_t index) const {
         const auto it = leases_.find(index);
         return it == leases_.end() ? Token{} : it->second;
@@ -161,5 +201,7 @@ private:
     Assignments assignments_;
     std::map<size_t, Token> leases_;
     std::set<size_t> stopping_;
+    std::map<size_t, uint64_t> controls_;
+    uint64_t nextControlId_ = 0;
     uint64_t generation_ = 0, nextId_ = 0;
 };

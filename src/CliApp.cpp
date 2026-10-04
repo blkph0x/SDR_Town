@@ -1508,7 +1508,10 @@ int runCLI(int argc, char* argv[]) {
                 std::cout << "not applying: measurement confidence/SNR is too low; use ppm <device> <ppm> manually if this carrier is known clean\n";
                 return;
             }
-            mgr.setFrequencyCorrection(static_cast<size_t>(deviceIndex), suggestedPpm);
+            std::string error;
+            if (!mgr.setFrequencyCorrection(static_cast<size_t>(deviceIndex), suggestedPpm, &error)) {
+                std::cout << "Correction rejected: " << error << '\n'; return;
+            }
             std::cout << "Frequency correction device " << deviceIndex << " -> " << suggestedPpm << " ppm\n";
         } else {
             std::cout << "Run 'ppm apply " << deviceIndex << " " << (knownHz / 1.0e6)
@@ -1843,9 +1846,11 @@ int runCLI(int argc, char* argv[]) {
                 std::cout << "spectrum fft <4096|8192|16384|65536> [dev] | spectrum status [dev]\n";
             }
         } else if (cmd == "gain") {
-            int di; double db; iss >> di >> db;
+            int di = -1; double db = 0;
+            if (!(iss >> di >> db)) { std::cout << "Usage: gain <device> <dB>\n"; continue; }
             if (di >= 0 && (size_t)di < mgr.getDevices().size()) {
-                mgr.setLiveGain(di, db);
+                std::string error;
+                if (!mgr.setLiveGain(di, db, &error)) { std::cout << "Gain rejected: " << error << '\n'; continue; }
                 {
                     std::lock_guard<std::mutex> lk(cliRxMutex);
                     ensureCliRxLocked(0);
@@ -1882,7 +1887,10 @@ int runCLI(int argc, char* argv[]) {
                     continue;
                 }
                 if (di >= 0 && static_cast<size_t>(di) < mgr.getDevices().size()) {
-                    mgr.setFrequencyCorrection(static_cast<size_t>(di), ppm);
+                    std::string error;
+                    if (!mgr.setFrequencyCorrection(static_cast<size_t>(di), ppm, &error)) {
+                        std::cout << "Correction rejected: " << error << '\n'; continue;
+                    }
                     std::cout << "Frequency correction device " << di << " -> " << ppm << " ppm\n";
                 } else {
                     std::cout << "bad device index\n";
@@ -3022,7 +3030,7 @@ int runCLI(int argc, char* argv[]) {
                 if (devIndex < mgr.getDevices().size()) mgr.setCenterFreq(devIndex, ccMhz * 1e6, DeviceManager::DeviceLeaseOwner::P25);
                 if (!mgr.isStreaming(devIndex) && devIndex < mgr.getDevices().size()) {
                     mgr.setEnabled(devIndex, true);
-                    mgr.startStreaming(devIndex, true);
+                    if (!mgr.startStreaming(devIndex, true, DeviceManager::DeviceLeaseOwner::P25)) { std::cout << "P25 radio start rejected\n"; continue; }
                 }
                 std::cout << "Monitoring muted P25 control channel " << ccMhz
                           << " MHz on RX" << rxidx << " (use p25 sync to inspect frames, p25 follow for clear TG audio)\n";
@@ -3159,7 +3167,7 @@ int runCLI(int argc, char* argv[]) {
                 uint64_t waitGrantTuneSeq = mgr.setCenterFreq(static_cast<size_t>(devIndex), ccHz, DeviceManager::DeviceLeaseOwner::P25);
                 if (!mgr.isStreaming(static_cast<size_t>(devIndex))) {
                     mgr.setEnabled(static_cast<size_t>(devIndex), true);
-                    mgr.startStreaming(static_cast<size_t>(devIndex), true);
+                    if (!mgr.startStreaming(static_cast<size_t>(devIndex), true, DeviceManager::DeviceLeaseOwner::P25)) { std::cout << "P25 radio start rejected\n"; continue; }
                 }
                 (void)mgr.waitForCenterTuneApplied(static_cast<size_t>(devIndex), waitGrantTuneSeq, 500);
 
@@ -5185,7 +5193,7 @@ int runCLI(int argc, char* argv[]) {
                 }
                 if (!mgr.isStreaming(devIndex) && devIndex < mgr.getDevices().size()) {
                     mgr.setEnabled(devIndex, true);
-                    mgr.startStreaming(devIndex, true);
+                    if (!mgr.startStreaming(devIndex, true, DeviceManager::DeviceLeaseOwner::P25)) { std::cout << "P25 radio start rejected\n"; continue; }
                 }
                 const bool manualPhase2Voice = p25TalkgroupIsPhase2(tg);
                 if (manualPhase2Voice && manualVoiceTuneSeq != 0) {

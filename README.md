@@ -9,6 +9,10 @@ the RDS/tone status window can inspect selected logical receivers. See the
 These are shared ownership/routing milestones, **not** complete multi-instance
 routing across all workflows or multiple simultaneous P25 followers. That is
 the active T-0103 work; P25/FM DSP and audio timing remain unchanged.
+Hardware controls now enforce those radio leases too: unrelated gain, PPM,
+sample-rate, antenna and bias-T changes are rejected rather than silently
+altering another workflow. Commands are logged with IDs and duration; startup
+readiness includes control confirmation. Slow native-driver recovery remains open.
 
 Earlier [infrastructure repairs](docs/INFRASTRUCTURE_HARDENING_20261003.md),
 clean package staging and complete Qt-runtime replacement tests are source/CI

@@ -1,5 +1,19 @@
 # Development log
 
+## 2026-10-04 - Close receive hardware-control ownership bypasses
+
+DEC-0184 / ISS-0068 / T-0103: reproduced five unauthorized writes, then fenced
+receive settings/start/enable/diversity with exact-session or legacy-operator
+control permits. Physical domains remain pinned through USB completion even
+after release; stop retires ownership and drains admitted commands. Startup
+ready follows control catch-up. Main gain uses the selected source, GUI/CLI/web
+surface rejection, and command IDs/durations plus web controlBusy aid diagnosis.
+Intermediate startup/read-lock defects were caught and repaired by the fixtures.
+Full build,17/17 tests78.20s,45 lifecycle repeats80.58s, four actual GUI profiles,
+CLI validation and exact frozen-pipeline guard PASS. Source publication/CI
+evidence follows on the commit. No claim of multiple independent P25 controllers,
+physical RF acceptance or a public release through the still-open ISS-0060 gate.
+
 ## 2026-10-04 - Catch repeater control leaking into secondary VFOs
 
 During final DEC-0182 review, found the analog worker applying the global

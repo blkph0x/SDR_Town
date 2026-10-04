@@ -274,8 +274,8 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware, bool
 
     {
         std::lock_guard lock(leaseMutex_);
-        if (ownership_.stopping()) {
-            spdlog::warn("Device rescan deferred while a radio is stopping");
+        if (ownership_.stopping() || ownership_.controlling()) {
+            spdlog::warn("Device rescan deferred while a radio operation is in progress");
             return getDevices();
         }
         ownership_.bind({}); // DEC-0181: old tokens cannot target reordered indices.
@@ -647,7 +647,13 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware, bool
     }
 }
 
-bool DeviceManager::setEnabled(size_t index, bool enabled) {
+bool DeviceManager::setEnabled(size_t index, bool enabled, std::string* error, const DeviceLeaseToken* token) {
+    auto control = beginControl(index, token, "enabled", error);
+    if (!control) return false;
+    return setEnabledImpl(index, enabled);
+}
+
+bool DeviceManager::setEnabledImpl(size_t index, bool enabled) {
     std::lock_guard<std::mutex> lk(devicesMutex);
     if (index >= devices.size()) return false;
     devices[index].enabled = enabled;
@@ -662,7 +668,18 @@ DeviceInfo* DeviceManager::getDevice(size_t index) {
     return &devices[index];
 }
 
-void DeviceManager::updateDeviceParams(size_t index, double sampleRate, double gain, const std::string& antenna, double frequencyCorrectionPpm) {
+bool DeviceManager::updateDeviceParams(size_t index, double sampleRate, double gain, const std::string& antenna, double frequencyCorrectionPpm, std::string* error) {
+    auto control = beginControl(index, nullptr, "parameters", error);
+    if (!control) return false;
+    if (!std::isfinite(sampleRate) || sampleRate <= 0 || !std::isfinite(gain) || !std::isfinite(frequencyCorrectionPpm)) {
+        if (error) *error = "Invalid radio sample rate, gain or correction";
+        return false;
+    }
+    updateDeviceParamsImpl(index, sampleRate, gain, antenna, frequencyCorrectionPpm);
+    return true;
+}
+
+void DeviceManager::updateDeviceParamsImpl(size_t index, double sampleRate, double gain, const std::string& antenna, double frequencyCorrectionPpm) {
     std::lock_guard<std::mutex> lk(devicesMutex);
     if (index >= devices.size()) return;
     auto& d = devices[index];
@@ -852,7 +869,13 @@ void DeviceManager::markStreamRetune(StreamState& st, double appliedCenterHz) {
 
 // --- Streaming implementation (real Soapy or simulated) ---
 
-bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
+bool DeviceManager::startStreaming(size_t index, bool attemptReal, DeviceLeaseOwner owner) {
+    auto control = beginControl(index, nullptr, "start", nullptr, owner);
+    if (!control) return false;
+    return startStreamingImpl(index, attemptReal);
+}
+
+bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
     DeviceInfo d;
     StreamState* stPtr = nullptr;
     {
@@ -869,8 +892,8 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
     if (d.isDiversityComposite) {
         attemptReal = false;
         size_t a = d.diversitySourceA, b = d.diversitySourceB;
-        if (a != static_cast<size_t>(-1) && a != index) startStreaming(a, true);
-        if (b != static_cast<size_t>(-1) && b != index) startStreaming(b, true);
+        if (a != static_cast<size_t>(-1) && a != index) startStreamingImpl(a, true);
+        if (b != static_cast<size_t>(-1) && b != index) startStreamingImpl(b, true);
     }
 
     bool wasActive = false;
@@ -890,7 +913,7 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
             // User explicitly wants real hardware (e.g. Apply in dialog), but we currently have
             // a safe stub running (from launch auto-start or previous failure). Stop the stub
             // cleanly then fall through to attempt the real open. This avoids "double use".
-            stopStreaming(index);
+            stopStreamingImpl(index);
             // fall through with active==false now
         } else {
             return true; // already streaming the desired mode
@@ -912,7 +935,7 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
             const bool realOpenInFlight = runtimeNow.find("opening hardware") != std::string::npos;
             if (attemptReal && !realNow && !realOpenInFlight) {
                 lifecycleLock.unlock();
-                stopStreaming(index);
+                stopStreamingImpl(index);
                 lifecycleLock.lock();
                 {
                     std::lock_guard<std::mutex> lk(st.stateMutex);
@@ -1272,7 +1295,7 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                         st.stopFlag.store(false, std::memory_order_release);
                         st.active = true;
                         st.isReal = true;
-                        st.runtimeState = "live hardware";
+                        st.runtimeState = "opening hardware controls";
                         st.frequencyCorrectionPpm = usePpm;
                         st.nativeFrequencyCorrectionActive = nativePpm;
                         localDev = nullptr;
@@ -1287,7 +1310,20 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
 
                 st.rxThread = std::thread(&DeviceManager::rxThreadFunc, this, index, myGen);
             }
-            spdlog::info("Background upgrade: Started real Soapy streaming for device {}", index);
+            {
+            // DEC-0184: finish this generation's settings before teardown or
+            // replacement can enter. Waiting releases the policy mutex.
+            auto startupControl = [&]() {
+                std::unique_lock lock(leaseMutex_);
+                leaseChanged_.wait(lock, [&] { return !ownership_.controlBusy(index); });
+                uint64_t command = 0;
+                if (!st.stopFlag.load() && st.sessionGen.load() == myGen) {
+                    const auto token = ownership_.current(index);
+                    command = ownership_.beginControl(index, token ? &token : nullptr);
+                }
+                return ControlScope(this, index, command);
+            }();
+            if (!startupControl) return;
 
             // Catch-up: re-apply the current desired RF gain now that the real soapyDev is published and active.
             // This fixes the case where the user changed the main-screen "RF Gain (dB)" spin (or dialog gain)
@@ -1314,14 +1350,22 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
                 if (!changeSdrplay(index, std::nullopt, &controlError))
                     spdlog::error("SDRplay startup control confirmation failed: {}", controlError);
             } else {
-                setLiveGain(index, latestGain);
+                setLiveGainImpl(index, latestGain, nullptr);
             }
             double latestPpm = usePpm;
             {
                 std::lock_guard<std::mutex> lk(devicesMutex);
                 if (index < devices.size()) latestPpm = devices[index].frequencyCorrectionPpm;
             }
-            setFrequencyCorrection(index, latestPpm);
+            setFrequencyCorrectionImpl(index, latestPpm);
+            } // Publish readiness only after the startup command has released its permit.
+            {
+                std::lock_guard lifecycleLock(st.lifecycleMutex);
+                std::lock_guard stateLock(st.stateMutex);
+                if (st.stopFlag.load() || st.sessionGen.load() != myGen) return;
+                st.runtimeState = "live hardware";
+            }
+            spdlog::info("Background upgrade: Started real Soapy streaming for device {}", index);
         } catch (const std::exception& ex) {
             spdlog::warn("Background real init failed for device {} ({}). Keeping safe stub.", index, ex.what());
             cleanupLocal();
@@ -1365,9 +1409,10 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
 
 void DeviceManager::stopStreaming(size_t index) {
     {
-        std::lock_guard lock(leaseMutex_);
+        std::unique_lock lock(leaseMutex_);
         if (!ownership_.beginStop(index)) return;
         ownership_.invalidate(index);
+        leaseChanged_.wait(lock, [&] { return !ownership_.controlBusy(index); });
     }
     try { stopStreamingImpl(index); }
     catch (...) {
@@ -1623,13 +1668,20 @@ double DeviceManager::getCurrentGain(size_t index) const {
     return devices[index].gain;
 }
 
-void DeviceManager::setLiveGain(size_t index, double gainDb) {
+bool DeviceManager::setLiveGain(size_t index, double gainDb, std::string* error, const DeviceLeaseToken* token) {
+    auto control = beginControl(index, token, "gain", error);
+    if (!control) return false;
+    if (!std::isfinite(gainDb)) { if (error) *error = "Gain must be finite"; return false; }
+    return setLiveGainImpl(index, gainDb, error);
+}
+
+bool DeviceManager::setLiveGainImpl(size_t index, double gainDb, std::string* error) {
     {
         const auto snapshot = getDevices();
         if (index < snapshot.size() && snapshot[index].isSdrplay) {
             // RFGR is a discrete LNA state, not dB; it does not disable IF AGC.
-            setLiveGainElement(index, "RFGR", std::round(clampGainForDevice(snapshot[index], gainDb)));
-            return;
+            return changeSdrplay(index, SdrplayControl::Change{SdrplayControl::Kind::Gain, "RFGR", "",
+                std::round(clampGainForDevice(snapshot[index], gainDb))}, error);
         }
     }
     DeviceInfo d;
@@ -1638,7 +1690,7 @@ void DeviceManager::setLiveGain(size_t index, double gainDb) {
     // Always update the persisted / model value with the effective RF gain.
     {
         std::lock_guard<std::mutex> lk(devicesMutex);
-        if (index >= devices.size()) return;
+        if (index >= devices.size()) return false;
         useGain = clampGainForDevice(devices[index], gainDb);
         devices[index].gain = useGain;
         if (devices[index].isSdrplay) {
@@ -1671,6 +1723,8 @@ void DeviceManager::setLiveGain(size_t index, double gainDb) {
                 appliedLive = true;
             } catch (const std::exception& ex) {
                 spdlog::warn("Failed to apply live gain to device {}: {}", index, ex.what());
+                if (error) *error = ex.what();
+                return false;
             }
         }
     }
@@ -1678,9 +1732,28 @@ void DeviceManager::setLiveGain(size_t index, double gainDb) {
         spdlog::debug("Live RF gain for device {} recorded as {} dB (model updated). No active soapyDev yet (stub, real upgrade still in progress, or device not started). Hardware will see it on next real start or via catch-up after upgrade.", index, useGain);
     }
 #endif
+    return true;
 }
 
-void DeviceManager::setFrequencyCorrection(size_t index, double ppm) {
+bool DeviceManager::setFrequencyCorrection(size_t index, double ppm, std::string* error, const DeviceLeaseToken* token) {
+    auto control = beginControl(index, token, "ppm", error);
+    if (!control) return false;
+    if (!std::isfinite(ppm)) { if (error) *error = "Frequency correction must be finite"; return false; }
+    setFrequencyCorrectionImpl(index, ppm);
+    return true;
+}
+
+bool DeviceManager::correctWorkflowFrequency(size_t index, DeviceLeaseOwner owner, double ppm, std::string* error) {
+    // Transitional adapter for the existing single P25 controller only; it
+    // cannot borrow another instance's token even when the workflow matches.
+    auto control = beginControl(index, nullptr, "workflow-ppm", error, owner);
+    if (!control) return false;
+    if (!std::isfinite(ppm)) { if (error) *error = "Frequency correction must be finite"; return false; }
+    setFrequencyCorrectionImpl(index, ppm);
+    return true;
+}
+
+void DeviceManager::setFrequencyCorrectionImpl(size_t index, double ppm) {
     const double usePpm = clampFrequencyCorrectionPpm(ppm);
     {
         std::lock_guard<std::mutex> lk(devicesMutex);
@@ -1749,7 +1822,9 @@ void DeviceManager::setFrequencyCorrection(size_t index, double ppm) {
 #endif
 }
 
-bool DeviceManager::setDirectSampling(size_t index, int mode, std::string* error) {
+bool DeviceManager::setDirectSampling(size_t index, int mode, std::string* error, const DeviceLeaseToken* token) {
+    auto control = beginControl(index, token, "direct-sampling", error);
+    if (!control) return false;
     const auto fail = [&](const std::string& message) {
         if (error) *error = message;
         spdlog::warn("Direct sampling device {}: {}", index, message);
@@ -1839,6 +1914,39 @@ const char* DeviceManager::leaseOwnerName(DeviceLeaseOwner owner) {
     return owner == DeviceLeaseOwner::None ? "none" : DeviceOwnership::name(owner);
 }
 
+DeviceManager::ControlScope::~ControlScope() {
+    if (!id) return;
+    {
+        std::lock_guard lock(manager->leaseMutex_);
+        manager->ownership_.endControl(index, id);
+    }
+    manager->leaseChanged_.notify_all();
+    spdlog::debug("Radio control completed: dev={} command={} elapsedUs={}", index, id,
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - started).count());
+}
+
+DeviceManager::ControlScope DeviceManager::beginControl(size_t index,
+    const DeviceLeaseToken* token, const char* operation, std::string* error, DeviceLeaseOwner legacyOwner) {
+    std::string reason;
+    uint64_t id = 0;
+    {
+        std::lock_guard lock(leaseMutex_);
+        if (!assignmentLoadError_.empty()) reason = "Repair device assignments before changing the radio";
+        else if (legacyOwner != DeviceLeaseOwner::None) {
+            if (ownership_.allowed(index, legacyOwner, std::string("legacy-") + leaseOwnerName(legacyOwner), &reason)) {
+                const auto legacy = ownership_.current(index);
+                id = ownership_.beginControl(index, legacy ? &legacy : nullptr, &reason);
+            }
+        } else id = ownership_.beginControl(index, token, &reason);
+    }
+    if (error) *error = reason;
+    if (!id) spdlog::warn("Radio control rejected: dev={} operation={} lease={} reason={}",
+        index, operation, token ? token->id : 0, reason);
+    else spdlog::debug("Radio control accepted: dev={} operation={} command={} lease={}",
+        index, operation, id, token ? token->id : 0);
+    return ControlScope(this, index, id);
+}
+
 void DeviceManager::bindWorkflowDevices() {
     std::lock_guard lock(leaseMutex_);
     std::vector<DeviceOwnership::Endpoint> endpoints;
@@ -1905,6 +2013,10 @@ bool DeviceManager::hasUniqueDeviceIdentity(size_t index) const {
 
 bool DeviceManager::setWorkflowAssignments(const DeviceOwnership::Assignments& values, std::string* error) {
     std::lock_guard lock(leaseMutex_);
+    if (ownership_.controlling() || ownership_.stopping()) {
+        if (error) *error = "Wait for radio operations to finish before changing assignments";
+        return false;
+    }
     const auto old = ownership_.assignments();
     const auto devices = getDevices();
     for (size_t i = 0; i < devices.size(); ++i) {
@@ -1943,6 +2055,7 @@ DeviceManager::DeviceLeaseToken DeviceManager::claimDevice(size_t index, DeviceL
         if (error) *error = "Repair device assignments before receiving: " + assignmentLoadError_;
         return {};
     }
+    if (!ownership_.allowed(index, owner, client, error)) return {};
     if (!ownership_.current(index) && isStreaming(index) && !attachUnmanagedLive) {
         if (error) *error = "Radio is already receiving; stop it or use its existing receiver tap";
         return {};
@@ -1956,6 +2069,11 @@ DeviceManager::DeviceLeaseToken DeviceManager::claimDevice(size_t index, DeviceL
 bool DeviceManager::ownsDevice(const DeviceLeaseToken& token) const {
     std::lock_guard lock(leaseMutex_);
     return ownership_.valid(token);
+}
+
+bool DeviceManager::deviceControlBusy(size_t index) const {
+    std::lock_guard lock(leaseMutex_);
+    return ownership_.controlBusy(index);
 }
 
 bool DeviceManager::releaseDevice(const DeviceLeaseToken& token) {
@@ -1979,11 +2097,8 @@ bool DeviceManager::tuneDevice(const DeviceLeaseToken& token, double freqHz, std
 }
 
 bool DeviceManager::startDevice(const DeviceLeaseToken& token, std::string* error, bool reuseLiveHardware) {
-    std::lock_guard lock(leaseMutex_);
-    if (!ownership_.valid(token) || !ownership_.allowed(token.index, token.owner, token.client, error)) {
-        if (error) *error = "Device ownership expired or the radio is stopping";
-        return false;
-    }
+    auto control = beginControl(token.index, &token, "workflow-start", error);
+    if (!control) return false;
     // A scoped workflow starts an idle radio, never upgrades/restarts another
     // stream. startStreaming launches hardware open asynchronously.
     if (isStreaming(token.index)) {
@@ -1991,12 +2106,13 @@ bool DeviceManager::startDevice(const DeviceLeaseToken& token, std::string* erro
         if (error) *error = "Radio already receiving";
         return false;
     }
-    return startStreaming(token.index, true);
+    return startStreamingImpl(token.index, true);
 }
 
 bool DeviceManager::configureDeviceCapture(const DeviceLeaseToken& token, double rate, double bandwidth, std::string* error) {
-    std::lock_guard lock(leaseMutex_);
-    if (!ownership_.valid(token) || isStreaming(token.index)) {
+    auto control = beginControl(token.index, &token, "capture-settings", error);
+    if (!control) return false;
+    if (isStreaming(token.index)) {
         if (error) *error = "Capture settings require an idle radio owned by this session";
         return false;
     }
@@ -2006,8 +2122,9 @@ bool DeviceManager::configureDeviceCapture(const DeviceLeaseToken& token, double
     }
     const auto devices = getDevices();
     const auto& device = devices.at(token.index);
-    updateDeviceParams(token.index, rate, device.gain, device.antenna, device.frequencyCorrectionPpm);
-    if (device.isSdrplay && bandwidth > 0) return setLiveBandwidth(token.index, bandwidth, error);
+    updateDeviceParamsImpl(token.index, rate, device.gain, device.antenna, device.frequencyCorrectionPpm);
+    if (device.isSdrplay && bandwidth > 0)
+        return changeSdrplay(token.index, SdrplayControl::Change{SdrplayControl::Kind::Bandwidth, "bandwidth", "", bandwidth}, error);
     return true;
 }
 
@@ -2017,7 +2134,14 @@ bool DeviceManager::restoreDevice(const DeviceLeaseToken& token, bool wasStreami
     // acquire by index. A cancelled/replaced worker cannot resurrect reception.
     uint64_t restoreRequest = 0;
     {
-        std::lock_guard lock(leaseMutex_);
+    auto restoration = [&]() {
+        std::unique_lock lock(leaseMutex_);
+        leaseChanged_.wait(lock, [&] { return !ownership_.controlBusy(token.index); });
+        return ControlScope(this, token.index, ownership_.beginControl(token.index, &token));
+    }();
+    if (!restoration) return false;
+    {
+        std::unique_lock lock(leaseMutex_);
         if (!ownership_.valid(token)) return false;
         if (wasStreaming && isHardwareStreaming(token.index)) {
             if (std::isfinite(centerHz) && centerHz > 0) restoreRequest = queueCenterFreq(token.index, centerHz);
@@ -2033,7 +2157,7 @@ bool DeviceManager::restoreDevice(const DeviceLeaseToken& token, bool wasStreami
                 if (!ownership_.valid(token)) return false;
                 if (!isHardwareStreaming(token.index)) break;
                 if (getCenterTuneAppliedSeq(token.index) >= restoreRequest && getCenterTuneRequestSeq(token.index) == restoreRequest) {
-                    setEnabled(token.index, wasEnabled);
+                    setEnabledImpl(token.index, wasEnabled);
                     ownership_.release(token);
                     spdlog::info("Workflow restored live radio: dev={} lease={} centerHz={}", token.index, token.id, centerHz);
                     return true;
@@ -2043,13 +2167,15 @@ bool DeviceManager::restoreDevice(const DeviceLeaseToken& token, bool wasStreami
         }
         spdlog::warn("Workflow restore could not confirm radio tune: dev={} lease={}", token.index, token.id);
     }
+    } // Release the restoration command before entering teardown.
     {
-        std::lock_guard lock(leaseMutex_);
+        std::unique_lock lock(leaseMutex_);
         if (!ownership_.valid(token)) return false;
         // No new lease can enter between restoring settings and marking stop.
         if (!ownership_.beginStop(token.index)) return false;
-        setEnabled(token.index, wasEnabled);
+        setEnabledImpl(token.index, wasEnabled);
         ownership_.invalidate(token.index);
+        leaseChanged_.wait(lock, [&] { return !ownership_.controlBusy(token.index); });
     }
     try { stopStreamingImpl(token.index); }
     catch (...) {
@@ -2097,9 +2223,10 @@ size_t DeviceManager::resolveWorkflowDevice(DeviceLeaseOwner owner, const std::s
 
 bool DeviceManager::stopDevice(const DeviceLeaseToken& token) {
     {
-        std::lock_guard lock(leaseMutex_);
+        std::unique_lock lock(leaseMutex_);
         if (!ownership_.valid(token) || !ownership_.beginStop(token.index)) return false;
         ownership_.invalidate(token.index);
+        leaseChanged_.wait(lock, [&] { return !ownership_.controlBusy(token.index); });
     }
     try { stopStreamingImpl(token.index); }
     catch (...) {
@@ -2116,7 +2243,7 @@ bool DeviceManager::isHardwareStreaming(size_t index) const {
     const auto* st = streamState(index);
     if (!st) return false;
     std::lock_guard lock(st->stateMutex);
-    return st->active && st->isReal;
+    return st->active && st->isReal && st->runtimeState == "live hardware";
 }
 
 bool DeviceManager::acquireDeviceLease(size_t index, DeviceLeaseOwner owner, bool force, std::string* error) {
@@ -2136,6 +2263,7 @@ bool DeviceManager::acquireDeviceLease(size_t index, DeviceLeaseOwner owner, boo
         if (error) *error = "Repair device assignments before receiving: " + assignmentLoadError_;
         return false;
     }
+    if (!ownership_.allowed(index, owner, std::string("legacy-") + leaseOwnerName(owner), error)) return false;
     if (!ownership_.current(index) && !force &&
                (owner == DeviceLeaseOwner::Satcom || owner == DeviceLeaseOwner::Inmarsat ||
                 owner == DeviceLeaseOwner::Aircraft || owner == DeviceLeaseOwner::Sstv) &&
@@ -2208,20 +2336,24 @@ double DeviceManager::getCurrentSampleRate(size_t index) const {
     return st->currentRate;
 }
 
-void DeviceManager::applyLiveSampleRate(size_t index, double sampleRateHz) {
+bool DeviceManager::applyLiveSampleRate(size_t index, double sampleRateHz, std::string* error) {
+    auto control = beginControl(index, nullptr, "sample-rate", error);
+    if (!control) return false;
+    if (!std::isfinite(sampleRateHz) || sampleRateHz <= 0) { if (error) *error = "Sample rate must be finite and positive"; return false; }
     DeviceInfo d;
     {
         std::lock_guard<std::mutex> lk(devicesMutex);
-        if (index >= devices.size()) return;
+        if (index >= devices.size()) return false;
         d = devices[index];
     }
     if (d.isSdrplay) sampleRateHz = SdrplayProfile::clampSampleRateHz(d.sdrplayDuoMode, sampleRateHz);
     const double live = getCurrentSampleRate(index);
-    updateDeviceParams(index, sampleRateHz, d.gain, d.antenna, d.frequencyCorrectionPpm);
+    updateDeviceParamsImpl(index, sampleRateHz, d.gain, d.antenna, d.frequencyCorrectionPpm);
     if (isStreaming(index) && std::abs(live - sampleRateHz) > 1.0) {
-        stopStreaming(index);
-        startStreaming(index, true);
+        stopStreamingImpl(index);
+        return startStreamingImpl(index, true);
     }
+    return true;
 }
 
 size_t DeviceManager::preferredListenDeviceIndex() const {
@@ -2235,7 +2367,9 @@ void DeviceManager::setPreferredListenDeviceIndex(size_t index) {
     preferredListenDeviceIndex_ = index;
 }
 
-bool DeviceManager::setRtlBiasT(size_t index, bool enabled, std::string* error) {
+bool DeviceManager::setRtlBiasT(size_t index, bool enabled, std::string* error, const DeviceLeaseToken* token) {
+    auto control = beginControl(index, token, "bias-t", error);
+    if (!control) return false;
     std::lock_guard<std::mutex> controlLock(rtlBiasTControlMutex_);
     std::string identity;
     try {
@@ -2358,23 +2492,33 @@ bool DeviceManager::changeSdrplay(size_t index, const std::optional<SdrplayContr
     }
 }
 
-bool DeviceManager::setLiveAgc(size_t index, bool enabled, std::string* error) {
+bool DeviceManager::setLiveAgc(size_t index, bool enabled, std::string* error, const DeviceLeaseToken* token) {
+    auto control = beginControl(index, token, "agc", error);
+    if (!control) return false;
     return changeSdrplay(index, SdrplayControl::Change{SdrplayControl::Kind::Agc, "AGC", "", enabled ? 1.0 : 0.0}, error);
 }
 
-bool DeviceManager::setLiveGainElement(size_t index, const std::string& element, double valueDb, std::string* error) {
+bool DeviceManager::setLiveGainElement(size_t index, const std::string& element, double valueDb, std::string* error, const DeviceLeaseToken* token) {
+    auto control = beginControl(index, token, "gain-element", error);
+    if (!control) return false;
     return changeSdrplay(index, SdrplayControl::Change{SdrplayControl::Kind::Gain, element, "", valueDb}, error);
 }
 
-bool DeviceManager::setLiveBandwidth(size_t index, double bandwidthHz, std::string* error) {
+bool DeviceManager::setLiveBandwidth(size_t index, double bandwidthHz, std::string* error, const DeviceLeaseToken* token) {
+    auto control = beginControl(index, token, "bandwidth", error);
+    if (!control) return false;
     return changeSdrplay(index, SdrplayControl::Change{SdrplayControl::Kind::Bandwidth, "bandwidth", "", bandwidthHz}, error);
 }
 
-bool DeviceManager::setLiveSdrplaySetting(size_t index, const std::string& key, const std::string& value, std::string* error) {
+bool DeviceManager::setLiveSdrplaySetting(size_t index, const std::string& key, const std::string& value, std::string* error, const DeviceLeaseToken* token) {
+    auto control = beginControl(index, token, "sdrplay-setting", error);
+    if (!control) return false;
     return changeSdrplay(index, SdrplayControl::Change{SdrplayControl::Kind::Setting, key, value}, error);
 }
 
-bool DeviceManager::setLiveAntenna(size_t index, const std::string& antenna, std::string* error) {
+bool DeviceManager::setLiveAntenna(size_t index, const std::string& antenna, std::string* error, const DeviceLeaseToken* token) {
+    auto control = beginControl(index, token, "antenna", error);
+    if (!control) return false;
     const auto snapshot = getDevices();
     if (index >= snapshot.size()) {
         if (error) *error = "Invalid device index";
@@ -2509,6 +2653,8 @@ void DeviceManager::restoreDiversityCompositeAfterEnumerate() {
 }
 
 bool DeviceManager::configureDiversity(size_t deviceIndexHint, SdrplayDiversity::Config config) {
+    auto control = beginControl(deviceIndexHint, nullptr, "diversity", nullptr, DeviceLeaseOwner::Listen);
+    if (!control) return false;
     diversityConfig_ = config;
     if (config.mode == SdrplayDiversity::Mode::Off) {
         spdlog::info("SDRplay diversity disabled");
@@ -2529,9 +2675,9 @@ bool DeviceManager::configureDiversity(size_t deviceIndexHint, SdrplayDiversity:
             devices[comp].enabled = true;
         }
     }
-    if (a != static_cast<size_t>(-1)) startStreaming(a, true);
-    if (b != static_cast<size_t>(-1)) startStreaming(b, true);
-    startStreaming(comp, false); // composite uses soft combine path (no Soapy)
+    if (a != static_cast<size_t>(-1)) startStreamingImpl(a, true);
+    if (b != static_cast<size_t>(-1)) startStreamingImpl(b, true);
+    startStreamingImpl(comp, false); // composite uses soft combine path (no Soapy)
     setPreferredListenDeviceIndex(comp);
     spdlog::info("SDRplay diversity enabled mode={} phase={} deg ampB={} composite={}",
                  SdrplayDiversity::modeName(config.mode), config.phaseDeg, config.amplitudeB, comp);
