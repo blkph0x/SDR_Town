@@ -18,6 +18,11 @@ UNRELEASED SOURCE: T-0102 infrastructure repairs; local 16/16 gates pass,
                   DEC-0178 stages pinned Qt sources/notices/SDK settings and
                   exact signed Microsoft runtime/license evidence. Local QtSvg
                   source rebuild/replacement passes; full toolchain kit remains open.
+                  3e4956e exact CI/inventory/QtSvg acceptance recorded in
+                  comment203316479. DEC-0179 extends source replacement QA to
+                  every packaged Qt runtime and actual no-RX GUI profiles;
+                  local16-file replacement and four GUI profiles PASS.
+                  full toolchain/distribution and hardware gates stay separate.
                   DEC-0176 prevents saved satellite auto-capture during GUI
                   dry-run; local four-profile no-RX gate passes.
                   T-0106 repairs reproduced control cancellation lifetime

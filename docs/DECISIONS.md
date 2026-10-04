@@ -1,5 +1,39 @@
 # Decisions
 
+## DEC-0179 - Rebuild and exercise the complete packaged Qt runtime (2026-10-04)
+
+T-0104 / ISS-0060. DEC-0178 source acceptance is now verified:3e4956e,
+Windows37160094253/YAML37160094287 PASS, inventory135 files; exact downloaded
+inventory and QtSvg result accepted in commit comment203316479. That smoke
+replaced only Svg; it did not rebuild Core/Gui/Widgets/Network or platform/TLS
+plugins. Extend the same harness to build pinned qtbase then qtsvg in an empty
+short-path workspace, with configured MSVC/Ninja and without the existing Qt
+SDK in the module search path. Replace every Qt runtime file present in the
+package or fail. Preserve original package/SDK, use no radio or external HTTP.
+
+Exercise SVG/image/icon pixels, Widgets rendering, loopback HTTP and native
+TLS backend availability, then actual CLI and four no-RX GUI startup profiles.
+Record exact commands, source-kit/app/replacement hashes and failures; reject
+stale success receipts. Compare relevant SDK feature settings and report any
+differences rather than claiming bit-for-bit upstream build reproduction.
+Build only base/svg runtime modules; qttools sources remain provided but a
+qttools rebuild is not implied. A source replacement test does not itself
+clear linked third-party distribution review or unrelated release blockers.
+
+First local configure selected RadioConda PCRE2/zlib/PNG/JPEG/Brotli/Zstd;
+abort that disposable build and explicitly select bundled alternatives. Check
+both requested and resolved Qt cache features before compiling. CI's existing
+6.7.3 package additionally contains qopensslbackend.dll; do not drop it. Require
+an explicit OpenSSL header SDK only for packages containing that plugin, hash
+its headers, and force runtime (not linked) OpenSSL. No OpenSSL DLL is copied.
+This external build-header prerequisite is recorded, not misrepresented as a
+fully self-contained Qt kit. Runner's documented path is Program Files/OpenSSL:
+https://github.com/actions/runner-images/blob/main/images/windows/scripts/build/Install-OpenSSL.ps1 .
+
+The upstream source kit and Qt's bundled CMake configuration are the build
+authority. Test fixture time/resource bounds are operational QA limits, not
+new receive/DSP timeouts. No installed dependencies or RF settings are changed.
+
 ## DEC-0178 - Version-bound Qt sources and Microsoft runtime evidence (2026-10-04)
 
 Continue T-0104 / ISS-0060 without radio/audio changes. CI uses Qt6.7.3;

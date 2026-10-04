@@ -23,6 +23,11 @@ and replacement instructions. A source-built QtSvg library and its plugins are
 tested in a disposable portable copy. Microsoft runtime evidence now records
 actual DLL/installer versions and the signed installer's embedded license,
 not just a folder label. Full rebuild/distribution requirements remain open.
+DEC-0179 extends replacement QA to all packaged Qtbase/QtSvg libraries and
+plugins, loopback networking, native TLS and four no-RX GUI startup profiles.
+It checks resolved build dependencies and uses an isolated runtime search path.
+Results distinguish a complete packaged-runtime rebuild from the earlier
+Svg-only smoke test; neither substitutes for the remaining distribution review.
 This is packaging hardening, with no receive/audio changes or new binary release.
 
 0.2.122 adds **Tools > DTMF Analysis**: short-burst decoding, explicit frequency

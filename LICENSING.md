@@ -96,7 +96,12 @@ See the [package ledger](docs/PACKAGE_HARDENING_20261003.md).
 
 The current staging tools include pinned Qt module sources and source notice
 catalogs, selected SDK settings, and rebuild/replacement instructions. A
-successful QtSvg replacement test is not a complete Qtbase rebuild. Microsoft
+successful QtSvg-only replacement test is not a complete Qtbase rebuild. The
+DEC-0179 full test additionally rebuilds every packaged Qtbase/QtSvg DLL/plugin
+and exercises the real GUI/CLI; its report records scope and configuration
+differences. It is not bit-identical build reproduction or distribution
+clearance. Builds with the optional OpenSSL plugin require an explicitly
+identified external header SDK, separately from the Qt sources. Microsoft
 runtime material includes the unmodified signed installer and its end-user
 license; that license is not evidence of the publisher's redistribution
 entitlement. The unresolved full-toolchain and distribution review stays open.

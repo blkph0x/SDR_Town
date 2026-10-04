@@ -54,6 +54,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/test_msvc_materials.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/test_qt_replacement_harness.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/test_remote_diag_server.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/test_diagnostics_packaging.py
@@ -292,11 +294,18 @@ jobs:
           python scripts/test_rtl_runtime_package.py --stage $stage
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Rebuild and test replaceable QtSvg runtime
+      - name: Rebuild and test all packaged Qt runtimes
         shell: pwsh
         run: |
+          $extra = @()
+          if (Test-Path build/deploy_staging/tls/qopensslbackend.dll) {
+            $roots = @('C:/Program Files/OpenSSL', 'C:/Program Files/OpenSSL-Win64', 'C:/OpenSSL-Win64')
+            $openssl = $roots | Where-Object { Test-Path "$_/include/openssl/ssl.h" } | Select-Object -First 1
+            if (-not $openssl) { throw 'Explicit OpenSSL header SDK required for packaged Qt TLS plugin' }
+            $extra = @('--openssl-root', $openssl)
+          }
           python scripts/test_qt_replacement.py --config build/runtime-inputs-Release.json `
-            --stage build/deploy_staging --output build/qt-replacement-qa
+            --stage build/deploy_staging --output build/qt-replacement-qa --full --work-root "$env:RUNNER_TEMP" @extra
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Create portable ZIP and checksum
@@ -386,6 +395,8 @@ jobs:
           path: |
             build/package-inventory.json
             build/qt-replacement-qa/result.json
+            build/qt-replacement-qa/*.log
+            build/qt-replacement-qa/*-config.summary
           if-no-files-found: ignore
           retention-days: 90
 

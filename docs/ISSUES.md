@@ -133,6 +133,16 @@ Corrected Microsoft provenance: directory14.44.35112 contains actual version
 entitlement remains a separate review. Full Qtbase, vcpkg tooling/independent
 rebuild, MinGW static-runtime evidence and remaining static distribution work
 are still open. Existing public0.2.122 is not replaced or retrospectively certified.
+DEC-0178 exact source CI3e4956e and downloaded evidence now pass (BUILD_NOTES).
+DEC-0179 extends source replacement testing to the complete packaged Qt runtime.
+Its first configure picked up RadioConda dependencies; explicit bundled-feature
+selection and resolved-cache checks now prevent that environmental dependency.
+Runtime searches exclude developer-tool directories. No claim that a source
+replacement smoke clears the remaining combined-distribution requirements.
+Full local6.11.1 replacement of16 packaged Qt files passes755.20s with actual
+CLI/four GUI no-RX profiles and native TLS/network/rendering probes. Exact
+upstream configuration reproduction is not claimed: optional-feature differences
+are recorded. Clean CI6.7.3 remains required for this source change.
 
 ## ISS-0058 - DTMF confidence, short bursts and input-watch gaps (2026-10-03, REPAIRED IN SOURCE)
 

@@ -93,7 +93,16 @@ distribution questions. No RX/DSP or live server changes in this pass.
   and embedded end-user license; distinguish publisher redistribution rights.
 - [X] Local source-built QtSvg library/plugins, pixel checks and application
   CLI replacement test; original SDK/package unchanged. Full Qtbase rebuild
-  and distribution review remain open. Exact pushed-source CI still required.
+  and distribution review remain open.3e4956e Windows37160094253 and
+  YAML37160094287 PASS; downloaded135-file inventory and Qt6.7.3 replacement
+  result verified, acceptance comment203316479.
+- [X] DEC-0179 local: source rebuild of Qtbase+QtSvg, complete packaged Qt replacement,
+  networking/TLS/rendering and actual CLI/four GUI dry-run gates; preserve SDK,
+  package and RF behavior.16 Qt6.11.1 replacements/4 no-RX GUI profiles PASS;
+  96 packaging/helper tests and16/16 native suites PASS. Input hashes and
+  optional-feature differences recorded. Independent CI6.7.3 still required;
+  no claim of all Qt modules, exact upstream feature reproduction or licensing
+  completion from runtime smoke. Remaining source-kit/toolchain review below.
 - [ ] Full transitive/combined-distribution review, then public asset verification.
 15 new inventory tests, 17 release-verifier tests and 16/16 native suites pass
 locally. Source929cb11 Windows CI37116308564 and YAML37116308593 PASS; clean

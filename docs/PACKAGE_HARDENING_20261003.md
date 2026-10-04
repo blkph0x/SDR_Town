@@ -74,9 +74,11 @@ unqualified; the Qt deploy warning is recorded in BUILD_NOTES.
 - DEC-0178 now provides exact Qt6.7.3/6.11.1 qtbase/qtsvg/qttools archives,
   verified against official SHA256 pins, source license/attribution catalogs,
   six SDK feature files and rebuild/replacement instructions. A source-built
-  QtSvg replacement passes pixel/plugin/application tests. Full independent
-  Qtbase rebuild/configuration reproduction and linked third-party review
-  remain open. A broad source catalog is not a linked-component SBOM.
+  QtSvg replacement passes pixel/plugin/application tests. DEC-0179 additionally
+  passes a local source-built Qtbase/QtSvg replacement of all16 packaged runtimes,
+  actual CLI and four GUI no-RX profiles. CI6.7.3 qualification, configuration
+  reproduction and linked third-party review remain distinct. A broad source
+  catalog is not a linked-component SBOM.
 - DEC-0175 now stages/verifies exact source archives and patched port recipes
   for ten configured vcpkg dependencies (local: ten archives,48 recipe files).
   Full vcpkg tooling/triplets/compiler reproduction, independent rebuild and
@@ -147,3 +149,30 @@ executes only trusted tooling, never the redistributable installer. No source
 archive is executed during inventory verification. CI runs the source-built
 QtSvg replacement test and uploads its compact result alongside the inventory,
 without uploading binaries while publication is blocked.
+
+DEC-0179 adds `--full` to `scripts/test_qt_replacement.py`. It builds qtbase then
+qtsvg from the verified sources using the configured MSVC compiler, installs
+only into a fresh disposable directory and replaces every Qt runtime/plugin
+in the package. A missing rebuilt plugin fails; there is no SDK fallback.
+The executable's DLL search PATH excludes developer tools. SVG/image/icon/widget
+pixels, native TLS backend, loopback HTTP, CLI and four actual GUI dry-run
+profiles are checked. No RX or external HTTP is used by the rendering/network
+probe. Original package hashes must be unchanged. Reports preserve exact input
+and replacement hashes, resolved settings, SDK feature differences and failures.
+
+Reproduce after staging:
+
+```powershell
+python scripts/test_qt_replacement.py --config build/runtime-inputs-Release.json `
+  --stage build/deploy_staging --output build/qt-full-replacement-qa --full `
+  --work-root D:/SDRTown-QtQA
+```
+
+Choose an existing spacious drive for `--work-root`; only fresh temporary
+children are removed. If the actual package includes `tls/qopensslbackend.dll`
+(CI6.7.3 does), also supply `--openssl-root` for its header SDK. Header hashes
+are recorded and linked OpenSSL is forbidden. No OpenSSL DLL is added to the
+package. These external build headers, compiler and Windows SDK are prerequisites,
+not falsely represented as contained in the Qt source kit. Full runtime rebuild
+does not mean all Qt modules, qttools, exact upstream build-farm reproduction,
+or a completed combined-distribution review.

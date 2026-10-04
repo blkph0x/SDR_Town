@@ -1,5 +1,48 @@
 # Build notes
 
+## 2026-10-04 - T-0104 complete Qt runtime replacement qualification
+
+DEC-0179; baseline3e4956e. First6.11.1 configure selected unrelated RadioConda
+system libraries. Stopped only the QA cmake/ninja tree; disposable build was
+cleaned, original SDK/package unchanged. Explicit bundled-library selection
+now checked against resolved QT_FEATURE cache entries before compilation.
+Second run failed in the new cache verifier: a multiline regex consumed CMake
+comments. Reproduced with comment-bearing fixture and repaired parser; no Qt
+or application source changes to hide the failure. Initial logs retained under
+build/qt-full-replacement-qa and -v2. Third run (-v3) successfully compiles
+qtbase+qtsvg but catches a harness classification error for the package's own
+package-inventory.json. Added that metadata entry to the selection fixture and
+excluded it from runtime classification. Full repeat is in -v4; no production
+library, decoder or test assertion weakened. The narrow source-built Svg test
+with the expanded widgets/network/TLS probe and restricted runtime PATH PASS
+in build/qt-svg-replacement-qa-v4; original package unchanged.
+Packaging/helper regression94 tests PASS39.20s; native Release16/16 PASS77.35s.
+Full -v4 replacement PASS755.20s:16 Qt6.11.1 libraries/plugins rebuilt from
+the pinned kit, widget/SVG/image/icon pixels, loopback HTTP, native Schannel,
+actual application CLI and all four GUI no-RX profiles. Original package
+unchanged; EXE SHA25657419c97bce700ddbf65fc7007f216b18ef6ee2e6c1ef57a632ee2a75dd5ffe7.
+Result SHA25646bc7cf978691807f09dba40b3a8f2aabcc54a7dbc8925796bfc2a933b41a5dd.
+Listening screenshot visually confirms a nonblank rendered application, not
+RF/on-air or exhaustive layout acceptance. Feature report explicitly records
+Release-only versus dual Debug/Release SDK, and missing Vulkan/DTLS/OCSP in the
+disposable local build; no exact upstream feature/bit reproduction claimed.
+Final96 packaging/helper tests PASS46.77s, including15 harness tests; native
+16/16 PASS77.35s, frozen-pipeline and3 workflow gates pass. P25/DSP untouched.
+Exact pushed-source CI6.7.3 remains required. Its17-file runtime also contains
+qopensslbackend.dll: require explicit recorded OpenSSL headers, no linked or
+deployed OpenSSL runtime. Full distribution/rebuild-kit requirements remain open.
+
+Previous-pass final acceptance:3e4956ebe9729aa1d6c35cbed0e1d91b0b8d11fe,
+Windows37160094253 PASS27m01s, YAML37160094287 PASS. Downloaded artifact
+11286964133 inventories135 files, source exact, policy T-0104-notices-5.
+Inventory SHA2566595669e6f9a161d802ad0821503e7fce05afc96988e8ea337602d4aa631774d.
+Qt6.7.3 kit3 archives/149 notices,61301748 bytes,
+SHA25670e78099d2491b6e2e351d3a94fd7f88eb61c1ac3cb050eaf66a4638fa5bd54b.
+Downloaded QtSvg replacement result matches that kit; original package unchanged,
+renderer/plugins/CLI pass, full Qtbase explicitly not proven by that prior test.
+Result SHA2569e2f96de526ad068636c8025fa7500b47f26de0d1ab24f81b0efcb0084d0cb58.
+Final acceptance: https://github.com/blkph0x/SDR_Town/commit/3e4956ebe9729aa1d6c35cbed0e1d91b0b8d11fe#commitcomment-203316479 .
+
 ## 2026-10-04 - T-0104 Qt sources, source replacement and exact MSVC evidence
 
 DEC-0178; baseline8eaedb8, application code/version unchanged. Official SHA256

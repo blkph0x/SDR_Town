@@ -11,12 +11,20 @@ fixed PowerShell helper and reads the signed Burn manifest/license with bounded
 runtime_signature.ps1 explicitly loads its own PowerShell Security module to
 avoid inherited PowerShell7/Windows PowerShell module-path incompatibility.
 
-test_qt_replacement.py uses the configured x64 MSVC environment and Ninja,
-rebuilds only pinned QtSvg, installs into a validated temporary directory,
-replaces three files in a disposable portable copy, checks renderer/image/icon
-pixels and actual DLL load paths, then runs SDR Town CLI help. The Qt SDK and
-original package are not changed; temporary paths are checked before cleanup.
-Full Qtbase rebuild is explicitly false, not inferred from this smoke test.
+test_qt_replacement.py uses the configured x64 MSVC environment and Ninja.
+DEC-0179 adds --full to build qtbase+qtsvg from the verified kit, replace every
+packaged Qt DLL/plugin, exercise widget/SVG/image/icon pixels, loopback HTTP,
+native TLS backend, actual CLI and four no-RX GUI profiles. Without --full the
+original narrow Svg-only smoke remains available and cannot claim full rebuild.
+Bundled dependencies are selected and resolved features checked; a package with
+qopensslbackend requires explicit --openssl-root headers, hashed in evidence,
+with linked OpenSSL forbidden. No OpenSSL runtime is imported for the test.
+--work-root permits short paths on a spacious disk; only validated fresh QA
+directories are cleaned. Command deadlines terminate that process tree. Results
+record failures instead of leaving stale successes, input/replacement hashes and
+SDK feature differences. Source SDK and original package remain unchanged.
+test_qt_replacement_harness.py covers missing plugins, extraction containment,
+feature checks, failure receipts and command failures without compiling Qt.
 Policy T-0104-notices-5 requires both new material sets whenever those runtimes
 are shipped. Remaining publication blockers are narrowed, not bypassed.
 

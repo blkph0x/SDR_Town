@@ -1,5 +1,26 @@
 # Development log
 
+## 2026-10-04 - T-0104 full packaged Qt replacement, remaining-work review
+
+DEC-0179 extends the existing source-replacement harness instead of changing
+radio/audio code. All packaged Qtbase/QtSvg files must rebuild and replace;
+missing libraries, ambient system-library choices and stale success receipts
+are rejected. Actual Widgets/SVG pixels, loopback HTTP, native TLS, CLI and
+four GUI no-RX profiles are the acceptance path. Found/fixed harness-only
+configuration parsing and package-metadata classification defects, recording
+the failures rather than claiming the first build passed. Narrow replacement
+probe and packaging/native regression gates pass; full repeat now PASS755.20s,
+all16 packaged Qt6.11.1 files replaced and four actual no-RX GUI profiles pass.
+Final96 packaging/helper tests and16/16 native suites pass; source CI pending.
+CI6.7.3 additionally needs explicit OpenSSL build headers for its existing
+plugin; this is recorded separately and no new runtime DLL is deployed.
+
+Remaining priorities stay T-0104 complete source/toolchain/distribution closure,
+then T-0103 generation-bound device ownership and stuck-driver tests, then
+T-0105 latency/correlation/watchdog and field corpora. The Visual Studio
+publisher-entitlement confirmation was requested; installation alone is not
+treated as that confirmation. No version bump, binary release or untracked
+reference-file changes. BUILD_NOTES carries3e4956e's final CI acceptance.
 ## 2026-10-04 - T-0104 exact Qt sources and runtime replacement evidence
 
 DEC-0178 continues release-material work; no application or receive/audio
