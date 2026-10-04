@@ -8,6 +8,8 @@ and passes after separating visibility from explicit Close/Escape/Stop.
 SSTV source refresh also overwrote an unstarted manual radio selection; retain
 that selection and keep per-named-session source/settings/cancellation isolated.
 Windows settings require case-normalized IDs to avoid two windows sharing a key.
+An additional negative fixture caught trailing-newline acceptance by PCRE's
+line-end anchor; strict string anchors fix it and GUI API tests also cover it.
 Full17/17 CTest and real GUI session/API tests pass. Physical simultaneous RF,
 repeated singleton engines and hung-driver cancellation remain outside this fix.
 

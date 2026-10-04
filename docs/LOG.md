@@ -2,6 +2,11 @@
 
 ## 2026-10-04 - Background sessions and committed-source distribution
 
+2026-10-05 completion review: malformed ID with final newline reproduced and
+rejected using strict string anchors. Explicit Inmarsat shutdown/join replaces
+the former dependency on hiding. Rebuilt;17/17 suites, actual GUI API and four
+layout/exit profiles pass. Earlier CI is superseded by this follow-up.
+
 DEC-0185/0186: fixed visibility-driven cancellation; added named SSTV sessions
 and additional CW/DTMF windows. Radio selection survives refresh, settings are
 isolated by case-normalized identity, and GUI/API addressing is consistent.

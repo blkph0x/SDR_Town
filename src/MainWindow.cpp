@@ -13285,6 +13285,8 @@ void MainWindow::stopAllStreaming()
         // SATCOM_HOST_INTEGRATION_BEGIN
         // Satcom owns a worker, device lease and a borrowed MainWindow audio
         // pointer. End that session before the shared GUI/audio/device services.
+        // DEC-0185: hiding no longer stops Inmarsat; explicit shutdown must join it.
+        InmarsatEngine::instance().stop();
         SatcomScannerEngine::instance().stop();
         SatcomHostServices::instance().clear();
         // SATCOM_HOST_INTEGRATION_END

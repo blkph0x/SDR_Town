@@ -5,6 +5,8 @@ MainWindow::ensureSstvWindow reuses a case-normalized ID; GUI and authenticated
 local API address the same instances. Additional CW/DTMF windows reuse existing
 per-window workers and source pickers. Hide is presentation only; explicit
 Close/Escape/Stop own teardown. SatcomHub no longer stops engines when hidden.
+MainWindow shutdown explicitly joins Inmarsat before clearing shared host
+services. SSTV IDs use strict PCRE string anchors, not line-end matching.
 P25 and satellite singleton-engine replication remains unimplemented.
 
 DEC-0186: scripts/project_sources.py archives committed Git objects plus three

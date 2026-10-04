@@ -59,7 +59,7 @@ def main():
             assert {s['sessionId'] for s in sessions} == {'qa_radio_a','qa_radio_b'}, sessions
             assert len(sessions)==2 and all(not s['busy'] for s in sessions), sessions
             for path in ('sessions','live','finish','cancel'):
-                for invalid in ('../escape', 'x'*65, 12):
+                for invalid in ('../escape', 'x'*65, 'radio\n', 12):
                     result = request('/v1/sstv/'+path, {'sessionId':invalid})
                     assert not result['ok'] and result['status']==400, result
             for path in ('finish','cancel'):

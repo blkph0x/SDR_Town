@@ -27,9 +27,17 @@ def expect_allowed(path: str) -> None:
 
 def main() -> int:
     import subprocess
+    for path in MODULE.WORKFLOW_SHUTDOWN_DIGESTS:
+        before = subprocess.check_output(["git", "show", "a7624ee:" + path], cwd=ROOT, text=True, encoding="utf-8")
+        after = (ROOT / path).read_text(encoding="utf-8")
+        assert MODULE.infrastructure_text_allowed(path, before, after)
+        assert not MODULE.infrastructure_text_allowed(path, before, after + "\nRF change")
+        assert not MODULE.infrastructure_text_allowed(path, after, before)
+        assert not MODULE.infrastructure_text_allowed("src/P25LiveDecoder.cpp", before, after)
+        assert after.index("InmarsatEngine::instance().stop();", after.index("void MainWindow::stopAllStreaming()")) < after.index("SatcomHostServices::instance().clear();", after.index("void MainWindow::stopAllStreaming()"))
     for path in MODULE.WORKFLOW_WINDOW_DIGESTS:
         before = subprocess.check_output(["git", "show", "9371201:" + path], cwd=ROOT, text=True, encoding="utf-8")
-        after = (ROOT / path).read_text(encoding="utf-8")
+        after = subprocess.check_output(["git", "show", "a7624ee:" + path], cwd=ROOT, text=True, encoding="utf-8")
         assert MODULE.infrastructure_text_allowed(path, before, after)
         assert not MODULE.infrastructure_text_allowed(path, after, before)
         assert not MODULE.infrastructure_text_allowed(path, before, after + "\nRF change")

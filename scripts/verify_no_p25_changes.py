@@ -152,6 +152,14 @@ WORKFLOW_WINDOW_DIGESTS = {
 }
 
 
+# DEC-0185 follow-up: explicit Inmarsat stop/join before shared host teardown.
+WORKFLOW_SHUTDOWN_DIGESTS = {
+    "src/MainWindow.cpp": (
+        "f310b5f986c86c51af4a9843c0c51d1874daa74b2491d46fcdcae6e133c5c773",
+        "fbb235ef625cd9b65c6f4454df845bf28b7e77c3461d051d2f7be48ca44394be"),
+}
+
+
 def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
     actual = (
         hashlib.sha256(before.encode("utf-8")).hexdigest(),
@@ -159,7 +167,8 @@ def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
     )
     return actual in (INFRASTRUCTURE_DIGESTS.get(path), LOSS_ACK_DIGESTS.get(path),
                       WORKFLOW_DIGESTS.get(path), WORKFLOW_ROUTING_DIGESTS.get(path), REPEATER_ROUTING_DIGESTS.get(path),
-                      CONTROL_OWNERSHIP_DIGESTS.get(path), WORKFLOW_WINDOW_DIGESTS.get(path))
+                      CONTROL_OWNERSHIP_DIGESTS.get(path), WORKFLOW_WINDOW_DIGESTS.get(path),
+                      WORKFLOW_SHUTDOWN_DIGESTS.get(path))
 
 
 # DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.
@@ -641,7 +650,7 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
-        if args.paths is None and path in (INFRASTRUCTURE_DIGESTS.keys() | WORKFLOW_DIGESTS.keys() | WORKFLOW_ROUTING_DIGESTS.keys() | REPEATER_ROUTING_DIGESTS.keys() | CONTROL_OWNERSHIP_DIGESTS.keys() | WORKFLOW_WINDOW_DIGESTS.keys()):
+        if args.paths is None and path in (INFRASTRUCTURE_DIGESTS.keys() | WORKFLOW_DIGESTS.keys() | WORKFLOW_ROUTING_DIGESTS.keys() | REPEATER_ROUTING_DIGESTS.keys() | CONTROL_OWNERSHIP_DIGESTS.keys() | WORKFLOW_WINDOW_DIGESTS.keys() | WORKFLOW_SHUTDOWN_DIGESTS.keys()):
             if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
                 print(f"P25 guard: accepted exact reviewed infrastructure/ownership patch: {path}")
                 continue

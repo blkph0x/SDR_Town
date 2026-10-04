@@ -22,6 +22,8 @@ also cancel workers on any hide. Workspace navigation therefore acts as a
 radio-stop command even with distinct physical sources. Presentation visibility
 must suspend painting only; explicit Stop, decoder-window Close/Escape and
 application shutdown retain their existing ownership-aware teardown.
+MainWindow shutdown explicitly stops/joins Inmarsat before host/audio/device
+services are destroyed; it must not rely on a hide event to do so.
 
 Add independently addressable decoder windows using the existing per-window
 workers and receiver selectors, not copies of singleton protocol engines.

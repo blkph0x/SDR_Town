@@ -33,7 +33,7 @@
 #include <stdexcept>
 
 bool SstvWindow::validSessionId(const QString& id) {
-    return id.isEmpty() || QRegularExpression("^[A-Za-z0-9_-]{1,64}$").match(id).hasMatch();
+    return id.isEmpty() || QRegularExpression("\\A[A-Za-z0-9_-]{1,64}\\z").match(id).hasMatch();
 }
 
 QString SstvWindow::sessionObjectName(const QString& id) {

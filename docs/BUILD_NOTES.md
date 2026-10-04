@@ -2,6 +2,20 @@
 
 ## 2026-10-04 - Background workflow windows and source bundle (DEC-0185/0186)
 
+Follow-up2026-10-05: exact actual-tree source export PASS2910 files/38,744,017
+bytes at a7624ee. Additional malformed-ID fixture reproduces trailing-newline
+acceptance (workflow-session-id-prefail.log); PCRE end-of-string anchor replaces
+the line-end anchor, and the actual GUI API fixture now checks the same input.
+The earlier CI run is superseded, not accepted for this repair.
+Shutdown review also moves Inmarsat's required stop/join to the explicit main
+shutdown path, before shared services; hiding is no longer its cleanup path.
+One rebuild hit LNK1104 on SDR_Town.exe; process inspection found no running
+SDR_Town by then. Retry succeeds; the transient file-lock owner is unproven.
+Final identifier/ownership fixture PASS39 assertions; complete CTest17/17
+PASS79.77s. Shutdown integration rebuild PASS, followed by actual GUI session
+automation and all four no-RX layout/exit profiles PASS again. Exact-patch
+negative guard passes for the explicit shutdown-only delta.
+
 Baseline9371201; Windows/MSVC14.44/Qt6.11.1. The two-CW visibility regression
 fails before the production fix (running1 instead of2) in
 workflow-windows-prefail-test.log. Initial test launch used an incomplete Qt

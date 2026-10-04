@@ -75,6 +75,7 @@ TEST_CASE("Named SSTV sessions keep separate radios settings and cancellation", 
     QSettings().remove("sstv/instances/ownership_test_a");
     QSettings().remove("sstv/instances/ownership_test_b");
     CHECK_FALSE(SstvWindow::validSessionId("../escape"));
+    CHECK_FALSE(SstvWindow::validSessionId("radio\n"));
     CHECK_FALSE(SstvWindow::validSessionId(QString(65,'a')));
     CHECK(SstvWindow::validSessionId({}));
     CHECK(SstvWindow::sessionObjectName("Radio_A")==SstvWindow::sessionObjectName("radio_a"));
