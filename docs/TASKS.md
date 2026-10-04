@@ -60,6 +60,8 @@ WORKFLOW_DEVICES.md. Main Listen's remaining raw lifecycle, primary index
 assumptions, repeatable P25/satellite engines and source/output persistence stay
 open. P25 DSP/vocoder/speaker cadence are unchanged; selectors are not proof of
 independent concurrent P25 controllers.
+DEC-0183 isolates primary repeater pair tuning/status from secondary NFM VFOs;
+this controller-only follow-up has local17/17 and exact-guard evidence.
 Depends on T-0102 loss-boundary/source regression evidence; ISS-0055. Define
 stable physical identity and generation-bound consumer tokens, including shared
 SDRplay tuner domains and ambiguous duplicate serials. Inventory every raw tune/

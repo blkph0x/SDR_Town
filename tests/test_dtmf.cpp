@@ -1,6 +1,8 @@
 #include "DtmfDecoder.h"
 #include "ControlEventLog.h"
 #include "RepeaterMonitor.h"
+#include "Receiver.h"
+
 #include "RepeaterControlHooks.h"
 #include "Demod.h"
 #include <catch2/catch_approx.hpp>
@@ -13,6 +15,20 @@
 #include <limits>
 #include <iostream>
 #include <chrono>
+
+TEST_CASE("Repeater controller binds logical identity before active filtering", "[dtmf][ownership]") {
+    Receiver primary, sameRadio, otherRadio;
+    primary.deviceIndex = sameRadio.deviceIndex = 0;
+    otherRadio.deviceIndex = 2;
+    CHECK(repeaterControlsReceiver(&primary, &primary));
+    CHECK_FALSE(repeaterControlsReceiver(&primary, &sameRadio));
+    CHECK_FALSE(repeaterControlsReceiver(&primary, &otherRadio));
+    primary.active = false; sameRadio.active = true;
+    CHECK_FALSE(repeaterControlsReceiver(&primary, &sameRadio));
+    CHECK_FALSE(repeaterControlsReceiver(nullptr, &primary));
+    CHECK_FALSE(repeaterControlsReceiver(&primary, nullptr));
+    CHECK_FALSE(repeaterControlsReceiver(nullptr, nullptr));
+}
 
 namespace {
 std::vector<float> tonePair(double rowHz, double colHz, unsigned rate, double seconds,

@@ -1,5 +1,14 @@
 # Development log
 
+## 2026-10-04 - Catch repeater control leaking into secondary VFOs
+
+During final DEC-0182 review, found the analog worker applying the global
+repeater pair to every NFM receiver. DEC-0183 binds RF changes and panel status
+to the real primary identity, not active-list index. Source build,7 identity
+assertions,17/17 regression suites78.27s and exact guard negative tests pass.
+Superseded CI37192889483 deliberately cancelled before acceptance; follow-up
+source CI is required. Remaining T-0103 work and ISS-0060 are unchanged.
+
 ## 2026-10-04 - Connect workflow UI and controllers to ownership (DEC-0182)
 
 User requests the same foundation across all interfaces, not P25/SSTV special

@@ -1,5 +1,24 @@
 # Decisions
 
+## DEC-0183 - Isolate primary repeater control from secondary VFOs (2026-10-04)
+
+T-0103 follow-up review of 53a518d found the analog loop in
+MainWindowP25Orchestration.cpp copies global repeaterDualWatchWanted into every
+active NFM receiver. That can retune a secondary radio and replace its audio
+target with the primary repeater output; each receiver also overwrites the
+global repeater status. Selected receiver UI makes this pre-existing coupling
+operationally important. The worker filters inactive receivers before looping,
+so active-list index zero is NOT a valid primary identity.
+
+Snapshot the actual primary receiver under the existing receiver-list lock,
+before active filtering. Bind dual-watch RF changes and controller status to
+that identity only. Ordinary per-receiver DTMF/CTCSS/DCS observation stays on;
+no filter, sample timing, P25 decode, vocoder or audio-buffer changes. Exercise
+same-radio/different-radio VFO identity, inactive primary and missing bindings.
+Accept only this exact orchestration delta in the frozen-pipeline guard, with
+negative mutations. Cancel superseded CI37192889483 rather than accepting an
+incomplete routing batch; rebuild/test and verify the follow-up's exact CI.
+
 ## DEC-0182 - Connect workflow controllers without cross-radio restoration (2026-10-04)
 
 T-0103 continues from ba26fe3. Inspection confirms Inmarsat/Satcom still restore

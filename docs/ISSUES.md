@@ -206,6 +206,10 @@ missing saved keys fail closed. Read-only observer pickers and selected-radio
 analog receiver creation are connected. Raw administrative hardware operations,
 remaining primary index assumptions, repeated engine instances and actual hung
 driver/unplug qualification are still open. No on-air P25 acceptance claim.
+DEC-0183 additionally fixes global repeater dual-watch retuning every NFM VFO
+and overwriting primary status. Identity is captured before active filtering;
+seven identity assertions and full17-suite regression pass. Physical multi-radio
+qualification remains open; no P25 DSP changes.
 WORKFLOW_DEVICES.md records the exact migration matrix; an assigned pool is not
 evidence of concurrent P25 decoding or full multi-instance satellite engines.
 

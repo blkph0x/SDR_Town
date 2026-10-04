@@ -1,5 +1,12 @@
 # Code notes (tree map)
 
+DEC-0183: RepeaterMonitor's identity helper binds hardware-affecting dual-watch
+and shared repeater-panel status to the actual primary Receiver. The shared
+GUI worker snapshots that identity before filtering inactive receivers; another
+VFO, even on the same SDR, is never promoted by active-list position. DTMF and
+tone observations remain per receiver. The exact controller-only orchestration
+delta is separately guarded; P25 decode/audio code is not changed.
+
 T-0103 / DEC-0182: `DeviceManager::resolveWorkflowDevice` implements explicit
 key/no-fallback selection and automatic reservation priority. Capture setup and
 confirmed restoration require the exact session token. Inmarsat/Satcom carry

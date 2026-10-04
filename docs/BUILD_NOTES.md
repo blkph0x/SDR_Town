@@ -1,5 +1,17 @@
 # Build notes
 
+## 2026-10-04 - Secondary receiver repeater isolation (DEC-0183)
+
+Final source review found global dual-watch RF tuning/status applied to every
+active NFM receiver. Fixed identity binding before active-list filtering;
+P25 decode branches, sample clocks and speaker processing are unchanged.
+Full Release build5 PASS. Identity fixture PASS7 assertions, complete
+CTest17/17 PASS78.27s, exact-patch guard and negative mutations PASS. Actual
+no-RX GUI profiles rerun under build/ownership-repeater-gui. No on-air claim.
+53a518d Windows37192889483 was intentionally cancelled while compiling, not
+accepted as complete. Its YAML validation37192889450 passed. The follow-up
+must receive its own full Windows CI/inventory acceptance before close-out.
+
 ## 2026-10-04 - T-0103 controller routing (DEC-0182)
 
 Baseline ba26fe3, Windows/MSVC14.44/Qt6.11.1 and configured C:/vcpkg.

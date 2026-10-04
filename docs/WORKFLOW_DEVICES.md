@@ -40,6 +40,9 @@ CW, DTMF and SSTV have the same logical-receiver picker. **Tools > RDS / CTCSS /
 DCS** opens a read-only status window for any selected receiver; the main status
 strip and repeater-control panel still belong to the primary Listen receiver.
 Removing/reordering receivers cannot redirect an observer to a replacement.
+Repeater dual-watch RF changes and its shared status are bound to the main
+receiver identity (DEC-0183). A secondary NFM receiver does not inherit that
+pair, even when it is the first active receiver or shares the same SDR.
 
 Inmarsat, Satcom and Aircraft have stable-key radio selectors. A missing saved
 radio stays visible as unavailable, rather than falling back to radio zero.

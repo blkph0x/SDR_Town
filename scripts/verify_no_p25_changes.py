@@ -111,13 +111,22 @@ WORKFLOW_ROUTING_DIGESTS = {
 }
 
 
+# DEC-0183: bind only the analog repeater controller to its logical receiver;
+# preserve all P25 branches and active-list ordering in the shared worker.
+REPEATER_ROUTING_DIGESTS = {
+    "src/MainWindowP25Orchestration.cpp": (
+        "713eeb72bf0e0e99647a4f8de31601da4133f83a892f61876bba3683e56f13e1",
+        "f0bf8a6b2e34f57b29cd4a6e502678fd93c2fea3c2d3151ee414de16ed57e50e"),
+}
+
+
 def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
     actual = (
         hashlib.sha256(before.encode("utf-8")).hexdigest(),
         hashlib.sha256(after.encode("utf-8")).hexdigest(),
     )
     return actual in (INFRASTRUCTURE_DIGESTS.get(path), LOSS_ACK_DIGESTS.get(path),
-                      WORKFLOW_DIGESTS.get(path), WORKFLOW_ROUTING_DIGESTS.get(path))
+                      WORKFLOW_DIGESTS.get(path), WORKFLOW_ROUTING_DIGESTS.get(path), REPEATER_ROUTING_DIGESTS.get(path))
 
 
 # DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.
@@ -599,7 +608,7 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
-        if args.paths is None and path in (INFRASTRUCTURE_DIGESTS.keys() | WORKFLOW_DIGESTS.keys() | WORKFLOW_ROUTING_DIGESTS.keys()):
+        if args.paths is None and path in (INFRASTRUCTURE_DIGESTS.keys() | WORKFLOW_DIGESTS.keys() | WORKFLOW_ROUTING_DIGESTS.keys() | REPEATER_ROUTING_DIGESTS.keys()):
             if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
                 print(f"P25 guard: accepted exact reviewed infrastructure/ownership patch: {path}")
                 continue

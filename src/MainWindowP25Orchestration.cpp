@@ -235,12 +235,14 @@ void MainWindow::startP25LiveDecodePipeline()
                 // S0-2 (P0 audit): short lock to snapshot the current receivers (shared_ptrs — cheap, stable).
                 // Then process without holding lock. shared_ptr keeps the Demodulator alive even if vector reallocates.
                 std::vector<std::shared_ptr<Receiver>> rxSnapshot;
+                std::shared_ptr<Receiver> repeaterReceiver;
                 {
                     // try_to_lock: never stall the DSP worker behind a GUI grant path
                     // that (historically) held receiversMutex while waiting on stateMutex.
                     std::unique_lock<std::mutex> lk(receiversMutex, std::try_to_lock);
                     if (lk.owns_lock()) {
                         ensureReceiver();
+                        repeaterReceiver = receivers.empty() ? nullptr : receivers.front();
                         rxSnapshot.reserve(receivers.size());
                         for (auto& r : receivers) if (r && r->active) rxSnapshot.push_back(r);
                     }
@@ -269,6 +271,7 @@ void MainWindow::startP25LiveDecodePipeline()
                     auto& rxPtr = rxSnapshot[r];
                     if (!rxPtr) continue;
                     Receiver& rx = *rxPtr;  // reference to the stable object
+                    const bool ownsRepeaterControls = repeaterControlsReceiver(repeaterReceiver.get(), rxPtr.get());
                     size_t i = 0;
                     bool rxP25VoiceDecodeSnapshot = false;
                     bool rxP25VoicePhase2Snapshot = false;
@@ -1145,7 +1148,7 @@ void MainWindow::startP25LiveDecodePipeline()
                             {
                                 std::lock_guard<std::mutex> lock(repeaterMonitorMutex);
                                 repEnabled = repeaterMonitorEnabled;
-                                repDualWanted = repeaterDualWatchWanted;
+                                repDualWanted = ownsRepeaterControls && repeaterDualWatchWanted;
                                 repLogDtmf = repeaterLogDtmf;
                                 repLogTones = repeaterLogTones;
                                 repLogCarrier = repeaterLogCarrier;
@@ -1196,7 +1199,7 @@ void MainWindow::startP25LiveDecodePipeline()
                             } else {
                                 rx.repeaterDualWatchCentered = false;
                             }
-                            {
+                            if (ownsRepeaterControls) {
                                 std::lock_guard<std::mutex> lock(repeaterMonitorMutex);
                                 repeaterDualWatchActive = dualActive;
                                 repeaterDualWatchReason = dualReason;

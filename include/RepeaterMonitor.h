@@ -4,6 +4,14 @@
 
 // Pure helpers for opt-in UHF repeater dual-watch (output listen + input control tap).
 
+struct Receiver;
+
+// DEC-0183: RF pair tuning and shared panel status belong to a logical receiver,
+// not every receiver on its radio or the first entry of a filtered active list.
+inline bool repeaterControlsReceiver(const Receiver* bound, const Receiver* candidate) {
+    return bound && candidate == bound;
+}
+
 struct RepeaterPassbandPlan {
     bool feasible = false;
     double centerHz = 0;
