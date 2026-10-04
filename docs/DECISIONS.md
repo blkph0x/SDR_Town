@@ -1,5 +1,43 @@
 # Decisions
 
+## DEC-0188 - Include the dependency build-tool sources (2026-10-05)
+
+T-0104: the existing dependency archive contains upstream sources and port
+recipes, but not vcpkg's scripts, triplets, bootstrap metadata or installed
+vcpkg-cmake helpers. Export those exact tracked inputs from the configured
+vcpkg checkout into a separate bounded ZIP. Verify installed helper-file hashes
+against their SPDX receipts, reject modified selected tooling inputs and bind
+the archive to both application and vcpkg commits. Preserve upstream notices.
+Never sweep download caches, untracked files or user configuration into it.
+Record bootstrap/tool prerequisites honestly; this does not contain a compiler,
+prove an independent USB-stack rebuild or resolve distribution review.
+
+## DEC-0187 - Independent Inmarsat receiver sessions (2026-10-05)
+
+T-0103: every Inmarsat widget, monitor and settings write still targets the
+singleton. Convert the engine to an explicitly owned QObject with a validated,
+case-normalized session ID, independent settings/message store/IQ cursor/worker
+and exact existing radio lease. Keep the empty-ID singleton for GUI/CLI/web
+compatibility. New sessions must not automatically start RF or copy another
+session's active radio. Expose named sessions in the satellite workspace;
+closing a session joins only its worker and application shutdown joins all.
+Queue failed-worker restoration to the engine's lifetime-bound QObject, not
+the application with a raw pointer. Do not alter modulation/FEC/audio algorithms.
+Scope decoder monitors, popouts, map caches/consent and message lists to their
+engine. Shared aircraft overview remains an aggregate of validated positions.
+Record session identity locally; existing remote consent/filtering stays intact.
+Allow up to 16 named session tabs as a UI/worker resource budget. Reopen saved
+tabs idle, never restart radios automatically. Authenticated
+/v1/inmarsat/sessions opens/configures/starts/stops/closes these exact controllers;
+stale/invalid identities must not fall back to the default. Dry-run rejects RF
+start and must not persist its test-only tab layout.
+The current diagnostic recorder selects by frequency, not engine identity;
+refuse ambiguous multi-session recording instead of silently capturing another
+radio. Test persistence, isolated controls/maps, missing-radio rejection,
+multi-radio workers and stop/destruction with existing mock hardware.
+Repeated P25/Satcom/Aircraft engines remain separately tracked, not implied by
+this implementation. Release-material work remains T-0104, not license approval.
+
 ## DEC-0186 - Ship the exact tracked source tree with package evidence (2026-10-04)
 
 T-0104: the vcpkg and Qt source kits do not include SDR Town's own embedded

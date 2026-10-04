@@ -11372,6 +11372,11 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
                 QByteArray::fromStdString(InmarsatEngine::instance().statusJson().dump()));
             return {{"ok", true}, {"inmarsat", doc.object()}};
         }
+        if (path == "/v1/inmarsat/sessions") {
+            auto* hub = findChild<SatcomHubWidget*>(QStringLiteral("satcomHub"));
+            if (!hub) return {{"ok",false},{"status",503},{"error","Inmarsat workspace unavailable"}};
+            return hub->controlInmarsatSessions(method, body);
+        }
         if (path == "/v1/inmarsat/bandplans" && method == "GET") {
             InmarsatBandPlanStore::instance().reload(nullptr);
             const QJsonDocument doc = QJsonDocument::fromJson(
@@ -13286,7 +13291,7 @@ void MainWindow::stopAllStreaming()
         // Satcom owns a worker, device lease and a borrowed MainWindow audio
         // pointer. End that session before the shared GUI/audio/device services.
         // DEC-0185: hiding no longer stops Inmarsat; explicit shutdown must join it.
-        InmarsatEngine::instance().stop();
+        InmarsatEngine::stopAll();
         SatcomScannerEngine::instance().stop();
         SatcomHostServices::instance().clear();
         // SATCOM_HOST_INTEGRATION_END

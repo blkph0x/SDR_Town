@@ -1,5 +1,19 @@
 # Development log
 
+## 2026-10-05 - Named Inmarsat receiver controllers
+
+DEC-0187/0188 advances both requested tracks. Independent engines replace
+Inmarsat's singleton limitation without touching DSP/FEC/audio. Named tabs,
+saved source/watch settings, independent message/map models, exact ownership
+and instance-bound failure cleanup are implemented; default endpoints remain.
+Mock-radio and native GUI regression gates pass. Dependency build scripts and
+verified CMake helpers are now packaged, not repeatedly treating the already
+completed Qt replacement as new work. Full repeated P25/Satcom/Aircraft
+controllers, hardware qualification and remaining distribution requirements
+are still open. Final native17/17 (82.66s), real GUI Inmarsat/SSTV sessions,
+four layouts,33 map/popout/session assertions and107 package helper tests PASS.
+Exact CI/publication result will be recorded on the pushed commit.
+
 ## 2026-10-04 - Background sessions and committed-source distribution
 
 2026-10-05 completion review: malformed ID with final newline reproduced and

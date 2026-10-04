@@ -2,6 +2,7 @@
 #ifdef HAVE_SOAPYSDR
 #include "SdrplayControlFixture.h"
 #include "WorkflowRadioSession.h"
+#include "InmarsatEngine.h"
 #include <SoapySDR/Registry.hpp>
 #include <QCoreApplication>
 #include <QStandardPaths>
@@ -172,5 +173,37 @@ TEST_CASE("Five independent RF workflows retain ownership through real manager l
     CHECK_FALSE(manager.correctWorkflowFrequency(first, DeviceOwnership::Owner::P25, 7, &error));
     CHECK(manager.getDevices()[first].frequencyCorrectionPpm == 1.25);
     CHECK(manager.releaseDevice(namedP25));
+
+    // DEC-0187: exercise real independent engines, not just ownership tokens.
+    for (auto index : indices) manager.stopStreaming(index);
+    SdrplayControlFixture::produceSamples.store(true);
+    struct Finish { ~Finish() { InmarsatEngine::stopAll(); SdrplayControlFixture::produceSamples.store(false); } } finish;
+    InmarsatEngine aeroA("worker-a"), aeroB("worker-b"), conflict("worker-conflict");
+    auto aeroConfig = InmarsatEngineConfig::defaults();
+    aeroConfig.playAudio = false; aeroConfig.recordVoice = false;
+    aeroConfig.deviceIndex = first; aeroConfig.deviceStableKey = devices[first].stableKey;
+    REQUIRE(aeroA.setConfig(aeroConfig));
+    REQUIRE(conflict.setConfig(aeroConfig));
+    aeroConfig.deviceIndex = second; aeroConfig.deviceStableKey = devices[second].stableKey;
+    aeroConfig.channelHz = 1542935000; aeroConfig.baud = 8400;
+    REQUIRE(aeroB.setConfig(aeroConfig));
+    REQUIRE(aeroA.start()); REQUIRE(aeroB.start());
+    CHECK_FALSE(conflict.start(true));
+    CHECK(InmarsatEngine::runningSessionCount() == 2);
+    const auto inputDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while ((aeroA.snapshot().diagnostics.value("samples",uint64_t{0}) == 0 ||
+            aeroB.snapshot().diagnostics.value("samples",uint64_t{0}) == 0) &&
+           std::chrono::steady_clock::now() < inputDeadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    CHECK(aeroA.snapshot().diagnostics.value("samples",uint64_t{0}) > 0);
+    CHECK(aeroB.snapshot().diagnostics.value("samples",uint64_t{0}) > 0);
+    aeroA.stop();
+    CHECK_FALSE(manager.isStreaming(first));
+    CHECK(manager.isHardwareStreaming(second));
+    CHECK(aeroB.snapshot().state == InmarsatEngineState::Running);
+    CHECK(manager.getCurrentCenterFreq(second) == aeroConfig.channelHz);
+    InmarsatEngine::stopAll();
+    CHECK_FALSE(manager.isStreaming(second));
+    CHECK(InmarsatEngine::runningSessionCount() == 0);
 }
 #endif

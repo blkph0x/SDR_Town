@@ -1,10 +1,17 @@
 # SDR Town
 
+Unreleased Inmarsat multi-radio update: open a named receiver using the **add
+session button in the Satellite workspace**. Each tab owns its radio, watch
+list, decoder state, messages and map. Saved tabs reopen stopped. Closing or
+stopping one does not stop another; the local authenticated session API uses
+these same controllers. Two-engine mock-radio tests pass; physical simultaneous
+RF acceptance remains open. See [session controls](docs/WORKFLOW_DEVICES.md).
+
 Unreleased workflow update: **Tools > Additional Decoder Window** opens
 independent Morse/DTMF observers or named SSTV sessions with separate radio,
 frequency, output and cancellation. Hiding a workspace no longer stops its
 satellite receiver. GUI/API session and lifecycle tests pass; repeated P25/
-Inmarsat engine instances remain in progress. See [workflow status](docs/WORKFLOW_DEVICES.md).
+Satcom/Aircraft engine instances remain in progress. See [workflow status](docs/WORKFLOW_DEVICES.md).
 
 Unreleased development: **Devices > Workflow Assignments** saves radio
 reservations by stable identity and shows their runtime status. P25 traffic

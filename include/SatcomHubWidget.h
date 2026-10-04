@@ -2,6 +2,7 @@
 
 #include <QString>
 #include <QWidget>
+#include <QJsonObject>
 
 #include <cstddef>
 
@@ -29,6 +30,8 @@ public:
     void showSatcomTab();
     void showInmarsatTab();
     void showAircraftTab();
+    InmarsatWidget* openInmarsatSession(const QString& sessionId);
+    QJsonObject controlInmarsatSessions(const QString& method, const QJsonObject& body);
 
 signals:
     void requestOpenSstvLive();
@@ -42,6 +45,7 @@ private slots:
 
 private:
     void ensureTabs();
+    void saveInmarsatSessions();
     void stopAutoCapture(bool keepHandledKey);
 
     QTabWidget* tabs_ = nullptr;

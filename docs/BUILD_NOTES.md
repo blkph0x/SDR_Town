@@ -1,5 +1,25 @@
 # Build notes
 
+## 2026-10-05 - Independent Inmarsat engines and dependency tooling
+
+Baseline63acf32; Windows/MSVC14.44/Qt6.11.1. Initial build invocation used the
+wrong GUI-test target name and failed after building the application/workspace;
+correct inmarsat_live_gui_tests and sdr_town_tests build passes. CTest17/17
+PASS81.33s, including two-engine mock IQ consumption and isolated stop. P25
+exact-patch negative tests pass. vcpkg_tooling5 and inventory20 tests pass;
+the initial fixture exposed global Git CRLF conversion, isolated with explicit
+fixture core.autocrlf=false. Actual configured tooling export PASS917 files,
+1,674,684 bytes at vcpkg eb35a05cc21c69ec1399f7532b7dd61d271ac0d1.
+Final application GUI/API automation PASS: independent named engines, two
+configurations, idempotent open, isolated stop/close/reopen, invalid/stale
+requests rejected, unchanged default config and no RF. Existing SSTV API and
+four actual GUI layouts also PASS. Final CTest17/17 PASS82.66s. Additional
+monitor/popout/map source isolation and screenshot fixture PASS33 assertions;
+its initial synthetic message was Status rather than trackable ACARS, corrected
+to the actual store contract without changing production logic. Screenshot
+build/inmarsat-session.png reviewed: radio/mode/watch controls visible and no
+overlap. Ten packaging helper suites PASS (107 tests). Exact source CI pending.
+
 ## 2026-10-04 - Background workflow windows and source bundle (DEC-0185/0186)
 
 Follow-up2026-10-05: exact actual-tree source export PASS2910 files/38,744,017

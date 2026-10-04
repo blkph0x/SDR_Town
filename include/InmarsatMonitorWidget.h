@@ -13,7 +13,8 @@ class QTimer;
 class InmarsatMonitorWidget : public QWidget {
 public:
     enum class View { Decoders, Aircraft };
-    explicit InmarsatMonitorWidget(View view, QWidget* parent = nullptr, bool popout = true);
+    explicit InmarsatMonitorWidget(View view, QWidget* parent = nullptr, bool popout = true,
+                                  InmarsatEngine* engine = nullptr);
     void updateSnapshot(const InmarsatEngineSnapshot& snapshot,
                         const std::vector<InmarsatAircraft>& aircraft, double now);
     QString tableText() const;
@@ -22,6 +23,7 @@ protected:
     void hideEvent(QHideEvent* event) override;
 private:
     void refresh();
+    InmarsatEngine& engine_;
     View view_;
     QTableWidget* table_;
     QLabel* count_;

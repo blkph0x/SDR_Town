@@ -1,5 +1,21 @@
 # Code notes (tree map)
 
+DEC-0187: InmarsatEngine is an explicitly owned QObject. Empty-ID instance()
+preserves the original API; named engines have separate config files, IQ
+cursors, decoder/watch workers, stores and lease tokens. stopAll joins the
+registry before shared host teardown. InmarsatWidget/WatchUi/MonitorWidget and
+TrackingPanel use the owning engine/store. SatcomHub opens/saves/closes named
+tabs and handles authenticated session commands; default CLI/API unchanged.
+DiagnosticRecording refuses concurrent-engine ambiguity; local open diagnostics
+record session and source key. The P25 guard permits only exact shutdown and
+session-route forwarding changes in MainWindow.
+
+DEC-0188: vcpkg_tooling.py exports configured Git-committed scripts/triplets/
+bootstrap/helper recipes and installed helper files verified against SPDX.
+Package inventory policy7 requires the nested kit and its source/hash manifest.
+Tool bootstrap downloads, compiler/SDK and independent runtime rebuild remain
+explicit prerequisites, not falsely bundled.
+
 DEC-0185: SstvWindow owns its worker, selected radio and named settings namespace.
 MainWindow::ensureSstvWindow reuses a case-normalized ID; GUI and authenticated
 local API address the same instances. Additional CW/DTMF windows reuse existing
@@ -7,7 +23,8 @@ per-window workers and source pickers. Hide is presentation only; explicit
 Close/Escape/Stop own teardown. SatcomHub no longer stops engines when hidden.
 MainWindow shutdown explicitly joins Inmarsat before clearing shared host
 services. SSTV IDs use strict PCRE string anchors, not line-end matching.
-P25 and satellite singleton-engine replication remains unimplemented.
+P25 and Satcom singleton-engine replication remains unimplemented; Inmarsat is
+now independently instantiated by DEC-0187.
 
 DEC-0186: scripts/project_sources.py archives committed Git objects plus three
 pinned external submodules, omitting reference-only _codex_refs. Staging and

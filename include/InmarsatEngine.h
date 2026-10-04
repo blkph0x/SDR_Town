@@ -9,6 +9,7 @@
 #include "SatcomHostServices.h"
 
 #include <nlohmann/json.hpp>
+#include <QObject>
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -45,8 +46,8 @@ struct InmarsatEngineConfig {
     static InmarsatEngineConfig defaults();
     nlohmann::json toJson() const;
     static InmarsatEngineConfig fromJson(const nlohmann::json& j);
-    void load();
-    void save() const;
+    void load(const std::string& sessionId = {});
+    void save(const std::string& sessionId = {}) const;
 };
 
 struct InmarsatEngineSnapshot {
@@ -87,9 +88,16 @@ struct InmarsatDisplaySnapshot {
     std::vector<InmarsatChannelDisplay> decoders;
 };
 
-class InmarsatEngine {
+class InmarsatEngine : public QObject {
 public:
     static InmarsatEngine& instance();
+    explicit InmarsatEngine(const std::string& sessionId);
+    ~InmarsatEngine() override;
+    static std::string normalizedSessionId(const std::string& id);
+    static void stopAll();
+    static size_t runningSessionCount();
+    const std::string& sessionId() const { return sessionId_; }
+    InmarsatMessageStore& messageStore();
 
     bool setConfig(const InmarsatEngineConfig& cfg);
     InmarsatEngineConfig config() const;
@@ -108,8 +116,8 @@ public:
     void setUpdateCallback(std::function<void()> cb);
 
 private:
-    InmarsatEngine();
-    ~InmarsatEngine();
+    const std::string sessionId_;
+    InmarsatMessageStore messagesStore_;
 
     struct PreviousDeviceState {
         size_t deviceIndex = std::numeric_limits<size_t>::max();

@@ -15,6 +15,7 @@ namespace InmarsatDiagnosticRecording {
 namespace {
 std::mutex mutex;
 std::atomic<bool> armed{false};
+bool multipleLiveSessions = false;
 const void* owner=nullptr;
 double frequency=0;
 int decoder=0;
@@ -39,6 +40,7 @@ void expire() {
 }
 bool arm(double channelHz) {
     std::lock_guard lock(mutex);
+    if (multipleLiveSessions) { state="Unavailable - stop other Inmarsat sessions before recording"; return false; }
     if(armed || !std::isfinite(channelHz) || channelHz<=0)return false;
     frequency=channelHz;owner=nullptr;decoder=0;input.clear();audio.clear();rawIq.clear();firstCounters={};lastCounters={};
     iqRate=0;iqCenter=0;iqStart=0;
@@ -46,6 +48,14 @@ bool arm(double channelHz) {
     started=QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
     state="Waiting for selected channel";deadline=std::chrono::steady_clock::now()+std::chrono::seconds(90);
     armed=true;return true;
+}
+void setMultipleLiveSessions(bool ambiguous) {
+    std::lock_guard lock(mutex);
+    multipleLiveSessions = ambiguous;
+    if (ambiguous && armed) {
+        armed=false;owner=nullptr;input.clear();audio.clear();rawIq.clear();
+        state="Cancelled - multiple live Inmarsat sessions";
+    }
 }
 void cancel() {std::lock_guard lock(mutex);armed=false;owner=nullptr;input.clear();audio.clear();rawIq.clear();state="Idle";}
 QString status() {std::lock_guard lock(mutex);expire();return state;}

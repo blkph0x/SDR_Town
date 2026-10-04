@@ -15,7 +15,7 @@ INVENTORY = 'package-inventory.json'
 INPUTS = 'licenses/build-inputs.json'
 RUNTIME_INPUTS = 'licenses/runtime-deployment.json'
 SOURCE_KIT = 'licenses/vcpkg/source-materials.zip'
-POLICY = 'T-0104-notices-6'
+POLICY = 'T-0104-notices-7'
 MAX_FILES = 10000
 MAX_BYTES = 512 * 1024 * 1024
 MAX_JSON = 8 * 1024 * 1024
@@ -68,6 +68,7 @@ KNOWN_NOTICES = {
     *STATIC_NOTICES, INPUTS, RUNTIME_INPUTS, SOURCE_KIT,
     'licenses/qt/source-materials.zip', 'licenses/msvc/runtime-materials.json',
     'licenses/project/source-materials.zip',
+    'licenses/vcpkg/tooling-materials.zip',
     'licenses/msvc/license.rtf', 'licenses/msvc/README.txt',
     'licenses/embedded-inputs.json', 'licenses/acars/ASN1-NOTICES.txt',
     'licenses/icao/LICENSE-CC0.txt', 'licenses/icao/README.md',
@@ -334,6 +335,9 @@ def make_document(entries, read):
     import project_sources
     sources['project'] = project_sources.verify(
         read(project_sources.KIT, project_sources.MAX_BYTES), inputs['sourceCommit'], inputs['submodules'])
+    import vcpkg_tooling
+    sources['tooling'] = vcpkg_tooling.verify(
+        read(vcpkg_tooling.KIT, vcpkg_tooling.MAX_BYTES), inputs['sourceCommit'])
     embedded = verify_embedded(read(EVIDENCE), read(NOTICES), inputs['sourceCommit'], entries)
     return {'schema': 1, 'policy': POLICY, 'sourceCommit': inputs['sourceCommit'],
             'scope': 'Exact files and known build inputs; NOT full transitive license clearance',

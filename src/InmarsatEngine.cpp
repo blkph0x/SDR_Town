@@ -6,6 +6,7 @@
 #include "SdrDeviceCandidate.h"
 #include "InmarsatDiagnostics.h"
 #include "InmarsatAudio.h"
+#include "InmarsatDiagnosticRecording.h"
 #include "SatcomHostServices.h"
 
 #include <QDir>
@@ -14,6 +15,8 @@
 #include <QCoreApplication>
 #include <QMetaObject>
 #include <QSaveFile>
+#include <QPointer>
+#include <map>
 
 #include <algorithm>
 #include <chrono>
@@ -25,10 +28,15 @@
 
 namespace {
 
-std::string configPath() {
+std::mutex enginesMutex;
+std::map<std::string, InmarsatEngine*> engines;
+
+std::string configPath(const std::string& sessionId) {
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(base);
-    return (base + "/inmarsat_engine.json").toStdString();
+    const auto id = InmarsatEngine::normalizedSessionId(sessionId);
+    return (base + (id.empty() ? "/inmarsat_engine.json" :
+        "/inmarsat_session_" + QString::fromStdString(id) + ".json")).toStdString();
 }
 
 double unixNow() {
@@ -91,9 +99,9 @@ InmarsatEngineConfig InmarsatEngineConfig::fromJson(const nlohmann::json& json) 
     return config;
 }
 
-void InmarsatEngineConfig::load() {
+void InmarsatEngineConfig::load(const std::string& sessionId) {
     try {
-        std::ifstream in(configPath());
+        std::ifstream in(configPath(sessionId));
         if (!in) {
             *this = defaults();
             return;
@@ -106,21 +114,32 @@ void InmarsatEngineConfig::load() {
     }
 }
 
-void InmarsatEngineConfig::save() const {
+void InmarsatEngineConfig::save(const std::string& sessionId) const {
     watch.validate();
-    QSaveFile file(QString::fromStdString(configPath()));
+    QSaveFile file(QString::fromStdString(configPath(sessionId)));
     const auto data=toJson().dump(2);
     if(!file.open(QIODevice::WriteOnly) || file.write(data.data(),qint64(data.size()))!=qint64(data.size()) || !file.commit())
         throw std::runtime_error("Cannot save Inmarsat configuration: "+file.errorString().toStdString());
 }
 
 InmarsatEngine& InmarsatEngine::instance() {
-    static InmarsatEngine engine;
+    static InmarsatEngine engine("");
     return engine;
 }
 
-InmarsatEngine::InmarsatEngine() {
-    config_.load();
+std::string InmarsatEngine::normalizedSessionId(const std::string& id) {
+    if (id.size() > 64 || std::any_of(id.begin(), id.end(), [](unsigned char c) {
+        return !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') || c == '_' || c == '-');
+    })) throw std::invalid_argument("Session name must use 1-64 ASCII letters, digits, underscores or hyphens");
+    auto result = id;
+    std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+    return result;
+}
+
+InmarsatEngine::InmarsatEngine(const std::string& sessionId)
+    : sessionId_(normalizedSessionId(sessionId)) {
+    config_.load(sessionId_);
     InmarsatBandPlanStore::instance().reload(nullptr);
     if (const auto* plan = InmarsatBandPlanStore::instance().findById(config_.bandPlanId)) {
         bandPlanName_ = plan->name;
@@ -132,9 +151,34 @@ InmarsatEngine::InmarsatEngine() {
     }
     iqRx_ = std::make_unique<Receiver>();
     lastStatus_ = "Classic Aero experimental receiver ready";
+    std::lock_guard lock(enginesMutex);
+    if (!engines.emplace(sessionId_, this).second)
+        throw std::invalid_argument("Inmarsat session is already open");
 }
 
-InmarsatEngine::~InmarsatEngine() { stop(); }
+InmarsatEngine::~InmarsatEngine() {
+    setUpdateCallback({});
+    stop();
+    std::lock_guard lock(enginesMutex);
+    engines.erase(sessionId_);
+}
+
+void InmarsatEngine::stopAll() {
+    // Controllers are created/destroyed on the host thread. Do not hold the
+    // registry lock across worker joins or host restoration callbacks.
+    std::vector<QPointer<InmarsatEngine>> active;
+    { std::lock_guard lock(enginesMutex); for (const auto& [id, engine] : engines) active.emplace_back(engine); }
+    for (const auto& engine : active) if (engine) engine->stop();
+}
+
+size_t InmarsatEngine::runningSessionCount() {
+    std::lock_guard lock(enginesMutex);
+    return std::count_if(engines.begin(), engines.end(), [](const auto& entry) { return entry.second->run_.load(); });
+}
+
+InmarsatMessageStore& InmarsatEngine::messageStore() {
+    return sessionId_.empty() ? InmarsatMessageStore::instance() : messagesStore_;
+}
 
 void InmarsatEngine::setUpdateCallback(std::function<void()> callback) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -166,7 +210,7 @@ bool InmarsatEngine::setConfig(const InmarsatEngineConfig& config) {
         lastStatus_="Enable at least one watch channel before starting automatic watch";
         return false;
     }
-    try {config.watch.validate();config.save();}
+    try {config.watch.validate();config.save(sessionId_);}
     catch(const std::exception& e) {lastStatus_=e.what();spdlog::warn("Inmarsat settings: {}",e.what());return false;}
     const bool watchChanged=config_.watch.toJson()!=config.watch.toJson();
     config_ = config;
@@ -350,7 +394,7 @@ bool InmarsatEngine::selectBandPlan(const std::string& id) {
             tunedHz_ = pick->freqHz;
             controlHz_ = pick->freqHz;
         }
-        try {config_.save();}
+        try {config_.save(sessionId_);}
         catch(const std::exception& e){lastStatus_=e.what();return false;}
         lastStatus_ = "Band plan " + plan->name;
     }
@@ -367,7 +411,7 @@ bool InmarsatEngine::selectChannel(double frequencyHz, const std::string& mode, 
         if (baud > 0) config_.baud = baud;
         tunedHz_ = frequencyHz;
         if (!followingVoice_) controlHz_ = frequencyHz;
-        try {config_.save();}
+        try {config_.save(sessionId_);}
         catch(const std::exception& e){lastStatus_=e.what();return false;}
         lastStatus_ = restart ? "Changing channel and restarting receiver" : "Channel selected";
     }
@@ -542,10 +586,12 @@ bool InmarsatEngine::start(bool force) {
     }
     if (iqRx_) manager.setReceiverCursorToLiveEdge(deviceIndex, *iqRx_);
     run_.store(true, std::memory_order_release);
+    InmarsatDiagnosticRecording::setMultipleLiveSessions(runningSessionCount() > 1);
     try {
         worker_ = std::thread(&InmarsatEngine::workerLoop, this);
     } catch (const std::exception& e) {
         run_.store(false, std::memory_order_release);
+        InmarsatDiagnosticRecording::setMultipleLiveSessions(runningSessionCount() > 1);
         {
             std::lock_guard<std::mutex> lock(mutex_);
             state_ = InmarsatEngineState::Idle;
@@ -562,6 +608,7 @@ bool InmarsatEngine::start(bool force) {
 void InmarsatEngine::stop() {
     const bool wasRunning = run_.exchange(false, std::memory_order_acq_rel);
     if (worker_.joinable()) worker_.join();
+    InmarsatDiagnosticRecording::setMultipleLiveSessions(runningSessionCount() > 1);
     {
         std::lock_guard<std::mutex> lock(mutex_);
         state_ = InmarsatEngineState::Idle;
@@ -646,6 +693,7 @@ InmarsatDisplaySnapshot InmarsatEngine::displaySnapshot() const {
 nlohmann::json InmarsatEngine::statusJson() const {
     const auto snapshot = this->snapshot();
     nlohmann::json json;
+    json["sessionId"] = sessionId_;
     json["state"] = stateName();
     json["carrierDetected"] = snapshot.carrierDetected;
     json["locked"] = snapshot.locked;
@@ -685,7 +733,7 @@ nlohmann::json InmarsatEngine::statusJson() const {
 }
 
 void InmarsatEngine::onMessage(const InmarsatMessage& message) {
-    InmarsatMessageStore::instance().push(message);
+    messageStore().push(message);
     {
         std::lock_guard<std::mutex> lock(mutex_);
         ++messages_;
@@ -861,7 +909,8 @@ void InmarsatEngine::workerLoop() {
         if(cfg.recordVoice) {
             QDir dir(QString::fromStdString(cfg.recordDir));
             if(!dir.mkpath(".")) throw std::runtime_error("Cannot create Inmarsat recording directory");
-            wav=dir.filePath("aero_"+QDateTime::currentDateTimeUtc().toString("yyyyMMdd_HHmmss_zzz")+".wav");
+            wav=dir.filePath("aero_"+QDateTime::currentDateTimeUtc().toString("yyyyMMdd_HHmmss_zzz")+
+                "_"+QUuid::createUuid().toString(QUuid::Id128)+".wav");
         }
         audio=std::make_unique<InmarsatAudio>(cfg.playAudio,wav);
         pipeline_.setPcmSink([&](std::span<const int16_t> pcm,uint32_t aes){audio->push(pcm,aes);});
@@ -885,6 +934,7 @@ void InmarsatEngine::workerLoop() {
         diagnostics.open({}, "live",true);
         const auto cfg = config();
         diagnostics.write("open", {{"state", processingFailed ? "error" : "running"},
+            {"sessionId", sessionId_}, {"deviceKey", cfg.deviceStableKey},
             {"channelHz", cfg.channelHz}, {"mode", cfg.mode}, {"baud", cfg.baud},
             {"speakerRequested", cfg.playAudio}, {"recordRequested", cfg.recordVoice}});
         std::lock_guard<std::mutex> lock(mutex_);
@@ -1021,6 +1071,7 @@ void InmarsatEngine::workerLoop() {
     pipeline_={}; // Destroy modem QObjects on their owning worker thread.
     watch_.reset();
     audio.reset(); // Stop C-channel playback before restoring ordinary Listen.
+    InmarsatDiagnosticRecording::setMultipleLiveSessions(runningSessionCount() > 1);
 
     if (lostHardware || processingFailed) {
         bool hasGuiTakeover;
@@ -1032,7 +1083,7 @@ void InmarsatEngine::workerLoop() {
             // The host's off-thread end is queued. Restore on the GUI thread
             // instead, so an old end cannot unpark Listen after a new Start.
             // Never block this worker on a GUI thread that may be joining it.
-            QMetaObject::invokeMethod(QCoreApplication::instance(), [this] {
+            QMetaObject::invokeMethod(this, [this] {
                 if (!run_.load(std::memory_order_acquire)) restorePreviousDeviceState();
             }, Qt::QueuedConnection);
         } else restorePreviousDeviceState();

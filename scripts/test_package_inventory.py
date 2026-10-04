@@ -15,6 +15,8 @@ from test_vcpkg_sources import fixture
 import qt_sources as qt
 import project_sources
 from test_project_sources import fixture as project_fixture
+from test_vcpkg_tooling import fixture as tooling_fixture
+import vcpkg_tooling
 from test_qt_sources import fixture as qt_fixture
 from test_msvc_materials import fixture as msvc_fixture
 
@@ -41,6 +43,7 @@ class InventoryTests(unittest.TestCase):
                                             for n in ('rtlsdr.dll', 'libusb-1.0.dll')}}
         project_blob, self.inputs['submodules'] = project_fixture(self.sha)
         self.write(project_sources.KIT, project_blob)
+        self.write(vcpkg_tooling.KIT, tooling_fixture(self.sha))
         self.write(inventory.INPUTS, inventory.json_bytes(self.inputs))
         self.write('build-info.json', inventory.json_bytes({
             'sourceCommit': self.sha, 'executableSha256': inventory.sha256(self.stage / 'SDR_Town.exe')}))

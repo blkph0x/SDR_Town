@@ -9,6 +9,7 @@ struct InmarsatAeroStats;
 // DEC-0155: one explicitly armed recording, never a background rolling buffer.
 namespace InmarsatDiagnosticRecording {
 bool arm(double channelHz);
+void setMultipleLiveSessions(bool ambiguous);
 void cancel();
 QString status();
 QByteArray bundle();

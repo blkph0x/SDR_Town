@@ -12,7 +12,10 @@
 #include <QShowEvent>
 #include <QHideEvent>
 
-InmarsatTrackingPanel::InmarsatTrackingPanel(QWidget* parent):QWidget(parent),lookup_(model_,this) {
+InmarsatTrackingPanel::InmarsatTrackingPanel(QWidget* parent, InmarsatMessageStore* store, const QString& sessionId)
+    : QWidget(parent), store_(store ? *store : InmarsatMessageStore::instance()),
+      settingsPrefix_(sessionId.isEmpty() ? "inmarsat/" : "inmarsat/sessions/" + sessionId + "/"),
+      lookup_(model_,this) {
     setObjectName("inmarsatTrackingPanel");
     auto* layout=new QVBoxLayout(this);layout->setContentsMargins(0,0,0,0);
     auto* controls=new QHBoxLayout;
@@ -27,8 +30,8 @@ InmarsatTrackingPanel::InmarsatTrackingPanel(QWidget* parent):QWidget(parent),lo
     status_=new QLabel;status_->setObjectName("inmarsatTrackingStatus");status_->setWordWrap(true);status_->setTextFormat(Qt::PlainText);
     layout->addWidget(status_);map_=new InmarsatMapWidget;layout->addWidget(map_,1);
     QSettings settings;
-    online_->setChecked(settings.value("inmarsat/mapOnlineConsentV1",false).toBool());
-    estimates_->setChecked(settings.value("inmarsat/mapEstimates",false).toBool());
+    online_->setChecked(settings.value(settingsPrefix_+"mapOnlineConsentV1",false).toBool());
+    estimates_->setChecked(settings.value(settingsPrefix_+"mapEstimates",false).toBool());
     lookup_.setEnabled(online_->isChecked());
     connect(online_,&QCheckBox::toggled,this,[this](bool enabled) {
         if(enabled && QMessageBox::question(this,"Enable online aircraft positions?",
@@ -38,12 +41,12 @@ InmarsatTrackingPanel::InmarsatTrackingPanel(QWidget* parent):QWidget(parent),lo
             QMessageBox::Yes|QMessageBox::No,QMessageBox::No)!=QMessageBox::Yes) {
             QSignalBlocker block(online_);online_->setChecked(false);return;
         }
-        QSettings().setValue("inmarsat/mapOnlineConsentV1",enabled);
+        QSettings().setValue(settingsPrefix_+"mapOnlineConsentV1",enabled);
         lookup_.setEnabled(enabled);refresh();
     });
-    connect(estimates_,&QCheckBox::toggled,this,[this](bool enabled){QSettings().setValue("inmarsat/mapEstimates",enabled);refresh();});
+    connect(estimates_,&QCheckBox::toggled,this,[this](bool enabled){QSettings().setValue(settingsPrefix_+"mapEstimates",enabled);refresh();});
     connect(clear,&QToolButton::clicked,this,[this] {
-        InmarsatMessageStore::instance().clearAircraft();
+        store_.clearAircraft();
         lookup_.setEnabled(false);lookup_.setEnabled(online_->isChecked());refresh();
     });
     lookup_.changed=[this]{refresh();};
@@ -71,7 +74,7 @@ nlohmann::json InmarsatTrackingPanel::webReport(const nlohmann::json& report) {
     return result;
 }
 void InmarsatTrackingPanel::refresh() {
-    const auto aircraft=InmarsatMessageStore::instance().trackingAircraft();
+    const auto aircraft=store_.trackingAircraft();
     const double now=inmarsatMonotonicSeconds();
     const bool observed=isVisible() || now<webObserverUntil_;
     lookup_.setActive(observed);

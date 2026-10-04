@@ -2,6 +2,8 @@
 
 #include <QWidget>
 #include <nlohmann/json.hpp>
+#include <memory>
+class InmarsatEngine;
 
 class QComboBox;
 class QDoubleSpinBox;
@@ -23,9 +25,11 @@ class QLineEdit;
 class InmarsatWidget : public QWidget {
     Q_OBJECT
 public:
-    explicit InmarsatWidget(QWidget* parent = nullptr);
+    explicit InmarsatWidget(QWidget* parent = nullptr, const QString& sessionId = {});
     ~InmarsatWidget() override;
     nlohmann::json webMapReport();
+    InmarsatEngine& engine() { return engine_; }
+    void reloadSessionControls();
 
 protected:
     void showEvent(QShowEvent* event) override;
@@ -42,6 +46,8 @@ private slots:
     void onRecordToggled(bool on);
 
 private:
+    std::unique_ptr<InmarsatEngine> ownedEngine_;
+    InmarsatEngine& engine_;
     void buildUi();
     void reloadBandPlans();
     void refreshDevices();

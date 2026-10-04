@@ -813,6 +813,8 @@ add_custom_command(TARGET deploy POST_BUILD
         --config "${RUNTIME_CONFIG}" --stage "${DEPLOY_STAGING}"
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/project_sources.py"
         --repo "${CMAKE_SOURCE_DIR}" --build "${CMAKE_BINARY_DIR}" --stage "${DEPLOY_STAGING}"
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/vcpkg_tooling.py"
+        --config "${RUNTIME_CONFIG}" --stage "${DEPLOY_STAGING}"
     VERBATIM)
 configure_file(cmake/VerifyPackageGate.cmake.in "${CMAKE_BINARY_DIR}/VerifyPackageGate.cmake" @ONLY)
 set(CPACK_PRE_BUILD_SCRIPTS "${CMAKE_BINARY_DIR}/VerifyPackageGate.cmake")

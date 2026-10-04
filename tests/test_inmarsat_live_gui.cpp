@@ -6,6 +6,7 @@
 #include "InmarsatMessageStore.h"
 #include "InmarsatAcarsApplication.h"
 #include "InmarsatMonitorWidget.h"
+#include "InmarsatTrackingPanel.h"
 #include <QPlainTextEdit>
 #include <QToolButton>
 #include <QClipboard>
@@ -35,6 +36,81 @@
 #include <QElapsedTimer>
 #include <iostream>
 #include <algorithm>
+
+TEST_CASE("Named Inmarsat engines keep settings messages and controls separate", "[inmarsat][gui][sessions]") {
+    const auto primary = InmarsatEngine::instance().config().toJson();
+    auto config = InmarsatEngineConfig::defaults();
+    config.playAudio = false;
+    config.deviceStableKey = "absent-first-radio";
+    config.channelHz = 1546005000;
+    {
+        InmarsatEngine first("isolation-a"), second("isolation-b");
+        REQUIRE(first.setConfig(config));
+        auto other = config; other.deviceStableKey = "absent-second-radio"; other.channelHz = 1542935000; other.baud = 8400;
+        REQUIRE(second.setConfig(other));
+        CHECK_THROWS_AS(InmarsatEngine("ISOLATION-A"), std::invalid_argument);
+        CHECK_THROWS_AS(InmarsatEngine("bad\n"), std::invalid_argument);
+        CHECK_THROWS_AS(InmarsatEngine("../escape"), std::invalid_argument);
+        InmarsatMessage message; message.validated = true; message.aesId = 0x7c1234;
+        message.kind = InmarsatMsgKind::Acars;
+        message.classicAeroIdentity = true; message.icaoHex = "7C1234";
+        message.hasPosition = true; message.latDeg = -34; message.lonDeg = 151;
+        message.unixTime = QDateTime::currentMSecsSinceEpoch() / 1000.0;
+        first.messageStore().push(message);
+        CHECK(first.messageStore().recent().size() == 1);
+        CHECK(second.messageStore().recent().empty());
+        InmarsatMonitorWidget monitorA(InmarsatMonitorWidget::View::Aircraft, nullptr, true, &first);
+        InmarsatMonitorWidget monitorB(InmarsatMonitorWidget::View::Aircraft, nullptr, true, &second);
+        monitorA.show(); monitorB.show(); QApplication::processEvents();
+        CHECK(monitorA.findChild<QTableWidget*>("inmarsatAircraftTable")->rowCount() == 1);
+        CHECK(monitorB.findChild<QTableWidget*>("inmarsatAircraftTable")->rowCount() == 0);
+        monitorA.findChild<QToolButton*>("inmarsatMonitorPopout")->click(); QApplication::processEvents();
+        auto* popout = monitorA.findChild<QDialog*>(); REQUIRE(popout);
+        CHECK(popout->findChild<QTableWidget*>("inmarsatAircraftTable")->rowCount() == 1);
+        InmarsatTrackingPanel mapA(nullptr, &first.messageStore(), "isolation-a"),
+            mapB(nullptr, &second.messageStore(), "isolation-b");
+        CHECK(mapA.webReport({})["positions"].size() == 1);
+        CHECK(mapB.webReport({})["positions"].empty());
+        CHECK_FALSE(first.start());
+        CHECK_FALSE(second.start());
+        first.stop();
+        CHECK(second.config().toJson() == other.toJson());
+        CHECK(InmarsatEngine::instance().config().toJson() == primary);
+    }
+    {
+        InmarsatEngine reopened("ISOLATION-A");
+        CHECK(reopened.sessionId() == "isolation-a");
+        CHECK(reopened.config().toJson() == config.toJson());
+        CHECK(reopened.messageStore().recent().empty());
+    }
+    InmarsatWidget one(nullptr, "isolation-a"), two(nullptr, "isolation-b");
+    auto* a = one.findChild<QDoubleSpinBox*>("inmarsatFrequencyMHz");
+    auto* b = two.findChild<QDoubleSpinBox*>("inmarsatFrequencyMHz");
+    REQUIRE(a); REQUIRE(b);
+    CHECK(a->value() == 1546.005); CHECK(b->value() == 1542.935);
+    one.hide(); two.show(); QApplication::processEvents();
+    CHECK(b->value() == 1542.935);
+    CHECK(InmarsatEngine::instance().config().toJson() == primary);
+    InmarsatEngine::stopAll();
+    CHECK(InmarsatEngine::runningSessionCount() == 0);
+    const auto screenshot = qEnvironmentVariable("SDR_TOWN_SESSION_SCREENSHOT");
+    if (!screenshot.isEmpty()) {
+        two.resize(1280, 1050); QApplication::processEvents();
+        CHECK(two.grab().save(screenshot));
+    }
+}
+
+TEST_CASE("Concurrent Inmarsat recording ambiguity fails closed", "[inmarsat][gui][sessions]") {
+    using namespace InmarsatDiagnosticRecording;
+    struct Reset { ~Reset() { cancel(); setMultipleLiveSessions(false); } } reset;
+    REQUIRE(arm(1546005000));
+    setMultipleLiveSessions(true);
+    CHECK(status().contains("multiple live"));
+    CHECK(bundle().isEmpty());
+    CHECK_FALSE(arm(1546005000));
+    setMultipleLiveSessions(false);
+    CHECK(arm(1546005000));
+}
 
 TEST_CASE("Aero map distinguishes unlocated and unidentified voice", "[inmarsat][gui]") {
     CHECK(inmarsatPositionFreshSeconds(false,30)==300);

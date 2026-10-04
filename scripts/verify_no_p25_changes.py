@@ -159,6 +159,13 @@ WORKFLOW_SHUTDOWN_DIGESTS = {
         "fbb235ef625cd9b65c6f4454df845bf28b7e77c3461d051d2f7be48ca44394be"),
 }
 
+# DEC-0187: all-session shutdown and forwarding the authenticated session route.
+INMARSAT_SESSION_DIGESTS = {
+    "src/MainWindow.cpp": (
+        "fbb235ef625cd9b65c6f4454df845bf28b7e77c3461d051d2f7be48ca44394be",
+        "82f145c49ecdcb8582b3f2608c08f961bcf77763fa8dbabb210d67b335788c91"),
+}
+
 
 def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
     actual = (
@@ -168,7 +175,7 @@ def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
     return actual in (INFRASTRUCTURE_DIGESTS.get(path), LOSS_ACK_DIGESTS.get(path),
                       WORKFLOW_DIGESTS.get(path), WORKFLOW_ROUTING_DIGESTS.get(path), REPEATER_ROUTING_DIGESTS.get(path),
                       CONTROL_OWNERSHIP_DIGESTS.get(path), WORKFLOW_WINDOW_DIGESTS.get(path),
-                      WORKFLOW_SHUTDOWN_DIGESTS.get(path))
+                      WORKFLOW_SHUTDOWN_DIGESTS.get(path), INMARSAT_SESSION_DIGESTS.get(path))
 
 
 # DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.

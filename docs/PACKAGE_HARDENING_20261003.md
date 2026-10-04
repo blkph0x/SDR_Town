@@ -1,5 +1,19 @@
 # Package hardening and source-kit ledger
 
+DEC-0188 (2026-10-05): policy `T-0104-notices-7` also requires
+`licenses/vcpkg/tooling-materials.zip`. It contains the configured checkout's
+committed scripts, triplets, bootstrap metadata, notices and helper port recipes,
+plus installed vcpkg-cmake/config files checked against their SPDX receipts.
+The manifest binds the application and tooling commits. No untracked files,
+download cache sweep, compiler binaries or SDK are included. Bootstrap may
+download the upstream tools referenced by the shipped metadata. Local export
+contains917 files/1,674,684 bytes; source/tooling tamper and dirty-input tests pass.
+Independent USB-stack rebuild, static MinGW evidence and remaining distribution
+review are still required. The completed Qt replacement gate is not reopened.
+
+Reproduce with `python scripts/vcpkg_tooling.py --config
+build/runtime-inputs-Release.json --stage build/deploy_staging`.
+
 DEC-0186 (2026-10-04): packages now require
 `licenses/project/source-materials.zip`, containing the committed application,
 build scripts, embedded sources/data and the exact miniaudio/mbelib/liquid-dsp

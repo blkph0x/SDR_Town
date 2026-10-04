@@ -1,5 +1,19 @@
 # Issues (canonical)
 
+## ISS-0070 - Inmarsat windows share engine, settings and observations (2026-10-05, LOCAL VERIFIED)
+
+DEC-0187 / T-0103. InmarsatWidget, monitor popouts and map stores all referenced
+the default singleton. Each named session now owns its engine, settings and
+message store; monitors/maps bind that source. Worker failure cleanup is queued
+to the engine QObject, preventing a callback into a destroyed session. Shutdown
+joins every engine before shared host services disappear. Tests cover independent
+workers on mock radios, occupied-radio rejection, stop-one/keep-other-running,
+case-normalized persistence and isolated observations. The recording collector
+still selects by frequency: multiple live engines explicitly block/cancel an
+armed recording rather than capture an ambiguous source. Per-session recording
+collection, independent P25/Satcom/Aircraft and asynchronous native-driver stop
+remain open. No physical RF or audio-quality acceptance claimed here.
+
 ## ISS-0069 - Hiding a workflow cancels background reception (2026-10-04, LOCAL VERIFIED)
 
 DEC-0185 / T-0103. SatcomHub hide stops satellite engines; CW/DTMF hide cancels

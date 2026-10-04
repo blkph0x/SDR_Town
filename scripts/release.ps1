@@ -54,6 +54,7 @@ Invoke-Checked python @('scripts/test_package_inventory.py')
 Invoke-Checked python @('scripts/test_stage_runtime.py')
 Invoke-Checked python @('scripts/test_vcpkg_sources.py')
 Invoke-Checked python @('scripts/test_project_sources.py')
+Invoke-Checked python @('scripts/test_vcpkg_tooling.py')
 
 # 1. Ensure clean branded build
 Write-Host "`n[1/6] Running clean deploy + windeployqt + cpack..." -ForegroundColor Yellow

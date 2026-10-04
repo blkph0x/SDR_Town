@@ -81,24 +81,24 @@ QWidget* InmarsatWidget::buildWatchUi() {
     connect(save,&QPushButton::clicked,this,&InmarsatWidget::saveWatchPolicy);
     connect(add,&QPushButton::clicked,this,&InmarsatWidget::addWatchChannel);
     connect(remove,&QPushButton::clicked,this,[this]{
-        const int row=watchTable_->currentRow();auto c=InmarsatEngine::instance().config();
+        const int row=watchTable_->currentRow();auto c=engine_.config();
         if(row<0 || size_t(row)>=c.watch.channels.size())return;
         c.watch.channels.erase(c.watch.channels.begin()+row);
         try {
-            if(!InmarsatEngine::instance().setConfig(c))throw std::runtime_error(InmarsatEngine::instance().snapshot().lastStatus);
+            if(!engine_.setConfig(c))throw std::runtime_error(engine_.snapshot().lastStatus);
             reloadWatchUi();}
         catch(const std::exception& e){QMessageBox::warning(this,"Watch list",e.what());}
     });
     connect(watchTable_,&QTableWidget::itemChanged,this,[this](QTableWidgetItem* item){
         if(item->column()!=0)return;
-        auto c=InmarsatEngine::instance().config();
+        auto c=engine_.config();
         if(size_t(item->row())>=c.watch.channels.size())return;
         c.watch.channels[item->row()].enabled=item->checkState()==Qt::Checked;
-        try {if(!InmarsatEngine::instance().setConfig(c))throw std::runtime_error(InmarsatEngine::instance().snapshot().lastStatus);}
+        try {if(!engine_.setConfig(c))throw std::runtime_error(engine_.snapshot().lastStatus);}
         catch(const std::exception& e){QMessageBox::warning(this,"Watch list",e.what());reloadWatchUi();}
     });
     connect(watchTable_,&QTableWidget::cellClicked,this,[this](int row,int){
-        const auto c=InmarsatEngine::instance().config();
+        const auto c=engine_.config();
         if(row<0 || size_t(row)>=c.watch.channels.size())return;
         const auto& channel=c.watch.channels[row];
         frequency_->setValue(channel.frequencyHz/1e6);decoderCombo_->setCurrentIndex(decoderCombo_->findData(channel.rate));
@@ -108,7 +108,7 @@ QWidget* InmarsatWidget::buildWatchUi() {
     reloadWatchUi();return page;
 }
 void InmarsatWidget::reloadWatchUi() {
-    const auto c=InmarsatEngine::instance().config().watch;
+    const auto c=engine_.config().watch;
     const auto selected=constellationChannel_->currentData();
     QSignalBlocker constellationBlock(constellationChannel_);
     constellationChannel_->clear();constellationChannel_->addItem("Current / first active channel",QString{});
@@ -132,18 +132,18 @@ void InmarsatWidget::reloadWatchUi() {
 }
 void InmarsatWidget::saveWatchPolicy() {
     try {
-        auto c=InmarsatEngine::instance().config();auto& w=c.watch;
+        auto c=engine_.config();auto& w=c.watch;
         w.dataMinSeconds=dataMin_->value();w.dataDwellSeconds=dataDwell_->value();w.positionTarget=positionTarget_->value();
         w.voiceAcquireSeconds=voiceAcquire_->value();w.voiceIdleSeconds=voiceIdle_->value();
         w.refreshSeconds=refreshInterval_->value();w.maxVoiceSeconds=maxVoice_->value();
         w.maxConcurrentChannels=watchConcurrent_->value();
         w.simultaneousInBand=simultaneousWatch_->isChecked();
-        if(!InmarsatEngine::instance().setConfig(c))throw std::runtime_error(InmarsatEngine::instance().snapshot().lastStatus);
+        if(!engine_.setConfig(c))throw std::runtime_error(engine_.snapshot().lastStatus);
         watchStatus_->setText("Watch timing saved");
     }catch(const std::exception& e){QMessageBox::warning(this,"Watch timing",e.what());}
 }
 void InmarsatWidget::updateWatchUi(bool running,const nlohmann::json& report) {
-    const auto cfg=InmarsatEngine::instance().config();
+    const auto cfg=engine_.config();
     // DEC-0127: edits are saved here, applied only at the worker's IQ boundary.
     watchEditors_->setEnabled(true);voiceFollowCheck_->setEnabled(true);
     QSignalBlocker block(voiceFollowCheck_);voiceFollowCheck_->setChecked(cfg.watch.enabled);
@@ -167,7 +167,7 @@ void InmarsatWidget::updateWatchUi(bool running,const nlohmann::json& report) {
 
 void InmarsatWidget::addWatchChannel() {
     try {
-        auto cfg=InmarsatEngine::instance().config();frequency_->interpretText();
+        auto cfg=engine_.config();frequency_->interpretText();
         const double hz=std::round(frequency_->value()*1e6);
         const int rate=decoderCombo_->currentData().toInt();
         auto existing=std::find_if(cfg.watch.channels.begin(),cfg.watch.channels.end(),[&](const auto& c){
@@ -178,7 +178,7 @@ void InmarsatWidget::addWatchChannel() {
         else {
             selected=QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
             cfg.watch.channels.push_back({selected,watchName_->text().trimmed().toStdString(),hz,rate,true});
-            if(!InmarsatEngine::instance().setConfig(cfg))throw std::runtime_error(InmarsatEngine::instance().snapshot().lastStatus);
+            if(!engine_.setConfig(cfg))throw std::runtime_error(engine_.snapshot().lastStatus);
             reloadWatchUi();
         }
         constellationChannel_->setCurrentIndex(constellationChannel_->findData(QString::fromStdString(selected)));
@@ -188,7 +188,7 @@ void InmarsatWidget::addWatchChannel() {
 
 void InmarsatWidget::refreshVisuals() {
     if(!watchSpectrum_ || !watchSpectrum_->isVisible())return;
-    const auto display=InmarsatEngine::instance().displaySnapshot();
+    const auto display=engine_.displaySnapshot();
     watchSpectrum_->setSpectrum(display.spectrumDb,display.centerHz,display.rateHz,display.channels);
     const auto id=constellationChannel_->currentData().toString().toStdString();
     constellation_->setChannels(display.decoders,id);

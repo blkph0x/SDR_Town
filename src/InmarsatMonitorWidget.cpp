@@ -38,8 +38,8 @@ void cell(QTableWidget* table, int row, int column, const QVariant& value) {
 }
 }
 
-InmarsatMonitorWidget::InmarsatMonitorWidget(View view, QWidget* parent, bool popout)
-    : QWidget(parent), view_(view) {
+InmarsatMonitorWidget::InmarsatMonitorWidget(View view, QWidget* parent, bool popout, InmarsatEngine* engine)
+    : QWidget(parent), engine_(engine ? *engine : InmarsatEngine::instance()), view_(view) {
     auto* root = new QVBoxLayout(this);
     auto* tools = new QHBoxLayout;
     count_ = new QLabel; tools->addWidget(count_);
@@ -62,7 +62,7 @@ InmarsatMonitorWidget::InmarsatMonitorWidget(View view, QWidget* parent, bool po
             auto* dialog=new QDialog(this);dialog->setAttribute(Qt::WA_DeleteOnClose);
             dialog->setWindowTitle(view_==View::Aircraft ? "Inmarsat aircraft" : "Inmarsat decoders");
             auto* layout=new QVBoxLayout(dialog);
-            layout->addWidget(new InmarsatMonitorWidget(view_,dialog,false));
+            layout->addWidget(new InmarsatMonitorWidget(view_,dialog,false,&engine_));
             dialog->resize(1000,500);dialog->show();
         });
     }
@@ -92,7 +92,7 @@ InmarsatMonitorWidget::InmarsatMonitorWidget(View view, QWidget* parent, bool po
     }
     connect(copy,&QToolButton::clicked,this,[this]{QApplication::clipboard()->setText(tableText());});
     connect(clear,&QToolButton::clicked,this,[this]{
-        if(view_==View::Aircraft)InmarsatMessageStore::instance().clearAircraft();
+        if(view_==View::Aircraft)engine_.messageStore().clearAircraft();
         else log_->clear();
         refresh();
     });
@@ -107,7 +107,7 @@ void InmarsatMonitorWidget::hideEvent(QHideEvent* event) {
     QWidget::hideEvent(event);timer_->stop();
 }
 void InmarsatMonitorWidget::refresh() {
-    updateSnapshot(InmarsatEngine::instance().snapshot(),InmarsatMessageStore::instance().aircraft(),
+    updateSnapshot(engine_.snapshot(),engine_.messageStore().aircraft(),
                    QDateTime::currentMSecsSinceEpoch()/1000.0);
 }
 QString InmarsatMonitorWidget::tableText() const {

@@ -10,7 +10,8 @@ class InmarsatMapWidget;
 
 class InmarsatTrackingPanel : public QWidget {
 public:
-    explicit InmarsatTrackingPanel(QWidget* parent=nullptr);
+    explicit InmarsatTrackingPanel(QWidget* parent=nullptr, InmarsatMessageStore* store=nullptr,
+                                  const QString& sessionId={});
     void setReceiverReport(const nlohmann::json& report);
     nlohmann::json webReport(const nlohmann::json& report);
 protected:
@@ -18,6 +19,8 @@ protected:
     void hideEvent(QHideEvent*) override;
 private:
     void refresh();
+    InmarsatMessageStore& store_;
+    QString settingsPrefix_;
     InmarsatTracking model_;
     InmarsatOnlineLookup lookup_;
     InmarsatDiagnostics diagnostics_;

@@ -1,5 +1,18 @@
 # Task list (canonical)
 
+2026-10-05 active continuation: T-0103 / DEC-0187 replaces the Inmarsat
+singleton restriction with named, isolated engines, maps and GUI/API controls.
+Two real engines consume mock-radio IQ concurrently; stop/ownership conflicts
+and settings/message isolation pass. Initial full native gates17/17 PASS81.33s.
+Final native17/17 (82.66s), actual GUI Inmarsat/SSTV session automation,
+four layout launches and33 map/popout/session assertions PASS. Exact source
+CI remains pending this commit.
+T-0104 / DEC-0188 adds the missing dependency build-tool kit (scripts, triplets,
+bootstrap metadata and receipt-verified CMake helpers);5 new tooling tests and
+20 inventory tests pass. Compiler-runtime evidence, independent USB rebuild and
+distribution review remain open. Repeated P25/Satcom/Aircraft controllers and
+physical multi-SDR acceptance remain T-0103 work, not marked complete.
+
 T-0107 | source verified / binary gate independent | GUI dry-run satellite auto-capture isolation |
 DEC-0176 / ISS-0066. Reproduced while qualifying T-0104's actual package.
 Prevent saved automatic pass capture from opening RX during layout QA; preserve
