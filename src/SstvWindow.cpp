@@ -29,9 +29,24 @@
 #include <QStandardPaths>
 #include <QDateTime>
 #include <QUuid>
+#include <QRegularExpression>
+#include <stdexcept>
 
-SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(std::move(decode)) {
-    setWindowTitle("SSTV Recorded Images");
+bool SstvWindow::validSessionId(const QString& id) {
+    return id.isEmpty() || QRegularExpression("^[A-Za-z0-9_-]{1,64}$").match(id).hasMatch();
+}
+
+QString SstvWindow::sessionObjectName(const QString& id) {
+    return id.isEmpty() ? QStringLiteral("sstvWindow") : QStringLiteral("sstvWindow.") + id.toLower();
+}
+
+SstvWindow::SstvWindow(Decode decode,QWidget* parent,const QString& sessionId)
+    :QDialog(parent),decode_(std::move(decode)),sessionId_(sessionId.toLower()),
+     settingsPrefix_(sessionId.isEmpty()?"sstv/":"sstv/instances/"+sessionId.toLower()+"/") {
+    if (!validSessionId(sessionId))
+        throw std::invalid_argument("Invalid SSTV session identity");
+    setObjectName(sessionObjectName(sessionId));
+    setWindowTitle(sessionId_.isEmpty() ? "SSTV Images" : "SSTV - " + sessionId_);
     resize(820,600);
     setMinimumSize(560,420);
     auto* layout=new QVBoxLayout(this);
@@ -42,7 +57,7 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
     device_->addItem("Receiver tap",QString()); form->addRow("Radio",device_);
     frequency_=new QDoubleSpinBox(this); frequency_->setObjectName("sstvFrequency");
     frequency_->setRange(0.001,6000.0); frequency_->setDecimals(6); frequency_->setSuffix(" MHz");
-    frequency_->setValue(QSettings().value("sstv/frequencyMHz",145.8).toDouble());
+    frequency_->setValue(QSettings().value(settingsPrefix_+"frequencyMHz",145.8).toDouble());
     form->addRow("Frequency",frequency_);
     connect(device_,&QComboBox::currentIndexChanged,this,[this]{setBusy(busy());});
     auto row=[&](QLineEdit*& edit,QPushButton*& button,const QString& label,QStyle::StandardPixmap icon) {
@@ -58,7 +73,7 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
     };
     row(input_,open_,"Recording",QStyle::SP_DialogOpenButton);
     row(output_,destination_,"Save folder",QStyle::SP_DirIcon);
-    output_->setText(QSettings().value("sstv/saveFolder",
+    output_->setText(QSettings().value(settingsPrefix_+"saveFolder",
         QDir(QStandardPaths::writableLocation(QStandardPaths::PicturesLocation)).filePath("SDR Town/SSTV")).toString());
     input_->setObjectName("sstvInput"); output_->setObjectName("sstvOutput");
     mode_=new QComboBox(this);
@@ -111,12 +126,12 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
     });
     connect(destination_,&QPushButton::clicked,this,[this] {
         const auto path=QFileDialog::getExistingDirectory(this,"SSTV save folder",output_->text());
-        if(!path.isEmpty()) {output_->setText(path);QSettings().setValue("sstv/saveFolder",path);}
+        if(!path.isEmpty()) {output_->setText(path);QSettings().setValue(settingsPrefix_+"saveFolder",path);}
     });
     connect(decodeButton_,&QPushButton::clicked,this,[this] {
         const auto root=QDir::cleanPath(output_->text().trimmed());
         if(output_->text().trimmed().isEmpty() || !QDir().mkpath(root)) {status_->setText("Cannot create SSTV save folder");return;}
-        QSettings().setValue("sstv/saveFolder",root);
+        QSettings().setValue(settingsPrefix_+"saveFolder",root);
         const auto session=QDateTime::currentDateTimeUtc().toString("yyyyMMdd_HHmmss_zzz")+"_"+QUuid::createUuid().toString(QUuid::Id128);
         startDecode(input_->text(),QDir(root).filePath(session),mode_->currentData().toString());
     });
@@ -136,12 +151,13 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
 void SstvWindow::setLiveSource(LiveOpen open) {
     if(busy()) return;
     liveOpen_=std::move(open);
-    if(liveOpen_ && source_->findData("live")<0) source_->addItem("Live RF - main receiver frequency","live");
+    if(liveOpen_ && source_->findData("live")<0) source_->addItem("Live RF","live");
     setWindowTitle(liveOpen_?"SSTV Images":"SSTV Recorded Images");
 }
 void SstvWindow::setRfDevices(const std::vector<std::pair<QString,QString>>& devices) {
     if(busy()) return;
-    const auto saved=QSettings().value("sstv/deviceKey").toString();
+    const auto saved=devicesInitialized_?selectedDeviceKey():QSettings().value(settingsPrefix_+"deviceKey").toString();
+    devicesInitialized_=true;
     device_->clear(); device_->addItem("Receiver tap",QString());
     for(const auto& [key,label]:devices) device_->addItem(label,key);
     if(!saved.isEmpty() && device_->findData(saved)<0)
@@ -184,8 +200,8 @@ bool SstvWindow::startDecode(const QString& input,const QString& output,const QS
     Decode decode=decode_;
     finish_.reset();
     if(live) {
-        QSettings().setValue("sstv/deviceKey",selectedDeviceKey());
-        QSettings().setValue("sstv/frequencyMHz",frequency_->value());
+        QSettings().setValue(settingsPrefix_+"deviceKey",selectedDeviceKey());
+        QSettings().setValue(settingsPrefix_+"frequencyMHz",frequency_->value());
         if(!sstvStreamingModeOk(mode.toStdString())) {
             status_->setText("Digital STWN is an experimental file-only format, not a live HamDRM decoder."); return false;
         }

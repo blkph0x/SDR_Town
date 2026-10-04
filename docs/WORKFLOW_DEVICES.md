@@ -1,4 +1,4 @@
-# Workflow Devices (T-0103 / DEC-0181..0184)
+# Workflow Devices (T-0103 / DEC-0181..0185)
 
 ## Universal contract
 
@@ -30,6 +30,23 @@ receiver; a named radio starts an exclusive worker-owned session. Stop/cancel cl
 only that session's radio. Selecting a missing radio reports an error; it does
 not substitute the primary. Hardware startup must succeed; synthetic/stub IQ
 does not qualify as reception. Output/save-folder behavior is unchanged.
+
+**Tools > Additional Decoder Window** opens another Morse or DTMF observer,
+or a named SSTV session. Each SSTV session has its own radio/frequency, save
+folder, worker and Stop/Cancel controls. Reopen the same name to reuse its
+settings; names are case-insensitive. Up to 32 SSTV windows may be open, with
+actual reception still subject to physical-device ownership and CPU capacity.
+Closing a named window stops only that session. Hiding a window or switching
+workspaces does not stop reception; satellite rendering timers pause while
+hidden, but the engine and automatic-pass controller continue.
+
+Automation can GET `/v1/sstv/sessions`, or POST it with `sessionId` to open a
+window without starting RF. The live/finish/cancel endpoints also accept that
+ID. Omitting it retains the original default session. Status includes all
+open sessions and their selected source, frequency, visibility and busy state.
+IDs contain 1-64 ASCII letters, digits, underscores or hyphens. Unknown IDs do
+not cancel another session; invalid IDs are rejected. Automatically generated
+output folders include a UUID so simultaneous jobs cannot reuse one directory.
 
 **Receivers > Add Receiver** selects a radio, frequency, analog mode, bandwidth
 and squelch. A live radio can host another receiver within its existing capture
@@ -87,7 +104,7 @@ fully asynchronous operator lifecycle remain open.
 | Common device layer | Per-endpoint leases, stable-key reservations, generation/client checks, scoped tune/start/stop API; settings/start/diversity permits and stop draining across shared hardware | Remove raw mutable model access; complete per-instance controllers and nonblocking lifecycle; hang/unplug qualification |
 | Listen: NFM/WFM/AM/USB/LSB/CW/AUTO | Selected-radio Add Receiver/table/remove, in-span sharing check, main tune targets selected Listen source; DSP unchanged | Persistent editable per-instance configuration/audio, all lifecycle tokens, remove remaining device-0 assumptions |
 | P25 | Traffic-source pool selection excludes other reservations; no decoder/audio changes | Per-system control/follow instances, simultaneous calls, explicit CC/traffic roles and RF non-regression acceptance |
-| SSTV | Dedicated selected radio via common scoped session, or selected logical receiver tap; web source/frequency uses same validation | Multiple image windows/sessions and shared-source negotiation |
+| SSTV | Multiple named image workers, isolated settings and cancellation; selected scoped radio or receiver tap; same GUI/web validation | Shared-source negotiation and physical multi-radio RF qualification |
 | Inmarsat / Satcom | Common source resolution; exact tune/start/restore tokens; per-radio GUI takeover and stale completion rejection; ownership-loss stop | Repeatable engine instances, fully asynchronous lifecycle and fault qualification |
 | Aircraft / 1090 | GUI/web stable-key selection, worker-scoped capture configuration/start/stop; CLI uses same session adapter | Multiple concurrent aircraft instances, cancellation/hung-driver field qualification |
 | RDS / CTCSS / DCS / DTMF / Morse | Read-only selected logical receiver windows; existing main-strip/repeater binding preserved | Persist instance layouts, general typed sample contract and automation |

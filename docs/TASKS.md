@@ -47,6 +47,17 @@ The completed source batch is 90edc4a + 65e3da3. T-0103..0105 below retain the
 unimplemented larger work; there is no new public binary or version bump.
 
 T-0103 | in_progress | Device ownership, workflow assignment and worker lifecycle qualification |
+DEC-0185 local PASS: visibility no longer cancels radio/decoder workflows;
+named SSTV and additional CW/DTMF windows use per-instance workers. Two-worker
+cancellation/settings tests, actual GUI API automation, four layout launches
+and17/17 CTest suites pass. Exact pushed-commit CI still requires acceptance.
+User also requests remaining T-0104 release work in this pass; independent
+evidence is required for both and neither implies completed P25 multi-system RX.
+DEC-0186 supplies the exact committed application and three external module
+sources in the release package, with nested hash/revision validation and
+dirty-input/secret-exclusion tests. Qt's completed rebuild is no longer listed
+as unfinished. Remaining distribution/toolchain reviews in ISS-0060 still gate
+public binaries; this is evidence progress, not release completion.
 DEC-0181: user requires identical ownership/selection across ALL modes, demods
 and workflows, with repeated instances; P25/SSTV are examples. First
 milestone: persistent per-device workflow reservations, per-device leases/token

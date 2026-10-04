@@ -1,5 +1,30 @@
 # Build notes
 
+## 2026-10-04 - Background workflow windows and source bundle (DEC-0185/0186)
+
+Baseline9371201; Windows/MSVC14.44/Qt6.11.1. The two-CW visibility regression
+fails before the production fix (running1 instead of2) in
+workflow-windows-prefail-test.log. Initial test launch used an incomplete Qt
+plugin environment; CDB confirmed createPlatformIntegration's fatal message
+box, not a worker deadlock. Explicit configured bin/plugin/font paths resolve
+the launcher. One attempted extra build target did not exist; SSTV tests are
+in sdr_town_workspace_tests. No assertions or timeout thresholds were weakened.
+
+Final Release app/workspace build PASS (workflow-session-verified-build.log).
+Complete CTest17/17 PASS80.05s (workflow-session-ctest.log). Two SSTV workers,
+independent cancel/finish, persisted radio/frequency, case-canonical identity,
+CW hide/show and explicit close/escape are covered. Actual GUI local-API test
+PASS with two named windows, idempotent reopen, bad/stale ID refusal and no RX;
+four no-RX layout launches also PASS (sstv-session-qa, workflow-session-layouts).
+P25 exact-patch guard negative mutation tests PASS; no DSP/voice/audio edits.
+
+Release verifier17, staging9, vcpkg-source12, project-source4, embedded-notice11,
+Qt-source8, Microsoft-material4, Qt-replacement-harness17 and package-inventory20
+tests PASS. Project kit excludes untracked inputs and reference-only clones;
+contents/source revision and three pinned external revisions are verified.
+Actual full-tree export and GitHub CI evidence must be recorded after commit.
+No binary publication while ISS-0060's remaining requirements remain open.
+
 ## 2026-10-04 - Ownership-fenced receive hardware controls (DEC-0184)
 
 Baseline d0f1633; Windows/MSVC14.44/Qt6.11.1. Pre-repair lifecycle fixture

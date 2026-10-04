@@ -94,6 +94,11 @@ coverage. Publication is mechanically blocked while that work remains; source
 CI uploads inventory evidence rather than another incomplete binary package.
 See the [package ledger](docs/PACKAGE_HARDENING_20261003.md).
 
+The package also contains the exact committed application and embedded build
+dependencies in `licenses/project/source-materials.zip`, with per-file hashes
+and recorded submodule revisions. Separate Qt and vcpkg source kits are retained.
+This source bundle does not imply MIT-only terms for the combined executable.
+
 The current staging tools include pinned Qt module sources and source notice
 catalogs, selected SDK settings, and rebuild/replacement instructions. A
 successful QtSvg-only replacement test is not a complete Qtbase rebuild. The

@@ -1,5 +1,11 @@
 # SDR Town
 
+Unreleased workflow update: **Tools > Additional Decoder Window** opens
+independent Morse/DTMF observers or named SSTV sessions with separate radio,
+frequency, output and cancellation. Hiding a workspace no longer stops its
+satellite receiver. GUI/API session and lifecycle tests pass; repeated P25/
+Inmarsat engine instances remain in progress. See [workflow status](docs/WORKFLOW_DEVICES.md).
+
 Unreleased development: **Devices > Workflow Assignments** saves radio
 reservations by stable identity and shows their runtime status. P25 traffic
 selection respects those reservations. Inmarsat, Satcom and Aircraft use selected

@@ -1,5 +1,18 @@
 # Code notes (tree map)
 
+DEC-0185: SstvWindow owns its worker, selected radio and named settings namespace.
+MainWindow::ensureSstvWindow reuses a case-normalized ID; GUI and authenticated
+local API address the same instances. Additional CW/DTMF windows reuse existing
+per-window workers and source pickers. Hide is presentation only; explicit
+Close/Escape/Stop own teardown. SatcomHub no longer stops engines when hidden.
+P25 and satellite singleton-engine replication remains unimplemented.
+
+DEC-0186: scripts/project_sources.py archives committed Git objects plus three
+pinned external submodules, omitting reference-only _codex_refs. Staging and
+inventory verification require the bounded nested source ZIP with member hashes
+and source revision checks. Untracked captures/keys are not copied. Qt/vcpkg/
+compiler kits and combined-distribution review remain separate requirements.
+
 DEC-0183: RepeaterMonitor's identity helper binds hardware-affecting dual-watch
 and shared repeater-panel status to the actual primary Receiver. The shared
 GUI worker snapshots that identity before filtering inactive receivers; another

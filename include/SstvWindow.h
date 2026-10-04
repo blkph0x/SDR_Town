@@ -25,7 +25,7 @@ public:
                                                const std::function<bool()>&, const SstvPreview&)>;
     using LiveOpen = std::function<Decode(const std::shared_ptr<std::atomic<bool>>&,
         const QString&,const std::function<void(const QString&)>&)>;
-    explicit SstvWindow(Decode decode, QWidget* parent = nullptr);
+    explicit SstvWindow(Decode decode, QWidget* parent = nullptr, const QString& sessionId = {});
     ~SstvWindow() override;
     bool startDecode(const QString& input, const QString& output, const QString& mode);
     void setLiveSource(LiveOpen open);
@@ -36,6 +36,9 @@ public:
     bool startLive(const QString& output,const QString& mode,const QString& rfMode = QStringLiteral("auto"));
     void finishLive();
     bool busy() const { return worker_ != nullptr; }
+    QString sessionId() const { return sessionId_; }
+    static bool validSessionId(const QString& id);
+    static QString sessionObjectName(const QString& id);
     void cancel();
     QString statusMessage() const;
     QString resultDirectory() const { return resultDirectory_; }
@@ -56,6 +59,9 @@ private:
     void updatePreview();
     QImage adjustedPreview() const;
     Decode decode_;
+    QString sessionId_;
+    QString settingsPrefix_;
+    bool devicesInitialized_ = false;
     LiveOpen liveOpen_;
     std::shared_ptr<std::atomic<bool>> finish_;
     QThread* worker_ = nullptr;

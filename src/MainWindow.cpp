@@ -10503,6 +10503,15 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
             sstv.insert("images", QJsonArray{});
             sstv.insert("summary", QStringLiteral("Open Tools → SSTV Images in SDR Town to decode pictures"));
         }
+        QJsonArray sstvSessions;
+        for (auto* window : findChildren<SstvWindow*>()) {
+            sstvSessions.append(QJsonObject{{"sessionId", window->sessionId()},
+                {"visible", window->isVisible()}, {"busy", window->busy()},
+                {"deviceKey", window->selectedDeviceKey()}, {"frequencyHz", window->selectedFrequencyHz()},
+                {"rfMode", window->selectedRfMode()}, {"status", window->statusMessage()},
+                {"outputDirectory", window->resultDirectory()}});
+        }
+        sstv.insert("sessions", sstvSessions);
         state.insert("sstv", sstv);
 
         QJsonObject caps;
@@ -11017,8 +11026,9 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
         return {{"ok", true}, {"state", sdrTownControlStatusSnapshot()}};
     }
 
-SstvWindow* MainWindow::ensureSstvWindow()
+SstvWindow* MainWindow::ensureSstvWindow(const QString& sessionId)
 {
+    if (!SstvWindow::validSessionId(sessionId)) return nullptr;
     const auto refreshDevices = [](SstvWindow* window) {
         auto& manager = DeviceManager::instance();
         const auto devices = manager.getDevices();
@@ -11029,10 +11039,12 @@ SstvWindow* MainWindow::ensureSstvWindow()
         }
         window->setRfDevices(choices);
     };
-    auto* window = findChild<SstvWindow*>(QStringLiteral("sstvWindow"));
+    auto* window = findChild<SstvWindow*>(SstvWindow::sessionObjectName(sessionId));
     if (window) { refreshDevices(window); return window; }
-    window = new SstvWindow(decodeSstvImageFile, this);
-    window->setObjectName(QStringLiteral("sstvWindow"));
+    // DEC-0185: bounded UI sessions, not a hardware/decoder channel limit.
+    if (findChildren<SstvWindow*>().size() >= 32) return nullptr;
+    window = new SstvWindow(decodeSstvImageFile, this, sessionId);
+    if (!sessionId.isEmpty()) window->setAttribute(Qt::WA_DeleteOnClose);
     auto* picker = new ReceiverSourcePicker([this] { std::lock_guard lock(receiversMutex); return receivers; }, window);
     static_cast<QVBoxLayout*>(window->layout())->insertWidget(0, picker);
     refreshDevices(window);
@@ -11444,7 +11456,22 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             tune.insert("p25Control", true);
             return applySdrTownControlTune(tune);
         }
+        if (path == "/v1/sstv/sessions" && method == "GET") {
+            return {{"ok",true},{"sessions",sdrTownControlStatusSnapshot().value("sstv").toObject().value("sessions")}};
+        }
+        if (path == "/v1/sstv/sessions" && method == "POST") {
+            const auto sessionId = body.value("sessionId").toString();
+            if (!body.value("sessionId").isString() || sessionId.isEmpty() || !SstvWindow::validSessionId(sessionId))
+                return {{"ok",false},{"status",400},{"error","invalid SSTV sessionId"}};
+            auto* window = ensureSstvWindow(sessionId);
+            if (!window) return {{"ok",false},{"status",409},{"error","SSTV session limit reached"}};
+            window->show(); window->raise();
+            return {{"ok",true},{"state",sdrTownControlStatusSnapshot()}};
+        }
         if (path == "/v1/sstv/live" && method == "POST") {
+            const auto sessionId = body.value("sessionId").toString();
+            if ((body.contains("sessionId") && !body.value("sessionId").isString()) || !SstvWindow::validSessionId(sessionId))
+                return {{"ok",false},{"status",400},{"error","invalid SSTV sessionId"}};
             QString mode = body.value("mode").toString("auto").trimmed().toLower();
             QString rfMode=body.value("rfMode").toString("auto").trimmed().toUpper();
             if(rfMode=="AUTO") rfMode="auto";
@@ -11453,7 +11480,7 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             if (!sstvStreamingModeOk(mode.toStdString())) {
                 return {{"ok", false}, {"status", 400}, {"error", "unsupported live SSTV mode; digital STWN is file-only"}};
             }
-            auto* window = ensureSstvWindow();
+            auto* window = ensureSstvWindow(sessionId);
             if (!window) {
                 return {{"ok", false}, {"status", 500}, {"error", "cannot open SSTV window"}};
             }
@@ -11469,7 +11496,7 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             QString output = body.value("outputDirectory").toString().trimmed();
             if (output.isEmpty()) {
                 const QString root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-                const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss");
+                const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz") + "-" + QUuid::createUuid().toString(QUuid::WithoutBraces);
                 output = QDir(root).filePath(QStringLiteral("sstv/sstv-%1").arg(stamp));
             }
             QDir().mkpath(QFileInfo(output).absolutePath());
@@ -11484,7 +11511,10 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             return {{"ok", true}, {"state", sdrTownControlStatusSnapshot()}};
         }
         if (path == "/v1/sstv/finish" && method == "POST") {
-            auto* window = findChild<SstvWindow*>(QStringLiteral("sstvWindow"));
+            const auto sessionId = body.value("sessionId").toString();
+            if ((body.contains("sessionId") && !body.value("sessionId").isString()) || !SstvWindow::validSessionId(sessionId))
+                return {{"ok",false},{"status",400},{"error","invalid SSTV sessionId"}};
+            auto* window = findChild<SstvWindow*>(SstvWindow::sessionObjectName(sessionId));
             if (!window || !window->busy()) {
                 return {{"ok", false}, {"status", 409}, {"error", "no live SSTV job to finish"}};
             }
@@ -11492,7 +11522,10 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             return {{"ok", true}, {"state", sdrTownControlStatusSnapshot()}};
         }
         if (path == "/v1/sstv/cancel" && method == "POST") {
-            auto* window = findChild<SstvWindow*>(QStringLiteral("sstvWindow"));
+            const auto sessionId = body.value("sessionId").toString();
+            if ((body.contains("sessionId") && !body.value("sessionId").isString()) || !SstvWindow::validSessionId(sessionId))
+                return {{"ok",false},{"status",400},{"error","invalid SSTV sessionId"}};
+            auto* window = findChild<SstvWindow*>(SstvWindow::sessionObjectName(sessionId));
             if (!window || !window->busy()) {
                 return {{"ok", false}, {"status", 409}, {"error", "no SSTV job to cancel"}};
             }
@@ -13454,8 +13487,8 @@ void MainWindow::createMenus()
             window->show();
         });
         // DEC-0168: DTMF observer settings only; no tuning or audio controls.
-        toolsMenu->addAction("DTMF Analysis...", this, [this] {
-            auto* window = findChild<DtmfWindow*>("dtmfWindow");
+        auto openDtmf = [this](bool separate) {
+            auto* window = separate ? nullptr : findChild<DtmfWindow*>("dtmfWindow");
             if (!window) {
                 auto* picker = new ReceiverSourcePicker([this] { std::lock_guard lock(receiversMutex); return receivers; });
                 window = new DtmfWindow([picker](bool input) -> std::shared_ptr<DtmfDecoder> {
@@ -13464,23 +13497,51 @@ void MainWindow::createMenus()
                     return {receiver, input ? &receiver->inputWatchDtmf : &receiver->dtmf};
                 }, this);
                 static_cast<QVBoxLayout*>(window->layout())->insertWidget(0, picker);
+                if (separate) {
+                    window->setObjectName("dtmfWindow." + QUuid::createUuid().toString(QUuid::WithoutBraces));
+                    window->setAttribute(Qt::WA_DeleteOnClose);
+                }
             }
             window->show(); window->raise(); window->activateWindow();
-        });
+        };
+        toolsMenu->addAction("DTMF Analysis...", this, [openDtmf] { openDtmf(false); });
         // DEC-0167: read-only Morse observer; no radio/speaker state changes.
-        toolsMenu->addAction("CW / Morse Decoder...", this, [this] {
-            auto* window = findChild<CwWindow*>("cwWindow");
+        auto openCw = [this](bool separate) {
+            auto* window = separate ? nullptr : findChild<CwWindow*>("cwWindow");
             if (!window) {
                 auto* picker = new ReceiverSourcePicker([this] { std::lock_guard lock(receiversMutex); return receivers; });
                 window = new CwWindow([picker] { return cwReceiverSource(picker->selected()); }, this);
                 static_cast<QVBoxLayout*>(window->layout())->insertWidget(0, picker);
+                if (separate) {
+                    window->setObjectName("cwWindow." + QUuid::createUuid().toString(QUuid::WithoutBraces));
+                    window->setAttribute(Qt::WA_DeleteOnClose);
+                }
             }
             window->show(); window->raise(); window->activateWindow();
-        });
+        };
+        toolsMenu->addAction("CW / Morse Decoder...", this, [openCw] { openCw(false); });
         toolsMenu->addAction("&SSTV Images...",this,[this] {
             if (auto* window = ensureSstvWindow()) {
                 window->show(); window->raise(); window->activateWindow();
             }
+        });
+        auto* additional = toolsMenu->addMenu("Additional Decoder Window");
+        additional->addAction("CW / Morse...", this, [openCw] { openCw(true); });
+        additional->addAction("DTMF...", this, [openDtmf] { openDtmf(true); });
+        additional->addAction("SSTV Session...", this, [this] {
+            QSettings settings;
+            settings.beginGroup("sstv/instances");
+            auto ids = settings.childGroups(); ids.sort();
+            bool accepted = false;
+            const auto id = QInputDialog::getItem(this, "SSTV Session", "Session name", ids, 0, true, &accepted).trimmed();
+            if (!accepted) return;
+            if (id.isEmpty() || !SstvWindow::validSessionId(id)) {
+                QMessageBox::warning(this, "SSTV Session", "Use 1-64 letters, digits, underscores or hyphens.");
+                return;
+            }
+            if (auto* window = ensureSstvWindow(id)) {
+                window->show(); window->raise(); window->activateWindow();
+            } else QMessageBox::warning(this, "SSTV Session", "Close an unused SSTV session before opening another (32 maximum).");
         });
         auto raiseSatcomHub = [this](auto showTab) {
             auto* hub = findChild<SatcomHubWidget*>("satcomHub");

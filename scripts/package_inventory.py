@@ -15,7 +15,7 @@ INVENTORY = 'package-inventory.json'
 INPUTS = 'licenses/build-inputs.json'
 RUNTIME_INPUTS = 'licenses/runtime-deployment.json'
 SOURCE_KIT = 'licenses/vcpkg/source-materials.zip'
-POLICY = 'T-0104-notices-5'
+POLICY = 'T-0104-notices-6'
 MAX_FILES = 10000
 MAX_BYTES = 512 * 1024 * 1024
 MAX_JSON = 8 * 1024 * 1024
@@ -67,6 +67,7 @@ STATIC_NOTICES = (
 KNOWN_NOTICES = {
     *STATIC_NOTICES, INPUTS, RUNTIME_INPUTS, SOURCE_KIT,
     'licenses/qt/source-materials.zip', 'licenses/msvc/runtime-materials.json',
+    'licenses/project/source-materials.zip',
     'licenses/msvc/license.rtf', 'licenses/msvc/README.txt',
     'licenses/embedded-inputs.json', 'licenses/acars/ASN1-NOTICES.txt',
     'licenses/icao/LICENSE-CC0.txt', 'licenses/icao/README.md',
@@ -184,7 +185,7 @@ def component(name):
 
 def required_notices(names):
     from embedded_notices import COPIES, EVIDENCE, NOTICES
-    required = {*ROOT_NOTICES, INPUTS, SOURCE_KIT, *STATIC_NOTICES,
+    required = {*ROOT_NOTICES, INPUTS, SOURCE_KIT, 'licenses/project/source-materials.zip', *STATIC_NOTICES,
                 EVIDENCE, NOTICES, *COPIES.values()}
     for port in PORTS:
         required.update((f'licenses/vcpkg/{port}/copyright', f'licenses/vcpkg/{port}/vcpkg.spdx.json'))
@@ -212,7 +213,7 @@ def blockers(names):
     components = {component(n) for n in names}
     result = ['ISS-0060: transitive static/source/data notice inventory and combined-distribution review incomplete']
     if 'qt' in components:
-        result.append('ISS-0060: full Qt rebuild and linked third-party distribution review incomplete')
+        result.append('ISS-0060: Qt linked third-party distribution review incomplete (replacement rebuild passed)')
     if 'rtlsdr' in components:
         result.append('ISS-0060: RTL-SDR/libusb/pthreads full tooling/rebuild and distribution review incomplete')
     if 'rds-mingw' in components:
@@ -330,6 +331,9 @@ def make_document(entries, read):
             from msvc_materials import verify as verify_msvc
             microsoft_materials = verify_msvc(read, entries, runtime)
     sources = verify_kit(read(SOURCE_KIT, MAX_KIT), receipts, inputs['sourceCommit'])
+    import project_sources
+    sources['project'] = project_sources.verify(
+        read(project_sources.KIT, project_sources.MAX_BYTES), inputs['sourceCommit'], inputs['submodules'])
     embedded = verify_embedded(read(EVIDENCE), read(NOTICES), inputs['sourceCommit'], entries)
     return {'schema': 1, 'policy': POLICY, 'sourceCommit': inputs['sourceCommit'],
             'scope': 'Exact files and known build inputs; NOT full transitive license clearance',

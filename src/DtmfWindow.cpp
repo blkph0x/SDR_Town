@@ -116,7 +116,8 @@ DtmfWindow::DtmfWindow(Source source, QWidget* parent) : QDialog(parent), live_(
     busy(false);
 }
 DtmfWindow::~DtmfWindow() {if (work_) work_->cancel=true; if (worker_.joinable()) worker_.join();}
-void DtmfWindow::hideEvent(QHideEvent* event) {if (work_) work_->cancel=true; QDialog::hideEvent(event);}
+void DtmfWindow::closeEvent(QCloseEvent* event) {if (work_) work_->cancel=true; QDialog::closeEvent(event);}
+void DtmfWindow::reject() {if (work_) work_->cancel=true; QDialog::reject();}
 DtmfOptions DtmfWindow::selectedOptions() const {
     return {profile_->currentIndex()==1,transform_->currentIndex()==1,pivot_->value(),scale_->value(),shift_->value()};
 }

@@ -17,7 +17,8 @@ public:
     explicit DtmfWindow(Source source, QWidget* parent = nullptr);
     ~DtmfWindow() override;
 protected:
-    void hideEvent(QHideEvent*) override;
+    void closeEvent(QCloseEvent*) override;
+    void reject() override;
 private:
     DtmfOptions selectedOptions() const;
     void refresh();

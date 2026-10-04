@@ -74,7 +74,6 @@ void SatcomScannerWidget::showEvent(QShowEvent* event) {
 void SatcomScannerWidget::hideEvent(QHideEvent* event) {
     QWidget::hideEvent(event);
     if (refreshTimer_) refreshTimer_->stop();
-    if (autoCaptureOwned_) stopAutoCapture(false);
 }
 
 SatcomScannerWidget::~SatcomScannerWidget() {

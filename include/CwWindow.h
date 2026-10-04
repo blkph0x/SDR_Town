@@ -18,7 +18,7 @@ public:
     ~CwWindow() override;
 protected:
     void closeEvent(QCloseEvent* event) override;
-    void hideEvent(QHideEvent* event) override;
+    void reject() override;
 private:
     void start();
     void refresh();

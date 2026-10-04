@@ -48,6 +48,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/test_vcpkg_sources.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/test_project_sources.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/test_embedded_notices.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/test_qt_sources.py
@@ -162,6 +164,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/vcpkg_sources.py --config build/runtime-inputs-Release.json --stage build/deploy_staging
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/project_sources.py --repo . --build build --stage build/deploy_staging
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/qt_sources.py --config build/runtime-inputs-Release.json --cache build/release-materials/qt --fetch --stage build/deploy_staging
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -235,6 +239,8 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
+          python scripts/test_sstv_sessions_gui.py --output build/sstv-session-ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/verify_inmarsat_replay.py --exe build/bin/Release/SDR_Town.exe --out build/inmarsat-replay-ci
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/test_inmarsat_recording.py --exe build/bin/Release/SDR_Town.exe
@@ -399,6 +405,8 @@ jobs:
             build/qt-replacement-qa/*-config.summary
             build/qt-replacement-qa/gui/
             build/qt-replacement-qa/gui-native/
+            build/sstv-session-ci/result.json
+            build/sstv-session-ci/gui.log
           if-no-files-found: ignore
           retention-days: 90
 

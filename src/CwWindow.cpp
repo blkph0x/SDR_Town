@@ -88,9 +88,10 @@ CwWindow::CwWindow(LiveFactory live, QWidget* parent) : QDialog(parent), live_(s
     setBusy(false);
 }
 CwWindow::~CwWindow() { if (work_) work_->stop = true; if (worker_.joinable()) worker_.join(); }
-void CwWindow::hideEvent(QHideEvent* event) {
-    if (work_) work_->stop = true; // Escape/reject must stop reception too.
-    QDialog::hideEvent(event);
+void CwWindow::reject() {
+    // DEC-0185: Escape closes a session; hiding/minimizing only changes its view.
+    if (work_ && !work_->done) {closePending_ = true; work_->stop = true; status_->setText("Stopping"); return;}
+    QDialog::reject();
 }
 void CwWindow::closeEvent(QCloseEvent* event) {
     if (work_ && !work_->done) {closePending_ = true; work_->stop = true; status_->setText("Stopping"); event->ignore(); return;}

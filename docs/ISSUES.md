@@ -1,5 +1,16 @@
 # Issues (canonical)
 
+## ISS-0069 - Hiding a workflow cancels background reception (2026-10-04, LOCAL VERIFIED)
+
+DEC-0185 / T-0103. SatcomHub hide stops satellite engines; CW/DTMF hide cancels
+workers. The new two-CW fixture fails before repair (one worker instead of two)
+and passes after separating visibility from explicit Close/Escape/Stop.
+SSTV source refresh also overwrote an unstarted manual radio selection; retain
+that selection and keep per-named-session source/settings/cancellation isolated.
+Windows settings require case-normalized IDs to avoid two windows sharing a key.
+Full17/17 CTest and real GUI session/API tests pass. Physical simultaneous RF,
+repeated singleton engines and hung-driver cancellation remain outside this fix.
+
 ## ISS-0068 - Legacy settings bypass workflow ownership (2026-10-04, LOCAL VERIFIED)
 
 T-0103 / DEC-0184. At d0f1633 a mock Inmarsat lease still accepts unrelated

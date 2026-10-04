@@ -140,6 +140,18 @@ CONTROL_OWNERSHIP_DIGESTS = {
 }
 
 
+# DEC-0185: only named decoder windows/status/API and independent observers.
+# No P25, device ownership, tuner or speaker behavior changes in this pair.
+WORKFLOW_WINDOW_DIGESTS = {
+    "src/MainWindow.cpp": (
+        "391cc6cc0f98c48243ca7c7716199f060d4ba5e4ceb21bec6bd1e71bdff4f810",
+        "f310b5f986c86c51af4a9843c0c51d1874daa74b2491d46fcdcae6e133c5c773"),
+    "include/MainWindow.h": (
+        "e1b4224b500f961de282d6e0cfe779551a5e6a44ab3bf19e6320ff97d5439019",
+        "7190137f5ae45d3501288af8cfcc547a01186a6cab0f5d7996e1ab07f21347e8"),
+}
+
+
 def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
     actual = (
         hashlib.sha256(before.encode("utf-8")).hexdigest(),
@@ -147,7 +159,7 @@ def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
     )
     return actual in (INFRASTRUCTURE_DIGESTS.get(path), LOSS_ACK_DIGESTS.get(path),
                       WORKFLOW_DIGESTS.get(path), WORKFLOW_ROUTING_DIGESTS.get(path), REPEATER_ROUTING_DIGESTS.get(path),
-                      CONTROL_OWNERSHIP_DIGESTS.get(path))
+                      CONTROL_OWNERSHIP_DIGESTS.get(path), WORKFLOW_WINDOW_DIGESTS.get(path))
 
 
 # DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.
@@ -629,7 +641,7 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
-        if args.paths is None and path in (INFRASTRUCTURE_DIGESTS.keys() | WORKFLOW_DIGESTS.keys() | WORKFLOW_ROUTING_DIGESTS.keys() | REPEATER_ROUTING_DIGESTS.keys() | CONTROL_OWNERSHIP_DIGESTS.keys()):
+        if args.paths is None and path in (INFRASTRUCTURE_DIGESTS.keys() | WORKFLOW_DIGESTS.keys() | WORKFLOW_ROUTING_DIGESTS.keys() | REPEATER_ROUTING_DIGESTS.keys() | CONTROL_OWNERSHIP_DIGESTS.keys() | WORKFLOW_WINDOW_DIGESTS.keys()):
             if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
                 print(f"P25 guard: accepted exact reviewed infrastructure/ownership patch: {path}")
                 continue

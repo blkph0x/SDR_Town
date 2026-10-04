@@ -1,5 +1,21 @@
 # Development log
 
+## 2026-10-04 - Background sessions and committed-source distribution
+
+DEC-0185/0186: fixed visibility-driven cancellation; added named SSTV sessions
+and additional CW/DTMF windows. Radio selection survives refresh, settings are
+isolated by case-normalized identity, and GUI/API addressing is consistent.
+Two workers and independent cancellation tested; actual GUI API, four layouts
+and17/17 regression suites pass. P25/audio processing remains untouched.
+
+Release work adds an independently verified committed-source ZIP including
+three pinned external modules, while excluding untracked secrets/reference
+clones. Source packaging and negative gates pass. Existing Qt rebuild is
+acknowledged as complete rather than repeatedly requested; distribution and
+toolchain gaps in ISS-0060 remain real. Exact GitHub CI/artifact acceptance is
+recorded on the resulting source commit after completion. No release/version
+claim is made before those remaining material requirements are satisfied.
+
 ## 2026-10-04 - Close receive hardware-control ownership bypasses
 
 DEC-0184 / ISS-0068 / T-0103: reproduced five unauthorized writes, then fenced

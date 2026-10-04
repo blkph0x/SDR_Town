@@ -54,3 +54,29 @@ TEST_CASE("Morse window reports bad sources and validates manual estimates", "[c
     REQUIRE(waitFor([&] {return start->isEnabled();}));
     REQUIRE(status->text().contains("Choose an audio recording"));
 }
+
+TEST_CASE("Morse sessions survive hiding and stop independently on explicit close", "[cw][gui][ownership]") {
+    std::atomic<int> running{0};
+    auto source = [&] { return [&](CwOptions, const CwCancel& cancel, const CwPublish&) {
+        ++running;
+        while (!cancel()) QThread::msleep(1);
+        --running;
+    }; };
+    CwWindow first(source), second(source);
+    first.show(); second.show();
+    first.findChild<QPushButton*>("cwStart")->click();
+    second.findChild<QPushButton*>("cwStart")->click();
+    REQUIRE(waitFor([&] { return running == 2; }));
+    first.hide();
+    // Keep processing beyond the normal UI polling interval to observe an
+    // accidental cancellation; no hardware or decoder timing is altered.
+    QElapsedTimer timer; timer.start();
+    while (timer.elapsed() < 200) { QApplication::processEvents(); QThread::msleep(5); }
+    CHECK(running == 2);
+    first.show();
+    QMetaObject::invokeMethod(&first, "reject", Qt::DirectConnection); // Escape.
+    REQUIRE(waitFor([&] { return running == 1 && !first.isVisible(); }));
+    CHECK(second.isVisible());
+    second.close();
+    REQUIRE(waitFor([&] { return running == 0 && !second.isVisible(); }));
+}

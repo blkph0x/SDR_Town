@@ -53,6 +53,8 @@ TEST_CASE("SSTV radio selection preserves stable identity and distinguishes rece
     CHECK(frequency->isEnabled());
     frequency->setValue(145.8);
     CHECK(window.selectedFrequencyHz()==145800000.0);
+    window.setRfDevices({{"radio-b","Renamed B"},{"radio-a","SDR A"}});
+    CHECK(window.selectedDeviceKey()=="radio-b");
     CHECK_FALSE(window.selectRfSource("missing-radio", 145800000.0));
     CHECK_FALSE(window.selectRfSource("radio-a", -1.0));
     CHECK(window.selectedDeviceKey()=="radio-b");
@@ -60,6 +62,61 @@ TEST_CASE("SSTV radio selection preserves stable identity and distinguishes rece
     CHECK(window.selectedDeviceKey()=="radio-a");
     CHECK(window.selectedFrequencyHz()==145900000.0);
     QSettings().remove("sstv/deviceKey");
+}
+
+TEST_CASE("Named SSTV sessions keep separate radios settings and cancellation", "[sstv-live-gui][ownership]") {
+    const QString firstId = "ownership_test_a", secondId = "ownership_test_b";
+    struct SettingsCleanup {
+        ~SettingsCleanup() {
+            QSettings().remove("sstv/instances/ownership_test_a");
+            QSettings().remove("sstv/instances/ownership_test_b");
+        }
+    } cleanup;
+    QSettings().remove("sstv/instances/ownership_test_a");
+    QSettings().remove("sstv/instances/ownership_test_b");
+    CHECK_FALSE(SstvWindow::validSessionId("../escape"));
+    CHECK_FALSE(SstvWindow::validSessionId(QString(65,'a')));
+    CHECK(SstvWindow::validSessionId({}));
+    CHECK(SstvWindow::sessionObjectName("Radio_A")==SstvWindow::sessionObjectName("radio_a"));
+    CHECK_THROWS_AS(SstvWindow(decodeSstvImageFile,nullptr,"../escape"), std::invalid_argument);
+    QTemporaryDir directory; REQUIRE(directory.isValid());
+    std::atomic<int> running{0};
+    auto source = [&running](const auto& finish,const auto&,const auto&) -> SstvWindow::Decode {
+        return [&running,finish](const auto&,const auto& output,const auto&,const auto& cancel,const auto&) -> nlohmann::json {
+            ++running;
+            while(!cancel() && !finish->load()) QThread::msleep(1);
+            --running;
+            return {{"outputDirectory",output.toStdString()},{"images",nlohmann::json::array()}};
+        };
+    };
+    auto until = [](auto predicate) {
+        QElapsedTimer timer; timer.start();
+        while(!predicate() && timer.elapsed()<3000) {QApplication::processEvents();QThread::msleep(1);}
+        return predicate();
+    };
+    {
+        SstvWindow first(decodeSstvImageFile,nullptr,firstId), second(decodeSstvImageFile,nullptr,secondId);
+        for(auto* window:{&first,&second}) {
+            window->setLiveSource(source);
+            window->setRfDevices({{"radio-a","A"},{"radio-b","B"}});
+            window->show();
+        }
+        REQUIRE(first.selectRfSource("radio-a",145800000));
+        REQUIRE(second.selectRfSource("radio-b",433400000));
+        REQUIRE(first.startLive(directory.filePath("a"),"auto"));
+        REQUIRE(second.startLive(directory.filePath("b"),"auto"));
+        REQUIRE(until([&]{return running==2;}));
+        first.hide(); QApplication::processEvents();
+        CHECK(running==2); CHECK(first.busy()); CHECK(second.busy());
+        first.cancel(); REQUIRE(wait(first));
+        CHECK(running==1); CHECK(second.busy());
+        second.finishLive(); REQUIRE(wait(second)); CHECK(running==0);
+    }
+    SstvWindow first(decodeSstvImageFile,nullptr,firstId), second(decodeSstvImageFile,nullptr,secondId);
+    for(auto* window:{&first,&second}) window->setRfDevices({{"radio-b","B"},{"radio-a","A"}});
+    CHECK(first.selectedDeviceKey()=="radio-a"); CHECK(second.selectedDeviceKey()=="radio-b");
+    CHECK(first.selectedFrequencyHz()==145800000); CHECK(second.selectedFrequencyHz()==433400000);
+    CHECK(first.objectName()!=second.objectName());
 }
 
 TEST_CASE("Live SSTV GUI finish saves and cancel releases its receiver","[sstv-live-gui]") {

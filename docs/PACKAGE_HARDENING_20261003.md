@@ -1,5 +1,16 @@
 # Package hardening and source-kit ledger
 
+DEC-0186 (2026-10-04): packages now require
+`licenses/project/source-materials.zip`, containing the committed application,
+build scripts, embedded sources/data and the exact miniaudio/mbelib/liquid-dsp
+submodule objects. A nested manifest binds file hashes to the executable's
+source revision. Untracked material and reference-only OP25/SDRTrunk clones
+are excluded; their URLs/pins remain in the source Git configuration. Export
+refuses dirty tracked inputs or mismatched dependencies. This closes the
+missing application/embedded source bundle, not the remaining licensing review
+or compiler/tooling rebuild gaps. Qt replacement rebuild passed already; only
+its linked third-party distribution review is still listed as a blocker.
+
 T-0104 / DEC-0172/0174; baseline e4d767e, version remains 0.2.122.
 No RX, demodulator, P25, vocoder, speaker or consent code changes.
 

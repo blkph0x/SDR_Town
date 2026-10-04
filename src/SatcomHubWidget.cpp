@@ -78,16 +78,9 @@ void SatcomHubWidget::showEvent(QShowEvent* event) {
 
 void SatcomHubWidget::hideEvent(QHideEvent* event) {
     QWidget::hideEvent(event);
-    auto& engine = SatcomScannerEngine::instance();
-    const auto snap = engine.snapshot();
-    // Keep an armed manual or automatic pass alive in the background. Ordinary
-    // band scanning still stops when the hub is hidden.
-    if (!autoCaptureOwned_ && !snap.passArmed) {
-        engine.stopRecording();
-        engine.stop();
-        engine.disarmPass();
-    }
-    InmarsatEngine::instance().stop();
+    // DEC-0185: workspace visibility is not a receiver stop command. Child
+    // widgets pause their rendering timers; explicit Stop/shutdown owns RF.
+    spdlog::info("Satellite workspace hidden; receiver ownership and capture continue unchanged.");
 }
 
 void SatcomHubWidget::stopAutoCapture(bool keepHandledKey) {

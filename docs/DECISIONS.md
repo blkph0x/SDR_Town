@@ -1,5 +1,41 @@
 # Decisions
 
+## DEC-0186 - Ship the exact tracked source tree with package evidence (2026-10-04)
+
+T-0104: the vcpkg and Qt source kits do not include SDR Town's own embedded
+libraries, data, build scripts and pinned Git submodules. Add a bounded source
+ZIP derived from the committed Git objects, not a developer-directory copy.
+Reject modified tracked inputs, unavailable/mismatched submodules, symlinks,
+unsafe paths and duplicate archive entries. Ignore unrelated untracked files
+(captures, local reference clones and credentials must never be swept in).
+Bind every member hash and the submodule revisions to the package source SHA.
+Test missing/tampered members, wrong revisions, dirty sources and untracked
+secret exclusion. This provides sources, not a blanket licensing clearance.
+Correct the stale Qt blocker wording: full replacement rebuild already passed
+on CI 37198827652; the separate distribution review remains unresolved.
+
+## DEC-0185 - Separate workflow visibility from receiver lifetime (2026-10-04)
+
+T-0103 continues at9371201. SatcomHubWidget::hideEvent currently stops both
+the Inmarsat singleton and unarmed Satcom scanning. CwWindow and DtmfWindow
+also cancel workers on any hide. Workspace navigation therefore acts as a
+radio-stop command even with distinct physical sources. Presentation visibility
+must suspend painting only; explicit Stop, decoder-window Close/Escape and
+application shutdown retain their existing ownership-aware teardown.
+
+Add independently addressable decoder windows using the existing per-window
+workers and receiver selectors, not copies of singleton protocol engines.
+Preserve the default SSTV automation endpoint while additional SSTV sessions
+have separate source settings and cancellation. Validate hide/show, Close/Escape,
+two simultaneous worker instances and isolated persisted source settings.
+Limit open SSTV windows to 32 as an explicit UI resource budget, not a DSP
+limit. Named sessions use 1-64 ASCII identifier characters, normalized to lower
+case because Windows settings keys are case-insensitive, and retain the
+existing default-session endpoint for older automation clients.
+This is not permission to duplicate P25 follow state or change decoding/audio.
+Release-material completion is also requested; it is tracked independently under
+T-0104 with actual component evidence, never by deleting an unresolved gate.
+
 ## DEC-0184 - Fence hardware settings against workflow ownership (2026-10-04)
 
 T-0103 inspection at d0f1633: raw gain, PPM, antenna, RTL and SDRplay setters
