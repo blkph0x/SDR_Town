@@ -133,7 +133,9 @@ std::string InmarsatEngine::normalizedSessionId(const std::string& id) {
             (c >= '0' && c <= '9') || c == '_' || c == '-');
     })) throw std::invalid_argument("Session name must use 1-64 ASCII letters, digits, underscores or hyphens");
     auto result = id;
-    std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+    std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) {
+        return char(c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c);
+    });
     return result;
 }
 

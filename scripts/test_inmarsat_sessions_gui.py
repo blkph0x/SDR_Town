@@ -67,7 +67,8 @@ def main():
                 assert not result['ok'] and result['status']==400
             for action in ('stop','close','configure','start'):
                 assert command(action, 'does-not-exist')['status']==409
-            for config in ({'channelHz':-1},{'baud':1234},{'playAudio':'wrong'},{'unknown':True}):
+            assert command(12)['status']==400
+            for config in ({'channelHz':-1},{'baud':1234},{'baud':1200.5},{'baud':1e100},{'playAudio':'wrong'},{'unknown':True}):
                 assert command('configure', config=config)['status']==400
             assert command('start')['status']==409 # Dry-run cannot silently open hardware.
             assert command('stop')['ok']

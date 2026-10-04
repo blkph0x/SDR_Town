@@ -13,6 +13,8 @@ controllers, hardware qualification and remaining distribution requirements
 are still open. Final native17/17 (82.66s), real GUI Inmarsat/SSTV sessions,
 four layouts,33 map/popout/session assertions and107 package helper tests PASS.
 Exact CI/publication result will be recorded on the pushed commit.
+Final API review rejects non-string commands and fractional/overflowing bit
+rates before conversion; ASCII identity folding does not depend on locale.
 
 ## 2026-10-04 - Background sessions and committed-source distribution
 

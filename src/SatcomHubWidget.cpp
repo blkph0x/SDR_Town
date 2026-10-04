@@ -156,6 +156,8 @@ QJsonObject SatcomHubWidget::controlInmarsatSessions(const QString& method, cons
     if (method != "POST") return {{"ok",false},{"status",405},{"error","GET or POST required"}};
     if (!body.value("sessionId").isString() || body.value("sessionId").toString().isEmpty())
         return {{"ok",false},{"status",400},{"error","A named sessionId is required"}};
+    if (body.contains("action") && !body.value("action").isString())
+        return {{"ok",false},{"status",400},{"error","action must be a string"}};
     try {
         const auto id = QString::fromStdString(InmarsatEngine::normalizedSessionId(body.value("sessionId").toString().toStdString()));
         const auto action = body.value("action").toString("open");
@@ -181,6 +183,9 @@ QJsonObject SatcomHubWidget::controlInmarsatSessions(const QString& method, cons
             if (!body.value("config").isObject())
                 return {{"ok",false},{"status",400},{"error","config object required"}};
             const auto edit = body.value("config").toObject();
+            if (edit.contains("baud") && (!edit.value("baud").isDouble() ||
+                !QList<double>{600,1200,8400,10500}.contains(edit.value("baud").toDouble())))
+                return {{"ok",false},{"status",400},{"error","Unsupported bit rate"}};
             for (auto it = edit.begin(); it != edit.end(); ++it)
                 if (!QStringList{"deviceStableKey","channelHz","mode","baud","playAudio","watch"}.contains(it.key()))
                     return {{"ok",false},{"status",400},{"error","Unsupported session setting"}};

@@ -6,7 +6,8 @@ Two real engines consume mock-radio IQ concurrently; stop/ownership conflicts
 and settings/message isolation pass. Initial full native gates17/17 PASS81.33s.
 Final native17/17 (82.66s), actual GUI Inmarsat/SSTV session automation,
 four layout launches and33 map/popout/session assertions PASS. Exact source
-CI remains pending this commit.
+CI remains pending this commit. Final input-validation follow-up native17/17
+(82.25s), actual GUI session API and negative guard tests also PASS.
 T-0104 / DEC-0188 adds the missing dependency build-tool kit (scripts, triplets,
 bootstrap metadata and receipt-verified CMake helpers);5 new tooling tests and
 20 inventory tests pass. Compiler-runtime evidence, independent USB rebuild and

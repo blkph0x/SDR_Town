@@ -18,7 +18,12 @@ monitor/popout/map source isolation and screenshot fixture PASS33 assertions;
 its initial synthetic message was Status rather than trackable ACARS, corrected
 to the actual store contract without changing production logic. Screenshot
 build/inmarsat-session.png reviewed: radio/mode/watch controls visible and no
-overlap. Ten packaging helper suites PASS (107 tests). Exact source CI pending.
+overlap. Ten packaging helper suites PASS (107 tests). Final review adds strict
+action/rate types (including fractional/overflowing rates) before numeric
+conversion and locale-independent ASCII session normalization. Earlier69c6228
+CI is superseded by that follow-up, not counted as final acceptance.
+Follow-up rebuilt successfully; actual GUI malformed-input/session test PASS,
+frozen P25 guard negative tests PASS and CTest17/17 PASS82.25s.
 
 ## 2026-10-04 - Background workflow windows and source bundle (DEC-0185/0186)
 
