@@ -1,5 +1,32 @@
 # Build notes
 
+## 2026-10-04 - T-0104 CI viewport qualification (DEC-0180)
+
+6d45304 Windows37164667115 FAILS only in the new full replacement GUI gate;
+YAML37164667107 PASS. All application compilation/native/lifecycle/replay/SSTV/
+staging gates pass. Qt6.7.3 base+svg compile, native pixel/network/TLS probe,
+CLI and actual listening960x720 profile pass. Trunking1280x900 capture is
+1028x749, so the unchanged aspect assertion correctly rejects it. Logs now
+downloaded under build/ci-37164667115-evidence. No binary was uploaded/published.
+Native screen metrics were missing, so do not claim a measured screen size.
+
+Keep native Windows probe and actual listening profile; use explicitly QA-only
+rebuilt qoffscreen for all four exact-size CI layout profiles. Local first
+offscreen rehearsal failed960x720 with1208x720 and missing-glyph boxes. Source
+inspection identifies QT_QPA_FONTDIR; pointing at installed Windows fonts fixes
+rendering and all four geometry/no-RX profiles pass in
+build/qt-headless-layout-fonts-qa. No assertion relaxed and no application edits.
+Full source-built integration PASS747.656s in
+build/qt-full-replacement-headless-qa:16 original Qt6.11.1 runtime files rebuilt,
+native pixel/network/TLS/CLI/listening checks and four offscreen no-RX profiles
+pass. Trunking screenshot visually checked: actual text/widgets, not missing
+glyphs or blank output. QA-only qoffscreen is recorded separately, installed
+Windows fonts are not copied, and original package hashes remain unchanged.
+Result SHA256d77fca6d501fc6262f0d0a5d27f0f83d9752a9f837217984e9365d432799611b.
+98 packaging/helper tests PASS38.601s;3 workflow files validate; frozen guard
+reports13 changed paths/0 protected. Application code unchanged from the prior
+16/16 native-suite pass. Exact clean-CI repeat remains required; no binary release.
+
 ## 2026-10-04 - T-0104 complete Qt runtime replacement qualification
 
 DEC-0179; baseline3e4956e. First6.11.1 configure selected unrelated RadioConda

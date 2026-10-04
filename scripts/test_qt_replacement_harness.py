@@ -13,6 +13,7 @@ from unittest.mock import patch
 from qt_sources import CONFIG_FILES
 from test_qt_replacement import (base_options, check_base_cache, extract_module,
                                  feature_differences, replacement_files, run, runtime_environment, test)
+from test_workspace_gui import CASES, selected_cases
 
 
 class ReplacementTests(unittest.TestCase):
@@ -144,6 +145,18 @@ class ReplacementTests(unittest.TestCase):
         self.assertIn('-DFEATURE_openssl=ON', options)
         self.assertIn('-DFEATURE_openssl_linked=OFF', options)
         self.assertIn(f'-DOPENSSL_INCLUDE_DIR={root}/include', options)
+
+    def test_full_gui_suite_is_default(self):
+        self.assertEqual(selected_cases([]), CASES)
+        self.assertEqual(len(selected_cases([])), 4)
+        self.assertEqual(selected_cases(['listening']), [CASES[0]])
+
+    def test_headless_flag_cannot_claim_narrow_rebuild(self):
+        stage, output = self.root / 'stage', self.root / 'out'
+        stage.mkdir()
+        with self.assertRaisesRegex(ValueError, 'requires the full Qt source build'):
+            test({'qtVersion': '6.7.3'}, stage, output, self.root, headless_layout=True)
+        self.assertEqual(json.loads((output / 'result.json').read_bytes())['status'], 'failed')
 
 
 if __name__ == '__main__':

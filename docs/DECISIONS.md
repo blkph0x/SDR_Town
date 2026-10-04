@@ -1,5 +1,28 @@
 # Decisions
 
+## DEC-0180 - Separate native-window smoke from CI layout viewport tests (2026-10-04)
+
+T-0104 continuation. CI37164667115 compiles all Qt6.7.3 runtimes, passes
+native Windows rendering/network/TLS/CLI and the960x720 actual GUI profile,
+then fails the1280x900 profile: captured window1028x749. Local native Windows
+passes all four sizes. This is a confirmed test viewport mismatch, not evidence
+of a radio or audio defect; available runner desktop dimensions were not yet
+recorded. Do not remove the geometry assertion or alter MainWindow/DSP.
+
+Record native desktop metrics. Keep a native Windows actual-app listening
+profile plus the existing native pixel/network/TLS probe. On CI, additionally
+run all four exact-size layout profiles with the source-built qoffscreen plugin,
+clearly identified as a QA-only input, never deployed into the real package.
+Local default remains all four native Windows profiles. Preserve all startup,
+no-RX, screenshot size/aspect and no-warning/error assertions. Upload per-profile
+reports/screenshots/logs for this CI-only QA so failures have the missing evidence.
+The full source replacement still must replace every original Qt DLL/plugin.
+Local offscreen rehearsal initially produced missing-glyph boxes and1208x720
+instead of960x720. Qt6.11.1 QPlatformFontDatabase::fontDir() reads
+QT_QPA_FONTDIR, otherwise expects fonts beside Qt libraries. Supply the installed
+Windows Fonts directory for that child process only; do not copy fonts. All
+four unchanged geometry/no-RX gates now pass on the local offscreen rehearsal.
+
 ## DEC-0179 - Rebuild and exercise the complete packaged Qt runtime (2026-10-04)
 
 T-0104 / ISS-0060. DEC-0178 source acceptance is now verified:3e4956e,

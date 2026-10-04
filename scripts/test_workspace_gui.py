@@ -5,15 +5,22 @@ from pathlib import Path
 import struct
 import subprocess
 
+CASES = [("listening", 960, 720, "AU"), ("trunking", 1280, 900, "US"),
+         ("hf", 800, 700, "GB"), ("analysis", 1600, 900, "AU")]
+
+
+def selected_cases(profiles):
+    return [case for case in CASES if not profiles or case[0] in profiles]
+
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exe", type=Path, default=Path("build/bin/Release/SDR_Town.exe"))
     parser.add_argument("--output", type=Path, default=Path("build/workspace_qa"))
+    parser.add_argument("--only-profile", choices=[c[0] for c in CASES], action="append", default=[])
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
-    cases = [("listening", 960, 720, "AU"), ("trunking", 1280, 900, "US"),
-             ("hf", 800, 700, "GB"), ("analysis", 1600, 900, "AU")]
+    cases = selected_cases(args.only_profile)
     for preset, width, height, profile in cases:
         stem = args.output.resolve() / preset
         image = stem.with_suffix(".png")

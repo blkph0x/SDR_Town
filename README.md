@@ -28,6 +28,8 @@ plugins, loopback networking, native TLS and four no-RX GUI startup profiles.
 It checks resolved build dependencies and uses an isolated runtime search path.
 Results distinguish a complete packaged-runtime rebuild from the earlier
 Svg-only smoke test; neither substitutes for the remaining distribution review.
+CI keeps native Windows smoke and uses an explicitly recorded, QA-only headless
+backend for large layouts; all size/no-RX checks remain enforced (DEC-0180).
 This is packaging hardening, with no receive/audio changes or new binary release.
 
 0.2.122 adds **Tools > DTMF Analysis**: short-burst decoding, explicit frequency

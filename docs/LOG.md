@@ -1,5 +1,18 @@
 # Development log
 
+## 2026-10-04 - T-0104 clean-CI viewport failure and repair
+
+6d45304 source CI compiles application and Qt6.7.3 successfully, then fails the
+large actual-GUI viewport assertion (1028x749 for1280x900). Native probe/CLI and
+listening profile pass. DEC-0180 / ISS-0067 splits native-window smoke from
+desktop-independent large-layout testing without weakening assertions or changing
+the application. Reproduced missing fonts in an offscreen rehearsal and supplied
+Windows' installed font directory only to that test process; all four layouts
+pass. Full source-built integration now PASS747.656s with16 runtime replacements,
+native listening and all four offscreen profiles; original package unchanged.
+98 helper tests, workflow validation and frozen-pipeline guard pass. Exact
+clean-CI repeat remains required; source-only delivery, no binary release.
+
 ## 2026-10-04 - T-0104 full packaged Qt replacement, remaining-work review
 
 DEC-0179 extends the existing source-replacement harness instead of changing

@@ -176,3 +176,11 @@ package. These external build headers, compiler and Windows SDK are prerequisite
 not falsely represented as contained in the Qt source kit. Full runtime rebuild
 does not mean all Qt modules, qttools, exact upstream build-farm reproduction,
 or a completed combined-distribution review.
+
+DEC-0180: CI uses `--headless-layout` because its large native-window capture
+did not match the requested viewport. Native Windows probe/CLI/listening smoke
+remain; all four full-size layouts run on an explicitly logged, source-built,
+QA-only qoffscreen plugin with installed Windows fonts. The portable package
+does not acquire that plugin or fonts. Local default still exercises all four
+native Windows layouts. Geometry/no-RX assertions are unchanged; desktop metrics,
+individual reports and screenshots are retained to diagnose runner differences.

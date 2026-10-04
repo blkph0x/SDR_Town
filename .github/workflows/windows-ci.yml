@@ -305,7 +305,7 @@ jobs:
             $extra = @('--openssl-root', $openssl)
           }
           python scripts/test_qt_replacement.py --config build/runtime-inputs-Release.json `
-            --stage build/deploy_staging --output build/qt-replacement-qa --full --work-root "$env:RUNNER_TEMP" @extra
+            --stage build/deploy_staging --output build/qt-replacement-qa --full --headless-layout --work-root "$env:RUNNER_TEMP" @extra
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Create portable ZIP and checksum
@@ -397,6 +397,8 @@ jobs:
             build/qt-replacement-qa/result.json
             build/qt-replacement-qa/*.log
             build/qt-replacement-qa/*-config.summary
+            build/qt-replacement-qa/gui/
+            build/qt-replacement-qa/gui-native/
           if-no-files-found: ignore
           retention-days: 90
 

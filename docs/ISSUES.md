@@ -1,5 +1,19 @@
 # Issues (canonical)
 
+## ISS-0067 - CI GUI replacement test viewport mismatch (2026-10-04, TEST REPAIR)
+
+T-0104 / DEC-0180.6d45304 CI37164667115 fully builds Qt6.7.3 and passes native
+probe/CLI/listening startup, but requested1280x900 becomes1028x749 in the runner.
+Native screen metrics were not captured; this alone does not prove an application
+regression. Local all-native profiles pass. Preserve native Windows smoke and
+all geometry assertions, record desktop metrics, exercise large layouts through
+an explicit QA-only offscreen backend. Its missing-font condition is separately
+reproduced locally and fixed with process-local Windows font-directory selection.
+Four local offscreen layouts and full source-built integration PASS747.656s;
+98 helper tests pass. Exact CI must pass before source acceptance.
+No production UI, radio, audio or package
+plugin changes. Other operating systems are not qualified by this Windows test.
+
 ## ISS-0066 - Satellite auto-capture bypasses GUI dry-run (2026-10-04, SOURCE VERIFIED)
 
 T-0107 / DEC-0176. Packaged GUI listening smoke failed no-RX assertion at

@@ -22,6 +22,10 @@ UNRELEASED SOURCE: T-0102 infrastructure repairs; local 16/16 gates pass,
                   comment203316479. DEC-0179 extends source replacement QA to
                   every packaged Qt runtime and actual no-RX GUI profiles;
                   local16-file replacement and four GUI profiles PASS.
+                  CI6d45304 builds Qt6.7.3 but large native viewport mismatches;
+                  DEC-0180 / ISS-0067 qualify native smoke plus headless layouts.
+                  Local full source-built integration/98 helper tests pass;
+                  exact clean-CI repeat pending before source acceptance.
                   full toolchain/distribution and hardware gates stay separate.
                   DEC-0176 prevents saved satellite auto-capture during GUI
                   dry-run; local four-profile no-RX gate passes.

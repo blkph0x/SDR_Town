@@ -25,6 +25,12 @@ record failures instead of leaving stale successes, input/replacement hashes and
 SDK feature differences. Source SDK and original package remain unchanged.
 test_qt_replacement_harness.py covers missing plugins, extraction containment,
 feature checks, failure receipts and command failures without compiling Qt.
+DEC-0180 adds --headless-layout for CI: native Windows probe/CLI/listening
+startup, then all four exact-size layouts using a source-built QA-only
+qoffscreen plugin and installed Windows fonts. The real package never gains
+that plugin. Desktop metrics, backend and QA plugin hash are explicit evidence.
+test_workspace_gui.py defaults to all profiles; --only-profile supports the
+additional native smoke without removing any full-suite assertion.
 Policy T-0104-notices-5 requires both new material sets whenever those runtimes
 are shipped. Remaining publication blockers are narrowed, not bypassed.
 

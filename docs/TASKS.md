@@ -103,6 +103,11 @@ distribution questions. No RX/DSP or live server changes in this pass.
   optional-feature differences recorded. Independent CI6.7.3 still required;
   no claim of all Qt modules, exact upstream feature reproduction or licensing
   completion from runtime smoke. Remaining source-kit/toolchain review below.
+- [ ] DEC-0180 / ISS-0067: source CI full rebuild passed but large native GUI
+  viewport was clamped. Keep native smoke, add recorded desktop metrics and
+  exact-size headless layouts using rebuilt QA-only qoffscreen/installed fonts.
+  Local full source-built integration PASS747.656s, native listening plus all
+  four offscreen profiles,98 helper tests. Exact clean CI pending.
 - [ ] Full transitive/combined-distribution review, then public asset verification.
 15 new inventory tests, 17 release-verifier tests and 16/16 native suites pass
 locally. Source929cb11 Windows CI37116308564 and YAML37116308593 PASS; clean

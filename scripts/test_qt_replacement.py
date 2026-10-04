@@ -1,5 +1,6 @@
 """DEC-0179: rebuild pinned Qt runtimes in isolation and test actual app replacement."""
 import argparse
+import ctypes
 import io
 import os
 from pathlib import Path
@@ -118,7 +119,22 @@ def runtime_environment(portable):
     return env
 
 
-def test(doc, stage, output, repo, full=False, work_root=None, openssl_root=None):
+def desktop_metrics():
+    # Raw logical desktop dimensions, not an assumption about Qt's DPI scale.
+    class Rect(ctypes.Structure):
+        _fields_ = [(n, ctypes.c_long) for n in ('left', 'top', 'right', 'bottom')]
+    api = ctypes.WinDLL('user32', use_last_error=True)
+    api.GetSystemMetrics.argtypes = [ctypes.c_int]
+    api.GetSystemMetrics.restype = ctypes.c_int
+    area = Rect()
+    api.SystemParametersInfoW.argtypes = [ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint]
+    api.SystemParametersInfoW.restype = ctypes.c_int
+    ok = api.SystemParametersInfoW(0x0030, 0, ctypes.byref(area), 0)  # SPI_GETWORKAREA, WinUser.h
+    return {'primaryWidth': api.GetSystemMetrics(0), 'primaryHeight': api.GetSystemMetrics(1),
+            'workArea': {n: getattr(area, n) for n, _ in area._fields_} if ok else None}
+
+
+def test(doc, stage, output, repo, full=False, work_root=None, openssl_root=None, headless_layout=False):
     stage, repo = plain(stage, directory=True), plain(repo, directory=True)
     require(not output.resolve().is_relative_to(stage), 'Replacement output must not be inside package')
     output.mkdir(parents=True, exist_ok=True)
@@ -133,7 +149,8 @@ def test(doc, stage, output, repo, full=False, work_root=None, openssl_root=None
     result_path.write_bytes(json_bytes(result))
     started = time.monotonic()
     try:
-        perform_test(doc, stage, output, repo, full, work_root, result, openssl_root)
+        require(not headless_layout or full, 'Headless layout requires the full Qt source build')
+        perform_test(doc, stage, output, repo, full, work_root, result, openssl_root, headless_layout)
     except BaseException as exc:
         result.update(status='failed', error=f'{type(exc).__name__}: {exc}', fullQtRebuildVerified=False)
         raise
@@ -142,11 +159,12 @@ def test(doc, stage, output, repo, full=False, work_root=None, openssl_root=None
         result_path.write_bytes(json_bytes(result))
 
 
-def perform_test(doc, stage, output, repo, full, work_root, result, openssl_root):
+def perform_test(doc, stage, output, repo, full, work_root, result, openssl_root, headless_layout):
     files = tree_files(stage)
     evidence = verify(files[KIT].read_bytes(), doc['qtVersion'])
     before = {n: sha256(p) for n, p in files.items()}
     result.update(sourceKitSha256=evidence['kitSha256'], applicationSha256=before['SDR_Town.exe'])
+    result['desktopMetrics'] = desktop_metrics()
     if full and 'tls/qopensslbackend.dll' in files:
         require(openssl_root is not None, 'Package includes OpenSSL backend: explicit --openssl-root required')
         openssl_root = plain(openssl_root, directory=True)
@@ -247,6 +265,22 @@ def perform_test(doc, stage, output, repo, full, work_root, result, openssl_root
         require('biastee <device>' in (output / 'cli.log').read_text(errors='replace'),
                 'Replaced Qt CLI did not reach command handling')
         if full:
+            if headless_layout:
+                run([sys.executable, repo / 'scripts/test_workspace_gui.py', '--exe', portable / 'SDR_Town.exe',
+                     '--output', output / 'gui-native', '--only-profile', 'listening'],
+                    output / 'gui-native.log', env, timeout=60)
+                result['nativeApplicationGui'] = 'listening-pass'
+                # DEC-0180: exact viewport layout QA must not depend on runner screen size.
+                # This auxiliary plugin is deliberately NOT part of the original package.
+                plugin = plain(install / 'plugins/platforms/qoffscreen.dll')
+                shutil.copyfile(plugin, portable / 'platforms/qoffscreen.dll')
+                result['auxiliaryQaPlugins'] = {'platforms/qoffscreen.dll': sha256(plugin)}
+                # Qt's generic offscreen font database uses QT_QPA_FONTDIR,
+                # otherwise a portable copy has no fonts and renders tofu.
+                fonts = plain(Path(env['SYSTEMROOT']) / 'Fonts', directory=True)
+                env = dict(env, QT_QPA_PLATFORM='offscreen', QT_QPA_FONTDIR=str(fonts))
+                result['offscreenFonts'] = 'Windows installed fonts; not copied or redistributed'
+            result['applicationGuiBackend'] = env['QT_QPA_PLATFORM']
             run([sys.executable, repo / 'scripts/test_workspace_gui.py', '--exe', portable / 'SDR_Town.exe',
                  '--output', output / 'gui'], output / 'gui.log', env, timeout=240)
             result['sdkFeatureDifferences'] = feature_differences(qt, install)
@@ -270,6 +304,8 @@ if __name__ == '__main__':
     parser.add_argument('--full', action='store_true', help='Rebuild all packaged Qtbase/QtSvg runtimes')
     parser.add_argument('--work-root', type=Path, help='Short disposable build parent, no preexisting files removed')
     parser.add_argument('--openssl-root', type=Path, help='Explicit header SDK when package includes qopensslbackend')
+    parser.add_argument('--headless-layout', action='store_true',
+                        help='Native listening smoke plus all exact-size GUI profiles on QA-only qoffscreen')
     args = parser.parse_args()
     test(config(args.config), args.stage, args.output, Path(__file__).resolve().parent.parent,
-         args.full, args.work_root, args.openssl_root)
+         args.full, args.work_root, args.openssl_root, args.headless_layout)
