@@ -9,3 +9,8 @@ nlohmann::json decodeSstvRfLive(const std::shared_ptr<Receiver>& receiver,
     const QString& output,const QString& imageMode,const QString& rfMode,
     const std::function<bool()>& finish,const std::function<bool()>& cancel,
     const SstvPreview& preview,const std::function<void(const QString&)>& routeStatus);
+
+nlohmann::json decodeSstvDedicatedRadio(const QString& deviceKey, double frequencyHz,
+    const QString& output, const QString& imageMode, const QString& rfMode,
+    const std::function<bool()>& finish, const std::function<bool()>& cancel,
+    const SstvPreview& preview, const std::function<void(const QString&)>& routeStatus);

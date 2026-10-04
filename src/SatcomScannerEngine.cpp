@@ -344,7 +344,7 @@ void SatcomScannerEngine::restorePreviousDeviceState() {
         manager.stopStreaming(deviceIndex);
         manager.setEnabled(deviceIndex, saved->wasEnabled);
     }
-    manager.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Satcom);
+    manager.releaseDeviceLease(deviceIndex, DeviceManager::DeviceLeaseOwner::Satcom);
 }
 
 bool SatcomScannerEngine::beginHostTakeover(size_t deviceIndex, std::string* error) {
@@ -399,7 +399,7 @@ void SatcomScannerEngine::endHostTakeover() {
 bool SatcomScannerEngine::prepareReceiverForSatcom(size_t deviceIndex, bool force,
                                                    std::string* error) {
     auto& manager = DeviceManager::instance();
-    const auto owner = manager.deviceLeaseOwner();
+    const auto owner = manager.deviceLeaseOwner(deviceIndex);
     if (owner == DeviceManager::DeviceLeaseOwner::P25) {
         const std::string message =
             "P25 owns the receiver; Satcom will not interrupt it. Select another device.";

@@ -8,6 +8,8 @@
 #include <fstream>
 #include <QStandardPaths>
 #include <QDir>
+#include <QFile>
+#include <QSaveFile>
 #include <thread>
 #include <queue>
 #include <mutex>
@@ -269,6 +271,14 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware, bool
         return devices;
     }
 
+    {
+        std::lock_guard lock(leaseMutex_);
+        if (ownership_.stopping()) {
+            spdlog::warn("Device rescan deferred while a radio is stopping");
+            return getDevices();
+        }
+        ownership_.bind({}); // DEC-0181: old tokens cannot target reordered indices.
+    }
     {
     std::lock_guard<std::mutex> lk(devicesMutex);
     devices.clear();
@@ -629,6 +639,7 @@ std::vector<DeviceInfo> DeviceManager::enumerateDevices(bool probeHardware, bool
     // unlock before diversity restore — ensureDiversityCompositeDevice takes devicesMutex
     }
     restoreDiversityCompositeAfterEnumerate();
+    bindWorkflowDevices();
     {
         std::lock_guard<std::mutex> lk(devicesMutex);
         return devices;
@@ -1352,6 +1363,22 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal) {
 }
 
 void DeviceManager::stopStreaming(size_t index) {
+    {
+        std::lock_guard lock(leaseMutex_);
+        if (!ownership_.beginStop(index)) return;
+        ownership_.invalidate(index);
+    }
+    try { stopStreamingImpl(index); }
+    catch (...) {
+        std::lock_guard lock(leaseMutex_);
+        ownership_.endStop(index);
+        throw;
+    }
+    std::lock_guard lock(leaseMutex_);
+    ownership_.endStop(index);
+}
+
+void DeviceManager::stopStreamingImpl(size_t index) {
     auto* stPtr = streamState(index);
     if (!stPtr) return;
     auto& st = *stPtr;
@@ -1808,32 +1835,185 @@ std::string DeviceManager::getSdrplaySetupStatus() const {
 }
 
 const char* DeviceManager::leaseOwnerName(DeviceLeaseOwner owner) {
-    switch (owner) {
-    case DeviceLeaseOwner::Listen: return "listen";
-    case DeviceLeaseOwner::P25: return "p25";
-    case DeviceLeaseOwner::Satcom: return "satcom";
-    case DeviceLeaseOwner::Inmarsat: return "inmarsat";
-    case DeviceLeaseOwner::Aircraft: return "aircraft";
-    case DeviceLeaseOwner::None:
-    default: return "none";
-    }
+    return owner == DeviceLeaseOwner::None ? "none" : DeviceOwnership::name(owner);
 }
 
-static int leasePriority(DeviceManager::DeviceLeaseOwner owner) {
-    using O = DeviceManager::DeviceLeaseOwner;
-    switch (owner) {
-    case O::P25: return 30;
-    case O::Listen: return 20;
-    case O::Satcom:
-    case O::Inmarsat:
-    case O::Aircraft: return 10;
-    default: return 0;
+void DeviceManager::bindWorkflowDevices() {
+    std::lock_guard lock(leaseMutex_);
+    std::vector<DeviceOwnership::Endpoint> endpoints;
+    for (const auto& device : getDevices()) {
+        // Separate RSPduo channels/modes share device-level controls. Do not
+        // promise independent ownership until their driver domain is qualified.
+        const auto domain = device.isSdrplay ? "sdrplay|" + device.serial : device.stableKey;
+        endpoints.push_back({device.stableKey, domain});
+    }
+    ownership_.bind(std::move(endpoints));
+    if (!assignmentsLoaded_) {
+        QFile file(QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).filePath("workflow_devices.json"));
+        if (file.exists()) {
+            try {
+                if (!file.open(QIODevice::ReadOnly) || file.size() > 128 * 1024)
+                    throw std::runtime_error("Cannot read bounded workflow assignment file");
+                const auto values = DeviceOwnership::parse(nlohmann::json::parse(file.readAll().toStdString()));
+                std::string error;
+                if (!ownership_.setAssignments(values, &error)) throw std::runtime_error(error);
+            } catch (const std::exception& e) {
+                assignmentLoadError_ = e.what();
+                spdlog::error("Device assignments not loaded: {}", e.what());
+                return; // Retain file and allow a later explicit retry; never rewrite on load.
+            }
+        }
+        assignmentsLoaded_ = true;
+        assignmentLoadError_.clear();
     }
 }
 
 DeviceManager::DeviceLeaseOwner DeviceManager::deviceLeaseOwner() const {
-    std::lock_guard<std::mutex> lk(leaseMutex_);
-    return deviceLeaseOwner_;
+    // Compatibility snapshot only. Decisions must query the selected device.
+    return deviceLeaseOwner(preferredListenDeviceIndex());
+}
+
+DeviceManager::DeviceLeaseOwner DeviceManager::deviceLeaseOwner(size_t index) const {
+    std::lock_guard lock(leaseMutex_);
+    return ownership_.current(index).owner;
+}
+
+bool DeviceManager::canUseDevice(size_t index, DeviceLeaseOwner owner, std::string* error) const {
+    std::lock_guard lock(leaseMutex_);
+    if (!assignmentLoadError_.empty()) {
+        if (error) *error = "Repair device assignments before receiving: " + assignmentLoadError_;
+        return false;
+    }
+    return ownership_.allowed(index, owner, std::string("legacy-") + leaseOwnerName(owner), error);
+}
+
+DeviceOwnership::Assignments DeviceManager::workflowAssignments() const {
+    std::lock_guard lock(leaseMutex_);
+    return ownership_.assignments();
+}
+
+DeviceManager::DeviceLeaseOwner DeviceManager::workflowAssignment(size_t index) const {
+    std::lock_guard lock(leaseMutex_);
+    return ownership_.assignment(index);
+}
+
+bool DeviceManager::hasUniqueDeviceIdentity(size_t index) const {
+    std::lock_guard lock(leaseMutex_);
+    return ownership_.unique(index);
+}
+
+bool DeviceManager::setWorkflowAssignments(const DeviceOwnership::Assignments& values, std::string* error) {
+    std::lock_guard lock(leaseMutex_);
+    const auto old = ownership_.assignments();
+    const auto devices = getDevices();
+    for (size_t i = 0; i < devices.size(); ++i) {
+        const auto it = values.find(devices[i].stableKey);
+        const auto next = it == values.end() ? DeviceLeaseOwner::None : it->second;
+        if (ownership_.assignment(i) != next && isStreaming(i)) {
+            if (error) *error = "Stop reception on this radio before changing its assignment";
+            return false;
+        }
+    }
+    if (!ownership_.setAssignments(values, error)) return false;
+    const auto dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(dir);
+    QSaveFile file(QDir(dir).filePath("workflow_devices.json"));
+    const auto data = QByteArray::fromStdString(DeviceOwnership::serialize(values).dump(2));
+    if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit()) {
+        ownership_.setAssignments(old, nullptr);
+        if (error) *error = "Could not save device assignments: " + file.errorString().toStdString();
+        return false;
+    }
+    assignmentsLoaded_ = true;
+    assignmentLoadError_.clear();
+    spdlog::info("Workflow device assignments saved: {} explicit reservations", values.size());
+    return true;
+}
+
+DeviceManager::DeviceLeaseToken DeviceManager::claimDevice(size_t index, DeviceLeaseOwner owner,
+    const std::string& client, std::string* error, const std::string& expectedKey) {
+    std::lock_guard lock(leaseMutex_);
+    const auto devices = getDevices();
+    if (index >= devices.size() || (!expectedKey.empty() && devices[index].stableKey != expectedKey)) {
+        if (error) *error = "Radio list changed; select the radio again";
+        return {};
+    }
+    if (!assignmentLoadError_.empty()) {
+        if (error) *error = "Repair device assignments before receiving: " + assignmentLoadError_;
+        return {};
+    }
+    if (!ownership_.current(index) && isStreaming(index)) {
+        if (error) *error = "Radio is already receiving; stop it or use its existing receiver tap";
+        return {};
+    }
+    const auto token = ownership_.claim(index, owner, client, error);
+    if (token) spdlog::info("Device lease acquired: dev={} workflow={} generation={} lease={}", index,
+        leaseOwnerName(owner), token.generation, token.id);
+    return token;
+}
+
+bool DeviceManager::ownsDevice(const DeviceLeaseToken& token) const {
+    std::lock_guard lock(leaseMutex_);
+    return ownership_.valid(token);
+}
+
+bool DeviceManager::releaseDevice(const DeviceLeaseToken& token) {
+    std::lock_guard lock(leaseMutex_);
+    const bool released = ownership_.release(token);
+    spdlog::info("Device lease release: dev={} lease={} accepted={}", token.index, token.id, released);
+    return released;
+}
+
+bool DeviceManager::tuneDevice(const DeviceLeaseToken& token, double freqHz, std::string* error) {
+    std::lock_guard lock(leaseMutex_);
+    if (!ownership_.valid(token) || !ownership_.allowed(token.index, token.owner, token.client, error)) {
+        if (error) *error = "Device ownership expired; restart the workflow";
+        return false;
+    }
+    if (!std::isfinite(freqHz) || freqHz <= 0) {
+        if (error) *error = "Center frequency must be finite and positive";
+        return false;
+    }
+    return queueCenterFreq(token.index, freqHz) != 0;
+}
+
+bool DeviceManager::startDevice(const DeviceLeaseToken& token, std::string* error) {
+    std::lock_guard lock(leaseMutex_);
+    if (!ownership_.valid(token) || !ownership_.allowed(token.index, token.owner, token.client, error)) {
+        if (error) *error = "Device ownership expired or the radio is stopping";
+        return false;
+    }
+    // A scoped workflow starts an idle radio, never upgrades/restarts another
+    // stream. startStreaming launches hardware open asynchronously.
+    if (isStreaming(token.index)) {
+        if (error) *error = "Radio already receiving";
+        return false;
+    }
+    return startStreaming(token.index, true);
+}
+
+bool DeviceManager::stopDevice(const DeviceLeaseToken& token) {
+    {
+        std::lock_guard lock(leaseMutex_);
+        if (!ownership_.valid(token) || !ownership_.beginStop(token.index)) return false;
+        ownership_.invalidate(token.index);
+    }
+    try { stopStreamingImpl(token.index); }
+    catch (...) {
+        std::lock_guard lock(leaseMutex_);
+        ownership_.endStop(token.index);
+        throw;
+    }
+    std::lock_guard lock(leaseMutex_);
+    ownership_.endStop(token.index);
+    return true;
+}
+
+bool DeviceManager::isHardwareStreaming(size_t index) const {
+    const auto* st = streamState(index);
+    if (!st) return false;
+    std::lock_guard lock(st->stateMutex);
+    return st->active && st->isReal;
 }
 
 bool DeviceManager::acquireDeviceLease(size_t index, DeviceLeaseOwner owner, bool force, std::string* error) {
@@ -1849,35 +2029,38 @@ bool DeviceManager::acquireDeviceLease(size_t index, DeviceLeaseOwner owner, boo
         }
     }
     std::lock_guard<std::mutex> lk(leaseMutex_);
-    if (deviceLeaseOwner_ != DeviceLeaseOwner::None && deviceLeaseOwner_ != owner) {
-        const bool streaming = isStreaming(deviceLeaseIndex_ == static_cast<size_t>(-1) ? index : deviceLeaseIndex_);
-        if (streaming && !force && leasePriority(owner) < leasePriority(deviceLeaseOwner_)) {
-            if (error) {
-                *error = std::string("device leased by ") + leaseOwnerName(deviceLeaseOwner_) +
-                         " — pass force=true to take the tuner";
-            }
-            return false;
-        }
-    } else if (deviceLeaseOwner_ == DeviceLeaseOwner::None && !force &&
+    if (!assignmentLoadError_.empty()) {
+        if (error) *error = "Repair device assignments before receiving: " + assignmentLoadError_;
+        return false;
+    }
+    if (!ownership_.current(index) && !force &&
                (owner == DeviceLeaseOwner::Satcom || owner == DeviceLeaseOwner::Inmarsat ||
-                owner == DeviceLeaseOwner::Aircraft) &&
+                owner == DeviceLeaseOwner::Aircraft || owner == DeviceLeaseOwner::Sstv) &&
                isStreaming(index)) {
         if (error) {
             *error = "live listen session owns the tuner — pass force=true to retune";
         }
         return false;
     }
-    deviceLeaseOwner_ = owner;
-    deviceLeaseIndex_ = index;
-    return true;
+    // force acknowledges an unmanaged Listen stream, never overrides a different
+    // workflow's explicit reservation or lease. That workflow must stop first.
+    return bool(ownership_.claim(index, owner, std::string("legacy-") + leaseOwnerName(owner), error));
 }
 
 void DeviceManager::releaseDeviceLease(DeviceLeaseOwner owner) {
     std::lock_guard<std::mutex> lk(leaseMutex_);
-    if (deviceLeaseOwner_ == owner) {
-        deviceLeaseOwner_ = DeviceLeaseOwner::None;
-        deviceLeaseIndex_ = static_cast<size_t>(-1);
+    for (size_t i = 0; i < getDevices().size(); ++i) {
+        const auto token = ownership_.current(i);
+        if (token.owner == owner && token.client == std::string("legacy-") + leaseOwnerName(owner))
+            ownership_.release(token);
     }
+}
+
+void DeviceManager::releaseDeviceLease(size_t index, DeviceLeaseOwner owner) {
+    std::lock_guard lock(leaseMutex_);
+    const auto token = ownership_.current(index);
+    if (token.owner == owner && token.client == std::string("legacy-") + leaseOwnerName(owner))
+        ownership_.release(token);
 }
 
 bool DeviceManager::retuneWithLease(size_t index, double freqHz, DeviceLeaseOwner owner, bool force,
@@ -1887,7 +2070,13 @@ bool DeviceManager::retuneWithLease(size_t index, double freqHz, DeviceLeaseOwne
         return false;
     }
     if (!acquireDeviceLease(index, owner, force, error)) return false;
-    const uint64_t requestSeq = setCenterFreq(index, freqHz);
+    std::lock_guard lock(leaseMutex_);
+    const auto token = ownership_.current(index);
+    if (token.owner != owner || token.client != std::string("legacy-") + leaseOwnerName(owner)) {
+        if (error) *error = "Device ownership changed before tuning";
+        return false;
+    }
+    const uint64_t requestSeq = queueCenterFreq(index, freqHz);
     if (requestSeq == 0) {
         if (error) {
             *error = "device index " + std::to_string(index) +
@@ -2182,8 +2371,15 @@ size_t DeviceManager::ensureDiversityCompositeDeviceLocked(size_t deviceIndexHin
 }
 
 size_t DeviceManager::ensureDiversityCompositeDevice(size_t deviceIndexHint) {
+    std::lock_guard leaseLock(leaseMutex_);
     std::lock_guard<std::mutex> lk(devicesMutex);
-    return ensureDiversityCompositeDeviceLocked(deviceIndexHint);
+    const auto before = devices.size();
+    const auto index = ensureDiversityCompositeDeviceLocked(deviceIndexHint);
+    if (devices.size() > before) {
+        const auto& device = devices.back();
+        ownership_.append({device.stableKey, "sdrplay|" + device.serial});
+    }
+    return index;
 }
 
 void DeviceManager::restoreDiversityCompositeAfterEnumerate() {
@@ -2656,7 +2852,24 @@ DeviceManager::RxHealthSnapshot DeviceManager::getRxHealth(size_t index) const {
         st->hardwareLossFloor.load(std::memory_order_acquire)};
 }
 
-uint64_t DeviceManager::setCenterFreq(size_t index, double freqHz) {
+uint64_t DeviceManager::setCenterFreq(size_t index, double freqHz, DeviceLeaseOwner owner) {
+    if (!std::isfinite(freqHz) || freqHz <= 0.0)
+        throw std::invalid_argument("Center frequency must be finite and positive");
+    std::lock_guard lock(leaseMutex_);
+    if (index >= getDevices().size()) return 0;
+    if (!assignmentLoadError_.empty()) {
+        spdlog::warn("Tune refused: repair device assignments: {}", assignmentLoadError_);
+        return 0;
+    }
+    std::string error;
+    if (!ownership_.allowed(index, owner, std::string("legacy-") + leaseOwnerName(owner), &error)) {
+        spdlog::warn("Tune refused: dev={} workflow={} reason={}", index, leaseOwnerName(owner), error);
+        return 0;
+    }
+    return queueCenterFreq(index, freqHz);
+}
+
+uint64_t DeviceManager::queueCenterFreq(size_t index, double freqHz) {
     if (!std::isfinite(freqHz) || freqHz <= 0.0)
         throw std::invalid_argument("Center frequency must be finite and positive");
     StreamState* stPtr = nullptr;
@@ -2684,8 +2897,8 @@ uint64_t DeviceManager::setCenterFreq(size_t index, double freqHz) {
 
     // Keep Dual Tuner sources locked to the same LO for coherent diversity.
     if (isComposite) {
-        if (diversityA != static_cast<size_t>(-1)) setCenterFreq(diversityA, freqHz);
-        if (diversityB != static_cast<size_t>(-1)) setCenterFreq(diversityB, freqHz);
+        if (diversityA != static_cast<size_t>(-1)) queueCenterFreq(diversityA, freqHz);
+        if (diversityB != static_cast<size_t>(-1)) queueCenterFreq(diversityB, freqHz);
         st.centerTuneAppliedSeq.store(seq, std::memory_order_release);
         return seq;
     }

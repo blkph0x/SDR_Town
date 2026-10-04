@@ -2,6 +2,7 @@
 #include "DiagnosticsHealthMonitor.h"
 #include "HfDemod.h"
 #include "SstvWindow.h"
+#include "WorkflowDevicesWindow.h"
 #include "DtmfWindow.h"
 #include "CwWindow.h"
 #include "CwRfSession.h"
@@ -164,6 +165,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             bool retunedDevice = false;
             bool anyStreaming = false;
             for (size_t i = 0; i < mgr.getDevices().size(); ++i) {
+                if (!mgr.canUseDevice(i, DeviceManager::DeviceLeaseOwner::Listen)) continue;
                 if (mgr.isStreaming(i)) {
                     mgr.setCenterFreq(i, f);
                     retunedDevice = true;
@@ -171,7 +173,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     break;
                 }
             }
-            if (!anyStreaming && !mgr.getDevices().empty()) {
+            if (!anyStreaming && !mgr.getDevices().empty() && mgr.canUseDevice(0, DeviceManager::DeviceLeaseOwner::Listen)) {
                 // "Just select a freq" should produce audio: auto-start first device (stub for safety, like Add Receiver / Scan).
                 // Aligns with expectation that clicking spectrum/waterfall starts monitoring that freq.
                 mgr.setEnabled(0, true);
@@ -230,6 +232,10 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         // Wire buttons (make functional)
         connect(addRxBtn, &QPushButton::clicked, this, [this]() {
             auto& mgr = DeviceManager::instance();
+            std::string conflict;
+            if (!mgr.canUseDevice(0, DeviceManager::DeviceLeaseOwner::Listen, &conflict)) {
+                statusBar()->showMessage(QString::fromStdString(conflict), 5000); return;
+            }
             if (!mgr.getDevices().empty()) {
                 mgr.setEnabled(0, true);
                 try { mgr.startStreaming(0, true /* real SDR, not stub */); } catch (...) { spdlog::warn("startStreaming(0,true) fault in Add Receiver (guarded)"); }
@@ -283,19 +289,30 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             }
         });
         connect(removeRxBtn, &QPushButton::clicked, this, [this]() {
-            // S0-7: actually remove a receiver from the live vector (under lock for snapshot safety).
-            // Stop a stream if present (existing behavior). Full per-rx stop + rich UI later.
+            size_t releasedDevice = size_t(-1);
+            bool stillUsed = false;
             {
                 std::lock_guard<std::mutex> lk(receiversMutex);
                 if (!receivers.empty()) {
+                    const auto removed = receivers.back();
+                    if (!removed) return;
+                    std::lock_guard receiverLock(removed->stateMutex);
+                    if (removed->p25VoiceDecodeEnabled || removed->p25ControlChannelMute || removed->p25IndependentTrafficSource) {
+                        statusBar()->showMessage("Stop P25 monitoring before removing its receiver", 5000); return;
+                    }
+                    releasedDevice = removed->deviceIndex;
                     receivers.pop_back();
+                    for (const auto& receiver : receivers) if (receiver) {
+                        std::lock_guard stateLock(receiver->stateMutex);
+                        stillUsed = stillUsed || receiver->deviceIndex == releasedDevice;
+                    }
                 }
             }
             auto& mgr = DeviceManager::instance();
-            for (size_t i = 0; i < mgr.getDevices().size(); ++i) {
-                if (mgr.isStreaming(i)) { mgr.stopStreaming(i); break; }
-            }
-            statusBar()->showMessage("Removed receiver + stopped a stream", 2000);
+            // DEC-0181: never stop an arbitrary first stream (possibly SSTV or satellite).
+            if (!stillUsed && releasedDevice != size_t(-1) && mgr.canUseDevice(releasedDevice, DeviceManager::DeviceLeaseOwner::Listen))
+                mgr.stopStreaming(releasedDevice);
+            statusBar()->showMessage("Receiver removed", 2000);
         });
         connect(scanBtn, &QPushButton::clicked, this, [this]() {
             auto& mgr = DeviceManager::instance();
@@ -303,6 +320,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             // (direct from SDR, no simulation). The old comment claimed "safe stub" — now honest.
             // Full energy-based smart scanner + hits table + promote-to-receiver is post-stabilization work.
             for (size_t i = 0; i < mgr.getDevices().size(); ++i) {
+                if (!mgr.canUseDevice(i, DeviceManager::DeviceLeaseOwner::Listen)) continue;
                 mgr.setEnabled(i, true);
                 try { mgr.startStreaming(i, true /* real SDR - no simulation, direct from hardware */); } catch (...) { spdlog::warn("startStreaming fault in scan (guarded)"); }
             }
@@ -563,6 +581,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             setReceiverActive(0, true);
             auto& mgr = DeviceManager::instance();
             for (size_t i = 0; i < mgr.getDevices().size(); ++i) {
+                if (!mgr.canUseDevice(i, DeviceManager::DeviceLeaseOwner::Listen)) continue;
                 if (mgr.isStreaming(i)) {
                     mgr.setCenterFreq(i, hz);
                     break;
@@ -2117,6 +2136,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             // Do not use two-channel getCenterFrequency for the follow LO
             // (115315: 421.975 ended at offset=997.3 kHz, CADENCE drop=A).
             for (size_t i = 0; i < devices.size(); ++i) {
+                if (!mgr.canUseDevice(i, DeviceManager::DeviceLeaseOwner::P25)) continue;
                 if (!mgr.isStreaming(i)) continue;
                 std::vector<float> pwr;
                 double cf = 0.0;
@@ -2177,13 +2197,14 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             // Second preference: allocate/retune a different physical SDR if one
             // exists.  This gives true simultaneous control+traffic monitoring.
             for (size_t i = 1; i < devices.size(); ++i) {
+                if (!mgr.canUseDevice(i, DeviceManager::DeviceLeaseOwner::P25)) continue;
                 try {
                     const double sr = devices[i].sampleRate > 0.0 ? devices[i].sampleRate : 2.048e6;
                     const double trafficCenterHz = phase2Traffic
                         ? p25Phase2LowIfTrafficCenterHz(voiceHz, sr)
                         : voiceHz;
                     mgr.setEnabled(i, true);
-                    mgr.setCenterFreq(i, trafficCenterHz);
+                    if (!mgr.setCenterFreq(i, trafficCenterHz, DeviceManager::DeviceLeaseOwner::P25)) continue;
                     if (!mgr.isStreaming(i)) mgr.startStreaming(i, true);
                     out.valid = true;
                     out.deviceIndex = i;
@@ -2215,7 +2236,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             // monitoring is paused while the single tuner is parked on traffic.
             // This is the mode that lets sdrtrunk work well with one RTL-SDR when
             // the voice channel is outside the current sampled passband.
-            if (!devices.empty()) {
+            if (!devices.empty() && mgr.canUseDevice(0, DeviceManager::DeviceLeaseOwner::P25)) {
                 const double sr = devices[0].sampleRate > 0.0 ? devices[0].sampleRate : 2.048e6;
                 out.valid = true;
                 out.deviceIndex = 0;
@@ -2290,7 +2311,8 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                         std::isfinite(currentCenterHz) &&
                         std::abs(currentCenterHz - desiredCenterHz) <= 50.0;
                     if (!alreadyCenteredOnTrafficSource) {
-                        primaryRetuneSeq = mgr.setCenterFreq(source.deviceIndex, desiredCenterHz);
+                        primaryRetuneSeq = mgr.setCenterFreq(source.deviceIndex, desiredCenterHz, DeviceManager::DeviceLeaseOwner::P25);
+                        if (!primaryRetuneSeq) return false;
                         primaryLoMovedAwayFromCc =
                             ccHz > 0.0 &&
                             std::abs(desiredCenterHz - ccHz) > 75e3;
@@ -2336,7 +2358,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     }
                     if (!std::isfinite(currentCenterHz) ||
                         std::abs(currentCenterHz - source.centerHz) > 50.0) {
-                        mgr.setCenterFreq(source.deviceIndex, source.centerHz);
+                        if (!mgr.setCenterFreq(source.deviceIndex, source.centerHz, DeviceManager::DeviceLeaseOwner::P25)) return false;
                         // DEC-0065: even with retunesPrimary=false, moving primary LO
                         // off the CC must be treated as one-RTL for return-to-CC.
                         if (source.deviceIndex == 0 &&
@@ -3732,7 +3754,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                         }
                         hopCenterHz = p25Phase2LowIfTrafficCenterHz(
                             sameCallFollowVoiceHz, hopSampleRateHz);
-                        retuneSeq = mgr.setCenterFreq(trafficDeviceIndex, hopCenterHz);
+                        retuneSeq = mgr.setCenterFreq(trafficDeviceIndex, hopCenterHz, DeviceManager::DeviceLeaseOwner::P25);
                         if (!mgr.isStreaming(trafficDeviceIndex)) {
                             mgr.startStreaming(trafficDeviceIndex, true);
                         }
@@ -4891,6 +4913,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             auto& mgr = DeviceManager::instance();
             bool any = false;
             for (size_t i=0; i<mgr.getDevices().size(); ++i) {
+                if (!mgr.canUseDevice(i, DeviceManager::DeviceLeaseOwner::Listen)) continue;
                 if (mgr.isStreaming(i)) {
                     mgr.setCenterFreq(i, tunedHz);
                     statusBar()->showMessage(QString("Monitor tuned to %1 MHz").arg(tunedHz/1e6,0,'f',3), 2000);
@@ -4898,7 +4921,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     break;
                 }
             }
-            if (!any && !mgr.getDevices().empty()) {
+            if (!any && !mgr.getDevices().empty() && mgr.canUseDevice(0, DeviceManager::DeviceLeaseOwner::Listen)) {
                 // Auto-start on explicit tune request so user gets audio without separate "Add" click.
                 mgr.setEnabled(0, true);
                 mgr.startStreaming(0, true /* real from SDR */);
@@ -10826,8 +10849,9 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
         } else {
             auto& mgr = DeviceManager::instance();
             for (size_t i = 0; i < mgr.getDevices().size(); ++i) {
+                if (!mgr.canUseDevice(i, DeviceManager::DeviceLeaseOwner::Listen)) continue;
                 if (mgr.isStreaming(i)) {
-                    mgr.setCenterFreq(i, freqHz);
+                    ok = mgr.setCenterFreq(i, freqHz) != 0;
                     break;
                 }
             }
@@ -10859,12 +10883,30 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
 
 SstvWindow* MainWindow::ensureSstvWindow()
 {
+    const auto refreshDevices = [](SstvWindow* window) {
+        auto& manager = DeviceManager::instance();
+        const auto devices = manager.getDevices();
+        std::vector<std::pair<QString, QString>> choices;
+        for (size_t i = 0; i < devices.size(); ++i) {
+            if (!devices[i].isDiversityComposite && manager.canUseDevice(i, DeviceManager::DeviceLeaseOwner::Sstv))
+                choices.emplace_back(QString::fromStdString(devices[i].stableKey), QString::fromStdString(devices[i].label));
+        }
+        window->setRfDevices(choices);
+    };
     auto* window = findChild<SstvWindow*>(QStringLiteral("sstvWindow"));
-    if (window) return window;
+    if (window) { refreshDevices(window); return window; }
     window = new SstvWindow(decodeSstvImageFile, this);
     window->setObjectName(QStringLiteral("sstvWindow"));
-    window->setLiveSource([this](const std::shared_ptr<std::atomic<bool>>& finish,const QString& rfMode,
+    refreshDevices(window);
+    window->setLiveSource([this,window](const std::shared_ptr<std::atomic<bool>>& finish,const QString& rfMode,
                                 const std::function<void(const QString&)>& routeStatus) -> SstvWindow::Decode {
+        const auto key = window->selectedDeviceKey();
+        const auto frequency = window->selectedFrequencyHz();
+        if (!key.isEmpty()) {
+            return [key,frequency,finish,rfMode,routeStatus](const QString&, const QString& output, const QString& mode, const auto& cancel, const auto& preview) {
+                return decodeSstvDedicatedRadio(key,frequency,output,mode,rfMode,[finish]{return finish->load();},cancel,preview,routeStatus);
+            };
+        }
         std::shared_ptr<Receiver> receiver;
         { std::lock_guard lock(receiversMutex); if (!receivers.empty()) receiver = receivers.front(); }
         if (!receiver) throw std::runtime_error("Start the main receiver before receiving SSTV");
@@ -13146,6 +13188,37 @@ void MainWindow::createMenus()
         connect(discoverAct, &QAction::triggered, this, &MainWindow::onDevices);
         devicesMenu->addSeparator();
         devicesMenu->addAction("Device &Manager...", this, &MainWindow::onDevices);
+        devicesMenu->addAction("Workflow &Assignments...", this, [this] {
+            auto* window = findChild<QDialog*>("workflowDevicesWindow");
+            if (!window) {
+                window = new WorkflowDevicesWindow([] {
+                    auto& manager = DeviceManager::instance();
+                    WorkflowDevicesWindow::Snapshot snapshot;
+                    snapshot.assignments = manager.workflowAssignments();
+                    const auto devices = manager.getDevices();
+                    for (size_t i = 0; i < devices.size(); ++i) {
+                        const auto& device = devices[i];
+                        const auto owner = manager.deviceLeaseOwner(i);
+                        QString status = QString::fromStdString(manager.getRuntimeStateLabel(i));
+                        if (owner != DeviceManager::DeviceLeaseOwner::None)
+                            status += QString(" / %1").arg(DeviceManager::leaseOwnerName(owner));
+                        const bool unique = manager.hasUniqueDeviceIdentity(i);
+                        if (!unique) status = "Ambiguous device identity";
+                        if (i == 0) status += " / Main Listen + P25 control";
+                        snapshot.rows.push_back({QString::fromStdString(device.stableKey),
+                            QString::fromStdString(device.label), status,
+                            i != 0 && unique && !manager.isStreaming(i)});
+                    }
+                    return snapshot;
+                }, [](const DeviceOwnership::Assignments& values) {
+                    std::string error;
+                    DeviceManager::instance().setWorkflowAssignments(values, &error);
+                    return QString::fromStdString(error);
+                }, this);
+                window->setAttribute(Qt::WA_DeleteOnClose);
+            }
+            window->show(); window->raise(); window->activateWindow();
+        });
 
         // Receivers (stub)
         QMenu* rxMenu = menuBar()->addMenu("&Receivers");

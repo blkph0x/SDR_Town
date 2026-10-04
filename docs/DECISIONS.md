@@ -1,5 +1,45 @@
 # Decisions
 
+## DEC-0181 - Bound release closure and isolate workflow device assignments (2026-10-04)
+
+User authorizes moving to T-0103, with explicit radio selection and several P25
+radios alongside SSTV. Clarification: this must apply consistently to **every**
+mode, demodulator and workflow, including repeated instances. Do not implement
+protocol-specific ownership privileges. `WorkflowRadioSession` is the common
+worker-owned lifecycle adapter; SSTV is its first UI integration, not its scope.
+The migration matrix in WORKFLOW_DEVICES.md must distinguish implemented
+ownership primitives from remaining singleton controllers and UI adapters.
+10259ca Windows37168422913/YAML37168422917 pass; downloaded
+135-file evidence and all17 Qt6.7.3 runtime replacements verified in acceptance
+comment203327059. DEC-0179/0180 technical gates are complete. Do not rerun or
+reimplement them as missing work. T-0104 retains only the finite materials/review
+items in PACKAGE_HARDENING_20261003.md, independent of T-0103 implementation.
+
+Inspection: DeviceManager has one global lease; MainWindow's traffic selector
+unconditionally opens a second SDR; SSTV live is tied to receivers.front().
+Implement a per-endpoint lease book with generation-bound tokens, persistent
+stable-key reservations, conservative shared SDRplay hardware domains, explicit
+conflict failures, and a Devices assignment window. Duplicate identities must
+not silently bind a saved assignment. Default automatic assignments preserve
+single-radio behavior. Reserved secondary workflows must not be retuned by the
+main monitor or the P25 source selector. Add a dedicated SSTV source selection,
+independent cursor/receiver, and scoped start/stop ownership, retaining the old
+read-only main-receiver tap. No demodulator/vocoder/audio timing edits.
+
+This pass is an ownership/assignment milestone, not an assertion of several
+simultaneous P25 call controllers. Current MainWindow has one follow state and
+one active traffic generation; a P25 device pool supplies that existing follow
+path. Multiple independent systems/concurrent calls need separate controller
+instances and stream-specific audio routing, with recorded RF acceptance.
+Raw driver-hang recovery and remaining legacy token migration stay explicit.
+Test independent devices, conflicts, stale token after release/re-enumeration,
+shared domains, duplicate keys, persistence and dedicated SSTV teardown. Review
+the exact shared-file patch and preserve the frozen DSP guard for other changes.
+The worker adapter reuses Inmarsat's bounded10-second hardware-open allowance;
+it rejects stub/failure and uses the existing settings/rate and driver. No new
+DSP timeout or guessed delay. A stopping endpoint blocks new claims until its
+driver teardown completes, without holding the ownership mutex across teardown.
+
 ## DEC-0180 - Separate native-window smoke from CI layout viewport tests (2026-10-04)
 
 T-0104 continuation. CI37164667115 compiles all Qt6.7.3 runtimes, passes

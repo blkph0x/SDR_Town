@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <QApplication>
 #include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QDir>
 #include <QFileInfo>
 #include <QElapsedTimer>
@@ -32,6 +33,27 @@ bool wait(SstvWindow& window) {
     if(window.busy()) window.cancel();
     return !window.busy();
 }
+}
+
+TEST_CASE("SSTV radio selection preserves stable identity and distinguishes receiver taps", "[sstv-live-gui][ownership]") {
+    QSettings().setValue("sstv/deviceKey","missing-radio");
+    SstvWindow window(decodeSstvImageFile);
+    window.setLiveSource([](const auto&,const auto&,const auto&) { return SstvWindow::Decode{}; });
+    window.setRfDevices({{"radio-a","SDR A"},{"radio-b","SDR B"}});
+    auto* combo=window.findChild<QComboBox*>("sstvDevice");
+    auto* frequency=window.findChild<QDoubleSpinBox*>("sstvFrequency");
+    REQUIRE(combo); REQUIRE(frequency);
+    CHECK(window.selectedDeviceKey()=="missing-radio");
+    CHECK(combo->currentText().contains("Unavailable"));
+    const auto source=window.findChild<QComboBox*>("sstvSource");
+    source->setCurrentIndex(source->findData("live"));
+    combo->setCurrentIndex(combo->findData(QString()));
+    CHECK_FALSE(frequency->isEnabled());
+    combo->setCurrentIndex(combo->findData("radio-b"));
+    CHECK(frequency->isEnabled());
+    frequency->setValue(145.8);
+    CHECK(window.selectedFrequencyHz()==145800000.0);
+    QSettings().remove("sstv/deviceKey");
 }
 
 TEST_CASE("Live SSTV GUI finish saves and cancel releases its receiver","[sstv-live-gui]") {

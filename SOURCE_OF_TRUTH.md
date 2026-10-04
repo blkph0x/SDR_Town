@@ -25,7 +25,9 @@ UNRELEASED SOURCE: T-0102 infrastructure repairs; local 16/16 gates pass,
                   CI6d45304 builds Qt6.7.3 but large native viewport mismatches;
                   DEC-0180 / ISS-0067 qualify native smoke plus headless layouts.
                   Local full source-built integration/98 helper tests pass;
-                  exact clean-CI repeat pending before source acceptance.
+                  exact clean CI10259ca passes (comment203327059).
+                  DEC-0181 starts T-0103 workflow assignment/ownership isolation;
+                  concurrent P25 call controllers are not yet implemented.
                   full toolchain/distribution and hardware gates stay separate.
                   DEC-0176 prevents saved satellite auto-capture during GUI
                   dry-run; local four-profile no-RX gate passes.

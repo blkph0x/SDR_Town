@@ -3005,7 +3005,7 @@ int runCLI(int argc, char* argv[]) {
                     // shutdown behind a muted control-channel receiver.
                     rx.active = false;
                 }
-                if (devIndex < mgr.getDevices().size()) mgr.setCenterFreq(devIndex, ccMhz * 1e6);
+                if (devIndex < mgr.getDevices().size()) mgr.setCenterFreq(devIndex, ccMhz * 1e6, DeviceManager::DeviceLeaseOwner::P25);
                 if (!mgr.isStreaming(devIndex) && devIndex < mgr.getDevices().size()) {
                     mgr.setEnabled(devIndex, true);
                     mgr.startStreaming(devIndex, true);
@@ -3142,7 +3142,7 @@ int runCLI(int argc, char* argv[]) {
                     rx.p25ControlChannelMute = true;
                     rx.active = true;
                 }
-                uint64_t waitGrantTuneSeq = mgr.setCenterFreq(static_cast<size_t>(devIndex), ccHz);
+                uint64_t waitGrantTuneSeq = mgr.setCenterFreq(static_cast<size_t>(devIndex), ccHz, DeviceManager::DeviceLeaseOwner::P25);
                 if (!mgr.isStreaming(static_cast<size_t>(devIndex))) {
                     mgr.setEnabled(static_cast<size_t>(devIndex), true);
                     mgr.startStreaming(static_cast<size_t>(devIndex), true);
@@ -3299,7 +3299,7 @@ int runCLI(int argc, char* argv[]) {
                     if (!controlInPassband) {
                         const qint64 retuneNowMs = QDateTime::currentMSecsSinceEpoch();
                         if (retuneNowMs - lastWaitGrantRetuneRequestMs >= 500) {
-                            waitGrantTuneSeq = mgr.setCenterFreq(static_cast<size_t>(devIndex), ccHz);
+                            waitGrantTuneSeq = mgr.setCenterFreq(static_cast<size_t>(devIndex), ccHz, DeviceManager::DeviceLeaseOwner::P25);
                             (void)mgr.waitForCenterTuneApplied(static_cast<size_t>(devIndex), waitGrantTuneSeq, 250);
                             lastWaitGrantRetuneRequestMs = retuneNowMs;
                         }
@@ -3859,7 +3859,7 @@ int runCLI(int argc, char* argv[]) {
                     : tg.lastVoiceFreqHz;
                 uint64_t voiceTuneSeq = 0;
                 if (mgr.isStreaming(static_cast<size_t>(devIndex))) {
-                    voiceTuneSeq = mgr.setCenterFreq(static_cast<size_t>(devIndex), cliTrafficCenterHz);
+                    voiceTuneSeq = mgr.setCenterFreq(static_cast<size_t>(devIndex), cliTrafficCenterHz, DeviceManager::DeviceLeaseOwner::P25);
                 }
                 if (selectedGrantPhase2 && voiceTuneSeq != 0) {
                     const bool tuneApplied = mgr.waitForCenterTuneApplied(static_cast<size_t>(devIndex), voiceTuneSeq, 650);
@@ -4398,7 +4398,7 @@ int runCLI(int argc, char* argv[]) {
                     rx.active = true;
                 }
                 if (cliAudio) cliAudio->clearBuffers();
-                if (mgr.isStreaming(static_cast<size_t>(devIndex))) mgr.setCenterFreq(static_cast<size_t>(devIndex), ccHz);
+                if (mgr.isStreaming(static_cast<size_t>(devIndex))) mgr.setCenterFreq(static_cast<size_t>(devIndex), ccHz, DeviceManager::DeviceLeaseOwner::P25);
                 std::cout << "P25 waitgrant returned to muted control channel " << ccMhz << " MHz." << std::endl;
 
                 const qint64 retryNowMs = QDateTime::currentMSecsSinceEpoch();
@@ -5167,7 +5167,7 @@ int runCLI(int argc, char* argv[]) {
                 }
                 uint64_t manualVoiceTuneSeq = 0;
                 if (devIndex < mgr.getDevices().size()) {
-                    manualVoiceTuneSeq = mgr.setCenterFreq(devIndex, tg.lastVoiceFreqHz);
+                    manualVoiceTuneSeq = mgr.setCenterFreq(devIndex, tg.lastVoiceFreqHz, DeviceManager::DeviceLeaseOwner::P25);
                 }
                 if (!mgr.isStreaming(devIndex) && devIndex < mgr.getDevices().size()) {
                     mgr.setEnabled(devIndex, true);

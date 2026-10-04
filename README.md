@@ -1,36 +1,19 @@
 # SDR Town
 
-Unreleased source hardening (T-0102): tested hardware-overflow boundaries,
-fail-closed test-tone TX, bounded local control/status requests, late opt-in
-health monitoring and numeric RX/HF diagnostics. See the
-[repair ledger and remaining gates](docs/INFRASTRUCTURE_HARDENING_20261003.md).
-These changes are not yet a public binary release; dependency notice/source
-coverage remains a release blocker (ISS-0060). P25/FM DSP is unchanged.
-T-0104 adds missing RTL USB-runtime staging, isolated package-loader tests and
-[exact-file inventory/publication gates](docs/PACKAGE_HARDENING_20261003.md).
-Dependency source/notice work remains open; CI uploads evidence only while blocked.
-DEC-0175 adds a hash-verified bundle of exact vcpkg source archives, recipes,
-patches and installed receipts. This is not yet a complete rebuild/distribution
-kit. GUI dry-run now suppresses saved satellite auto-capture (ISS-0066), so layout
-tests cannot silently start an automatic pass; normal pass settings are retained.
-Local and CI packaging now share declared runtime inputs and configured Qt/MSVC
-deployment. Old DLLs in a developer's build folder are neither copied into the
-package nor deleted. Runtime hashes/version evidence is included in the inventory.
-DEC-0177 also preserves per-file ASN.1 notices and the ICAO dataset dedication,
-and verifies packaged Inmarsat channel lists against their source inputs.
-DEC-0178 adds exact-version Qt source archives, notice catalogs, SDK settings
-and replacement instructions. A source-built QtSvg library and its plugins are
-tested in a disposable portable copy. Microsoft runtime evidence now records
-actual DLL/installer versions and the signed installer's embedded license,
-not just a folder label. Full rebuild/distribution requirements remain open.
-DEC-0179 extends replacement QA to all packaged Qtbase/QtSvg libraries and
-plugins, loopback networking, native TLS and four no-RX GUI startup profiles.
-It checks resolved build dependencies and uses an isolated runtime search path.
-Results distinguish a complete packaged-runtime rebuild from the earlier
-Svg-only smoke test; neither substitutes for the remaining distribution review.
-CI keeps native Windows smoke and uses an explicitly recorded, QA-only headless
-backend for large layouts; all size/no-RX checks remain enforced (DEC-0180).
-This is packaging hardening, with no receive/audio changes or new binary release.
+Unreleased development: **Devices > Workflow Assignments** saves radio
+reservations by stable identity and shows their runtime status. P25 traffic
+selection respects those reservations. SSTV can use a selected, dedicated radio
+and frequency, or retain its existing main-receiver tap. See the
+[device ownership guide and migration matrix](docs/WORKFLOW_DEVICES.md).
+This is the first shared ownership milestone, **not** complete multi-instance
+routing across all workflows or multiple simultaneous P25 followers. That is
+the active T-0103 work; P25/FM DSP and audio timing remain unchanged.
+
+Earlier [infrastructure repairs](docs/INFRASTRUCTURE_HARDENING_20261003.md),
+clean package staging and complete Qt-runtime replacement tests are source/CI
+verified. The remaining [distribution-materials review](docs/PACKAGE_HARDENING_20261003.md)
+still blocks a new public binary (ISS-0060); CI artifacts are test evidence,
+not a published update. These completed packaging checks are not new implementation tasks.
 
 0.2.122 adds **Tools > DTMF Analysis**: short-burst decoding, explicit frequency
 inversion/shift/scale, sample-indexed evidence and local diagnostic export.

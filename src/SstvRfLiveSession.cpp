@@ -3,12 +3,25 @@
 #include "SstvLiveSession.h"
 #include "DeviceManager.h"
 #include "Receiver.h"
+#include "WorkflowRadioSession.h"
 #include <QDir>
 #include <QFileInfo>
 #include <QElapsedTimer>
 #include <stdexcept>
 
 namespace {void require(bool ok,const char* message){if(!ok) throw std::runtime_error(message);}}
+nlohmann::json decodeSstvDedicatedRadio(const QString& key, double frequencyHz,
+    const QString& output, const QString& imageMode, const QString& rfMode,
+    const std::function<bool()>& finish, const std::function<bool()>& cancel,
+    const SstvPreview& preview, const std::function<void(const QString&)>& routeStatus) {
+    WorkflowRadioSession radio(DeviceManager::instance(), key.toStdString(),
+        DeviceManager::DeviceLeaseOwner::Sstv, frequencyHz,
+        [&] { return (cancel && cancel()) || (finish && finish()); });
+    auto receiver = std::make_shared<Receiver>();
+    receiver->deviceIndex = radio.deviceIndex(); receiver->freqHz = frequencyHz; receiver->active = true;
+    return decodeSstvRfLive(receiver, output, imageMode, rfMode, finish,
+        [&] { return !radio.valid() || (cancel && cancel()); }, preview, routeStatus);
+}
 nlohmann::json decodeSstvRfLive(const std::shared_ptr<Receiver>& receiver,
     const QString& output,const QString& imageMode,const QString& rfMode,
     const std::function<bool()>& finish,const std::function<bool()>& cancel,

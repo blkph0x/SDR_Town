@@ -287,7 +287,7 @@ void InmarsatEngine::restorePreviousDeviceState() {
         manager.stopStreaming(deviceIndex);
         manager.setEnabled(deviceIndex, saved->wasEnabled);
     }
-    manager.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Inmarsat);
+    manager.releaseDeviceLease(deviceIndex, DeviceManager::DeviceLeaseOwner::Inmarsat);
     // Restore RF first; otherwise ordinary Listen demodulates the satellite carrier.
     if (restoreListen) SatcomHostServices::instance().endReceiverTakeover();
 }
@@ -414,7 +414,7 @@ InmarsatTakeoverResult InmarsatEngine::prepareTakeover(bool stopP25) {
     const auto deviceIndex = resolveDeviceIndex(&error);
     if (deviceIndex == std::numeric_limits<size_t>::max()) return {false, false, error};
     if (run_.load(std::memory_order_acquire)) return {true, false, {}};
-    const auto owner = DeviceManager::instance().deviceLeaseOwner();
+    const auto owner = DeviceManager::instance().deviceLeaseOwner(deviceIndex);
     if (owner == DeviceManager::DeviceLeaseOwner::Satcom ||
         owner == DeviceManager::DeviceLeaseOwner::Aircraft) {
         return {false, false, std::string(DeviceManager::leaseOwnerName(owner)) +
@@ -450,7 +450,7 @@ bool InmarsatEngine::start(bool force) {
     }
 
     auto& manager = DeviceManager::instance();
-    const auto owner = manager.deviceLeaseOwner();
+    const auto owner = manager.deviceLeaseOwner(deviceIndex);
     if (owner == DeviceManager::DeviceLeaseOwner::P25 ||
         owner == DeviceManager::DeviceLeaseOwner::Satcom ||
         owner == DeviceManager::DeviceLeaseOwner::Aircraft) {
@@ -485,7 +485,7 @@ bool InmarsatEngine::start(bool force) {
             previousDeviceState_.reset(); // No hardware state has changed yet.
             lastStatus_ = error.empty() ? "Could not pause Listen audio for Inmarsat" : error;
         }
-        manager.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Inmarsat);
+        manager.releaseDeviceLease(deviceIndex, DeviceManager::DeviceLeaseOwner::Inmarsat);
         notify();
         return false;
     }

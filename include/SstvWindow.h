@@ -16,6 +16,7 @@ class QSlider;
 class QThread;
 class QCloseEvent;
 class QResizeEvent;
+class QDoubleSpinBox;
 
 class SstvWindow final : public QDialog {
     Q_OBJECT
@@ -28,6 +29,9 @@ public:
     ~SstvWindow() override;
     bool startDecode(const QString& input, const QString& output, const QString& mode);
     void setLiveSource(LiveOpen open);
+    void setRfDevices(const std::vector<std::pair<QString, QString>>& devices);
+    QString selectedDeviceKey() const;
+    double selectedFrequencyHz() const;
     bool startLive(const QString& output,const QString& mode,const QString& rfMode = QStringLiteral("auto"));
     void finishLive();
     bool busy() const { return worker_ != nullptr; }
@@ -57,6 +61,8 @@ private:
     bool closePending_ = false;
     QLineEdit *input_, *output_;
     QComboBox *mode_, *source_, *rfMode_;
+    QComboBox* device_;
+    QDoubleSpinBox* frequency_;
     QLabel* rfStatus_;
     QPushButton *open_, *destination_, *decodeButton_, *cancelButton_, *folder_;
     QPushButton* finishButton_;

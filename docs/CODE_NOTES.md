@@ -1,5 +1,19 @@
 # Code notes (tree map)
 
+T-0103 / DEC-0181: `DeviceOwnership.h` is the serialized control-plane policy
+(stable-key reservations, per-endpoint/client leases, generations, shared domains,
+teardown exclusion and bounded persistence). `DeviceManager` owns its mutex,
+atomic assignment save/load, scoped commands and legacy per-device adapters.
+No driver teardown occurs while holding the ownership mutex. `WorkflowRadioSession`
+is a generic worker-only RAII adapter for any RF workflow; it validates the exact
+selected key again at claim time, rejects stub startup and uses scoped cleanup.
+`WorkflowDevicesWindow` is callback-injected Qt presentation; the manager rechecks
+active-stream conflicts at save. `SstvWindow`/`SstvRfLiveSession` provide the first
+dedicated UI adapter, with existing main-receiver tap retained. MainWindow P25
+source allocation respects reservations; P25 decode/audio kernels are untouched.
+Policy/widget/five-mock-radio tests cover ownership, not decoded RF acceptance.
+The complete adapter/instance migration is **not** done: see WORKFLOW_DEVICES.md.
+
 T-0104 / DEC-0178: qt_sources.py explicitly fetches only reviewed SHA256-pinned
 Qt module archives, preserves complete sources, catalogs license/attribution
 files and records six SDK configuration files. Streaming tar inspection has

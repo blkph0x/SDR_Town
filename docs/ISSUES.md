@@ -1,6 +1,6 @@
 # Issues (canonical)
 
-## ISS-0067 - CI GUI replacement test viewport mismatch (2026-10-04, TEST REPAIR)
+## ISS-0067 - CI GUI replacement test viewport mismatch (2026-10-04, SOURCE VERIFIED)
 
 T-0104 / DEC-0180.6d45304 CI37164667115 fully builds Qt6.7.3 and passes native
 probe/CLI/listening startup, but requested1280x900 becomes1028x749 in the runner.
@@ -10,7 +10,8 @@ all geometry assertions, record desktop metrics, exercise large layouts through
 an explicit QA-only offscreen backend. Its missing-font condition is separately
 reproduced locally and fixed with process-local Windows font-directory selection.
 Four local offscreen layouts and full source-built integration PASS747.656s;
-98 helper tests pass. Exact CI must pass before source acceptance.
+98 helper tests pass.10259ca Windows37168422913/YAML37168422917 pass; exact
+downloaded acceptance is comment203327059. Technical/source repair complete.
 No production UI, radio, audio or package
 plugin changes. Other operating systems are not qualified by this Windows test.
 
@@ -194,6 +195,13 @@ still need a typed discontinuity contract. See the infrastructure ledger.
 An additional failing empty-poll test at 90edc4a is now repaired: consumer
 epoch acknowledgement waits for a nonempty delivery, so sample-driven HF
 reset detection survives polling during the loss interval.
+T-0103 / DEC-0181 implements the first per-endpoint ownership/reservation model
+and generic scoped worker lifecycle, with five-mock-radio checks. Remaining
+issues are not closed: raw legacy start/gain/rate/restore operations, singleton
+host takeover and P25 controllers, logical-receiver source selection across all
+demods, shared-source negotiation and real driver-hang/unplug qualification.
+WORKFLOW_DEVICES.md records the exact migration matrix; an assigned pool is not
+evidence of concurrent P25 decoding or full multi-instance satellite engines.
 
 ## ISS-0056 - Test-tone hardware TX and control hardening (2026-10-03, OPEN)
 

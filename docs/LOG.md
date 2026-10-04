@@ -1,5 +1,23 @@
 # Development log
 
+## 2026-10-04 - Move from repeated release tracking to universal device ownership
+
+Reconciled10259ca's completed Qt/CI acceptance instead of reimplementing it.
+DEC-0181 / T-0103 begins the common ownership migration. User clarified that
+every mode/demod/workflow needs the same source-selection model, with repeated
+instances; P25/SSTV were examples. Added stable-key reservations, instance tokens,
+scoped worker sessions, assignment/status UI and dedicated SSTV source controls.
+P25 pool selection excludes reserved secondary radios. Inmarsat/Satcom checks
+refer to their selected radio, not an unrelated global owner. The full migration
+matrix explicitly retains singleton/controller, hardware-mutation and observer
+binding gaps. Do not call the complete multi-workflow system finished.
+Policy, widget and five-mock-radio manager tests pass; final all-target Release
+build and17/17 CTest suites PASS78.98s. Ownership widgets18 assertions pass and
+their screenshot is visually checked. Four actual-app offscreen/no-RX profiles
+also pass after final CLI tune-role alignment. Exact source CI outcome is recorded
+on the published commit's acceptance comment. No new public binary while ISS-0060
+is unresolved. No RF quality claim or P25 timing change.
+
 ## 2026-10-04 - T-0104 clean-CI viewport failure and repair
 
 6d45304 source CI compiles application and Qt6.7.3 successfully, then fails the

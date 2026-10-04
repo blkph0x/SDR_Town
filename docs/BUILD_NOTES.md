@@ -1,5 +1,39 @@
 # Build notes
 
+## 2026-10-04 - T-0103 ownership milestone (DEC-0181), qualification in progress
+
+Host Windows/MSVC14.44/Qt6.11.1, configured C:/vcpkg; baseline10259ca.
+First targeted compile failed at new isHardwareStreaming: `stateMtx` is not a
+StreamState member. Corrected to the existing mutable `stateMutex`; subsequent
+application/core/workspace/all-target Release builds pass. Later final source
+rebuild and full regressions are still being qualified below; do not infer CI.
+Policy:75 assertions/6 tests PASS. Assignment widgets:10 assertions/2 tests PASS.
+First offscreen widget launch did not initialize with the ambient plugin path;
+explicit configured Qt plugin/bin paths run successfully. Five-mock-radio
+DeviceManager lifecycle:27 assertions PASS (four independent P25 ownership
+instances plus SSTV, refused cross-workflow tune, stale-worker cleanup cannot
+stop a replacement lease). This does not decode or prove concurrent P25 calls.
+Exact-patch P25 guard self-tests/negative mutations PASS. No P25 DSP/vocoder/
+speaker timing modifications. Build logs are under build/ownership-*.log.
+Final all-target Release rebuild PASS. Full CTest17/17 PASS in78.98s; includes
+new WorkflowRadioLifecycle and all existing RF/control/GUI/Rust backend suites.
+Final offscreen ownership widgets18 assertions/3 tests PASS, including stable
+SSTV selection. Visually inspected build/workflow-devices.png: labels, controls
+and table fit without overlaps. Physical multi-radio RF and remote CI acceptance
+are not established by those local fixtures.
+Final call-site review keeps repeater dual-watch tuning under Listen (despite
+its source file's P25 name) and labels the six actual CLI P25 tuning calls as
+P25, so a P25 reservation works from both interfaces. Application rebuild PASS;
+four actual-app offscreen profiles PASS at960x720,1280x900,800x700,1600x900,
+with no RX/startup errors. Exact-commit source CI outcome belongs in that
+commit's acceptance comment; no additional release-loop implementation implied.
+
+Previous release work reconciled:10259ca Windows37168422913 and YAML37168422917
+PASS; complete17-file Qt6.7.3 replacement, native smoke and four layouts are
+verified in downloaded135-file inventory, commit comment203327059. Those are
+completed technical gates, not pending implementation. ISS-0060 materials/review
+remains a separate publication blocker.
+
 ## 2026-10-04 - T-0104 CI viewport qualification (DEC-0180)
 
 6d45304 Windows37164667115 FAILS only in the new full replacement GUI gate;

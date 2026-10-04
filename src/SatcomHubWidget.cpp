@@ -166,18 +166,16 @@ void SatcomHubWidget::autoCaptureTick() {
     if (!best) return;
 
     auto& manager = DeviceManager::instance();
-    const auto currentOwner = manager.deviceLeaseOwner();
-    if (currentOwner == DeviceManager::DeviceLeaseOwner::P25 ||
-        currentOwner == DeviceManager::DeviceLeaseOwner::Inmarsat ||
-        currentOwner == DeviceManager::DeviceLeaseOwner::Aircraft) {
-        autoCaptureRetryAfter_ = now + 10;
-        return;
-    }
-
     std::string deviceError;
     const size_t deviceIndex = engine.resolveDeviceIndex(&deviceError);
     if (deviceIndex == static_cast<size_t>(-1)) {
         autoCaptureRetryAfter_ = now + 15;
+        return;
+    }
+
+    const auto currentOwner = manager.deviceLeaseOwner(deviceIndex);
+    if (!manager.canUseDevice(deviceIndex, DeviceManager::DeviceLeaseOwner::Satcom)) {
+        autoCaptureRetryAfter_ = now + 10;
         return;
     }
 

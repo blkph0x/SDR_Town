@@ -46,7 +46,15 @@ Repair details and follow-up order: INFRASTRUCTURE_HARDENING_20261003.md.
 The completed source batch is 90edc4a + 65e3da3. T-0103..0105 below retain the
 unimplemented larger work; there is no new public binary or version bump.
 
-T-0103 | queued | Device ownership and worker lifecycle qualification |
+T-0103 | in_progress | Device ownership, workflow assignment and worker lifecycle qualification |
+DEC-0181: user requires identical ownership/selection across ALL modes, demods
+and workflows, with repeated instances; P25/SSTV are examples. First
+milestone: persistent per-device workflow reservations, per-device leases/token
+invalidation, visible conflict/status UI, P25 pool isolation and dedicated SSTV.
+Concurrent P25 controllers/calls and driver-hang recovery are separate remaining
+milestones; do not present an assigned pool as concurrent call decoding.
+Current migration matrix and concrete limits: WORKFLOW_DEVICES.md. Main Listen,
+P25, satellite singleton controllers and observer-source selection remain open.
 Depends on T-0102 loss-boundary/source regression evidence; ISS-0055. Define
 stable physical identity and generation-bound consumer tokens, including shared
 SDRplay tuner domains and ambiguous duplicate serials. Inventory every raw tune/
@@ -56,7 +64,7 @@ make/read/stop, stub handoff and destruction. Do not simply remove the global
 driver mutex or block the GUI on an unbounded join. P25 callers require a new
 reviewed change and capture/field acceptance, not this pass's guard exception.
 
-T-0104 | in_progress / release blocker | Exact binary dependency notice/source kit |
+T-0104 | remaining materials/review / binary gate | Exact binary dependency notice/source kit |
 DEC-0172: first implement exact-file inventory, staged original/vcpkg notices,
 binary-to-build-input checks and negative ZIP tests. Do not label mechanical
 coverage as complete transitive licensing or silently clear source/runtime
@@ -100,14 +108,16 @@ distribution questions. No RX/DSP or live server changes in this pass.
   networking/TLS/rendering and actual CLI/four GUI dry-run gates; preserve SDK,
   package and RF behavior.16 Qt6.11.1 replacements/4 no-RX GUI profiles PASS;
   96 packaging/helper tests and16/16 native suites PASS. Input hashes and
-  optional-feature differences recorded. Independent CI6.7.3 still required;
+  optional-feature differences recorded. Independent CI6.7.3 now PASS10259ca;
   no claim of all Qt modules, exact upstream feature reproduction or licensing
   completion from runtime smoke. Remaining source-kit/toolchain review below.
-- [ ] DEC-0180 / ISS-0067: source CI full rebuild passed but large native GUI
+- [X] DEC-0180 / ISS-0067: source CI full rebuild passed but large native GUI
   viewport was clamped. Keep native smoke, add recorded desktop metrics and
   exact-size headless layouts using rebuilt QA-only qoffscreen/installed fonts.
   Local full source-built integration PASS747.656s, native listening plus all
-  four offscreen profiles,98 helper tests. Exact clean CI pending.
+  four offscreen profiles,98 helper tests.10259ca Windows37168422913 and
+  YAML37168422917 PASS; downloaded17-runtime result/135-file inventory match.
+  Acceptance comment203327059. These technical checks are closed, not pending.
 - [ ] Full transitive/combined-distribution review, then public asset verification.
 15 new inventory tests, 17 release-verifier tests and 16/16 native suites pass
 locally. Source929cb11 Windows CI37116308564 and YAML37116308593 PASS; clean

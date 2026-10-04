@@ -27,9 +27,17 @@ def expect_allowed(path: str) -> None:
 
 def main() -> int:
     import subprocess
+    for path in MODULE.WORKFLOW_DIGESTS:
+        before = subprocess.check_output(["git", "show", "10259ca:" + path], cwd=ROOT, text=True, encoding="utf-8")
+        after = (ROOT / path).read_text(encoding="utf-8")
+        assert MODULE.infrastructure_text_allowed(path, before, after)
+        assert not MODULE.infrastructure_text_allowed(path, before, after + "\nRF change")
+        assert not MODULE.infrastructure_text_allowed(path, after, before)
+        assert not MODULE.infrastructure_text_allowed("src/P25LiveDecoder.cpp", before, after)
+        assert not MODULE.infrastructure_text_allowed(path, before, after.replace("false", "true", 1))
     for path in MODULE.INFRASTRUCTURE_DIGESTS:
         before = subprocess.check_output(["git", "show", "d47f000:" + path], cwd=ROOT, text=True, encoding="utf-8")
-        after = (ROOT / path).read_text(encoding="utf-8")
+        after = subprocess.check_output(["git", "show", "10259ca:" + path], cwd=ROOT, text=True, encoding="utf-8")
         assert MODULE.infrastructure_text_allowed(path, before, after)
         assert not MODULE.infrastructure_text_allowed(path, before, after + "\nRF change")
         assert not MODULE.infrastructure_text_allowed(path, before + "\n", after)
@@ -41,7 +49,7 @@ def main() -> int:
         assert not MODULE.infrastructure_text_allowed(path, before, after.replace("false", "true", 1))
     path = "src/DeviceManager.cpp"
     before = subprocess.check_output(["git", "show", "90edc4a:" + path], cwd=ROOT, text=True, encoding="utf-8")
-    after = (ROOT / path).read_text(encoding="utf-8")
+    after = subprocess.check_output(["git", "show", "10259ca:" + path], cwd=ROOT, text=True, encoding="utf-8")
     assert MODULE.infrastructure_text_allowed(path, before, after)
     assert not MODULE.infrastructure_text_allowed(path, before, after + "\nchange")
     assert not MODULE.infrastructure_text_allowed(path, after, before)
@@ -59,7 +67,7 @@ def main() -> int:
     assert not MODULE.dtmf_text_allowed(path, after, before_dtmf)
     orchestration="src/MainWindowP25Orchestration.cpp"
     old=subprocess.check_output(["git","show","ab21a4f:"+orchestration],cwd=ROOT,text=True,encoding="utf-8")
-    new=(ROOT/orchestration).read_text(encoding="utf-8")
+    new=subprocess.check_output(["git","show","10259ca:"+orchestration],cwd=ROOT,text=True,encoding="utf-8")
     assert MODULE.dtmf_text_allowed(orchestration,old,new)
     assert not MODULE.dtmf_text_allowed(orchestration,old,new+"\nchange")
     assert not MODULE.dtmf_text_allowed(orchestration,old,new.replace("repEnabled && dualActive", "repEnabled || dualActive"))

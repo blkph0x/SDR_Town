@@ -15,6 +15,7 @@
 #include "SdrplayDiversity.h"
 #include "SdrplayControl.h"
 #include "RtlBiasT.h"
+#include "DeviceOwnership.h"
 
 struct Receiver;  // forward for per-rx cursor methods (full def in Receiver.h, included in .cpp)
 
@@ -88,24 +89,33 @@ public:
     // devices to populate antennas, sample rates, gain ranges, freq limits etc.
     // probeHardware=false for launch / initial count (completely avoids any hardware open/make
     // at startup so we never crash on open even with bad RTL driver/USB state).
-    enum class DeviceLeaseOwner {
-        None = 0,
-        Listen = 1,
-        P25 = 2,
-        Satcom = 3,
-        Inmarsat = 4,
-        Aircraft = 5,
-    };
+    using DeviceLeaseOwner = DeviceOwnership::Owner;
+    using DeviceLeaseToken = DeviceOwnership::Token;
 
     std::vector<DeviceInfo> enumerateDevices(bool probeHardware = true, bool stopActiveStreams = true);
 
     // Secondary features (satcom/Inmarsat/aircraft) must retune through a lease so they
-    // cannot steal a live listen/P25 session unless force=true.
+    // force acknowledges unmanaged reception; it never steals an explicit lease.
     bool acquireDeviceLease(size_t index, DeviceLeaseOwner owner, bool force, std::string* error);
     void releaseDeviceLease(DeviceLeaseOwner owner);
+    void releaseDeviceLease(size_t index, DeviceLeaseOwner owner);
     DeviceLeaseOwner deviceLeaseOwner() const;
+    DeviceLeaseOwner deviceLeaseOwner(size_t index) const;
     bool retuneWithLease(size_t index, double freqHz, DeviceLeaseOwner owner, bool force, std::string* error);
     static const char* leaseOwnerName(DeviceLeaseOwner owner);
+    DeviceLeaseToken claimDevice(size_t index, DeviceLeaseOwner owner, const std::string& client, std::string* error,
+                                 const std::string& expectedKey = {});
+    bool ownsDevice(const DeviceLeaseToken& token) const;
+    bool releaseDevice(const DeviceLeaseToken& token);
+    bool tuneDevice(const DeviceLeaseToken& token, double freqHz, std::string* error);
+    bool startDevice(const DeviceLeaseToken& token, std::string* error);
+    bool stopDevice(const DeviceLeaseToken& token);
+    bool isHardwareStreaming(size_t index) const;
+    bool canUseDevice(size_t index, DeviceLeaseOwner owner, std::string* error = nullptr) const;
+    DeviceOwnership::Assignments workflowAssignments() const;
+    bool setWorkflowAssignments(const DeviceOwnership::Assignments& assignments, std::string* error);
+    DeviceLeaseOwner workflowAssignment(size_t index) const;
+    bool hasUniqueDeviceIdentity(size_t index) const;
 
     double getCurrentCenterFreq(size_t index) const;
     double getCurrentSampleRate(size_t index) const;
@@ -190,7 +200,7 @@ public:
     size_t getSpectrumFftBins(size_t index) const;
 
     // Tune / scanner support
-    uint64_t setCenterFreq(size_t index, double freqHz);
+    uint64_t setCenterFreq(size_t index, double freqHz, DeviceLeaseOwner owner = DeviceLeaseOwner::Listen);
     uint64_t getCenterTuneRequestSeq(size_t index) const;
     uint64_t getCenterTuneAppliedSeq(size_t index) const;
     bool waitForCenterTuneApplied(size_t index, uint64_t requestSeq, int timeoutMs) const;
@@ -397,6 +407,10 @@ private:
     size_t diversityCompositeIndex_ = static_cast<size_t>(-1);
     size_t preferredListenDeviceIndex_ = 0;
     mutable std::mutex leaseMutex_;
-    DeviceLeaseOwner deviceLeaseOwner_ = DeviceLeaseOwner::None;
-    size_t deviceLeaseIndex_ = static_cast<size_t>(-1);
+    DeviceOwnership ownership_;
+    bool assignmentsLoaded_ = false;
+    std::string assignmentLoadError_;
+    void bindWorkflowDevices();
+    void stopStreamingImpl(size_t index);
+    uint64_t queueCenterFreq(size_t index, double freqHz);
 };

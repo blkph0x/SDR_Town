@@ -113,6 +113,8 @@ set(SDR_TOWN_SOURCES
     src/SstvRfLiveSession.cpp
     src/SstvProgress.cpp
     src/SstvWindow.cpp
+    src/WorkflowDevicesWindow.cpp
+    src/WorkflowRadioSession.cpp
     include/SstvWindow.h
     src/main.cpp
     src/P25VoiceTiming.cpp
@@ -455,6 +457,7 @@ if(BUILD_TESTS)
     tests/test_sstv_live_input.cpp
     tests/test_sstv_rate_converter.cpp
     tests/test_devicemanager.cpp
+    tests/test_device_ownership.cpp
     tests/test_tx_safety.cpp
     tests/test_hardware_loss.cpp
     tests/test_sdrplay_profile.cpp
@@ -636,6 +639,7 @@ if(BUILD_TESTS)
     src/CwWindow.cpp include/CwWindow.h src/CwSession.cpp)
   target_sources(sdr_town_workspace_tests PRIVATE tests/test_dtmf_gui.cpp
     src/DtmfWindow.cpp include/DtmfWindow.h)
+  target_sources(sdr_town_workspace_tests PRIVATE tests/test_workflow_devices_gui.cpp src/WorkflowDevicesWindow.cpp)
   target_link_libraries(sdr_town_workspace_tests PRIVATE sdr_town_morse)
   target_sources(sdr_town_workspace_tests PRIVATE tests/test_sdrplay_controls_gui.cpp
       src/SdrplayControlsWidget.cpp src/SdrplayControl.cpp src/SdrplayProfile.cpp
@@ -651,6 +655,11 @@ if(BUILD_TESTS)
   endif()
 
   # DEC-0123: real widget/engine with a hardware-free DeviceManager backend.
+  target_sources(sdr_town_tests PRIVATE src/WorkflowRadioSession.cpp tests/test_workflow_radio_session.cpp)
+  if(TARGET SoapySDR)
+    add_test(NAME WorkflowRadioLifecycle COMMAND sdr_town_tests "[.ownership-live]")
+    set_tests_properties(WorkflowRadioLifecycle PROPERTIES TIMEOUT 60)
+  endif()
   # Reuse core build inputs, not copies/stubs of the selection/receiver logic.
   get_target_property(inmarsat_gui_sources sdr_town_tests SOURCES)
   list(FILTER inmarsat_gui_sources EXCLUDE REGEX "(^|/)tests/")

@@ -46,6 +46,7 @@ PROTECTED_PATTERNS: tuple[str, ...] = (
     "include/AudioEngine.h",
     "src/MainWindow.cpp",
     "include/MainWindow.h",
+    "src/CliApp.cpp",
 )
 
 SATCOM_MAINWINDOW_PATH = "src/MainWindow.cpp"
@@ -74,13 +75,30 @@ LOSS_ACK_DIGESTS = {
         "78c94d69c87650c4e3b1469f826e3b0d4d309d5daec340da187533121ea01112"),
 }
 
+# DEC-0181 / T-0103: exact reviewed ownership/assignment patch. Source selection
+# may reject reserved radios; no demodulator, vocoder or speaker timing edits.
+WORKFLOW_DIGESTS = {
+    "src/CliApp.cpp": (
+        "272b694b177a186ab62ddf38dade9e1def8d03c4a44636752debd5c0ca9e0839",
+        "21f6522f5a61cd8dc3537b21c0fd2cc7f7e6ca36ecf9f9c5d6cd3cfc2f8a662d"),
+    "src/DeviceManager.cpp": (
+        "78c94d69c87650c4e3b1469f826e3b0d4d309d5daec340da187533121ea01112",
+        "14a3753c9cd4f4b2d75cee02bee574ceb08c26748930a9ce1295cd55b938e612"),
+    "include/DeviceManager.h": (
+        "1444bb34ee7da5d7bdaea0dd1d4de77d8491787704e1cbb65f92e46aaadac33b",
+        "c19c6dde380f1ee1cd8ca59208cfd0445d32da857437dc78c405b0cfe2dc85e2"),
+    "src/MainWindow.cpp": (
+        "7354c636fb731ac250c0aa9aa1a900cadc78baa465ff9e617d43d5d97f97b40d",
+        "055f919232c2dc78e8be9628c031cdea70874bd382f1e5183598e5e551b9a219"),
+}
+
 
 def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
     actual = (
         hashlib.sha256(before.encode("utf-8")).hexdigest(),
         hashlib.sha256(after.encode("utf-8")).hexdigest(),
     )
-    return actual in (INFRASTRUCTURE_DIGESTS.get(path), LOSS_ACK_DIGESTS.get(path))
+    return actual in (INFRASTRUCTURE_DIGESTS.get(path), LOSS_ACK_DIGESTS.get(path), WORKFLOW_DIGESTS.get(path))
 
 
 # DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.
@@ -562,9 +580,9 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
-        if args.paths is None and path in INFRASTRUCTURE_DIGESTS:
+        if args.paths is None and path in (INFRASTRUCTURE_DIGESTS.keys() | WORKFLOW_DIGESTS.keys()):
             if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
-                print(f"P25 guard: accepted exact DEC-0171 infrastructure repair: {path}")
+                print(f"P25 guard: accepted exact reviewed infrastructure/ownership patch: {path}")
                 continue
         if args.paths is None and path in ("src/MainWindow.cpp", "src/MainWindowP25Orchestration.cpp"):
             if dtmf_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
