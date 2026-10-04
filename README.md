@@ -2,10 +2,11 @@
 
 Unreleased development: **Devices > Workflow Assignments** saves radio
 reservations by stable identity and shows their runtime status. P25 traffic
-selection respects those reservations. SSTV can use a selected, dedicated radio
-and frequency, or retain its existing main-receiver tap. See the
+selection respects those reservations. Inmarsat, Satcom and Aircraft use selected
+radio sessions. Add Receiver selects radio/mode/frequency; SSTV, CW, DTMF and
+the RDS/tone status window can inspect selected logical receivers. See the
 [device ownership guide and migration matrix](docs/WORKFLOW_DEVICES.md).
-This is the first shared ownership milestone, **not** complete multi-instance
+These are shared ownership/routing milestones, **not** complete multi-instance
 routing across all workflows or multiple simultaneous P25 followers. That is
 the active T-0103 work; P25/FM DSP and audio timing remain unchanged.
 

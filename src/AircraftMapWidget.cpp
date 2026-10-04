@@ -5,6 +5,8 @@
 #include "AircraftReceivePlan.h"
 #include "AircraftMagnitudeStream.h"
 #include "Receiver.h"
+#include "WorkflowRadioSession.h"
+#include "WorkflowDeviceCombo.h"
 
 #include <QCheckBox>
 #include <QDialog>
@@ -56,6 +58,16 @@ AircraftMapWidget::AircraftMapWidget(QWidget* parent)
 
     status_ = new QLabel("Aircraft map — OpenSky (local 1090 off)", this);
     tuneBtn_ = new QPushButton("Tune 1090", this);
+    tuneBtn_->setObjectName("aircraftTune");
+    stopBtn_ = new QPushButton("Stop radio", this);
+    stopBtn_->setObjectName("aircraftStop");
+    stopBtn_->setEnabled(false);
+    deviceCombo_ = new QComboBox(this);
+    deviceCombo_->setObjectName("aircraftDevice");
+    deviceCombo_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    deviceCombo_->setMinimumContentsLength(18);
+    refreshWorkflowDeviceCombo(*deviceCombo_, DeviceOwnership::Owner::Aircraft,
+        QSettings().value("aircraft/deviceKey").toString());
     netBtn_ = new QPushButton("Refresh net", this);
     localAdsbCheck_ = new QCheckBox("Local 1090 decode", this);
     localAdsbCheck_->setChecked(false);
@@ -81,6 +93,10 @@ AircraftMapWidget::AircraftMapWidget(QWidget* parent)
     layout->addWidget(new QLabel("Capture bandwidth", toolbar_), 2, 0);
     layout->addWidget(captureBandwidth_, 2, 1, 1, 2);
     layout->addWidget(tuneBtn_, 2, 3);
+    layout->addWidget(new QLabel("Radio", toolbar_), 3, 0);
+    layout->addWidget(deviceCombo_, 3, 1, 1, 2);
+    layout->addWidget(stopBtn_, 3, 3);
+    stopBtn_->setEnabled(false);
     toolbar_->setStyleSheet("QWidget { background: #202428; color: #eeeeee; }");
     netBtn_->setEnabled(internetCheck_->isChecked());
     localAdsbCheck_->setToolTip("Decode new IQ in order on the selected receiver at 1090 MHz. Processing gaps are logged.");
@@ -95,6 +111,10 @@ AircraftMapWidget::AircraftMapWidget(QWidget* parent)
     // or touch DeviceManager while the user is on normal WFM listening.
 
     connect(tuneBtn_, &QPushButton::clicked, this, &AircraftMapWidget::onTune1090);
+    connect(stopBtn_, &QPushButton::clicked, this, [this] { localRun_.store(false); tuneStatus_ = "Stopping aircraft radio"; refreshUi(); });
+    connect(deviceCombo_, &QComboBox::currentIndexChanged, this, [this] {
+        QSettings().setValue("aircraft/deviceKey", deviceCombo_->currentData());
+    });
     connect(netBtn_, &QPushButton::clicked, this, &AircraftMapWidget::onRefreshNetwork);
     connect(localAdsbCheck_, &QCheckBox::toggled, this, &AircraftMapWidget::onLocalAdsbToggled);
     connect(internetCheck_, &QCheckBox::toggled, this, &AircraftMapWidget::onInternetAircraftToggled);
@@ -110,7 +130,8 @@ void AircraftMapWidget::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);
     if (uiTimer_ && !uiTimer_->isActive()) uiTimer_->start(1500);
     if (AdsBTrackStore::instance().networkEnabled() && !netTimer_->isActive()) netTimer_->start(30000);
-    if (localAdsbCheck_ && localAdsbCheck_->isChecked()) startLocalWorker();
+    if (!radioBusy_.load()) refreshWorkflowDeviceCombo(*deviceCombo_, DeviceOwnership::Owner::Aircraft,
+        deviceCombo_->currentData().toString());
     fetchOpenSky();
     refreshUi();
 }
@@ -120,7 +141,7 @@ void AircraftMapWidget::hideEvent(QHideEvent* event) {
     if (uiTimer_) uiTimer_->stop();
     if (netTimer_) netTimer_->stop();
     if (aircraftReply_) aircraftReply_->abort();
-    if(!remoteLocal_)stopLocalWorker();
+    if (!remoteLocal_) localRun_.store(false);
 }
 
 AircraftMapWidget::~AircraftMapWidget() {
@@ -140,23 +161,38 @@ void AircraftMapWidget::stopLocalWorker() {
     if (localThread_.joinable()) localThread_.join();
 }
 
-void AircraftMapWidget::startLocalWorker() {
+void AircraftMapWidget::startLocalWorker(const std::string& key, double rateHz, double bandwidthHz) {
     stopLocalWorker();
+    radioBusy_.store(true);
     localRun_.store(true);
-    localThread_ = std::thread([this]() {
+    decodeLocal_.store(localAdsbCheck_->isChecked());
+    deviceCombo_->setEnabled(false); captureBandwidth_->setEnabled(false); tuneBtn_->setEnabled(false); stopBtn_->setEnabled(true);
+    localThread_ = std::thread([this, key, rateHz, bandwidthHz]() {
+        std::string failure;
+        try {
+        auto& mgr = DeviceManager::instance();
+        WorkflowRadioSession radio(mgr, key, DeviceOwnership::Owner::Aircraft, 1090e6,
+            [this] { return !localRun_.load(); }, rateHz, bandwidthHz);
+        const auto i = radio.deviceIndex();
+        radioReady_.store(true);
+        QMetaObject::invokeMethod(this, [this, rateHz] {
+            tuneStatus_ = QString("1090 MHz ready | Capture %1 MHz").arg(rateHz / 1e6, 0, 'f', 2);
+            refreshUi();
+        }, Qt::QueuedConnection);
         Receiver cursor;
         AircraftMagnitudeStream decoder;
         size_t selected = static_cast<size_t>(-1);
         uint64_t next = 0, epoch = 0, samples = 0, gaps = 0, decoded = 0;
         auto reportAt = std::chrono::steady_clock::now();
-        while (localRun_.load()) {
+        while (localRun_.load() && radio.valid()) {
+            if (!mgr.isHardwareStreaming(i)) {
+                failure = "Aircraft receiver lost live hardware";
+                break;
+            }
             bool received = false;
             try {
-                auto& mgr = DeviceManager::instance();
-                const auto devs = mgr.getDevices();
-                const auto i = mgr.preferredListenDeviceIndex();
                 const double rate = mgr.getCurrentSampleRate(i);
-                if (i < devs.size() && devs[i].enabled && mgr.isStreaming(i) &&
+                if (decodeLocal_.load() && mgr.isHardwareStreaming(i) &&
                     mgr.getCurrentCenterFreq(i) == 1090e6 && rate >= 2e6 && rate <= 20e6) {
                     if (selected != i) { mgr.setReceiverCursorToLiveEdge(i, cursor); decoder.reset(); selected = i; next = 0; }
                     // Bounded work units, chronological cursor. One-second backlog
@@ -185,16 +221,29 @@ void AircraftMapWidget::startLocalWorker() {
                 }
             } catch (const std::exception& e) {
                 spdlog::warn("Aircraft IQ worker stopped: {}", e.what());
+                failure = e.what();
                 localRun_.store(false);
             }
             if (!received) std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
+        if (localRun_.load() && !radio.valid()) failure = "Aircraft radio ownership expired";
+        } catch (const std::exception& e) {
+            if (localRun_.load()) failure = e.what();
+        }
+        localRun_.store(false); radioReady_.store(false);
+        QMetaObject::invokeMethod(this, [this, failure] {
+            radioBusy_.store(false);
+            tuneStatus_ = failure.empty() ? "Aircraft radio stopped" : "Aircraft radio: " + QString::fromStdString(failure);
+            deviceCombo_->setEnabled(true); captureBandwidth_->setEnabled(true); tuneBtn_->setEnabled(true); stopBtn_->setEnabled(false);
+            refreshWorkflowDeviceCombo(*deviceCombo_, DeviceOwnership::Owner::Aircraft, deviceCombo_->currentData().toString());
+            refreshUi();
+        }, Qt::QueuedConnection);
     });
 }
 
 void AircraftMapWidget::onLocalAdsbToggled(bool on) {
-    if (on && (isVisible() || remoteLocal_)) startLocalWorker();
-    else stopLocalWorker();
+    decodeLocal_.store(on);
+    if (on && !radioBusy_.load()) tuneStatus_ = "Select a radio and Tune 1090 to start local decoding";
     refreshUi();
 }
 
@@ -218,7 +267,7 @@ void AircraftMapWidget::refreshUi() {
             .arg(snap.tracks.size())
             .arg(snap.localCrcOk)
             .arg(!snap.networkEnabled ? QString("disabled") : snap.networkOnline ? QString("OK age %1s").arg(snap.networkAgeSec) : QString("offline"))
-            .arg(localRun_.load() ? "on" : "off")
+            .arg(radioReady_.load() && decodeLocal_.load() ? "on" : "off")
             .arg(QString::fromStdString(snap.lastStatus)) + (tuneStatus_.isEmpty() ? QString{} : "\n" + tuneStatus_));
     toolbar_->setGeometry(8, 8, width() - 16, toolbar_->sizeHint().height());
     ensureTiles();
@@ -259,10 +308,13 @@ void AircraftMapWidget::fetchOpenSky() {
 
 void AircraftMapWidget::onTune1090() {
     tuneSucceeded_=false;
+    if (radioBusy_.load()) { tuneStatus_ = "Stop the aircraft radio before tuning again"; refreshUi(); return; }
     auto& mgr = DeviceManager::instance();
     const auto devs = mgr.getDevices();
-    const size_t idx = mgr.preferredListenDeviceIndex();
-    if (idx >= devs.size()) { tuneStatus_ = "No receiver available"; refreshUi(); return; }
+    std::string err;
+    const size_t idx = mgr.resolveWorkflowDevice(DeviceOwnership::Owner::Aircraft,
+        deviceCombo_->currentData().toString().toStdString(), mgr.preferredListenDeviceIndex(), &err);
+    if (idx >= devs.size()) { tuneStatus_ = QString::fromStdString(err); refreshUi(); return; }
     const auto plan = aircraftReceivePlan(captureBandwidth_->value() * 1e6,
         devs[idx].sampleRates, devs[idx].bandwidthsHz);
     if (plan.sampleRateHz == 0) {
@@ -272,34 +324,13 @@ void AircraftMapWidget::onTune1090() {
     if (devs[idx].maxFreq > 0 && (devs[idx].maxFreq < 1090e6 || devs[idx].minFreq > 1090e6)) {
         tuneStatus_ = "Selected receiver cannot tune 1090 MHz"; refreshUi(); return;
     }
-    std::string err;
-    if (!mgr.acquireDeviceLease(idx, DeviceManager::DeviceLeaseOwner::Aircraft, false, &err)) {
-        tuneStatus_ = QString::fromStdString(err); refreshUi();
-        return;
-    }
-    stopLocalWorker();
-    // Apply capture geometry while stopped so startup cannot copy old IF settings.
-    mgr.stopStreaming(idx);
-    mgr.applyLiveSampleRate(idx, plan.sampleRateHz);
-    bool ok = mgr.setEnabled(idx, true);
-    if (ok && devs[idx].isSdrplay && plan.hardwareBandwidthHz > 0)
-        ok = mgr.setLiveBandwidth(idx, plan.hardwareBandwidthHz, &err);
-    if (ok) ok = mgr.retuneWithLease(idx, 1090e6, DeviceManager::DeviceLeaseOwner::Aircraft, false, &err);
-    if (ok) ok = mgr.startStreaming(idx, true);
-    if (!ok) {
-        mgr.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Aircraft);
-        tuneStatus_ = "1090 setup failed: " + QString::fromStdString(err.empty() ? mgr.getRuntimeStateLabel(idx) : err);
-    } else {
-        const double actual = mgr.getCurrentSampleRate(idx);
-        tuneStatus_ = QString("1090 MHz requested | Capture %1 / requested %2 MHz | IF %3")
-            .arg(actual / 1e6, 0, 'f', 2).arg(plan.requestedHz / 1e6, 0, 'f', 1)
-            .arg(devs[idx].isSdrplay && plan.hardwareBandwidthHz > 0 ?
-                QString::number(plan.hardwareBandwidthHz / 1e6, 'f', 2) + " MHz" : "driver managed");
-        spdlog::info("Aircraft tune dev={} requestedHz={} captureHz={} plannedIfHz={} state={}",
-            idx, plan.requestedHz, actual, plan.hardwareBandwidthHz, mgr.getRuntimeStateLabel(idx));
-        tuneSucceeded_=true;
-        if (localAdsbCheck_->isChecked() && (isVisible() || remoteLocal_)) startLocalWorker();
-    }
+    if (mgr.isStreaming(idx)) { tuneStatus_ = "Selected radio is already receiving; stop its workflow or choose another SDR"; refreshUi(); return; }
+    const auto key = devs[idx].stableKey;
+    QSettings().setValue("aircraft/deviceKey", QString::fromStdString(key));
+    refreshWorkflowDeviceCombo(*deviceCombo_, DeviceOwnership::Owner::Aircraft, QString::fromStdString(key));
+    tuneStatus_ = "Opening selected aircraft radio";
+    startLocalWorker(key, plan.sampleRateHz, plan.hardwareBandwidthHz);
+    tuneSucceeded_=true; // Accepted, not proof of hardware ready; webStatus exposes both.
     refreshUi();
 }
 
@@ -327,7 +358,10 @@ QJsonObject AircraftMapWidget::webStatus() const {
         AdsBTrackStore::instance().statusJson().dump())).object();
     for(const auto* key:{"centerLat","centerLon","radiusNm"})result.remove(key);
     result.insert("ok",true);result.insert("localDecodeEnabled",localAdsbCheck_->isChecked());
-    result.insert("localDecodeRunning",localRun_.load());
+    result.insert("localDecodeRunning",radioReady_.load() && localRun_.load() && decodeLocal_.load());
+    result.insert("radioReady",radioReady_.load());
+    result.insert("radioBusy",radioBusy_.load());
+    result.insert("deviceKey",deviceCombo_->currentData().toString());
     result.insert("captureBandwidthMHz",captureBandwidth_->value());
     result.insert("tuneStatus",tuneStatus_);
     return result;
@@ -336,11 +370,18 @@ QJsonObject AircraftMapWidget::webStatus() const {
 QJsonObject AircraftMapWidget::webControl(const QJsonObject& body) {
     const auto action=body.value("action").toString();
     if(action=="tune") {
+        if (radioBusy_.load()) return {{"ok",false},{"status",409},{"error","Stop the aircraft radio before changing source"}};
+        if (body.contains("deviceKey")) {
+            if (!body.value("deviceKey").isString()) return {{"ok",false},{"status",400},{"error","deviceKey must be a string"}};
+            refreshWorkflowDeviceCombo(*deviceCombo_, DeviceOwnership::Owner::Aircraft, body.value("deviceKey").toString());
+        }
         const double mhz=body.value("captureBandwidthMHz").toDouble(20);
         if(!std::isfinite(mhz) || mhz<2 || mhz>20)
             return {{"ok",false},{"status",400},{"error","captureBandwidthMHz must be 2..20"}};
         captureBandwidth_->setValue(mhz);onTune1090();
         if(!tuneSucceeded_)return {{"ok",false},{"status",409},{"error",tuneStatus_}};
+    } else if(action=="stop") {
+        localRun_.store(false);
     } else if(action=="local") {
         if(!body.value("enabled").isBool())return {{"ok",false},{"status",400},{"error","enabled boolean required"}};
         remoteLocal_=body.value("enabled").toBool();

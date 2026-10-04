@@ -16,6 +16,7 @@ class QCheckBox;
 class QNetworkAccessManager;
 class QNetworkReply;
 class QDoubleSpinBox;
+class QComboBox;
 
 class AircraftMapWidget : public QWidget {
     Q_OBJECT
@@ -47,7 +48,7 @@ private:
     void ensureTiles();
     void fetchOpenSky();
     void stopLocalWorker();
-    void startLocalWorker();
+    void startLocalWorker(const std::string& key, double rateHz, double bandwidthHz);
     QPointF latLonToPixel(double lat, double lon) const;
     bool pixelToLatLon(const QPointF& pt, double* lat, double* lon) const;
     void showPopout(const QString& icaoHex);
@@ -59,6 +60,8 @@ private:
     QTimer* netTimer_ = nullptr;
     QLabel* status_ = nullptr;
     QPushButton* tuneBtn_ = nullptr;
+    QPushButton* stopBtn_ = nullptr;
+    QComboBox* deviceCombo_ = nullptr;
     QPushButton* netBtn_ = nullptr;
     QCheckBox* localAdsbCheck_ = nullptr;
     QCheckBox* internetCheck_ = nullptr;
@@ -71,6 +74,9 @@ private:
     QString followIcao_;
 
     std::atomic<bool> localRun_{false};
+    std::atomic<bool> radioBusy_{false};
+    std::atomic<bool> radioReady_{false};
+    std::atomic<bool> decodeLocal_{false};
     std::thread localThread_;
     bool remoteLocal_=false;
     bool tuneSucceeded_=false;

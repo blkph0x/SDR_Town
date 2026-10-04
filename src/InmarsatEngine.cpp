@@ -1,4 +1,5 @@
 #include "InmarsatEngine.h"
+#include <QUuid>
 #include "AdsBTrackStore.h"
 #include "DeviceManager.h"
 #include "Receiver.h"
@@ -156,6 +157,10 @@ void InmarsatEngine::notify() {
 
 bool InmarsatEngine::setConfig(const InmarsatEngineConfig& config) {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (deviceLease_ && (config.deviceStableKey != config_.deviceStableKey || config.deviceIndex != config_.deviceIndex)) {
+        lastStatus_ = "Stop Inmarsat before changing its radio";
+        return false;
+    }
     if(run_.load() && config.watch.enabled &&
         std::none_of(config.watch.channels.begin(),config.watch.channels.end(),[](const auto& c){return c.enabled;})) {
         lastStatus_="Enable at least one watch channel before starting automatic watch";
@@ -190,38 +195,12 @@ size_t InmarsatEngine::resolveDeviceIndex(std::string* error) {
     }
 
     InmarsatEngineConfig selected = config();
-    size_t chosen = std::numeric_limits<size_t>::max();
-    if (!selected.deviceStableKey.empty()) {
-        for (size_t i = 0; i < devices.size(); ++i) {
-            if (devices[i].stableKey == selected.deviceStableKey && SdrDeviceCandidate::canAttemptRealHardware(devices[i].label)) {
-                chosen = i;
-                break;
-            }
-        }
-    }
-    if (chosen == std::numeric_limits<size_t>::max() && selected.deviceIndex < devices.size() &&
-        SdrDeviceCandidate::canAttemptRealHardware(devices[selected.deviceIndex].label)) {
-        chosen = selected.deviceIndex;
-    }
-
-    const auto choose = [&](auto predicate) {
-        if (chosen != std::numeric_limits<size_t>::max()) return;
-        for (size_t i = 0; i < devices.size(); ++i) {
-            if (SdrDeviceCandidate::canAttemptRealHardware(devices[i].label) && predicate(i, devices[i])) {
-                chosen = i;
-                return;
-            }
-        }
-    };
-    choose([&](size_t index, const DeviceInfo&) { return manager.isStreaming(index); });
-    choose([](size_t, const DeviceInfo& device) { return device.enabled; });
-    choose([](size_t, const DeviceInfo& device) { return device.isSdrplay; });
-    choose([](size_t, const DeviceInfo&) { return true; });
-
-    if (chosen == std::numeric_limits<size_t>::max()) {
-        if (error) *error = "No hardware-capable SDR entry is available. Rescan devices; explicit (stub) demo entries cannot run Inmarsat.";
-        return chosen;
-    }
+    const auto active = leaseToken();
+    if (active && manager.ownsDevice(active)) return active.index;
+    const size_t chosen = manager.resolveWorkflowDevice(DeviceOwnership::Owner::Inmarsat,
+        selected.deviceStableKey, selected.deviceIndex, error);
+    if (chosen == size_t(-1)) return chosen;
+    if (chosen >= devices.size()) { if (error) *error = "Radio list changed; select the radio again"; return size_t(-1); }
 
     const std::string stableKey = devices[chosen].stableKey;
     if (selected.deviceIndex != chosen || selected.deviceStableKey != stableKey) {
@@ -252,13 +231,21 @@ void InmarsatEngine::capturePreviousDeviceState(size_t deviceIndex) {
     if (!previousDeviceState_.has_value()) previousDeviceState_ = saved;
 }
 
+DeviceOwnership::Token InmarsatEngine::leaseToken() const {
+    std::lock_guard lock(mutex_);
+    return deviceLease_;
+}
+
 void InmarsatEngine::restorePreviousDeviceState() {
     std::optional<PreviousDeviceState> saved;
+    DeviceOwnership::Token token;
     bool restoreListen = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         saved = previousDeviceState_;
         previousDeviceState_.reset();
+        token = deviceLease_;
+        deviceLease_ = {};
         restoreListen = hostTakeoverActive_;
         hostTakeoverActive_ = false;
         activeDeviceIndex_ = std::numeric_limits<size_t>::max();
@@ -267,29 +254,10 @@ void InmarsatEngine::restorePreviousDeviceState() {
     }
 
     auto& manager = DeviceManager::instance();
-    if (!saved.has_value() || saved->deviceIndex == std::numeric_limits<size_t>::max()) {
-        manager.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Inmarsat);
-        if (restoreListen) SatcomHostServices::instance().endReceiverTakeover();
-        return;
-    }
-
-    const size_t deviceIndex = saved->deviceIndex;
-    if (saved->wasStreaming) {
-        manager.setEnabled(deviceIndex, true);
-        if (!manager.isStreaming(deviceIndex)) manager.startStreaming(deviceIndex, true);
-        if (saved->centerHz > 0.0) {
-            std::string ignored;
-            manager.retuneWithLease(deviceIndex, saved->centerHz,
-                                    DeviceManager::DeviceLeaseOwner::Inmarsat,
-                                    true, &ignored);
-        }
-    } else {
-        manager.stopStreaming(deviceIndex);
-        manager.setEnabled(deviceIndex, saved->wasEnabled);
-    }
-    manager.releaseDeviceLease(deviceIndex, DeviceManager::DeviceLeaseOwner::Inmarsat);
+    const bool restored = saved && token && manager.restoreDevice(token,
+        saved->wasStreaming, saved->wasEnabled, saved->centerHz);
     // Restore RF first; otherwise ordinary Listen demodulates the satellite carrier.
-    if (restoreListen) SatcomHostServices::instance().endReceiverTakeover();
+    if (restoreListen) SatcomHostServices::instance().endReceiverTakeover(token, restored);
 }
 
 bool InmarsatEngine::waitForOperationalStream(size_t deviceIndex, int timeoutMs,
@@ -299,6 +267,7 @@ bool InmarsatEngine::waitForOperationalStream(size_t deviceIndex, int timeoutMs,
                           std::chrono::milliseconds(std::max(250, timeoutMs));
     std::string state = "starting";
     while (std::chrono::steady_clock::now() < deadline) {
+        if (!manager.ownsDevice(leaseToken())) { if (error) *error = "Inmarsat radio ownership expired"; return false; }
         state = manager.getRuntimeStateLabel(deviceIndex);
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -327,9 +296,8 @@ bool InmarsatEngine::tuneAndConfirm(size_t deviceIndex, double frequencyHz,
                                     int timeoutMs, std::string* error) {
     auto& manager = DeviceManager::instance();
     std::string tuneError;
-    if (!manager.retuneWithLease(deviceIndex, frequencyHz,
-                                 DeviceManager::DeviceLeaseOwner::Inmarsat,
-                                 true, &tuneError)) {
+    const auto token = leaseToken();
+    if (token.index != deviceIndex || !manager.tuneDevice(token, frequencyHz, &tuneError)) {
         if (error) *error = tuneError.empty() ? "Could not tune Inmarsat receiver" : tuneError;
         return false;
     }
@@ -339,6 +307,7 @@ bool InmarsatEngine::tuneAndConfirm(size_t deviceIndex, double frequencyHz,
                           std::chrono::milliseconds(std::max(250, timeoutMs));
     while (std::chrono::steady_clock::now() < deadline) {
         const std::string state = manager.getRuntimeStateLabel(deviceIndex);
+        if (!manager.ownsDevice(token)) { if (error) *error = "Inmarsat radio ownership expired"; return false; }
         if (state != "live hardware") {
             if (error) *error = "Inmarsat receiver left live hardware mode while tuning: " + state;
             return false;
@@ -465,8 +434,9 @@ bool InmarsatEngine::start(bool force) {
     }
 
     capturePreviousDeviceState(deviceIndex);
-    if (!manager.acquireDeviceLease(deviceIndex, DeviceManager::DeviceLeaseOwner::Inmarsat,
-                                    force, &error)) {
+    const auto token = manager.claimDevice(deviceIndex, DeviceManager::DeviceLeaseOwner::Inmarsat,
+        QUuid::createUuid().toString(QUuid::Id128).toStdString(), &error, config().deviceStableKey, force);
+    if (!token) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
             previousDeviceState_.reset();
@@ -476,16 +446,18 @@ bool InmarsatEngine::start(bool force) {
         return false;
     }
 
+    { std::lock_guard lock(mutex_); deviceLease_ = token; }
     // DEC-0123: a tuner lease alone does not park the GUI's analog Listen DSP.
     // This existing host bridge also refuses an active P25 receiver.
     auto& host = SatcomHostServices::instance();
-    if (!host.beginReceiverTakeover(deviceIndex, &error)) {
+    if (!host.beginReceiverTakeover(token, &error)) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
             previousDeviceState_.reset(); // No hardware state has changed yet.
+            deviceLease_ = {};
             lastStatus_ = error.empty() ? "Could not pause Listen audio for Inmarsat" : error;
         }
-        manager.releaseDeviceLease(deviceIndex, DeviceManager::DeviceLeaseOwner::Inmarsat);
+        manager.releaseDevice(token);
         notify();
         return false;
     }
@@ -503,7 +475,7 @@ bool InmarsatEngine::start(bool force) {
             : "Starting selected Inmarsat receiver";
     }
 
-    if (!manager.setEnabled(deviceIndex, true) || !manager.startStreaming(deviceIndex, true)) {
+    if (!manager.startDevice(token, &error, true)) {
         error = "Could not start selected Inmarsat receiver";
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -762,15 +734,19 @@ void InmarsatEngine::returnToControl() {
     }
     if (deviceIndex == std::numeric_limits<size_t>::max()) return;
     try {
-        DeviceManager::instance().retuneWithLease(
-            deviceIndex, frequencyHz, DeviceManager::DeviceLeaseOwner::Inmarsat,
-            true, nullptr);
+        DeviceManager::instance().tuneDevice(leaseToken(), frequencyHz, nullptr);
     } catch (...) {
     }
 }
 
 bool InmarsatEngine::processIq(InmarsatAudio& audio) {
     if (!run_.load(std::memory_order_acquire)) return false;
+    if (!DeviceManager::instance().ownsDevice(leaseToken())) {
+        std::lock_guard lock(mutex_);
+        lastStatus_ = "Inmarsat stopped: radio ownership expired";
+        run_.store(false, std::memory_order_release);
+        return false;
+    }
     size_t deviceIndex = std::numeric_limits<size_t>::max();
     double tuned = 0.0;
     {
@@ -925,9 +901,11 @@ void InmarsatEngine::workerLoop() {
             std::lock_guard<std::mutex> lock(mutex_);
             deviceIndex = activeDeviceIndex_;
         }
-        if (deviceIndex == std::numeric_limits<size_t>::max() ||
+        const bool ownsRadio = DeviceManager::instance().ownsDevice(leaseToken());
+        if (!ownsRadio || deviceIndex == std::numeric_limits<size_t>::max() ||
             DeviceManager::instance().getRuntimeStateLabel(deviceIndex) != "live hardware") {
-            const std::string state = deviceIndex == std::numeric_limits<size_t>::max()
+            const std::string state = !ownsRadio ? "radio ownership expired"
+                : deviceIndex == std::numeric_limits<size_t>::max()
                 ? "no active receiver"
                 : DeviceManager::instance().getRuntimeStateLabel(deviceIndex);
             {

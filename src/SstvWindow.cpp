@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <memory>
 #include <array>
+#include <cmath>
 #include <mutex>
 #include <QTimer>
 #include <QSettings>
@@ -38,7 +39,7 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent):QDialog(parent),decode_(st
     source_=new QComboBox(this); source_->setObjectName("sstvSource");
     source_->addItem("Recording","file"); form->addRow("Source",source_);
     device_=new QComboBox(this); device_->setObjectName("sstvDevice");
-    device_->addItem("Main receiver",QString()); form->addRow("Radio",device_);
+    device_->addItem("Receiver tap",QString()); form->addRow("Radio",device_);
     frequency_=new QDoubleSpinBox(this); frequency_->setObjectName("sstvFrequency");
     frequency_->setRange(0.001,6000.0); frequency_->setDecimals(6); frequency_->setSuffix(" MHz");
     frequency_->setValue(QSettings().value("sstv/frequencyMHz",145.8).toDouble());
@@ -141,7 +142,7 @@ void SstvWindow::setLiveSource(LiveOpen open) {
 void SstvWindow::setRfDevices(const std::vector<std::pair<QString,QString>>& devices) {
     if(busy()) return;
     const auto saved=QSettings().value("sstv/deviceKey").toString();
-    device_->clear(); device_->addItem("Main receiver",QString());
+    device_->clear(); device_->addItem("Receiver tap",QString());
     for(const auto& [key,label]:devices) device_->addItem(label,key);
     if(!saved.isEmpty() && device_->findData(saved)<0)
         device_->addItem("Unavailable: "+saved,saved); // Never silently select a different SDR.
@@ -150,6 +151,14 @@ void SstvWindow::setRfDevices(const std::vector<std::pair<QString,QString>>& dev
 }
 QString SstvWindow::selectedDeviceKey() const { return device_->currentData().toString(); }
 double SstvWindow::selectedFrequencyHz() const { return frequency_->value()*1e6; }
+bool SstvWindow::selectRfSource(const QString& key, double hz) {
+    if (busy() || !std::isfinite(hz) || hz < frequency_->minimum()*1e6 || hz > frequency_->maximum()*1e6) return false;
+    const int row = device_->findData(key);
+    if (row < 0 || device_->itemText(row).startsWith("Unavailable:")) return false;
+    device_->setCurrentIndex(row);
+    frequency_->setValue(hz/1e6);
+    return true;
+}
 bool SstvWindow::startLive(const QString& output,const QString& mode,const QString& rfMode) {
     if(busy() || !liveOpen_) return false;
     if(rfMode_->findData(rfMode)<0) {status_->setText("Unsupported SSTV RF mode"); return false;}
@@ -250,6 +259,7 @@ bool SstvWindow::startDecode(const QString& input,const QString& output,const QS
 void SstvWindow::setBusy(bool value) {
     for(auto* widget:std::array<QWidget*,6>{input_,output_,mode_,open_,destination_,decodeButton_}) widget->setEnabled(!value);
     const bool live=source_->currentData()=="live";
+    if (auto* picker = findChild<QComboBox*>("receiverSource")) picker->setEnabled(!value && live && selectedDeviceKey().isEmpty());
     device_->setEnabled(!value && live);
     frequency_->setEnabled(!value && live && !selectedDeviceKey().isEmpty());
     rfMode_->setEnabled(!value && live); rfStatus_->setEnabled(live);

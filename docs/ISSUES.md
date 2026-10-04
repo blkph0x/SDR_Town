@@ -200,6 +200,12 @@ and generic scoped worker lifecycle, with five-mock-radio checks. Remaining
 issues are not closed: raw legacy start/gain/rate/restore operations, singleton
 host takeover and P25 controllers, logical-receiver source selection across all
 demods, shared-source negotiation and real driver-hang/unplug qualification.
+DEC-0182 removes satellite recycled-index restoration and the single global
+host takeover record. Aircraft now consumes its selected source under a token;
+missing saved keys fail closed. Read-only observer pickers and selected-radio
+analog receiver creation are connected. Raw administrative hardware operations,
+remaining primary index assumptions, repeated engine instances and actual hung
+driver/unplug qualification are still open. No on-air P25 acceptance claim.
 WORKFLOW_DEVICES.md records the exact migration matrix; an assigned pool is not
 evidence of concurrent P25 decoding or full multi-instance satellite engines.
 

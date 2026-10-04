@@ -537,19 +537,19 @@ TEST_CASE("Satcom host services forward MainWindow ownership", "[satcom][host]")
 
     SatcomHostCallbacks callbacks;
     callbacks.beginReceiverTakeover =
-        [&](size_t deviceIndex, std::string* error) {
+        [&](const DeviceOwnership::Token& token, std::string* error) {
             ++beginCount;
-            selectedDevice = deviceIndex;
+            selectedDevice = token.index;
             if (error) error->clear();
             return true;
         };
-    callbacks.endReceiverTakeover = [&]() { ++endCount; };
+    callbacks.endReceiverTakeover = [&](const DeviceOwnership::Token&, bool) { ++endCount; };
     callbacks.acquireAudioEngine = [](std::string* error) -> AudioEngine* {
         if (error) *error = "test has no audio device";
         return nullptr;
     };
     callbacks.publishSpectrum =
-        [&](const std::vector<float>& power, double centerHz, double) {
+        [&](const DeviceOwnership::Token&, const std::vector<float>& power, double centerHz, double) {
             ++spectrumCount;
             publishedCenter = centerHz;
             CHECK(power.size() == 3);
@@ -562,18 +562,19 @@ TEST_CASE("Satcom host services forward MainWindow ownership", "[satcom][host]")
 
     REQUIRE(host.installed());
     std::string error;
-    REQUIRE(host.beginReceiverTakeover(2, &error));
+    const DeviceOwnership::Token token{2, 1, 1, DeviceOwnership::Owner::Satcom, "host-test"};
+    REQUIRE(host.beginReceiverTakeover(token, &error));
     CHECK(error.empty());
     CHECK(beginCount == 1);
     CHECK(selectedDevice == 2);
 
-    host.publishSpectrum({-100.0f, -80.0f, -95.0f}, 145.8e6, 2.048e6);
+    host.publishSpectrum(token, {-100.0f, -80.0f, -95.0f}, 145.8e6, 2.048e6);
     CHECK(spectrumCount == 1);
     CHECK(publishedCenter == 145.8e6);
 
     host.publishStatus("armed");
     CHECK(statusCount == 1);
-    host.endReceiverTakeover();
+    host.endReceiverTakeover(token);
     CHECK(endCount == 1);
 
     CHECK(host.acquireAudioEngine(&error) == nullptr);
@@ -582,6 +583,6 @@ TEST_CASE("Satcom host services forward MainWindow ownership", "[satcom][host]")
     host.clear();
     CHECK_FALSE(host.installed());
     error = "stale";
-    CHECK(host.beginReceiverTakeover(9, &error));
+    CHECK(host.beginReceiverTakeover(token, &error));
     CHECK(error.empty());
 }

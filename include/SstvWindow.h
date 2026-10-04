@@ -32,6 +32,7 @@ public:
     void setRfDevices(const std::vector<std::pair<QString, QString>>& devices);
     QString selectedDeviceKey() const;
     double selectedFrequencyHz() const;
+    bool selectRfSource(const QString& deviceKey, double frequencyHz);
     bool startLive(const QString& output,const QString& mode,const QString& rfMode = QStringLiteral("auto"));
     void finishLive();
     bool busy() const { return worker_ != nullptr; }

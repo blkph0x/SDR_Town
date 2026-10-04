@@ -1,4 +1,5 @@
 #include "DeviceOwnership.h"
+#include "ReceiverTakeoverSessions.h"
 #include <catch2/catch_test_macros.hpp>
 
 using Book = DeviceOwnership;
@@ -92,4 +93,24 @@ TEST_CASE("All workflow types use the same reservation contract", "[ownership]")
         CHECK_FALSE(book.claim(0, owner, "different-instance"));
         CHECK_FALSE(book.setAssignments({{"a", Owner(99)}}, nullptr));
     }
+}
+
+TEST_CASE("GUI takeovers are scoped to radio and exact session", "[ownership]") {
+    ReceiverTakeoverSessions sessions;
+    DeviceOwnership::Token a{0,1,1,Owner::Inmarsat,"a"}, b{1,1,2,Owner::Satcom,"b"};
+    REQUIRE(sessions.begin(a)); REQUIRE(sessions.begin(b));
+    CHECK(sessions.find(a)); CHECK(sessions.find(b));
+    auto replacement = a; replacement.id = 3;
+    CHECK_FALSE(sessions.begin(replacement));
+    CHECK_FALSE(sessions.take(replacement));
+    REQUIRE(sessions.take(a));
+    REQUIRE(sessions.begin(replacement));
+    CHECK_FALSE(sessions.take(a));
+    CHECK(sessions.find(replacement)); CHECK(sessions.find(b));
+    auto wrongGeneration = replacement; ++wrongGeneration.generation;
+    CHECK_FALSE(sessions.take(wrongGeneration));
+    CHECK_FALSE(sessions.empty());
+    REQUIRE(sessions.take(b)); REQUIRE(sessions.take(replacement));
+    CHECK(sessions.empty());
+    CHECK_FALSE(sessions.begin({}));
 }

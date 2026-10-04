@@ -1,5 +1,26 @@
 # Development log
 
+## 2026-10-04 - Connect workflow UI and controllers to ownership (DEC-0182)
+
+User requests the same foundation across all interfaces, not P25/SSTV special
+cases. Satellite controllers now use exact lifecycle tokens and independent
+GUI takeover records; old stop/restore callbacks cannot operate by recycled
+device index. Aircraft GUI/CLI share a worker-scoped source, and web commands
+select that same source. Missing saved devices remain missing, not substituted.
+Added selected-radio analog receiver creation, actual receiver table/removal,
+CW/DTMF/SSTV receiver pickers and selected-receiver RDS/tone status windows.
+Main tune/Device Manager Apply no longer opportunistically act on unrelated
+streaming radios. Status exports reservations, owners and hardware state.
+
+Final all-target build,17/17 native suites79.07s,53-assertion aircraft/picker
+GUI check, four actual-app no-RX layouts, CLI refusal/stop and guard-negative
+tests PASS. No RF-quality claim; P25 DSP/audio unchanged. WORKFLOW_DEVICES.md
+tracks what is now connected and what remains: primary index assumptions,
+remaining raw administrative operations, repeated P25/satellite engines,
+per-instance persistence/audio and driver-hang qualification. T-0103 stays open.
+Source publication requires exact CI acceptance; binary ISS-0060 remains
+separate. No new version or public asset is claimed from these local results.
+
 ## 2026-10-04 - Move from repeated release tracking to universal device ownership
 
 Reconciled10259ca's completed Qt/CI acceptance instead of reimplementing it.

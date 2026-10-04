@@ -1,4 +1,5 @@
 #pragma once
+#include "DeviceOwnership.h"
 
 #include <cstddef>
 #include <exception>
@@ -17,10 +18,10 @@ struct InmarsatTakeoverResult {
 };
 
 struct SatcomHostCallbacks {
-    std::function<bool(size_t deviceIndex, std::string* error)> beginReceiverTakeover;
-    std::function<void()> endReceiverTakeover;
+    std::function<bool(const DeviceOwnership::Token&, std::string* error)> beginReceiverTakeover;
+    std::function<void(const DeviceOwnership::Token&, bool restore)> endReceiverTakeover;
     std::function<AudioEngine*(std::string* error)> acquireAudioEngine;
-    std::function<void(const std::vector<float>& powerDb,
+    std::function<void(const DeviceOwnership::Token&, const std::vector<float>& powerDb,
                        double centerHz,
                        double sampleRateHz)> publishSpectrum;
     std::function<void(const std::string& status)> publishStatus;
@@ -58,8 +59,9 @@ public:
                static_cast<bool>(callbacks_.prepareInmarsatTakeover);
     }
 
-    bool beginReceiverTakeover(size_t deviceIndex, std::string* error = nullptr) {
-        std::function<bool(size_t, std::string*)> callback;
+    bool beginReceiverTakeover(const DeviceOwnership::Token& token, std::string* error = nullptr) {
+        if (!token) { if (error) *error = "A current radio lease is required"; return false; }
+        std::function<bool(const DeviceOwnership::Token&, std::string*)> callback;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             callback = callbacks_.beginReceiverTakeover;
@@ -69,7 +71,7 @@ public:
             return true;
         }
         try {
-            return callback(deviceIndex, error);
+            return callback(token, error);
         } catch (const std::exception& ex) {
             if (error) *error = std::string("Satcom host takeover: ") + ex.what();
         } catch (...) {
@@ -96,15 +98,16 @@ public:
         }
     }
 
-    void endReceiverTakeover() noexcept {
-        std::function<void()> callback;
+    void endReceiverTakeover(const DeviceOwnership::Token& token, bool restore = true) noexcept {
+        if (!token) return;
+        std::function<void(const DeviceOwnership::Token&, bool)> callback;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             callback = callbacks_.endReceiverTakeover;
         }
         if (!callback) return;
         try {
-            callback();
+            callback(token, restore);
         } catch (...) {
         }
     }
@@ -129,17 +132,17 @@ public:
         return nullptr;
     }
 
-    void publishSpectrum(const std::vector<float>& powerDb,
+    void publishSpectrum(const DeviceOwnership::Token& token, const std::vector<float>& powerDb,
                          double centerHz,
                          double sampleRateHz) noexcept {
-        std::function<void(const std::vector<float>&, double, double)> callback;
+        std::function<void(const DeviceOwnership::Token&, const std::vector<float>&, double, double)> callback;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             callback = callbacks_.publishSpectrum;
         }
         if (!callback) return;
         try {
-            callback(powerDb, centerHz, sampleRateHz);
+            callback(token, powerDb, centerHz, sampleRateHz);
         } catch (...) {
         }
     }

@@ -28,6 +28,9 @@ UNRELEASED SOURCE: T-0102 infrastructure repairs; local 16/16 gates pass,
                   exact clean CI10259ca passes (comment203327059).
                   DEC-0181 starts T-0103 workflow assignment/ownership isolation;
                   concurrent P25 call controllers are not yet implemented.
+                  DEC-0182 connects selected-radio satellite/aircraft controllers,
+                  exact-token restoration and logical receiver observer pickers;
+                  full repeated-instance and raw-mutation migration stays open.
                   full toolchain/distribution and hardware gates stay separate.
                   DEC-0176 prevents saved satellite auto-capture during GUI
                   dry-run; local four-profile no-RX gate passes.

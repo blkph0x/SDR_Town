@@ -1,5 +1,20 @@
 # Code notes (tree map)
 
+T-0103 / DEC-0182: `DeviceManager::resolveWorkflowDevice` implements explicit
+key/no-fallback selection and automatic reservation priority. Capture setup and
+confirmed restoration require the exact session token. Inmarsat/Satcom carry
+tokens through tune/start/restore and fail on ownership loss; host callbacks
+carry the same token. `ReceiverTakeoverSessions` separates GUI pause state by
+radio/session and ignores old completions. `WorkflowDeviceCombo` preserves
+missing identities. Aircraft GUI/CLI use `WorkflowRadioSession`; only its worker
+owns the selected IQ cursor and teardown. Ready and opening are distinct states.
+`ReceiverSourcePicker` retains logical receiver identity across vector reorder;
+CW/DTMF/SSTV and RDS/tone observers share it. MainWindow's table now reflects
+real receivers and selected-row removal. Web source setters go through the same
+controls and status exposes workflow reservations/runtime. Existing P25 controller,
+DSP/audio, primary repeater and diversity processing are not replaced. Remaining
+raw administrative mutations and repeatable workflow engines are still T-0103.
+
 T-0103 / DEC-0181: `DeviceOwnership.h` is the serialized control-plane policy
 (stable-key reservations, per-endpoint/client leases, generations, shared domains,
 teardown exclusion and bounded persistence). `DeviceManager` owns its mutex,

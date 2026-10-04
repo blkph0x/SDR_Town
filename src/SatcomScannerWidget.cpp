@@ -1,4 +1,5 @@
 #include "SatcomScannerWidget.h"
+#include "WorkflowDeviceCombo.h"
 #include "SatcomScannerEngine.h"
 #include "SatCatalogueDialog.h"
 #include "SatPassPlanner.h"
@@ -6,7 +7,6 @@
 #include "ObserverMapWidget.h"
 #include "AdsBTrackStore.h"
 #include "DeviceManager.h"
-#include "SdrDeviceCandidate.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -41,16 +41,6 @@ int autoCapturePriority(const std::string& role) {
     if (role == "data") return 3;
     if (role == "voice") return 4;
     return 5;
-}
-
-QString receiverDisplayText(size_t index, const DeviceInfo& device, bool streaming) {
-    const QString state = streaming ? "LIVE"
-        : (device.enabled ? "READY"
-           : (SdrDeviceCandidate::isDeferredHardwareProxyLabel(device.label)
-                  ? "PROBE ON START" : "AVAILABLE"));
-    return QString("%1 — %2 [%3]")
-        .arg(static_cast<qulonglong>(index))
-        .arg(QString::fromStdString(device.label), state);
 }
 
 } // namespace
@@ -128,6 +118,9 @@ void SatcomScannerWidget::buildUi() {
     modeCombo_ = new QComboBox();
     modeCombo_->addItems({"NFM", "WFM", "AM", "USB", "LSB", "APT", "APRS"});
     deviceCombo_ = new QComboBox();
+    deviceCombo_->setObjectName("satcomDevice");
+    deviceCombo_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    deviceCombo_->setMinimumContentsLength(18);
     deviceCombo_->setToolTip(
         "Choose the SDR used by Satcom. Select a second receiver to keep the main Listen receiver "
         "running. If you choose the active Listen receiver, START/ARM automatically takes it over "
@@ -228,18 +221,13 @@ void SatcomScannerWidget::buildUi() {
     });
     connect(deviceCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int row) {
         if (row < 0) return;
-        bool ok = false;
-        const size_t index = static_cast<size_t>(
-            deviceCombo_->itemData(row).toString().toULongLong(&ok));
-        const auto devices = DeviceManager::instance().getDevices();
-        if (!ok || index >= devices.size()) return;
         auto config = SatcomScannerEngine::instance().config();
-        config.deviceIndex = index;
-        config.deviceStableKey = devices[index].stableKey;
+        config.deviceIndex = size_t(-1);
+        config.deviceStableKey = deviceCombo_->itemData(row).toString().toStdString();
         SatcomScannerEngine::instance().setConfig(config);
         if (passStatusLabel_) {
             passStatusLabel_->setText(
-                "Satcom receiver selected: " + QString::fromStdString(devices[index].label));
+                "Satcom receiver selected: " + deviceCombo_->itemText(row));
         }
     });
 
@@ -350,14 +338,8 @@ void SatcomScannerWidget::applyFieldsToConfig() {
     config.squelchDb = squelchSpin_->value();
     config.monitorAudio = monitorAudioCheck_ && monitorAudioCheck_->isChecked();
     if (deviceCombo_ && deviceCombo_->currentIndex() >= 0) {
-        bool ok = false;
-        const size_t index = static_cast<size_t>(
-            deviceCombo_->currentData().toString().toULongLong(&ok));
-        const auto devices = DeviceManager::instance().getDevices();
-        if (ok && index < devices.size()) {
-            config.deviceIndex = index;
-            config.deviceStableKey = devices[index].stableKey;
-        }
+        const auto key = deviceCombo_->currentData().toString().toStdString();
+        if (key != config.deviceStableKey) { config.deviceStableKey = key; config.deviceIndex = size_t(-1); }
     }
     SatcomScannerEngine::instance().setConfig(config);
 }
@@ -713,42 +695,13 @@ void SatcomScannerWidget::refreshPassesTable() {
 }
 
 void SatcomScannerWidget::refreshUi() {
-    const auto currentSnapshot = SatcomScannerEngine::instance().snapshot();
-    const bool currentlyActive = currentSnapshot.state != SatcomScannerState::Idle ||
-                                 currentSnapshot.passArmed;
-    if (!currentlyActive) SatcomScannerEngine::instance().resolveDeviceIndex(nullptr);
-
     const auto snapshot = SatcomScannerEngine::instance().snapshot();
     const auto& config = snapshot.config;
     static int passTableThrottle = 0;
     const bool refreshPasses = (++passTableThrottle % 4) == 0;
 
-    auto& manager = DeviceManager::instance();
-    const auto devices = manager.getDevices();
-    bool rebuildDevices = deviceCombo_->count() != static_cast<int>(devices.size());
-    if (!rebuildDevices) {
-        for (int i = 0; i < deviceCombo_->count(); ++i) {
-            const auto index = static_cast<size_t>(i);
-            const QString expected = receiverDisplayText(index, devices[index], manager.isStreaming(index));
-            if (deviceCombo_->itemText(i) != expected) {
-                rebuildDevices = true;
-                break;
-            }
-        }
-    }
-    deviceCombo_->blockSignals(true);
-    if (rebuildDevices) {
-        deviceCombo_->clear();
-        for (size_t i = 0; i < devices.size(); ++i) {
-            deviceCombo_->addItem(
-                receiverDisplayText(i, devices[i], manager.isStreaming(i)),
-                QString::number(static_cast<qulonglong>(i)));
-        }
-    }
-    const int selectedDevice = deviceCombo_->findData(
-        QString::number(static_cast<qulonglong>(config.deviceIndex)));
-    if (selectedDevice >= 0) deviceCombo_->setCurrentIndex(selectedDevice);
-    deviceCombo_->blockSignals(false);
+    refreshWorkflowDeviceCombo(*deviceCombo_, DeviceOwnership::Owner::Satcom,
+        QString::fromStdString(config.deviceStableKey));
 
     if (!lowSpin_->hasFocus()) lowSpin_->setValue(config.lowHz / 1e6);
     if (!highSpin_->hasFocus()) highSpin_->setValue(config.highHz / 1e6);

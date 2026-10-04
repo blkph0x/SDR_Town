@@ -6,7 +6,8 @@
 #include <spdlog/spdlog.h>
 
 WorkflowRadioSession::WorkflowRadioSession(DeviceManager& manager, const std::string& key,
-    DeviceManager::DeviceLeaseOwner owner, double frequencyHz, const std::function<bool()>& cancel)
+    DeviceManager::DeviceLeaseOwner owner, double frequencyHz, const std::function<bool()>& cancel,
+    double sampleRateHz, double bandwidthHz)
     : manager_(manager) {
     const auto devices = manager.getDevices();
     size_t index = size_t(-1);
@@ -24,6 +25,8 @@ WorkflowRadioSession::WorkflowRadioSession(DeviceManager& manager, const std::st
     token_ = manager.claimDevice(index, owner, QUuid::createUuid().toString(QUuid::Id128).toStdString(), &error, key);
     if (!token_) throw std::runtime_error(error);
     try {
+        if (sampleRateHz > 0 && !manager.configureDeviceCapture(token_, sampleRateHz, bandwidthHz, &error))
+            throw std::runtime_error(error);
         if (!manager.tuneDevice(token_, frequencyHz, &error) || !manager.startDevice(token_, &error))
             throw std::runtime_error(error.empty() ? "Could not start selected radio" : error);
         // Same bounded hardware-open allowance as InmarsatEngine, not a DSP timer.

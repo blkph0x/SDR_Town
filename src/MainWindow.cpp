@@ -1,4 +1,8 @@
 #include "MainWindow.h"
+#include "ReceiverTakeoverSessions.h"
+#include "ReceiverSourcePicker.h"
+#include "WorkflowDeviceCombo.h"
+#include <QDialogButtonBox>
 #include "DiagnosticsHealthMonitor.h"
 #include "HfDemod.h"
 #include "SstvWindow.h"
@@ -134,6 +138,11 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         mainLayout->addWidget(rdsStatus);
         spectrum->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         connect(spectrum, &SpectrumWidget::frequencySelected, this, [this, spectrum](double f) {
+            const auto selectedDevice = sdrTownControlActiveDeviceIndex();
+            std::string conflict;
+            if (!DeviceManager::instance().canUseDevice(selectedDevice, DeviceOwnership::Owner::Listen, &conflict)) {
+                statusBar()->showMessage(QString::fromStdString(conflict),5000); return;
+            }
             classifierRoiBuilder.clear();
             if (monitorFreqSpin) {
                 const QSignalBlocker blocker(monitorFreqSpin);
@@ -165,6 +174,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             bool retunedDevice = false;
             bool anyStreaming = false;
             for (size_t i = 0; i < mgr.getDevices().size(); ++i) {
+                if (i != selectedDevice) continue;
                 if (!mgr.canUseDevice(i, DeviceManager::DeviceLeaseOwner::Listen)) continue;
                 if (mgr.isStreaming(i)) {
                     mgr.setCenterFreq(i, f);
@@ -173,11 +183,10 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     break;
                 }
             }
-            if (!anyStreaming && !mgr.getDevices().empty() && mgr.canUseDevice(0, DeviceManager::DeviceLeaseOwner::Listen)) {
-                // "Just select a freq" should produce audio: auto-start first device (stub for safety, like Add Receiver / Scan).
-                // Aligns with expectation that clicking spectrum/waterfall starts monitoring that freq.
-                mgr.setEnabled(0, true);
-                try { mgr.startStreaming(0, true /* real SDR - no simulation */); } catch (...) {}
+            if (!anyStreaming && selectedDevice < mgr.getDevices().size() && mgr.canUseDevice(selectedDevice, DeviceManager::DeviceLeaseOwner::Listen)) {
+                // Start only the selected Listen source, never another workflow's radio.
+                mgr.setEnabled(selectedDevice, true);
+                try { mgr.startStreaming(selectedDevice, true /* real SDR - no simulation */); } catch (...) {}
                 anyStreaming = true;
                 // Defer audio output activation (speakers + VAC etc.) like other start paths.
                 QTimer::singleShot(120, this, [this]() {
@@ -195,7 +204,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     }
                 });
                 // Immediately retune the newly started stream
-                mgr.setCenterFreq(0, f);
+                mgr.setCenterFreq(selectedDevice, f);
                 retunedDevice = true;
             }
             QString msg = QString("Tuned monitor to %1 MHz").arg(f/1e6, 0, 'f', 4);
@@ -205,40 +214,102 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         });
         mainLayout->addWidget(spectrum, 3);
 
-        // S0-7 (P2): removed hardcoded APT/DMR/NFM demo rows (was claiming live receiver table).
-        // The vector<Receiver> + snapshot in DSP is the real foundation; full live QTable + per-rx persistence
-        // (receivers.json) + rich editor comes in the receiver management work after stabilization.
+        // DEC-0182: display actual logical sources. Side decoders select these
+        // receiver identities; hardware reservations remain a separate control.
         QGroupBox* rxBox = new QGroupBox("Receiver Controls");
         rxBox->setStyleSheet("QGroupBox { font-size: 11px; }");
         QVBoxLayout* rxLay = new QVBoxLayout(rxBox);
 
         QTableWidget* rxTable = new QTableWidget(0, 6, this);
-        rxTable->setHorizontalHeaderLabels({"Freq (MHz)", "Mode", "Squelch", "Level", "Monitor", "Record"});
+        rxTable->setObjectName("workflowReceiverTable");
+        rxTable->setHorizontalHeaderLabels({"Radio", "Freq (MHz)", "Mode", "BW (kHz)", "Squelch", "Status"});
         rxTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
         rxTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+        rxTable->setSelectionMode(QAbstractItemView::SingleSelection);
         rxTable->horizontalHeader()->setStretchLastSection(true);
         rxLay->addWidget(rxTable);
 
         QHBoxLayout* rxBtnLay = new QHBoxLayout();
         QPushButton* addRxBtn = new QPushButton("Add Receiver");
+        addRxBtn->setObjectName("workflowAddReceiver");
         QPushButton* removeRxBtn = new QPushButton("Remove");
+        removeRxBtn->setObjectName("workflowRemoveReceiver");
         QPushButton* scanBtn = new QPushButton("Start Smart Scan (PR6)");
         rxBtnLay->addWidget(addRxBtn);
         rxBtnLay->addWidget(removeRxBtn);
         rxBtnLay->addStretch();
         rxBtnLay->addWidget(scanBtn);
         rxLay->addLayout(rxBtnLay);
+        const auto displayedReceivers = std::make_shared<std::vector<std::weak_ptr<Receiver>>>();
+        auto* receiverTableTimer = new QTimer(this);
+        connect(receiverTableTimer, &QTimer::timeout, this, [this, rxTable, displayedReceivers] {
+            const int selectedRow = rxTable->currentRow();
+            const auto selected = selectedRow >= 0 && selectedRow < static_cast<int>(displayedReceivers->size())
+                ? (*displayedReceivers)[selectedRow].lock() : nullptr;
+            std::vector<std::shared_ptr<Receiver>> snapshot;
+            { std::unique_lock lock(receiversMutex, std::try_to_lock); if (!lock.owns_lock()) return; snapshot = receivers; }
+            const QSignalBlocker blocker(rxTable);
+            rxTable->setRowCount(static_cast<int>(snapshot.size()));
+            displayedReceivers->assign(snapshot.begin(), snapshot.end());
+            for (int i = 0; i < static_cast<int>(snapshot.size()); ++i) {
+                const auto& rx = snapshot[i]; if (!rx) continue;
+                std::unique_lock lock(rx->stateMutex, std::try_to_lock); if (!lock.owns_lock()) continue;
+                const QStringList values{QString::number(rx->deviceIndex), QString::number(rx->freqHz / 1e6, 'f', 5),
+                    modeToQString(rx->mode), QString::number(rx->channelBwHz / 1e3, 'f', 2), QString::number(rx->squelchDb, 'f', 1),
+                    rx->p25IndependentTrafficSource ? "P25 traffic" : rx->p25ControlChannelMute ? "P25 control" : rx->active ? "Receiving" : "Stopped"};
+                for (int column = 0; column < values.size(); ++column) {
+                    auto* item = rxTable->item(i, column);
+                    if (!item) { item = new QTableWidgetItem; rxTable->setItem(i, column, item); }
+                    if (item->text() != values[column]) item->setText(values[column]);
+                }
+                if (rx == selected) rxTable->selectRow(i);
+            }
+        });
+        receiverTableTimer->start(500); // UI snapshots only; no receiver/DSP clock changes.
 
         // Wire buttons (make functional)
         connect(addRxBtn, &QPushButton::clicked, this, [this]() {
             auto& mgr = DeviceManager::instance();
+            QDialog dialog(this); dialog.setWindowTitle("Add Receiver");
+            auto* layout = new QFormLayout(&dialog);
+            QComboBox radio; refreshWorkflowDeviceCombo(radio, DeviceOwnership::Owner::Listen, {});
+            radio.setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon); radio.setMinimumContentsLength(24);
+            QDoubleSpinBox frequency; frequency.setRange(.001,6000); frequency.setDecimals(6); frequency.setSuffix(" MHz");
+            frequency.setValue(currentMonitorFreq / 1e6);
+            QComboBox mode; mode.addItems({"AUTO","NFM","WFM","AM","USB","LSB","CW"}); mode.setCurrentText(modeToQString(currentMonitorMode));
+            QDoubleSpinBox bandwidth; bandwidth.setRange(.05,500); bandwidth.setDecimals(2); bandwidth.setSuffix(" kHz"); bandwidth.setValue(monitorChannelBwHz/1e3);
+            QDoubleSpinBox squelch; squelch.setRange(-140,0); squelch.setSuffix(" dB"); squelch.setValue(monitorSquelchDb);
+            layout->addRow("Radio", &radio); layout->addRow("Frequency", &frequency); layout->addRow("Mode", &mode);
+            layout->addRow("Bandwidth", &bandwidth); layout->addRow("Squelch", &squelch);
+            QDialogButtonBox buttons(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+            layout->addRow(&buttons);
+            connect(&buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept);
+            connect(&buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
+            if (dialog.exec() != QDialog::Accepted) return;
             std::string conflict;
-            if (!mgr.canUseDevice(0, DeviceManager::DeviceLeaseOwner::Listen, &conflict)) {
+            const auto index = mgr.resolveWorkflowDevice(DeviceOwnership::Owner::Listen,
+                radio.currentData().toString().toStdString(), mgr.preferredListenDeviceIndex(), &conflict);
+            if (index == size_t(-1)) {
                 statusBar()->showMessage(QString::fromStdString(conflict), 5000); return;
             }
+            const double targetHz = frequency.value()*1e6;
+            const auto devices = mgr.getDevices();
+            if (index >= devices.size()) return;
+            if ((devices[index].minFreq > 0 && targetHz < devices[index].minFreq) ||
+                (devices[index].maxFreq > 0 && targetHz > devices[index].maxFreq)) {
+                statusBar()->showMessage("Frequency is outside the selected radio range",5000); return;
+            }
+            if (mgr.isStreaming(index) && std::abs(targetHz-mgr.getCurrentCenterFreq(index)) + bandwidth.value()*500 > mgr.getCurrentSampleRate(index)*.5) {
+                statusBar()->showMessage("Frequency is outside this radio's current capture span; tune it first or choose another SDR",5000); return;
+            }
             if (!mgr.getDevices().empty()) {
-                mgr.setEnabled(0, true);
-                try { mgr.startStreaming(0, true /* real SDR, not stub */); } catch (...) { spdlog::warn("startStreaming(0,true) fault in Add Receiver (guarded)"); }
+                if (!mgr.canUseDevice(index, DeviceOwnership::Owner::Listen, &conflict)) {
+                    statusBar()->showMessage(QString::fromStdString(conflict),5000); return;
+                }
+                mgr.setEnabled(index, true);
+                if (!mgr.isStreaming(index)) mgr.setCenterFreq(index,targetHz);
+                try { if (!mgr.startStreaming(index,true)) throw std::runtime_error("Radio could not start"); }
+                catch (const std::exception& e) { statusBar()->showMessage(QString::fromLocal8Bit(e.what()),5000); return; }
 
                 // S0-2 (P0): protect vector mutation under mutex (GUI thread). Worker will snapshot.
                 // Use shared_ptr so reallocation never invalidates live Demodulator instances.
@@ -246,13 +317,13 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     std::lock_guard<std::mutex> lk(receiversMutex);
                     ensureReceiver();
                     auto newRx = std::make_shared<Receiver>();
-                    newRx->deviceIndex = 0;
-                    newRx->freqHz = currentMonitorFreq;
-                    newRx->mode = currentMonitorMode;
-                    newRx->channelBwHz = monitorChannelBwHz;
+                    newRx->deviceIndex = index;
+                    newRx->freqHz = targetHz;
+                    newRx->mode = modeFromString(mode.currentText().toStdString());
+                    newRx->channelBwHz = bandwidth.value()*1e3;
                     newRx->lpfHz = monitorLpfHz;
                     newRx->audioLpfEnabled = monitorAudioLpfEnabled;
-                    newRx->squelchDb = monitorSquelchDb;
+                    newRx->squelchDb = squelch.value();
                     newRx->rfGainDb = monitorRfGainDb;
                     newRx->audioGain = monitorGain;
                     newRx->gain = monitorGain;
@@ -261,14 +332,9 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     newRx->active = true;
                     receivers.push_back(std::move(newRx));
                 }
-                // Same class as Device Apply / Scan (ecf9303): streaming alone does not
-                // feed guiDspWorker — primary monitor must be armed or DSP stalls / P25
-                // orchestration (always receivers[0]) stays idle while waterfall runs.
-                syncMonitorVarsToReceiver(0);
-                setReceiverActive(0, true);
-
-                statusBar()->showMessage(QString("Added receiver #%1 (dev 0, %.3f MHz, %2) - streaming + audio")
-                    .arg(receivers.size()).arg(currentMonitorFreq/1e6, 0, 'f', 3), 3000);
+                // The new receiver is active; leave the primary monitor unchanged.
+                statusBar()->showMessage(QString("Added receiver on radio %1 at %2 MHz")
+                    .arg(index).arg(targetHz/1e6, 0, 'f', 5), 3000);
 
                 // Defer audio activation (lazy engine) - same pattern
                 QTimer::singleShot(100, this, [this]() {
@@ -288,20 +354,26 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 });
             }
         });
-        connect(removeRxBtn, &QPushButton::clicked, this, [this]() {
+        connect(removeRxBtn, &QPushButton::clicked, this, [this, rxTable, displayedReceivers]() {
             size_t releasedDevice = size_t(-1);
             bool stillUsed = false;
+            const int selectedRow = rxTable->currentRow();
+            if (selectedRow < 0 || selectedRow >= static_cast<int>(displayedReceivers->size())) return;
+            const auto removed = (*displayedReceivers)[selectedRow].lock();
+            if (!removed) return;
             {
                 std::lock_guard<std::mutex> lk(receiversMutex);
                 if (!receivers.empty()) {
-                    const auto removed = receivers.back();
-                    if (!removed) return;
+                    const auto it = std::find(receivers.begin(), receivers.end(), removed);
+                    if (it == receivers.end()) return;
+                    if (it == receivers.begin()) { statusBar()->showMessage("The main receiver is controlled from Listen and Devices",5000); return; }
                     std::lock_guard receiverLock(removed->stateMutex);
                     if (removed->p25VoiceDecodeEnabled || removed->p25ControlChannelMute || removed->p25IndependentTrafficSource) {
                         statusBar()->showMessage("Stop P25 monitoring before removing its receiver", 5000); return;
                     }
                     releasedDevice = removed->deviceIndex;
-                    receivers.pop_back();
+                    removed->active = false;
+                    receivers.erase(it);
                     for (const auto& receiver : receivers) if (receiver) {
                         std::lock_guard stateLock(receiver->stateMutex);
                         stillUsed = stillUsed || receiver->deviceIndex == releasedDevice;
@@ -566,6 +638,11 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         });
         auto tuneRepeaterFreq = [this](double hz) {
             if (!monitorFreqSpin) return;
+            const auto selectedDevice = sdrTownControlActiveDeviceIndex();
+            std::string conflict;
+            if (!DeviceManager::instance().canUseDevice(selectedDevice, DeviceOwnership::Owner::Listen, &conflict)) {
+                statusBar()->showMessage(QString::fromStdString(conflict),5000); return;
+            }
             const QSignalBlocker blocker(monitorFreqSpin);
             monitorFreqSpin->setValue(hz / 1e6);
             {
@@ -581,6 +658,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             setReceiverActive(0, true);
             auto& mgr = DeviceManager::instance();
             for (size_t i = 0; i < mgr.getDevices().size(); ++i) {
+                if (i != selectedDevice) continue;
                 if (!mgr.canUseDevice(i, DeviceManager::DeviceLeaseOwner::Listen)) continue;
                 if (mgr.isStreaming(i)) {
                     mgr.setCenterFreq(i, hz);
@@ -4886,6 +4964,11 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         });
 
         connect(setMonBtn, &QPushButton::clicked, this, [this, monFreq]() {
+            const auto selectedDevice = sdrTownControlActiveDeviceIndex();
+            std::string conflict;
+            if (!DeviceManager::instance().canUseDevice(selectedDevice, DeviceOwnership::Owner::Listen, &conflict)) {
+                statusBar()->showMessage(QString::fromStdString(conflict),5000); return;
+            }
             classifierRoiBuilder.clear();
             const double tunedHz = monFreq->value() * 1e6;
             const auto plan = autoDetectMode ? findBandPlanForFrequency(tunedHz) : std::nullopt;
@@ -4913,6 +4996,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             auto& mgr = DeviceManager::instance();
             bool any = false;
             for (size_t i=0; i<mgr.getDevices().size(); ++i) {
+                if (i != selectedDevice) continue;
                 if (!mgr.canUseDevice(i, DeviceManager::DeviceLeaseOwner::Listen)) continue;
                 if (mgr.isStreaming(i)) {
                     mgr.setCenterFreq(i, tunedHz);
@@ -4921,11 +5005,11 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     break;
                 }
             }
-            if (!any && !mgr.getDevices().empty() && mgr.canUseDevice(0, DeviceManager::DeviceLeaseOwner::Listen)) {
+            if (!any && selectedDevice < mgr.getDevices().size() && mgr.canUseDevice(selectedDevice, DeviceManager::DeviceLeaseOwner::Listen)) {
                 // Auto-start on explicit tune request so user gets audio without separate "Add" click.
-                mgr.setEnabled(0, true);
-                mgr.startStreaming(0, true /* real from SDR */);
-                mgr.setCenterFreq(0, tunedHz);
+                mgr.setEnabled(selectedDevice, true);
+                mgr.startStreaming(selectedDevice, true /* real from SDR */);
+                mgr.setCenterFreq(selectedDevice, tunedHz);
                 statusBar()->showMessage(QString("Started monitor + tuned to %1 MHz").arg(tunedHz/1e6,0,'f',3), 2500);
                 // defer audio outputs
                 QTimer::singleShot(120, this, [this]() {
@@ -4983,10 +5067,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             // SATCOM_HOST_INTEGRATION_BEGIN
             struct SatcomMainWindowSessionState {
                 std::mutex mutex;
-                bool active = false;
-                bool tookOverListen = false;
-                size_t deviceIndex = static_cast<size_t>(-1);
-                std::vector<std::pair<std::weak_ptr<Receiver>, bool>> receiverStates;
+                ReceiverTakeoverSessions sessions;
             };
             auto satcomHostState = std::make_shared<SatcomMainWindowSessionState>();
 
@@ -5000,8 +5081,8 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                         if (shutdownStarted.load(std::memory_order_acquire))
                             return {false, false, "SDR Town is shutting down"};
                         std::unique_lock sessionLock(satcomHostState->mutex, std::try_to_lock);
-                        if (!sessionLock.owns_lock() || satcomHostState->active)
-                            return {false, false, "Another receiver takeover is active; stop it first"};
+                        if (!sessionLock.owns_lock() || satcomHostState->sessions.find(deviceIndex))
+                            return {false, false, "This radio already has an active receiver takeover"};
                         std::unique_lock listLock(receiversMutex, std::try_to_lock);
                         if (!listLock.owns_lock())
                             return {false, false, "Receiver is busy; try Inmarsat Start again"};
@@ -5083,18 +5164,21 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 };
             // SATCOM_HOST_INTEGRATION_END
             satcomCallbacks.beginReceiverTakeover =
-                [this, satcomHostState](size_t deviceIndex, std::string* error) -> bool {
-                    auto beginOnGui = [this, satcomHostState, deviceIndex]()
+                [this, satcomHostState](const DeviceOwnership::Token& token, std::string* error) -> bool {
+                    auto beginOnGui = [this, satcomHostState, token]()
                         -> std::pair<bool, std::string> {
                         if (shutdownStarted.load(std::memory_order_acquire)) {
                             return {false, "SDR Town is shutting down"};
                         }
 
                         std::lock_guard<std::mutex> sessionLock(satcomHostState->mutex);
-                        if (satcomHostState->active) {
-                            if (satcomHostState->deviceIndex == deviceIndex)
+                        const auto deviceIndex = token.index;
+                        if (!DeviceManager::instance().ownsDevice(token))
+                            return {false, "Radio ownership expired before receiver takeover"};
+                        if (auto* existing = satcomHostState->sessions.find(deviceIndex)) {
+                            if (existing->token == token)
                                 return {true, {}};
-                            return {false, "Another Satcom receiver takeover is already active"};
+                            return {false, "This radio still has another receiver takeover; retry after it stops"};
                         }
 
                         std::unique_lock<std::mutex> receiverListLock(
@@ -5127,17 +5211,14 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             }
                         }
 
-                        satcomHostState->receiverStates.clear();
-                        satcomHostState->tookOverListen = false;
+                        auto* session = satcomHostState->sessions.begin(token);
                         for (const auto& rx : matching) {
-                            satcomHostState->receiverStates.emplace_back(rx, rx->active);
+                            session->receivers.push_back({rx, rx->active, rx->freqHz, static_cast<int>(rx->mode)});
                             if (rx->active) {
-                                satcomHostState->tookOverListen = true;
+                                session->tookOverListen = true;
                                 rx->active = false;
                             }
                         }
-                        satcomHostState->active = true;
-                        satcomHostState->deviceIndex = deviceIndex;
                         setProperty("satcomTakeoverActive", true);
                         return {true, {}};
                     };
@@ -5156,25 +5237,25 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     return result.first;
                 };
 
-            satcomCallbacks.endReceiverTakeover = [this, satcomHostState]() {
-                auto endOnGui = [this, satcomHostState]() {
+            satcomCallbacks.endReceiverTakeover = [this, satcomHostState](const DeviceOwnership::Token& token, bool restore) {
+                auto endOnGui = [this, satcomHostState, token, restore]() {
                     std::lock_guard<std::mutex> sessionLock(satcomHostState->mutex);
-                    if (!satcomHostState->active) return;
+                    const auto session = satcomHostState->sessions.take(token);
+                    if (!session) return;
 
                     std::lock_guard<std::mutex> receiverListLock(receiversMutex);
-                    for (const auto& saved : satcomHostState->receiverStates) {
-                        if (auto rx = saved.first.lock()) {
+                    for (const auto& saved : session->receivers) {
+                        if (auto rx = saved.receiver.lock()) {
                             std::lock_guard<std::mutex> receiverLock(rx->stateMutex);
-                            rx->active = saved.second;
+                            if (restore && rx->deviceIndex == token.index &&
+                                rx->freqHz == saved.frequency && static_cast<int>(rx->mode) == saved.mode &&
+                                !rx->p25VoiceDecodeEnabled && !rx->p25IndependentTrafficSource && !rx->p25ControlChannelMute)
+                                rx->active = saved.active;
                         }
                     }
-                    satcomHostState->receiverStates.clear();
-                    satcomHostState->active = false;
-                    satcomHostState->tookOverListen = false;
-                    satcomHostState->deviceIndex = static_cast<size_t>(-1);
-                    setProperty("satcomTakeoverActive", false);
+                    setProperty("satcomTakeoverActive", !satcomHostState->sessions.empty());
                     statusBar()->showMessage(
-                        "Satcom stopped — previous Listen receiver restored", 3500);
+                        restore ? "Radio released; previous receiver restored" : "Radio session ended; reception remains stopped", 3500);
                 };
 
                 if (QThread::currentThread() == thread()) {
@@ -5202,19 +5283,22 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             };
 
             satcomCallbacks.publishSpectrum =
-                [this, satcomHostState](const std::vector<float>& powerDb,
+                [this, satcomHostState](const DeviceOwnership::Token& token, const std::vector<float>& powerDb,
                                         double centerHz,
                                         double sampleRateHz) {
                     bool mirrorMainSpectrum = false;
                     {
                         std::lock_guard<std::mutex> lock(satcomHostState->mutex);
-                        mirrorMainSpectrum =
-                            satcomHostState->active && satcomHostState->tookOverListen;
+                        const auto* session = satcomHostState->sessions.find(token);
+                        mirrorMainSpectrum = session && session->tookOverListen &&
+                            token.index == DeviceManager::instance().preferredListenDeviceIndex();
                     }
                     if (!mirrorMainSpectrum) return;
                     QMetaObject::invokeMethod(
                         this,
-                        [this, powerDb, centerHz, sampleRateHz]() {
+                        [this, satcomHostState, token, powerDb, centerHz, sampleRateHz]() {
+                            std::lock_guard lock(satcomHostState->mutex);
+                            if (!satcomHostState->sessions.find(token)) return;
                             if (spectrumWidget)
                                 spectrumWidget->updateSpectrum(
                                     powerDb, centerHz, sampleRateHz);
@@ -8255,8 +8339,11 @@ void MainWindow::showDevicesDialog()
                 const size_t listen = mgr.preferredListenDeviceIndex();
                 {
                     std::lock_guard<std::mutex> lk(receiversMutex);
-                    for (auto& rx : receivers) {
-                        if (rx) rx->deviceIndex = listen;
+                    if (!receivers.empty() && receivers.front()) {
+                        const auto& rx = receivers.front();
+                        std::lock_guard stateLock(rx->stateMutex);
+                        if (!rx->p25VoiceDecodeEnabled && !rx->p25ControlChannelMute && !rx->p25IndependentTrafficSource)
+                            rx->deviceIndex = listen;
                     }
                 }
                 sdrDivHint->setText(QString("Diversity on (%1). Listen path is the composite device %2.")
@@ -8297,7 +8384,26 @@ void MainWindow::showDevicesDialog()
 
         connect(applyBtn, &QPushButton::clicked, [&]() {
             try {
+                std::set<size_t> p25Devices;
+                {
+                    std::lock_guard listLock(receiversMutex);
+                    for (const auto& rx : receivers) if (rx) {
+                        std::lock_guard stateLock(rx->stateMutex);
+                        if (rx->p25VoiceDecodeEnabled || rx->p25ControlChannelMute || rx->p25IndependentTrafficSource)
+                            p25Devices.insert(rx->deviceIndex);
+                    }
+                }
+                size_t applied = 0, skipped = 0;
                 for (size_t i = 0; i < devs.size(); ++i) {
+                    std::string conflict;
+                    const auto current = mgr.getDevices();
+                    if (p25Devices.contains(i) || i >= current.size() || current[i].stableKey != devs[i].stableKey ||
+                        !mgr.canUseDevice(i, DeviceManager::DeviceLeaseOwner::Listen, &conflict)) {
+                        spdlog::warn("Device Manager Apply skipped dev={}: {}", i,
+                            conflict.empty() ? "radio identity changed or P25 owns this source" : conflict);
+                        ++skipped;
+                        continue; // Never stop/reconfigure a different workflow on Apply All.
+                    }
                     bool en = enableChecks[i]->isChecked();
                     mgr.setEnabled(i, en);
 
@@ -8324,25 +8430,20 @@ void MainWindow::showDevicesDialog()
                     } else {
                         mgr.stopStreaming(i);
                     }
+                    ++applied;
                 }
                 mgr.saveSettings();
                 // guiDspWorker only demodulates receivers with active==true. Streaming +
                 // waterfall can run without that flag; audio then underruns (buzz) and
                 // analog/P25 DSP looks "stalled". Arm the primary monitor path on Apply.
-                bool anyEnabledStreaming = false;
-                for (size_t i = 0; i < devs.size(); ++i) {
-                    if (enableChecks[i]->isChecked() && mgr.isStreaming(i)) {
-                        anyEnabledStreaming = true;
-                        break;
-                    }
+                const auto primary = sdrTownControlActiveDeviceIndex();
+                if (primary < devs.size() && !p25Devices.contains(primary) && mgr.canUseDevice(primary, DeviceOwnership::Owner::Listen)) {
+                    const bool receiving = enableChecks[primary]->isChecked() && mgr.isStreaming(primary);
+                    if (receiving) syncMonitorVarsToReceiver(0);
+                    setReceiverActive(0, receiving);
                 }
-                if (anyEnabledStreaming) {
-                    syncMonitorVarsToReceiver(0);
-                    setReceiverActive(0, true);
-                } else {
-                    setReceiverActive(0, false);
-                }
-                statusBar()->showMessage(QString("Applied settings to %1 device(s)").arg(devs.size()), 3000);
+                statusBar()->showMessage(QString("Applied settings to %1 radio(s); %2 active-workflow or changed radio(s) left unchanged")
+                    .arg(applied).arg(skipped), 5000);
                 spdlog::info("Device settings applied from dialog.");
 
                 // Defer audio activation (and lazy engine creation) to prevent hanging on Apply.
@@ -10007,6 +10108,17 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
         }
         state.insert("activeDevice", activeDevice);
         state.insert("activeDeviceIndex", static_cast<int>(haveActive ? activeIdx : -1));
+        QJsonArray workflowDevices;
+        for (size_t i = 0; i < devs.size(); ++i) {
+            workflowDevices.append(QJsonObject{
+                {"index",static_cast<int>(i)}, {"deviceKey",QString::fromStdString(devs[i].stableKey)},
+                {"label",QString::fromStdString(devs[i].label)},
+                {"assignment",DeviceManager::leaseOwnerName(mgr.workflowAssignment(i))},
+                {"owner",DeviceManager::leaseOwnerName(mgr.deviceLeaseOwner(i))},
+                {"uniqueIdentity",mgr.hasUniqueDeviceIdentity(i)},
+                {"runtime",QString::fromStdString(mgr.getRuntimeStateLabel(i))}});
+        }
+        state.insert("workflowDevices",workflowDevices);
 
         // SDRplay feature panel — present only while the active device is SDRplay.
         if (active && active->isSdrplay) {
@@ -10676,6 +10788,12 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
         const QString requestedMode = body.value("mode").toString().trimmed().toUpper();
         const bool p25Control = body.value("p25Control").toBool(false) ||
             requestedMode == "P25" || requestedMode == "P25P1" || requestedMode == "P25P2";
+        if (!guiRuntimeConfig.dryRun) {
+            std::string conflict;
+            if (!DeviceManager::instance().canUseDevice(guiRuntimeDeviceIndex(),
+                p25Control ? DeviceOwnership::Owner::P25 : DeviceOwnership::Owner::Listen, &conflict))
+                return {{"ok",false},{"status",409},{"error",QString::fromStdString(conflict)}};
+        }
         appendP25LogLineKeyed(
             QStringLiteral("sdr-town-control-tune"),
             QString("SDR Town control tune: freq=%1MHz mode=%2 p25Control=%3 autoFollow=%4 followLive=%5.")
@@ -10848,13 +10966,8 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
             ok = startGuiRuntimeDeviceAt(freqHz, false);
         } else {
             auto& mgr = DeviceManager::instance();
-            for (size_t i = 0; i < mgr.getDevices().size(); ++i) {
-                if (!mgr.canUseDevice(i, DeviceManager::DeviceLeaseOwner::Listen)) continue;
-                if (mgr.isStreaming(i)) {
-                    ok = mgr.setCenterFreq(i, freqHz) != 0;
-                    break;
-                }
-            }
+            const auto index = guiRuntimeDeviceIndex();
+            ok = mgr.canUseDevice(index, DeviceOwnership::Owner::Listen) && mgr.setCenterFreq(index, freqHz) != 0;
         }
 
         if (std::isfinite(rfGain) && rfGain >= 0.0) {
@@ -10866,7 +10979,7 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
                     {"deviceIndex", static_cast<int>(selected)}, {"rfgrDb", rfGain}});
                 if (!result.value("ok").toBool()) return result;
             } else if (!devices.empty()) {
-                mgr.setLiveGain(0, rfGain);
+                mgr.setLiveGain(selected, rfGain);
             }
         }
 
@@ -10897,8 +11010,10 @@ SstvWindow* MainWindow::ensureSstvWindow()
     if (window) { refreshDevices(window); return window; }
     window = new SstvWindow(decodeSstvImageFile, this);
     window->setObjectName(QStringLiteral("sstvWindow"));
+    auto* picker = new ReceiverSourcePicker([this] { std::lock_guard lock(receiversMutex); return receivers; }, window);
+    static_cast<QVBoxLayout*>(window->layout())->insertWidget(0, picker);
     refreshDevices(window);
-    window->setLiveSource([this,window](const std::shared_ptr<std::atomic<bool>>& finish,const QString& rfMode,
+    window->setLiveSource([picker,window](const std::shared_ptr<std::atomic<bool>>& finish,const QString& rfMode,
                                 const std::function<void(const QString&)>& routeStatus) -> SstvWindow::Decode {
         const auto key = window->selectedDeviceKey();
         const auto frequency = window->selectedFrequencyHz();
@@ -10907,9 +11022,8 @@ SstvWindow* MainWindow::ensureSstvWindow()
                 return decodeSstvDedicatedRadio(key,frequency,output,mode,rfMode,[finish]{return finish->load();},cancel,preview,routeStatus);
             };
         }
-        std::shared_ptr<Receiver> receiver;
-        { std::lock_guard lock(receiversMutex); if (!receivers.empty()) receiver = receivers.front(); }
-        if (!receiver) throw std::runtime_error("Start the main receiver before receiving SSTV");
+        auto receiver = picker->selected();
+        if (!receiver) throw std::runtime_error("Select an available receiver before receiving SSTV");
         return [receiver,finish,rfMode,routeStatus](const QString&, const QString& output, const QString& mode, const auto& cancel, const auto& preview) {
             return decodeSstvRfLive(receiver,output,mode,rfMode,[finish]{return finish->load();},cancel,preview,routeStatus);
         };
@@ -10957,7 +11071,7 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             }
             syncMonitorVarsToReceiver(0);
             auto& mgr = DeviceManager::instance();
-            if (!mgr.getDevices().empty()) mgr.setLiveGain(0, gain);
+            if (selected < devices.size()) mgr.setLiveGain(selected, gain);
             if (rfGainSpin) {
                 rfGainSpin->blockSignals(true);
                 rfGainSpin->setValue(std::clamp(gain, rfGainSpin->minimum(), rfGainSpin->maximum()));
@@ -11322,6 +11436,12 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             if (window->busy()) {
                 return {{"ok", false}, {"status", 409}, {"error", "SSTV job already running"}};
             }
+            if (body.contains("deviceKey") || body.contains("frequencyHz")) {
+                if ((body.contains("deviceKey") && !body.value("deviceKey").isString()) ||
+                    !window->selectRfSource(body.value("deviceKey").toString(window->selectedDeviceKey()),
+                        body.value("frequencyHz").toDouble(window->selectedFrequencyHz())))
+                    return {{"ok",false},{"status",400},{"error","Invalid or unavailable SSTV radio/frequency"}};
+            }
             QString output = body.value("outputDirectory").toString().trimmed();
             if (output.isEmpty()) {
                 const QString root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -11408,6 +11528,13 @@ bool MainWindow::startGuiRuntimeDeviceAt(double freqHz,  bool p25Defaults)
         }
 
         const size_t devIndex = guiRuntimeDeviceIndex();
+        if (!guiRuntimeConfig.dryRun) {
+            std::string conflict;
+            if (!DeviceManager::instance().canUseDevice(devIndex,
+                p25Defaults ? DeviceOwnership::Owner::P25 : DeviceOwnership::Owner::Listen, &conflict)) {
+                recordGuiRuntimeError(QString::fromStdString(conflict)); return false;
+            }
+        }
         if (monitorFreqSpin) {
             const QSignalBlocker blocker(monitorFreqSpin);
             if (monitorFreqSpin->minimum() > 0.1 || monitorFreqSpin->maximum() < 6000.0) {
@@ -11468,7 +11595,9 @@ bool MainWindow::startGuiRuntimeDeviceAt(double freqHz,  bool p25Defaults)
         try {
             mgr.setEnabled(devIndex, true);
             const bool started = mgr.isStreaming(devIndex) || mgr.startStreaming(devIndex, true);
-            mgr.setCenterFreq(devIndex, freqHz);
+            const bool tuned = mgr.setCenterFreq(devIndex, freqHz,
+                p25Defaults ? DeviceOwnership::Owner::P25 : DeviceOwnership::Owner::Listen) != 0;
+            if (!started || !tuned) { recordGuiRuntimeError("Radio start/tune request was rejected"); return false; }
             if (spectrumWidget) spectrumWidget->setCenterFreq(freqHz);
             QTimer::singleShot(120, this, [this]() {
                 AudioEngine* eng = getOrCreateAudioEngine();
@@ -13220,10 +13349,14 @@ void MainWindow::createMenus()
             window->show(); window->raise(); window->activateWindow();
         });
 
-        // Receivers (stub)
+        // Receivers share the same controls as the workspace panel.
         QMenu* rxMenu = menuBar()->addMenu("&Receivers");
-        rxMenu->addAction("&Add Receiver...", [](){});
-        rxMenu->addAction("&Receiver Table", [](){});
+        rxMenu->addAction("&Add Receiver...", this, [this] {
+            if (auto* button = findChild<QPushButton*>("workflowAddReceiver")) button->click();
+        });
+        rxMenu->addAction("&Receiver Table", this, [this] {
+            for (auto* dock : findChildren<QDockWidget*>()) if (dock->objectName() == "workspace.receivers") { dock->show(); dock->raise(); }
+        });
 
         // Scan (stub)
         QMenu* scanMenu = menuBar()->addMenu("&Scan");
@@ -13263,25 +13396,60 @@ void MainWindow::createMenus()
             QSettings().setValue("bandplan/overlay", enabled);
         });
         QMenu* toolsMenu = menuBar()->addMenu("&Tools");
+        toolsMenu->addAction("RDS / CTCSS / DCS...", this, [this] {
+            auto* window = new QDialog(this);
+            window->setAttribute(Qt::WA_DeleteOnClose);
+            window->setWindowTitle("Receiver Signal Data");
+            window->resize(580, 160);
+            auto* layout = new QVBoxLayout(window);
+            auto* picker = new ReceiverSourcePicker([this] { std::lock_guard lock(receiversMutex); return receivers; }, window);
+            auto* status = new RdsStatusWidget(window);
+            layout->addWidget(picker); layout->addWidget(status); layout->addStretch();
+            auto* timer = new QTimer(window);
+            connect(timer, &QTimer::timeout, window, [picker, status] {
+                const auto rx = picker->selected();
+                bool rds = false, tones = false, nfm = false;
+                double frequency = 0;
+                if (rx) {
+                    std::unique_lock lock(rx->stateMutex, std::try_to_lock);
+                    if (!lock.owns_lock()) return;
+                    frequency = rx->freqHz;
+                    const bool active = rx->active && !rx->p25VoiceDecodeEnabled && !rx->p25ControlChannelMute;
+                    nfm = rx->mode == DemodMode::NFM;
+                    rds = active && (rx->mode == DemodMode::WFM || rx->mode == DemodMode::AUTO);
+                    tones = active && (nfm || rx->mode == DemodMode::AUTO);
+                }
+                const auto tone = rx ? rx->ctcss.snapshot() : CtcssSnapshot{};
+                if (nfm || (tones && tone.status != "Inactive"))
+                    status->presentTone(tone, tones, frequency, RdsMpxDecoder::monotonicMs(), rx ? rx->dcs.snapshot() : DcsSnapshot{});
+                else status->present(rx ? std::get<RdsMpxSnapshot>(rx->rds->snapshot()) : RdsMpxSnapshot{},
+                    rds, frequency, RdsMpxDecoder::monotonicMs());
+            });
+            timer->start(250); // Same UI-only snapshot cadence as the main status strip.
+            window->show();
+        });
         // DEC-0168: DTMF observer settings only; no tuning or audio controls.
         toolsMenu->addAction("DTMF Analysis...", this, [this] {
             auto* window = findChild<DtmfWindow*>("dtmfWindow");
-            if (!window) window = new DtmfWindow([this](bool input) -> std::shared_ptr<DtmfDecoder> {
-                std::lock_guard lock(receiversMutex);
-                if (receivers.empty()) return {};
-                auto receiver = receivers.front();
-                return {receiver, input ? &receiver->inputWatchDtmf : &receiver->dtmf};
-            }, this);
+            if (!window) {
+                auto* picker = new ReceiverSourcePicker([this] { std::lock_guard lock(receiversMutex); return receivers; });
+                window = new DtmfWindow([picker](bool input) -> std::shared_ptr<DtmfDecoder> {
+                    auto receiver = picker->selected();
+                    if (!receiver) return {};
+                    return {receiver, input ? &receiver->inputWatchDtmf : &receiver->dtmf};
+                }, this);
+                static_cast<QVBoxLayout*>(window->layout())->insertWidget(0, picker);
+            }
             window->show(); window->raise(); window->activateWindow();
         });
         // DEC-0167: read-only Morse observer; no radio/speaker state changes.
         toolsMenu->addAction("CW / Morse Decoder...", this, [this] {
             auto* window = findChild<CwWindow*>("cwWindow");
-            if (!window) window = new CwWindow([this] {
-                std::shared_ptr<Receiver> receiver;
-                { std::lock_guard lock(receiversMutex); if (!receivers.empty()) receiver = receivers.front(); }
-                return cwReceiverSource(receiver);
-            }, this);
+            if (!window) {
+                auto* picker = new ReceiverSourcePicker([this] { std::lock_guard lock(receiversMutex); return receivers; });
+                window = new CwWindow([picker] { return cwReceiverSource(picker->selected()); }, this);
+                static_cast<QVBoxLayout*>(window->layout())->insertWidget(0, picker);
+            }
             window->show(); window->raise(); window->activateWindow();
         });
         toolsMenu->addAction("&SSTV Images...",this,[this] {

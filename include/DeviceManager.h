@@ -104,12 +104,16 @@ public:
     bool retuneWithLease(size_t index, double freqHz, DeviceLeaseOwner owner, bool force, std::string* error);
     static const char* leaseOwnerName(DeviceLeaseOwner owner);
     DeviceLeaseToken claimDevice(size_t index, DeviceLeaseOwner owner, const std::string& client, std::string* error,
-                                 const std::string& expectedKey = {});
+                                 const std::string& expectedKey = {}, bool attachUnmanagedLive = false);
     bool ownsDevice(const DeviceLeaseToken& token) const;
     bool releaseDevice(const DeviceLeaseToken& token);
     bool tuneDevice(const DeviceLeaseToken& token, double freqHz, std::string* error);
-    bool startDevice(const DeviceLeaseToken& token, std::string* error);
+    bool startDevice(const DeviceLeaseToken& token, std::string* error, bool reuseLiveHardware = false);
     bool stopDevice(const DeviceLeaseToken& token);
+    bool restoreDevice(const DeviceLeaseToken& token, bool wasStreaming, bool wasEnabled, double centerHz);
+    bool configureDeviceCapture(const DeviceLeaseToken& token, double sampleRateHz, double bandwidthHz, std::string* error);
+    size_t resolveWorkflowDevice(DeviceLeaseOwner owner, const std::string& stableKey,
+                                 size_t preferredIndex, std::string* error) const;
     bool isHardwareStreaming(size_t index) const;
     bool canUseDevice(size_t index, DeviceLeaseOwner owner, std::string* error = nullptr) const;
     DeviceOwnership::Assignments workflowAssignments() const;

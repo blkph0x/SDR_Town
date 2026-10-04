@@ -1,9 +1,9 @@
 #include "InmarsatWidget.h"
+#include "WorkflowDeviceCombo.h"
 #include "InmarsatEngine.h"
 #include "InmarsatBandPlan.h"
 #include "InmarsatMessageStore.h"
 #include "DeviceManager.h"
-#include "SdrDeviceCandidate.h"
 #include "InmarsatReplayDialog.h"
 #include "InmarsatDiagnostics.h"
 #include "InmarsatMapWidget.h"
@@ -32,20 +32,6 @@
 
 #include <limits>
 #include <cmath>
-
-namespace {
-
-QString receiverDisplayText(size_t index, const DeviceInfo& device, bool streaming) {
-    const QString state = streaming ? "LIVE"
-        : (device.enabled ? "READY"
-           : (SdrDeviceCandidate::isDeferredHardwareProxyLabel(device.label)
-                  ? "PROBE ON START" : "AVAILABLE"));
-    return QString("%1 — %2 [%3]")
-        .arg(static_cast<qulonglong>(index))
-        .arg(QString::fromStdString(device.label), state);
-}
-
-} // namespace
 
 InmarsatWidget::InmarsatWidget(QWidget* parent)
     : QWidget(parent)
@@ -96,6 +82,9 @@ void InmarsatWidget::buildUi() {
     auto* receiverRow = new QHBoxLayout();
     receiverRow->addWidget(new QLabel("INMARSAT RX DEVICE"));
     deviceCombo_ = new QComboBox();
+    deviceCombo_->setObjectName("inmarsatDevice");
+    deviceCombo_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    deviceCombo_->setMinimumContentsLength(18);
     deviceCombo_->setToolTip(
         "Choose the SDR used by Inmarsat. START / TAKE OVER reuses an already-live Listen "
                   "receiver without reopening it, or starts the selected idle receiver. Switching from P25 requires confirmation.");
@@ -232,59 +221,20 @@ void InmarsatWidget::buildUi() {
             this, &InmarsatWidget::onRecordToggled);
     connect(deviceCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int row) {
         if (row < 0) return;
-        bool ok = false;
-        const size_t index = static_cast<size_t>(
-            deviceCombo_->itemData(row).toString().toULongLong(&ok));
-        const auto devices = DeviceManager::instance().getDevices();
-        if (!ok || index >= devices.size() ||
-            !SdrDeviceCandidate::canAttemptRealHardware(devices[index].label)) return;
         auto config = InmarsatEngine::instance().config();
-        config.deviceIndex = index;
-        config.deviceStableKey = devices[index].stableKey;
+        config.deviceStableKey = deviceCombo_->itemData(row).toString().toStdString();
+        config.deviceIndex = size_t(-1);
         InmarsatEngine::instance().setConfig(config);
         statusLabel_->setText(
-            "Inmarsat receiver selected: " + QString::fromStdString(devices[index].label));
+            "Inmarsat receiver selected: " + deviceCombo_->itemText(row));
     });
 }
 
 void InmarsatWidget::refreshDevices() {
     if (!deviceCombo_) return;
-    const auto devices = DeviceManager::instance().getDevices();
     const auto config = InmarsatEngine::instance().config();
-
-    struct Item { QString text; QString data; };
-    std::vector<Item> items;
-    int selectedRow = -1;
-    for (size_t index = 0; index < devices.size(); ++index) {
-        if (!SdrDeviceCandidate::canAttemptRealHardware(devices[index].label)) continue;
-        const QString data = QString::number(static_cast<qulonglong>(index));
-        items.push_back({receiverDisplayText(index, devices[index],
-                                             DeviceManager::instance().isStreaming(index)), data});
-        if ((!config.deviceStableKey.empty() && devices[index].stableKey == config.deviceStableKey) ||
-            (config.deviceStableKey.empty() && config.deviceIndex == index)) {
-            selectedRow = static_cast<int>(items.size()) - 1;
-        }
-    }
-
-    bool rebuild = deviceCombo_->count() != static_cast<int>(items.size());
-    if (!rebuild) {
-        for (int row = 0; row < deviceCombo_->count(); ++row) {
-            if (deviceCombo_->itemText(row) != items[static_cast<size_t>(row)].text ||
-                deviceCombo_->itemData(row).toString() != items[static_cast<size_t>(row)].data) {
-                rebuild = true;
-                break;
-            }
-        }
-    }
-    if (!rebuild) return;
-
-    deviceCombo_->blockSignals(true);
-    deviceCombo_->clear();
-    for (const auto& item : items) deviceCombo_->addItem(item.text, item.data);
-    if (selectedRow < 0 && !items.empty()) selectedRow = 0;
-    deviceCombo_->setCurrentIndex(selectedRow);
-    deviceCombo_->setEnabled(!items.empty());
-    deviceCombo_->blockSignals(false);
+    refreshWorkflowDeviceCombo(*deviceCombo_, DeviceOwnership::Owner::Inmarsat,
+        QString::fromStdString(config.deviceStableKey));
 }
 
 void InmarsatWidget::reloadBandPlans() {

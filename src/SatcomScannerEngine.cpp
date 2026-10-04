@@ -1,4 +1,5 @@
 #include "SatcomScannerEngine.h"
+#include <QUuid>
 #include "AudioEngine.h"
 #include "SatcomHostServices.h"
 #include "Ax25AprsDecoder.h"
@@ -193,6 +194,10 @@ SatcomScannerEngine::~SatcomScannerEngine() {
 
 void SatcomScannerEngine::setConfig(const SatcomScannerConfig& config) {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (deviceLease_ && (config.deviceStableKey != config_.deviceStableKey || config.deviceIndex != config_.deviceIndex)) {
+        lastStatus_ = "Stop Satcom before changing its radio";
+        return;
+    }
     config_ = config;
     config_.save();
     log_.setLogDirectory(config_.logDir);
@@ -223,37 +228,12 @@ size_t SatcomScannerEngine::resolveDeviceIndex(std::string* error) {
     }
 
     SatcomScannerConfig selected = config();
-    size_t chosen = static_cast<size_t>(-1);
-    if (!selected.deviceStableKey.empty()) {
-        for (size_t i = 0; i < devices.size(); ++i) {
-            if (devices[i].stableKey == selected.deviceStableKey && SdrDeviceCandidate::canAttemptRealHardware(devices[i].label)) {
-                chosen = i;
-                break;
-            }
-        }
-    }
-    if (chosen == static_cast<size_t>(-1) && selected.deviceIndex < devices.size() &&
-        SdrDeviceCandidate::canAttemptRealHardware(devices[selected.deviceIndex].label)) {
-        chosen = selected.deviceIndex;
-    }
-    const auto choose = [&](auto predicate) {
-        if (chosen != static_cast<size_t>(-1)) return;
-        for (size_t i = 0; i < devices.size(); ++i) {
-            if (SdrDeviceCandidate::canAttemptRealHardware(devices[i].label) && predicate(i, devices[i])) {
-                chosen = i;
-                return;
-            }
-        }
-    };
-    choose([&](size_t index, const DeviceInfo&) { return manager.isStreaming(index); });
-    choose([](size_t, const DeviceInfo& device) { return device.enabled; });
-    choose([](size_t, const DeviceInfo& device) { return device.isSdrplay; });
-    choose([](size_t, const DeviceInfo&) { return true; });
-
-    if (chosen == static_cast<size_t>(-1)) {
-        if (error) *error = "No hardware-capable SDR entry is available. Rescan devices; explicit (stub) demo entries cannot run Satcom.";
-        return chosen;
-    }
+    const auto active = leaseToken();
+    if (active && manager.ownsDevice(active)) return active.index;
+    const size_t chosen = manager.resolveWorkflowDevice(DeviceOwnership::Owner::Satcom,
+        selected.deviceStableKey, selected.deviceIndex, error);
+    if (chosen == size_t(-1)) return chosen;
+    if (chosen >= devices.size()) { if (error) *error = "Radio list changed; select the radio again"; return size_t(-1); }
 
     const std::string stableKey = devices[chosen].stableKey;
     if (selected.deviceIndex != chosen || selected.deviceStableKey != stableKey) {
@@ -315,36 +295,28 @@ void SatcomScannerEngine::capturePreviousDeviceState(size_t deviceIndex) {
     if (!previousDeviceState_.has_value()) previousDeviceState_ = saved;
 }
 
+DeviceOwnership::Token SatcomScannerEngine::leaseToken() const {
+    std::lock_guard lock(mutex_);
+    return deviceLease_;
+}
+
 void SatcomScannerEngine::restorePreviousDeviceState() {
     std::optional<PreviousDeviceState> saved;
+    DeviceOwnership::Token token;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         saved = previousDeviceState_;
         previousDeviceState_.reset();
+        token = deviceLease_;
+        deviceLease_ = {};
         activeDeviceIndex_ = static_cast<size_t>(-1);
     }
 
     auto& manager = DeviceManager::instance();
-    if (!saved.has_value() || saved->deviceIndex == static_cast<size_t>(-1)) {
-        manager.releaseDeviceLease(DeviceManager::DeviceLeaseOwner::Satcom);
-        return;
-    }
-
-    const size_t deviceIndex = saved->deviceIndex;
-    if (saved->wasStreaming) {
-        manager.setEnabled(deviceIndex, true);
-        if (!manager.isStreaming(deviceIndex)) manager.startStreaming(deviceIndex, true);
-        if (saved->centerHz > 0.0) {
-            std::string ignored;
-            manager.retuneWithLease(deviceIndex, saved->centerHz,
-                                    DeviceManager::DeviceLeaseOwner::Satcom,
-                                    true, &ignored);
-        }
-    } else {
-        manager.stopStreaming(deviceIndex);
-        manager.setEnabled(deviceIndex, saved->wasEnabled);
-    }
-    manager.releaseDeviceLease(deviceIndex, DeviceManager::DeviceLeaseOwner::Satcom);
+    const bool restored = saved && token && manager.restoreDevice(token,
+        saved->wasStreaming, saved->wasEnabled, saved->centerHz);
+    std::lock_guard lock(mutex_);
+    if (hostLease_ == token) hostRestoreAllowed_ = restored;
 }
 
 bool SatcomScannerEngine::beginHostTakeover(size_t deviceIndex, std::string* error) {
@@ -363,7 +335,8 @@ bool SatcomScannerEngine::beginHostTakeover(size_t deviceIndex, std::string* err
     }
 
     std::string hostError;
-    if (!host.beginReceiverTakeover(deviceIndex, &hostError)) {
+    const auto token = leaseToken();
+    if (token.index != deviceIndex || !host.beginReceiverTakeover(token, &hostError)) {
         const std::string message = hostError.empty()
             ? "SDR Town could not park the selected Listen receiver"
             : hostError;
@@ -378,6 +351,8 @@ bool SatcomScannerEngine::beginHostTakeover(size_t deviceIndex, std::string* err
     {
         std::lock_guard<std::mutex> lock(mutex_);
         hostTakeoverActive_ = true;
+        hostLease_ = token;
+        hostRestoreAllowed_ = false;
     }
     host.publishStatus("Satcom owns the selected receiver");
     if (error) error->clear();
@@ -386,13 +361,19 @@ bool SatcomScannerEngine::beginHostTakeover(size_t deviceIndex, std::string* err
 
 void SatcomScannerEngine::endHostTakeover() {
     bool active = false;
+    bool restore = false;
+    DeviceOwnership::Token token;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         active = hostTakeoverActive_;
         hostTakeoverActive_ = false;
+        token = hostLease_;
+        hostLease_ = {};
+        restore = hostRestoreAllowed_;
+        hostRestoreAllowed_ = false;
     }
     if (!active) return;
-    SatcomHostServices::instance().endReceiverTakeover();
+    SatcomHostServices::instance().endReceiverTakeover(token, restore);
     SatcomHostServices::instance().publishStatus("Satcom receiver released");
 }
 
@@ -413,8 +394,9 @@ bool SatcomScannerEngine::prepareReceiverForSatcom(size_t deviceIndex, bool forc
 
     capturePreviousDeviceState(deviceIndex);
     std::string leaseError;
-    if (!manager.acquireDeviceLease(deviceIndex, DeviceManager::DeviceLeaseOwner::Satcom,
-                                    force, &leaseError)) {
+    const auto token = manager.claimDevice(deviceIndex, DeviceManager::DeviceLeaseOwner::Satcom,
+        QUuid::createUuid().toString(QUuid::Id128).toStdString(), &leaseError, config().deviceStableKey, force);
+    if (!token) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
             previousDeviceState_.reset();
@@ -424,6 +406,15 @@ bool SatcomScannerEngine::prepareReceiverForSatcom(size_t deviceIndex, bool forc
         return false;
     }
 
+    { std::lock_guard lock(mutex_); deviceLease_ = token; }
+    // Park only this radio's receivers before starting hardware or changing RF.
+    if (!beginHostTakeover(deviceIndex, error)) {
+        manager.releaseDevice(token);
+        std::lock_guard lock(mutex_);
+        deviceLease_ = {};
+        previousDeviceState_.reset();
+        return false;
+    }
     bool wasStreaming = false;
     std::string existingState;
     {
@@ -438,9 +429,9 @@ bool SatcomScannerEngine::prepareReceiverForSatcom(size_t deviceIndex, bool forc
     // Do not stop a healthy live stream during takeover. DeviceManager starts a
     // temporary stub before its asynchronous Soapy open; recycling a working
     // receiver here caused Start/Arm to fall back to "opening hardware (stub active)".
-    // startStreaming(true) is idempotent for an already-live stream and upgrades a
-    // pre-existing safe stub when that is genuinely required.
-    if (!manager.setEnabled(deviceIndex, true) || !manager.startStreaming(deviceIndex, true)) {
+    // Reuse is allowed only for confirmed live hardware; an opening/stub stream
+    // is not restarted underneath another asynchronous opener.
+    if (!manager.startDevice(token, &leaseError, true)) {
         const std::string message = "Could not start selected Satcom receiver";
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -449,6 +440,7 @@ bool SatcomScannerEngine::prepareReceiverForSatcom(size_t deviceIndex, bool forc
         }
         restorePreviousDeviceState();
         if (error) *error = message;
+        endHostTakeover();
         return false;
     }
 
@@ -461,6 +453,7 @@ bool SatcomScannerEngine::prepareReceiverForSatcom(size_t deviceIndex, bool forc
         }
         restorePreviousDeviceState();
         if (error) *error = streamError;
+        endHostTakeover();
         return false;
     }
 
@@ -484,9 +477,8 @@ bool SatcomScannerEngine::tuneAndConfirm(size_t deviceIndex, double frequencyHz,
                                         int timeoutMs, std::string* error) {
     auto& manager = DeviceManager::instance();
     std::string tuneError;
-    if (!manager.retuneWithLease(deviceIndex, frequencyHz,
-                                 DeviceManager::DeviceLeaseOwner::Satcom,
-                                 true, &tuneError)) {
+    const auto token = leaseToken();
+    if (token.index != deviceIndex || !manager.tuneDevice(token, frequencyHz, &tuneError)) {
         if (error) *error = tuneError.empty() ? "Could not tune Satcom receiver" : tuneError;
         return false;
     }
@@ -502,6 +494,7 @@ bool SatcomScannerEngine::tuneAndConfirm(size_t deviceIndex, double frequencyHz,
             }
             return false;
         }
+        if (!manager.ownsDevice(token)) { if (error) *error = "Satcom radio ownership expired"; return false; }
         if (manager.getCenterTuneAppliedSeq(deviceIndex) >= requested &&
             std::abs(manager.getCurrentCenterFreq(deviceIndex) - frequencyHz) <= 100.0) {
             if (error) error->clear();
@@ -528,7 +521,10 @@ void SatcomScannerEngine::resetChronologicalInput() {
 }
 
 SatcomIqCursor::Result SatcomScannerEngine::pullNewIq(size_t deviceIndex, size_t maxSamples) {
-    const auto window = DeviceManager::instance().getRecentIQWindowWithCursor(deviceIndex, maxSamples);
+    auto& manager = DeviceManager::instance();
+    const auto token = leaseToken();
+    if (token.index != deviceIndex || !manager.ownsDevice(token)) return {};
+    const auto window = manager.getRecentIQWindowWithCursor(deviceIndex, maxSamples);
     std::lock_guard<std::mutex> lock(iqMutex_);
     return iqCursor_.consume(window.samples,
                              window.startAbsolute,
@@ -545,6 +541,7 @@ bool SatcomScannerEngine::waitForOperationalStream(size_t deviceIndex, int timeo
     std::string lastState = "starting";
 
     while (std::chrono::steady_clock::now() < deadline) {
+        if (!manager.ownsDevice(leaseToken())) { if (error) *error = "Satcom radio ownership expired"; return false; }
         lastState = manager.getRuntimeStateLabel(deviceIndex);
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -1235,7 +1232,7 @@ bool SatcomScannerEngine::refreshSpectrum(size_t deviceIndex, double* peakHz,
         streamState_ = manager.getRuntimeStateLabel(deviceIndex);
         deviceConnected_ = streamState_ == "live hardware";
     }
-    SatcomHostServices::instance().publishSpectrum(power, center, rate);
+    SatcomHostServices::instance().publishSpectrum(leaseToken(), power, center, rate);
     return true;
 }
 
@@ -1432,7 +1429,7 @@ void SatcomScannerEngine::workerLoop() {
             passHold = passTrackActive_;
         }
 
-        if (manager.getRuntimeStateLabel(deviceIndex) != "live hardware") {
+        if (!manager.ownsDevice(leaseToken()) || manager.getRuntimeStateLabel(deviceIndex) != "live hardware") {
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 streamState_ = manager.getRuntimeStateLabel(deviceIndex);
@@ -1481,9 +1478,7 @@ void SatcomScannerEngine::workerLoop() {
                 lastStatus_ = "Scanning";
             }
             std::string tuneError;
-            if (!manager.retuneWithLease(deviceIndex, tuneHz,
-                                         DeviceManager::DeviceLeaseOwner::Satcom,
-                                         true, &tuneError)) {
+            if (!manager.tuneDevice(leaseToken(), tuneHz, &tuneError)) {
                 std::lock_guard<std::mutex> lock(mutex_);
                 lastStatus_ = tuneError.empty() ? "scan retune blocked" : tuneError;
             }
@@ -1505,9 +1500,7 @@ void SatcomScannerEngine::workerLoop() {
                     armedRole_.clear();
                 }
                 resetChronologicalInput();
-                manager.retuneWithLease(deviceIndex, peakHz,
-                                        DeviceManager::DeviceLeaseOwner::Satcom,
-                                        true, nullptr);
+                manager.tuneDevice(leaseToken(), peakHz, nullptr);
                 pushLog(SatcomLog::EventType::Lock, peakHz, "activity");
             } else {
                 std::lock_guard<std::mutex> lock(mutex_);

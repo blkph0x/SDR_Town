@@ -8,6 +8,8 @@
 #include "AudioEngine.h"
 #include "AudioCapture.h"
 #include "DeviceManager.h"
+#include "WorkflowRadioSession.h"
+#include "AircraftReceivePlan.h"
 #include "Demod.h"
 #include "RdsDecoder.h"
 #include "RdsMpxFile.h"
@@ -1514,6 +1516,7 @@ int runCLI(int argc, char* argv[]) {
         }
     };
 
+    std::unique_ptr<WorkflowRadioSession> aircraftRadio;
     if (!cliBatchCommands.empty()) {
         const std::string last = cliBatchCommands.back();
         std::string lowerLast = last;
@@ -1581,7 +1584,7 @@ int runCLI(int argc, char* argv[]) {
                       << "  tle status|refresh|load <path>|show [norad]\n"
                       << "  satcom status|start [force]|stop|skip|record|arm|disarm|track\n"
                       << "  inmarsat status|start [force]|stop|channel <mhz>|plan <id>\n"
-                      << "  aircraft status|refresh|tune [force]|track <icao>\n"
+                      << "  aircraft status|refresh|tune [device-index]|stop|track <icao>\n"
                       << "  squelch <db> [rx]       - set squelch\n"
                       << "  stats | status [rx]     - live diagnostics (gain/mode/BW/IQ/DSP/ring/underrun)\n"
                       << "  fav list|add|tune|del   - saved frequencies\n"
@@ -2198,16 +2201,27 @@ int runCLI(int argc, char* argv[]) {
             } else if (sub == "tune") {
                 std::string extra;
                 iss >> extra;
-                const bool force = (extra == "force");
                 std::string err;
-                if (!mgr.acquireDeviceLease(0, DeviceManager::DeviceLeaseOwner::Aircraft, force, &err)) {
-                    std::cout << "fail " << err << "\n";
-                } else {
-                    mgr.setEnabled(0, true);
-                    mgr.startStreaming(0, true);
-                    mgr.retuneWithLease(0, 1090e6, DeviceManager::DeviceLeaseOwner::Aircraft, true, nullptr);
-                    std::cout << "tuned 1090\n";
-                }
+                try {
+                    const auto devices = mgr.getDevices();
+                    size_t index = size_t(-1);
+                    if (extra.empty()) index = mgr.resolveWorkflowDevice(DeviceOwnership::Owner::Aircraft, {}, mgr.preferredListenDeviceIndex(), &err);
+                    else {
+                        bool valid = false;
+                        index = QString::fromStdString(extra).toULongLong(&valid);
+                        if (!valid) throw std::runtime_error("Use a device index; stop the current workflow before reusing its radio");
+                    }
+                    if (index >= devices.size()) throw std::runtime_error(err.empty() ? "Invalid radio index" : err);
+                    if (aircraftRadio && aircraftRadio->valid()) throw std::runtime_error("Run aircraft stop before changing radio");
+                    const auto plan = aircraftReceivePlan(20e6, devices[index].sampleRates, devices[index].bandwidthsHz);
+                    if (!plan.sampleRateHz) throw std::runtime_error("No advertised Mode-S sample rate; rescan the radio");
+                    aircraftRadio.reset();
+                    aircraftRadio = std::make_unique<WorkflowRadioSession>(mgr, devices[index].stableKey,
+                        DeviceOwnership::Owner::Aircraft,1090e6,[] { return false; },plan.sampleRateHz,plan.hardwareBandwidthHz);
+                    std::cout << "1090 radio ready on device " << index << " (tune only; use GUI for continuous local Mode-S decoding)\n";
+                } catch (const std::exception& e) { std::cout << "fail " << e.what() << "\n"; }
+            } else if (sub == "stop") {
+                aircraftRadio.reset(); std::cout << "aircraft radio stopped\n";
             } else if (sub == "track") {
                 std::string hex;
                 iss >> hex;
@@ -2221,7 +2235,7 @@ int runCLI(int argc, char* argv[]) {
                               << " lon=" << t.lonDeg << " valid=" << t.positionValid << "\n";
                 }
             } else {
-                std::cout << "usage: aircraft status|refresh|tune [force]|track <icao>\n";
+                std::cout << "usage: aircraft status|refresh|tune [device-index]|stop|track <icao>\n";
             }
         } else if (cmd == "squelch") {
             double db; int rxidx=0;

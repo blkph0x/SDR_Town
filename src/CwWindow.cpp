@@ -33,7 +33,7 @@ CwWindow::CwWindow(LiveFactory live, QWidget* parent) : QDialog(parent), live_(s
     auto* layout = new QVBoxLayout(this);
     auto* form = new QFormLayout;
     source_ = new QComboBox(this); source_->setObjectName("cwSource");
-    source_->addItem("Main receiver", "live"); source_->addItem("Audio recording", "file");
+    source_->addItem("Receiver tap", "live"); source_->addItem("Audio recording", "file");
     form->addRow("Source", source_);
     auto* row = new QHBoxLayout;
     file_ = new QLineEdit(this); file_->setObjectName("cwFile");
@@ -97,6 +97,7 @@ void CwWindow::closeEvent(QCloseEvent* event) {
     QDialog::closeEvent(event);
 }
 void CwWindow::setBusy(bool busy) {
+    if (auto* picker = findChild<QComboBox*>("receiverSource")) picker->setEnabled(!busy && source_->currentData() == "live");
     source_->setEnabled(!busy); pitch_->setEnabled(!busy); speed_->setEnabled(!busy);
     file_->setEnabled(!busy && source_->currentData() == "file"); open_->setEnabled(file_->isEnabled());
     start_->setEnabled(!busy); stop_->setEnabled(busy); clear_->setEnabled(!busy);

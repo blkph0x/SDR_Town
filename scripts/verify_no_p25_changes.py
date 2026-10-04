@@ -93,12 +93,31 @@ WORKFLOW_DIGESTS = {
 }
 
 
+# DEC-0182: exact GUI/CLI routing and token-scoped satellite/aircraft lifecycle
+# follow-up to ba26fe3. No P25 DSP, receive cadence or audio implementation edits.
+WORKFLOW_ROUTING_DIGESTS = {
+    "src/CliApp.cpp": (
+        "21f6522f5a61cd8dc3537b21c0fd2cc7f7e6ca36ecf9f9c5d6cd3cfc2f8a662d",
+        "450dbf7743e23939e1c0385fcac82fb6a542f76b19c72c270936a2565c1fccee"),
+    "src/DeviceManager.cpp": (
+        "14a3753c9cd4f4b2d75cee02bee574ceb08c26748930a9ce1295cd55b938e612",
+        "d7affe51d89a1d5b91f78963cab65aaba71b24168e03d040c65d0599b715a45e"),
+    "include/DeviceManager.h": (
+        "c19c6dde380f1ee1cd8ca59208cfd0445d32da857437dc78c405b0cfe2dc85e2",
+        "5fba5178a13fe71b39e7b16eb713400d1a447f685412443a7e3d1edb0f61abcc"),
+    "src/MainWindow.cpp": (
+        "055f919232c2dc78e8be9628c031cdea70874bd382f1e5183598e5e551b9a219",
+        "1bee21e1adb220ea826a02927cebe045639e925e8012b0b74062a6f55a1559d8"),
+}
+
+
 def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
     actual = (
         hashlib.sha256(before.encode("utf-8")).hexdigest(),
         hashlib.sha256(after.encode("utf-8")).hexdigest(),
     )
-    return actual in (INFRASTRUCTURE_DIGESTS.get(path), LOSS_ACK_DIGESTS.get(path), WORKFLOW_DIGESTS.get(path))
+    return actual in (INFRASTRUCTURE_DIGESTS.get(path), LOSS_ACK_DIGESTS.get(path),
+                      WORKFLOW_DIGESTS.get(path), WORKFLOW_ROUTING_DIGESTS.get(path))
 
 
 # DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.
@@ -580,7 +599,7 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
-        if args.paths is None and path in (INFRASTRUCTURE_DIGESTS.keys() | WORKFLOW_DIGESTS.keys()):
+        if args.paths is None and path in (INFRASTRUCTURE_DIGESTS.keys() | WORKFLOW_DIGESTS.keys() | WORKFLOW_ROUTING_DIGESTS.keys()):
             if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
                 print(f"P25 guard: accepted exact reviewed infrastructure/ownership patch: {path}")
                 continue

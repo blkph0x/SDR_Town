@@ -1,5 +1,33 @@
 # Decisions
 
+## DEC-0182 - Connect workflow controllers without cross-radio restoration (2026-10-04)
+
+T-0103 continues from ba26fe3. Inspection confirms Inmarsat/Satcom still restore
+by a recycled device index and use one global GUI takeover record; Aircraft
+reads preferred Listen rather than its selected source. Saved satellite keys
+also fall back to another index when absent. These defeat DEC-0181 isolation.
+
+Use exact generation/client lease tokens for satellite and aircraft lifecycle,
+including tune, stop and restore. Explicit force may attach an unmanaged live
+Listen stream, never another lease/reservation. Reuse only live hardware; do
+not restart a stub under the ownership mutex. Restore only while that exact
+lease remains valid. GUI pause/restore and spectrum publication carry the
+same token, permit independent radios, and reject stale completions. Missing
+or ambiguous saved identities fail closed instead of selecting another SDR.
+
+Wire UI/control source selection through these rules; preserve other logical
+receivers during main-source/diversity changes and show unavailable selections.
+Observer decoders must use a deliberately selected receiver, not implicitly
+the first radio. No DSP/filter/vocoder/security/cadence changes are authorized.
+Multi-instance P25 orchestration remains a separate migration, not something
+proved by a source selector or four ownership tokens.
+
+Gates: mock-radio lifecycle with stale restoration and independent controllers,
+GUI source persistence/missing-device tests, host token isolation, existing
+satellite/aircraft/SSTV tests, full build/CTest, actual no-RX GUI profiles and
+exact frozen-P25 guard plus negative mutations. Source CI must pass; ISS-0060
+still blocks binary publication independently of this work.
+
 ## DEC-0181 - Bound release closure and isolate workflow device assignments (2026-10-04)
 
 User authorizes moving to T-0103, with explicit radio selection and several P25

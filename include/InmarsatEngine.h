@@ -1,4 +1,5 @@
 #pragma once
+#include "DeviceOwnership.h"
 
 #include "InmarsatBandPlan.h"
 #include "InmarsatDemod.h"
@@ -129,6 +130,7 @@ private:
     bool tuneAndConfirm(size_t deviceIndex, double frequencyHz, int timeoutMs, std::string* error);
     void capturePreviousDeviceState(size_t deviceIndex);
     void restorePreviousDeviceState();
+    DeviceOwnership::Token leaseToken() const;
 
     mutable std::mutex mutex_;
     InmarsatEngineConfig config_;
@@ -152,6 +154,7 @@ private:
     bool deviceConnected_ = false;
     size_t activeDeviceIndex_ = std::numeric_limits<size_t>::max();
     std::optional<PreviousDeviceState> previousDeviceState_;
+    DeviceOwnership::Token deviceLease_;
     bool hostTakeoverActive_ = false;
     std::vector<float> spectrumDb_;
     double spectrumCenterHz_ = 0.0;

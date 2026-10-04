@@ -1,5 +1,34 @@
 # Build notes
 
+## 2026-10-04 - T-0103 controller routing (DEC-0182)
+
+Baseline ba26fe3, Windows/MSVC14.44/Qt6.11.1 and configured C:/vcpkg.
+Targeted and full Release builds PASS; final build4 includes the idle Aircraft
+Stop-state repair found during visual inspection. Full CTest17/17 PASS79.07s
+(`build/ownership-routing-final2-ctest.log`), after earlier full passes79.67s
+and80.38s. Includes five mock radios, confirmed satellite restore/live reuse,
+stale-worker rejection, host lifecycle, SSTV live cancel/finish and source
+validation, aircraft missing-source/web refusal and logical receiver identity.
+
+Actual application no-RX GUI profiles PASS at960x720,1280x900,800x700,1600x900
+under configured offscreen Qt/Windows fonts. Compact560x360 and1100x650
+Aircraft widget renders PASS53 assertions/3 tests; source and Stop controls
+fit. Screenshots inspected in build/ownership-routing-gui. Initial standalone
+widget launch lacked the application DLL directory in PATH and did not start;
+using the same bin/plugin paths as CTest passes. No production workaround.
+
+CLI invalid aircraft source and stop commands execute and exit cleanly, with
+no hardware stream started (`ownership-routing-cli.log`). Use repeated
+`--cmd="..."` arguments: bare `--cmd` intentionally consumes the remaining
+arguments as one command. Local enumeration reports an RTL receiver and an
+unavailable SDRplay API/service; this is not physical RSP or multi-radio proof.
+
+Exact DEC-0182 frozen-P25 guard and negative mutation tests PASS. P25 decoder,
+vocoder, speaker implementation and FM/HF DSP are unchanged. Physical RF,
+driver hangs and repeatable P25/satellite controller instances remain open.
+Exact pushed-source CI/inventory outcome is recorded on that commit's acceptance
+comment; no public binary is authorized while ISS-0060 remains open.
+
 ## 2026-10-04 - T-0103 ownership milestone (DEC-0181), qualification in progress
 
 Host Windows/MSVC14.44/Qt6.11.1, configured C:/vcpkg; baseline10259ca.

@@ -53,6 +53,12 @@ TEST_CASE("SSTV radio selection preserves stable identity and distinguishes rece
     CHECK(frequency->isEnabled());
     frequency->setValue(145.8);
     CHECK(window.selectedFrequencyHz()==145800000.0);
+    CHECK_FALSE(window.selectRfSource("missing-radio", 145800000.0));
+    CHECK_FALSE(window.selectRfSource("radio-a", -1.0));
+    CHECK(window.selectedDeviceKey()=="radio-b");
+    REQUIRE(window.selectRfSource("radio-a", 145900000.0));
+    CHECK(window.selectedDeviceKey()=="radio-a");
+    CHECK(window.selectedFrequencyHz()==145900000.0);
     QSettings().remove("sstv/deviceKey");
 }
 
@@ -69,6 +75,7 @@ TEST_CASE("Live SSTV GUI finish saves and cancel releases its receiver","[sstv-l
         });
         window.show();
         REQUIRE(window.startLive(directory.filePath("live"),"auto"));
+        CHECK_FALSE(window.selectRfSource({}, 145800000.0));
         REQUIRE_FALSE(window.startLive(directory.filePath("duplicate"),"auto"));
         REQUIRE_FALSE(window.findChild<QComboBox*>("sstvSource")->isEnabled());
         QTimer::singleShot(100,&window,[&]{if(cancel) window.close();else window.finishLive();});

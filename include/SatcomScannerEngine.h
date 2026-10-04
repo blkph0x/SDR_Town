@@ -1,4 +1,5 @@
 #pragma once
+#include "DeviceOwnership.h"
 #include "SatcomDoppler.h"
 
 #include "SatcomAsyncLog.h"
@@ -174,6 +175,7 @@ private:
     void shutdownAudioOutput();
     void capturePreviousDeviceState(size_t deviceIndex);
     void restorePreviousDeviceState();
+    DeviceOwnership::Token leaseToken() const;
     void notifyUpdate();
     void pushLog(SatcomLog::EventType t, double hz, const char* text);
     std::string makeCaptureStem(const std::string& satId, const std::string& downlinkId) const;
@@ -212,6 +214,9 @@ private:
     double passNominalHz_ = 0.0;
     size_t activeDeviceIndex_ = static_cast<size_t>(-1);
     std::optional<PreviousDeviceState> previousDeviceState_;
+    DeviceOwnership::Token deviceLease_;
+    DeviceOwnership::Token hostLease_;
+    bool hostRestoreAllowed_ = false;
 
     std::atomic<bool> run_{false};
     std::thread worker_;

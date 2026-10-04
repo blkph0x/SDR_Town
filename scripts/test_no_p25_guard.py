@@ -29,6 +29,14 @@ def main() -> int:
     import subprocess
     for path in MODULE.WORKFLOW_DIGESTS:
         before = subprocess.check_output(["git", "show", "10259ca:" + path], cwd=ROOT, text=True, encoding="utf-8")
+        after = subprocess.check_output(["git", "show", "ba26fe3:" + path], cwd=ROOT, text=True, encoding="utf-8")
+        assert MODULE.infrastructure_text_allowed(path, before, after)
+        assert not MODULE.infrastructure_text_allowed(path, before, after + "\nRF change")
+        assert not MODULE.infrastructure_text_allowed(path, after, before)
+        assert not MODULE.infrastructure_text_allowed("src/P25LiveDecoder.cpp", before, after)
+        assert not MODULE.infrastructure_text_allowed(path, before, after.replace("false", "true", 1))
+    for path in MODULE.WORKFLOW_ROUTING_DIGESTS:
+        before = subprocess.check_output(["git", "show", "ba26fe3:" + path], cwd=ROOT, text=True, encoding="utf-8")
         after = (ROOT / path).read_text(encoding="utf-8")
         assert MODULE.infrastructure_text_allowed(path, before, after)
         assert not MODULE.infrastructure_text_allowed(path, before, after + "\nRF change")

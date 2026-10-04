@@ -53,8 +53,13 @@ milestone: persistent per-device workflow reservations, per-device leases/token
 invalidation, visible conflict/status UI, P25 pool isolation and dedicated SSTV.
 Concurrent P25 controllers/calls and driver-hang recovery are separate remaining
 milestones; do not present an assigned pool as concurrent call decoding.
-Current migration matrix and concrete limits: WORKFLOW_DEVICES.md. Main Listen,
-P25, satellite singleton controllers and observer-source selection remain open.
+DEC-0182 adds selected-radio GUI/CLI/web routes, exact satellite restoration,
+per-radio GUI takeover, aircraft worker ownership and logical receiver pickers
+for CW/DTMF/SSTV/RDS/tone status. Current migration matrix and concrete limits:
+WORKFLOW_DEVICES.md. Main Listen's remaining raw lifecycle, primary index
+assumptions, repeatable P25/satellite engines and source/output persistence stay
+open. P25 DSP/vocoder/speaker cadence are unchanged; selectors are not proof of
+independent concurrent P25 controllers.
 Depends on T-0102 loss-boundary/source regression evidence; ISS-0055. Define
 stable physical identity and generation-bound consumer tokens, including shared
 SDRplay tuner domains and ambiguous duplicate serials. Inventory every raw tune/

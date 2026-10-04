@@ -1,4 +1,5 @@
 #include "DeviceManager.h"
+#include "SdrDeviceCandidate.h"
 #include "Receiver.h"   // for getNewSamplesForReceiver(..., Receiver& rx, ... ) cursor update
 #include "SdrplayProfile.h"
 #include "SdrplayRuntime.h"
@@ -1931,7 +1932,7 @@ bool DeviceManager::setWorkflowAssignments(const DeviceOwnership::Assignments& v
 }
 
 DeviceManager::DeviceLeaseToken DeviceManager::claimDevice(size_t index, DeviceLeaseOwner owner,
-    const std::string& client, std::string* error, const std::string& expectedKey) {
+    const std::string& client, std::string* error, const std::string& expectedKey, bool attachUnmanagedLive) {
     std::lock_guard lock(leaseMutex_);
     const auto devices = getDevices();
     if (index >= devices.size() || (!expectedKey.empty() && devices[index].stableKey != expectedKey)) {
@@ -1942,7 +1943,7 @@ DeviceManager::DeviceLeaseToken DeviceManager::claimDevice(size_t index, DeviceL
         if (error) *error = "Repair device assignments before receiving: " + assignmentLoadError_;
         return {};
     }
-    if (!ownership_.current(index) && isStreaming(index)) {
+    if (!ownership_.current(index) && isStreaming(index) && !attachUnmanagedLive) {
         if (error) *error = "Radio is already receiving; stop it or use its existing receiver tap";
         return {};
     }
@@ -1977,7 +1978,7 @@ bool DeviceManager::tuneDevice(const DeviceLeaseToken& token, double freqHz, std
     return queueCenterFreq(token.index, freqHz) != 0;
 }
 
-bool DeviceManager::startDevice(const DeviceLeaseToken& token, std::string* error) {
+bool DeviceManager::startDevice(const DeviceLeaseToken& token, std::string* error, bool reuseLiveHardware) {
     std::lock_guard lock(leaseMutex_);
     if (!ownership_.valid(token) || !ownership_.allowed(token.index, token.owner, token.client, error)) {
         if (error) *error = "Device ownership expired or the radio is stopping";
@@ -1986,10 +1987,112 @@ bool DeviceManager::startDevice(const DeviceLeaseToken& token, std::string* erro
     // A scoped workflow starts an idle radio, never upgrades/restarts another
     // stream. startStreaming launches hardware open asynchronously.
     if (isStreaming(token.index)) {
+        if (reuseLiveHardware && isHardwareStreaming(token.index)) return true;
         if (error) *error = "Radio already receiving";
         return false;
     }
     return startStreaming(token.index, true);
+}
+
+bool DeviceManager::configureDeviceCapture(const DeviceLeaseToken& token, double rate, double bandwidth, std::string* error) {
+    std::lock_guard lock(leaseMutex_);
+    if (!ownership_.valid(token) || isStreaming(token.index)) {
+        if (error) *error = "Capture settings require an idle radio owned by this session";
+        return false;
+    }
+    if (!std::isfinite(rate) || rate <= 0 || !std::isfinite(bandwidth) || bandwidth < 0) {
+        if (error) *error = "Invalid capture sample rate or bandwidth";
+        return false;
+    }
+    const auto devices = getDevices();
+    const auto& device = devices.at(token.index);
+    updateDeviceParams(token.index, rate, device.gain, device.antenna, device.frequencyCorrectionPpm);
+    if (device.isSdrplay && bandwidth > 0) return setLiveBandwidth(token.index, bandwidth, error);
+    return true;
+}
+
+bool DeviceManager::restoreDevice(const DeviceLeaseToken& token, bool wasStreaming,
+    bool wasEnabled, double centerHz) {
+    // DEC-0182: restoration is an operation of the OLD lease, never a fresh
+    // acquire by index. A cancelled/replaced worker cannot resurrect reception.
+    uint64_t restoreRequest = 0;
+    {
+        std::lock_guard lock(leaseMutex_);
+        if (!ownership_.valid(token)) return false;
+        if (wasStreaming && isHardwareStreaming(token.index)) {
+            if (std::isfinite(centerHz) && centerHz > 0) restoreRequest = queueCenterFreq(token.index, centerHz);
+        }
+    }
+    // Same four-second hardware confirmation bound as Inmarsat tuneAndConfirm;
+    // no GUI receiver resumes while the hardware is still on the satellite IF.
+    if (restoreRequest) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(4);
+        while (std::chrono::steady_clock::now() < deadline) {
+            {
+                std::lock_guard lock(leaseMutex_);
+                if (!ownership_.valid(token)) return false;
+                if (!isHardwareStreaming(token.index)) break;
+                if (getCenterTuneAppliedSeq(token.index) >= restoreRequest && getCenterTuneRequestSeq(token.index) == restoreRequest) {
+                    setEnabled(token.index, wasEnabled);
+                    ownership_.release(token);
+                    spdlog::info("Workflow restored live radio: dev={} lease={} centerHz={}", token.index, token.id, centerHz);
+                    return true;
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        spdlog::warn("Workflow restore could not confirm radio tune: dev={} lease={}", token.index, token.id);
+    }
+    {
+        std::lock_guard lock(leaseMutex_);
+        if (!ownership_.valid(token)) return false;
+        // No new lease can enter between restoring settings and marking stop.
+        if (!ownership_.beginStop(token.index)) return false;
+        setEnabled(token.index, wasEnabled);
+        ownership_.invalidate(token.index);
+    }
+    try { stopStreamingImpl(token.index); }
+    catch (...) {
+        std::lock_guard lock(leaseMutex_);
+        ownership_.endStop(token.index);
+        throw;
+    }
+    std::lock_guard lock(leaseMutex_);
+    ownership_.endStop(token.index);
+    spdlog::info("Workflow stopped owned radio: dev={} lease={}", token.index, token.id);
+    return !wasStreaming; // Failed hardware must not resume a paused Listen receiver.
+}
+
+size_t DeviceManager::resolveWorkflowDevice(DeviceLeaseOwner owner, const std::string& key,
+    size_t preferredIndex, std::string* error) const {
+    const auto devices = getDevices();
+    const auto usable = [&](size_t i) {
+        return i < devices.size() && SdrDeviceCandidate::canAttemptRealHardware(devices[i].label) &&
+            hasUniqueDeviceIdentity(i) && canUseDevice(i, owner);
+    };
+    if (!key.empty()) {
+        size_t selected = size_t(-1);
+        for (size_t i = 0; i < devices.size(); ++i) if (devices[i].stableKey == key) {
+            if (selected != size_t(-1)) {
+                if (error) *error = "Selected radio identity is ambiguous; use unique SDR serials";
+                return size_t(-1);
+            }
+            selected = i;
+        }
+        if (selected == size_t(-1)) { if (error) *error = "Saved radio is unavailable; select a radio explicitly"; }
+        else if (!canUseDevice(selected, owner, error)) return size_t(-1);
+        else if (!usable(selected)) { if (error) *error = "Selected radio is not a usable hardware source"; }
+        else { if (error) error->clear(); return selected; }
+        return size_t(-1);
+    }
+    // An explicit workflow reservation outranks the old first-radio default.
+    for (size_t i = 0; i < devices.size(); ++i)
+        if (workflowAssignment(i) == owner && usable(i)) { if (error) error->clear(); return i; }
+    if (usable(preferredIndex)) { if (error) error->clear(); return preferredIndex; }
+    for (size_t i = 0; i < devices.size(); ++i)
+        if (usable(i)) { if (error) error->clear(); return i; }
+    if (error) *error = "No available radio for this workflow; check Workflow Assignments";
+    return size_t(-1);
 }
 
 bool DeviceManager::stopDevice(const DeviceLeaseToken& token) {

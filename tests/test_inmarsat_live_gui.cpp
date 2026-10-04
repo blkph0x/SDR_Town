@@ -369,14 +369,14 @@ TEST_CASE("Inmarsat takeover refuses safely and restores on hardware startup fai
         ~Cleanup() { InmarsatEngine::instance().stop(); SatcomHostServices::instance().clear(); }
     } cleanup;
     SatcomHostCallbacks callbacks;
-    callbacks.beginReceiverTakeover = [&](size_t index, std::string* error) {
+    callbacks.beginReceiverTakeover = [&](const DeviceOwnership::Token& token, std::string* error) {
         ++begins;
-        CHECK(index == 0);
+        CHECK(token.index == 0);
         CHECK_FALSE(manager.isStreaming(0)); // Parking precedes any stream start.
         *error = "Test host refused takeover";
         return false;
     };
-    callbacks.endReceiverTakeover = [&] {
+    callbacks.endReceiverTakeover = [&](const DeviceOwnership::Token&, bool) {
         ++ends;
         CHECK_FALSE(manager.isStreaming(0)); // Restore hardware before Listen.
         parked = false;
@@ -388,7 +388,7 @@ TEST_CASE("Inmarsat takeover refuses safely and restores on hardware startup fai
     CHECK(manager.deviceLeaseOwner() == DeviceManager::DeviceLeaseOwner::None);
     CHECK(manager.getCurrentCenterFreq(0) == originalCenter);
 
-    callbacks.beginReceiverTakeover = [&](size_t, std::string*) {
+    callbacks.beginReceiverTakeover = [&](const DeviceOwnership::Token&, std::string*) {
         ++begins; parked = true; return true;
     };
     host.install(callbacks);
@@ -462,13 +462,13 @@ TEST_CASE("Inmarsat asks before leaving P25 and rechecks after confirmation", "[
         p25Configured = false;
         return {true, false, {}};
     };
-    callbacks.beginReceiverTakeover = [&](size_t index, std::string*) {
-        CHECK(index == 0);
+    callbacks.beginReceiverTakeover = [&](const DeviceOwnership::Token& token, std::string*) {
+        CHECK(token.index == 0);
         ++starts;
         CHECK_FALSE(p25Configured);
         return true;
     };
-    callbacks.endReceiverTakeover = [&] { ++restores; CHECK_FALSE(p25Configured); };
+    callbacks.endReceiverTakeover = [&](const DeviceOwnership::Token&, bool) { ++restores; CHECK_FALSE(p25Configured); };
     host.install(callbacks);
     InmarsatWidget widget;
     bool answerYes = false;
