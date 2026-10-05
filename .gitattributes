@@ -1,0 +1,3 @@
+# Original upstream licence bytes are hash-pinned; do not change line endings
+# or "repair" whitespace belonging to those original texts on Windows.
+resources/licenses/*.txt -text -whitespace
