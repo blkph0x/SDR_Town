@@ -2,6 +2,12 @@
 
 ## Current completion pass: DEC-0196
 
+Local exact-package qualification now passes with143 files and zero blockers.
+The first clean CI attempt stopped on the newer Jansson2.15.1 MIT AND dtoa
+expression; upstream LICENSE includes the Lucent dtoa notice. The verifier now
+checks that notice explicitly, and CI's vcpkg commit is pinned. Full details
+and negative-test evidence are in BUILD_NOTES. Public release is not yet claimed.
+
 The four historical blockers were unconditional strings, so new material alone
 could never satisfy them. Policy T-0104-notices-8 instead verifies a source-bound
 distribution kit and exact-package Qt/USB replacement qualification. Missing

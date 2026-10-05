@@ -117,10 +117,17 @@ jobs:
       - name: Install pinned Rust for SSTV
         uses: dtolnay/rust-toolchain@1.88.0
 
+      - name: Checkout pinned dependency tooling
+        uses: actions/checkout@v7
+        with:
+          repository: microsoft/vcpkg
+          ref: 19780d9cdf84d0944cf9a318666703b89ab6629c
+          path: vcpkg
+          persist-credentials: false
+
       - name: Bootstrap vcpkg
         shell: pwsh
         run: |
-          git clone --depth 1 https://github.com/microsoft/vcpkg.git "${{ github.workspace }}/vcpkg"
           & "${{ github.workspace }}/vcpkg/bootstrap-vcpkg.bat" -disableMetrics
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -171,6 +178,8 @@ jobs:
           python scripts/vcpkg_tooling.py --config build/runtime-inputs-Release.json --stage build/deploy_staging
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/qt_sources.py --config build/runtime-inputs-Release.json --cache build/release-materials/qt --fetch --stage build/deploy_staging
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/distribution_materials.py --config build/runtime-inputs-Release.json --stage build/deploy_staging --preflight
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Checkout pinned RTL-SDR driver module

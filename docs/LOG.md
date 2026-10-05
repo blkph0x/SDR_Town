@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-10-05 - Distribution completion, DEC-0196
+
+Replaced permanent release-blocker strings with exact source/notice/runtime
+qualification. Local package reaches zero blockers after independent USB and
+full Qt rebuild/replacement gates. Clean CI found a newer Jansson dtoa licence
+expression; reviewed its actual upstream notice, added regression tests, pinned
+CI's dependency checkout and added an early preflight. No P25 processing change.
+
 ## 2026-10-05 - Measured P25 timing, not new hold guesses
 
 DEC-0194 adds bounded capture-only timing/identity/counter instrumentation and

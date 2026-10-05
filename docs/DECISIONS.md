@@ -28,6 +28,14 @@ Primary references: Qt open-source obligations, the shipped RTL source headers,
 and GCC's libstdc++ license / COPYING.RUNTIME. Publisher authorization cannot
 waive other authors' rights. Any new incompatible component must fail review.
 
+CI follow-up: the clean runner uses Jansson2.15.1, whose upstream LICENSE
+explicitly includes Lucent's dtoa permission, unlike the older local receipt's
+MIT-only expression. Accept the reviewed MIT AND dtoa expression only with its
+original notice present; retain the source/receipt checks. Pin CI vcpkg to its
+observed commit19780d9cdf84d0944cf9a318666703b89ab6629c so future runs cannot
+silently change dependency versions. Run source/attribution preflight before
+application compilation, not only during final packaging.
+
 ## DEC-0195 - Complete the USB build-helper closure (2026-10-05)
 
 T-0104 inspection of the exported libusb1.0.30 recipe confirms its Windows

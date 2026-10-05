@@ -1,5 +1,22 @@
 # Build notes
 
+## 2026-10-05 - DEC-0196 exact-package qualification and CI input repair
+
+Local0.2.123/c6e4a1b:17/17 CTest,116 packaging helper tests, RDS/DTMF CLI,
+independent USB rebuild/replacement and full Qt6.11.1 rebuild/replacement pass.
+Qt replacement includes four no-RX GUI profiles and leaves the original package
+unchanged. Inventory verifies143 files with zero publication blockers.
+Evidence: D:/SDRTown-ReleaseQA (no private radio payloads).
+
+CI37271299738/37271300272 compiled and passed application tests, then correctly
+stopped before publication: current Jansson2.15.1 declares MIT AND dtoa, whereas
+the local installed receipt declares MIT. Verified the upstream v2.15.1 LICENSE
+and src/dtoa.c: retain Lucent's original permission/disclaimer. Added positive
+and missing-notice/unknown-expression tests; ten distribution tests now pass.
+Pin CI vcpkg to observed19780d9cdf84d0944cf9a318666703b89ab6629c and move the
+source/attribution preflight before the application build. No radio-code edits.
+Public acceptance remains pending the corrected Actions run and download.
+
 ## 2026-10-05 - Passive P25 timeline and tuning identity, DEC-0194/0195
 
 Baseline dfd4c68b0d49a936f0bc802128376d5a2f79c9cc, Windows/MSVC14.44/Qt6.11.1.

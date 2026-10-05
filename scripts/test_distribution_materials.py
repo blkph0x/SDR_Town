@@ -44,6 +44,19 @@ def qualification_fixture():
 
 
 class DistributionTests(unittest.TestCase):
+    def test_jansson_dtoa_requires_the_original_notice(self):
+        inputs = {'vcpkg': {p: {'license': v[0] if isinstance(v, tuple) else v}
+                            for p, v in materials.PORT_LICENSES.items()}}
+        materials.review_ports(lambda n: b'fixture MIT notice', inputs)
+        inputs['vcpkg']['jansson']['license'] = 'MIT AND dtoa'
+        with self.assertRaisesRegex(ValueError, 'dtoa notice missing'):
+            materials.review_ports(lambda n: b'fixture MIT notice only', inputs)
+        materials.review_ports(
+            lambda n: b'Lucent Technologies; provided that this entire notice', inputs)
+        inputs['vcpkg']['jansson']['license'] = 'proprietary-fixture'
+        with self.assertRaisesRegex(ValueError, 'Unreviewed dependency'):
+            materials.review_ports(lambda n: b'fixture', inputs)
+
     def test_licence_texts_have_the_reviewed_unmodified_hashes(self):
         root = Path(__file__).resolve().parents[1]
         for name, expected in materials.LICENSES.items():

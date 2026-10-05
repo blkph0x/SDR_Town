@@ -40,7 +40,7 @@ EMBEDDED = {
     'resources/icao': ('CC0-1.0', 'LICENSE-CC0.txt'),
     'resources/maps': ('Public domain', 'README.md'),
 }
-PORT_LICENSES = {'fmt': 'MIT', 'jansson': 'MIT', 'libsodium': 'ISC',
+PORT_LICENSES = {'fmt': 'MIT', 'jansson': ('MIT', 'MIT AND dtoa'), 'libsodium': 'ISC',
                  'libusb': 'LGPL-2.1-or-later', 'nlohmann-json': 'MIT',
                  'pthreads': 'Apache-2.0', 'rtlsdr': 'GPL-2.0-or-later',
                  'soapysdr': 'BSL-1.0', 'spdlog': 'MIT', 'zlib': 'Zlib'}
@@ -145,9 +145,18 @@ def compiler_materials(doc, stage, archive):
                      'runtimeException': 'GCC-exception-3.1', 'eligibleSourceCompilation': True}
 
 
+def review_ports(read, inputs):
+    for port, licences in PORT_LICENSES.items():
+        allowed = licences if isinstance(licences, tuple) else (licences,)
+        require(inputs['vcpkg'][port]['license'] in allowed, 'Unreviewed dependency licence: ' + port)
+    if inputs['vcpkg']['jansson']['license'] == 'MIT AND dtoa':
+        notice = read('licenses/vcpkg/jansson/copyright')
+        require(b'Lucent Technologies' in notice and b'provided that this entire notice' in notice,
+                'Jansson dtoa notice missing')
+
+
 def review(read, inputs):
-    for port, licence in PORT_LICENSES.items():
-        require(inputs['vcpkg'][port]['license'] == licence, 'Unreviewed dependency licence: ' + port)
+    review_ports(read, inputs)
     return {'policy': REVIEW_VERSION, 'sourceCommit': inputs['sourceCommit'],
             'combinedApplicationLicense': 'GPL-3.0-or-later', 'originalSourceLicense': 'MIT',
             'embedded': source_review(read('licenses/project/source-materials.zip', 256 * 1024**2)),
@@ -222,7 +231,16 @@ if __name__ == '__main__':
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--stage', type=Path, required=True)
     parser.add_argument('--repo', type=Path, default=Path(__file__).resolve().parents[1])
-    parser.add_argument('--cache', type=Path, required=True)
-    parser.add_argument('--toolchain-archive', type=Path, required=True)
+    parser.add_argument('--cache', type=Path)
+    parser.add_argument('--toolchain-archive', type=Path)
+    parser.add_argument('--preflight', action='store_true', help='Review source/notice kits before compiling')
     args = parser.parse_args()
-    export(config(args.config), args.stage, args.repo, args.cache, args.toolchain_archive)
+    if args.preflight:
+        inputs = parse_json((args.stage / 'licenses/build-inputs.json').read_bytes())
+        record = review(lambda n, limit=0: (args.stage / n).read_bytes(), inputs)
+        print('PASS distribution preflight:', len(record['embedded']), 'embedded roots,',
+              len(record['qt']), 'Qt attributions, all dependency notices')
+    else:
+        require(args.cache is not None and args.toolchain_archive is not None,
+                'Full material export requires --cache and --toolchain-archive')
+        export(config(args.config), args.stage, args.repo, args.cache, args.toolchain_archive)
