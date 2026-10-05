@@ -179,6 +179,24 @@ TEST_CASE("Aero watch single role does not retune one unchanged group", "[inmars
     InmarsatWatchSchedule s(c,96000,0);
     REQUIRE_FALSE(s.advance(13));REQUIRE(s.group().voice);
 }
+
+TEST_CASE("Aero 1529 MHz data and distant voice return to data after idle", "[inmarsat][watch]") {
+    auto config=example();
+    config.channels[0].frequencyHz=1529.5e6;
+    config.channels[1].frequencyHz=1542.5e6;
+    config.simultaneousInBand=true;
+    InmarsatWatchSchedule schedule(config,2e6,0);
+    REQUIRE(schedule.groupCount()==2);
+    CHECK_FALSE(schedule.group().voice);
+    REQUIRE(schedule.advance(config.dataDwellSeconds));
+    CHECK(schedule.group().voice);
+    const double speechAt=config.dataDwellSeconds+config.voiceAcquireSeconds-1;
+    schedule.speech(speechAt);
+    CHECK_FALSE(schedule.advance(speechAt+config.voiceIdleSeconds-0.1));
+    REQUIRE(schedule.advance(speechAt+config.voiceIdleSeconds+0.1));
+    CHECK_FALSE(schedule.group().voice);
+    CHECK(schedule.group().channels[0].frequencyHz==1529.5e6);
+}
 TEST_CASE("Aero watch silence cannot select speaker or refresh activity", "[inmarsat][watch]") {
     auto c=example();c.channels.erase(c.channels.begin());
     c.channels.push_back({"voice2","",1543012500,8400,true});

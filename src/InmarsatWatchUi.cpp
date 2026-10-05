@@ -32,6 +32,20 @@ QWidget* InmarsatWidget::buildWatchUi() {
     scatterColumn->addWidget(constellationChannel_);
     constellation_=new InmarsatConstellationWidget;scatterColumn->addWidget(constellation_,1);
     visualRow->addLayout(scatterColumn);root->addLayout(visualRow,2);
+    auto* navigation=new QHBoxLayout;
+    auto* outside=new QCheckBox("Browse outside capture");outside->setObjectName("inmarsatBrowseOutsideCapture");
+    outside->setToolTip("Plan watch channels outside current RF coverage. Browsing does not retune the radio.");
+    auto* viewCenter=new QDoubleSpinBox;viewCenter->setObjectName("inmarsatViewCenterMHz");
+    viewCenter->setRange(1,100000);viewCenter->setDecimals(6);viewCenter->setSuffix(" MHz");
+    viewCenter->setKeyboardTracking(false);viewCenter->setEnabled(false);
+    navigation->addWidget(outside);navigation->addWidget(new QLabel("View center"));navigation->addWidget(viewCenter);navigation->addStretch();
+    root->addLayout(navigation);
+    connect(outside,&QCheckBox::toggled,watchSpectrum_,&InmarsatWatchSpectrum::setOutsideCaptureEnabled);
+    connect(outside,&QCheckBox::toggled,viewCenter,&QWidget::setEnabled);
+    connect(viewCenter,&QDoubleSpinBox::valueChanged,watchSpectrum_,[this](double mhz){watchSpectrum_->setViewCenterHz(mhz*1e6);});
+    connect(watchSpectrum_,&InmarsatWatchSpectrum::viewChanged,viewCenter,[viewCenter](double hz){
+        if(!viewCenter->hasFocus() && std::isfinite(hz) && hz>=1e6) {QSignalBlocker block(viewCenter);viewCenter->setValue(hz/1e6);}
+    });
     connect(constellationChannel_,&QComboBox::currentIndexChanged,this,&InmarsatWidget::refreshVisuals);
     connect(watchSpectrum_,&InmarsatWatchSpectrum::frequencySelected,this,[this](double hz){
         frequency_->setValue(std::round(hz)/1e6);

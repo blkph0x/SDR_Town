@@ -91,16 +91,16 @@ AircraftMapWidget::AircraftMapWidget(QWidget* parent, const QString& sessionId)
     captureBandwidth_ = new QDoubleSpinBox(toolbar_);
     captureBandwidth_->setObjectName("aircraftCaptureBandwidthMHz");
     captureBandwidth_->setRange(2, 20);
-    captureBandwidth_->setDecimals(1);
-    captureBandwidth_->setSuffix(" MHz");
-    captureBandwidth_->setValue(QSettings().value(settingsPrefix_ + "captureBandwidthMHz", 20).toDouble());
-    captureBandwidth_->setToolTip("Requested RF capture span. Limited to the receiver's advertised sample rates; not the audio filter.");
+    captureBandwidth_->setDecimals(3);
+    captureBandwidth_->setSuffix(" MS/s");
+    captureBandwidth_->setValue(QSettings().value(settingsPrefix_ + "captureBandwidthMHz", 2.4).toDouble());
+    captureBandwidth_->setToolTip("Requested IQ sample rate. 2.4 MS/s is the default; the applied device rate is shown after tuning. Existing saved requests are preserved.");
     layout->addWidget(status_, 0, 0, 1, 4);
     status_->setWordWrap(true);
     layout->addWidget(localAdsbCheck_, 1, 0, 1, 2);
     layout->addWidget(internetCheck_, 1, 2);
     layout->addWidget(netBtn_, 1, 3);
-    layout->addWidget(new QLabel("Capture bandwidth", toolbar_), 2, 0);
+    layout->addWidget(new QLabel("Sample rate", toolbar_), 2, 0);
     layout->addWidget(captureBandwidth_, 2, 1, 1, 2);
     layout->addWidget(tuneBtn_, 2, 3);
     layout->addWidget(new QLabel("Radio", toolbar_), 3, 0);
@@ -193,10 +193,12 @@ void AircraftMapWidget::startLocalWorker(const std::string& key, double rateHz, 
         WorkflowRadioSession radio(mgr, key, DeviceOwnership::Owner::Aircraft, 1090e6,
             [this] { return !localRun_.load(); }, rateHz, bandwidthHz);
         const auto i = radio.deviceIndex();
-        spdlog::info("Aircraft session={} radio={} key={} ready", sessionId_.toStdString(), i, key);
+        const double appliedRate=mgr.getCurrentSampleRate(i);
+        appliedSampleRateHz_.store(appliedRate);
+        spdlog::info("Aircraft session={} radio={} key={} requestedRateHz={} appliedRateHz={} ready", sessionId_.toStdString(), i, key, rateHz, appliedRate);
         radioReady_.store(true);
-        QMetaObject::invokeMethod(this, [this, rateHz] {
-            tuneStatus_ = QString("1090 MHz ready | Capture %1 MHz").arg(rateHz / 1e6, 0, 'f', 2);
+        QMetaObject::invokeMethod(this, [this, appliedRate] {
+            tuneStatus_ = QString("1090 MHz ready | Applied %1 MS/s").arg(appliedRate / 1e6, 0, 'f', 3);
             refreshUi();
         }, Qt::QueuedConnection);
         Receiver cursor;
@@ -250,7 +252,7 @@ void AircraftMapWidget::startLocalWorker(const std::string& key, double rateHz, 
         } catch (const std::exception& e) {
             if (localRun_.load()) failure = e.what();
         }
-        localRun_.store(false); radioReady_.store(false);
+        localRun_.store(false); radioReady_.store(false); appliedSampleRateHz_.store(0);
         QMetaObject::invokeMethod(this, [this, failure] {
             radioBusy_.store(false);
             tuneStatus_ = failure.empty() ? "Aircraft radio stopped" : "Aircraft radio: " + QString::fromStdString(failure);
@@ -390,6 +392,7 @@ QJsonObject AircraftMapWidget::webStatus() const {
     result.insert("radioBusy",radioBusy_.load());
     result.insert("deviceKey",deviceCombo_->currentData().toString());
     result.insert("captureBandwidthMHz",captureBandwidth_->value());
+    result.insert("appliedSampleRateHz",appliedSampleRateHz_.load());
     result.insert("tuneStatus",tuneStatus_);
     return result;
 }
@@ -507,13 +510,14 @@ void AircraftMapWidget::paintEvent(QPaintEvent*) {
         const QPointF pt = latLonToPixel(t.latDeg, t.lonDeg);
         p.save();
         p.translate(pt);
-        p.rotate(t.trackDeg);
+        if(t.trackValid)p.rotate(t.trackDeg);
         p.setBrush(t.fromAdsc ? QColor(255, 180, 40)
                               : (t.fromLocal ? QColor(57, 255, 20) : QColor(80, 160, 255)));
         p.setPen(Qt::black);
         QPolygon poly;
         poly << QPoint(0, -8) << QPoint(5, 8) << QPoint(0, 4) << QPoint(-5, 8);
-        p.drawPolygon(poly);
+        if(t.trackValid)p.drawPolygon(poly);
+        else p.drawEllipse(QPointF(0,0),5,5);
         p.restore();
         p.setPen(Qt::white);
         p.drawText(pt + QPointF(8, -4),

@@ -1,5 +1,16 @@
 # Development log
 
+## 2026-10-05 - Aircraft direction and watch planning, DEC-0197
+
+Confirmed user's1529-1530 MHz range. Added explicit off-capture browse with
+blank RF, validated direction markers, applied ADS-B sample-rate reporting and
+TC20-22 CPR dispatch repair. Existing ACARS/identity checks and voice/data
+schedule retained and tested. Full17/17 suites,1550 focused assertions and
+RDS/DTMF CLI pass; screenshots inspected. No P25 or shared RF/audio changes.
+Hardware L-band acceptance and documented broader ADS-B limits remain open.
+Public0.2.124 qualification follows this source commit. Previous0.2.123 release
+acceptance closes T-0104/ISS-0060; historical blocker text is not reopened.
+
 ## 2026-10-05 - Distribution completion, DEC-0196
 
 Replaced permanent release-blocker strings with exact source/notice/runtime

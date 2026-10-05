@@ -1,5 +1,13 @@
 # Code notes (tree map)
 
+DEC-0197: InmarsatMapWidget renders validated clockwise ground track and neutral
+unknown-direction markers; AdsBTrackStore publishes trackValid. AircraftMapWidget
+labels IQ rate in MS/s, defaults new settings to2.4 and publishes applied device
+readback separately. InmarsatWatchSpectrum's explicit off-capture browse clips
+waterfall source/destination spans to received RF; navigation cannot retune.
+AdsBTrackStore routes geometric-altitude TC20-22 to existing CPR, TC19 to velocity.
+Watch scheduling, ACARS direction/CRC/identity gating and P25 remain unchanged.
+
 DEC-0194: P25PipelineTrace is the bounded passive capture-event queue and CC
 acquisition identity contract. MainWindow captures grant decisions, CC worker
 identity/timing and writes JSONL; MainWindowP25Voice captures queue/decode/

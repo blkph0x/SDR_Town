@@ -139,7 +139,8 @@ void AdsBTrackStore::ingestModeSFrame(const uint8_t* msg14) {
     if (tc >= 1 && tc <= 4) {
         auto id = ModeS::decodeIdentity(msg14);
         if (id.valid) t.callsign = id.callsign;
-    } else if (tc >= 9 && tc <= 18) {
+    } else if ((tc >= 9 && tc <= 18) || (tc >= 20 && tc <= 22)) {
+        // DEC-0197: both barometric and geometric-altitude reports carry CPR.
         const bool isOdd = (msg14[6] & 0x04) != 0;
         const int latCpr = ((msg14[6] & 3) << 15) | (msg14[7] << 7) | (msg14[8] >> 1);
         const int lonCpr = ((msg14[8] & 1) << 16) | (msg14[9] << 8) | msg14[10];
@@ -166,11 +167,12 @@ void AdsBTrackStore::ingestModeSFrame(const uint8_t* msg14) {
                 t.positionValid = true;
             }
         }
-    } else if (tc >= 19 && tc <= 22) {
+    } else if (tc == 19) {
         auto vel = ModeS::decodeVelocity(msg14);
         if (vel.valid) {
             t.gsKt = vel.groundSpeedKt;
             t.trackDeg = vel.trackDeg;
+            t.trackValid = std::isfinite(vel.trackDeg) && vel.trackDeg >= 0 && vel.trackDeg < 360;
             t.verticalRateFpm = vel.verticalRateFpm;
         }
     }
@@ -254,7 +256,10 @@ bool AdsBTrackStore::mergeNetworkJson(const std::string& body, uint64_t generati
             }
             if (st[7].is_number()) t.altFt = st[7].get<double>() * 3.28084;
             if (st[9].is_number()) t.gsKt = st[9].get<double>() * 1.94384;
-            if (st[10].is_number()) t.trackDeg = st[10].get<double>();
+            if (st[10].is_number()) {
+                t.trackDeg = st[10].get<double>();
+                t.trackValid = std::isfinite(t.trackDeg) && t.trackDeg >= 0 && t.trackDeg < 360;
+            }
             if (st[11].is_number()) t.verticalRateFpm = st[11].get<double>() * 196.85;
             if (st.size() > 14 && st[14].is_string()) t.squawk = st[14].get<std::string>().substr(0, 8);
             t.photoUrl = photoUrlFor(t);
@@ -374,6 +379,7 @@ nlohmann::json AdsBTrackStore::statusJson() const {
                        {"altFt", t.altFt},
                        {"gsKt", t.gsKt},
                        {"trackDeg", t.trackDeg},
+                       {"trackValid", t.trackValid},
                        {"vrateFpm", t.verticalRateFpm},
                        {"squawk", t.squawk},
                        {"type", t.typeCode},

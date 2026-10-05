@@ -85,6 +85,7 @@ private:
     std::atomic<bool> localRun_{false};
     std::atomic<bool> radioBusy_{false};
     std::atomic<bool> radioReady_{false};
+    std::atomic<double> appliedSampleRateHz_{0};
     std::atomic<bool> decodeLocal_{false};
     std::thread localThread_;
     bool remoteLocal_=false;

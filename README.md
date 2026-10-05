@@ -1,6 +1,12 @@
 # SDR Town
 
-0.2.123 prepares the multi-radio/controller and P25 diagnostic changes below
+0.2.124 adds aircraft ground-track rotation, explicit off-capture Inmarsat watch
+planning (including1529-1530 MHz), applied ADS-B sample-rate reporting and a
+local ADS-B geometric-position dispatch fix. See the
+[aircraft workflow audit](docs/AIRCRAFT_WORKFLOW_AUDIT_20261005.md) and
+[release notes](docs/RELEASE_0.2.124.md). P25/audio DSP is unchanged.
+
+0.2.123 published the multi-radio/controller and P25 diagnostic changes below
 for public testing with verified dependency sources, notices and replacement
 tests. Original source contributions remain MIT; the RTL-enabled combined
 binary is distributed under GPL-3.0-or-later. See [distribution and rebuilding
@@ -8,7 +14,7 @@ instructions](DISTRIBUTION.md) and [release notes](docs/RELEASE_0.2.123.md).
 This packaging pass does not change P25 decoding or audio timing. The remaining
 control-channel coverage and short-call audio-tail issues are still tracked.
 
-Unreleased Satcom/Aircraft multi-radio update: the Satellite workspace's
+Satcom/Aircraft multi-radio update: the Satellite workspace's
 **Add receiver session** menu opens independent Inmarsat, Satcom or Aircraft
 tabs. Satcom has separate pass planning, recordings and audio; Aircraft has
 separate local decoding, tracks and network settings. Saved tabs reopen idle,
@@ -16,7 +22,7 @@ and Stop/Close affects only that controller. GUI/API and mock-radio tests cover
 isolation; physical multi-radio acceptance and repeated P25 followers remain
 open. See [workflow controls](docs/WORKFLOW_DEVICES.md).
 
-Unreleased Inmarsat multi-radio update: open a named receiver using the **add
+Inmarsat multi-radio update: open a named receiver using the **add
 session button in the Satellite workspace**. Each tab owns its radio, watch
 list, decoder state, messages and map. Saved tabs reopen stopped. Closing or
 stopping one does not stop another; the local authenticated session API uses
@@ -46,9 +52,9 @@ readiness includes control confirmation. Slow native-driver recovery remains ope
 Earlier [infrastructure repairs](docs/INFRASTRUCTURE_HARDENING_20261003.md),
 clean package staging and complete Qt-runtime replacement tests are source/CI
 verified. The [distribution-materials ledger](docs/PACKAGE_HARDENING_20261003.md)
-records completed checks and finite publication requirements. Version 0.2.123
-must pass source, notice and replacement verification before its public asset
-is published; a CI artifact alone is not a published update.
+records completed checks and finite publication requirements. Version0.2.123
+passed public source, notice and replacement verification (Actions37273822180);
+the same gates apply to every new release.
 
 0.2.122 adds **Tools > DTMF Analysis**: short-burst decoding, explicit frequency
 inversion/shift/scale, sample-indexed evidence and local diagnostic export.

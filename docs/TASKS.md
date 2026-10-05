@@ -1,6 +1,14 @@
 # Task list (canonical)
 
-T-0104 | in_progress | Close the four finite publication requirements (DEC-0196) |
+T-0109 | in_progress | Aircraft map direction, RF watch planning and workflow audit |
+DEC-0197: confirmed 1529-1530 MHz, applied ADS-B rate, ACARS and voice/data
+association tests; preserve P25. Build, test and qualify public release.
+Local17/17 suites,1550 focused assertions, RDS/DTMF CLI and visual checks pass.
+v0.2.124-experimental publication/anonymous verification pending.
+
+T-0104 | done | Close the four finite publication requirements (DEC-0196) |
+Public v0.2.123-experimental verified; release Actions37273822180 successful.
+Acceptance: commit1b035aa comment203450320; public144-file package, zero blockers.
 User priority2026-10-05: finish materials, distribution scope, independent USB
 rebuild, compiler-runtime provenance, then publish and verify a new tester asset.
 Do not change P25 or use a permanent untestable release-blocker list.

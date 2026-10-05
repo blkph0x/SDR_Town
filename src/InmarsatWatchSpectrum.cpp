@@ -13,6 +13,21 @@ InmarsatWatchSpectrum::InmarsatWatchSpectrum(QWidget* parent):QWidget(parent) {
     setToolTip("Wheel: zoom at cursor. Drag: pan captured RF. Double-click: full span. Click: select frequency.");
 }
 QRectF InmarsatWatchSpectrum::plot() const {return QRectF(8,8,std::max(1,width()-16),std::max(1,height()-36));}
+double InmarsatWatchSpectrum::boundedStart(double start) const {
+    if(!outsideCapture_)return std::clamp(start,0.0,1.0-viewSpan_);
+    // Match the watch editor's explicit frequency range, never a tuning command.
+    return std::clamp(start,0.5+(1e6-center_)/rate_,0.5+(100e9-center_)/rate_-viewSpan_);
+}
+void InmarsatWatchSpectrum::setOutsideCaptureEnabled(bool enabled) {
+    outsideCapture_=enabled;
+    if(rate_>0 && std::isfinite(rate_))viewStart_=boundedStart(viewStart_);
+    emit viewChanged(visibleCenterHz());update();
+}
+void InmarsatWatchSpectrum::setViewCenterHz(double hz) {
+    if(!std::isfinite(hz) || !std::isfinite(rate_) || rate_<=0 || !std::isfinite(center_))return;
+    viewStart_=boundedStart(0.5+(hz-center_)/rate_-viewSpan_/2);
+    emit viewChanged(visibleCenterHz());update();
+}
 void InmarsatWatchSpectrum::setSpectrum(const std::vector<float>& bins,double center,double rate,
         const std::vector<InmarsatWatchChannel>& channels) {
     channels_=channels;
@@ -31,20 +46,23 @@ void InmarsatWatchSpectrum::setSpectrum(const std::vector<float>& bins,double ce
             row[x]=QColor::fromHsvF((1-v)*0.66,0.85,0.12+0.88*v).rgb();
         }
     }
-    update();
+    emit viewChanged(visibleCenterHz());update();
 }
 void InmarsatWatchSpectrum::paintEvent(QPaintEvent*) {
     QPainter p(this);p.fillRect(rect(),QColor(16,20,22));
     if(bins_.empty() || !std::isfinite(rate_) || !std::isfinite(center_) || rate_<=0){p.setPen(Qt::lightGray);p.drawText(rect(),Qt::AlignCenter,"No live spectrum");return;}
     const auto area=plot();const double half=area.height()*0.5;
     p.save();p.setClipRect(area);
-    if(!waterfall_.isNull()) {
+    const double receivedLeft=std::max(0.0,viewStart_);
+    const double receivedRight=std::min(1.0,viewStart_+viewSpan_);
+    if(!waterfall_.isNull() && receivedRight>receivedLeft) {
         const int tail=waterfall_.height()-head_;
         const double h=half*tail/waterfall_.height();
-        p.drawImage(QRectF(area.left(),area.top()+half,area.width(),h),waterfall_,
-                    QRectF(viewStart_*waterfall_.width(),head_,viewSpan_*waterfall_.width(),tail));
-        if(head_)p.drawImage(QRectF(area.left(),area.top()+half+h,area.width(),half-h),waterfall_,
-                            QRectF(viewStart_*waterfall_.width(),0,viewSpan_*waterfall_.width(),head_));
+        const double x=area.left()+area.width()*(receivedLeft-viewStart_)/viewSpan_;
+        const double w=area.width()*(receivedRight-receivedLeft)/viewSpan_;
+        const double sx=receivedLeft*waterfall_.width(),sw=(receivedRight-receivedLeft)*waterfall_.width();
+        p.drawImage(QRectF(x,area.top()+half,w,h),waterfall_,QRectF(sx,head_,sw,tail));
+        if(head_)p.drawImage(QRectF(x,area.top()+half+h,w,half-h),waterfall_,QRectF(sx,0,sw,head_));
     }
     QPainterPath path;
     for(size_t i=0;i<bins_.size();++i) {
@@ -54,6 +72,9 @@ void InmarsatWatchSpectrum::paintEvent(QPaintEvent*) {
         if(i)path.lineTo(x,y);else path.moveTo(x,y);
     }
     p.setPen(QColor(92,204,245));p.drawPath(path);
+    if(receivedRight<=receivedLeft) {
+        p.setPen(Qt::lightGray);p.drawText(area,Qt::AlignCenter,"Outside captured RF");
+    }
     for(const auto& c:channels_) if(c.enabled) {
         const double x=area.left()+area.width()*(0.5+(c.frequencyHz-center_)/rate_-viewStart_)/viewSpan_;
         if(x<area.left() || x>area.right())continue;
@@ -83,12 +104,12 @@ void InmarsatWatchSpectrum::mouseMoveEvent(QMouseEvent* event) {
     if((event->position()-press_).manhattanLength()>=QApplication::startDragDistance())dragged_=true;
     if(!dragged_)return;
     setCursor(Qt::ClosedHandCursor);
-    viewStart_=std::clamp(dragStart_-(event->position().x()-press_.x())/plot().width()*viewSpan_,0.0,1.0-viewSpan_);
-    update();
+    viewStart_=boundedStart(dragStart_-(event->position().x()-press_.x())/plot().width()*viewSpan_);
+    emit viewChanged(visibleCenterHz());update();
 }
 void InmarsatWatchSpectrum::mouseDoubleClickEvent(QMouseEvent* event) {
     if(event->button()!=Qt::LeftButton || !plot().contains(event->position()))return;
-    pressed_=dragged_=false;viewStart_=0;viewSpan_=1;unsetCursor();update();
+    pressed_=dragged_=false;viewStart_=0;viewSpan_=1;unsetCursor();emit viewChanged(visibleCenterHz());update();
 }
 void InmarsatWatchSpectrum::wheelEvent(QWheelEvent* event) {
     if(bins_.empty() || rate_<=0 || !std::isfinite(rate_) || !std::isfinite(center_) ||
@@ -99,8 +120,8 @@ void InmarsatWatchSpectrum::wheelEvent(QWheelEvent* event) {
     const double minimum=std::min(1.0,16.0/std::max(size_t{1},bins_.size()));
     const double steps=std::clamp(event->angleDelta().y()/120.0,-20.0,20.0);
     viewSpan_=std::clamp(viewSpan_*std::pow(0.8,steps),minimum,1.0);
-    viewStart_=std::clamp(anchor-fraction*viewSpan_,0.0,1.0-viewSpan_);
-    pressed_=dragged_=false;unsetCursor();event->accept();update();
+    viewStart_=boundedStart(anchor-fraction*viewSpan_);
+    pressed_=dragged_=false;unsetCursor();event->accept();emit viewChanged(visibleCenterHz());update();
 }
 
 InmarsatConstellationWidget::InmarsatConstellationWidget(QWidget* parent):QWidget(parent) {

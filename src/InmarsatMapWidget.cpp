@@ -103,7 +103,11 @@ void InmarsatMapWidget::setReport(const nlohmann::json& report,bool replay) {
             detail+=QString("\nICAO: %1").arg(icao.isEmpty()?"not received":icao);
             const bool stale=p.value("stale",false);
             if(p.contains("ageSeconds")) detail+=QString("\nPosition age %1 s%2").arg(p.value("ageSeconds",0.0),0,'f',0).arg(stale?" (position needs refresh)":"");
-            tracks_.push_back({aes,{lon,-lat},reg.isEmpty()?hex:reg,detail,activeIds.contains(aes),stale,online,estimated});
+            const auto direction=p.find("groundTrackDeg");
+            const double track=direction!=p.end() && direction->is_number()?direction->get<double>():-1;
+            const bool hasTrack=std::isfinite(track) && track>=0 && track<360;
+            detail+=hasTrack?QString("\nGround track: %1 degrees").arg(track,0,'f',1):QString("\nGround track unavailable");
+            tracks_.push_back({aes,{lon,-lat},reg.isEmpty()?hex:reg,detail,activeIds.contains(aes),stale,online,estimated,track,hasTrack});
             if(tracks_.size()==512) break; // DEC-0164 bounded RF/identity union.
         }
     }
@@ -130,12 +134,15 @@ void InmarsatMapWidget::paintEvent(QPaintEvent*) {
     p.setPen(QColor("#33454b"));
     for(int lon=-180;lon<=180;lon+=30)p.drawLine(screen({double(lon),-90}),screen({double(lon),90}));
     for(int lat=-90;lat<=90;lat+=30)p.drawLine(screen({-180,double(lat)}),screen({180,double(lat)}));
-    // No heading is inferred: the upright aircraft is an identity marker only.
+    // DEC-0197: ground track is clockwise from north; unknown motion is a dot.
     const QPolygonF aircraft{QPointF(0,-10),QPointF(3,-2),QPointF(9,2),QPointF(9,4),QPointF(2,2),QPointF(2,7),QPointF(4,9),QPointF(-4,9),QPointF(-2,7),QPointF(-2,2),QPointF(-9,4),QPointF(-9,2),QPointF(-3,-2)};
     for(const auto& t:tracks_) {
         const auto point=screen(t.point);p.save();p.translate(point);
         p.setPen(QPen(t.estimated?QColor("#ffd65c"):QColor(Qt::black),t.estimated?2.5:1.5));
-        p.setBrush(t.active?QColor("#52ef88"):t.stale?QColor("#a0a7b0"):t.online?QColor("#60c8ff"):QColor("#f5f7f8"));p.drawPolygon(aircraft);p.restore();
+        p.setBrush(t.active?QColor("#52ef88"):t.stale?QColor("#a0a7b0"):t.online?QColor("#60c8ff"):QColor("#f5f7f8"));
+        if(t.hasGroundTrack) {p.rotate(t.groundTrack);p.drawPolygon(aircraft);}
+        else p.drawEllipse(QPointF(0,0),5,5);
+        p.restore();
         p.setPen(Qt::black);p.drawText(point+QPointF(14,5),t.label);
         p.setPen(Qt::white);p.drawText(point+QPointF(13,4),t.label);
     }

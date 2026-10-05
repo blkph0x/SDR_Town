@@ -1,5 +1,25 @@
 # Decisions
 
+## DEC-0197 - Honest aircraft direction and off-capture watch planning (2026-10-05)
+
+User confirms 1529.000-1530.000 MHz. Allow explicit Inmarsat spectrum planning
+outside the received span, but leave unreceived RF blank and never retune merely
+because the operator pans. Existing watch scheduling remains authoritative.
+Rotate map aircraft only from validated ground track; unknown motion must not
+imply north. InmarsatTracking already publishes groundTrackDeg but the map
+ignores it. AircraftMap already rotates tracks; audit validity separately.
+Clarify requested ADS-B sample rate versus applied device rate, keeping existing
+wide-rate API compatibility. Audit ACARS identity/position and voice association
+without inventing positions or changing P25. Tests precede release claims.
+
+Audit extension: AdsBTrackStore routes TC20-22 to decodeVelocity, which only
+accepts TC19. FlightAware dump1090 mode_s.c decodeESAirbornePosition and its
+message dispatch confirm TC20-22 use airborne CPR position fields. Route these
+through the existing CPR decoder; no altitude conversion is claimed here.
+Reference: https://github.com/flightaware/dump1090/blob/master/mode_s.c
+Fixtures retain known CPR payloads, change TC and recompute Mode-S CRC24.
+
+
 ## DEC-0196 - Close finite distribution requirements with verified materials (2026-10-05)
 
 User prioritizes completion of ISS-0060 and authorizes necessary licensing

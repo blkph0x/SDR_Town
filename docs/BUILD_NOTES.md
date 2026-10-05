@@ -1,5 +1,22 @@
 # Build notes
 
+## 2026-10-05 - DEC-0197 aircraft workflows (local qualification complete)
+
+MSVC14.44/Qt6.11.1 Release: initial GUI build passed. InmarsatLiveGui passes
+including pixel-based direction and off-capture selection tests. AircraftGui
+initially failed one old default20 expectation; updated it to the intentional
+new2.4 MS/s default. Focused native1284 assertions/36 cases pass before the final
+TC20-22 fixture rebuild. Final build and all17/17 CTest suites pass (84.29s).
+Focused ADS-B/watch/application/tracking1550 assertions in58 cases pass, including
+TC20-22. RDS and DTMF CLI smoke and all five bandplans pass. P25 guard passes:
+zero protected paths changed. Visually inspected direction, all-blank outside
+capture and correctly clipped partial-coverage screenshots. Public CI pending.
+Visual evidence: D:/SDRTown-ReleaseQA/aircraft-124.
+
+Previous release closure: 1b035aa / v0.2.123-experimental, Actions37273822180 and
+master37273822080 success; public144-file package verified, zero blockers.
+Acceptance commit comment203450320 records hash and shipped smoke results.
+
 ## 2026-10-05 - DEC-0196 exact-package qualification and CI input repair
 
 Local0.2.123/c6e4a1b:17/17 CTest,116 packaging helper tests, RDS/DTMF CLI,

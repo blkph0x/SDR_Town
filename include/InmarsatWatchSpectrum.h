@@ -13,8 +13,11 @@ public:
     uint64_t waterfallRows() const {return rows_;}
     double visibleCenterHz() const {return center_+(viewStart_+viewSpan_/2-0.5)*rate_;}
     double visibleSpanHz() const {return viewSpan_*rate_;}
+    void setOutsideCaptureEnabled(bool enabled);
+    void setViewCenterHz(double hz);
 signals:
     void frequencySelected(double hz);
+    void viewChanged(double centerHz);
 protected:
     void paintEvent(QPaintEvent*) override;
     void mouseReleaseEvent(QMouseEvent*) override;
@@ -30,6 +33,8 @@ private:
     double viewStart_=0,viewSpan_=1,dragStart_=0;
     QPointF press_;
     bool pressed_=false,dragged_=false;
+    bool outsideCapture_=false;
+    double boundedStart(double start) const;
     QImage waterfall_;
     int head_=0;
     uint64_t rows_=0;

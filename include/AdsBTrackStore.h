@@ -19,6 +19,7 @@ struct AircraftTrack {
     double altFt = 0.0;
     double gsKt = 0.0;
     double trackDeg = 0.0;
+    bool trackValid = false;
     double verticalRateFpm = 0.0;
     std::string squawk;
     std::string reg;

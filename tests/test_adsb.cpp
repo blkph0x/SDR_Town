@@ -189,6 +189,25 @@ TEST_CASE("ADS-C merges into AdsBTrackStore", "[adsb]")
     REQUIRE(track.latDeg == Catch::Approx(-33.87).margin(1e-4));
 }
 
+TEST_CASE("Aircraft geometric-altitude reports reach the position decoder", "[adsb]") {
+    // Known 40621D CPR coordinates, TC20/21/22 and recomputed CRC24 (DEC-0197).
+    const char* pairs[][2]={
+        {"8D40621DA0C382D690C8AC5C84CA","8D40621DA0C386435CC4121DCDBB"},
+        {"8D40621DA8C382D690C8ACBF775F","8D40621DA8C386435CC412FE3E2E"},
+        {"8D40621DB0C382D690C8AC6497E9","8D40621DB0C386435CC41225DE98"}};
+    for(const auto& pair:pairs) {
+        AdsBTrackStore store("qa-geometric");store.setNetworkEnabled(false);
+        const auto even=hexFrame(pair[0]),odd=hexFrame(pair[1]);
+        REQUIRE(ModeS::crcOk(even.data(),14));REQUIRE(ModeS::crcOk(odd.data(),14));
+        store.ingestModeSFrame(even.data());CHECK_FALSE(store.trackByIcao(0x40621d).positionValid);
+        store.ingestModeSFrame(odd.data());const auto track=store.trackByIcao(0x40621d);
+        REQUIRE(track.positionValid);
+        CHECK(track.latDeg==Catch::Approx(52.26).margin(.01));
+        CHECK(track.lonDeg==Catch::Approx(3.93).margin(.02));
+        CHECK_FALSE(track.trackValid);
+    }
+}
+
 TEST_CASE("Aircraft capture request respects RF capabilities not audio filter", "[adsb]") {
     CHECK(aircraftReceivePlan(20e6, {2e6, 10e6, 20e6}, {}).sampleRateHz == 20e6);
     const auto rsp = aircraftReceivePlan(20e6, {2e6, 8e6, 10e6}, {200e3, 1.536e6, 8e6});
@@ -277,5 +296,24 @@ TEST_CASE("Aircraft network decoder rejects malformed rows independently", "[ads
     CHECK_FALSE(store.mergeNetworkJson("{", store.networkGeneration()));
     CHECK_FALSE(store.mergeNetworkJson(std::string(2 * 1024 * 1024 + 1, 'x'), store.networkGeneration()));
     CHECK(store.statusJson().at("networkEnabled").get<bool>());
+    store.setNetworkEnabled(false);
+}
+
+TEST_CASE("Aircraft ground track is validated independently of position", "[adsb]") {
+    AdsBTrackStore store("qa-direction");store.setNetworkEnabled(true);
+    auto row=networkAircraft("a0b099","DIRECTION");
+    for(const auto value:nlohmann::json::array({0,90,359.9,-1,360,nullptr,"90"})) {
+        row[10]=value;
+        REQUIRE(store.mergeNetworkJson(nlohmann::json{{"states",{row}}}.dump(),store.networkGeneration()));
+        const auto track=store.trackByIcao(0xa0b099);
+        CHECK(track.positionValid);
+        const bool valid=value.is_number() && value.get<double>()>=0 && value.get<double>()<360;
+        CHECK(track.trackValid==valid);
+        if(valid)CHECK(track.trackDeg==value.get<double>());
+    }
+    const auto frame=hexFrame("8D485020994409940838175B284F");
+    store.ingestModeSFrame(frame.data());
+    CHECK(store.trackByIcao(0x485020).trackValid);
+    CHECK(store.trackByIcao(0x485020).trackDeg==Catch::Approx(182.88).margin(.02));
     store.setNetworkEnabled(false);
 }

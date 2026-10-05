@@ -19,6 +19,15 @@
 #include <QTabWidget>
 #include <QTemporaryDir>
 
+TEST_CASE("Aircraft sample rate default and applied telemetry are explicit", "[aircraft][gui]") {
+    QSettings settings;settings.remove("aircraft/sessions/qa-rate-default");
+    AircraftMapWidget widget(nullptr,"qa-rate-default");
+    auto* rate=widget.findChild<QDoubleSpinBox*>("aircraftCaptureBandwidthMHz");REQUIRE(rate);
+    CHECK(rate->value()==2.4);CHECK(rate->suffix()==" MS/s");
+    CHECK(widget.webStatus().value("appliedSampleRateHz").toDouble()==0);
+    rate->setValue(2.048);CHECK(rate->value()==2.048);
+}
+
 TEST_CASE("Named satellite controllers isolate settings planner and track state", "[aircraft][gui][ownership]") {
     CHECK_THROWS(normalizedWorkflowSessionId("../escape"));
     CHECK_THROWS(normalizedWorkflowSessionId("bad\n"));
@@ -119,7 +128,7 @@ TEST_CASE("Aircraft internet control removes sources and persists across windows
     AircraftMapWidget map;
     auto* check = map.findChild<QCheckBox*>("aircraftInternetEnabled"); REQUIRE(check);
     auto* bandwidth = map.findChild<QDoubleSpinBox*>("aircraftCaptureBandwidthMHz"); REQUIRE(bandwidth);
-    CHECK(bandwidth->value() == 20);
+    CHECK(bandwidth->value() == 2.4);
     CHECK(bandwidth->maximum() == 20);
     const auto generation = store.networkGeneration();
     REQUIRE(store.mergeNetworkJson(R"({"states":[["a0b022","TEST",null,null,null,151,-34,1000,false,100,90,0]]})", generation));

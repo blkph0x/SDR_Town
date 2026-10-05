@@ -1,5 +1,16 @@
 # Issues (canonical)
 
+## ISS-0075 - Aircraft direction and requested/applied rate ambiguity (2026-10-05, LOCAL REPAIR)
+
+InmarsatMap ignores validated groundTrackDeg. ADS-B capture control defaults to
+20 MHz while constrained devices apply a lower sample rate. Spectrum panning is
+restricted to captured RF, preventing off-screen watch planning. DEC-0197 adds
+explicit planning without fabricated samples and checks actual device readback.
+TC20-22 dispatch also repaired. Full17 native/GUI suites and1550 focused
+assertions pass. Public release qualification pending; physical RF acceptance
+and the separate limitations in AIRCRAFT_WORKFLOW_AUDIT_20261005.md remain.
+
+
 ## ISS-0074 - P25 diagnostic interference and unbound CC results (2026-10-05, LOCAL REPAIR)
 
 DEC-0194. Validation/deep logging triggers alternative AMBE synthesis, consuming
@@ -250,7 +261,13 @@ P25-specific release block follows solely from implementing the same ideas.
 Actual bundled/dependency licensing and ISS-0060 remain separate. No source
 comments, code, upstream notices or Git history were changed to mask evidence.
 
-## ISS-0060 - Binary license/source notice inventory incomplete (2026-10-03, OPEN)
+## ISS-0060 - Binary license/source notice inventory incomplete (2026-10-03, CLOSED 2026-10-05)
+
+Closure: DEC-0196, source1b035aa, public v0.2.123-experimental. Actions37273822180
+passed source/material/replacement verification and public-download smoke.
+Downloaded144-file package has zero blockers; acceptance comment203450320
+records exact hashes. Historical investigation below is retained, not a new
+blocker on subsequent versions that pass the same finite gates.
 
 The independently downloaded public v0.2.122 portable ZIP has licenses for
 ACARS/Aero, GGMorse, redsea/liquid-dsp, SGP4, SSTV and RTL/SDRplay modules, but

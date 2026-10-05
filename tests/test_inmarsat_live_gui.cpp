@@ -139,6 +139,24 @@ TEST_CASE("Aero map distinguishes unlocated and unidentified voice", "[inmarsat]
     report["speechActive"]=false;map.setReport(report,true);CHECK(status->isHidden());
     CHECK_FALSE(map.grab().toImage().isNull());
 }
+TEST_CASE("Aero map rotates validated ground track and keeps unknown direction neutral", "[inmarsat][gui]") {
+    InmarsatMapWidget map;map.resize(720,440);
+    nlohmann::json report={{"positions",{{{"aesId",0x123456},{"latDeg",0},{"lonDeg",0},{"groundTrackDeg",0}}}}};
+    auto picture=[&] {map.setReport(report,false);return map.grab().toImage().copy(348,208,24,24);};
+    const auto north=picture();
+    report["positions"][0]["groundTrackDeg"]=90;const auto east=picture();
+    CHECK(north!=east);
+    report["positions"][0].erase("groundTrackDeg");const auto unknown=picture();
+    CHECK(unknown!=north);CHECK(unknown!=east);
+    for(const auto invalid:nlohmann::json::array({-1,360,"90",nullptr})) {
+        report["positions"][0]["groundTrackDeg"]=invalid;CHECK(picture()==unknown);
+    }
+    report["voiceActive"]=true;report["voiceAesId"]=0x123456;CHECK(picture()!=unknown);
+    report["positions"][0]["groundTrackDeg"]=90;picture();
+    const auto dir=qEnvironmentVariable("SDR_TOWN_TEST_VISUAL_DIR");
+    if(!dir.isEmpty())CHECK(map.grab().save(dir+"/inmarsat-direction.png"));
+}
+
 TEST_CASE("Inmarsat diagnostic recording requires consent and discards on close", "[inmarsat][gui]") {
     QWidget parent;
     showInmarsatDiagnosticRecording(&parent,1545000000);
@@ -642,6 +660,33 @@ TEST_CASE("Aero zoom and pan share waterfall coordinates without selecting on dr
     CHECK(selections==1);CHECK(spectrum.visibleSpanHz()==10e6);
     wheel(120);spectrum.setSpectrum(bins,1546e6,2e6,{});
     CHECK(spectrum.visibleSpanHz()==2e6);CHECK(spectrum.visibleCenterHz()==1546e6);
+}
+
+TEST_CASE("Aero off-capture planning selects 1529 MHz without fabricating RF", "[inmarsat][gui]") {
+    InmarsatWatchSpectrum spectrum;spectrum.resize(800,240);
+    spectrum.setSpectrum(std::vector<float>(1024,-20),1545.5e6,2e6,{});
+    spectrum.setViewCenterHz(1529.5e6);CHECK(spectrum.visibleCenterHz()==1545.5e6);
+    spectrum.setOutsideCaptureEnabled(true);spectrum.setViewCenterHz(1529.5e6);
+    CHECK(spectrum.visibleCenterHz()==1529.5e6);
+    CHECK(spectrum.waterfallRows()==1);
+    double selected=0;
+    QObject::connect(&spectrum,&InmarsatWatchSpectrum::frequencySelected,[&](double hz){selected=hz;});
+    for(auto type:{QEvent::MouseButtonPress,QEvent::MouseButtonRelease}) {
+        QMouseEvent event(type,QPointF(400,150),QPointF(400,150),Qt::LeftButton,
+            type==QEvent::MouseButtonPress?Qt::LeftButton:Qt::NoButton,Qt::NoModifier);
+        QApplication::sendEvent(&spectrum,&event);
+    }
+    CHECK(selected==1529.5e6);
+    const auto picture=spectrum.grab().toImage();
+    CHECK(picture.pixelColor(100,170)==QColor(16,20,22));
+    const auto dir=qEnvironmentVariable("SDR_TOWN_TEST_VISUAL_DIR");
+    if(!dir.isEmpty())CHECK(picture.save(dir+"/inmarsat-outside-capture.png"));
+    spectrum.setViewCenterHz(1544.5e6);
+    const auto partial=spectrum.grab().toImage();
+    CHECK(partial.pixelColor(100,110)==QColor(16,20,22));
+    CHECK(partial.pixelColor(700,110)!=QColor(16,20,22));
+    if(!dir.isEmpty())CHECK(partial.save(dir+"/inmarsat-partial-capture.png"));
+    spectrum.setOutsideCaptureEnabled(false);CHECK(spectrum.visibleCenterHz()==1545.5e6);
 }
 
 TEST_CASE("Inmarsat multi click adds independent saved channels without duplicates", "[inmarsat][gui]") {
