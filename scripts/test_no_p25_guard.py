@@ -28,15 +28,25 @@ def expect_allowed(path: str) -> None:
 def main() -> int:
     import subprocess
     import re
+    from types import SimpleNamespace
+    observer_files = {}
     for path in MODULE.P25_OBSERVER_DIGESTS:
         before = subprocess.check_output(["git", "show", "6805bf6:" + path], cwd=ROOT, text=True, encoding="utf-8")
         after = (ROOT / path).read_text(encoding="utf-8")
+        observer_files[("before", path)] = before
+        observer_files[("after", path)] = after
         assert MODULE.infrastructure_text_allowed(path, before, after)
         assert not MODULE.infrastructure_text_allowed(path, before, after + "\nRF change")
         assert not MODULE.infrastructure_text_allowed(path, after, before)
         assert not MODULE.infrastructure_text_allowed("src/P25VoiceDecode.cpp", before, after)
         if path.endswith(".cpp"):
             assert not MODULE.infrastructure_text_allowed(path, before, after.replace("false", "true", 1))
+    with patch.object(MODULE, "parse_args", return_value=SimpleNamespace(base="before", head="after", paths=None)), \
+         patch.object(MODULE, "git_changed_paths", return_value=list(MODULE.P25_OBSERVER_DIGESTS)), \
+         patch.object(MODULE, "git_file_text", side_effect=lambda ref, path: observer_files[(ref, path)]):
+        assert MODULE.main() == 0
+        observer_files[("after", "src/P25TrafficChannelProcessor.cpp")] += "\nRF change"
+        assert MODULE.main() == 1
     for path in MODULE.DRIVER_IO_ADMISSION_DIGESTS:
         before = subprocess.check_output(["git", "show", "26716b3:" + path], cwd=ROOT, text=True, encoding="utf-8")
         after = (ROOT / path).read_text(encoding="utf-8")

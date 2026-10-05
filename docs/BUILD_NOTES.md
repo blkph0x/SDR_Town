@@ -37,6 +37,9 @@ new PTT, unknown next-caller security, opposite-slot and unmasked exclusions.
 Existing security/slot/hold constants and all DSP/vocoder/audio paths unchanged.
 Rebuilt Release/native targets PASS; traffic97 assertions/16 cases PASS.
 Full CTest17/17 PASS45.18s; exact frozen-patch negative tests PASS.
+The first post-commit frozen-path command rejected the observer files because
+the new exact hashes were not dispatched by main(). Added exact-path dispatch
+and entrypoint positive/mutated-negative tests; no wildcard or bypass.
 
 Identical-IQ baseline/fixed CLI voicetest (no forced-clear/probe):
 - offset4000ms,10s,417.550MHz,center417.53875,TG10120/s0: both

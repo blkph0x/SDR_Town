@@ -688,6 +688,10 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
+        if args.paths is None and path in P25_OBSERVER_DIGESTS:
+            if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
+                print(f"P25 guard: accepted exact DEC-0192 traffic-observer repair: {path}")
+                continue
         if args.paths is None and path in (INFRASTRUCTURE_DIGESTS.keys() | WORKFLOW_DIGESTS.keys() | WORKFLOW_ROUTING_DIGESTS.keys() | REPEATER_ROUTING_DIGESTS.keys() | CONTROL_OWNERSHIP_DIGESTS.keys() | WORKFLOW_WINDOW_DIGESTS.keys() | WORKFLOW_SHUTDOWN_DIGESTS.keys()):
             if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
                 print(f"P25 guard: accepted exact reviewed infrastructure/ownership patch: {path}")
