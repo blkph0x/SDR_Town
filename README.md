@@ -1,5 +1,11 @@
 # SDR Town
 
+0.2.125 hardens the Classic Aero/Inmarsat receive path. ACARS fragments now
+reassemble through both letter and digit block cycles, 8400 voice erasures no
+longer reset codec history, flagged codec words are muted before playback, and
+the channelizer keeps symmetric signed headroom. See the
+[Classic Aero audit notes](docs/RELEASE_0.2.125.md). P25/audio DSP is unchanged.
+
 0.2.124 adds aircraft ground-track rotation, explicit off-capture Inmarsat watch
 planning (including1529-1530 MHz), applied ADS-B sample-rate reporting and a
 local ADS-B geometric-position dispatch fix. See the

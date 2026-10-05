@@ -218,6 +218,17 @@ bool ISUData::update(QByteArray data)
     return false;
 }
 
+namespace {
+bool isNextAcarsBlockId(uchar previous, uchar current)
+{
+    if(previous>='A' && previous<='Z')
+        return current==uchar('A'+((previous-'A'+1)%26));
+    if(previous>='0' && previous<='9')
+        return current==uchar('0'+((previous-'0'+1)%10));
+    return false;
+}
+}
+
 int ACARSDefragmenter::findfragment(ACARSItem &acarsitem)
 {
     //    QString tmp;
@@ -257,8 +268,7 @@ int ACARSDefragmenter::findfragment(ACARSItem &acarsitem)
             //            qDebug()<<(char)pitem->anacarsitem.BI;
             //            qDebug()<<(char)acarsitem.BI;
 
-            uchar expnewbi=(((pitem->anacarsitem.BI+1)-'A')%26)+'A';
-            if(expnewbi==acarsitem.BI)
+            if(isNextAcarsBlockId(pitem->anacarsitem.BI,acarsitem.BI))
             {
                 //                qDebug()<<"found acars fragment"<<idx;
                 return idx;

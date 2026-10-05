@@ -1,5 +1,12 @@
 # Code notes (tree map)
 
+DEC-0198: Classic Aero reassembly accepts both ACARS block-ID alphabets. The
+8400 evidence wrapper treats zero-valid-unit C-frames and codec failures as
+erasures without resetting persistent state; M/E/T words are silenced before
+the PCM sink. Inmarsat channelizer conversion uses symmetric signed headroom.
+The scheduler and ParserISU acceptance policy remain unchanged pending protocol
+fixtures. P25 paths are untouched.
+
 DEC-0197: InmarsatMapWidget renders validated clockwise ground track and neutral
 unknown-direction markers; AdsBTrackStore publishes trackValid. AircraftMapWidget
 labels IQ rate in MS/s, defaults new settings to2.4 and publishes applied device

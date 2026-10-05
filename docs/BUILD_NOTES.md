@@ -1,5 +1,15 @@
 # Build notes
 
+## 2026-10-05 - Classic Aero audit hardening, DEC-0198
+
+MSVC14.44/Qt6.11.1 Release build of `sdr_town_tests` passed. The focused
+Inmarsat native filter passed21,708 assertions in16 cases. Full CTest passed
+17/17 (85.13s), including InmarsatLiveGui, AircraftGui, device lifecycle,
+remote diagnostics, SSTV and P25 protected-change gates. New fixtures cover
+ACARS A-Z and 0-9 block cycles, C-frame erasure state retention, mute-word
+silencing and channelizer headroom. Public source CI and the v0.2.125 tester
+asset remain pending.
+
 ## 2026-10-05 - DEC-0197 aircraft workflows (local qualification complete)
 
 MSVC14.44/Qt6.11.1 Release: initial GUI build passed. InmarsatLiveGui passes

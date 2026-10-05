@@ -3,9 +3,9 @@ SDR TOWN — SOURCE OF TRUTH (SoT)
 ================================================================================
 VERSION: 1.0.0
 PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
-CURRENT VERSION IN TREE: 0.2.124 (aircraft workflow polish; qualification pending)
-CURRENT WORK: DEC-0197 direction validity, explicit off-capture planning and
-              applied ADS-B rate; TC20-22 CPR dispatch repaired. P25 unchanged.
+CURRENT VERSION IN TREE: 0.2.125 (Classic Aero audit hardening; qualification pending)
+CURRENT WORK: DEC-0198 repairs ACARS digit-cycle reassembly, 8400 erasure
+              recovery, flagged-word muting and channelizer headroom. P25 unchanged.
 PUBLIC BASELINE: v0.2.123-experimental accepted, Actions37273822180; zero package
                  blockers (commit1b035aa acceptance comment203450320).
 LATEST PACKAGE: DEC-0196 replaces four permanent blocker strings with finite,

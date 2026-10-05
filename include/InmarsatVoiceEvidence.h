@@ -1,5 +1,6 @@
 #pragma once
 #include "InmarsatAero.h"
+#include <algorithm>
 #include <array>
 #include <cstring>
 
@@ -24,16 +25,25 @@ template<class Decode,class Reset,class Sink>
 void inmarsatValidatedCFrame(std::span<const uint8_t> words,int validUnits,
     InmarsatAeroStats& s,Decode decode,Reset reset,Sink sink) {
     ++s.cFrames;
-    if(validUnits==0 || words.size()!=300) {++s.rejectedCFrames;++s.invalidCFrames;reset();return;}
+    // A C-frame with no CRC-valid subunits is an erasure.  Keep the codec
+    // history alive so a short RF fade can be concealed by the next frame.
+    // A valid SU carrying a new AES identity is the only normal reset path;
+    // that is handled by inmarsatValidatedVoiceIdentity before this callback.
+    static_cast<void>(reset);
+    if(validUnits==0 || words.size()!=300) {++s.rejectedCFrames;++s.invalidCFrames;return;}
     std::array<int16_t,4000> pcm{};bool speech=false;
     for(int i=0;i<25;++i) {
-        char flags[64]{};++s.codecAttemptedWords;
-        const int errors=decode(words.data()+i*12,pcm.data()+i*160,flags);
-        if(errors<0) {++s.codecFailures;++s.rejectedCFrames;reset();return;}
+        char flags[64]{};std::array<int16_t,160> wordPcm{};++s.codecAttemptedWords;
+        const int errors=decode(words.data()+i*12,wordPcm.data(),flags);
+        if(errors<0) {++s.codecFailures;++s.rejectedCFrames;return;}
         s.codecErrors+=errors;
         if(std::strchr(flags,'R'))++s.codecRepeats;
-        if(std::strchr(flags,'M') || std::strchr(flags,'E') || std::strchr(flags,'T'))++s.codecMutes;
-        else speech=true;
+        const bool muted=std::strchr(flags,'M') || std::strchr(flags,'E') || std::strchr(flags,'T');
+        if(muted) {
+            ++s.codecMutes;
+            std::fill(wordPcm.begin(),wordPcm.end(),int16_t(0));
+        } else speech=true;
+        std::copy(wordPcm.begin(),wordPcm.end(),pcm.begin()+i*160);
     }
     s.voiceWords+=25;s.pcmSamples+=pcm.size();
     if(speech) {s.lastVoiceSample=s.input48k;++s.speechFrames;if(!inmarsatVoiceAes(s))++s.unidentifiedSpeechFrames;}

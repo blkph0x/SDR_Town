@@ -1,5 +1,14 @@
 # Development log
 
+## 2026-10-05 - Classic Aero audit hardening, DEC-0198
+
+Validated the supplied audit against commit70525b5. Repaired ACARS letter/digit
+fragment sequencing, preserved Aero codec state across invalid/failed C-frames,
+silenced codec-flagged words, and added symmetric channelizer headroom. Native
+Inmarsat tests pass21,708 assertions/16 cases; full17/17 CTest passes. P25
+protected-change guard passes; exact source CI and public asset qualification
+remain.
+
 ## 2026-10-05 - Aircraft direction and watch planning, DEC-0197
 
 Confirmed user's1529-1530 MHz range. Added explicit off-capture browse with

@@ -1,5 +1,13 @@
 # Task list (canonical)
 
+T-0110 | pending_release | Classic Aero audit validation and hardened recovery |
+DEC-0198: confirm audit claims against source, repair ACARS digit reassembly,
+preserve 8400 codec state across erasures, mute flagged voice words, and add
+regression fixtures. Keep scheduler/parser recommendations evidence-bound,
+preserve P25, then run full release qualification and publish a tester asset.
+Local native and full17/17 CTest gates pass; exact source CI and public asset
+verification remain.
+
 T-0109 | in_progress | Aircraft map direction, RF watch planning and workflow audit |
 DEC-0197: confirmed 1529-1530 MHz, applied ADS-B rate, ACARS and voice/data
 association tests; preserve P25. Build, test and qualify public release.

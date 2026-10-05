@@ -1,5 +1,19 @@
 # Issues (canonical)
 
+## ISS-0076 - Classic Aero audit findings and deferred protocol hardening (2026-10-05, IN PROGRESS)
+
+The audit against70525b5 confirmed three receive-path defects, repaired under
+DEC-0198: ACARS fragment block identifiers did not support the digit cycle;
+invalid/failed 8400 C-frames reset persistent codec state; and full-scale
+channelizer conversion had asymmetric clipping. The repair now retains codec
+history through erasures and suppresses M/E/T words before audio emission.
+
+Remaining audit recommendations are deliberately separate: longer data-survey
+dwell is a deployment profile rather than an unconditional default, while
+ParserISU framing/BCS variants and post-codec filtering require captured
+protocol fixtures before changing acceptance behavior. Physical Inmarsat RF,
+aircraft position coverage and the existing P25 acceptance items remain open.
+
 ## ISS-0075 - Aircraft direction and requested/applied rate ambiguity (2026-10-05, LOCAL REPAIR)
 
 InmarsatMap ignores validated groundTrackDeg. ADS-B capture control defaults to

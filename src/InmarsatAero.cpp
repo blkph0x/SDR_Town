@@ -255,7 +255,12 @@ std::vector<int16_t> InmarsatChannelizer::process(std::span<const std::complex<f
         std::complex<double> x=0;
         for(size_t i=0;i<taps;++i) x+=std::complex<double>(s.queue[center-32+i-s.base])*s.bank[phase][i];
         const double real=(x*std::polar(1.0,s.ifPhase)).real();
-        out.push_back(int16_t(std::lrint(std::clamp(real,-1.0,32767.0/32768)*32768)));
+        // Keep deterministic headroom for FIR gain and downstream audio
+        // conversion.  The old asymmetric full-scale clamp could hard-clip
+        // positive peaks while leaving no margin for a valid input sample.
+        const double scaled=std::clamp(real*0.5,-1.0,1.0);
+        const long sample=std::lround(scaled*32767.0);
+        out.push_back(static_cast<int16_t>(std::clamp(sample,-32768L,32767L)));
         s.ifPhase=std::remainder(s.ifPhase+2*pi*8000/48000,2*pi);
         s.next+=s.rate/48000;
     }

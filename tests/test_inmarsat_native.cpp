@@ -9,6 +9,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include "AeroCodec.h"
+#include "aerol.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <QFile>
@@ -47,18 +48,47 @@ TEST_CASE("Aero C-frame transactions preserve unknown audio and reject codec fai
     auto bad=[&](const uint8_t*,int16_t*,char*){return ++calls==4?-1:0;};
     inmarsatValidatedCFrame(words,1,s,bad,reset,sink);
     CHECK(calls==4);CHECK(s.codecFailures==1);CHECK(s.rejectedCFrames==1);
-    CHECK(s.pcmSamples==committed);CHECK(emits==emitted);CHECK(resets==3);
+    CHECK(s.pcmSamples==committed);CHECK(emits==emitted);CHECK(resets==2);
     inmarsatValidatedCFrame(words,1,s,good,reset,sink);
     CHECK(emits==emitted+1);CHECK(s.pcmSamples==committed+4000);
     const auto attempts=s.codecAttemptedWords;
     inmarsatValidatedCFrame(words,0,s,good,reset,sink);
-    CHECK(s.invalidCFrames==1);CHECK(s.codecAttemptedWords==attempts);
+    CHECK(s.invalidCFrames==1);CHECK(s.codecAttemptedWords==attempts);CHECK(resets==2);
+    std::vector<int16_t> flagged;
+    calls=0;
+    auto muted=[&](const uint8_t*,int16_t* pcm,char* flags){
+        const int call=++calls;std::fill_n(pcm,160,42);
+        if(call==5)flags[0]='M';
+        return 0;
+    };
+    inmarsatValidatedCFrame(words,1,s,muted,reset,[&](std::span<const int16_t> pcm,uint32_t){
+        flagged.assign(pcm.begin(),pcm.end());
+    });
+    REQUIRE(flagged.size()==4000);
+    CHECK(std::all_of(flagged.begin()+4*160,flagged.begin()+5*160,[](int16_t v){return v==0;}));
+    CHECK(flagged[3*160]==42);CHECK(flagged[5*160]==42);CHECK(s.codecMutes>=1);
     s.input48k=s.lastVoiceSample+24000;CHECK(inmarsatVoiceActive(s));
     ++s.input48k;CHECK_FALSE(inmarsatVoiceActive(s));
     s.input48k=s.lastVoiceSample-1;CHECK_FALSE(inmarsatVoiceActive(s));
     CHECK_FALSE(InmarsatAdsc::matchesIdentity(0x123456,0x654321));
     CHECK(InmarsatAdsc::matchesIdentity(0x123456,0x123456));
     CHECK(InmarsatAdsc::matchesIdentity(0x123456,0));
+}
+
+TEST_CASE("ACARS block identifiers advance through letters and digits", "[inmarsat][native]") {
+    auto item=[](uchar bi,bool more,const char* message){
+        ACARSItem value;
+        value.PLANEREG="N12345";value.LABEL="H1";value.MODE='A';value.TAK='K';
+        value.isuitem.AESID=0x123456;value.isuitem.GESID=7;
+        value.BI=bi;value.moretocome=more;value.message=message;return value;
+    };
+    for(const auto ids:std::array<std::array<uchar,2>,2>{{{'A','B'},{'9','0'}}}) {
+        ACARSDefragmenter defrag;
+        auto first=item(ids[0],true,"first");auto second=item(ids[1],false,"second");
+        CHECK_FALSE(defrag.defragment(first));
+        CHECK(defrag.defragment(second));
+        CHECK(second.message=="firstsecond");
+    }
 }
 
 TEST_CASE("Aero rejected input cannot mutate receiver state and probe is optional", "[inmarsat][native]") {
@@ -136,6 +166,15 @@ TEST_CASE("Aero channelizer is continuous across arbitrary chunks", "[inmarsat][
         int crossings=0;for(size_t i=101;i<actual.size();++i) if(actual[i-1]<=0 && actual[i]>0)++crossings;
         CHECK(double(crossings)*48000/(actual.size()-101)==Catch::Approx(9000).margin(10));
     }
+}
+
+TEST_CASE("Aero channelizer leaves deterministic signed headroom", "[inmarsat][native]") {
+    InmarsatChannelizer channelizer(48000,0);
+    const std::vector<std::complex<float>> input(48000,{0.99f,0.0f});
+    const auto output=channelizer.process(input);
+    REQUIRE(output.size()>1000);
+    int peak=0;for(const auto sample:output)peak=std::max(peak,std::abs(int(sample)));
+    CHECK(peak>14000);CHECK(peak<20000);
 }
 TEST_CASE("Native Aero silence never creates validated frames or audio", "[inmarsat][native]") {
     const std::vector<int16_t> zero(48000*2);

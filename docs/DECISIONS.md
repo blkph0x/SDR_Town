@@ -1,5 +1,23 @@
 # Decisions
 
+## DEC-0198 - Validate and repair the Classic Aero audit findings (2026-10-05)
+
+The audit was checked against source commit70525b5, not only comments or release
+notes. Three concrete defects are repaired without touching P25: ACARS block
+identifier reassembly now advances through both the A-Z and 0-9 cycles; an
+8400 C-frame with no CRC-valid subunits or a codec erasure no longer resets the
+persistent voice state; and the channelizer applies symmetric deterministic
+headroom before converting to signed PCM. M/E/T codec words are muted before
+they reach the audio sink, while repeat words remain available for concealment.
+
+The scheduler's two-channel/30-second defaults are deliberate live-load policy,
+not protocol correctness failures. The UI already permits a longer position
+survey and operators should use the documented survey profile when mapping
+slow ADS-C traffic. Parser framing/BCS strengthening and a post-codec speech
+filter remain open until a protocol fixture proves the exact accepted variants;
+they are not guessed into the receive path. P25 files and DSP behavior are
+explicitly out of scope.
+
 ## DEC-0197 - Honest aircraft direction and off-capture watch planning (2026-10-05)
 
 User confirms 1529.000-1530.000 MHz. Allow explicit Inmarsat spectrum planning
