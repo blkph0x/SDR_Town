@@ -4225,3 +4225,19 @@ Direct3D 12 dxcompiler/dxil; no related smoke-test failure was observed.
   - `sdr_town_tests.exe` — 10166 assertions / 206 cases
   - `build/bin/Release/SDR_Town.exe` linked (main.cpp compiled with `P25AudioDropClass`)
 - **Not proven:** live or IQ `drop=` on a clear Phase 2 call (ISS-0001 / ISS-0007)
+# 2026-10-05 DEC-0196 publication requirements
+
+Baseline d5a9a23. Windows/MSVC14.44; local Qt6.11.1, CI Qt6.7.3.
+Independent USB-source rebuild: D:/SDRTown-ReleaseQA/usb-initial/result.json,
+PASS86.25s. New vcpkg root reconstructed from shipped tooling/recipes; no
+binary cache, source SHA512s matched, rebuilt rtlsdr/libusb/pthreadVC3 loaded
+with the actual app and module, missing-USB negative failed as intended.
+This first qualification uses prior staging and is not reused for a new EXE.
+
+Pinned WinLibs archive SHA256403380c3c125b5ba565d6b29d1f4aa9e18e6080f048da97bee841979d520b4c4.
+Old local RDS CMake cache initially failed after changing compilers; repeat
+configuration supplied the explicit MinGW make path and succeeded. Full
+GCC14.2 RDS build and scripts/test_rds_cli.py PASS. No DSP source modification.
+Distribution tests9/9, inventory20/20, release verifier17/17 PASS.
+Qt6.7.3/6.11.1 exact-source attribution review63/91 records PASS.
+Final source-stamped build, complete package qualification and Actions follow.

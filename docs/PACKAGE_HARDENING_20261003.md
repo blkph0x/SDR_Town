@@ -1,5 +1,43 @@
 # Package hardening and source-kit ledger
 
+## Current completion pass: DEC-0196
+
+The four historical blockers were unconditional strings, so new material alone
+could never satisfy them. Policy T-0104-notices-8 instead verifies a source-bound
+distribution kit and exact-package Qt/USB replacement qualification. Missing
+material remains blocked; mismatched notices, source hashes, executable hashes,
+runtime sets and failed QA are rejected. This is a finite engineering checklist,
+not a perpetual requirement to repeat an unspecified legal certification.
+
+Original source remains MIT. The RTL-enabled combined distribution selects
+GPL-3.0-or-later with original grants/notices preserved. DISTRIBUTION.md explains
+scope, corresponding sources, rebuilding and user library replacement.
+Fourteen embedded roots and all runtime-candidate Qt attribution expressions
+are accounted for from the shipped source archives. The source kits retain
+per-file copyrights and terms; the catalogue does not assert every optional
+Qt component is linked. FreeType uses FTL. Original licence texts are hash-pinned.
+
+The release RDS compiler is WinLibs GCC14.2.0 / MinGW-w64 12.0.0 UCRT POSIX,
+upstream ZIP SHA256403380c3c125b5ba565d6b29d1f4aa9e18e6080f048da97bee841979d520b4c4.
+Packaging matches compiler binaries/static archive candidates to that ZIP,
+checks the configured RDS compiler/link flags/output, and ships GCC runtime
+exceptions, actual C++ headers and complete MinGW runtime sources. Libm0.2.16
+and both pinned Soapy module sources are included too. Compiler executables
+themselves are not put in the portable app.
+
+Independent local USB rebuild from exported recipes/scripts passed in86.25s
+with binary caches disabled, exact source-resource comparison, isolated DLL
+replacement positive/negative loader tests and CLI smoke. Qt6.7.3 and6.11.1
+attribution reviews pass63/91 records. New distribution/qualification tests9/9,
+existing inventory20/20 and release-verifier17/17 pass. Identified-compiler RDS
+reference PI/MPX/confirmation/error tests pass. Final exact-commit package,
+Actions and downloaded public release acceptance still follow; do not mistake
+this implementation entry for a published asset.
+
+The historical entries below are retained for provenance. Requirements they
+describe clear when the new verifier validates the concrete materials and QA,
+not by editing a generated blockers array.
+
 DEC-0195: the libusb Windows recipe requires vcpkg-msbuild and its transitive
 helpers, omitted by the original two-helper export. The kit now includes six
 receipt-verified helpers and the tracked pkgconf recipe. App-local pkgconf DLLs

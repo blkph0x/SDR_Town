@@ -164,6 +164,8 @@ def perform_test(doc, stage, output, repo, full, work_root, result, openssl_root
     evidence = verify(files[KIT].read_bytes(), doc['qtVersion'])
     before = {n: sha256(p) for n, p in files.items()}
     result.update(sourceKitSha256=evidence['kitSha256'], applicationSha256=before['SDR_Town.exe'])
+    result['originalQtSha256'] = {n: h for n, h in before.items()
+                                 if n != 'package-inventory.json' and component(n) == 'qt'}
     result['desktopMetrics'] = desktop_metrics()
     if full and 'tls/qopensslbackend.dll' in files:
         require(openssl_root is not None, 'Package includes OpenSSL backend: explicit --openssl-root required')

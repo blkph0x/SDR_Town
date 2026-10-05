@@ -6,6 +6,12 @@ drivers or other material. Existing upstream notices and terms continue to
 apply, including to adapted code outside `external/`. The combined application
 is **not represented as an MIT-only distribution**.
 
+For the RTL-enabled combined binary we select **GPL-3.0-or-later**, exercising
+librtlsdr's later-version option while preserving the original MIT grant and
+third-party notices. See [DISTRIBUTION.md](DISTRIBUTION.md) for the complete
+source-kit, component scope, licence texts and practical rebuilding/replacement
+instructions. Separately installed vendor APIs are not included or relicensed.
+
 The maintainer welcomes reuse, learning and improvements, including commercial
 reuse as permitted by the applicable licenses. A personal shout-out is optional;
 retaining required copyright and permission notices is not. The project intends
@@ -82,6 +88,13 @@ report. Compiler/runtime exceptions and dynamic linking must not be assumed
 to make every dependency MIT.
 
 ## Binary release gate
+
+DEC-0196 replaces the historical four unconditional blockers with checks of
+the actual distribution materials, exact-source component review, identified
+GCC/MinGW runtime evidence and successful Qt/USB replacement reports tied to
+the package executable and source hashes. Missing or altered evidence fails.
+The historical findings below describe why this work was required; they are
+not four permanent conditions that remain open after qualification passes.
 
 The public 0.2.122 portable ZIP was inspected for this change. It contains many
 upstream notices but does **not** contain a complete license inventory or the

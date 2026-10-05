@@ -68,6 +68,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/test_p25_timeline.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/test_distribution_materials.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Enforce frozen P25 pipeline
         shell: pwsh
@@ -122,6 +124,12 @@ jobs:
           & "${{ github.workspace }}/vcpkg/bootstrap-vcpkg.bat" -disableMetrics
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Install identified RDS compiler
+        shell: pwsh
+        run: |
+          python scripts/rds_toolchain.py --root build/release-tools
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Configure CMake (VS 2022 + vcpkg manifest)
         shell: pwsh
         env:
@@ -129,20 +137,10 @@ jobs:
           VCPKG_BINARY_SOURCES: clear
         run: |
           # DEC-0130: publish the RDS backend too, not a reduced CI-only build.
-          $candidates = @('C:\mingw64\bin\gcc.exe', 'C:\msys64\mingw64\bin\gcc.exe')
-          $candidates += @(Get-Command x86_64-w64-mingw32-gcc,gcc -ErrorAction SilentlyContinue | ForEach-Object { $_.Source })
-          $cc = $null
-          foreach ($candidate in $candidates) {
-            if (-not (Test-Path -LiteralPath $candidate)) { continue }
-            $bin = Split-Path $candidate
-            $cxx = Join-Path $bin 'g++.exe'
-            $make = Join-Path $bin 'mingw32-make.exe'
-            if ((Test-Path $cxx) -and (Test-Path $make) -and ((& $candidate -dumpmachine) -eq 'x86_64-w64-mingw32')) {
-              $cc = $candidate
-              break
-            }
-          }
-          if (-not $cc) { throw "Matching x64 MinGW GCC/G++/make required for published RDS support" }
+          $bin = (Resolve-Path build/release-tools/mingw64/bin).Path
+          $cc = Join-Path $bin 'gcc.exe'
+          $cxx = Join-Path $bin 'g++.exe'
+          $make = Join-Path $bin 'mingw32-make.exe'
           Write-Host "RDS toolchain: $cc"
           $requireDiagnostics = if ($env:GITHUB_REF_NAME.StartsWith('release/')) { 'ON' } else { 'OFF' }
           cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
@@ -322,6 +320,16 @@ jobs:
             --stage build/deploy_staging --output build/qt-replacement-qa --full --headless-layout --work-root "$env:RUNNER_TEMP" @extra
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Close distribution material and replacement requirements
+        shell: pwsh
+        run: |
+          python scripts/distribution_materials.py --config build/runtime-inputs-Release.json --stage build/deploy_staging --cache build/release-materials/distribution --toolchain-archive build/release-tools/winlibs-x86_64-posix-seh-gcc-14.2.0-mingw-w64ucrt-12.0.0-r1.zip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/test_usb_replacement.py --config build/runtime-inputs-Release.json --stage build/deploy_staging --output build/usb-replacement-qa --work-root "$env:RUNNER_TEMP"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/qualify_distribution.py --stage build/deploy_staging --qt-report build/qt-replacement-qa/result.json --usb-report build/usb-replacement-qa/result.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Create portable ZIP and checksum
         shell: pwsh
         run: |
@@ -413,6 +421,8 @@ jobs:
             build/qt-replacement-qa/*-config.summary
             build/qt-replacement-qa/gui/
             build/qt-replacement-qa/gui-native/
+            build/usb-replacement-qa/*.log
+            build/usb-replacement-qa/result.json
             build/sstv-session-ci/result.json
             build/sstv-session-ci/gui.log
             build/inmarsat-session-ci/result.json

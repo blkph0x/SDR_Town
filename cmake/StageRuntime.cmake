@@ -28,6 +28,7 @@ file(GENERATE OUTPUT "${RUNTIME_CONFIG}" CONTENT "{
   \"qtBin\": \"$<TARGET_FILE_DIR:Qt6::Core>\",
   \"qtVersion\": \"${Qt6_VERSION}\",
   \"compiler\": \"${CMAKE_CXX_COMPILER}\",
+  \"rdsCompiler\": \"${SDR_TOWN_RDS_CC}\",
   \"builtFiles\": ${_runtime_files},
   \"moduleNotices\": {
     \"licenses/SoapyRTLSDR-LICENSE.txt\": \"${CMAKE_BINARY_DIR}/rtl-driver-source/LICENSE.txt\",

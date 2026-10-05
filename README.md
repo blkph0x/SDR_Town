@@ -1,5 +1,13 @@
 # SDR Town
 
+0.2.123 prepares the multi-radio/controller and P25 diagnostic changes below
+for public testing with verified dependency sources, notices and replacement
+tests. Original source contributions remain MIT; the RTL-enabled combined
+binary is distributed under GPL-3.0-or-later. See [distribution and rebuilding
+instructions](DISTRIBUTION.md) and [release notes](docs/RELEASE_0.2.123.md).
+This packaging pass does not change P25 decoding or audio timing. The remaining
+control-channel coverage and short-call audio-tail issues are still tracked.
+
 Unreleased Satcom/Aircraft multi-radio update: the Satellite workspace's
 **Add receiver session** menu opens independent Inmarsat, Satcom or Aircraft
 tabs. Satcom has separate pass planning, recordings and audio; Aircraft has
@@ -37,9 +45,10 @@ readiness includes control confirmation. Slow native-driver recovery remains ope
 
 Earlier [infrastructure repairs](docs/INFRASTRUCTURE_HARDENING_20261003.md),
 clean package staging and complete Qt-runtime replacement tests are source/CI
-verified. The remaining [distribution-materials review](docs/PACKAGE_HARDENING_20261003.md)
-still blocks a new public binary (ISS-0060); CI artifacts are test evidence,
-not a published update. These completed packaging checks are not new implementation tasks.
+verified. The [distribution-materials ledger](docs/PACKAGE_HARDENING_20261003.md)
+records completed checks and finite publication requirements. Version 0.2.123
+must pass source, notice and replacement verification before its public asset
+is published; a CI artifact alone is not a published update.
 
 0.2.122 adds **Tools > DTMF Analysis**: short-burst decoding, explicit frequency
 inversion/shift/scale, sample-indexed evidence and local diagnostic export.

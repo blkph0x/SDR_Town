@@ -3,7 +3,11 @@ SDR TOWN — SOURCE OF TRUTH (SoT)
 ================================================================================
 VERSION: 1.0.0
 PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
-CURRENT VERSION IN TREE: 0.2.122 (DTMF burst analysis; public experimental asset verified)
+CURRENT VERSION IN TREE: 0.2.123 (distribution completion; public qualification pending)
+LATEST PACKAGE: DEC-0196 replaces four permanent blocker strings with finite,
+                source-bound material and exact-package qualification checks.
+                Combined RTL-enabled binary selects GPL3-or-later; original
+                source MIT grant remains. No P25/receive/audio changes.
 LATEST UNRELEASED: DEC-0194 adds bounded passive P25 timing/decision traces,
                   current-tuning CC reads and stale acquisition-result fencing.
                   Passive logging no longer invokes alternate voice synthesis;
@@ -63,7 +67,7 @@ UNRELEASED SOURCE: T-0102 infrastructure repairs; local 16/16 gates pass,
                   dry-run; local four-profile no-RX gate passes.
                   T-0106 repairs reproduced control cancellation lifetime
                   failure; local stress/debugger/16-suite gates and92ab955 CI pass.
-ACTIVE PHASE: P25 missing-response diagnosis at user request; controller expansion deferred
+ACTIVE PHASE: complete public release materials/qualification at user request; P25 diagnosis remains open
 METHOD: Athanor / SovereignFoundry process (never guess, evidence, trackers).
          This tree is NOT Athanor. Qt, SoapySDR, mbelib, miniaudio stay.
 DO NOT EDIT: C:\Users\Blkph0x\source\repos\SovereignFoundry

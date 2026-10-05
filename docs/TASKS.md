@@ -1,6 +1,11 @@
 # Task list (canonical)
 
-T-0108 | in_progress | P25 first caller clear, missing response diagnosis |
+T-0104 | in_progress | Close the four finite publication requirements (DEC-0196) |
+User priority2026-10-05: finish materials, distribution scope, independent USB
+rebuild, compiler-runtime provenance, then publish and verify a new tester asset.
+Do not change P25 or use a permanent untestable release-blocker list.
+
+T-0108 | pending_after_release | P25 first caller clear, missing response diagnosis |
 DEC-0194: passive per-stage capture timeline, CC stale-result fencing and
 logging/synthesis non-interference tests. Re-measure live gaps without changing
 audio/DSP timing. Public package work remains T-0104, not a waived gate.

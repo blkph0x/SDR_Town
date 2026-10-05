@@ -1521,3 +1521,11 @@ Unicode SSTV paths initially failed in both narrow file opening and CRT batch
 arguments. Qt argument ingestion plus wide-file opening passes the actual CLI
 test; existing RDS/tone/registry CLI regressions pass. Other legacy file loaders'
 Unicode behavior is not certified by this scoped repair.
+## ISS-0060 completion pass (2026-10-05, qualification pending)
+
+DEC-0196 replaces unconditional blocker messages with source-bound material
+and exact-package qualification checks. Combined binary distribution scope
+and original-source MIT grant are explicit. New USB source rebuild, identified
+GCC runtime evidence, component/Qt attribution review and tamper tests are
+implemented. Keep original history below. Close only after new-source Actions
+and downloaded public asset verification pass, not merely source compilation.

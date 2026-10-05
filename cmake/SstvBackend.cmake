@@ -10,7 +10,7 @@ if(NOT SDR_TOWN_ENABLE_SSTV_IMAGES)
 endif()
 
 find_program(SDR_TOWN_CARGO cargo HINTS "${CMAKE_BINARY_DIR}/toolchains/cargo/bin" REQUIRED)
-set(SSTV_ENV "RUSTFLAGS=-C target-feature=+crt-static")
+set(SSTV_ENV "RUSTFLAGS=-C target-feature=+crt-static" "RUSTUP_TOOLCHAIN=1.88.0")
 if(EXISTS "${CMAKE_BINARY_DIR}/toolchains/rustup")
     list(APPEND SSTV_ENV "CARGO_HOME=${CMAKE_BINARY_DIR}/toolchains/cargo"
                          "RUSTUP_HOME=${CMAKE_BINARY_DIR}/toolchains/rustup")

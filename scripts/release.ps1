@@ -8,6 +8,8 @@ param(
     [string]$Channel = "experimental",
     [string]$RemoteDiagnosticsUrl = "",
     [string]$RemoteDiagnosticsTokenFile = "$env:APPDATA\SDR_Town\remote_diagnostics_token.txt",
+    [string]$QualificationWorkRoot = "$env:TEMP",
+    [string]$OpenSslRoot = "",
     [switch]$SkipPush,
     [switch]$SkipAssets
 )
@@ -55,10 +57,15 @@ Invoke-Checked python @('scripts/test_stage_runtime.py')
 Invoke-Checked python @('scripts/test_vcpkg_sources.py')
 Invoke-Checked python @('scripts/test_project_sources.py')
 Invoke-Checked python @('scripts/test_vcpkg_tooling.py')
+Invoke-Checked python @('scripts/test_distribution_materials.py')
 
 # 1. Ensure clean branded build
 Write-Host "`n[1/6] Running clean deploy + windeployqt + cpack..." -ForegroundColor Yellow
-Invoke-Checked cmake @('-S', '.', '-B', 'build', '-DSDR_TOWN_ENABLE_SSTV_IMAGES=ON')
+Invoke-Checked python @('scripts/rds_toolchain.py', '--root', 'build/release-tools')
+$rdsBin = (Resolve-Path 'build/release-tools/mingw64/bin').Path.Replace('\', '/')
+Invoke-Checked cmake @('-S', '.', '-B', 'build', '-DSDR_TOWN_ENABLE_SSTV_IMAGES=ON',
+    "-DSDR_TOWN_RDS_CC=$rdsBin/gcc.exe", "-DSDR_TOWN_RDS_CXX=$rdsBin/g++.exe",
+    "-DSDR_TOWN_RDS_MAKE=$rdsBin/mingw32-make.exe")
 & "$PSScriptRoot/build_rtl_module.ps1"
 & "$PSScriptRoot/build_sdrplay_module.ps1"
 Invoke-Checked cmake @('--build', 'build', '--config', 'Release', '--target', 'deploy', 'sdr_town_tests', 'sdr_town_workspace_tests', 'inmarsat_live_gui_tests', 'remote_diagnostics_tests', 'antenna_control_tests', '-j', '4')
@@ -110,6 +117,18 @@ if (-not [string]::IsNullOrWhiteSpace($RemoteDiagnosticsUrl)) {
 }
 
 Invoke-Checked python @('scripts/test_rtl_runtime_package.py', '--stage', 'build/deploy_staging')
+$qtArgs = @('scripts/test_qt_replacement.py', '--config', 'build/runtime-inputs-Release.json',
+    '--stage', 'build/deploy_staging', '--output', 'build/qt-replacement-qa', '--full',
+    '--work-root', $QualificationWorkRoot)
+if ($OpenSslRoot) { $qtArgs += @('--openssl-root', $OpenSslRoot) }
+Invoke-Checked python $qtArgs
+Invoke-Checked python @('scripts/distribution_materials.py', '--config', 'build/runtime-inputs-Release.json',
+    '--stage', 'build/deploy_staging', '--cache', 'build/release-materials/distribution',
+    '--toolchain-archive', 'build/release-tools/winlibs-x86_64-posix-seh-gcc-14.2.0-mingw-w64ucrt-12.0.0-r1.zip')
+Invoke-Checked python @('scripts/test_usb_replacement.py', '--config', 'build/runtime-inputs-Release.json',
+    '--stage', 'build/deploy_staging', '--output', 'build/usb-replacement-qa', '--work-root', $QualificationWorkRoot)
+Invoke-Checked python @('scripts/qualify_distribution.py', '--stage', 'build/deploy_staging',
+    '--qt-report', 'build/qt-replacement-qa/result.json', '--usb-report', 'build/usb-replacement-qa/result.json')
 Invoke-Checked python @('scripts/package_inventory.py', 'generate', '--stage', 'build/deploy_staging', '--require-publishable')
 Invoke-Checked cpack @('-G', 'NSIS', '-C', 'Release', '--config', 'build/CPackConfig.cmake')
 

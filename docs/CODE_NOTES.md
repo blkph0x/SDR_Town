@@ -1103,3 +1103,15 @@ adapter, not a change to its correction math or decoder/audio pipeline.
 MainWindow/CLI propagate refused controls; source selection and DSP are separate.
 `test_workflow_radio_session` includes a blocked driver call, old-token release,
 competing replacement, independent-radio claim and deferred teardown fixture.
+# DEC-0196 distribution completion
+
+scripts/distribution_materials.py reviews embedded/Qt/versioned dependency
+licences against exact source kits, exports supplemental source/runtime
+materials and verifies nested hashes. scripts/rds_toolchain.py installs the
+identified GCC14.2/MinGW12 archive without sweeping an ambient compiler.
+scripts/test_usb_replacement.py independently rebuilds the USB stack from
+exported tooling/recipes and exercises isolated replacement loading.
+scripts/qualify_distribution.py binds compact passing Qt/USB results to the
+package executable, source archives and runtime set. package_inventory.py
+now clears finite blockers only after these checks, retaining original
+source/notice/signature/ZIP safety gates. No P25/receive/audio code changes.

@@ -15,7 +15,7 @@ INVENTORY = 'package-inventory.json'
 INPUTS = 'licenses/build-inputs.json'
 RUNTIME_INPUTS = 'licenses/runtime-deployment.json'
 SOURCE_KIT = 'licenses/vcpkg/source-materials.zip'
-POLICY = 'T-0104-notices-7'
+POLICY = 'T-0104-notices-8'
 MAX_FILES = 10000
 MAX_BYTES = 512 * 1024 * 1024
 MAX_JSON = 8 * 1024 * 1024
@@ -52,6 +52,7 @@ MSVC_FILES = {
 PROJECT_FILES = {
     'sdr_town.exe', 'sdrtowncontrol.dll', 'build-info.json', 'qt.conf',
     'remote_diagnostics.defaults.json', 'remote_diagnostics.json',
+    'distribution.md',
     'tools/diagnostics/remote_diag_server.py', 'scripts/start_remote_diag_server.ps1',
     'scripts/install_remote_diag_task.ps1',
     *(name.lower() for name in ROOT_NOTICES),
@@ -65,6 +66,10 @@ STATIC_NOTICES = (
     'licenses/aero/NaturalEarth.txt',
 )
 KNOWN_NOTICES = {
+    'licenses/distribution/materials.zip', 'licenses/distribution/qualification.json',
+    'licenses/distribution/GPL-3.0.txt', 'licenses/distribution/GCC-Runtime-Exception-3.1.txt',
+    'licenses/distribution/MinGW-w64-12.0.0-COPYING.txt',
+    'licenses/distribution/Winpthreads-12.0.0-COPYING.txt',
     *STATIC_NOTICES, INPUTS, RUNTIME_INPUTS, SOURCE_KIT,
     'licenses/qt/source-materials.zip', 'licenses/msvc/runtime-materials.json',
     'licenses/project/source-materials.zip',
@@ -188,6 +193,10 @@ def required_notices(names):
     from embedded_notices import COPIES, EVIDENCE, NOTICES
     required = {*ROOT_NOTICES, INPUTS, SOURCE_KIT, 'licenses/project/source-materials.zip', *STATIC_NOTICES,
                 EVIDENCE, NOTICES, *COPIES.values()}
+    if 'licenses/distribution/materials.zip' in names:
+        from distribution_materials import LICENSES
+        required.add('DISTRIBUTION.md')
+        required.update('licenses/distribution/' + n for n in LICENSES)
     for port in PORTS:
         required.update((f'licenses/vcpkg/{port}/copyright', f'licenses/vcpkg/{port}/vcpkg.spdx.json'))
     by_component = {
@@ -209,9 +218,18 @@ def required_notices(names):
     return required
 
 
-def blockers(names):
-    """No generated 'approved' flag can bypass outstanding reviewed requirements."""
+def blockers(names, read=None, inputs=None):
+    """Requirements clear only after source-bound materials and exact-package QA."""
     components = {component(n) for n in names}
+    from distribution_materials import KIT, verify
+    from qualify_distribution import QUALIFICATION, verify as verify_qualification
+    if KIT in names:
+        require(read is not None and inputs is not None, 'Distribution verification inputs missing')
+        verify(read(KIT, 64 * 1024**2), read, inputs, names)
+        if QUALIFICATION not in names:
+            return ['ISS-0060: exact-package Qt/USB replacement qualification missing']
+        verify_qualification(parse_json(read(QUALIFICATION)), names, inputs)
+        return []
     result = ['ISS-0060: transitive static/source/data notice inventory and combined-distribution review incomplete']
     if 'qt' in components:
         result.append('ISS-0060: Qt linked third-party distribution review incomplete (replacement rebuild passed)')
@@ -341,7 +359,7 @@ def make_document(entries, read):
     embedded = verify_embedded(read(EVIDENCE), read(NOTICES), inputs['sourceCommit'], entries)
     return {'schema': 1, 'policy': POLICY, 'sourceCommit': inputs['sourceCommit'],
             'scope': 'Exact files and known build inputs; NOT full transitive license clearance',
-            'releaseBlockers': blockers(entries), 'sourceMaterials': sources,
+            'releaseBlockers': blockers(entries, read, inputs), 'sourceMaterials': sources,
             'embeddedMaterials': embedded, 'qtMaterials': qt_materials,
             'microsoftMaterials': microsoft_materials, 'files': entries}
 

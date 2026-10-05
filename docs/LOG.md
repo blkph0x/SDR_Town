@@ -2499,3 +2499,13 @@ Unicode batch/path loss with Qt arguments and wide Windows file opening.
 284 core/Qt cases and existing decoder CLI gates pass. Docs/README updated.
 No new release published; 0.2.56 release assets remain unchanged. SSTV image
 reconstruction, GUI/live input and public satellite decoding remain future work.
+# 2026-10-05 DEC-0196 finite release-material completion
+
+User prioritizes resolving all four remaining publication items and authorizes
+necessary licensing changes. Implemented evidence-based completion rather than
+permanent blocker strings; original MIT remains, combined RTL-enabled binary
+selects GPL3-or-later. Added pinned RDS runtime evidence, supplemental sources,
+exact-source attribution review and independently rebuilt USB replacement QA.
+Local qualification/unit/RDS evidence recorded in BUILD_NOTES. Final build,
+CI/publication and downloaded-asset checks pending. P25 code/timing untouched;
+T-0108 remains open after this release-priority task.

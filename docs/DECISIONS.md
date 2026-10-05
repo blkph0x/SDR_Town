@@ -1,5 +1,33 @@
 # Decisions
 
+## DEC-0196 - Close finite distribution requirements with verified materials (2026-10-05)
+
+User prioritizes completion of ISS-0060 and authorizes necessary licensing
+changes. The current four blockers are unconditional strings, not tests which
+can become satisfied. Replace them only as actual materials and qualification
+are supplied. Preserve exact-file/source, tamper, loader and replacement gates.
+No P25, receive, playback or security-policy changes in this task.
+
+Retain MIT on original source contributions and all upstream grants. Select
+GPL-3.0-or-later for distribution of the combined RTL-enabled application,
+using librtlsdr's explicit GPL-2.0-or-later option. Ship the GPL text, exact
+application/dependency sources and rebuild/replacement instructions. This
+does not relabel vendor runtimes or claim patent/legal certification.
+
+Inventory embedded libraries/data and Qt runtime attributions from the exact
+source kits. Include compiler-runtime notices and record the actual RDS GCC
+toolchain/static inputs, not an inferred version. Pin a redistributable,
+documented MinGW toolchain for official builds if the old local installation
+cannot establish its runtime provenance. RDS behavior must pass existing gates.
+Rebuild RTL/libusb/pthreads independently from the shipped vcpkg tool/source
+kit without binary caches and load the replacements in a disposable package.
+Tests must reject missing, altered or mismatched release evidence. Release
+qualification remains finite; already-passed Qt work is not a new blocker.
+
+Primary references: Qt open-source obligations, the shipped RTL source headers,
+and GCC's libstdc++ license / COPYING.RUNTIME. Publisher authorization cannot
+waive other authors' rights. Any new incompatible component must fail review.
+
 ## DEC-0195 - Complete the USB build-helper closure (2026-10-05)
 
 T-0104 inspection of the exported libusb1.0.30 recipe confirms its Windows
