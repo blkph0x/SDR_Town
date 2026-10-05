@@ -2,6 +2,21 @@
 
 #include <QTimer>
 
+namespace {
+template<class Work> P25PipelineEvent voiceTrace(const Work& work, const char* stage) {
+    P25PipelineEvent event;
+    P25PipelineEvent::text(event.stage, stage);
+    event.job = work.sequence; event.session = work.callSessionId;
+    event.generation = work.trafficGeneration; event.flush = work.flushSeq;
+    event.tg = work.talkgroupId; event.rid = work.sourceId;
+    event.slot = work.tdmaSlotKnown ? static_cast<int>(work.tdmaSlot & 1u) : -1;
+    event.centerHz = work.centerFreqHz; event.targetHz = work.targetFreqHz;
+    event.sampleRate = work.sampleRateHz; event.iqStart = work.iqStartAbsolute;
+    event.iqEnd = work.iqDecodeEndAbsolute; event.submittedUs = work.submittedUs;
+    return event;
+}
+}
+
 // AUTOMOC: Q_OBJECT lives in MainWindow.h (SpectrumWidget / TranscriptWindow pattern).
 // P25 clear-audio voice worker / submit / backpressure / publish (ISS-0004 follow-up).
 // Mechanical move from MainWindow.cpp — no behavior change.
@@ -53,6 +68,11 @@ void MainWindow::startP25VoiceWorker()
                 result.flushSeq = job.flushSeq;
                 result.receiverSessionKey = job.receiverSessionKey;
                 result.callSessionId = job.callSessionId;
+                result.submittedUs = job.submittedUs;
+                result.startedUs = P25PipelineEvent::nowUs();
+                auto startedTrace = voiceTrace(job, "voice_started");
+                startedTrace.startedUs = result.startedUs;
+                p25PipelineTrace.push(startedTrace);
 
                 const uintptr_t workerRxKey = reinterpret_cast<uintptr_t>(job.rx.get());
                 const uint64_t workerSeq = job.sequence;
@@ -584,6 +604,21 @@ void MainWindow::startP25VoiceWorker()
                     publishResult = true;
                 }
 
+                result.completedUs = P25PipelineEvent::nowUs();
+                auto completedTrace = voiceTrace(result, "voice_completed");
+                completedTrace.startedUs = result.startedUs;
+                completedTrace.completedUs = result.completedUs;
+                completedTrace.pcmSamples = result.speakerAudio.size();
+                completedTrace.selectedVcw = result.audio.phase2TargetVoiceCodewords;
+                completedTrace.companionVcw = result.audio.phase2OppositeVoiceCodewords;
+                completedTrace.acceptedFrames = result.audio.phase2AmbeAcceptedFrames;
+                completedTrace.fedFrames = result.audio.phase2FedToMbelib;
+                completedTrace.rejectedVcw = result.audio.phase2RejectedVoiceCodewords;
+                completedTrace.duplicateVcw = result.audio.phase2DuplicateSuppressedVoiceCodewords;
+                completedTrace.contextVcw = result.audio.phase2ContextSuppressedVoiceCodewords;
+                P25PipelineEvent::text(completedTrace.reason, !result.error.empty() ? "worker-exception" :
+                    result.stale ? result.staleReason.c_str() : result.speakerGateReason.c_str());
+                p25PipelineTrace.push(completedTrace);
                 if (publishResult) {
                     std::unique_lock<std::mutex> lock(p25VoiceWorkerMutex);
                     // Block until the GUI DSP worker drains completed voice
@@ -646,6 +681,8 @@ bool MainWindow::submitP25VoiceDecodeJob(MainWindow::P25VoiceDecodeJob job)
                 return false;
             }
             job.sequence = p25VoiceJobSequence.fetch_add(1, std::memory_order_relaxed) + 1;
+            job.submittedUs = P25PipelineEvent::nowUs();
+            p25PipelineTrace.push(voiceTrace(job, "voice_submitted"));
             p25VoicePendingJobs.push_back(std::move(job));
         }
         p25VoiceWorkerCv.notify_one();
@@ -755,7 +792,15 @@ MainWindow::P25VoiceDecodeWorkPurge MainWindow::purgeP25VoiceDecodeWorkForSessio
 P25VoicePublishOutcome MainWindow::publishP25VoiceDecodeResult(const MainWindow::P25VoiceDecodeResult& result, 
                                                        P25SpeakerPendingMap& pendingAudioByRx)
 {
-        if (!result.rx) return P25VoicePublishOutcome::ReceiverGone;
+        auto trace = voiceTrace(result, "voice_publish");
+        trace.startedUs = result.startedUs; trace.completedUs = result.completedUs;
+        trace.pcmSamples = result.speakerAudio.size();
+        auto finish = [&](P25VoicePublishOutcome outcome, const char* reason) {
+            P25PipelineEvent::text(trace.reason, reason);
+            p25PipelineTrace.push(trace);
+            return outcome;
+        };
+        if (!result.rx) return finish(P25VoicePublishOutcome::ReceiverGone, "receiver-null");
         // After return-to-control, the traffic Receiver may have been removed from the receivers list
         // (and its storage released). Guard against publishing stale results that would dereference
         // a now-invalid Receiver* (e.g. rx.stateMutex). This eliminates a source of freezes after
@@ -764,7 +809,7 @@ P25VoicePublishOutcome MainWindow::publishP25VoiceDecodeResult(const MainWindow:
             std::unique_lock<std::mutex> lk(receiversMutex, std::try_to_lock);
             if (!lk.owns_lock()) {
                 p25VoicePublicationLockMisses.fetch_add(1, std::memory_order_relaxed);
-                return P25VoicePublishOutcome::Deferred;
+                return finish(P25VoicePublishOutcome::Deferred, "receiver-list-lock");
             }
             bool stillActive = false;
             for (auto& r : receivers) {
@@ -782,7 +827,7 @@ P25VoicePublishOutcome MainWindow::publishP25VoiceDecodeResult(const MainWindow:
                             .arg(reason),
                         1000);
                 });
-                return P25VoicePublishOutcome::ReceiverGone;
+                return finish(P25VoicePublishOutcome::ReceiverGone, "receiver-gone");
             }
         }
         Receiver& rx = *result.rx;
@@ -793,12 +838,12 @@ P25VoicePublishOutcome MainWindow::publishP25VoiceDecodeResult(const MainWindow:
                     QString("P25 voice worker decode error: %1").arg(err),
                     2500);
             });
-            return P25VoicePublishOutcome::DiscardedStale;
+            return finish(P25VoicePublishOutcome::DiscardedStale, "worker-exception");
         }
         bool stale = result.stale;
         bool publishVoiceDiag = result.publishVoiceDiag;
         std::string staleReason = result.staleReason;
-        if (!result.hasAudioBlock && !stale) return P25VoicePublishOutcome::Published;
+        if (!result.hasAudioBlock && !stale) return finish(P25VoicePublishOutcome::Published, "no-audio-block");
         if (!stale &&
             result.flushSeq != p25PendingAudioFlushSeq.load(std::memory_order_acquire)) {
             stale = true;
@@ -808,7 +853,7 @@ P25VoicePublishOutcome MainWindow::publishP25VoiceDecodeResult(const MainWindow:
             std::unique_lock<std::mutex> rxLock(rx.stateMutex, std::try_to_lock);
             if (!rxLock.owns_lock()) {
                 p25VoicePublicationLockMisses.fetch_add(1, std::memory_order_relaxed);
-                return P25VoicePublishOutcome::Deferred;
+                return finish(P25VoicePublishOutcome::Deferred, "receiver-state-lock");
             }
             if (!rx.active || !rx.p25VoiceDecodeEnabled || !rx.p25VoicePhase2) {
                 stale = true;
@@ -900,7 +945,7 @@ P25VoicePublishOutcome MainWindow::publishP25VoiceDecodeResult(const MainWindow:
                                 .arg(genLog),
                             1000);
                     });
-                    return P25VoicePublishOutcome::DiscardedStale;
+                    return finish(P25VoicePublishOutcome::DiscardedStale, staleReason.c_str());
                 }
                 // DEC-0046: empty wall stamp — keep pending, publish diags only.
                 stale = false;
@@ -1243,6 +1288,16 @@ P25VoicePublishOutcome MainWindow::publishP25VoiceDecodeResult(const MainWindow:
                         &pushedRealAudio);
                 }
                 // Never clear accepted speaker PCM on transient gate failure.
+                auto speakerTrace = voiceTrace(result, "speaker_queue");
+                speakerTrace.startedUs = result.startedUs; speakerTrace.completedUs = result.completedUs;
+                speakerTrace.pcmSamples = speakerAudioToQueue->size();
+                speakerTrace.pushedSamples = pushedSamples;
+                speakerTrace.pendingSamples = pendingSpeaker.samples.size();
+                speakerTrace.ringPercent = audioRingFillPercent;
+                P25PipelineEvent::text(speakerTrace.reason, !phase2SpeakerSessionReady ? "session-not-ready" :
+                    !carrierOk ? "carrier-closed" : !gateEmit ? "emit-gate-closed" :
+                    pushedSamples ? "pushed" : "no-push");
+                p25PipelineTrace.push(speakerTrace);
                 if (pushedSamples > 0) {
                 p25Phase2ResetPlayoutBridge(rx);
                 const P25P2CallAudioKey speakerKey =
@@ -1411,5 +1466,5 @@ P25VoicePublishOutcome MainWindow::publishP25VoiceDecodeResult(const MainWindow:
                 p25SpeakerPendingFor(pendingAudioByRx, rx),
                 P25PendingClearReason::EncryptedState);
         }
-        return P25VoicePublishOutcome::Published;
+        return finish(P25VoicePublishOutcome::Published, "published");
     }

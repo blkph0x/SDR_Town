@@ -219,8 +219,8 @@ def blockers(names):
         result.append('ISS-0060: RTL-SDR/libusb/pthreads full tooling/rebuild and distribution review incomplete')
     if 'rds-mingw' in components:
         result.append('ISS-0060: static MinGW runtime version, notices and exception evidence incomplete')
-    if 'msvc-runtime' in components:
-        result.append('ISS-0060: Microsoft publisher redistribution entitlement review incomplete')
+    # DEC-0194: publisher confirmed Visual Studio/Build Tools entitlement on
+    # 2026-10-05. Exact signed permitted-runtime/license checks above still apply.
     return result
 
 

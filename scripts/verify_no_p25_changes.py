@@ -210,6 +210,23 @@ P25_FOLLOW_LIFECYCLE_DIGESTS = {
 }
 
 
+# DEC-0194: exact passive trace, current-tuning CC view and diagnostic synthesis
+# repair. No receive budgets, slot/encryption policy or speaker timings change.
+P25_TRACE_CONTEXT_DIGESTS = {
+    "include/DeviceManager.h": ("09be7f885a929b124d36d824fbc7376d37e271871865c8500d3e442f7a92ccb1", "cc568d765e1fed0759151f91c9f410b30fc4276baea4ecb84e546756bf559e94"),
+    "include/MainWindow.h": ("7190137f5ae45d3501288af8cfcc547a01186a6cab0f5d7996e1ab07f21347e8", "f213ced64f4952bfef7e5b300835b9eff06d892f986b9b7df6b2b8afa3046091"),
+    "include/P25VoiceTest.h": ("abbc7d87727704f82ea7e1abaf87b971792ee7650eef73e636a93f727ffe00c9", "90185ae59e90afb997a040370ba36263fff202251b2ccaa17831f7fbb0b86c90"),
+    "include/P25PipelineTrace.h": ("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "3eda8d57020b0f467174ddf1235638f998a4943163985d2f27e707b783c2fdcd"),
+    "src/DeviceManager.cpp": ("82b7115943eb9b015962d1bd315c0133f4e1f6b06a87e41fe660d6e32add692d", "99ae844bd9211f0009a9f2e780a7ffdeed47213accaeb1b011df2221d3d71438"),
+    "src/CliApp.cpp": ("e56e546ff3cea066c01ab55c8b57dc29039e8a9ed113efafa27d7268f3ad9ed8", "009bbffa8a513a64eb05eab33a56297de78ba85ad353b6e96313cd91eec061b1"),
+    "src/MainWindow.cpp": ("0ef4e88814b6ecdc6ce951e2c12c4659ee0adc79fe80d7432e9b220da71685df", "0d1ab8f8c40321869c8d2ff2621fac732ddba797d131519e01b75fdfb47698e3"),
+    "src/MainWindowP25Voice.cpp": ("24e26a4b70eab89417e17c9a83310c195d3de86f52471f7817c5c37ba86977f1", "8727230a46abcbed425d6cc646410f629b8b26a9450e8d05c6fb73555bca0a6b"),
+    "src/MainWindowP25Orchestration.cpp": ("f0bf8a6b2e34f57b29cd4a6e502678fd93c2fea3c2d3151ee414de16ed57e50e", "e2266e4f44a134ee3999cb084da4b2d94f44dc779726f0fee51eaf365897de59"),
+    "src/P25VoiceDecode.cpp": ("a045731d2e554bb3c19512bdf8c1b439220ed195de66e79718549fccc7e4bfaf", "e40e23bc224d419272c3542cfd7fe8147e99824c52332c6b898bbd5619781e98"),
+    "tests/test_p25_pipeline_trace.cpp": ("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "681fc72b256687a746363b9b6cbd9e1cce600356ca561f84ab73d2715ae27fd8"),
+}
+
+
 def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
     actual = (
         hashlib.sha256(before.encode("utf-8")).hexdigest(),
@@ -220,7 +237,8 @@ def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
                       CONTROL_OWNERSHIP_DIGESTS.get(path), WORKFLOW_WINDOW_DIGESTS.get(path),
                       WORKFLOW_SHUTDOWN_DIGESTS.get(path), INMARSAT_SESSION_DIGESTS.get(path),
                       SATELLITE_SESSION_DIGESTS.get(path), DRIVER_IO_ADMISSION_DIGESTS.get(path),
-                      P25_OBSERVER_DIGESTS.get(path), P25_FOLLOW_LIFECYCLE_DIGESTS.get(path))
+                      P25_OBSERVER_DIGESTS.get(path), P25_FOLLOW_LIFECYCLE_DIGESTS.get(path),
+                      P25_TRACE_CONTEXT_DIGESTS.get(path))
 
 
 # DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.
@@ -678,6 +696,22 @@ def default_base() -> str:
     return "origin/master"
 
 
+def trace_before_text(ref: str, path: str) -> str:
+    try:
+        return git_file_text(ref, path)
+    except RuntimeError:
+        pair = P25_TRACE_CONTEXT_DIGESTS.get(path)
+        if not pair or pair[0] != hashlib.sha256(b"").hexdigest():
+            raise
+        # Only the reviewed additions may have an empty base. A missing Git ref
+        # is an error, never interpreted as a new file.
+        result = subprocess.run(["git", "ls-tree", "--name-only", ref, "--", path],
+                                check=True, capture_output=True, text=True, encoding="utf-8")
+        if result.stdout.strip():
+            raise
+        return ""
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Reject modifications to the frozen P25 and shared RF/audio pipeline."
@@ -702,6 +736,10 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
+        if args.paths is None and path in P25_TRACE_CONTEXT_DIGESTS:
+            if infrastructure_text_allowed(path, trace_before_text(args.base, path), git_file_text(args.head, path)):
+                print(f"P25 guard: accepted exact DEC-0194 trace/context repair: {path}")
+                continue
         if args.paths is None and path in P25_FOLLOW_LIFECYCLE_DIGESTS:
             if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
                 print(f"P25 guard: accepted exact DEC-0193 follow-lifecycle repair: {path}")

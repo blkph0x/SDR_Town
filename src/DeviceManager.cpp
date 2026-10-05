@@ -1204,6 +1204,7 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
                 center = st.currentCenter;
             }
             bool nativePpm = false;
+            bool initialCenterApplied = false;
             const double tuneCenterPrep = center;
             {
                 std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
@@ -1222,6 +1223,7 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
                 const double tuneCenter = nativePpm ? tuneCenterPrep : correctedTuneFrequencyHz(tuneCenterPrep, usePpm);
                 try {
                     localDev->setFrequency(SOAPY_SDR_RX, rxCh, tuneCenter);
+                    initialCenterApplied = true;
                     st.centerTuneAppliedSeq.store(centerTuneSeq, std::memory_order_release);
                 } catch (...) {}
 
@@ -1282,6 +1284,10 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
                 }
 
                 resetStreamBuffers(st);
+
+                // DEC-0194: IQ metadata describes the successful hardware tune,
+                // not a desired GUI setting or the discarded synthetic ring.
+                if (initialCenterApplied) markStreamRetune(st, center);
 
                 bool staleSession = false;
                 {
@@ -1804,6 +1810,7 @@ void DeviceManager::setFrequencyCorrectionImpl(size_t index, double ppm) {
                 : correctedTuneFrequencyHz(logicalCenter, usePpm);
             try {
                 st.soapyDev->setFrequency(SOAPY_SDR_RX, rxCh, tuneHz);
+                markStreamRetune(st, logicalCenter);
             } catch (const std::exception& ex) {
                 spdlog::warn("Retune after PPM correction failed for device {}: {}", index, ex.what());
             } catch (...) {}
@@ -2724,7 +2731,7 @@ std::string DeviceManager::getRuntimeStateLabel(size_t index) const {
 // S0-3 (P1): non-consuming recent window so N receivers on the same device each get a coherent
 // recent RF capture for their private channelizer/demod. Read from the absolute-sample ring
 // instead of the consuming iqQueue so monitor/CLI P25 sync cannot starve or disturb spectrum.
-DeviceManager::RecentIQWindow DeviceManager::getRecentIQWindowWithCursor(size_t index, size_t maxSamples) {
+DeviceManager::RecentIQWindow DeviceManager::getRecentIQWindowWithCursor(size_t index, size_t maxSamples, bool currentTuningOnly) {
     RecentIQWindow outWindow;
     if (maxSamples == 0) return outWindow;
     auto* stPtr = streamState(index);
@@ -2738,10 +2745,14 @@ DeviceManager::RecentIQWindow DeviceManager::getRecentIQWindowWithCursor(size_t 
     std::lock_guard<std::mutex> ringLock(st.ringMutex);
     const size_t cap = st.ringCapacity;
     outWindow.streamEpoch = st.streamEpoch.load(std::memory_order_acquire);
+    outWindow.retuneStartAbsolute = st.retuneValidFromAbsolute.load(std::memory_order_acquire);
+    outWindow.appliedCenterHz = st.lastAppliedCenterHz.load(std::memory_order_acquire);
     const uint64_t total = st.totalSamplesWritten.load(std::memory_order_acquire);
     if (cap == 0 || st.iqRing.empty() || total == 0) return outWindow;
 
-    const uint64_t floor = std::min(total, st.hardwareLossFloor.load(std::memory_order_acquire));
+    const uint64_t floor = std::min(total, std::max(
+        st.hardwareLossFloor.load(std::memory_order_acquire),
+        currentTuningOnly ? outWindow.retuneStartAbsolute : uint64_t{0}));
     const uint64_t available = std::min<uint64_t>(total - floor, static_cast<uint64_t>(cap));
     const size_t toRead = static_cast<size_t>(std::min<uint64_t>(available, static_cast<uint64_t>(maxSamples)));
     // Return the newest contiguous ring window in chronological order.

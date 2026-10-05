@@ -1,5 +1,26 @@
 # Issues (canonical)
 
+## ISS-0074 - P25 diagnostic interference and unbound CC results (2026-10-05, LOCAL REPAIR)
+
+DEC-0194. Validation/deep logging triggers alternative AMBE synthesis, consuming
+mbelib's shared random stream; paired replay hashes differ on/off. Pending GUI
+CC results and trusted offset updates lack acquisition epoch/reset identity.
+Add passive bounded timing/identity evidence and deterministic stale-context
+tests before narrow repairs. These defects do not prove every live gap; preserve
+the known-good first-caller PCM and quantify the still-suspended CC intervals.
+Current-tuning CC reads also now reject the pre-retune ring tail, preserving
+the raw capture view. Initial applied-center metadata was missing; live QA
+caught that regression and a startup fixture now covers it. Both paired replay
+windows are byte-identical in normal/validation/deep modes and to the original
+normal baseline. Final startup/full-suite/live qualification and exact CI are
+tracked in BUILD_NOTES; missing-grant coverage remains ISS-0073, not closed.
+
+DEC-0194 timing evidence: the first540.160s trace has370 same-context CC IQ
+submission gaps totaling53.28s, separate from174.65s off-channel/suspended.
+This confirms unexamined IQ, not which grants were lost. No material voice
+worker queue delay was observed. See P25_TIMELINE_AUDIT_20261005.md for metrics,
+source boundaries, remaining per-controller offset state and acceptance limits.
+
 ## ISS-0073 - Initial P25 caller clear but response missing (2026-10-05, INVESTIGATING)
 
 DEC-0193 follow-up: selected CRC-valid repeated FACCH END_PTT was available

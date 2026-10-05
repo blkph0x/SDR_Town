@@ -29,10 +29,36 @@ def main() -> int:
     import subprocess
     import re
     from types import SimpleNamespace
+    assert MODULE.trace_before_text("dfd4c68", "include/P25PipelineTrace.h") == ""
+    try:
+        MODULE.trace_before_text("no-such-p25-test-ref", "include/P25PipelineTrace.h")
+        raise AssertionError("Missing base ref must not become an added-file approval")
+    except subprocess.CalledProcessError:
+        pass
+    trace_files = {}
+    for path in MODULE.P25_TRACE_CONTEXT_DIGESTS:
+        old = subprocess.run(["git", "show", "dfd4c68:" + path], cwd=ROOT,
+                             text=True, encoding="utf-8", capture_output=True)
+        before = old.stdout if old.returncode == 0 else ""
+        after = (ROOT / path).read_text(encoding="utf-8")
+        trace_files[("before", path)] = before
+        trace_files[("after", path)] = after
+        assert MODULE.infrastructure_text_allowed(path, before, after)
+        assert not MODULE.infrastructure_text_allowed(path, before, after + "\nRF change")
+        assert not MODULE.infrastructure_text_allowed(path, after, before)
+        assert not MODULE.infrastructure_text_allowed("src/AudioEngine.cpp", before, after)
+        if "false" in after:
+            assert not MODULE.infrastructure_text_allowed(path, before, after.replace("false", "true", 1))
+    with patch.object(MODULE, "parse_args", return_value=SimpleNamespace(base="before", head="after", paths=None)), \
+         patch.object(MODULE, "git_changed_paths", return_value=list(MODULE.P25_TRACE_CONTEXT_DIGESTS)), \
+         patch.object(MODULE, "git_file_text", side_effect=lambda ref, path: trace_files[(ref, path)]):
+        assert MODULE.main() == 0
+        trace_files[("after", "src/P25VoiceDecode.cpp")] += "\nRF change"
+        assert MODULE.main() == 1
     lifecycle_files = {}
     for path in MODULE.P25_FOLLOW_LIFECYCLE_DIGESTS:
         before = subprocess.check_output(["git", "show", "d3975a3:" + path], cwd=ROOT, text=True, encoding="utf-8")
-        after = (ROOT / path).read_text(encoding="utf-8")
+        after = subprocess.check_output(["git", "show", "dfd4c68:" + path], cwd=ROOT, text=True, encoding="utf-8")
         lifecycle_files[("before", path)] = before
         lifecycle_files[("after", path)] = after
         assert MODULE.infrastructure_text_allowed(path, before, after)
@@ -66,7 +92,7 @@ def main() -> int:
         assert MODULE.main() == 1
     for path in MODULE.DRIVER_IO_ADMISSION_DIGESTS:
         before = subprocess.check_output(["git", "show", "26716b3:" + path], cwd=ROOT, text=True, encoding="utf-8")
-        after = (ROOT / path).read_text(encoding="utf-8")
+        after = subprocess.check_output(["git", "show", "dfd4c68:" + path], cwd=ROOT, text=True, encoding="utf-8")
         expected = before.replace('#include "DeviceManager.h"', '#include "DeviceManager.h"\n#include "DriverIoMutex.h"', 1)
         expected = expected.replace("static std::mutex gSoapyLiveIoMutex;", "static DriverIoMutex gSoapyLiveIoMutex;", 1)
         expected, count = re.subn(r"std::(lock_guard|unique_lock)<std::mutex>(\s+\w+\(gSoapyLiveIoMutex)",
@@ -138,7 +164,7 @@ def main() -> int:
             assert not MODULE.infrastructure_text_allowed(path, before, after.replace("DeviceLeaseOwner::P25", "DeviceLeaseOwner::Listen"))
     for path in MODULE.REPEATER_ROUTING_DIGESTS:
         before = subprocess.check_output(["git", "show", "53a518d:" + path], cwd=ROOT, text=True, encoding="utf-8")
-        after = (ROOT / path).read_text(encoding="utf-8")
+        after = subprocess.check_output(["git", "show", "dfd4c68:" + path], cwd=ROOT, text=True, encoding="utf-8")
         assert MODULE.infrastructure_text_allowed(path, before, after)
         assert not MODULE.infrastructure_text_allowed(path, after, before)
         assert not MODULE.infrastructure_text_allowed(path, before, after + "\nRF change")

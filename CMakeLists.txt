@@ -476,6 +476,7 @@ if(BUILD_TESTS)
     tests/test_p25control.cpp
     tests/test_p25live.cpp
     tests/test_p25follow.cpp
+    tests/test_p25_pipeline_trace.cpp
     tests/test_p25_audio_drop_class.cpp
     tests/test_p25_sdrtrunk_tune.cpp
     tests/test_p25tx.cpp

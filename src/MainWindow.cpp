@@ -1699,7 +1699,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     trafficRetunedPrimary || rfAwayFromControl;
                 p25IndependentTrafficRetunedPrimary = false;
                 p25LiveDecoder.reset();
-                p25ControlWorkerResetPending.store(true, std::memory_order_release);
+                requestP25ControlWorkerReset();
                 {
                     std::unique_lock<std::mutex> pendingLock(p25ControlPendingMutex, std::try_to_lock);
                     if (pendingLock.owns_lock()) p25ControlPendingResult.reset();
@@ -1784,7 +1784,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 p25LiveDecoder.reset();
                 // Do not block the Qt/UI thread behind an in-flight P25 control decode.
                 // Request a reset and let the worker apply it when it next owns the decoder.
-                p25ControlWorkerResetPending.store(true, std::memory_order_release);
+                requestP25ControlWorkerReset();
                 {
                     std::unique_lock<std::mutex> pendingLock(p25ControlPendingMutex, std::try_to_lock);
                     if (pendingLock.owns_lock()) p25ControlPendingResult.reset();
@@ -2789,7 +2789,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 p25AutoFollowReturnControlFreqHz = ccHz;
                 setP25ControlChannelMute(true);
                 p25LiveDecoder.reset();
-                p25ControlWorkerResetPending.store(true, std::memory_order_release);
+                requestP25ControlWorkerReset();
                 {
                     std::unique_lock<std::mutex> pendingLock(p25ControlPendingMutex, std::try_to_lock);
                     if (pendingLock.owns_lock()) p25ControlPendingResult.reset();
@@ -2816,18 +2816,34 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
 
         auto autoFollowP25Grant = [this, p25Status, p25TgFollowBtn, tuneP25Path, prepareP25InBandVoiceTarget, p25TrafficInCurrentSamplePassband, p25Phase2TrafficInQualityPassband, scheduleP25VoiceFollowArm, returnP25AutoFollowToControl, selectP25IndependentTrafficSource, startP25IndependentTrafficSource, expireP25WarmStandbyIfNeeded]
             (const P25TalkgroupEntry& tg, const P25ControlEvent& event, qint64 nowMs) -> bool {
-            if (!p25AutoFollowEnabled || tg.talkgroupId == 0) return false;
-            if (event.talkgroupId != 0 && event.talkgroupId != tg.talkgroupId) return false;
+            P25PipelineEvent grantTrace;
+            grantTrace.submittedUs = P25PipelineEvent::nowUs();
+            grantTrace.tg = event.talkgroupId; grantTrace.rid = event.sourceId;
+            grantTrace.slot = event.tdmaSlotKnown ? (event.tdmaSlot & 1u) : -1;
+            grantTrace.targetHz = event.voiceFrequencyHz;
+            grantTrace.controlOpcode = event.phase2Mac ? event.macMessageOpcode : event.opcode;
+            grantTrace.encryptionState = event.encryptionKnown ? (event.encrypted ? 1 : 0) : -1;
+            P25PipelineEvent::text(grantTrace.stage, "grant_evaluate");
+            p25PipelineTrace.push(grantTrace);
+            auto reportFollow = [&](bool accepted, int sourceLine) {
+                grantTrace.decisionLine = sourceLine;
+                grantTrace.completedUs = P25PipelineEvent::nowUs();
+                P25PipelineEvent::text(grantTrace.stage, accepted ? "grant_accepted" : "grant_deferred");
+                p25PipelineTrace.push(grantTrace);
+                return accepted;
+            };
+            if (!p25AutoFollowEnabled || tg.talkgroupId == 0) return reportFollow(false, __LINE__);
+            if (event.talkgroupId != 0 && event.talkgroupId != tg.talkgroupId) return reportFollow(false, __LINE__);
 
             const double ccHz = p25MonitoredControlFreqHz > 0.0 ? p25MonitoredControlFreqHz : tg.controlFreqHz;
-            if (ccHz <= 0.0) return false;
+            if (ccHz <= 0.0) return reportFollow(false, __LINE__);
 
             P25TalkgroupEntry followTg = tg;
             if (p25ControlEventIsResolvedVoiceGrant(event)) {
                 followTg = p25TalkgroupEntryFromCurrentGrant(ccHz, event, nowMs);
                 p25PreserveTalkgroupEncryptionFromPrior(followTg, tg);
             }
-            if (followTg.lastVoiceFreqHz <= 0.0) return false;
+            if (followTg.lastVoiceFreqHz <= 0.0) return reportFollow(false, __LINE__);
             const bool grantLooksPhase2 = p25TalkgroupIsPhase2(followTg);
             double sameCallFollowVoiceHz = followTg.lastVoiceFreqHz;
             if (grantLooksPhase2) {
@@ -2914,7 +2930,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             .arg(followTg.talkgroupId)
                             .arg(followTg.lastVoiceFreqHz / 1e6, 0, 'f', 5),
                         4000);
-                    return false;
+                    return reportFollow(false, __LINE__);
                 }
                 appendP25LogLineKeyed(QString("auto-skip-encrypted:%1:%2").arg(followTg.talkgroupId).arg(static_cast<int>(grantLooksPhase2)),
                     QString("Auto-follow skipped encrypted P25 TG %1 (%2); staying on/returning to control channel.")
@@ -2926,7 +2942,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     appendP25LogLine(QString("Encrypted re-grant/late update for followed TG %1; releasing voice follow immediately.").arg(followTg.talkgroupId));
                     returnP25AutoFollowToControl();
                 }
-                return false;
+                return reportFollow(false, __LINE__);
             }
             if (grantLooksPhase2 && !event.encryptionKnown) {
                 bool bypassEncryptedHold = false;
@@ -2967,7 +2983,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                 .arg(followTg.talkgroupId)
                                 .arg(encryptedHoldAgeMs),
                             5000);
-                        return false;
+                        return reportFollow(false, __LINE__);
                     }
                 }
             }
@@ -3018,7 +3034,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 appendP25LogLineKeyed(QString("auto-skip-clear-unknown:%1").arg(followTg.talkgroupId),
                     QString("Auto-follow is waiting for a clear-state grant before following P25 TG %1.").arg(followTg.talkgroupId),
                     5000);
-                return false;
+                return reportFollow(false, __LINE__);
             }
             if (!followTg.encryptionKnown && p25TalkgroupIsPhase2(followTg)) {
                 appendP25LogLineKeyed(QString("auto-follow-p2-clear-unknown:%1").arg(followTg.talkgroupId),
@@ -3032,7 +3048,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                         .arg(followTg.lastVoiceFreqHz / 1e6, 0, 'f', 5)
                         .arg(p25FollowTalkgroupId),
                     5000);
-                return false;
+                return reportFollow(false, __LINE__);
             }
 
             if (p25FollowAutoActive && p25FollowTalkgroupId == followTg.talkgroupId) {
@@ -3069,7 +3085,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                         appendP25LogLineKeyed("auto-follow-same-call-receivers-busy",
                             "P25 same-call metadata update deferred (receivers busy); GUI did not block.",
                             500);
-                        return false;
+                        return reportFollow(false, __LINE__);
                     }
                     auto activeRx = findActiveP25FollowReceiverLocked();
                     if (activeRx) {
@@ -3078,7 +3094,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             appendP25LogLineKeyed("auto-follow-same-call-state-busy",
                                 "P25 same-call metadata update deferred (rx state busy); GUI did not block.",
                                 500);
-                            return false;
+                            return reportFollow(false, __LINE__);
                         }
                         liveTrafficVoiceFreqHz = activeRx->p25TrafficVoiceFreqHz > 0.0
                             ? activeRx->p25TrafficVoiceFreqHz
@@ -3275,7 +3291,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                         .arg(followTg.talkgroupId)
                         .arg(followTg.lastVoiceFreqHz / 1e6, 0, 'f', 5));
                     returnP25AutoFollowToControl();
-                    return false;
+                    return reportFollow(false, __LINE__);
                 }
                 if (promotedClear || updatedSlot || updatedSource || updatedMask || updatedTrafficMetadata) {
                     appendP25LogLineKeyed(QString("auto-follow-same-call-promote:%1:%2")
@@ -3410,7 +3426,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                 .arg(sameCallFollowVoiceHz / 1e6, 0, 'f', 5),
                             2500);
                     }
-                    return false;
+                    return reportFollow(false, __LINE__);
                 }
             }
 
@@ -3570,7 +3586,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             .arg(followTg.talkgroupId)
                             .arg(followTg.lastVoiceFreqHz / 1e6, 0, 'f', 5),
                         1500);
-                    return false;
+                    return reportFollow(false, __LINE__);
                 }
                 if (sameRfDifferentSlotGrant &&
                     currentFollowSpeakerActive &&
@@ -3586,7 +3602,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             .arg(followTg.talkgroupId)
                             .arg(followTg.tdmaSlotKnown ? QString::number(followTg.tdmaSlot & 0x01u) : QString("unknown")),
                         1500);
-                    return false;
+                    return reportFollow(false, __LINE__);
                 }
                 const qint64 effectiveUnacquiredStealMs = sameRfDifferentSlotGrant
                     ? kP25Phase2SameRfUnacquiredSlotStealMs
@@ -3617,7 +3633,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             .arg(std::max<qint64>(0, dwellMs))
                             .arg(kP25AutoFollowDifferentCallMinDwellMs),
                         3000);
-                    return false;
+                    return reportFollow(false, __LINE__);
                 }
                 if (allowPhase2DwellSteal && !sameRfPhase2SlotHandoff) {
                     appendP25LogLineKeyed(QString("auto-follow-stalled-preempt:%1:%2")
@@ -3669,7 +3685,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             .arg(std::max<qint64>(0, p25SameRfClearGrantHoldUntilMs - nowMs))
                             .arg(followTg.talkgroupId),
                         2500);
-                    return false;
+                    return reportFollow(false, __LINE__);
                 }
 
                 const bool sameRfMetadataFollowReady =
@@ -3685,7 +3701,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     if (p25LastSameRfMetadataSwitchMs > 0 &&
                         nowMs - p25LastSameRfMetadataSwitchMs < kP25Phase2SameRfMetadataSwitchCooldownMs &&
                         p25FollowTalkgroupId != followTg.talkgroupId) {
-                        return false;
+                        return reportFollow(false, __LINE__);
                     }
                     // Same RF carrier, different Phase-2 timeslot/TG: sdrtrunk would
                     // keep the traffic channel running and update the TS1/TS2 tracker.
@@ -3729,12 +3745,12 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             .arg(followTg.lastVoiceFreqHz / 1e6, 0, 'f', 5));
                         if (p25Status) p25Status->setText(QString("Auto follow %1").arg(
                             p25TalkgroupStatusLabel(followTg.talkgroupId, followTg.wacn, followTg.systemId, followTg.p25MaskParamsKnown)));
-                        return true;
+                        return reportFollow(true, __LINE__);
                     }
                     appendP25LogLineKeyed("auto-follow-same-rf-metadata-switch-busy",
                         "P25 Phase 2 same-RF slot metadata switch was skipped because receiver locks were busy; preserving current decoder instead of forcing a retune/reset.",
                         2500);
-                    return false;
+                    return reportFollow(false, __LINE__);
                 }
             }
 
@@ -3773,7 +3789,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             .arg(p25AutoFollowVoiceFreqHz / 1e6, 0, 'f', 5)
                             .arg(sameCallFollowVoiceHz / 1e6, 0, 'f', 5),
                         2500);
-                    return false;
+                    return reportFollow(false, __LINE__);
                 }
                 std::shared_ptr<Receiver> activeRx;
                 int trafficDeviceIndex = -1;
@@ -3866,7 +3882,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                 appendP25LogLineKeyed("p25-same-call-hop-state-busy",
                                     "P25 same-call hop metadata update deferred (rx state busy); GUI did not block.",
                                     2000);
-                                return false;
+                                return reportFollow(false, __LINE__);
                             }
                             activeRx->freqHz = sameCallFollowVoiceHz;
                             activeRx->p25TrafficVoiceFreqHz = sameCallFollowVoiceHz;
@@ -3985,7 +4001,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             .arg(sameCallFollowVoiceHz / 1e6, 0, 'f', 5));
                         if (p25Status) p25Status->setText(QString("Auto follow %1").arg(
                             p25TalkgroupStatusLabel(followTg.talkgroupId, followTg.wacn, followTg.systemId, followTg.p25MaskParamsKnown)));
-                        return true;
+                        return reportFollow(true, __LINE__);
                     }
                 }
             }
@@ -4023,7 +4039,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             .arg(followTg.tdmaSlotKnown ? QString::number(followTg.tdmaSlot & 0x01u) : QString("unknown"))
                             .arg(followTg.lastVoiceFreqHz / 1e6, 0, 'f', 5));
                         appendP25LogLine(p25FollowDetailLogText(followTg));
-                        return true;
+                        return reportFollow(true, __LINE__);
                     }
                 } else if (p25AutoFollowWarmStandbyUntilMs > nowMs &&
                            std::isfinite(p25AutoFollowWarmStandbyVoiceHz) &&
@@ -4041,7 +4057,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             appendP25LogLineKeyed("auto-follow-same-mhz-receivers-busy",
                                 "P25 same-MHz follow deferred (receivers busy); GUI did not block.",
                                 500);
-                            return false;
+                            return reportFollow(false, __LINE__);
                         }
                         const uint64_t liveGen = p25TrafficSourceGeneration.load(std::memory_order_acquire);
                         for (auto& rxPtr : receivers) {
@@ -4065,7 +4081,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                     appendP25LogLineKeyed("auto-follow-same-mhz-state-busy",
                                         "P25 same-MHz follow deferred (rx state busy); GUI did not block.",
                                         500);
-                                    return false;
+                                    return reportFollow(false, __LINE__);
                                 }
                                 p25CommitPhase2TrafficMetadataFollow(*activeRx, followTg, ccHz, nowMs);
                                 activeRx->active = true;
@@ -4082,7 +4098,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                 .arg(followTg.talkgroupId)
                                 .arg(followTg.tdmaSlotKnown ? QString::number(followTg.tdmaSlot & 0x01u) : QString("unknown"))
                                 .arg(followTg.lastVoiceFreqHz / 1e6, 0, 'f', 5));
-                            return true;
+                            return reportFollow(true, __LINE__);
                         }
                     }
                 }
@@ -4103,7 +4119,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             .arg(followTg.p25MaskParamsKnown ? "known" : "pending")
                             .arg(kP25Phase2PostArmSettleMs)
                             .arg(guiRuntimeConfig.p25LateEntryAudioProbe ? "on" : "off"));
-                        return true;
+                        return reportFollow(true, __LINE__);
                     }
                 } else {
                     appendP25LogLineKeyed(QString("p25-traffic-source-unavailable:%1:%2")
@@ -4127,7 +4143,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 appendP25LogLineKeyed("auto-follow-transition-busy",
                     "P25 auto-follow ignored a grant while a previous voice-follow retune is still settling.",
                     2500);
-                return false;
+                return reportFollow(false, __LINE__);
             }
             struct AutoFollowTransitionGuard {
                 std::atomic_bool& flag;
@@ -4157,7 +4173,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     .arg(liveSampleRateHz / 1e6, 0, 'f', 3));
             }
 
-            if (!tuneP25Path(followTg.lastVoiceFreqHz)) return false;
+            if (!tuneP25Path(followTg.lastVoiceFreqHz)) return reportFollow(false, __LINE__);
 
             p25AutoFollowReturnControlFreqHz = ccHz;
             p25AutoFollowVoiceFreqHz = followTg.lastVoiceFreqHz;
@@ -4191,7 +4207,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             }
             if (p25Status) p25Status->setText(QString("Auto follow %1").arg(
                 p25TalkgroupStatusLabel(followTg.talkgroupId, followTg.wacn, followTg.systemId, followTg.p25MaskParamsKnown)));
-            return true;
+            return reportFollow(true, __LINE__);
         };
 
         auto rememberPendingP25VoiceGrant = [this](const P25ControlEvent& ev, int correctedDibitErrors, qint64 nowMs) {
@@ -4376,7 +4392,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             p25LiveDecoder.reset();
             // Do not block the Qt/UI thread behind an in-flight P25 control decode.
             // Request a reset and let the worker apply it when it next owns the decoder.
-            p25ControlWorkerResetPending.store(true, std::memory_order_release);
+                requestP25ControlWorkerReset();
             { std::lock_guard<std::mutex> pendingLock(p25ControlPendingMutex); p25ControlPendingResult.reset(); }
             p25LiveControlAnalyzer.reset();
             p25PendingVoiceGrants.clear();
@@ -4413,7 +4429,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             p25LiveDecoder.reset();
             // Do not block the Qt/UI thread behind an in-flight P25 control decode.
             // Request a reset and let the worker apply it when it next owns the decoder.
-            p25ControlWorkerResetPending.store(true, std::memory_order_release);
+                requestP25ControlWorkerReset();
             { std::lock_guard<std::mutex> pendingLock(p25ControlPendingMutex); p25ControlPendingResult.reset(); }
             p25LiveControlAnalyzer.reset();
             p25PendingVoiceGrants.clear();
@@ -5662,6 +5678,19 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                 !warmStandbyTunerAwayFromCc &&
                                 (!p25FollowEnabled ||
                                  (p25IndependentTrafficActive && !p25IndependentTrafficRetunedPrimary));
+                            const int ccTraceState = decodeControlFromThisDevice ? 0 :
+                                (!p25CcInPassband ? 1 : (warmStandbyTunerAwayFromCc ? 2 : 3));
+                            if (p25PipelineTrace.enabled() && ccTraceState != p25TraceCcState) {
+                                p25TraceCcState = ccTraceState;
+                                P25PipelineEvent trace;
+                                P25PipelineEvent::text(trace.stage, "cc_availability");
+                                P25PipelineEvent::text(trace.reason, ccTraceState == 0 ? "enabled" :
+                                    ccTraceState == 1 ? "outside-passband-or-unset" :
+                                    ccTraceState == 2 ? "warm-standby" : "traffic-follow-suspended");
+                                trace.device = static_cast<int>(i); trace.centerHz = cf;
+                                trace.targetHz = p25MonitoredControlFreqHz; trace.sampleRate = sr;
+                                p25PipelineTrace.push(trace);
+                            }
                             if (decodeControlFromThisDevice) {
                                 static auto lastP25LiveDecode = std::chrono::steady_clock::now() - std::chrono::seconds(1);
                                 const auto now = std::chrono::steady_clock::now();
@@ -5671,9 +5700,26 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                     {
                                         std::lock_guard<std::mutex> pendingLock(p25ControlPendingMutex);
                                         if (p25ControlPendingResult.has_value()) {
-                                            live = std::move(*p25ControlPendingResult);
+                                            auto pending = std::move(*p25ControlPendingResult);
                                             p25ControlPendingResult.reset();
-                                            haveP25LiveResult = true;
+                                            const auto currentIq = mgr.getRecentIQWindowWithCursor(i, 1, true);
+                                            const P25ControlContext current{i, currentIq.streamEpoch,
+                                                p25ControlResetGeneration.load(std::memory_order_acquire),
+                                                currentIq.appliedCenterHz, sr, p25MonitoredControlFreqHz};
+                                            haveP25LiveResult = pending.context.matches(current);
+                                            P25PipelineEvent::text(pending.trace.stage,
+                                                haveP25LiveResult ? "cc_consumed" : "cc_stale");
+                                            p25PipelineTrace.push(pending.trace);
+                                            if (haveP25LiveResult) {
+                                                live = std::move(pending.decoded);
+                                                if ((p25ControlDecodeHasTrustedPayload(live) || p25ControlDecodeHasValidatedNid(live)) &&
+                                                    std::isfinite(pending.effectiveTargetHz) &&
+                                                    std::abs(pending.effectiveTargetHz - pending.context.targetHz) <= 25000.0) {
+                                                    gP25LastTrustedControlFreqHz.store(pending.context.targetHz, std::memory_order_release);
+                                                    gP25LastTrustedControlOffsetHz.store(pending.effectiveTargetHz - pending.context.targetHz, std::memory_order_release);
+                                                    gP25LastTrustedControlOffsetMs.store(QDateTime::currentMSecsSinceEpoch(), std::memory_order_release);
+                                                }
+                                            }
                                         }
                                     }
 
@@ -5681,9 +5727,22 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                         if (!p25ControlWorkerBusy.exchange(true, std::memory_order_acq_rel)) {
                                             const size_t requestedSamples = static_cast<size_t>(
                                                 std::clamp(sr * kP25ControlDecodeWindowSeconds, 24000.0, 4194304.0));
-                                            auto iq = mgr.getRecentIQWindow(i, requestedSamples);
+                                            auto iqWindow = mgr.getRecentIQWindowWithCursor(i, requestedSamples, true);
+                                            const P25ControlContext workerContext{i, iqWindow.streamEpoch,
+                                                p25ControlResetGeneration.load(std::memory_order_acquire),
+                                                iqWindow.appliedCenterHz, sr, p25MonitoredControlFreqHz};
+                                            P25PipelineEvent trace;
+                                            P25PipelineEvent::text(trace.stage, "cc_submitted");
+                                            trace.job = ++p25ControlJobSequence;
+                                            trace.generation = workerContext.resetGeneration;
+                                            trace.session = workerContext.streamEpoch;
+                                            trace.device = static_cast<int>(i);
+                                            trace.iqStart = iqWindow.startAbsolute; trace.iqEnd = iqWindow.endAbsolute;
+                                            trace.centerHz = iqWindow.appliedCenterHz; trace.targetHz = p25MonitoredControlFreqHz; trace.sampleRate = sr;
+                                            trace.submittedUs = P25PipelineEvent::nowUs();
+                                            p25PipelineTrace.push(trace);
                                             const double workerSr = sr;
-                                            const double workerCf = cf;
+                                            const double workerCf = iqWindow.appliedCenterHz;
                                             const double workerTarget = p25MonitoredControlFreqHz;
                                             if (p25ControlWorkerThread.joinable()) {
                                                 // Previous worker already cleared busy before exit. Never join()
@@ -5692,36 +5751,32 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                                 // access is guarded by p25ControlWorkerDecoderMutex + busy flag.
                                                 p25ControlWorkerThread.detach();
                                             }
-                                            p25ControlWorkerThread = std::thread([this, iq = std::move(iq), workerSr, workerCf, workerTarget]() mutable {
+                                            p25ControlWorkerThread = std::thread([this, iq = std::move(iqWindow.samples), workerSr, workerCf, workerTarget, workerContext, trace]() mutable {
                                                 P25LiveDecodeResult result;
+                                                trace.startedUs = P25PipelineEvent::nowUs();
+                                                double effectiveTargetHz = workerTarget;
                                                 try {
                                                     std::lock_guard<std::mutex> decoderLock(p25ControlWorkerDecoderMutex);
                                                     if (p25ControlWorkerResetPending.exchange(false, std::memory_order_acq_rel)) {
                                                         p25ControlWorkerDecoder = P25LiveDecoder(p25RealtimeControlDecoderConfig());
                                                     }
-                                                    double effectiveTargetHz = workerTarget;
                                                     result = decodeP25ControlWithOffsetProbe(
                                                         p25ControlWorkerDecoder, iq, workerSr, workerCf, workerTarget, &effectiveTargetHz);
-                                                    if ((p25ControlDecodeHasTrustedPayload(result) || p25ControlDecodeHasValidatedNid(result)) &&
-                                                        std::isfinite(effectiveTargetHz) &&
-                                                        std::abs(effectiveTargetHz - workerTarget) <= 25000.0) {
-                                                        gP25LastTrustedControlFreqHz.store(workerTarget, std::memory_order_release);
-                                                        gP25LastTrustedControlOffsetHz.store(effectiveTargetHz - workerTarget, std::memory_order_release);
-                                                        gP25LastTrustedControlOffsetMs.store(
-                                                            static_cast<long long>(QDateTime::currentMSecsSinceEpoch()),
-                                                            std::memory_order_release);
-                                                    }
                                                 } catch (const std::exception& ex) {
                                                     result.warnings.push_back(std::string("P25 control worker exception: ") + ex.what());
                                                 } catch (...) {
                                                     result.warnings.push_back("P25 control worker unknown exception");
                                                 }
+                                                trace.completedUs = P25PipelineEvent::nowUs();
+                                                P25PipelineEvent::text(trace.stage, "cc_completed");
+                                                P25PipelineEvent::text(trace.reason, p25ControlDecodeHasTrustedPayload(result) ? "trusted-payload" : "no-trusted-payload");
+                                                p25PipelineTrace.push(trace);
                                                 {
                                                     std::lock_guard<std::mutex> pendingLock(p25ControlPendingMutex);
                                                     if (p25ControlPendingResult.has_value()) {
                                                         ++p25ControlDroppedResults;
                                                     }
-                                                    p25ControlPendingResult = std::move(result);
+                                                    p25ControlPendingResult = ControlPendingResult{std::move(result), workerContext, trace, effectiveTargetHz};
                                                 }
                                                 p25ControlWorkerBusy.store(false, std::memory_order_release);
                                             });
@@ -10736,7 +10791,7 @@ void MainWindow::disableP25ControlMonitorDueToValidation(const QString& reason)
         p25LiveControlAnalyzer.reset();
         p25PendingVoiceGrants.clear();
         p25RepeatedVoiceGrants.clear();
-        p25ControlWorkerResetPending.store(true, std::memory_order_release);
+        requestP25ControlWorkerReset();
         {
             std::lock_guard<std::mutex> pendingLock(p25ControlPendingMutex);
             p25ControlPendingResult.reset();
@@ -10974,7 +11029,7 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
         p25LiveControlAnalyzer.reset();
         p25PendingVoiceGrants.clear();
         p25RepeatedVoiceGrants.clear();
-        p25ControlWorkerResetPending.store(true, std::memory_order_release);
+        requestP25ControlWorkerReset();
         {
             std::lock_guard<std::mutex> pendingLock(p25ControlPendingMutex);
             p25ControlPendingResult.reset();
@@ -11794,7 +11849,7 @@ bool MainWindow::armGuiRuntimeP25Control(double ccHz,  bool grantTest)
         p25IndependentTrafficActive = false;
         p25IndependentTrafficRetunedPrimary = false;
         p25LiveDecoder.reset();
-        p25ControlWorkerResetPending.store(true, std::memory_order_release);
+        requestP25ControlWorkerReset();
         {
             std::lock_guard<std::mutex> pendingLock(p25ControlPendingMutex);
             p25ControlPendingResult.reset();
@@ -12499,6 +12554,7 @@ void MainWindow::writeLiveIqCaptureEvent(const json& row,  bool flushNow)
         if (!liveIqCapture.active || !liveIqCapture.events.is_open()) return;
         liveIqCapture.events << row.dump() << "\n";
         if (flushNow) liveIqCapture.events.flush();
+        if (!liveIqCapture.events.good()) ++liveIqCapture.pipelineEventWriteErrors;
     }
 
 LiveIqCaptureResult MainWindow::startLiveIqCapture(const std::string& label,  int plannedDurationMs)
@@ -12624,9 +12680,13 @@ LiveIqCaptureResult MainWindow::startLiveIqCapture(const std::string& label,  in
             liveIqCapturePendingP25Lines.clear();
         }
         liveIqCaptureLogActive.store(true, std::memory_order_release);
+        p25TraceCcState = -1;
+        p25PipelineTrace.start();
 
         json startRow = {
             {"event", "capture_start"},
+            {"monotonic_us", P25PipelineEvent::nowUs()},
+            {"p25_pipeline_schema", 1},
             {"utc", liveIqCapture.startedUtc.toString(Qt::ISODateWithMs).toStdString()},
             {"label", liveIqCapture.label},
             {"session_id", liveIqCapture.sessionId},
@@ -12681,6 +12741,23 @@ LiveIqCaptureResult MainWindow::startLiveIqCapture(const std::string& label,  in
 void MainWindow::pollLiveIqCapture(bool finalPoll)
 {
         if (!liveIqCapture.active) return;
+        for (const auto& e : p25PipelineTrace.drain()) {
+            writeLiveIqCaptureEvent(json{
+                {"event", "p25_pipeline"}, {"schema", 1}, {"stage", e.stage}, {"reason", e.reason},
+                {"trace_seq", e.traceSequence}, {"monotonic_us", e.monotonicUs},
+                {"job", e.job}, {"session", e.session}, {"generation", e.generation}, {"flush", e.flush},
+                {"tg", e.tg}, {"rid", e.rid}, {"rid_known", e.rid != 0}, {"slot", e.slot}, {"device", e.device},
+                {"center_hz", e.centerHz}, {"target_hz", e.targetHz}, {"sample_rate", e.sampleRate},
+                {"iq_start", e.iqStart}, {"iq_end", e.iqEnd}, {"submitted_us", e.submittedUs},
+                {"started_us", e.startedUs}, {"completed_us", e.completedUs},
+                {"pcm_samples", e.pcmSamples}, {"pushed_samples", e.pushedSamples}, {"pending_samples", e.pendingSamples},
+                {"selected_vcw", e.selectedVcw}, {"companion_vcw", e.companionVcw},
+                {"accepted_frames", e.acceptedFrames}, {"ring_percent", e.ringPercent},
+                {"fed_frames", e.fedFrames}, {"rejected_vcw", e.rejectedVcw},
+                {"duplicate_vcw", e.duplicateVcw}, {"context_vcw", e.contextVcw},
+                {"decision_line", e.decisionLine}, {"control_opcode", e.controlOpcode},
+                {"encryption_state", e.encryptionState}}, false);
+        }
         auto& mgr = DeviceManager::instance();
         const QDateTime nowUtc = QDateTime::currentDateTimeUtc();
 
@@ -12964,6 +13041,7 @@ LiveIqCaptureResult MainWindow::stopLiveIqCapture()
             liveIqCaptureWriterThread.join();
         }
         if (liveIqCaptureTimer) liveIqCaptureTimer->stop();
+        p25PipelineTrace.stop();
         pollLiveIqCapture(true);
         liveIqCaptureLogActive.store(false, std::memory_order_release);
         liveIqCapture.stoppedUtc = QDateTime::currentDateTimeUtc();
@@ -12973,6 +13051,9 @@ LiveIqCaptureResult MainWindow::stopLiveIqCapture()
 
         json endRow = {
             {"event", "capture_stop"},
+            {"monotonic_us", P25PipelineEvent::nowUs()},
+            {"p25_trace_dropped", p25PipelineTrace.dropped()},
+            {"p25_event_write_errors", liveIqCapture.pipelineEventWriteErrors},
             {"utc", liveIqCapture.stoppedUtc.toString(Qt::ISODateWithMs).toStdString()},
             {"sample_count", liveIqCapture.samplesWritten},
             {"actual_seconds", actualSeconds},

@@ -1,5 +1,19 @@
 # Package hardening and source-kit ledger
 
+DEC-0195: the libusb Windows recipe requires vcpkg-msbuild and its transitive
+helpers, omitted by the original two-helper export. The kit now includes six
+receipt-verified helpers and the tracked pkgconf recipe. App-local pkgconf DLLs
+remain excluded. Tool acquisition can still download Meson/pkgconf inputs;
+this does not silently close the independent USB rebuild gate.
+
+2026-10-05 / DEC-0194: publisher explicitly confirms Visual Studio/Build Tools
+licensing and permission to redistribute the permitted runtimes. Close that
+external confirmation item; signed runtime provenance, original license and
+allowlisted file checks remain mandatory. These are native C++ runtime files,
+not a requirement for testers to install the development environment.
+Microsoft guidance: https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files
+The other four material/review requirements are not cleared by this confirmation.
+
 DEC-0188 (2026-10-05): policy `T-0104-notices-7` also requires
 `licenses/vcpkg/tooling-materials.zip`. It contains the configured checkout's
 committed scripts, triplets, bootstrap metadata, notices and helper port recipes,
@@ -112,7 +126,7 @@ unqualified; the Qt deploy warning is recorded in BUILD_NOTES.
 - MinGW static runtime versions, applicable notices and exception evidence for
   the RDS DLL. Microsoft exact DLL/bundle versions, signed original installer
   and embedded end-user terms now ship. Publisher redistribution entitlement
-  is separate and still requires review; no unsupported license clearance.
+  was explicitly confirmed2026-10-05; see the DEC-0194 entry above.
 - DEC-0177 now preserves ASN.1 per-file notices, including explicit accounting
   for3 upstream headerless files;488 C/headers are hashed. Pinned ICAO CC0 and
   provenance ship, with map/country inputs and channel-list copy verification.

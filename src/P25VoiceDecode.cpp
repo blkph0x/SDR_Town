@@ -5068,12 +5068,9 @@ P25Phase2AmbeResolveResult p25ResolvePhase2AmbeFrame(Receiver& rx,
     // Canonical mapping only on the live path (variant 0).  Alternatives are
     // diagnostic counters and never feed the speaker or reset the vocoder.
     if (lockedVariant < 0) {
-        result.probed = p25Phase2DeepTraceEnabled() || p25Phase2ValidationLoggingEnabled();
-        if (result.probed) {
-            for (int variant : kP25Phase2AmbeProbeVariants) {
-                result.probes.push_back(p25ProbeSinglePhase2AmbeVariant(codeword, variant));
-            }
-        }
+        // DEC-0194: throwaway synthesis consumes mbelib's shared rand() stream.
+        // Logging must not change the audio it measures. Explicit forensic probe
+        // callers remain separate; the live canonical path never synthesizes probes.
         p25Phase2LockAmbeVariant(rx, codeword.voiceIndex, 0, false);
     } else if (lockedVariant != 0) {
         ++out.phase2AmbeVariantChanges;

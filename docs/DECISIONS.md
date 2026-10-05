@@ -1,5 +1,63 @@
 # Decisions
 
+## DEC-0195 - Complete the USB build-helper closure (2026-10-05)
+
+T-0104 inspection of the exported libusb1.0.30 recipe confirms its Windows
+dependency on vcpkg-msbuild. That helper depends on vcpkg-cmake-get-vars and
+vcpkg-pkgconfig-get-modules; the latter uses pkgconf, whose recipe depends on
+vcpkg-tool-meson. DEC-0188 exported only cmake/config helpers. Include the six
+installed helper sources/receipts and tracked pkgconf recipe, and reject a
+missing/tampered helper even if the outer manifest is regenerated. Do not ship
+pkgconf runtime DLLs in the app. This is a concrete tooling repair, not evidence
+of an independent full USB rebuild or completed distribution review.
+
+## DEC-0194 - Passive correlated P25 capture evidence and stale CC fencing (2026-10-05)
+
+T-0108 / ISS-0073. User reports lost syllables and late initial callers. Do not
+change DSP budgets, speaker holds, slot/security rules or acquisition constants.
+Add bounded POD trace events to the existing capture events JSONL: monotonic
+time, job/session/generation, IQ positions, tuning context, queue/decode/publish
+timing and PCM counts. Capture writer alone formats/writes; producers try-lock
+and count overflow/contention. Capacity4096 is a diagnostic memory bound, not
+a receive timing constant. No payload/PCM copying or audio callback logging.
+Trace loss must be visible, not mistaken for lost RF/audio. Record unknown RID
+as unknown. Wall-clock anchors correlate logs; latency uses steady_clock.
+
+Code inspection: pending CC results carry no source epoch/context; trusted
+offset is published by the worker before any stale-result check. Bind results
+to device/stream epoch/reset generation/center/rate/target and reject changed
+contexts before updating offsets/analyzer/grants. Test out-and-back retunes and
+same-context acceptance. This is a concrete stale-result defect, not proof that
+it caused every reported delay. Concurrent in-passband CC remains separately open.
+
+Paired replay evidence (p25-follow-20261005) shows validation-on changes PCM
+hashes while equal settings are repeatable. p25ResolvePhase2AmbeFrame runs
+throwaway synthesis on logging enable; mbelib synthesis consumes shared rand().
+Remove those probes from passive validation/deep logging. Preserve explicit
+probe APIs for forensic callers; canonical mapping and decoder stay unchanged.
+Require identical-IQ replay logging on/off and focused/full regression gates.
+
+Publisher confirms Visual Studio/Build Tools licensing and redistribution
+entitlement this turn. Record that confirmation separately from exact runtime
+materials and other still-open package requirements; do not waive them.
+
+Follow-up inspection: recent-window CC reads honor hardware-loss floor but not
+retuneValidFromAbsolute; chronological voice reads honor both. Thus the first
+256ms CC window after return can include pre-retune traffic IQ under new tuning
+metadata. Reproduce with controlled pre/post-retune sample markers. Add an
+explicit current-tuning-only recent read for GUI/CLI CC, preserving capture and
+all other callers' existing continuous ring. Publish the applied RF center and
+retune boundary under the ring lock. Do not shorten settle times or truncate IQ
+captures. An epoch is not proof that every sample in a raw recent window belongs
+to that epoch. Test empty post-retune input and exact subsequent sample identity.
+
+Live qualification of the first repair exposed an initial-open contract gap:
+appliedCenterHz remained zero until a queued retune, so the new CC reader could
+not decode after startup. Record a successfully applied initial center after
+stub-ring reset and before publishing real RX; do not infer it from GUI intent.
+Also record successful PPM-path retunes. Test initial metadata before the fixture
+issues any subsequent tune. Failed tuning must not manufacture applied metadata.
+
 ## DEC-0193 - Confirmed traffic teardown, not shorter silence guesses (2026-10-05)
 
 T-0108 / ISS-0073; baseline d3975a3. Replay capture003120, skip71000ms,

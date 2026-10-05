@@ -17,8 +17,11 @@ MAX_BYTES = 64 * 1024 * 1024
 MAX_FILES = 4096
 ROOTS = ('scripts', 'triplets', 'bootstrap-vcpkg.bat', 'bootstrap-vcpkg.sh',
          '.vcpkg-root', 'LICENSE.txt', 'NOTICE.txt', 'README.md',
-         'ports/vcpkg-cmake', 'ports/vcpkg-cmake-config')
-HELPERS = ('vcpkg-cmake', 'vcpkg-cmake-config')
+         'ports/vcpkg-cmake', 'ports/vcpkg-cmake-config', 'ports/vcpkg-msbuild',
+         'ports/vcpkg-cmake-get-vars', 'ports/vcpkg-pkgconfig-get-modules',
+         'ports/vcpkg-tool-meson', 'ports/pkgconf')
+HELPERS = ('vcpkg-cmake', 'vcpkg-cmake-config', 'vcpkg-msbuild',
+           'vcpkg-cmake-get-vars', 'vcpkg-pkgconfig-get-modules', 'vcpkg-tool-meson')
 SCOPE = ('Tracked vcpkg tooling and installed CMake helpers. Bootstrap may download '
          'tools; compiler/SDK and independent runtime rebuild remain separate prerequisites.')
 
@@ -49,7 +52,8 @@ def verify(blob, source):
             'Tooling resource limit')
     required = {'tooling/' + n for n in ROOTS if '.' in n and '/' not in n}
     required |= {'tooling/scripts/buildsystems/vcpkg.cmake', 'tooling/triplets/x64-windows.cmake',
-                 'tooling/scripts/vcpkg-tool-metadata.txt'}
+                 'tooling/scripts/vcpkg-tool-metadata.txt',
+                 'tooling/ports/pkgconf/vcpkg.json', 'tooling/ports/pkgconf/portfile.cmake'}
     require(required <= files.keys(), 'Incomplete dependency tooling')
     for name in files:
         require(any(name == 'tooling/' + n or name.startswith('tooling/' + n + '/') for n in ROOTS)

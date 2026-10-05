@@ -1675,6 +1675,16 @@ void MainWindow::startP25LiveDecodePipeline()
                         receiverSessionStillActive,
                         &realTopUpPushed,
                         &bridgeTopUpPushed);
+                    if (topUpPushed > 0) {
+                        P25PipelineEvent trace;
+                        P25PipelineEvent::text(trace.stage, "idle_speaker_topup");
+                        P25PipelineEvent::text(trace.reason, "aggregate-not-rid-attributed");
+                        trace.pushedSamples = realTopUpPushed;
+                        trace.pcmSamples = bridgeTopUpPushed;
+                        trace.pendingSamples = speakerEngine->getRingQueuedSamples();
+                        trace.ringPercent = speakerEngine->getRingFillPercent();
+                        p25PipelineTrace.push(trace);
+                    }
                     if (realTopUpPushed > 0) {
                         const qint64 topUpNowMs = QDateTime::currentMSecsSinceEpoch();
                         guiP25AudioLastOutputMs.store(topUpNowMs, std::memory_order_relaxed);

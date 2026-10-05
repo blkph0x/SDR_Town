@@ -171,6 +171,7 @@ struct LiveIqCaptureSession {
     uint64_t ringEpochResetSkippedSamples = 0;
     uint64_t zeroAppendPolls = 0;
     uint64_t fileWriteErrorPolls = 0;
+    uint64_t pipelineEventWriteErrors = 0;
     uint64_t pollCount = 0;
     size_t samplesWritten = 0;
     uint64_t bytesWritten = 0;

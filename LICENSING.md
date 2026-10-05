@@ -108,8 +108,10 @@ differences. It is not bit-identical build reproduction or distribution
 clearance. Builds with the optional OpenSSL plugin require an explicitly
 identified external header SDK, separately from the Qt sources. Microsoft
 runtime material includes the unmodified signed installer and its end-user
-license; that license is not evidence of the publisher's redistribution
-entitlement. The unresolved full-toolchain and distribution review stays open.
+license. The publisher confirmed Visual Studio/Build Tools licensing and
+permitted-runtime redistribution entitlement on 2026-10-05 (DEC-0194).
+Testers do not need the IDE. Exact signed-runtime checks remain; the separate
+full-toolchain and distribution review stays open.
 
 Before publishing another binary:
 

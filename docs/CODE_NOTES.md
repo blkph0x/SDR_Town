@@ -1,5 +1,16 @@
 # Code notes (tree map)
 
+DEC-0194: P25PipelineTrace is the bounded passive capture-event queue and CC
+acquisition identity contract. MainWindow captures grant decisions, CC worker
+identity/timing and writes JSONL; MainWindowP25Voice captures queue/decode/
+publication/PCM outcomes; orchestration accounts for aggregate idle top-ups.
+DeviceManager's explicit current-tuning recent view honors the retune floor
+without changing the default recording view; GUI/CLI CC both use it. Startup
+and PPM success publish applied tuning metadata. P25VoiceDecode no longer
+invokes alternate synthesis solely because passive logging is enabled.
+See P25_TIMELINE_AUDIT_20261005.md and the new trace/timeline/neutrality tests.
+No speaker timing, FEC, slot/encryption policy or normal synthesis changed.
+
 DEC-0193: P25TrafficChannelProcessor confirms teardown only after two distinct
 CRC-valid selected FACCH END_PTTs, separated by at least one180-dibit burst.
 New selected PTT/ACTIVE/masked voice clears the proof. Allocation reuse now

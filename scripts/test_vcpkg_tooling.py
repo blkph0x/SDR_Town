@@ -25,6 +25,8 @@ def payloads():
         'tooling/scripts/buildsystems/vcpkg.cmake': b'# toolchain\n',
         'tooling/triplets/x64-windows.cmake': b'# triplet\n',
         'tooling/scripts/vcpkg-tool-metadata.txt': b'tool-version-sha=fixture\n',
+        'tooling/ports/pkgconf/vcpkg.json': b'{"name":"pkgconf"}\n',
+        'tooling/ports/pkgconf/portfile.cmake': b'# fixture\n',
     })
     for helper in tooling.HELPERS:
         prefix = 'installed/' + helper + '/'
@@ -57,7 +59,10 @@ class ToolingTests(unittest.TestCase):
 
     def test_reject_missing_tampered_and_extra_inputs(self):
         for name in ('tooling/LICENSE.txt', 'tooling/scripts/buildsystems/vcpkg.cmake',
-                     'installed/vcpkg-cmake/helper.cmake', 'installed/vcpkg-cmake/copyright'):
+                     'installed/vcpkg-cmake/helper.cmake', 'installed/vcpkg-cmake/copyright',
+                     'installed/vcpkg-msbuild/helper.cmake',
+                     'installed/vcpkg-tool-meson/helper.cmake',
+                     'tooling/ports/pkgconf/portfile.cmake'):
             for delete in (False, True):
                 files = payloads()
                 files['manifest.json'] = json_bytes(tooling.manifest(files, '1' * 40, '2' * 40))
@@ -74,7 +79,9 @@ class ToolingTests(unittest.TestCase):
             tooling.verify(zipped(files), '1' * 40)
 
     def test_receipt_still_fails_after_manifest_regenerated(self):
-        for name in ('installed/vcpkg-cmake/helper.cmake', 'tooling/ports/vcpkg-cmake/helper.cmake'):
+        for name in ('installed/vcpkg-cmake/helper.cmake', 'tooling/ports/vcpkg-cmake/helper.cmake',
+                     'installed/vcpkg-msbuild/helper.cmake',
+                     'tooling/ports/vcpkg-pkgconfig-get-modules/helper.cmake'):
             files = payloads()
             files[name] += b'bad'
             files['manifest.json'] = json_bytes(tooling.manifest(files, '1' * 40, '2' * 40))

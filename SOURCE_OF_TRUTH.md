@@ -4,7 +4,13 @@ SDR TOWN — SOURCE OF TRUTH (SoT)
 VERSION: 1.0.0
 PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
 CURRENT VERSION IN TREE: 0.2.122 (DTMF burst analysis; public experimental asset verified)
-LATEST UNRELEASED: DEC-0193 adds session-bound confirmed FACCH teardown to
+LATEST UNRELEASED: DEC-0194 adds bounded passive P25 timing/decision traces,
+                  current-tuning CC reads and stale acquisition-result fencing.
+                  Passive logging no longer invokes alternate voice synthesis;
+                  both reference WAVs match normal/validation/deep and baseline.
+                  Live QA caught/fixed missing initial applied-center metadata.
+                  CC coverage/response acceptance and ISS-0060 remain open.
+                  DEC-0193 adds session-bound confirmed FACCH teardown to
                   GUI/CLI follow and matches observer allocation identity.
                   No DSP/PCM/timer changes; paired replay PCM unchanged.
                   Live373.904s: six confirmed returns, no IQ/producer drops.

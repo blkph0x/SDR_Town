@@ -32,6 +32,7 @@
 #include "P25VoiceDecode.h"
 #include "P25VoiceSession.h"
 #include "P25VoiceTest.h"
+#include "P25PipelineTrace.h"
 #include "P25VoiceTiming.h"
 #include "SavedFrequencies.h"
 #include "Receiver.h"
@@ -222,6 +223,7 @@ private:
         uint64_t flushSeq = 0;
         ReceiverSessionKey receiverSessionKey{};
         uint64_t callSessionId = 0;
+        uint64_t submittedUs = 0;
     };
 
     struct P25VoiceDecodeResult {
@@ -261,6 +263,7 @@ private:
         std::string speakerGateReason;
         std::string staleReason;
         std::string error;
+        uint64_t submittedUs = 0, startedUs = 0, completedUs = 0;
     };
 
     struct P25VoiceWorkerQueueSnapshot {
@@ -432,7 +435,21 @@ private:
     P25LiveDecoder p25ControlWorkerDecoder{p25RealtimeControlDecoderConfig()};
     std::mutex p25ControlWorkerDecoderMutex;
     std::mutex p25ControlPendingMutex;
-    std::optional<P25LiveDecodeResult> p25ControlPendingResult;
+    struct ControlPendingResult {
+        P25LiveDecodeResult decoded;
+        P25ControlContext context;
+        P25PipelineEvent trace;
+        double effectiveTargetHz = 0;
+    };
+    std::optional<ControlPendingResult> p25ControlPendingResult;
+    P25PipelineTrace<> p25PipelineTrace;
+    std::atomic<uint64_t> p25ControlResetGeneration{0};
+    uint64_t p25ControlJobSequence = 0;
+    int p25TraceCcState = -1;
+    void requestP25ControlWorkerReset() {
+        p25ControlResetGeneration.fetch_add(1, std::memory_order_acq_rel);
+        p25ControlWorkerResetPending.store(true, std::memory_order_release);
+    }
     std::atomic<bool> p25ControlWorkerBusy{false};
     std::atomic<long long> p25ControlDroppedResults{0};
     std::atomic<bool> p25ControlWorkerResetPending{false};

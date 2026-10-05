@@ -1,6 +1,15 @@
 # Task list (canonical)
 
 T-0108 | in_progress | P25 first caller clear, missing response diagnosis |
+DEC-0194: passive per-stage capture timeline, CC stale-result fencing and
+logging/synthesis non-interference tests. Re-measure live gaps without changing
+audio/DSP timing. Public package work remains T-0104, not a waived gate.
+Current-tuning CC input and startup applied metadata repaired; full17/17 PASS,
+both replay WAVs identical across normal/validation/deep modes and baseline.
+First trace confirms53.28s of unsubmitted CC IQ while enabled; no significant
+voice-job queue delay. Final live repeat and exact source CI acceptance follow.
+DEC-0195 repairs missing MSBuild/transitive helpers in the release source kit;
+actual981-file export and5 tooling tests pass. Four package requirements remain.
 DEC-0193 continuation: qualify repeated selected FACCH teardown and allocation
 identity before changing follow behavior. Keep decoder/audio baseline unchanged.
 Scoped repair locally verified: full17/17,65 focused assertions, identical

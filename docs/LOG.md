@@ -1,5 +1,19 @@
 # Development log
 
+## 2026-10-05 - Measured P25 timing, not new hold guesses
+
+DEC-0194 adds bounded capture-only timing/identity/counter instrumentation and
+repairs stale CC results, major-retune IQ provenance and passive-log synthesis
+interference. Live testing exposed the initial applied-center gap; fixed before
+publication with an explicit startup fixture. Full17-suite gates pass and both
+reference WAVs match normal/validation/deep modes and the preserved baseline.
+CC coverage gaps are now quantified; no speaker buffer/timeout/FEC/security or
+slot-policy experiment was made. Missing-response acceptance stays T-0108.
+DEC-0195 adds omitted transitive USB build helpers to the source kit. Publisher
+Microsoft entitlement is confirmed; four other ISS-0060 requirements remain.
+Exact source Actions and final live-capture acceptance must be recorded before
+calling source verification complete. No public binary release is claimed.
+
 ## 2026-10-05 - Calculated follow lifecycle repair
 
 DEC-0193 uses recorded selected-slot CRC-valid FACCH teardown and SDRTrunk's

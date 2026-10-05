@@ -1,5 +1,42 @@
 # Build notes
 
+## 2026-10-05 - Passive P25 timeline and tuning identity, DEC-0194/0195
+
+Baseline dfd4c68b0d49a936f0bc802128376d5a2f79c9cc, Windows/MSVC14.44/Qt6.11.1.
+Private evidence: D:/SDRTown-Diagnostics/p25-timeline-20261005. No RF payload,
+audio or transcript is published. Preserved baseline executable remains local.
+
+- Retune marker fixture fails before the current-tuning CC read fix (old IQ
+  still present). A repeated fixture initially reused its persisted frequency;
+  it now establishes100MHz explicitly before testing the420.350MHz transition.
+- Full build PASS. Initial CTest had one transient CelesTrak network failure;
+  no RF/test predicate was weakened. Subsequent full runs17/17 PASS86.69s and,
+  after startup-frequency qualification,17/17 PASS84.74s.
+- Initial live qualification of current-tuning reads caught center_hz=0 after
+  hardware open. Closed GUI normally, kept evidence, repaired successful
+  startup/PPM metadata publication and added initial-state coverage. Do not
+  count that capture as good RF acceptance.
+- Normal/validation/deep paired replays PASS for both reference windows.
+  First caller:1866284-byte WAV, SHA256
+  dd95bcaa9367b53700a14635803de3efdd98181b8923f575fde810eb0727b8f4;
+  tail:506924-byte WAV, SHA256
+  141e5f0ce9e682d4980205182c7536647efa99dafe8ab8e4c22304330358a438.
+  Both equal the pre-change normal-logging WAV. This proves non-interference,
+  not uninterrupted speech in the tail's ended-call interval.
+- Timeline tests5/5 PASS. Exact protected-patch guard accepts only reviewed
+  digests; reverse/wrong-path/one-literal/extra-text and missing-ref cases fail.
+- Package inventory tests20/20 PASS before helper extension; final rerun follows.
+  Tooling tests5/5 PASS including removed/modified MSBuild/Meson helpers.
+  Actual export validates981 files/1884403 bytes at tooling
+  eb35a05cc21c69ec1399f7532b7dd61d271ac0d1.
+
+First live trace540.160s: zero IQ overrun/rewind/write failure and trace loss;
+CC IQ coverage gaps53.28s while enabled, separate from off-channel intervals.
+See P25_TIMELINE_AUDIT_20261005.md for scope and latency metrics. Final nine-
+minute live repeat with startup repair and complete trace is running at source
+preparation; retain its result with exact pushed-commit CI acceptance. Do not
+claim missing-response completion or a public asset while ISS-0073/0060 remain.
+
 ## 2026-10-05 - Confirmed P25 follow teardown, DEC-0193
 
 Baseline d3975a37c69b87529fdaa453ca4adfbede2b8464, Windows/MSVC14.44/Qt6.11.1.

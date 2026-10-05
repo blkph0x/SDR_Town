@@ -86,7 +86,8 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(first, (self.stage / inventory.INVENTORY).read_bytes())
         self.pack()
         self.assertEqual(doc, inventory.verify_zip(self.archive))
-        self.assertEqual(len(doc['releaseBlockers']), 5)
+        self.assertEqual(len(doc['releaseBlockers']), 4)
+        self.assertFalse(any('Microsoft publisher' in b for b in doc['releaseBlockers']))
         with self.assertRaisesRegex(ValueError, 'Publication blocked'):
             inventory.verify_zip(self.archive, require_publishable=True)
 

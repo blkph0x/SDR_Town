@@ -3351,7 +3351,7 @@ int runCLI(int argc, char* argv[]) {
                     const size_t requestedSamples = static_cast<size_t>(
                         std::clamp(sr * kP25ControlDecodeWindowSeconds, 24000.0, 4194304.0));
                     markWaitGrantStage(2);
-                    auto iqWindow = mgr.getRecentIQWindowWithCursor(static_cast<size_t>(devIndex), requestedSamples);
+                    auto iqWindow = mgr.getRecentIQWindowWithCursor(static_cast<size_t>(devIndex), requestedSamples, true);
                     auto& iq = iqWindow.samples;
                     if (iq.empty() || iqWindow.endAbsolute <= waitGrantLastWindowEnd) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(80));
@@ -3366,7 +3366,7 @@ int runCLI(int argc, char* argv[]) {
                     markWaitGrantStage(3);
                     double effectiveControlTargetHz = ccHz;
                     auto result = decodeP25ControlWithOffsetProbe(
-                        decoder, iq, sr, cf, ccHz, &effectiveControlTargetHz);
+                        decoder, iq, sr, iqWindow.appliedCenterHz, ccHz, &effectiveControlTargetHz);
                     const auto decodeMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::steady_clock::now() - decodeStart).count();
                     markWaitGrantStage(4);

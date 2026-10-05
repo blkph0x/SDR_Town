@@ -172,9 +172,14 @@ public:
         uint64_t startAbsolute = 0;
         uint64_t endAbsolute = 0;
         uint64_t streamEpoch = 0;
+        uint64_t retuneStartAbsolute = 0;
+        double appliedCenterHz = 0;
         bool cursorDiscontinuity = false;
     };
-    RecentIQWindow getRecentIQWindowWithCursor(size_t index, size_t maxSamples);
+    // DEC-0194: control decode must not label pre-retune IQ with the new RF center.
+    // Capture callers retain the complete ring unless they explicitly opt in.
+    RecentIQWindow getRecentIQWindowWithCursor(size_t index, size_t maxSamples,
+                                               bool currentTuningOnly = false);
     struct RxHealthSnapshot {
         uint64_t reads = 0, timeouts = 0, errors = 0, overflows = 0;
         uint64_t liveIoWaitUs = 0, readUs = 0, lastLossAbsolute = 0;

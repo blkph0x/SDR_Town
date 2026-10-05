@@ -42,6 +42,11 @@ TEST_CASE("Hardware overflow creates an epoch boundary without mixing pre-loss I
     LossFixture::command = 0; LossFixture::completed = 0;
     REQUIRE(manager.startStreaming(index, true));
     REQUIRE(awaitLossFixture([&] { return manager.getRuntimeStateLabel(index) == "live hardware"; }));
+    CHECK(manager.getRecentIQWindowWithCursor(index, 1, true).appliedCenterHz > 0);
+    // Persisted fixture settings must not turn the final retune into a no-op.
+    const auto initialTune = manager.setCenterFreq(index, 100000000);
+    REQUIRE(initialTune != 0);
+    REQUIRE(manager.waitForCenterTuneApplied(index, initialTune, 5000));
     LossFixture::command = 1;
     REQUIRE(awaitLossFixture([&] { return !manager.getRecentIQWindow(index, 1024).empty(); }));
     const auto before = manager.getRecentIQWindowWithCursor(index, 4096);
@@ -93,5 +98,22 @@ TEST_CASE("Hardware overflow creates an epoch boundary without mixing pre-loss I
     CHECK(final.startAbsolute == after.endAbsolute);
     REQUIRE(final.samples.size() == 1024);
     CHECK(std::all_of(final.samples.begin(), final.samples.end(), [](auto iq) { return iq == std::complex<float>(3, 0); }));
+    const auto tune = manager.setCenterFreq(index, 420350000);
+    REQUIRE(tune != 0);
+    REQUIRE(manager.waitForCenterTuneApplied(index, tune, 5000));
+    // DEC-0194: demonstrate that an epoch alone does not qualify the old tail.
+    const auto afterRetune = manager.getRecentIQWindowWithCursor(index, 4096, true);
+    CHECK(afterRetune.samples.empty());
+    CHECK(afterRetune.appliedCenterHz == 420350000);
+    CHECK(afterRetune.retuneStartAbsolute == final.endAbsolute);
+    CHECK(afterRetune.streamEpoch > final.streamEpoch);
+    // The recording view is intentionally unchanged and still includes old RF.
+    CHECK(manager.getRecentIQWindowWithCursor(index, 4096).samples == final.samples);
+    LossFixture::command = 4;
+    REQUIRE(awaitLossFixture([&] { return manager.getRecentIQWindowWithCursor(index, 4096).endAbsolute > final.endAbsolute; }));
+    const auto newRf = manager.getRecentIQWindowWithCursor(index, 4096, true);
+    CHECK(newRf.startAbsolute == afterRetune.retuneStartAbsolute);
+    REQUIRE(newRf.samples.size() == 1024);
+    CHECK(std::all_of(newRf.samples.begin(), newRf.samples.end(), [](auto iq) { return iq == std::complex<float>(4, 0); }));
 }
 #endif
