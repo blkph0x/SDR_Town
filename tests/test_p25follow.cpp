@@ -13,6 +13,60 @@ constexpr int diag(P25FollowDiagCode code)
 
 } // namespace
 
+TEST_CASE("P25 confirmed selected teardown returns without a silence timeout", "[p25][follow][confirmed-end]")
+{
+    P25FollowSnapshot s;
+    s.nowMs = 10000;
+    s.tunedAtMs = 1000;
+    s.lastActiveMs = 9900; // companion structure must not prolong a closed call
+    s.diagUpdatedMs = 9990;
+    s.autoActive = true;
+    s.phase2Voice = true;
+    s.currentCallSessionId = 42;
+    s.phase2TrafficSessionId = 42;
+    s.phase2TrafficProcessorActive = true;
+    s.phase2TrafficTeardownConfirmed = true;
+    s.grantEncryptionKnown = true;
+    s.phase2Bursts = 12;
+    s.phase2MaskedBursts = 12;
+    s.phase2SuperframeBursts = 12;
+    s.phase2MacCrcValid = 4;
+    s.recentSpeakerOutputMs = 7000;
+    REQUIRE(evaluateP25Follow(s).action == P25FollowAction::ReturnCallEnded);
+    SECTION("selected observer hold has not expired") {
+        s.phase2TrafficCallActive = true;
+        REQUIRE(evaluateP25Follow(s).action == P25FollowAction::None);
+    }
+    SECTION("queued speaker tail retains existing immediate grace") {
+        s.recentSpeakerOutputMs = 9000;
+        REQUIRE(evaluateP25Follow(s).action == P25FollowAction::None);
+    }
+    SECTION("stale prior call cannot end a response") {
+        s.phase2TrafficSessionId = 41;
+        REQUIRE(evaluateP25Follow(s).action != P25FollowAction::ReturnCallEnded);
+    }
+    SECTION("unknown session is not teardown proof") {
+        s.currentCallSessionId = 0;
+        REQUIRE(evaluateP25Follow(s).action != P25FollowAction::ReturnCallEnded);
+    }
+    SECTION("manual follow stays parked") {
+        s.autoActive = false;
+        REQUIRE(evaluateP25Follow(s).action == P25FollowAction::None);
+    }
+    SECTION("new selected voice cancels teardown") {
+        s.phase2VoiceCodewords = 4;
+        REQUIRE(evaluateP25Follow(s).action != P25FollowAction::ReturnCallEnded);
+    }
+    SECTION("old cached diagnostic is not current teardown proof") {
+        s.diagUpdatedMs = 1000;
+        REQUIRE(evaluateP25Follow(s).action != P25FollowAction::ReturnCallEnded);
+    }
+    SECTION("encryption handling keeps precedence") {
+        s.grantEncrypted = true;
+        REQUIRE(evaluateP25Follow(s).action == P25FollowAction::ReturnEncrypted);
+    }
+}
+
 TEST_CASE("P25 talkspurt reset preserves the speaker call ordinal", "[p25][audio]")
 {
     P25Phase2FrameSequencer sequence;

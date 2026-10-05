@@ -2,6 +2,19 @@
 
 ## ISS-0073 - Initial P25 caller clear but response missing (2026-10-05, INVESTIGATING)
 
+DEC-0193 follow-up: selected CRC-valid repeated FACCH END_PTT was available
+at76.616s in the old capture, but the GUI did not return until97.253s.
+Both GUI/CLI now honor that explicit teardown after unchanged audio/end holds;
+GUI skips the additional5s warm standby. Observer allocation identity includes
+TG/frequency/slot, not just session. Full17-suite and targeted negative gates
+pass; normal-logging first-caller and tail replays are byte-identical.
+Live373.904s gapless GUI test exercises six confirmed returns,13 follows,
+45.08s consumed speaker PCM with connected multi-turn STT and no producer/
+worker drops. This closes the narrowly reproduced teardown/observer gaps,
+not the whole missing-response issue. In-passband CC remains suspended while
+traffic is active; the live output RID is unknown. Isolated concurrent CC
+budgeting and an independently identified response pair remain open.
+
 User field report: initial follows produce clear continuous speech; subsequent
 speaker activity appears in the UI but no response audio. Cause unconfirmed.
 Investigate slot/RID/alias lifecycle, missed grants, RF evidence and per-call
@@ -18,10 +31,10 @@ aggregate/companion VCW activity bugs have failing fixtures and local repairs.
 First-caller PCM remains byte-identical with duty0.972. Full response acceptance
 remains OPEN: prove reply-grant capture and prompt handoff with preserved audio.
 Remaining work: isolate/budget the in-passband CC worker without reviving the
-previous traffic-worker starvation; honor explicit selected-call end evidence
-in follow decisions (currently only callActive is passed); qualify controller
-re-creation on same-TG slot/allocation changes; add retune epochs to capture
-metadata. A single tuner cannot capture an out-of-passband CC while on voice.
+previous traffic-worker starvation; add retune epochs to capture metadata.
+DEC-0193 addresses explicit selected-call end evidence and same-TG observer
+re-creation on allocation changes. A single tuner cannot capture an
+out-of-passband CC while on voice.
 Do not alter security gates, enable other-slot PCM or shorten timers by guess.
 
 ## ISS-0072 - Read-loop lock starvation blocks a fourth radio (2026-10-05, LOCAL VERIFIED)

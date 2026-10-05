@@ -1,5 +1,18 @@
 # Development log
 
+## 2026-10-05 - Calculated follow lifecycle repair
+
+DEC-0193 uses recorded selected-slot CRC-valid FACCH teardown and SDRTrunk's
+repeated-END criterion, not a new timeout. GUI/CLI consume session-matched
+proof after the existing holds; GUI returns directly without warm standby.
+Observer allocation keys include slot/carrier/TG. New negative fixtures,
+full17-suite rebuild, identical normal-logging replay PCM and a373.904s
+gapless live GUI capture verify the scoped change. Six confirmed returns,
+13 follows and45.08s consumed PCM; STT contains multi-turn phrases, but output
+RID is unknown. No DSP/vocoder/security/PCM edits, and no claim every reply
+is recovered. Exact source CI is the remaining delivery gate; ISS-0060 still
+blocks public assets. Active in-passband CC work stays tracked in ISS-0073.
+
 ## 2026-10-05 - P25 response capture and narrow observer repairs
 
 Preserved6805bf6 and captured600.032s of live GUI auto-follow IQ after the user

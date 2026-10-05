@@ -1,5 +1,15 @@
 # Code notes (tree map)
 
+DEC-0193: P25TrafficChannelProcessor confirms teardown only after two distinct
+CRC-valid selected FACCH END_PTTs, separated by at least one180-dibit burst.
+New selected PTT/ACTIVE/masked voice clears the proof. Allocation reuse now
+matches session/TG/carrier/slot. GUI and CLI pass confirmation/session to
+P25FollowStateMachine; matching current call plus expired existing observer/
+speaker holds permits ReturnCallEnded before aggregate-structure silence
+heuristics. GUI skips warm standby only on this proof and logs the cause.
+No new timeout, decoder/vocoder behavior, security release or PCM path.
+Exact protected-file hashes and negative entrypoint tests bound the exception.
+
 DEC-0192: P25TrafficChannelProcessor is an observational follow-health owner,
 not a second vocoder. It folds selected-slot/TG bursts in capture order under
 an observation mutex, uses absolute positions to reject replayed overlap,

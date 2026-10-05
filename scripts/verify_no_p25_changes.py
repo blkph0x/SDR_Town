@@ -196,6 +196,20 @@ P25_OBSERVER_DIGESTS = {
 }
 
 
+# DEC-0193: exact confirmed-teardown/allocation repair. DSP/audio remain frozen.
+P25_FOLLOW_LIFECYCLE_DIGESTS = {
+    "include/P25FollowStateMachine.h": ("9341590f05858f945d8c0c9d1612b60f869493b69b126b5453fb5a91fd5fdad4", "f0ad755d0f36d99d342053c7cc3e1b54b2bb5ba0946e9c7e15e2a25fffc14eed"),
+    "include/P25TrafficChannelProcessor.h": ("cabe3cdb1aa312c074d2d9615f7021e57be7d8fe8271512284fa7d22a48196d2", "392128cee3bf0c455eb2e3fefe1f6176281644f1b855fbca09d1968d30da9bec"),
+    "src/P25FollowStateMachine.cpp": ("a79220c876a99f3597f4e468aa6f67eadd7b0f8900de275054417685d7eb6911", "fff39a851d0252a7c60fe06a99bcb6350d32fd0529d60e4858123ea2e2fb78a8"),
+    "src/P25TrafficChannelProcessor.cpp": ("b68f79ab11e5e8e77d1f7b4a6e8825396c404dde0192a3daea67782f51c379f7", "54f6ce8b9edb68dd48f08b0f5da65dd77eeb7a5986e08e131e911e8c933d4961"),
+    "src/P25VoiceDecode.cpp": ("0c30057dd2225e997bfbfbc45cc52c8d80dba380ac33ab33c3c84a059fca5c18", "a045731d2e554bb3c19512bdf8c1b439220ed195de66e79718549fccc7e4bfaf"),
+    "src/MainWindow.cpp": ("b0181884f8d80d5c7370303bad751b5b812f553296d725326604881c263bc976", "0ef4e88814b6ecdc6ce951e2c12c4659ee0adc79fe80d7432e9b220da71685df"),
+    "src/CliApp.cpp": ("4e1094a11b6bf05ea974a9b0a6f250efd8aae0c28fb5af6120e357f9ec600ffb", "e56e546ff3cea066c01ab55c8b57dc29039e8a9ed113efafa27d7268f3ad9ed8"),
+    "tests/test_p25follow.cpp": ("fb7ac4c6ccda5f8cd144124c185cdd2a862693cd4091098b3992541893364d78", "0a5df977916c127610189b7a2f8f98165617973b1ec03ead8e7e687fe69a4757"),
+    "tests/test_p25traffic_processor.cpp": ("dfc08bb5fc0ab769238b3562fbd2c0214a77d2e9d8fe837970fbad10dfcf1249", "683d2b12366446956c5f5c965c71af74a43765fac8d13103af3fad066f05af16"),
+}
+
+
 def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
     actual = (
         hashlib.sha256(before.encode("utf-8")).hexdigest(),
@@ -206,7 +220,7 @@ def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
                       CONTROL_OWNERSHIP_DIGESTS.get(path), WORKFLOW_WINDOW_DIGESTS.get(path),
                       WORKFLOW_SHUTDOWN_DIGESTS.get(path), INMARSAT_SESSION_DIGESTS.get(path),
                       SATELLITE_SESSION_DIGESTS.get(path), DRIVER_IO_ADMISSION_DIGESTS.get(path),
-                      P25_OBSERVER_DIGESTS.get(path))
+                      P25_OBSERVER_DIGESTS.get(path), P25_FOLLOW_LIFECYCLE_DIGESTS.get(path))
 
 
 # DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.
@@ -688,6 +702,10 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
+        if args.paths is None and path in P25_FOLLOW_LIFECYCLE_DIGESTS:
+            if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
+                print(f"P25 guard: accepted exact DEC-0193 follow-lifecycle repair: {path}")
+                continue
         if args.paths is None and path in P25_OBSERVER_DIGESTS:
             if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
                 print(f"P25 guard: accepted exact DEC-0192 traffic-observer repair: {path}")

@@ -3782,7 +3782,7 @@ P25TrafficChannelProcessor* ensureP25TrafficProcessor(Receiver& rx)
         static_cast<double>(std::numeric_limits<uint32_t>::max())));
 
     if (!rx.p25TrafficProcessor ||
-        rx.p25TrafficProcessor->getDiag().sessionId != sessionId) {
+        !rx.p25TrafficProcessor->matchesAllocation(sessionId, rx.p25VoiceTalkgroupId, voiceHz, grantedSlot)) {
         rx.p25TrafficProcessor = std::make_unique<P25TrafficChannelProcessor>(
             sessionId, rx.p25VoiceTalkgroupId, voiceHz, grantedSlot);
     }

@@ -7,6 +7,116 @@
 #include <chrono>
 #include <thread>
 
+TEST_CASE("P25 observer allocation excludes changed slot carrier and TG", "[p25][traffic][confirmed-end]")
+{
+    P25TrafficChannelProcessor p(42, 10120, 420100000, 0);
+    REQUIRE(p.matchesAllocation(42, 10120, 420100000, 0));
+    REQUIRE_FALSE(p.matchesAllocation(42, 10120, 420100000, 1));
+    REQUIRE_FALSE(p.matchesAllocation(42, 10120, 420100000, -1));
+    REQUIRE_FALSE(p.matchesAllocation(42, 10120, 421350000, 0));
+    REQUIRE_FALSE(p.matchesAllocation(42, 12068, 420100000, 0));
+    REQUIRE_FALSE(p.matchesAllocation(43, 10120, 420100000, 0));
+}
+
+TEST_CASE("P25 teardown requires distinct CRC-valid selected FACCH ends", "[p25][traffic][confirmed-end]")
+{
+    P25TrafficChannelProcessor p(42, 10120, 420100000, 0);
+    P25Phase2Burst end;
+    end.valid = true;
+    end.grantSlotKnown = true;
+    end.kind = P25Phase2BurstKind::FacchClear;
+    end.macEndPttSeen = true;
+    end.macCrcValid = true;
+    end.streamBurstStartDibitKnown = true;
+    end.streamBurstStartDibit = 458616;
+    auto feed = [&](const P25Phase2Burst& b) {
+        P25LiveDecodeResult r;
+        r.phase2Bursts = {b};
+        p.observeDecodeResult(r, b.streamBurstStartDibit + 180);
+    };
+    feed(end);
+    REQUIRE_FALSE(p.getDiag().teardownConfirmed);
+    feed(end); // exact overlap
+    end.streamBurstStartDibit++;
+    feed(end); // same burst with a different symbol-eye offset
+    REQUIRE_FALSE(p.getDiag().teardownConfirmed);
+    end.streamBurstStartDibit = 459696;
+    SECTION("second valid end confirms teardown") {
+        feed(end);
+        REQUIRE(p.getDiag().teardownConfirmed);
+        REQUIRE(p.getDiag().confirmedFacchEnds == 2);
+        SECTION("later selected PTT invalidates the old teardown") {
+            end.streamBurstStartDibit += 360;
+            end.macEndPttSeen = false;
+            end.macPttSeen = true;
+            feed(end);
+            REQUIRE_FALSE(p.getDiag().teardownConfirmed);
+            REQUIRE_FALSE(p.getDiag().callEnded);
+        }
+        SECTION("new masked voice invalidates the old teardown") {
+            end.streamBurstStartDibit += 360;
+            end.macEndPttSeen = false;
+            end.kind = P25Phase2BurstKind::Voice4;
+            end.xorMaskApplied = true;
+            end.voiceCodewords.resize(4);
+            feed(end);
+            REQUIRE_FALSE(p.getDiag().teardownConfirmed);
+            REQUIRE(p.getDiag().confirmedFacchEnds == 0);
+            REQUIRE_FALSE(p.getDiag().callEnded);
+        }
+        SECTION("selected ACTIVE invalidates the old teardown") {
+            end.streamBurstStartDibit += 360;
+            end.macEndPttSeen = false;
+            end.macActiveSeen = true;
+            feed(end);
+            REQUIRE_FALSE(p.getDiag().teardownConfirmed);
+            REQUIRE_FALSE(p.getDiag().callEnded);
+        }
+    }
+    SECTION("scrambled FACCH with valid CRC also confirms teardown") {
+        end.kind = P25Phase2BurstKind::FacchScrambled;
+        feed(end);
+        REQUIRE(p.getDiag().teardownConfirmed);
+    }
+    SECTION("unknown grant slot cannot supply the second end") {
+        end.grantSlotKnown = false;
+        feed(end);
+        REQUIRE_FALSE(p.getDiag().teardownConfirmed);
+    }
+    SECTION("opposite slot cannot supply the second end") {
+        end.grantSlot = 1;
+        feed(end);
+        REQUIRE_FALSE(p.getDiag().teardownConfirmed);
+    }
+    SECTION("wrong TG cannot supply the second end") {
+        end.trafficTalkgroupKnown = true;
+        end.trafficTalkgroupId = 12068;
+        feed(end);
+        REQUIRE_FALSE(p.getDiag().teardownConfirmed);
+    }
+    SECTION("failed CRC cannot supply the second end") {
+        end.macCrcValid = false;
+        feed(end);
+        REQUIRE_FALSE(p.getDiag().teardownConfirmed);
+    }
+    SECTION("SACCH END is not FACCH teardown") {
+        end.kind = P25Phase2BurstKind::SacchClear;
+        feed(end);
+        REQUIRE_FALSE(p.getDiag().teardownConfirmed);
+    }
+    SECTION("hangtime is not teardown") {
+        end.macEndPttSeen = false;
+        end.macHangtimeSeen = true;
+        feed(end);
+        REQUIRE_FALSE(p.getDiag().teardownConfirmed);
+    }
+    SECTION("unknown absolute position cannot confirm distinctness") {
+        end.streamBurstStartDibitKnown = false;
+        feed(end);
+        REQUIRE_FALSE(p.getDiag().teardownConfirmed);
+    }
+}
+
 TEST_CASE("P25 Phase 2 audio call key binds selected allocation identity", "[p25][traffic][session]")
 {
     P25P2CallAudioKey first;

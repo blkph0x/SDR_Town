@@ -4250,6 +4250,8 @@ int runCLI(int argc, char* argv[]) {
                     followSnapshot.phase2EssEncrypted = p2EssEncrypted;
                     followSnapshot.phase2TrafficProcessorActive = trafficStatus.present;
                     followSnapshot.phase2TrafficCallActive = trafficStatus.callActive;
+                    followSnapshot.phase2TrafficSessionId = trafficStatus.diag.sessionId;
+                    followSnapshot.phase2TrafficTeardownConfirmed = trafficStatus.diag.teardownConfirmed;
                     followSnapshot.phase2TrafficAudioOpen =
                         cliCallSecurityLatch == P25CallSecurityLatch::Clear &&
                         trafficStatus.callActive;
@@ -4292,7 +4294,14 @@ int runCLI(int argc, char* argv[]) {
                         break;
                     }
                     if (followDecision.action != P25FollowAction::None) {
-                        if (followDecision.action == P25FollowAction::ReturnNoMacEss) {
+                        if (followDecision.action == P25FollowAction::ReturnCallEnded) {
+                            followCaptureReason = QStringLiteral("confirmed_teardown");
+                            std::cout << "  P25 confirmed traffic teardown: TG=" << tg.talkgroupId
+                                      << " session=" << trafficStatus.diag.sessionId
+                                      << " slot=" << trafficStatus.diag.grantedSlot
+                                      << " FACCH_END=" << trafficStatus.diag.confirmedFacchEnds
+                                      << "; playout grace drained, returning to control." << std::endl;
+                        } else if (followDecision.action == P25FollowAction::ReturnNoMacEss) {
                             followCaptureReason = QStringLiteral("no_mac_ess");
                             if (followDecision.tdmaVcwNoSuperframeTimeout) {
                                 std::cout << "  TDMA ACQ watchdog: VCWs present but no superframe/mask/ESS lock for TG "

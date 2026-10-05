@@ -1,5 +1,26 @@
 # Decisions
 
+## DEC-0193 - Confirmed traffic teardown, not shorter silence guesses (2026-10-05)
+
+T-0108 / ISS-0073; baseline d3975a3. Replay capture003120, skip71000ms,
+center420.08875MHz, TG10120/s0 recovers CRC-valid FACCH END_PTT at absolute
+dibits458616,459696,460056 (capture76.436/76.616/76.676s). The reply grant
+was present by90s while live waited until97.253s to return. Preserve the IQ.
+Reference: SDRTrunk P25P2DecoderState.processEndPushToTalk treats two FACCH
+END_PTTs as traffic teardown. Do not treat HANGTIME, a single END, invalid CRC,
+companion-slot END or overlapping copies of one END as equivalent evidence.
+
+Add selected-slot, CRC-validated, distinct-position FACCH-end confirmation to
+the observer, reset on a new selected PTT/ACTIVE/voice, and propagate it with
+matching allocation/session identity to both GUI and CLI follow snapshots.
+Return only after the existing observer hold and immediate speaker-drain grace;
+skip GUI warm standby on this confirmed release (it otherwise disables CC
+decoding for another5s). Keep all silence/acquisition/security/DSP timings.
+Verify observer reuse against session/TG/frequency/slot, not session alone.
+Use failing unit fixtures, identical-IQ WAV comparison and live GUI follow
+before acceptance. Concurrent in-passband CC decode remains a separate change;
+do not re-enable its old unbudgeted path to disguise this lifecycle defect.
+
 ## DEC-0192 - Reproduce traffic observer ordering before repair (2026-10-05)
 
 T-0108 inspection: P25TrafficChannelProcessor::observeDecodeResult ORs all

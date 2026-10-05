@@ -1545,7 +1545,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             return true;
         };
 
-        auto returnP25AutoFollowToControl = [this, p25Status, p25TgFollowBtn, tuneP25Path, clearP25VoiceFollowState, setP25ControlChannelMute]() {
+        auto returnP25AutoFollowToControl = [this, p25Status, p25TgFollowBtn, tuneP25Path, clearP25VoiceFollowState, setP25ControlChannelMute](bool confirmedTeardown = false) {
             const auto retStart = std::chrono::steady_clock::now();
             const qint64 returnNowMs = QDateTime::currentMSecsSinceEpoch();
             // DEC-0044: bake sustained CC AFC into device PPM only when idle on
@@ -1714,7 +1714,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                         }
                         if (releasedVoiceHz > 0.0 &&
                             std::isfinite(releasedVoiceHz) &&
-                            recentSpeakerBeforeReturn) {
+                            recentSpeakerBeforeReturn && !confirmedTeardown) {
                             // Claim monitored CC for grant matching, but RF stays on voice until
                             // warm-standby expires. Decode/validation must stay paused (DEC-0064).
                             p25MonitoredControlFreqHz = ccHz;
@@ -1733,9 +1733,11 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                             p25AutoFollowWarmStandbyUntilMs = 0;
                             p25AutoFollowWarmStandbyVoiceHz = 0.0;
                             if (releasedVoiceHz > 0.0 && std::isfinite(releasedVoiceHz)) {
-                                appendP25LogLine(QString("P25 warm standby skipped: TG traffic had no recent selected-slot speaker audio, so RF retuned immediately from voice=%1MHz to control=%2MHz.")
+                                appendP25LogLine(QString("P25 warm standby skipped: %3; RF retuned immediately from voice=%1MHz to control=%2MHz.")
                                     .arg(releasedVoiceHz / 1e6, 0, 'f', 5)
-                                    .arg(ccHz / 1e6, 0, 'f', 5));
+                                    .arg(ccHz / 1e6, 0, 'f', 5)
+                                    .arg(confirmedTeardown ? "selected call teardown confirmed" :
+                                        "TG traffic had no recent selected-slot speaker audio"));
                             } else {
                                 appendP25LogLine(QString("P25 one-RTL traffic source released; RF retuned back to control channel %1MHz.")
                                     .arg(ccHz / 1e6, 0, 'f', 5));
@@ -6638,6 +6640,8 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                     followSnapshot.phase2EssEncrypted = p2EssEncrypted;
                                     followSnapshot.phase2TrafficProcessorActive = trafficStatus.present;
                                     followSnapshot.phase2TrafficCallActive = trafficStatus.callActive;
+                                    followSnapshot.phase2TrafficSessionId = trafficStatus.diag.sessionId;
+                                    followSnapshot.phase2TrafficTeardownConfirmed = trafficStatus.diag.teardownConfirmed;
                                     followSnapshot.phase2TrafficAudioOpen =
                                         voiceStateCallSecurityLatch == P25CallSecurityLatch::Clear &&
                                         trafficStatus.callActive;
@@ -6758,7 +6762,13 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                         return;
                                     }
                                     if (followDecision.action != P25FollowAction::None) {
-                                        if (followDecision.action == P25FollowAction::ReturnNoMacEss) {
+                                        if (followDecision.action == P25FollowAction::ReturnCallEnded) {
+                                            appendP25LogLine(QString("P25 confirmed traffic teardown: TG=%1 session=%2 slot=%3 FACCH_END=%4; selected call ended and playout grace drained, returning directly to CC without warm standby.")
+                                                .arg(followDecision.effectiveTalkgroupId)
+                                                .arg(static_cast<qulonglong>(trafficStatus.diag.sessionId))
+                                                .arg(trafficStatus.diag.grantedSlot)
+                                                .arg(trafficStatus.diag.confirmedFacchEnds));
+                                        } else if (followDecision.action == P25FollowAction::ReturnNoMacEss) {
                                             if (followDecision.tdmaVcwNoSuperframeTimeout) {
                                                 appendP25LogLine(QString("TDMA ACQ watchdog: Phase 2 VCWs are present but no superframe/mask/ESS lock formed for TG %1; returning to control channel to avoid hanging on a stale or mis-acquired voice channel. sf=%2 mask=%3 mac=%4/%5 ess=%6 p2vcw=%7.")
                                                     .arg(static_cast<long long>(followDecision.effectiveTalkgroupId))
@@ -6785,7 +6795,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                             appendP25LogLine(QString("P25 auto-follow TG %1 ended or went quiet; returning to control channel.")
                                                 .arg(static_cast<long long>(followDecision.effectiveTalkgroupId)));
                                         }
-                                        returnP25AutoFollowToControl();
+                                        returnP25AutoFollowToControl(followDecision.action == P25FollowAction::ReturnCallEnded);
                                         return;
                                     }
                                 }

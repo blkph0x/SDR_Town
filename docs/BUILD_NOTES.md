@@ -1,5 +1,63 @@
 # Build notes
 
+## 2026-10-05 - Confirmed P25 follow teardown, DEC-0193
+
+Baseline d3975a37c69b87529fdaa453ca4adfbede2b8464, Windows/MSVC14.44/Qt6.11.1.
+Private evidence: D:/SDRTown-Diagnostics/p25-follow-20261005. Baseline exe,
+IQ, WAVs, logs and offline STT are retained locally; not uploaded.
+Capture003120 tail replay (skip71000ms,25s,420.100MHz,center420.08875,
+TG10120/slot0) recovers distinct CRC-valid FACCH END_PTTs at76.436/76.616s.
+The prior live return was97.253s, after the independently recovered reply
+grant at90s. This justifies protocol-confirmed teardown, not shorter silence.
+
+New follow fixtures failed on baseline (2 failures/22 assertions), passed after
+repair. First build failed because the burst-length constant used namespace
+p25 instead of p25dsp; corrected without changing180-dibit burst geometry.
+Final full Release build PASS; CTest17/17 PASS87.70s. Focused teardown tests:
+65 assertions/3 cases PASS; all traffic tests146 assertions/18 cases PASS.
+Coverage: exact and shifted overlap, opposite/unknown slot, wrong TG, CRC
+failure, SACCH vs FACCH, hangtime, masked voice/PTT/ACTIVE restart, stale call
+session, stale diagnostics, manual follow, existing speaker grace/encryption.
+Frozen-patch guard positive and single-mutation negative entrypoint tests PASS.
+
+Paired identical-IQ replay with matching diagnostics settings:
+- First caller: PASS_CONTINUOUS_AUDIO duty0.972,486/486 AMBE,466560 speaker
+  samples. Both WAV SHA256 dd95bcaa9367b53700a14635803de3efdd98181b8923f575fde810eb0727b8f4.
+- Tail25s: identical134 fed/130 accepted,126720 speaker samples, duty0.1056,
+  no slot changes/speaker drops. Both normal-logging WAV SHA256
+  141e5f0ce9e682d4980205182c7536647efa99dafe8ab8e4c22304330358a438.
+  The initial baseline with deep validation enabled had different PCM but
+  identical counts; rerunning the unchanged baseline with normal logging
+  matches the fixed build exactly. Do not compare unmatched instrumentation
+  runs or claim the logging-dependent synthesis difference is diagnosed.
+  Tail includes call end, not25s of continuous speech.
+
+Actual GUI RTL run420.350MHz, capture021015:373.904s,765755392 CF32 samples,
+6126043136 bytes; zero overruns/epoch gaps/write errors. Clean exit code0.
+13 follows; six confirmed selected FACCH teardowns bypass warm standby.
+Five with logged audio return2.526-2.853s after the last logged push, preserving
+the existing2.5s grace. Subsequent grants resume; next decoded grant observed
+1.635-8.342s later (air activity, NOT a measured decoder latency).
+2163840 callback-consumed samples=45.08s; zero partial callbacks, producer
+drops, worker job/result drops. Counter reset at shutdown is excluded from
+delta arithmetic. Offline STT recovers connected multi-turn phrases; no
+claim that STT proves every RF word or every response. RID in these output
+lines is unknown, so do not claim independent RID-level response acceptance.
+The first10s overlapped a short offline replay; later intervals were uncontended.
+Run closed cleanly before the planned420s; no startup-self-test result file
+was written. Do not label the scheduled GUI harness verdict as passed.
+
+Final GUI return log now names confirmed teardown rather than falsely saying
+there was no recent audio. No DSP/vocoder/PCM/slot/security timing changes.
+CLI live waitgrant smoke followed TG12068, proved encrypted, returned muted
+and exited0. A second120s run filtered to the previously clear TG20202:
+857 trusted TSBKs/74 other grants, no eligible target grant, no decode timeout;
+clean exit0. This is NOT live CLI clear-teardown acceptance. Shared follow
+tests206 assertions/52 cases PASS; GUI live proof remains separate.
+Exact pushed-commit CI is recorded at final acceptance.
+T-0108 remains open for the concurrent in-passband CC/controller work;
+the five existing ISS-0060 distribution blockers still prohibit public assets.
+
 ## 2026-10-05 - P25 response audit, DEC-0191/0192
 
 Baseline6805bf64be30b63015e4714238b96e08da057f77; Windows/MSVC14.44,

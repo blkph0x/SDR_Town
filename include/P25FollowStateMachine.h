@@ -52,6 +52,8 @@ struct P25FollowSnapshot {
     bool phase2EssEncrypted = false;
     bool phase2TrafficProcessorActive = false;
     bool phase2TrafficCallActive = false;
+    uint64_t phase2TrafficSessionId = 0;
+    bool phase2TrafficTeardownConfirmed = false;
     bool phase2TrafficAudioOpen = false;
     bool phase2TrafficEncrypted = false;
     bool grantEncryptionKnown = false;
@@ -72,6 +74,7 @@ enum class P25FollowAction {
     ReturnHardTimeout,
     ReturnNoMacEss,
     ReturnNoVoiceCodewords,
+    ReturnCallEnded,
 };
 
 struct P25FollowDecision {

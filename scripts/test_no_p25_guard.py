@@ -29,10 +29,27 @@ def main() -> int:
     import subprocess
     import re
     from types import SimpleNamespace
+    lifecycle_files = {}
+    for path in MODULE.P25_FOLLOW_LIFECYCLE_DIGESTS:
+        before = subprocess.check_output(["git", "show", "d3975a3:" + path], cwd=ROOT, text=True, encoding="utf-8")
+        after = (ROOT / path).read_text(encoding="utf-8")
+        lifecycle_files[("before", path)] = before
+        lifecycle_files[("after", path)] = after
+        assert MODULE.infrastructure_text_allowed(path, before, after)
+        assert not MODULE.infrastructure_text_allowed(path, before, after + "\nRF change")
+        assert not MODULE.infrastructure_text_allowed(path, after, before)
+        assert not MODULE.infrastructure_text_allowed("src/P25LiveDecoder.cpp", before, after)
+        assert not MODULE.infrastructure_text_allowed(path, before, after.replace("false", "true", 1))
+    with patch.object(MODULE, "parse_args", return_value=SimpleNamespace(base="before", head="after", paths=None)), \
+         patch.object(MODULE, "git_changed_paths", return_value=list(MODULE.P25_FOLLOW_LIFECYCLE_DIGESTS)), \
+         patch.object(MODULE, "git_file_text", side_effect=lambda ref, path: lifecycle_files[(ref, path)]):
+        assert MODULE.main() == 0
+        lifecycle_files[("after", "src/P25FollowStateMachine.cpp")] += "\nRF change"
+        assert MODULE.main() == 1
     observer_files = {}
     for path in MODULE.P25_OBSERVER_DIGESTS:
         before = subprocess.check_output(["git", "show", "6805bf6:" + path], cwd=ROOT, text=True, encoding="utf-8")
-        after = (ROOT / path).read_text(encoding="utf-8")
+        after = subprocess.check_output(["git", "show", "d3975a3:" + path], cwd=ROOT, text=True, encoding="utf-8")
         observer_files[("before", path)] = before
         observer_files[("after", path)] = after
         assert MODULE.infrastructure_text_allowed(path, before, after)
@@ -60,7 +77,7 @@ def main() -> int:
         assert not MODULE.infrastructure_text_allowed(path, after, before)
     for path in MODULE.SATELLITE_SESSION_DIGESTS:
         before = subprocess.check_output(["git", "show", "26716b3:" + path], cwd=ROOT, text=True, encoding="utf-8")
-        after = (ROOT / path).read_text(encoding="utf-8")
+        after = subprocess.check_output(["git", "show", "d3975a3:" + path], cwd=ROOT, text=True, encoding="utf-8")
         expected = before.replace("        SatcomScannerEngine::instance().stop();", "        SatcomScannerEngine::stopAll();\n        AircraftMapWidget::stopAll();", 1)
         route = '''        if (path == "/v1/satcom/sessions" || path == "/v1/aircraft/sessions") {
             auto* hub = findChild<SatcomHubWidget*>(QStringLiteral("satcomHub"));

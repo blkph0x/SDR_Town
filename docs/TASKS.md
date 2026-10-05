@@ -1,6 +1,12 @@
 # Task list (canonical)
 
 T-0108 | in_progress | P25 first caller clear, missing response diagnosis |
+DEC-0193 continuation: qualify repeated selected FACCH teardown and allocation
+identity before changing follow behavior. Keep decoder/audio baseline unchanged.
+Scoped repair locally verified: full17/17,65 focused assertions, identical
+first-caller/tail PCM,373.904s gapless live GUI run/six confirmed returns.
+Exact pushed-commit CI remains required. T-0108 stays open: active in-passband
+CC monitoring and independent RID-level reply acceptance are not completed.
 2026-10-05 user redirects from controller work. Preserve6805bf6 baseline;
 capture a complete live GUI exchange, compare grant/TG/RID/slot/ESS/PCM epochs
 and replay identical IQ before any narrowly evidenced repair. DEC-0191 /

@@ -165,6 +165,22 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         return decision;
     }
 
+    // DEC-0193: selected, CRC-confirmed FACCH teardown is stronger evidence
+    // than aggregate structure or the long silence/acquisition heuristics.
+    // Preserve the observer's existing end hold and immediate playout grace.
+    const bool confirmedSelectedTeardown = diagnosticFresh && phase2Follow &&
+        snapshot.phase2TrafficProcessorActive && snapshot.phase2TrafficTeardownConfirmed &&
+        snapshot.currentCallSessionId != 0 &&
+        snapshot.phase2TrafficSessionId == snapshot.currentCallSessionId &&
+        !snapshot.phase2TrafficCallActive && !hasRecentVoiceVcws;
+    if (confirmedSelectedTeardown) {
+        decision.voiceStillLooksActive = false;
+        if (!haveSpeakerOutputTimestamp || speakerOutputAgeMs > kSpeakerImmediateGraceMs) {
+            decision.action = P25FollowAction::ReturnCallEnded;
+        }
+        return decision;
+    }
+
     // Speaker output is authoritative activity only during the bounded grace
     // above.  A stale speaker timestamp must not extend the silence clock after
     // the traffic stream has gone quiet.

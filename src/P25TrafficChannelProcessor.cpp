@@ -1,4 +1,5 @@
 #include "P25TrafficChannelProcessor.h"
+#include "dsp/P25DspTypes.h"
 
 #include <algorithm>
 #include <chrono>
@@ -27,6 +28,14 @@ P25TrafficChannelProcessor::P25TrafficChannelProcessor(uint64_t sessionId, uint3
 }
 
 P25TrafficChannelProcessor::~P25TrafficChannelProcessor() = default;
+
+bool P25TrafficChannelProcessor::matchesAllocation(uint64_t sessionId, uint32_t talkgroup,
+                                                   uint32_t voiceFreqHz, int grantedSlot) const
+{
+    // DEC-0193: a refreshed grant can change slot without changing session ID.
+    return m_sessionId == sessionId && m_talkgroup == talkgroup &&
+        m_voiceFreqHz == voiceFreqHz && m_grantedSlot == grantedSlot;
+}
 
 void P25TrafficChannelProcessor::feedHardDibits(const std::vector<int>& dibits, uint64_t absoluteDibitIndex)
 {
@@ -94,6 +103,24 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
             m_lastObservedBurstDibit = burst.streamBurstStartDibit;
         }
         const bool ended = burst.macEndPttSeen || burst.macIdleSeen || burst.macHangtimeSeen;
+        // DEC-0193 / SDRTrunk P25P2DecoderState.processEndPushToTalk:
+        // two distinct FACCH END_PTTs confirm traffic-channel teardown. This
+        // follow-only proof requires CRC, not the decoder's weaker FEC lock.
+        // A shifted eye on overlapping IQ must not count the same burst twice.
+        const bool selectedVoice = burst.xorMaskApplied && !burst.voiceCodewords.empty();
+        if (!ended && (burst.macPttSeen || burst.macActiveSeen || selectedVoice)) {
+            m_confirmedFacchEnds.store(0, std::memory_order_release);
+        } else if (targetSlotKnown && burst.valid && burst.macCrcValid &&
+                   burst.macEndPttSeen && burst.streamBurstStartDibitKnown &&
+                   (burst.kind == P25Phase2BurstKind::FacchClear ||
+                    burst.kind == P25Phase2BurstKind::FacchScrambled)) {
+            const unsigned count = m_confirmedFacchEnds.load(std::memory_order_relaxed);
+            if (count == 0 || (burst.streamBurstStartDibit > m_lastConfirmedFacchEndDibit &&
+                burst.streamBurstStartDibit - m_lastConfirmedFacchEndDibit >= p25dsp::kPhase2BurstDibits)) {
+                m_lastConfirmedFacchEndDibit = burst.streamBurstStartDibit;
+                m_confirmedFacchEnds.store(std::min(count + 1u, 2u), std::memory_order_release);
+            }
+        }
         if (ended || burst.macPttSeen) {
             // Security evidence before a call boundary cannot describe the
             // next caller. The existing this-burst proof below must establish it.
@@ -311,6 +338,8 @@ P25TrafficChannelProcessor::Diag P25TrafficChannelProcessor::getDiag() const
     d.macIdleSeen = m_macIdleSeen.load();
     d.macHangtimeSeen = m_macHangtimeSeen.load();
     d.callEnded = m_callEnded.load();
+    d.confirmedFacchEnds = m_confirmedFacchEnds.load();
+    d.teardownConfirmed = d.callEnded && d.confirmedFacchEnds >= 2;
     d.lastActiveMs = m_lastActiveMs.load();
     d.lastVoiceMs = m_lastVoiceMs.load();
     d.lastMacMs = m_lastMacMs.load();

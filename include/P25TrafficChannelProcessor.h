@@ -29,6 +29,8 @@ public:
 
     bool isCallStillActive() const;
     bool mayEmitSustainedAudio() const;
+    bool matchesAllocation(uint64_t sessionId, uint32_t talkgroup,
+                           uint32_t voiceFreqHz, int grantedSlot) const;
     void requestTeardown(const std::string& reason);
 
     struct Diag {
@@ -56,6 +58,8 @@ public:
         bool macIdleSeen = false;
         bool macHangtimeSeen = false;
         bool callEnded = false;
+        unsigned confirmedFacchEnds = 0;
+        bool teardownConfirmed = false;
         std::string state;
         std::string endReason;
         std::string teardownReason;
@@ -112,6 +116,8 @@ private:
     std::mutex m_observationMutex;
     bool m_observedBurstPositionKnown = false;
     uint64_t m_lastObservedBurstDibit = 0;
+    uint64_t m_lastConfirmedFacchEndDibit = 0;
+    std::atomic<unsigned> m_confirmedFacchEnds{0};
     std::string m_teardownReason;
     std::string m_endReason;
 
