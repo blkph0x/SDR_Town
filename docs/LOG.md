@@ -1,5 +1,21 @@
 # Development log
 
+## 2026-10-05 - P25 response capture and narrow observer repairs
+
+Preserved6805bf6 and captured600.032s of live GUI auto-follow IQ after the user
+reconnected a stalled RTL. No IQ loss;126.46s consumed speaker PCM and readable
+offline STT. CC replay proves a later TG10120 allocation was available in the
+recorded passband about9.5s before live followed it. Existing live CC scheduling
+deliberately suspends monitoring during traffic; this is not an alias finding.
+Reproduced and repaired selected-call observer event ordering, repeated-end
+clock renewal, duplicate overlap boundaries and companion VCW activity counts.
+No demod/vocoder/PCM/timing changes. Both comparison WAV pairs are bit-identical;
+the clear first call remains PASS_CONTINUOUS_AUDIO duty0.972. Native17/17 and
+traffic97 assertions pass. Detailed evidence/commands/outstanding causal limits
+are in BUILD_NOTES and ISS-0073. T-0108 is deliberately not marked complete.
+Source publication/CI and the short patched live run are the remaining gates
+for this scoped patch; ISS-0060 still blocks public release assets.
+
 ## 2026-10-05 - Satcom and Aircraft controller isolation
 
 The mixed four-controller test exposed read-loop starvation of hardware startup,

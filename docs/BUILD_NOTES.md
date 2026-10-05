@@ -1,5 +1,59 @@
 # Build notes
 
+## 2026-10-05 - P25 response audit, DEC-0191/0192
+
+Baseline6805bf64be30b63015e4714238b96e08da057f77; Windows/MSVC14.44,
+Qt6.11.1. Private evidence is D:/SDRTown-Diagnostics/p25-response-20261005_112000,
+not uploaded. Baseline executable/settings/log hashes retained. Initial run
+002038 contains47.25s IQ before a user-confirmed USB unplug; no trusted CC.
+CDB non-invasive stacks show the GUI event loop responsive and the driver
+reader waiting after USB loss, not evidence of a P25 deadlock.
+
+Reopened GUI capture003120 on420.350MHz:600.032s,1228865536 CF32 samples,
+9830924288 bytes, no overruns/epoch gaps/write errors. Native GUI exits cleanly.
+14 auto-follows; speaker callback consumed6070080 samples (126.46s/48k),
+zero producer drops/partial callbacks. Long silent intervals and empty callbacks
+are not proof of missing speech. Offline STT recovers substantial intelligible
+conversation but is not proof that every response was heard.
+
+Confirmed missed allocation: live follows TG10120 on420.100/slot0 at00:32:19.802.
+At capture offset90s, with physical center420.08875, offline CC420.350 replay
+recovers CRC-valid grant0x70D9 for TG10120/RID0x1FA4E6, resolved by identifier7
+to421.350/slot1. Live CC decoding was intentionally suspended, even though CC
+was within the2.048MHz passband. Live returns at00:32:57.668 and follows that
+allocation at00:32:59.921, about9.5s after the first recovered CC evidence.
+This is a measured control-monitoring gap, not an alpha-tag mismatch. Current
+SigMF metadata records the initial center only; use the logged actual center
+and a retune-free interval for these replays. Do not replay the whole file at
+one assumed center or infer an unrecorded out-of-passband response.
+
+Observer counterexamples fail before repair:
+- END followed by PTT in one batch remains ended.
+- Repeated idle overwrites the first ended timestamp.
+- Overlap replays PTT/END and renews that timestamp.
+- Four selected VCWs plus twelve companion VCWs publishes16 as call activity.
+Repair tests include reversed ordering, absolute-position sort/dedup, later
+new PTT, unknown next-caller security, opposite-slot and unmasked exclusions.
+Existing security/slot/hold constants and all DSP/vocoder/audio paths unchanged.
+Rebuilt Release/native targets PASS; traffic97 assertions/16 cases PASS.
+Full CTest17/17 PASS45.18s; exact frozen-patch negative tests PASS.
+
+Identical-IQ baseline/fixed CLI voicetest (no forced-clear/probe):
+- offset4000ms,10s,417.550MHz,center417.53875,TG10120/s0: both
+  PASS_CONTINUOUS_AUDIO duty0.972,486/486 AMBE,466560 speaker samples,
+  no vocoder reset/slot change/speaker drop. WAV SHA256 both
+  dd95bcaa9367b53700a14635803de3efdd98181b8923f575fde810eb0727b8f4.
+- offset71000ms,10s,420.100MHz,center420.08875,TG10120/s0: both
+  PASS_PARTIAL_AUDIO duty0.248,124/124 AMBE,119040 samples. This span includes
+  the end of selected-slot speech; do not label it continuously talking.
+  WAV SHA256 both db72a9466a852fd3e8ed13feeb90b524a3c4b8674016570e733c518d49db655e.
+These establish unchanged PCM, not a complete fix of missing response grants.
+Short patched live verification and exact source CI follow. Public binary
+publication remains blocked by the existing five ISS-0060 inventory failures.
+
+Previous controller source6805bf6: Windows37240056799 and YAML37240056806
+completed successfully; downloaded package inventory retains all five blockers.
+
 ## 2026-10-05 - Independent Satcom and Aircraft controllers
 
 Final mixed-workflow expansion reproduced ISS-0072 before repair: startup of

@@ -4,7 +4,12 @@ SDR TOWN — SOURCE OF TRUTH (SoT)
 VERSION: 1.0.0
 PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
 CURRENT VERSION IN TREE: 0.2.122 (DTMF burst analysis; public experimental asset verified)
-LATEST UNRELEASED: DEC-0189 adds named Satcom/Aircraft GUI/API controllers,
+LATEST UNRELEASED: DEC-0192 repairs P25 traffic-observer event ordering,
+                  repeated-end clocks and companion-slot activity accounting.
+                  First-caller replay remains byte-identical at duty0.972.
+                  Missing-response acceptance is open (T-0108 / ISS-0073);
+                  in-passband CC monitoring during follow remains suspended.
+                  DEC-0189 adds named Satcom/Aircraft GUI/API controllers,
                   independent planners/tracks/settings and joined lifecycle;
                   mock-radio and native GUI gates pass, physical RF open.
                   P25 per-system controller extraction remains incomplete.
@@ -48,7 +53,7 @@ UNRELEASED SOURCE: T-0102 infrastructure repairs; local 16/16 gates pass,
                   dry-run; local four-profile no-RX gate passes.
                   T-0106 repairs reproduced control cancellation lifetime
                   failure; local stress/debugger/16-suite gates and92ab955 CI pass.
-ACTIVE PHASE: Receive decoder expansion; P25 acceptance remains open, work deferred by user
+ACTIVE PHASE: P25 missing-response diagnosis at user request; controller expansion deferred
 METHOD: Athanor / SovereignFoundry process (never guess, evidence, trackers).
          This tree is NOT Athanor. Qt, SoapySDR, mbelib, miniaudio stay.
 DO NOT EDIT: C:\Users\Blkph0x\source\repos\SovereignFoundry

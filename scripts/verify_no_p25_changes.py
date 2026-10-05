@@ -181,6 +181,21 @@ DRIVER_IO_ADMISSION_DIGESTS = {
 }
 
 
+# DEC-0192 / explicit P25 diagnosis request: exact call-observer repair only.
+# Decoder, vocoder, playout, and hold constants remain frozen.
+P25_OBSERVER_DIGESTS = {
+    "src/P25TrafficChannelProcessor.cpp": (
+        "bbd474be7ca114346deb0fdd13ef4254d39a477a8f6fc99971ba941cf3727972",
+        "b68f79ab11e5e8e77d1f7b4a6e8825396c404dde0192a3daea67782f51c379f7"),
+    "include/P25TrafficChannelProcessor.h": (
+        "5361d78ff933cf60a9aa8e69d4dc6f08e0aa393d2eea1db2973a70be27030f9a",
+        "cabe3cdb1aa312c074d2d9615f7021e57be7d8fe8271512284fa7d22a48196d2"),
+    "tests/test_p25traffic_processor.cpp": (
+        "7807987b05ec0365533bc8cd3a66db6fd12161cb879c2469f9945a1d2a08bfad",
+        "dfc08bb5fc0ab769238b3562fbd2c0214a77d2e9d8fe837970fbad10dfcf1249"),
+}
+
+
 def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
     actual = (
         hashlib.sha256(before.encode("utf-8")).hexdigest(),
@@ -190,7 +205,8 @@ def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
                       WORKFLOW_DIGESTS.get(path), WORKFLOW_ROUTING_DIGESTS.get(path), REPEATER_ROUTING_DIGESTS.get(path),
                       CONTROL_OWNERSHIP_DIGESTS.get(path), WORKFLOW_WINDOW_DIGESTS.get(path),
                       WORKFLOW_SHUTDOWN_DIGESTS.get(path), INMARSAT_SESSION_DIGESTS.get(path),
-                      SATELLITE_SESSION_DIGESTS.get(path), DRIVER_IO_ADMISSION_DIGESTS.get(path))
+                      SATELLITE_SESSION_DIGESTS.get(path), DRIVER_IO_ADMISSION_DIGESTS.get(path),
+                      P25_OBSERVER_DIGESTS.get(path))
 
 
 # DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.

@@ -1,5 +1,29 @@
 # Issues (canonical)
 
+## ISS-0073 - Initial P25 caller clear but response missing (2026-10-05, INVESTIGATING)
+
+User field report: initial follows produce clear continuous speech; subsequent
+speaker activity appears in the UI but no response audio. Cause unconfirmed.
+Investigate slot/RID/alias lifecycle, missed grants, RF evidence and per-call
+security/decoder state separately; do not relax gates based on the symptom.
+DEC-0191 records the capture/baseline/non-regression method. No fix claimed yet.
+
+2026-10-05 DEC-0192: ten-minute gapless GUI capture003120, plus paired CLI
+replays, confirms late grant acquisition while CC monitoring is suspended.
+At offset90s a trusted CC grant moves TG10120 to421.350/s1; live is still on
+420.100/s0 and follows the move about9.5s later. CC is physically in the recorded
+passband. Do not claim that RID changes or alias imports caused this interval.
+Observer END/PTT ordering, repeated-idle timestamp renewal, overlap replay and
+aggregate/companion VCW activity bugs have failing fixtures and local repairs.
+First-caller PCM remains byte-identical with duty0.972. Full response acceptance
+remains OPEN: prove reply-grant capture and prompt handoff with preserved audio.
+Remaining work: isolate/budget the in-passband CC worker without reviving the
+previous traffic-worker starvation; honor explicit selected-call end evidence
+in follow decisions (currently only callActive is passed); qualify controller
+re-creation on same-TG slot/allocation changes; add retune epochs to capture
+metadata. A single tuner cannot capture an out-of-passband CC while on voice.
+Do not alter security gates, enable other-slot PCM or shorten timers by guess.
+
 ## ISS-0072 - Read-loop lock starvation blocks a fourth radio (2026-10-05, LOCAL VERIFIED)
 
 DEC-0190. Mixed actual Aircraft/Satcom/Inmarsat controllers on four mock radios

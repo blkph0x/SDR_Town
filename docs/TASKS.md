@@ -1,5 +1,18 @@
 # Task list (canonical)
 
+T-0108 | in_progress | P25 first caller clear, missing response diagnosis |
+2026-10-05 user redirects from controller work. Preserve6805bf6 baseline;
+capture a complete live GUI exchange, compare grant/TG/RID/slot/ESS/PCM epochs
+and replay identical IQ before any narrowly evidenced repair. DEC-0191 /
+ISS-0073. Do not assume slot leakage or alias failure from the symptom alone.
+DEC-0192 observer fixes locally pass97 assertions/16 cases and full17 suites;
+paired first-caller and later-call WAVs are byte-identical before/after.
+600.032s gapless live IQ establishes a missed CC allocation during follow.
+Do not close T-0108 on these repairs: prompt reply handoff remains unproved.
+Previous controller source6805bf6 passed Windows37240056799 and YAML37240056806;
+public package gate remains separate. T-0103 controller extraction deferred
+while this user-requested diagnosis is active.
+
 2026-10-05 continuation: T-0103 / DEC-0189 Satcom/Aircraft controllers locally
 verified; exact source CI pending. Named planners/audio/tracks/settings, GUI/API
 controls, hidden-worker continuity, isolated stop/reopen and log concurrency

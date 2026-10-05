@@ -1,5 +1,58 @@
 # Decisions
 
+## DEC-0192 - Reproduce traffic observer ordering before repair (2026-10-05)
+
+T-0108 inspection: P25TrafficChannelProcessor::observeDecodeResult ORs all
+selected-slot END/IDLE/HANGTIME messages in a decode batch, overriding a later
+PTT in that batch. Test END followed by a clear PTT/voice and the reverse order,
+including opposite-slot isolation, before considering changes. Reference:
+_codex_refs/sdrtrunk/src/main/java/io/github/dsheirer/module/decode/p25/phase2/
+P25P2DecoderState.java processMacMessage/processPushToTalk/processEndPushToTalk
+process each message in order. This observer affects follow health, not the
+vocoder directly; a failing fixture alone does not prove the reported field
+failure. No timing, squelch, security or decoder algorithm changes authorized
+by this investigation. The first live run was interrupted by a user-confirmed
+USB unplug/replug and contains no validated CC; retry before RF conclusions.
+
+The [response-order] fixture fails on6805bf6 (ended remains true after the
+new PTT); reverse-order and opposite-slot fixtures pass. Permit a narrow
+observer repair: fold selected-slot boundaries in capture order, preserve the
+first ended timestamp until a real selected-slot restart, and retain existing
+security predicates/hold durations. Add repeated-IDLE/end-timer tests before
+repair. This is not a change to PCM release or CQPSK/AMBE. Live field causality
+and identical-IQ non-regression remain separate acceptance requirements.
+Overlapping windows must not replay old END/PTT state or renew activity. Add
+absolute-dibit ordering/idempotence cases, including out-of-order input, an
+unknown-security next PTT, and a new selected-slot call after teardown. Only
+fresh selected-slot observations may advance the observer. Unknown absolute
+positions retain stable in-batch order; never infer a global clock from them.
+
+Live capture20261005_003120 confirms another accounting defect: at00:32:35
+TG10120/slot0 has zero VCWs while slot1 TG12068 carries voice. The observer's
+p2vcw=max(global, selected) publishes the companion's activity to both GUI and
+CLI follow health. Offline CC replay at skip90000ms, center420.08875MHz recovers
+CRC-valid TG10120 grant0x70D9 (421.350MHz/slot1/RID0x1FA4E6) while live remains
+on420.100 until00:32:57.668 and follows the new channel at00:32:59.921.
+Repair p2vcw to fresh, masked, selected-slot/TG codewords; keep aggregate VCWs
+in a separate diagnostic field. No guessed shorter hold, slot flip, CC worker
+concurrency or audio-gate change. Add mixed-slot/unmasked/overlap and follow
+snapshot regression tests. CC-in-passband monitoring remains a separately
+measured gap: this patch does not enable the intentionally suspended CC worker.
+
+## DEC-0191 - Capture first-caller/response boundaries before P25 repairs (2026-10-05)
+
+T-0108 / ISS-0073. User reports fully clear initial follows but missing second
+speakers. Preserve current source/binary/settings hashes and recent logs.
+Record ten minutes of GUI auto-follow IQ on saved420.350MHz with synchronized
+events, validation and speaker evidence, using D: (C: has about7GB free).
+Keep current RF gain/PPM, normal encryption policy and production timing.
+Disable remote uploads for private diagnostic runs. Trace response transitions
+across CC grant/channel resolution, TG/RID/alias identity, traffic retune/slot,
+MAC/PTT/ESS context, VCWs, PCM queue and speaker release. A second RID on one TG
+does not prove a slot change; lack of PCM does not prove encrypted RF. Require
+observed evidence and failing regression cases before modifying decoder/follow
+behavior. STT is corroboration, never sole proof of valid/continuous voice.
+
 ## DEC-0190 - FIFO admission to the existing live-driver lock (2026-10-05)
 
 T-0103 / ISS-0072: the new four-controller mixed workflow fixture fails while

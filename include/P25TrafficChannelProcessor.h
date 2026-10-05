@@ -38,6 +38,7 @@ public:
         uint32_t voiceFreqHz = 0;
         int p2bursts = 0;
         int p2vcw = 0;
+        int p2AllSlotVcw = 0;
         int p2mac = 0;
         int p2macPdus = 0;
         int p2macCrcValid = 0;
@@ -76,6 +77,7 @@ private:
 
     std::atomic<int>  m_p2bursts{0};
     std::atomic<int>  m_p2vcw{0};
+    std::atomic<int>  m_p2AllSlotVcw{0};
     std::atomic<int>  m_p2mac{0};
     std::atomic<int>  m_p2macPdus{0};
     std::atomic<int>  m_p2macCrcValid{0};
@@ -105,6 +107,11 @@ private:
     std::atomic<uint64_t> m_lastAbsoluteDibit{0};
 
     mutable std::mutex m_mutex;
+    // DEC-0192: serialize observation folding separately from diagnostic reads.
+    // Absolute positions deduplicate overlap without inventing wall-clock gaps.
+    std::mutex m_observationMutex;
+    bool m_observedBurstPositionKnown = false;
+    uint64_t m_lastObservedBurstDibit = 0;
     std::string m_teardownReason;
     std::string m_endReason;
 

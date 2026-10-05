@@ -28,6 +28,15 @@ def expect_allowed(path: str) -> None:
 def main() -> int:
     import subprocess
     import re
+    for path in MODULE.P25_OBSERVER_DIGESTS:
+        before = subprocess.check_output(["git", "show", "6805bf6:" + path], cwd=ROOT, text=True, encoding="utf-8")
+        after = (ROOT / path).read_text(encoding="utf-8")
+        assert MODULE.infrastructure_text_allowed(path, before, after)
+        assert not MODULE.infrastructure_text_allowed(path, before, after + "\nRF change")
+        assert not MODULE.infrastructure_text_allowed(path, after, before)
+        assert not MODULE.infrastructure_text_allowed("src/P25VoiceDecode.cpp", before, after)
+        if path.endswith(".cpp"):
+            assert not MODULE.infrastructure_text_allowed(path, before, after.replace("false", "true", 1))
     for path in MODULE.DRIVER_IO_ADMISSION_DIGESTS:
         before = subprocess.check_output(["git", "show", "26716b3:" + path], cwd=ROOT, text=True, encoding="utf-8")
         after = (ROOT / path).read_text(encoding="utf-8")

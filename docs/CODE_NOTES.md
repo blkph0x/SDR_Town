@@ -1,5 +1,17 @@
 # Code notes (tree map)
 
+DEC-0192: P25TrafficChannelProcessor is an observational follow-health owner,
+not a second vocoder. It folds selected-slot/TG bursts in capture order under
+an observation mutex, uses absolute positions to reject replayed overlap,
+keeps the first end time until a selected restart, and clears pre-boundary
+security evidence. p2vcw now means fresh masked selected VCWs as GUI/CLI
+already expect; p2AllSlotVcw retains the raw aggregate for diagnostics.
+This does not change speaker gates, timeout constants or sample processing.
+The main GUI intentionally suspends CC decoding while one-radio traffic is
+offset from CC, including some in-passband cases; ISS-0073 records an actual
+grant missed there. Do not remove that scheduling gate without concurrent
+CC/voice CPU, stale-retune, slot-isolation and continuity acceptance.
+
 DEC-0190: DriverIoMutex is a FIFO BasicLockable ticket queue using standard
 mutex/condition_variable. DeviceManager retains every existing live-driver
 critical section and timeout but prevents a read loop barging ahead of queued

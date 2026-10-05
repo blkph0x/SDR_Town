@@ -44,6 +44,8 @@ void P25TrafficChannelProcessor::processDibits(const int16_t* dibits, size_t cou
 
 void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& result, uint64_t absoluteDibitIndex)
 {
+    std::lock_guard<std::mutex> observationLock(m_observationMutex);
+    if (m_teardownRequested.load(std::memory_order_acquire)) return;
     size_t burstVoiceCodewords = 0;
     size_t targetVoiceCodewords = 0;
     size_t meaningfulVoiceCodewords = 0;
@@ -55,9 +57,26 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
     bool macEndPttSeen = false;
     bool macIdleSeen = false;
     bool macHangtimeSeen = false;
+    const char* latestEndReason = nullptr;
+    bool selectedRestart = false;
     const bool targetSlotKnown = m_grantedSlot == 0 || m_grantedSlot == 1;
     const uint8_t targetSlot = static_cast<uint8_t>(m_grantedSlot & 0x01);
-    for (const auto& burst : result.phase2Bursts) {
+    // DEC-0192: END and the next PTT can share a decode batch. Fold them in
+    // capture order, as the voice feeder does, rather than ORing an old END
+    // over a later reply. Sort pointers to avoid copying the voice payloads.
+    std::vector<const P25Phase2Burst*> ordered;
+    ordered.reserve(result.phase2Bursts.size());
+    for (const auto& burst : result.phase2Bursts) ordered.push_back(&burst);
+    std::stable_sort(ordered.begin(), ordered.end(), [](const auto* a, const auto* b) {
+        if (a->streamBurstStartDibitKnown && b->streamBurstStartDibitKnown &&
+            a->streamBurstStartDibit != b->streamBurstStartDibit)
+            return a->streamBurstStartDibit < b->streamBurstStartDibit;
+        if (a->streamBurstStartDibitKnown != b->streamBurstStartDibitKnown)
+            return a->streamBurstStartDibitKnown;
+        return a->dibitOffset < b->dibitOffset;
+    });
+    for (const auto* item : ordered) {
+        const auto& burst = *item;
         burstVoiceCodewords += burst.voiceCodewords.size();
         const bool trafficTalkgroupBelongsToCall =
             !burst.trafficTalkgroupKnown ||
@@ -68,6 +87,27 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
              static_cast<uint8_t>(burst.grantSlot & 0x01u) == targetSlot);
         const bool burstTargetsCall = slotMatches && trafficTalkgroupBelongsToCall;
         if (!burstTargetsCall) continue;
+        if (burst.streamBurstStartDibitKnown) {
+            if (m_observedBurstPositionKnown &&
+                burst.streamBurstStartDibit <= m_lastObservedBurstDibit) continue;
+            m_observedBurstPositionKnown = true;
+            m_lastObservedBurstDibit = burst.streamBurstStartDibit;
+        }
+        const bool ended = burst.macEndPttSeen || burst.macIdleSeen || burst.macHangtimeSeen;
+        if (ended || burst.macPttSeen) {
+            // Security evidence before a call boundary cannot describe the
+            // next caller. The existing this-burst proof below must establish it.
+            sessionAudioRelease = false;
+            burstEssKnown = false;
+            burstEncrypted = false;
+        }
+        if (ended) {
+            latestEndReason = burst.macEndPttSeen ? "end-ptt" :
+                (burst.macIdleSeen ? "idle" : "hangtime");
+        } else if (burst.macPttSeen || burst.macActiveSeen || burst.sessionAudioRelease) {
+            latestEndReason = nullptr;
+            selectedRestart = true;
+        }
         targetVoiceCodewords += burst.voiceCodewords.size();
         const bool goodVoiceEvidence = burst.xorMaskApplied &&
             (!burst.voiceCodewords.empty() ||
@@ -130,13 +170,16 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
     const bool essKnown = burstEssKnown || globalEssKnown;
     const bool encrypted = burstEncrypted || globalEncrypted;
     const bool clearEss = essKnown && !encrypted;
-    const bool callEnded = macEndPttSeen || macIdleSeen || macHangtimeSeen;
+    const bool callEnded = latestEndReason != nullptr;
     const bool audioOpen = !callEnded && !encrypted && (sessionAudioRelease || clearEss);
     const uint64_t now = steadyNowMs();
 
     m_p2bursts.store(p2bursts, std::memory_order_release);
-    size_t effectiveP2vcw = (meaningfulVoiceCodewords > p2vcw) ? meaningfulVoiceCodewords : p2vcw;
-    m_p2vcw.store(meaningfulVoiceCodewords > 0 ? effectiveP2vcw : p2vcw, std::memory_order_release);
+    // GUI and CLI use p2vcw to renew the followed call. Companion-slot and
+    // overlapping-context VCWs are diagnostics, not fresh selected activity.
+    m_p2AllSlotVcw.store(p2vcw, std::memory_order_release);
+    m_p2vcw.store(static_cast<int>(std::min<size_t>(meaningfulVoiceCodewords,
+        static_cast<size_t>(std::numeric_limits<int>::max()))), std::memory_order_release);
     m_p2mac.store(p2macCrcValid, std::memory_order_release);
     m_p2macPdus.store(p2macPdus, std::memory_order_release);
     m_p2macCrcValid.store(p2macCrcValid, std::memory_order_release);
@@ -155,14 +198,14 @@ void P25TrafficChannelProcessor::observeDecodeResult(const P25LiveDecodeResult& 
     if (macIdleSeen) m_macIdleSeen.store(true, std::memory_order_release);
     if (macHangtimeSeen) m_macHangtimeSeen.store(true, std::memory_order_release);
     if (callEnded) {
-        m_callEnded.store(true, std::memory_order_release);
+        const bool alreadyEnded = m_callEnded.exchange(true, std::memory_order_acq_rel);
         m_audioOpen.store(false, std::memory_order_release);
-        m_endedMs.store(now, std::memory_order_release);
+        // Repeated idle/end signaling must not renew the existing hold forever.
+        // A selected-slot restart followed by a new END is a new boundary.
+        if (!alreadyEnded || selectedRestart) m_endedMs.store(now, std::memory_order_release);
         std::lock_guard<std::mutex> lock(m_mutex);
-        if (macEndPttSeen) m_endReason = "end-ptt";
-        else if (macIdleSeen) m_endReason = "idle";
-        else if (macHangtimeSeen) m_endReason = "hangtime";
-    } else if (p2vcw > 0 || macPttSeen || macActiveSeen || sessionAudioRelease || audioOpen) {
+        if (!alreadyEnded || selectedRestart) m_endReason = latestEndReason;
+    } else if (targetVoiceCodewords > 0 || macPttSeen || macActiveSeen || sessionAudioRelease || audioOpen) {
         m_callEnded.store(false, std::memory_order_release);
         m_endedMs.store(0, std::memory_order_release);
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -250,6 +293,7 @@ P25TrafficChannelProcessor::Diag P25TrafficChannelProcessor::getDiag() const
     d.voiceFreqHz = m_voiceFreqHz;
     d.p2bursts = m_p2bursts.load();
     d.p2vcw = m_p2vcw.load();
+    d.p2AllSlotVcw = m_p2AllSlotVcw.load();
     d.p2mac = m_p2mac.load();
     d.p2macPdus = m_p2macPdus.load();
     d.p2macCrcValid = m_p2macCrcValid.load();

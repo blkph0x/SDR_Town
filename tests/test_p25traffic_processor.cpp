@@ -4,6 +4,9 @@
 #include "P25TrafficChannelProcessor.h"
 #include "Receiver.h"
 
+#include <chrono>
+#include <thread>
+
 TEST_CASE("P25 Phase 2 audio call key binds selected allocation identity", "[p25][traffic][session]")
 {
     P25P2CallAudioKey first;
@@ -106,6 +109,197 @@ TEST_CASE("P25 traffic processor advances dibit cursor without internal decode",
     REQUIRE(processor.getDiag().lastAbsoluteDibit == 6090);
 }
 
+TEST_CASE("P25 traffic observer respects end and next PTT order", "[p25][traffic][response-order]")
+{
+    // DEC-0192: a batch can span the end of one caller and the next caller's
+    // PTT. The final selected-slot event, not any earlier END, owns its state.
+    P25TrafficChannelProcessor processor(99, 30003, 416550000, 0);
+    P25Phase2Burst end;
+    end.valid = true;
+    end.grantSlotKnown = true;
+    end.grantSlot = 0;
+    end.macCrcValid = true;
+    end.macEndPttSeen = true;
+    P25Phase2Burst start = end;
+    start.macEndPttSeen = false;
+    start.macPttSeen = true;
+    start.essObservedThisBurst = true;
+    start.essKnown = true;
+    start.sessionAudioRelease = true;
+    P25Phase2Burst voice = start;
+    voice.macPttSeen = false;
+    voice.essObservedThisBurst = false;
+    voice.xorMaskApplied = true;
+    voice.voiceCodewords.push_back(P25Phase2VoiceCodeword{});
+    P25LiveDecodeResult result;
+    SECTION("a new selected-slot PTT supersedes the old end") {
+        result.phase2Bursts = {end, start, voice};
+        processor.observeDecodeResult(result, 2000);
+        REQUIRE_FALSE(processor.getDiag().callEnded);
+        REQUIRE(processor.mayEmitSustainedAudio());
+    }
+    SECTION("a later end still closes the selected slot") {
+        result.phase2Bursts = {start, voice, end};
+        processor.observeDecodeResult(result, 2000);
+        REQUIRE(processor.getDiag().callEnded);
+        REQUIRE_FALSE(processor.mayEmitSustainedAudio());
+    }
+    SECTION("another slot cannot restart the ended selected slot") {
+        start.grantSlot = 1;
+        voice.grantSlot = 1;
+        result.phase2Bursts = {end, start, voice};
+        processor.observeDecodeResult(result, 2000);
+        REQUIRE(processor.getDiag().callEnded);
+        REQUIRE_FALSE(processor.mayEmitSustainedAudio());
+    }
+}
+
+TEST_CASE("P25 traffic repeated idle does not extend an ended call", "[p25][traffic][response-order]")
+{
+    P25TrafficChannelProcessor processor(100, 30003, 416550000, 0);
+    P25Phase2Burst end;
+    end.valid = true;
+    end.grantSlotKnown = true;
+    end.grantSlot = 0;
+    end.macCrcValid = true;
+    end.macEndPttSeen = true;
+    P25LiveDecodeResult result;
+    result.phase2Bursts = {end};
+    processor.observeDecodeResult(result, 1000);
+    const auto firstEnd = processor.getDiag().endedMs;
+    // Cross one monotonic-clock tick; this tests timestamp stability, not a
+    // decoder/hold timing threshold. No production timeout is changed.
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    end.macEndPttSeen = false;
+    end.macIdleSeen = true;
+    result.phase2Bursts = {end};
+    processor.observeDecodeResult(result, 2000);
+    REQUIRE(processor.getDiag().callEnded);
+    REQUIRE(processor.getDiag().endedMs == firstEnd);
+    REQUIRE_FALSE(processor.mayEmitSustainedAudio());
+}
+
+TEST_CASE("P25 traffic observer does not replay overlapping call boundaries", "[p25][traffic][response-order]")
+{
+    P25TrafficChannelProcessor processor(101, 30003, 416550000, 0);
+    P25Phase2Burst start;
+    start.valid = true;
+    start.grantSlotKnown = true;
+    start.grantSlot = 0;
+    start.macCrcValid = true;
+    start.macPttSeen = true;
+    start.streamBurstStartDibitKnown = true;
+    start.streamBurstStartDibit = 1000;
+    start.essObservedThisBurst = true;
+    start.essKnown = true;
+    P25Phase2Burst end = start;
+    end.macPttSeen = false;
+    end.macEndPttSeen = true;
+    end.essObservedThisBurst = false;
+    end.streamBurstStartDibit = 2000;
+    P25LiveDecodeResult result;
+    // Deliberately not vector order: absolute capture position wins.
+    result.phase2Bursts = {end, start};
+    processor.observeDecodeResult(result, 3000);
+    REQUIRE(processor.getDiag().callEnded);
+    const auto firstEnd = processor.getDiag().endedMs;
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    processor.observeDecodeResult(result, 4000);
+    REQUIRE(processor.getDiag().callEnded);
+    REQUIRE(processor.getDiag().endedMs == firstEnd);
+
+    start.streamBurstStartDibit = 5000;
+    start.essObservedThisBurst = false;
+    start.essKnown = false;
+    result.phase2Bursts = {start, end};
+    processor.observeDecodeResult(result, 6000);
+    REQUIRE_FALSE(processor.getDiag().callEnded);
+    REQUIRE_FALSE(processor.getDiag().audioOpen);
+    // Old context from the first caller cannot end the reply or renew its clock.
+    result.phase2Bursts = {end};
+    const auto lastActive = processor.getDiag().lastActiveMs;
+    processor.observeDecodeResult(result, 7000);
+    REQUIRE_FALSE(processor.getDiag().callEnded);
+    REQUIRE(processor.getDiag().lastActiveMs == lastActive);
+
+    end.streamBurstStartDibit = 8000;
+    result.phase2Bursts = {end};
+    processor.observeDecodeResult(result, 9000);
+    REQUIRE(processor.getDiag().callEnded);
+    REQUIRE(processor.getDiag().endedMs > firstEnd);
+}
+
+TEST_CASE("P25 traffic next PTT cannot inherit previous caller security", "[p25][traffic][response-order]")
+{
+    P25TrafficChannelProcessor processor(102, 30003, 416550000, 0);
+    P25Phase2Burst first;
+    first.valid = true;
+    first.grantSlotKnown = true;
+    first.grantSlot = 0;
+    first.essObservedThisBurst = true;
+    first.essKnown = true;
+    first.sessionAudioRelease = true;
+    first.voiceCodewords.push_back(P25Phase2VoiceCodeword{});
+    P25Phase2Burst next;
+    next.valid = true;
+    next.grantSlotKnown = true;
+    next.grantSlot = 0;
+    next.macCrcValid = true;
+    next.macPttSeen = true;
+    P25LiveDecodeResult result;
+    result.phase2Bursts = {first, next};
+    processor.observeDecodeResult(result, 3000);
+    REQUIRE_FALSE(processor.getDiag().callEnded);
+    REQUIRE_FALSE(processor.getDiag().essTrusted);
+    REQUIRE_FALSE(processor.mayEmitSustainedAudio());
+}
+
+TEST_CASE("P25 traffic activity excludes companion and stale voice", "[p25][traffic][response-order]")
+{
+    // Capture003120 at00:32:35: selected TG10120/s0 is in hangtime, while
+    // companion TG12068/s1 still has VCWs. It must not count as selected voice.
+    P25TrafficChannelProcessor processor(103, 10120, 420100000, 0);
+    P25Phase2Burst selected;
+    selected.valid = true;
+    selected.grantSlotKnown = true;
+    selected.grantSlot = 0;
+    selected.trafficTalkgroupKnown = true;
+    selected.trafficTalkgroupId = 10120;
+    selected.xorMaskApplied = true;
+    selected.streamBurstStartDibitKnown = true;
+    selected.streamBurstStartDibit = 1000;
+    selected.voiceCodewords.resize(4);
+    auto companion = selected;
+    companion.grantSlot = 1;
+    companion.trafficTalkgroupId = 12068;
+    companion.streamBurstStartDibit = 1180;
+    companion.voiceCodewords.resize(12);
+    P25LiveDecodeResult result;
+    result.phase2Bursts = {selected, companion};
+    result.stats.phase2VoiceCodewords = 16;
+    processor.observeDecodeResult(result, 2000);
+    REQUIRE(processor.getDiag().p2vcw == 4);
+    REQUIRE(processor.getDiag().p2AllSlotVcw == 16);
+    processor.observeDecodeResult(result, 3000);
+    REQUIRE(processor.getDiag().p2vcw == 0);
+    selected.voiceCodewords.clear();
+    selected.macHangtimeSeen = true;
+    selected.streamBurstStartDibit = 4000;
+    companion.streamBurstStartDibit = 4180;
+    result.phase2Bursts = {selected, companion};
+    processor.observeDecodeResult(result, 5000);
+    REQUIRE(processor.getDiag().p2vcw == 0);
+    REQUIRE(processor.getDiag().callEnded);
+    REQUIRE_FALSE(processor.mayEmitSustainedAudio());
+    selected.macHangtimeSeen = false;
+    selected.voiceCodewords.resize(4);
+    selected.xorMaskApplied = false;
+    selected.streamBurstStartDibit = 6000;
+    result.phase2Bursts = {selected};
+    processor.observeDecodeResult(result, 7000);
+    REQUIRE(processor.getDiag().p2vcw == 0);
+}
+
 TEST_CASE("P25 traffic processor tracks evidence without opening audio on generic MAC alone", "[p25][traffic]")
 {
     P25TrafficChannelProcessor processor(42, 30302, 416550000, 0);
@@ -124,7 +318,8 @@ TEST_CASE("P25 traffic processor tracks evidence without opening audio on generi
     REQUIRE(diag.talkgroup == 30302);
     REQUIRE(diag.sessionId == 42);
     REQUIRE(diag.grantedSlot == 0);
-    REQUIRE(diag.p2vcw == 8);
+    REQUIRE(diag.p2vcw == 0); // no selected burst proof in aggregate stats
+    REQUIRE(diag.p2AllSlotVcw == 8);
     REQUIRE(diag.p2mac == 1);
     REQUIRE(diag.p2macPdus == 3);
     REQUIRE(diag.p2macCrcValid == 1);
@@ -149,6 +344,7 @@ TEST_CASE("P25 traffic processor opens sustained audio on clear target-slot sess
     burst.grantSlot = 0;
     burst.sessionAudioRelease = true;
     burst.encrypted = false;
+    burst.xorMaskApplied = true;
     burst.voiceCodewords.push_back(P25Phase2VoiceCodeword{});
     result.phase2Bursts.push_back(burst);
 
@@ -174,6 +370,7 @@ TEST_CASE("P25 traffic processor closes audio immediately on Phase 2 call-end MA
     voiceBurst.grantSlot = 0;
     voiceBurst.sessionAudioRelease = true;
     voiceBurst.encrypted = false;
+    voiceBurst.xorMaskApplied = true;
     voiceBurst.voiceCodewords.push_back(P25Phase2VoiceCodeword{});
     voice.phase2Bursts.push_back(voiceBurst);
 
