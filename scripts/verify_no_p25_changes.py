@@ -234,16 +234,40 @@ P25_TRACE_CONTEXT_DIGESTS = {
 P25_EMIT_GAP_DIGESTS = {
     "include/P25VoiceTiming.h": (
         "1f5b679283fd3034ffdc963fb6ef3017f79caa67bd3079d6c7ca5fe57a55577f",
-        "3c25716efce3b52e32287bb2f37b10e093eb7b96a52aa41595463695b71342a4"),
+        "efbcf36274de9795a48d8beebaee5ea24e5c03a75293e76ae29cd4c3514dff21"),
     "src/P25VoiceTiming.cpp": (
         "2e5f558aec52fb9d3d34cf21c6087203b81b21ea7db2cca3af778d0ee9635d58",
-        "a31b89088a261a12880f32c5a2ee6e3c1aefa5aaef26db4be0536e0631273148"),
+        "94ddc4ea4051e50a431b869614645e4cb573c41ed8644fdda70416cd6fb0fbd6"),
     "src/tools/verify_p25_phase2_realtime_catchup_geometry.py": (
         "000d8108bdaeba4c7d03dc25c8280c97c6555a4ee5a3e230d0e4462f304f3356",
         "982f03a6553d04420acba02073d3c7a8ea17d4b9a1ed46eaa42ab61a0e14739d"),
     "tests/test_p25_voice_timing.cpp": (
         "d287d67322171b8b1ff96702863fc85abe9c707c02646045c504e368ca274d41",
-        "6d7517506ff346c0e97ca04d46c623cfec7e5e799671c70481d9c1adf329a5fc"),
+        "3a3e110fad20af490daaee832c7c8fdef5a439e3728d5a77e9e4eca62591a681"),
+}
+
+
+# DEC-0203 / capture 20261006_093930: first locked-lattice empty hop stays
+# healthy 80/4. Exact digests are 14e1090 (0.2.128) -> planner + live call.
+P25_LOCKED_LATTICE_EMPTY_DIGESTS = {
+    "include/P25VoiceTiming.h": (
+        "3c25716efce3b52e32287bb2f37b10e093eb7b96a52aa41595463695b71342a4",
+        "efbcf36274de9795a48d8beebaee5ea24e5c03a75293e76ae29cd4c3514dff21"),
+    "src/P25VoiceTiming.cpp": (
+        "a31b89088a261a12880f32c5a2ee6e3c1aefa5aaef26db4be0536e0631273148",
+        "94ddc4ea4051e50a431b869614645e4cb573c41ed8644fdda70416cd6fb0fbd6"),
+    "src/MainWindowP25Voice.cpp": (
+        "8727230a46abcbed425d6cc646410f629b8b26a9450e8d05c6fb73555bca0a6b",
+        "54956d949f0cbbc362269373818985a1089775220c8bb9e7938f9579723796b3"),
+    "tests/test_p25_voice_timing.cpp": (
+        "6d7517506ff346c0e97ca04d46c623cfec7e5e799671c70481d9c1adf329a5fc",
+        "3a3e110fad20af490daaee832c7c8fdef5a439e3728d5a77e9e4eca62591a681"),
+    "src/tools/verify_p25_phase2_live_eyelost_replay_caps.py": (
+        "ce34dc79f8c96a58bc2db1a13208b02d529740029ffd1c073f55bf41ea1f5a03",
+        "41e6ecfbbbf562b99462d337bda12714cb87b576b2defce278f232a5c3ed2efa"),
+    "src/tools/verify_p25_phase2_no_post_emit_cold_escalate.py": (
+        "0b2682dd94e4de318e2f55e9557cb84a34e1a00976618469c6db378d77723a17",
+        "e9196fdaf5fe4cf84fa47907e3b77881b2508cb3c8f8453da9d6609010aec30b"),
 }
 
 
@@ -258,7 +282,8 @@ def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
                       WORKFLOW_SHUTDOWN_DIGESTS.get(path), INMARSAT_SESSION_DIGESTS.get(path),
                       SATELLITE_SESSION_DIGESTS.get(path), DRIVER_IO_ADMISSION_DIGESTS.get(path),
                       P25_OBSERVER_DIGESTS.get(path), P25_FOLLOW_LIFECYCLE_DIGESTS.get(path),
-                      P25_TRACE_CONTEXT_DIGESTS.get(path), P25_EMIT_GAP_DIGESTS.get(path))
+                      P25_TRACE_CONTEXT_DIGESTS.get(path), P25_EMIT_GAP_DIGESTS.get(path),
+                      P25_LOCKED_LATTICE_EMPTY_DIGESTS.get(path))
 
 
 # DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.
@@ -769,6 +794,10 @@ def main() -> int:
         if args.paths is None and path in P25_EMIT_GAP_DIGESTS:
             if infrastructure_text_allowed(path, emit_gap_before_text(args.base, path), git_file_text(args.head, path)):
                 print(f"P25 guard: accepted exact DEC-0201 emit-gap repair: {path}")
+                continue
+        if args.paths is None and path in P25_LOCKED_LATTICE_EMPTY_DIGESTS:
+            if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
+                print(f"P25 guard: accepted exact DEC-0203 locked-lattice empty-hop repair: {path}")
                 continue
         if args.paths is None and path in P25_FOLLOW_LIFECYCLE_DIGESTS:
             if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):

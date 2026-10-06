@@ -52,3 +52,46 @@ TEST_CASE("Realtime catch-up constants are not compiled back in", "[p25][voice-t
 #endif
     SUCCEED();
 }
+
+TEST_CASE("Locked-lattice first empty hop stays healthy 80/4", "[p25][voice-timing][dec0203]") {
+    REQUIRE(kP25LiveLockedLatticeEmptyEscalateStreak == 2);
+    REQUIRE(kP25LiveEyeLostReplayCandStreak == 1);
+    REQUIRE(kP25LiveHealthySustainBudgetMs == 80);
+    REQUIRE(kP25LiveHealthySustainCqpskCandidates == 4);
+
+    const P25Phase2LiveEyeSnapshot lockedEmpty{0, 0, 8, 8, 8};
+    const auto first = p25Phase2PlanLiveHotSearch(lockedEmpty, true, 0);
+    CHECK(first.eyeLost);
+    CHECK(first.lockedLatticeEmpty);
+    CHECK_FALSE(first.escalateReplayCands);
+    CHECK(first.eyeLostStreak == 1);
+    CHECK(first.budgetMs == kP25LiveHealthySustainBudgetMs);
+    CHECK(first.cqpskCandidates == kP25LiveHealthySustainCqpskCandidates);
+
+    const auto second = p25Phase2PlanLiveHotSearch(lockedEmpty, true, first.eyeLostStreak);
+    CHECK(second.lockedLatticeEmpty);
+    CHECK(second.escalateReplayCands);
+    CHECK(second.eyeLostStreak == 2);
+    CHECK(second.budgetMs == kP25LiveEyeLostReplayBudgetMs);
+    CHECK(second.cqpskCandidates == kP25ReplayHotCqpskCandidates);
+}
+
+TEST_CASE("True lost-eye still escalates on the first miss", "[p25][voice-timing][dec0203]") {
+    const P25Phase2LiveEyeSnapshot noStructure{0, 0, 0, 0, 0};
+    const auto plan = p25Phase2PlanLiveHotSearch(noStructure, true, 0);
+    CHECK(plan.eyeLost);
+    CHECK_FALSE(plan.lockedLatticeEmpty);
+    CHECK(plan.escalateReplayCands);
+    CHECK(plan.budgetMs == kP25LiveEyeLostReplayBudgetMs);
+    CHECK(plan.cqpskCandidates == kP25ReplayHotCqpskCandidates);
+}
+
+TEST_CASE("Healthy target eye stays on 80/4", "[p25][voice-timing][dec0203]") {
+    const P25Phase2LiveEyeSnapshot healthy{18, 14, 16, 13, 13};
+    const auto plan = p25Phase2PlanLiveHotSearch(healthy, true, 3);
+    CHECK_FALSE(plan.eyeLost);
+    CHECK_FALSE(plan.lockedLatticeEmpty);
+    CHECK(plan.eyeLostStreak == 0);
+    CHECK(plan.budgetMs == kP25LiveHealthySustainBudgetMs);
+    CHECK(plan.cqpskCandidates == kP25LiveHealthySustainCqpskCandidates);
+}

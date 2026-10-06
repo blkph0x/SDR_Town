@@ -113,6 +113,11 @@ inline constexpr int kP25LiveEyeLostReplayCandStreak = 1;
 // path (eye present); keep DEC-0041 eye-lost escalate width.
 inline constexpr int kP25LiveHealthySustainBudgetMs = 80;
 inline constexpr size_t kP25LiveHealthySustainCqpskCandidates = 4;
+// ISS-0080 / capture 20261006_093930: first empty hop with SF+mask still
+// locked is a companion/dup window, not a lost CQPSK eye. Keep healthy 80/4
+// so the next unique-speech hop is not delayed on cand=16/120. Second
+// consecutive locked-lattice empty still escalates (DEC-0039/0048 re-lock).
+inline constexpr int kP25LiveLockedLatticeEmptyEscalateStreak = 2;
 // DEC-0054 (081416 no-audio): cold first-eye must NOT forceCheap — re-arm a
 // generous full-annotate window. Sticky sustain may cheap-commit with hot budget.
 inline constexpr int kP25LiveColdCommitAllowanceMs = 200;
@@ -333,3 +338,30 @@ P25Phase2VoiceChunkPlan p25Phase2PlanVoiceDecodeChunk(
     bool firstColdEyeChunk,
     bool unacquiredAcquireWindow,
     bool decodeCursorAdvancedPastStart) noexcept;
+
+// Previous hop's live diag used to pick the next single-flight search caps.
+struct P25Phase2LiveEyeSnapshot {
+    long long targetVoiceCodewords = 0;
+    long long decodedFrames = 0;
+    long long phase2Bursts = 0;
+    long long phase2MaskedBursts = 0;
+    long long phase2SuperframeBursts = 0;
+};
+
+struct P25Phase2LiveHotSearchPlan {
+    int budgetMs = kP25LiveHealthySustainBudgetMs;
+    size_t cqpskCandidates = kP25LiveHealthySustainCqpskCandidates;
+    size_t syncHits = kP25VoiceWorkerHotMaxPhase2SyncHits;
+    size_t superframeLocks = kP25VoiceWorkerHotMaxPhase2SuperframeLocks;
+    bool eyeLost = false;
+    bool lockedLatticeEmpty = false;
+    bool escalateReplayCands = false;
+    int eyeLostStreak = 0;
+};
+
+// DEC-0203: classify healthy vs eye-lost vs locked-lattice empty without
+// changing hop geometry, slot, or security.
+P25Phase2LiveHotSearchPlan p25Phase2PlanLiveHotSearch(
+    const P25Phase2LiveEyeSnapshot& prev,
+    bool hadSuccessfulEmit,
+    int eyeLostStreak) noexcept;

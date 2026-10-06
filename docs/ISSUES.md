@@ -1,5 +1,48 @@
 # Issues (canonical)
 
+## ISS-0080 - v0.2.128 capture 093930 remaining holes are extract/PTT-edge, not cadence (2026-10-06, CLASSIFIED)
+
+Capture `20261006_093930_588` (CC 423.35 MHz, 364.72 s, v0.2.128, RTL
+2.048 Msps) was measured from WAV + p25_log + ring CSV + sdr_town.log +
+code, not from DEC-0202. IQ is gapless (CSV `gap_samples` sum=0/max=0,
+producer_dropped delta=0, no in-session overflow/`readStream -4`). Listen
+classifier: CLEAR, 88.90 s, active_ratio 0.781, 0 non-silent 20 ms repeats.
+Audio-open CADENCE n=88 mean duty 0.7577 (66≥0.65, 46≥0.80). Dominant hops
+1080×208+280 ms; waiting-fresh minFresh always 200 ms. `fed==emit` on all
+121 emit workers. 52 `wrongSlot` workers are all `gate=empty-audio`
+`speaker=0` (companion-slot rejects). TG12068 silent: ESS `enc`, follow
+returned.
+
+Ordered remainder (file-measured):
+
+1. PTT / retune first-eye: `post-arm-settle` (17 CADENCE windows) and cold
+   720 ms hops. WAV zeros at 17.32–17.64 s are seq=254–257 after a
+   single-RTL retune to 417.55 MHz (`p2mac=2/4`, `gaps=1`, then DEC-0052
+   budget trips). Not minFresh starvation.
+2. Mid-call RF/MAC lattice: 44 emit hops with `gaps=1`; example 09:45:14
+   duty 0.439 on `p2mac=8/11` then empty hops / worker-busy. 15 audio-open
+   windows are `drop=D`.
+3. One speech-embedded 20 ms digital-zero at WAV 40.7 s / seq=454:
+   `gaps=0` `fed=emit=8` `p2mac=4/5` — vocoder silence, not a missing VCW.
+4. Three `Phase 2 AMBE rejected` follow lines, all with imperfect MAC
+   (`2/4`, `3/6`, `5/9`) and `decoded=0` — eye-loss, not mass collapse.
+
+Audit tags that are not speaker bugs on this capture: `audio_output_underpush`
+is ordinal de-dupe (`p25Phase2SpeakerAudioForQueue`) into a ~72% full ring;
+`speaker_ring_starvation` is sparse-output AND underrun-climb (includes
+inter-PTT); `traffic_retune_stall` fires when capture ends still on traffic
+or same-RF follow; logscan `FEED_GATE` is 4 `dup_context_accounted` lines,
+not feed starve.
+
+Do not raise minFresh, thin overlap, raise the 80 ms healthy-sustain abort, invent PLC,
+or open encrypted audio.
+
+DEC-0203 repairs the measured worker delay: first post-emit empty hop with
+SF+mask still locked stays on healthy 80/4 instead of cand=16/120. Lattice
+`gaps=1` / vocoder-zero / PTT-edge remain. Implemented in v0.2.129; Catch
+planner cases and 081738 file voicetest non-regress. Live re-prove of the
+093930 0.439 dip is still required before closing this remainder.
+
 ## ISS-0079 - v0.2.127 residual active-clear speaker gaps (2026-10-06, LIVE PROVED)
 
 Capture `20261006_081738_771` restores clear audio and has gapless IQ, but the

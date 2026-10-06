@@ -1,5 +1,20 @@
 # Task list (canonical)
 
+T-0115 | in_progress | P25 locked-lattice empty-hop search (DEC-0203 / ISS-0080) |
+Capture 093930: mid-call duty 0.439 sits on empty hops that still have SF+mask
+locked; DEC-0048 then spends cand=16/120 on the next unique-speech window.
+Keep healthy 80/4 on the first locked-lattice empty; escalate on the second
+or when structure is gone. No minFresh/PLC/slot/security change. Local
+Release + Catch 39/7 + 081738 TG10120 duty=0.71/710 AMBE hold. Public
+v0.2.129-experimental and live 093930-class re-prove still required.
+
+T-0114 | classified_no_code | P25 093930 remainder (ISS-0080) |
+v0.2.128 capture 093930 at 423.35 MHz: gapless IQ, CLEAR 88.9 s WAV, audio-open
+duty 0.758, hops 1080×208+280. Remaining holes are PTT/retune first-eye,
+RF/MAC lattice (`gaps=1` / imperfect MAC), one vocoder-zero at seq=454, and
+encrypted TG12068 mute. Audit underpush is ordinal de-dupe. No hop/PLC/security
+change without a non-regressing saved-IQ sweep.
+
 T-0113 | done | P25 residual active-clear gap repair (DEC-0201/0202) |
 Capture 081738 on v0.2.127: gapless IQ and clear audio restored, but active
 epochs duty 0.582/0.633 on dominant 160+280 windows. Six-call replay sweep

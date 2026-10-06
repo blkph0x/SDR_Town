@@ -35,6 +35,15 @@ def main() -> int:
     if "kP25LiveHealthySustainCqpskCandidates = 4" not in text:
         print("FAIL: DEC-0042 healthy sustain cand=4 constant missing")
         return 1
+    if "kP25LiveLockedLatticeEmptyEscalateStreak = 2" not in text:
+        print("FAIL: DEC-0203 locked-lattice empty escalate streak must be 2")
+        return 1
+    if "p25Phase2PlanLiveHotSearch" not in text:
+        print("FAIL: DEC-0203 live hot-search planner missing")
+        return 1
+    if "lockedLatticeEmpty" not in text:
+        print("FAIL: DEC-0203 locked-lattice empty classification missing")
+        return 1
     m = re.search(
         r"else if \(hotPhase2TrafficJob\) \{(.*?)rx\.p25VoiceLiveDecoder\.setCqpskDiscreteFrozen",
         text,
@@ -56,43 +65,42 @@ def main() -> int:
     if "DEC-0042" not in block:
         print("FAIL: DEC-0042 healthy sustain path missing")
         return 1
-    if "noTargetEye" not in block or "eyeLost" not in block:
-        print("FAIL: noTargetEye / eyeLost branch missing")
-        return 1
     if "hadSuccessfulEmit" not in block:
         print("FAIL: post-emit no-target must consider hadSuccessfulEmit")
         return 1
     if "postEmitEyeLostStreak" not in block:
         print("FAIL: postEmitEyeLostStreak debounce missing")
         return 1
-    if "escalateReplayCands" not in block:
+    if "p25Phase2PlanLiveHotSearch" not in block:
+        print("FAIL: hot path must call p25Phase2PlanLiveHotSearch")
+        return 1
+    if "escalateReplayCands" not in text:
         print("FAIL: escalateReplayCands gate missing")
         return 1
-    if "kP25ReplayHotCqpskCandidates" not in block:
+    if "noTargetEye" not in text or "eyeLost" not in text:
+        print("FAIL: noTargetEye / eyeLost branch missing")
+        return 1
+    if "kP25ReplayHotCqpskCandidates" not in text:
         print("FAIL: eye-lost path does not use kP25ReplayHotCqpskCandidates")
         return 1
-    if "kP25LiveEyeLostReplayBudgetMs" not in block:
+    if "kP25LiveEyeLostReplayBudgetMs" not in text:
         print("FAIL: eye-lost path must use kP25LiveEyeLostReplayBudgetMs (not 240)")
         return 1
     if "hotBudgetMs = kP25ReplayHotBudgetMs" in block:
         print("FAIL: live eye-lost must not assign kP25ReplayHotBudgetMs (240)")
         return 1
-    if "kP25LiveHealthySustainBudgetMs" not in block:
+    if "kP25LiveHealthySustainBudgetMs" not in text:
         print("FAIL: healthy path must use kP25LiveHealthySustainBudgetMs")
         return 1
-    if "kP25LiveHealthySustainCqpskCandidates" not in block:
+    if "kP25LiveHealthySustainCqpskCandidates" not in text:
         print("FAIL: healthy path must use kP25LiveHealthySustainCqpskCandidates")
-        return 1
-    # With streak=1, first eye-lost hop escalates to cand=16; cand=8 branch remains
-    # as the non-escalate fallback if streak logic changes.
-    if "kP25ReplayHotCqpskCandidates" not in block:
-        print("FAIL: eye-lost escalate must still reference kP25ReplayHotCqpskCandidates")
         return 1
     # DEC-0046: do not clamp decodeWallMs to a tight healthy/eye-lost wall.
     if "decodeWallMs = std::min" in block:
         print("FAIL: DEC-0046 forbids clamping decodeWallMs inside healthy/eye-lost path")
         return 1
-    print("PASS: live healthy sustain cand=4/80; eye-lost streak>=1->cand=16/120; no wall clamp")
+    print("PASS: live healthy 80/4; locked-lattice first empty stays 80/4; "
+          "true eye-lost streak>=1->cand=16/120; lattice empty streak>=2 escalates; no wall clamp")
     return 0
 
 

@@ -1,5 +1,27 @@
 # Decisions
 
+## DEC-0203 - Keep healthy 80/4 on first locked-lattice empty hop (2026-10-06)
+
+Capture `20261006_093930_588` on v0.2.128 is RF-gapless and listen=CLEAR, but
+mid-call CADENCE still dips (example 09:45:14 duty 0.439, seq 1061→1064). The
+empty hops between those emits still have SF+mask locked (`p2bursts=8`,
+`p2sf=8`, `p2mask=8`, `p2mac=4/4`, `targetVcw=0`). DEC-0039/0048 treats
+post-emit `targetVcw=0` as eye-lost and DEC-0048 escalates the **next** hop to
+cand=16 / 120 ms. That hop is often the next unique-speech window, so empty
+companion/dup slices occupy the single-flight worker longer than a healthy
+emit (80/4).
+
+True lost-eye still needs immediate cand=16 (DEC-0048 / capture `041612`
+permanent `no-vcw`). Two consecutive locked-lattice empties still escalate so
+DEC-0039 companion-burst re-lock is preserved.
+
+Decision: extract `p25Phase2PlanLiveHotSearch`. When SF+mask are still held,
+the first post-emit empty hop stays on healthy `kP25LiveHealthySustainBudgetMs`
+/ cand=4. Escalate cand=16/120 only on streak ≥
+`kP25LiveLockedLatticeEmptyEscalateStreak` (2) for locked lattice, or on the
+first miss when structure is gone. Do not raise minFresh, thin 280 ms overlap,
+raise the 80 ms healthy abort, invent PLC, or soften slot/security.
+
 ## DEC-0202 - Do not retune cadence or invent PLC for residual 20 ms lattice gaps (2026-10-06)
 
 Live capture `20261006_090937_216` on v0.2.128 (DEC-0201) is RF-gapless

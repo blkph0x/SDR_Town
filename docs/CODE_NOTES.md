@@ -1,5 +1,14 @@
 # Code notes (tree map)
 
+DEC-0203: `p25Phase2PlanLiveHotSearch` in `P25VoiceTiming` classifies the next
+live hot search. `MainWindowP25Voice.cpp` applies the plan; first locked-lattice
+empty hop stays 80/4, true lost-eye still 16/120 on streak 1.
+
+ISS-0080 / capture 093930: no timing/PLC/security change. Remaining speaker
+holes are PTT/retune first-eye, RF/MAC lattice (`gaps=1`), and one vocoder
+zero (seq=454). `p25Phase2SpeakerAudioForQueue` ordinal skip explains audit
+`audio_output_underpush` when `decoded` > `pushed` at ~72% ring fill.
+
 DEC-0202: no timing/PLC change after live 090937. Residual two 20 ms zeros
 are `gaps=1` lattice misses on hops that already emitted `fed=emitPcm`.
 

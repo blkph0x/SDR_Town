@@ -24,13 +24,13 @@ checks = {
         if "speakerLiveHot" in region
         else False
     ),
-    "speakerLiveHot keeps hot cand=8 on first eye-lost miss": (
+    "speakerLiveHot uses DEC-0203 live hot-search planner": (
         "speakerLiveHot" in region
-        and "hotCands = kP25VoiceWorkerHotMaxCqpskCandidates" in speaker_hot
+        and "p25Phase2PlanLiveHotSearch" in speaker_hot
     ),
     "DEC-0042 healthy sustain caps present": (
-        "kP25LiveHealthySustainCqpskCandidates" in speaker_hot
-        and "kP25LiveHealthySustainBudgetMs" in speaker_hot
+        "kP25LiveHealthySustainCqpskCandidates" in main
+        and "kP25LiveHealthySustainBudgetMs" in main
     ),
     "soft mask rehunt still present": (
         "p25Phase2StructureNoTargetVoiceWindows" in main

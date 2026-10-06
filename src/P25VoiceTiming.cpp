@@ -216,3 +216,55 @@ P25Phase2VoiceChunkPlan p25Phase2PlanVoiceDecodeChunk(
     plan.minFreshFloorSamples = 16384.0;
     return plan;
 }
+
+P25Phase2LiveHotSearchPlan p25Phase2PlanLiveHotSearch(
+    const P25Phase2LiveEyeSnapshot& prev,
+    bool hadSuccessfulEmit,
+    int eyeLostStreak) noexcept
+{
+    P25Phase2LiveHotSearchPlan plan;
+    const bool noTargetEye =
+        prev.targetVoiceCodewords == 0 && prev.decodedFrames == 0;
+    const bool noStructureEye =
+        prev.phase2Bursts == 0 && prev.phase2MaskedBursts == 0;
+    const bool latticeHeld =
+        prev.phase2SuperframeBursts > 0 && prev.phase2MaskedBursts > 0;
+    // DEC-0039: after the call has spoken, no-target counts as eye-lost even
+    // when companion/structure bursts remain.
+    plan.eyeLost = noTargetEye && (noStructureEye || hadSuccessfulEmit);
+    // ISS-0080 / 093930: SF+mask still held means this empty slice is not a
+    // lost CQPSK eye. Do not spend cand=16/120 on the first such miss.
+    plan.lockedLatticeEmpty = plan.eyeLost && !noStructureEye && latticeHeld;
+    if (plan.eyeLost) {
+        plan.eyeLostStreak = std::min(std::max(eyeLostStreak, 0) + 1, 64);
+    } else {
+        plan.eyeLostStreak = 0;
+    }
+    const int escalateNeed = plan.lockedLatticeEmpty
+        ? kP25LiveLockedLatticeEmptyEscalateStreak
+        : kP25LiveEyeLostReplayCandStreak;
+    plan.escalateReplayCands = plan.eyeLost && plan.eyeLostStreak >= escalateNeed;
+
+    if (plan.escalateReplayCands) {
+        plan.budgetMs = kP25LiveEyeLostReplayBudgetMs;
+        plan.cqpskCandidates = kP25ReplayHotCqpskCandidates;
+        plan.syncHits = kP25ReplayHotSyncHits;
+        plan.superframeLocks = kP25ReplayHotSuperframeLocks;
+    } else if (plan.lockedLatticeEmpty) {
+        plan.budgetMs = kP25LiveHealthySustainBudgetMs;
+        plan.cqpskCandidates = kP25LiveHealthySustainCqpskCandidates;
+        plan.syncHits = kP25VoiceWorkerHotMaxPhase2SyncHits;
+        plan.superframeLocks = kP25VoiceWorkerHotMaxPhase2SuperframeLocks;
+    } else if (plan.eyeLost) {
+        plan.budgetMs = kP25VoiceWorkerHotRealtimeBudgetMs;
+        plan.cqpskCandidates = kP25VoiceWorkerHotMaxCqpskCandidates;
+        plan.syncHits = kP25VoiceWorkerHotMaxPhase2SyncHits;
+        plan.superframeLocks = kP25VoiceWorkerHotMaxPhase2SuperframeLocks;
+    } else {
+        plan.budgetMs = kP25LiveHealthySustainBudgetMs;
+        plan.cqpskCandidates = kP25LiveHealthySustainCqpskCandidates;
+        plan.syncHits = kP25VoiceWorkerHotMaxPhase2SyncHits;
+        plan.superframeLocks = kP25VoiceWorkerHotMaxPhase2SuperframeLocks;
+    }
+    return plan;
+}

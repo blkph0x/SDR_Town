@@ -1,5 +1,30 @@
 # Build notes
 
+## 2026-10-06 - v0.2.129 locked-lattice empty-hop search, DEC-0203
+
+Intent: first post-emit empty hop with SF+mask still locked stays healthy 80/4
+(capture 093930 mid-call 0.439 / seq 1061→1064). True lost-eye still cand=16/120
+on streak 1. No hop/PLC/slot/security change.
+
+Local Release `SDR_Town` + `sdr_town_tests` build PASS. Catch `[p25][voice-timing]`
+39 assertions / 7 cases PASS. Full `sdr_town_tests` 528 passed / 2 skipped /
+241417 assertions. Live-eyelost and no-post-emit-cold-escalate verifiers PASS.
+P25 guard self-test PASS (DEC-0203 digest pair). Full native CTest 17/17 PASS
+(98.38 s). File voicetest of 081738 TG10120
+slot 1 skip=39700 20 s hopms=200: `PASS_CONTINUOUS_AUDIO` duty=0.71, 710/710 AMBE,
+speakerDrop=0 (matches 0.2.128). Wrong-slot slot=0 and explicit `enc` both
+`FAIL_NO_AUDIO` speakerSamples=0. Unrelated Satcom/SSTV dirty work remains
+uncommitted. Live re-prove of the 093930-class mid-call dip is still required;
+file voicetest does not exercise `p25Phase2PlanLiveHotSearch`.
+
+## 2026-10-06 - v0.2.128 capture 093930 forensic, ISS-0080
+
+Local v0.2.128 (`Starting SDR Town v0.2.128` at 20:39:14) ran capture
+`20261006_093930_588` on CC 423.35 MHz. Summary `ok_gapless`; ring CSV
+gap_sum=0; sdr_town.log has no overflow/`readStream -4` in 20:39–20:45.
+Audio-open duty mean 0.7577; listen CLEAR 88.90 s; hops 1080×208+280.
+Remaining holes classified in ISS-0080. No P25 code change, no version bump.
+
 ## 2026-10-06 - v0.2.128 live forensic, DEC-0202
 
 Local v0.2.128 ran capture `20261006_090937_216` (started 20:09:18 local /

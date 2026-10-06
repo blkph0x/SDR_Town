@@ -1,5 +1,34 @@
 # Development log
 
+## 2026-10-06 - Locked-lattice empty-hop search, DEC-0203
+
+ISS-0080 capture 093930 proved mid-call 0.439 windows are empty hops with
+SF+mask still locked, after which DEC-0048 escalated the next hop to
+cand=16/120. `p25Phase2PlanLiveHotSearch` keeps the first such miss on
+healthy 80/4 and still escalates on the second miss or when structure is
+gone. Hop geometry, slot, security, and PLC unchanged. Local Release gates
+and 081738 TG10120 `PASS_CONTINUOUS_AUDIO` duty=0.71 / 710/710 AMBE hold;
+wrong-slot and encrypted replays stay muted. Live 093930-class dip re-prove
+is still required.
+
+## 2026-10-06 - Live forensic of capture 093930 (v0.2.128, 423.35 MHz)
+
+Re-measured from files, not from DEC-0202. Capture `20261006_093930_588`
+is 364.72 s at 2.048 Msps, SNR 18.72 dB, AFC 530 Hz, v0.2.128 started
+20:39:14. Ring CSV `gap_samples` sum=0 / max=0, producer_dropped=0, no
+in-session `readStream -4`. Live WAV 88.90 s, listen=CLEAR, active_ratio
+0.781, longest run 8.84 s, zero non-silent 20 ms repeats. Audio-open CADENCE
+mean duty 0.7577 (66/88 windows ≥0.65). Dominant hops 1080×208+280 ms.
+Longest clear epochs: TG30302 16.16 s mean 0.864, TG10120 8.36 s mean 0.897,
+TG30302 7.16 s mean 0.971. TG12068 silent because ESS proved `enc` and
+follow returned. Strict both-neighbor speech-embedded 20 ms zero: one at
+WAV 40.7 s / seq=454 `gaps=0` `fed=emit=8` (vocoder silence). Zeros at
+17.32–17.64 s are first-eye after a single-RTL retune (seq=254–257).
+Mid-call duty 0.439 at 09:45:14 sits on `p2mac=8/11` then empty hops /
+worker-busy, not minFresh starvation. `fed==emit` on all 121 emit workers.
+Audit `audio_output_underpush` is speaker-ordinal de-dupe into a ~72% ring.
+No P25 code change.
+
 ## 2026-10-06 - Live forensic of v0.2.128, DEC-0202
 
 Capture `20261006_090937_216` (v0.2.128, 278.624 s, 2.048 Msps, SNR 14.2 dB)

@@ -3,12 +3,10 @@ SDR TOWN — SOURCE OF TRUTH (SoT)
 ================================================================================
 VERSION: 1.0.0
 PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
-CURRENT VERSION IN TREE: 0.2.128 (P25 residual active-clear cadence repair)
-CURRENT WORK: DEC-0201 200 ms active-clear minFresh live-proved on capture
-              090937 (duty 0.88–1.07, listen=CLEAR, gapless IQ). DEC-0202:
-              do not raise minFresh or invent PLC for two leftover 20 ms
-              lattice `gaps=1` frames. Public v0.2.128-experimental verified
-              (Actions 37438167836).
+CURRENT VERSION IN TREE: 0.2.129 (P25 locked-lattice empty-hop search repair)
+CURRENT WORK: DEC-0203: first locked-lattice empty hop stays healthy 80/4 so
+              mid-call unique speech is not delayed on cand=16/120. True
+              lost-eye still escalates immediately. No hop/PLC/security change.
 PUBLIC BASELINE: v0.2.123-experimental accepted, Actions37273822180; zero package
                  blockers (commit1b035aa acceptance comment203450320).
 LATEST PACKAGE: DEC-0196 replaces four permanent blocker strings with finite,

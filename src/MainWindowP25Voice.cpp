@@ -421,49 +421,30 @@ void MainWindow::startP25VoiceWorker()
                                     // duty 0.83. Shrink only healthy sustain
                                     // search — do not touch eye-lost escalate,
                                     // hop geometry, or DEC-0012.
-                                    const auto& liveDiag = rx.p25VoiceDiagnostics;
-                                    const bool noTargetEye =
-                                        liveDiag.phase2TargetVoiceCodewords == 0 &&
-                                        liveDiag.decodedFrames == 0;
-                                    const bool noStructureEye =
-                                        liveDiag.phase2Bursts == 0 &&
-                                        liveDiag.phase2MaskedBursts == 0;
-                                    const bool eyeLost =
-                                        noTargetEye &&
-                                        (noStructureEye ||
-                                         rx.p25SessionState.sustain.hadSuccessfulEmit);
+                                    // DEC-0046: do not clamp decodeWallMs here.
+                                    // Search caps: kP25LiveHealthySustainBudgetMs /
+                                    // kP25LiveHealthySustainCqpskCandidates via
+                                    // p25Phase2PlanLiveHotSearch (DEC-0042/0203).
+                                    // Never assign the 240 ms replay budget.
+                                    // DEC-0035/0039/0041/0042/0048 live search
+                                    // caps, plus DEC-0203 locked-lattice empty.
                                     auto& sustainMut = rx.p25SessionState.sustain;
-                                    if (eyeLost) {
-                                        sustainMut.postEmitEyeLostStreak =
-                                            std::min(sustainMut.postEmitEyeLostStreak + 1, 64);
-                                    } else {
-                                        sustainMut.postEmitEyeLostStreak = 0;
-                                    }
-                                    const bool escalateReplayCands =
-                                        eyeLost &&
-                                        sustainMut.postEmitEyeLostStreak >=
-                                            kP25LiveEyeLostReplayCandStreak;
-                                    if (escalateReplayCands) {
-                                        hotBudgetMs = kP25LiveEyeLostReplayBudgetMs;
-                                        hotCands = kP25ReplayHotCqpskCandidates;
-                                        hotSyncHits = kP25ReplayHotSyncHits;
-                                        hotSfLocks = kP25ReplayHotSuperframeLocks;
-                                    } else if (eyeLost) {
-                                        // First miss: DEC-0041 cheap challenge.
-                                        hotBudgetMs = kP25VoiceWorkerHotRealtimeBudgetMs;
-                                        hotCands = kP25VoiceWorkerHotMaxCqpskCandidates;
-                                        hotSyncHits = kP25VoiceWorkerHotMaxPhase2SyncHits;
-                                        hotSfLocks = kP25VoiceWorkerHotMaxPhase2SuperframeLocks;
-                                    } else {
-                                        // DEC-0042 healthy sustain search only.
-                                        // DEC-0045 tried wall=105 here; rejected
-                                        // DEC-0046 — post-hoc wall stamps wiped
-                                        // pending on empty eyes and killed audio.
-                                        hotBudgetMs = kP25LiveHealthySustainBudgetMs;
-                                        hotCands = kP25LiveHealthySustainCqpskCandidates;
-                                        hotSyncHits = kP25VoiceWorkerHotMaxPhase2SyncHits;
-                                        hotSfLocks = kP25VoiceWorkerHotMaxPhase2SuperframeLocks;
-                                    }
+                                    const P25Phase2LiveEyeSnapshot prevEye{
+                                        rx.p25VoiceDiagnostics.phase2TargetVoiceCodewords,
+                                        rx.p25VoiceDiagnostics.decodedFrames,
+                                        rx.p25VoiceDiagnostics.phase2Bursts,
+                                        rx.p25VoiceDiagnostics.phase2MaskedBursts,
+                                        rx.p25VoiceDiagnostics.phase2SuperframeBursts,
+                                    };
+                                    const auto search = p25Phase2PlanLiveHotSearch(
+                                        prevEye,
+                                        rx.p25SessionState.sustain.hadSuccessfulEmit,
+                                        sustainMut.postEmitEyeLostStreak);
+                                    sustainMut.postEmitEyeLostStreak = search.eyeLostStreak;
+                                    hotBudgetMs = search.budgetMs;
+                                    hotCands = search.cqpskCandidates;
+                                    hotSyncHits = search.syncHits;
+                                    hotSfLocks = search.superframeLocks;
                                 }
                                 rx.p25VoiceLiveDecoder.setRealtimeDecodeBudgetMs(
                                     std::min(priorDecodeBudgetMs, hotBudgetMs));
