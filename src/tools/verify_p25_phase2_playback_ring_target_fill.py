@@ -52,7 +52,8 @@ checks = {
     'phase2 bridge survives empty worker holes': 'consecutiveEmptyFeedWindows >= 48' in main,
     'phase2 mid-call hot prime': 'midCallRingRestart' in main and '0.240' in live_push[:3200],
     'startup prime is not reapplied to an active stream':
-        'p25SpeakerNeedsStartupPrime(queuedNow, pending.size(), minPrimeSamples)' in live_push,
+        ('p25SpeakerNeedsStartupPrime(queuedNow, pending.size(), minPrimeSamples)' in live_push
+         or 'p25SpeakerNeedsStartupPrime(queuedNow, pending.size(), minPrimeSamples, endOfStream)' in live_push),
     'phase2 bridge bounded to active clear tail': 'p25Phase2PlayoutBridgeAllowed' in main and 'sinceLastEmitMs > 4500' in main,
     'top-up never inserts synthetic silence behind speech': (
         'pushP25Phase2PlayoutBridge(' not in topup_helper

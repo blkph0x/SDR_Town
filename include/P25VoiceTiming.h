@@ -215,6 +215,14 @@ inline constexpr double kP25Phase2VoiceDecodeBacklogCatchUpOverlapSeconds = 0.28
 inline constexpr double kP25Phase2VoiceDecodeSpeakerBacklogCatchUpChunkSeconds = 0.240;
 inline constexpr double kP25Phase2VoiceDecodeSpeakerBacklogCatchUpMinFreshSeconds = 0.160;
 inline constexpr double kP25Phase2VoiceDecodeSpeakerBacklogCatchUpOverlapSeconds = 0.280;
+// Live audit 20261006: once a clear speaker call is established, the 240/160/280
+// catch-up profile advanced less fresh RF than its measured ~166 ms median worker
+// time.  That made the single-flight worker permanently fall behind.  Advance one
+// complete 280 ms lattice segment while keeping the same 280 ms context.  This is
+// only selected for an already-active speaker backlog; cold acquisition and normal
+// sustain retain their existing geometry and single-flight state ownership.
+inline constexpr double kP25Phase2VoiceDecodeSpeakerRealtimeCatchUpChunkSeconds = 0.360;
+inline constexpr double kP25Phase2VoiceDecodeSpeakerRealtimeCatchUpMinFreshSeconds = 0.280;
 inline constexpr double kP25Phase2VoicePullWindowSeconds = 0.100;
 inline constexpr int kP25Phase2VoiceDecodeCadenceMs = 10;
 inline constexpr int kP25Phase2VoiceDecodeColdCadenceMs = 8;

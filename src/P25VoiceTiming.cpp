@@ -131,11 +131,19 @@ P25Phase2VoiceChunkPlan p25Phase2PlanVoiceDecodeChunk(
     // (40 ms WAV islands / bridge top-ups). DEC-0061: 240+280 (see header).
     if (speakerSustainDecode ||
         (activeSpeakerClearPath && !wideReacquireWindow &&
-         !maskEpochRepairWindow && !unacquiredAcquireWindow && !coldEye)) {
+        !maskEpochRepairWindow && !unacquiredAcquireWindow && !coldEye)) {
         if (backlogCatchUp) {
-            plan.maxChunkSeconds = kP25Phase2VoiceDecodeSpeakerBacklogCatchUpChunkSeconds;
+            // Keep the historical profile for a speaker-sustain job that has
+            // not been classified as an active clear speaker path.  The live
+            // clear path gets the measured-throughput profile; diagnostics and
+            // non-live callers retain the established 240/160/280 geometry.
+            plan.maxChunkSeconds = activeSpeakerClearPath
+                ? kP25Phase2VoiceDecodeSpeakerRealtimeCatchUpChunkSeconds
+                : kP25Phase2VoiceDecodeSpeakerBacklogCatchUpChunkSeconds;
             plan.overlapSeconds = kP25Phase2VoiceDecodeSpeakerBacklogCatchUpOverlapSeconds;
-            plan.minFreshSeconds = kP25Phase2VoiceDecodeSpeakerBacklogCatchUpMinFreshSeconds;
+            plan.minFreshSeconds = activeSpeakerClearPath
+                ? kP25Phase2VoiceDecodeSpeakerRealtimeCatchUpMinFreshSeconds
+                : kP25Phase2VoiceDecodeSpeakerBacklogCatchUpMinFreshSeconds;
             plan.minFreshFloorSamples = 8192.0;
             return plan;
         }

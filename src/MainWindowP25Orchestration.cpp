@@ -776,8 +776,10 @@ void MainWindow::startP25LiveDecodePipeline()
                                 phase2SessionHadBurstEye;
                             if (!p25VoiceWorkerCanAcceptJobForDepth(phase2VoiceQueueSustainHint)) {
                                 const auto workerState = p25VoiceWorkerQueueSnapshot();
+                                const size_t workerBacklogSamples =
+                                    p25Phase2UndecodedBacklogSamples(rolling);
                                 logP25VoiceScheduler("worker-busy",
-                                    QString("pending=%1 pendingJobs=%2 busy=%3 stopping=%4 thread=%5 qDrop=%6 rDrop=%7 publish=%8 completed=%9 rolling=%10 tg=%11 target=%12MHz.")
+                                    QString("pending=%1 pendingJobs=%2 busy=%3 stopping=%4 thread=%5 qDrop=%6 rDrop=%7 publish=%8 completed=%9 rolling=%10 undecoded=%11 sustain=%12 tg=%13 target=%14MHz.")
                                         .arg(workerState.pending ? "yes" : "no")
                                         .arg(static_cast<qulonglong>(workerState.pendingJobs))
                                         .arg(workerState.busy ? "yes" : "no")
@@ -788,6 +790,8 @@ void MainWindow::startP25LiveDecodePipeline()
                                         .arg(static_cast<qulonglong>(workerState.pendingPublishResults))
                                         .arg(static_cast<qulonglong>(workerState.completedResults))
                                         .arg(static_cast<qulonglong>(rolling.samples.size()))
+                                        .arg(static_cast<qulonglong>(workerBacklogSamples))
+                                        .arg(phase2VoiceQueueSustainHint ? "yes" : "no")
                                         .arg(monP25VoiceTalkgroupId)
                                         .arg(demodFreq / 1e6, 0, 'f', 5),
                                     1000);
