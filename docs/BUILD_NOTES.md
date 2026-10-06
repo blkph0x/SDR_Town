@@ -1,5 +1,24 @@
 # Build notes
 
+## 2026-10-06 - v0.2.128 live forensic, DEC-0202
+
+Local v0.2.128 ran capture `20261006_090937_216` (started 20:09:18 local /
+09:09:37Z). Summary health `ok_gapless`; `sdr_town.log` has no overflow or
+`readStream -4` between 20:09:18 and 20:14:20. CADENCE audio-open mean duty
+0.6895; longest TG10327 epoch 10 windows mean 0.922 min 0.716 all `drop=ok`.
+Worker submits: 849×208+280, 31×224+280, 5×240+280, 18×720 cold. Emit DSP
+p50 89.6 ms / p90 197 ms. WAV: 2504 frames, listen CLEAR, 0 non-silent
+adjacent/lag repeats, 2 exact-zero 20 ms frames inside speech both with
+`gaps=1` and ringFill 49%. No P25 code change.
+
+Public release: https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.128-experimental
+(pre-release, not draft). Actions
+https://github.com/blkph0x/SDR_Town/actions/runs/37438167836 success for
+`408b1a770bcec3a95d89f3145377515848b033ea`. Downloaded
+`SDR_Town-0.2.128-experimental-win64.zip` SHA256
+`c35ebcb404e8aa9bb1c89dae43197cb7459cd4dda955dc94821a39dcf6f60953` matches
+sidecar. Extracted `SDR_Town.exe` embeds `0.2.128`; CLI `help` smoke PASS.
+
 ## 2026-10-06 - Active-clear 200 ms cadence qualification, DEC-0201
 
 Version 0.2.128. Evidence capture `20261006_081738_771` was made by v0.2.127:

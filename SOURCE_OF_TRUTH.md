@@ -4,11 +4,11 @@ SDR TOWN — SOURCE OF TRUTH (SoT)
 VERSION: 1.0.0
 PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
 CURRENT VERSION IN TREE: 0.2.128 (P25 residual active-clear cadence repair)
-CURRENT WORK: DEC-0201 raises only active-clear backlog minFresh from 160 to
-              measured 200 ms after gapless capture 081738 and a six-call
-              160/180/200/220/240 same-IQ sweep. 240 ms max / 280 ms overlap,
-              non-active 160 ms, slot/security/quality gates and jitter policy
-              stay unchanged. Live multi-call acceptance remains required.
+CURRENT WORK: DEC-0201 200 ms active-clear minFresh live-proved on capture
+              090937 (duty 0.88–1.07, listen=CLEAR, gapless IQ). DEC-0202:
+              do not raise minFresh or invent PLC for two leftover 20 ms
+              lattice `gaps=1` frames. Public v0.2.128-experimental verified
+              (Actions 37438167836).
 PUBLIC BASELINE: v0.2.123-experimental accepted, Actions37273822180; zero package
                  blockers (commit1b035aa acceptance comment203450320).
 LATEST PACKAGE: DEC-0196 replaces four permanent blocker strings with finite,

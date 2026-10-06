@@ -1,5 +1,8 @@
 # Code notes (tree map)
 
+DEC-0202: no timing/PLC change after live 090937. Residual two 20 ms zeros
+are `gaps=1` lattice misses on hops that already emitted `fed=emitPcm`.
+
 DEC-0201: `P25VoiceTiming` keeps the DEC-0200 240 ms maximum / 280 ms
 overlap, adds an active-clear-only 200 ms minFresh, and preserves the
 non-active 160 ms minimum. `tests/test_p25_voice_timing.cpp` compiles both

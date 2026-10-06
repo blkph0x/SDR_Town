@@ -1,5 +1,30 @@
 # Decisions
 
+## DEC-0202 - Do not retune cadence or invent PLC for residual 20 ms lattice gaps (2026-10-06)
+
+Live capture `20261006_090937_216` on v0.2.128 (DEC-0201) is RF-gapless
+(`ok_gapless`, zero overruns/resets, no `readStream -4` in-session) at
+2.048 Msps for 278.624 s. Dominant hops are 208 ms fresh + 280 ms context
+(849/903 submits), matching the 200 ms active-clear minimum. Longest
+clear epochs run CADENCE duty 0.88–1.07 (10-window TG10327 mean 0.922, all
+`drop=ok`); first TG10327 island is 0.88–1.07. Listen classifier labels
+the 50.08 s live speaker WAV **CLEAR**. Mixed-slot/unsafe output, `seqDrop`,
+queue/result/producer drops, and non-silent 20 ms repeats are all zero.
+`wrongSlot` counts are companion-slot rejects (`targetVcw=0`, `gate=empty-audio`).
+
+The only remaining digital speaker holes are two exact-zero 20 ms frames in
+50.08 s, mapped to emit hops `seq=471` TG10327 and `seq=489` TG10329. Both
+have `gaps=1`, `fed=emitPcm`, ringFill ≈49%, and imperfect MAC (`p2mac=4/6`
+and `3/4`). They are bucket-A lattice misses, not cadence starvation. Raising
+active minFresh to 220/240 ms already regressed a TG30302 interval on the
+081738 sweep (DEC-0201). Inventing PLC or softening slot/security gates is
+forbidden. Short first-eye PTTs still show acquire `drop=A/D`; that is not
+the 160 ms residual D that DEC-0201 closed.
+
+Decision: keep 240/200/280 on the active-clear path. Do not raise minFresh,
+thin overlap, raise the 80 ms healthy-sustain abort, or synthesize missing
+AMBE. Treat the two 20 ms zeros as RF/lattice remainder, not a new hop bug.
+
 ## DEC-0201 - Require 200 ms fresh IQ for active-clear backlog catch-up (2026-10-06)
 
 Capture `20261006_081738_771` on v0.2.127 is RF-gapless at 2.048 Msps

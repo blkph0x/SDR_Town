@@ -1,5 +1,14 @@
 # Development log
 
+## 2026-10-06 - Live forensic of v0.2.128, DEC-0202
+
+Capture `20261006_090937_216` (v0.2.128, 278.624 s, 2.048 Msps, SNR 14.2 dB)
+is `ok_gapless` with zero in-session Soapy overflow. Live speaker WAV is
+50.08 s, listen=CLEAR, no non-silent 20 ms repeats. Long clear epochs duty
+0.88–1.07 versus 0.58/0.63 on 081738. Dominant hops 208+280 ms (200 ms
+minFresh). The only exact-zero speaker frames are two 20 ms lattice `gaps=1`
+hops (TG10327 seq=471, TG10329 seq=489). Do not raise minFresh or invent PLC.
+
 ## 2026-10-06 - Residual active-clear cadence repair, DEC-0201
 
 v0.2.127 capture `20261006_081738_771` restored clear audio with gapless IQ,

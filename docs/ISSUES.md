@@ -1,6 +1,6 @@
 # Issues (canonical)
 
-## ISS-0079 - v0.2.127 residual active-clear speaker gaps (2026-10-06, LOCAL REPAIR / PENDING LIVE)
+## ISS-0079 - v0.2.127 residual active-clear speaker gaps (2026-10-06, LIVE PROVED)
 
 Capture `20261006_081738_771` restores clear audio and has gapless IQ, but the
 two long clear epochs have live duties 0.582/0.633 with ring underrun climbs.
@@ -15,7 +15,13 @@ speaker drops 3 -> 0). A 240 ms minimum is rejected because one interval loses
 near-adjacent 20 ms repeat, no lag 2-5 exact repeat, no codec `R`, `seqDrop=0`.
 Apply only the active-clear 200 ms minimum and require a new live capture.
 
-## ISS-0078 - v0.2.126 realtime catch-up collapses clear AMBE / speaker audio (2026-10-06, PENDING LIVE RE-PROVE)
+Live re-prove on v0.2.128 capture `20261006_090937_216` (DEC-0202): gapless IQ,
+dominant 208+280 hops, long-call duties 0.88–1.07, listen=CLEAR, no repeats,
+no mixed-slot/unsafe/`seqDrop`. Residual two 20 ms exact-zero frames map to
+`gaps=1` lattice hops with imperfect MAC, not hop starvation. Not closable
+without PLC. Cadence residual of ISS-0079 is closed.
+
+## ISS-0078 - v0.2.126 realtime catch-up collapses clear AMBE / speaker audio (2026-10-06, LIVE PROVED)
 
 After DEC-0199, capture `20261006_075758_372` (v0.2.126) is RF-gapless but
 produces an empty live speaker WAV and many `Phase 2 AMBE rejected` lines with
@@ -24,6 +30,9 @@ first burst eye. Prior v0.2.125 capture on the same CC had audio and zero AMBE
 rejects. Treat as wrong-slot/lattice thrash from the realtime catch-up profile,
 not a return of Soapy overflow. DEC-0200 reverts that profile; spectrum worker
 stays.
+
+Live re-prove on v0.2.128 capture `20261006_090937_216`: 50.08 s CLEAR speaker
+WAV, two AMBE-reject log lines (not mass `ambe=N/0`), no empty-WAV collapse.
 
 ## ISS-0077 - P25 small audio emit gaps from IQ loss and catch-up cadence (2026-10-06, IN PROGRESS)
 

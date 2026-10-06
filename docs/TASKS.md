@@ -1,18 +1,19 @@
 # Task list (canonical)
 
-T-0113 | pending_release_live | P25 residual active-clear gap repair (DEC-0201) |
+T-0113 | done | P25 residual active-clear gap repair (DEC-0201/0202) |
 Capture 081738 on v0.2.127: gapless IQ and clear audio restored, but active
 epochs duty 0.582/0.633 on dominant 160+280 windows. Six-call replay sweep
-selects active-only 200 ms minimum (all intervals non-regressing; aggregate
-35.38s -> 37.00s; speaker drops 3 -> 0). Implemented active 240/200/280 while
-preserving non-active 240/160/280, slot/security/quality gates and jitter policy.
-Local build/replay/full 17/17 pass; publish v0.2.128-experimental, then require
-live multi-call re-prove.
+selects active-only 200 ms minimum. Live capture 090937 on v0.2.128: gapless
+IQ, 208+280 hops, long-call duty 0.88–1.07, listen=CLEAR, two leftover 20 ms
+lattice zeros (`gaps=1`) not closable without PLC. Keep 240/200/280.
+Public v0.2.128-experimental verified (Actions 37438167836, SHA256
+c35ebcb404e8aa9bb1c89dae43197cb7459cd4dda955dc94821a39dcf6f60953).
 
-T-0112 | pending_release | Revert regressing P25 realtime catch-up (DEC-0200) |
+T-0112 | done | Revert regressing P25 realtime catch-up (DEC-0200) |
 Capture 075758 on 0.2.126: gapless IQ, empty speaker WAV, mass AMBE rejects.
-Removed realtime 360/160 profile; kept spectrum worker. Local 17/17 PASS;
-publish v0.2.127-experimental and live re-prove on the same CC.
+Removed realtime 360/160 profile; kept spectrum worker. Published
+v0.2.127-experimental; live re-prove on v0.2.128 capture 090937 (CLEAR WAV,
+not empty, two AMBE-reject lines).
 
 T-0111 | pending_live_acceptance | P25 emit-gap repair (IQ continuity + live cadence) |
 DEC-0199: spectrum worker off Soapy readStream (kept). Realtime 360/160/280
