@@ -227,34 +227,23 @@ P25_TRACE_CONTEXT_DIGESTS = {
 }
 
 
-# DEC-0199: exact spectrum-off-readStream worker + active-clear 360/160/280
-# catch-up repair from capture 20261006_062201_289. Encryption/slot policy and
-# non-active sustain/backlog geometry stay frozen; only these reviewed files move.
+# DEC-0200: revert regressing realtime 360/160 catch-up after capture
+# 20261006_075758_372 (empty speaker WAV / mass AMBE rejects). Spectrum worker
+# from DEC-0199 stays unchanged vs origin/master, so it is not re-listed here.
+# Digests are f16f036/origin/master (0.2.126) -> this repair.
 P25_EMIT_GAP_DIGESTS = {
-    "include/DeviceManager.h": (
-        "cc568d765e1fed0759151f91c9f410b30fc4276baea4ecb84e546756bf559e94",
-        "a70e88581206518d5ab3ac94bd9ba7f363e3fa7d29c1281027724f5dc3a01a38"),
-    "src/DeviceManager.cpp": (
-        "99ae844bd9211f0009a9f2e780a7ffdeed47213accaeb1b011df2221d3d71438",
-        "59f538c24323af4e47bb48dd0166117cee3cbb214787e63e3d07fe09b586ede2"),
     "include/P25VoiceTiming.h": (
-        "d7c6ea19299509e3b791236897f5aba78cd208f5e0d5dfb1299fede707d7e62c",
-        "369292d758031162364b5b5e1ed9f69f0c5590e3dd3c1de2720775650e95c639"),
+        "369292d758031162364b5b5e1ed9f69f0c5590e3dd3c1de2720775650e95c639",
+        "1f5b679283fd3034ffdc963fb6ef3017f79caa67bd3079d6c7ca5fe57a55577f"),
     "src/P25VoiceTiming.cpp": (
-        "8293a164cc7a12f4429b287c4af1993d8cb9898118870a1b15aab4b45c043fe3",
-        "799d89583c8b9dd6ee432eccde8ef82d26ed0b8e7403466c1405df639356d588"),
-    "src/MainWindowP25Orchestration.cpp": (
-        "e2266e4f44a134ee3999cb084da4b2d94f44dc779726f0fee51eaf365897de59",
-        "1df151bf7b4df6651145e0829f5a22db8e6586e78c04662312de55ccb4dc3f21"),
-    "src/tools/verify_p25_phase2_playback_ring_target_fill.py": (
-        "561168ebcf3361165edab53dd6f29476d8b84e647bf712fba667eeb8bb7724f4",
-        "a2db81157657f8e61779d79e91ee8cf1382c5edeb58b5585ec329b535321c24e"),
+        "799d89583c8b9dd6ee432eccde8ef82d26ed0b8e7403466c1405df639356d588",
+        "2e5f558aec52fb9d3d34cf21c6087203b81b21ea7db2cca3af778d0ee9635d58"),
     "src/tools/verify_p25_phase2_realtime_catchup_geometry.py": (
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "15a650c2ce5ce65b5bf4ca23f9b30c02285be1f2ae8c237c9cce1adc1f58b6dc"),
+        "15a650c2ce5ce65b5bf4ca23f9b30c02285be1f2ae8c237c9cce1adc1f58b6dc",
+        "000d8108bdaeba4c7d03dc25c8280c97c6555a4ee5a3e230d0e4462f304f3356"),
     "tests/test_p25_voice_timing.cpp": (
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "8cdc11664370220212f5db47f3c8d5999d84ec088950b8815dff23fcd0751e88"),
+        "8cdc11664370220212f5db47f3c8d5999d84ec088950b8815dff23fcd0751e88",
+        "d287d67322171b8b1ff96702863fc85abe9c707c02646045c504e368ca274d41"),
 }
 
 
@@ -779,7 +768,7 @@ def main() -> int:
                 continue
         if args.paths is None and path in P25_EMIT_GAP_DIGESTS:
             if infrastructure_text_allowed(path, emit_gap_before_text(args.base, path), git_file_text(args.head, path)):
-                print(f"P25 guard: accepted exact DEC-0199 emit-gap repair: {path}")
+                print(f"P25 guard: accepted exact DEC-0200 emit-gap repair: {path}")
                 continue
         if args.paths is None and path in P25_FOLLOW_LIFECYCLE_DIGESTS:
             if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):

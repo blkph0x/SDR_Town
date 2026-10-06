@@ -1,11 +1,14 @@
 # Task list (canonical)
 
+T-0112 | pending_release | Revert regressing P25 realtime catch-up (DEC-0200) |
+Capture 075758 on 0.2.126: gapless IQ, empty speaker WAV, mass AMBE rejects.
+Removed realtime 360/160 profile; kept spectrum worker. Local 17/17 PASS;
+publish v0.2.127-experimental and live re-prove on the same CC.
+
 T-0111 | in_progress | P25 emit-gap repair (IQ continuity + live cadence) |
-DEC-0199: move spectrum FFT off the Soapy readStream loop into a joined
-per-stream worker; set active-clear catch-up to 360/160/280; add planner and
-hardware-loss lifecycle coverage. Preserve Satcom/SSTV dirty work. Qualify,
-publish v0.2.126-experimental, verify public assets. Capture evidence from
-20261006_062201_289 (bucket A overflows + residual bucket D minFresh).
+DEC-0199: spectrum worker off Soapy readStream (kept). Realtime 360/160/280
+catch-up caused 075758 AMBE/audio collapse and is reverted by DEC-0200 /
+T-0112. Prior evidence 062201 bucket A overflows.
 
 T-0110 | pending_release | Classic Aero audit validation and hardened recovery |
 DEC-0198: confirm audit claims against source, repair ACARS digit reassembly,

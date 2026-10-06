@@ -1,5 +1,21 @@
 # Decisions
 
+## DEC-0200 - Revert realtime catch-up after AMBE/slot audio collapse (2026-10-06)
+
+Capture `20261006_075758_372` on v0.2.126 is gapless (`ok_gapless`, zero ring
+overruns) after the spectrum-worker move, but live speaker WAV is empty (44-byte
+header only). CADENCE shows mass `Phase 2 AMBE rejected` / `ambe-rejected-zero-accepted`
+with `ambe=N/0`, avg duty ≈0.10, and scheduler hops dominated by `fresh=327680`
+(160 ms @ 2.048 Msps) once `phase2SessionHadBurstEye` makes `activeSpeakerClearPath`
+true. The same trunk on v0.2.125 (`20261006_062201_289`) had zero AMBE-rejected
+lines, duty ≈0.23, and a 3.4 MB speaker WAV.
+
+Decision: remove the e7870ef/DEC-0199 realtime catch-up profile
+(`kP25Phase2VoiceDecodeSpeakerRealtimeCatchUp*`) and restore shared DEC-0061
+240/160/280 speaker backlog catch-up for active-clear and non-active paths.
+Keep the DEC-0199 spectrum worker (bucket A IQ loss repair is still valid).
+Do not invent PLC or soften encryption/slot gates. Live re-prove required.
+
 ## DEC-0199 - Repair measured P25 emit gaps from IQ loss and catch-up cadence (2026-10-06)
 
 Capture `20261006_062201_289` (2.4 Msps, CC 420.350, NAC 2D2) proves two defects

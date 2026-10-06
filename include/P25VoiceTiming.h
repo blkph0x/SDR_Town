@@ -215,16 +215,11 @@ inline constexpr double kP25Phase2VoiceDecodeBacklogCatchUpOverlapSeconds = 0.28
 inline constexpr double kP25Phase2VoiceDecodeSpeakerBacklogCatchUpChunkSeconds = 0.240;
 inline constexpr double kP25Phase2VoiceDecodeSpeakerBacklogCatchUpMinFreshSeconds = 0.160;
 inline constexpr double kP25Phase2VoiceDecodeSpeakerBacklogCatchUpOverlapSeconds = 0.280;
-// Live audit 20261006: once a clear speaker call is established, the 240/160/280
-// catch-up profile advanced less fresh RF than its measured ~166 ms median worker
-// time.  That made the single-flight worker permanently fall behind.  Cap fresh at
-// one 360 ms superframe while keeping DEC-0009 280 ms overlap.  DEC-0199 restores
-// the accepted 160 ms dispatch minimum: 280 ms minFresh forced ~325 ms submissions
-// for ~280 ms of real PCM and left residual CADENCE drop D after e7870ef.  This is
-// only selected for an already-active speaker backlog; cold acquisition and normal
-// sustain retain their existing geometry and single-flight state ownership.
-inline constexpr double kP25Phase2VoiceDecodeSpeakerRealtimeCatchUpChunkSeconds = 0.360;
-inline constexpr double kP25Phase2VoiceDecodeSpeakerRealtimeCatchUpMinFreshSeconds = 0.160;
+// DEC-0200: removed the DEC-0199/e7870ef live "realtime catch-up" 360/160–280
+// profile. Capture 20261006_075758 on 0.2.126 showed gapless IQ but empty
+// speaker WAV, dominant fresh=327680 (160 ms) hops after first burst eye, and
+// mass Phase 2 AMBE rejected (ambe=N/0) — absent on 0.2.125. Keep the proven
+// 240/160/280 backlog geometry for active-clear catch-up.
 inline constexpr double kP25Phase2VoicePullWindowSeconds = 0.100;
 inline constexpr int kP25Phase2VoiceDecodeCadenceMs = 10;
 inline constexpr int kP25Phase2VoiceDecodeColdCadenceMs = 8;

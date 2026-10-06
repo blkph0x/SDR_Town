@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-10-06 - Revert realtime catch-up after AMBE collapse, DEC-0200
+
+v0.2.126 capture `20261006_075758_372` proved spectrum-off-RX works (gapless)
+but cleared audio died: empty speaker WAV, mass Phase 2 AMBE rejected with
+ambe=N/0, 160 ms catch-up hops after first burst eye. Reverted the realtime
+360/160 profile to DEC-0061 240/160/280; kept the spectrum worker. Publishing
+v0.2.127-experimental.
+
 ## 2026-10-06 - P25 emit-gap repair, DEC-0199
 
 Measured capture `20261006_062201_289` as bucket A (Soapy overflow / ring gaps

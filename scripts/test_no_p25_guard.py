@@ -55,8 +55,8 @@ def main() -> int:
         assert MODULE.main() == 1
     emit_files = {}
     for path in MODULE.P25_EMIT_GAP_DIGESTS:
-        before = MODULE.emit_gap_before_text("7bc0fae", path)
-        after = subprocess.check_output(["git", "show", "3af218e:" + path], cwd=ROOT, text=True, encoding="utf-8")
+        before = MODULE.emit_gap_before_text("f16f036", path)
+        after = (ROOT / path).read_text(encoding="utf-8").replace("\r\n", "\n")
         emit_files[("before", path)] = before
         emit_files[("after", path)] = after
         assert MODULE.infrastructure_text_allowed(path, before, after)
@@ -70,7 +70,7 @@ def main() -> int:
          patch.object(MODULE, "git_file_text", side_effect=lambda ref, path: emit_files[(ref, path)]), \
          patch.object(MODULE, "emit_gap_before_text", side_effect=lambda ref, path: emit_files[("before", path)]):
         assert MODULE.main() == 0
-        emit_files[("after", "src/DeviceManager.cpp")] += "\nRF change"
+        emit_files[("after", "src/P25VoiceTiming.cpp")] += "\nRF change"
         assert MODULE.main() == 1
     lifecycle_files = {}
     for path in MODULE.P25_FOLLOW_LIFECYCLE_DIGESTS:

@@ -1,5 +1,15 @@
 # Issues (canonical)
 
+## ISS-0078 - v0.2.126 realtime catch-up collapses clear AMBE / speaker audio (2026-10-06, PENDING LIVE RE-PROVE)
+
+After DEC-0199, capture `20261006_075758_372` (v0.2.126) is RF-gapless but
+produces an empty live speaker WAV and many `Phase 2 AMBE rejected` lines with
+`ambe=N/0`. Scheduler stays on 160 ms fresh hops for active-clear catch-up after
+first burst eye. Prior v0.2.125 capture on the same CC had audio and zero AMBE
+rejects. Treat as wrong-slot/lattice thrash from the realtime catch-up profile,
+not a return of Soapy overflow. DEC-0200 reverts that profile; spectrum worker
+stays.
+
 ## ISS-0077 - P25 small audio emit gaps from IQ loss and catch-up cadence (2026-10-06, IN PROGRESS)
 
 Capture `20261006_062201_289` classifies clear-fed emit gaps as bucket A then

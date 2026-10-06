@@ -3,9 +3,9 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-TEST_CASE("Active-clear speaker realtime catch-up uses 360/160/280 geometry", "[p25][voice-timing]") {
-    REQUIRE(kP25Phase2VoiceDecodeSpeakerRealtimeCatchUpChunkSeconds == 0.360);
-    REQUIRE(kP25Phase2VoiceDecodeSpeakerRealtimeCatchUpMinFreshSeconds == 0.160);
+TEST_CASE("Active-clear speaker backlog catch-up stays on 240/160/280", "[p25][voice-timing]") {
+    REQUIRE(kP25Phase2VoiceDecodeSpeakerBacklogCatchUpChunkSeconds == 0.240);
+    REQUIRE(kP25Phase2VoiceDecodeSpeakerBacklogCatchUpMinFreshSeconds == 0.160);
     REQUIRE(kP25Phase2VoiceDecodeSpeakerBacklogCatchUpOverlapSeconds == 0.280);
 
     const auto plan = p25Phase2PlanVoiceDecodeChunk(
@@ -20,7 +20,7 @@ TEST_CASE("Active-clear speaker realtime catch-up uses 360/160/280 geometry", "[
         /*unacquiredAcquireWindow=*/false,
         /*decodeCursorAdvancedPastStart=*/true);
 
-    CHECK(plan.maxChunkSeconds == Catch::Approx(0.360));
+    CHECK(plan.maxChunkSeconds == Catch::Approx(0.240));
     CHECK(plan.minFreshSeconds == Catch::Approx(0.160));
     CHECK(plan.overlapSeconds == Catch::Approx(0.280));
 }
@@ -41,4 +41,13 @@ TEST_CASE("Speaker sustain stays on 80/40/280 when not catching up", "[p25][voic
     CHECK(plan.maxChunkSeconds == Catch::Approx(0.080));
     CHECK(plan.minFreshSeconds == Catch::Approx(0.040));
     CHECK(plan.overlapSeconds == Catch::Approx(0.280));
+}
+
+TEST_CASE("Realtime catch-up constants are not compiled back in", "[p25][voice-timing]") {
+    // Named identifiers must stay gone after DEC-0200 revert.
+#if defined(kP25Phase2VoiceDecodeSpeakerRealtimeCatchUpChunkSeconds) || \
+    defined(kP25Phase2VoiceDecodeSpeakerRealtimeCatchUpMinFreshSeconds)
+#  error "realtime catch-up constants must remain removed"
+#endif
+    SUCCEED();
 }

@@ -1,5 +1,15 @@
 # Build notes
 
+## 2026-10-06 - Revert realtime catch-up, DEC-0200
+
+Version 0.2.127. Remove regressing speaker realtime catch-up; keep spectrum
+worker. Evidence: capture 075758 empty WAV + AMBE rejects vs 062201 on 0.2.125.
+
+Local gates: Release `SDR_Town` + `sdr_town_tests`; `[p25][voice-timing]` 13
+assertions PASS; realtime catch-up revert verifier PASS; P25 guard self-test
+PASS; full native CTest 17/17 PASS (87.37s). Unrelated Satcom/SSTV dirty tree
+left uncommitted.
+
 ## 2026-10-06 - P25 emit-gap repair, DEC-0199
 
 Version 0.2.126. Scope: DeviceManager spectrum off readStream; P25VoiceTiming
