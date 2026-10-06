@@ -16,5 +16,10 @@ Local Release `SDR_Town` / `sdr_town_tests` (528 passed, 2 skipped), Catch
 planner cases, and 081738 TG10120 `PASS_CONTINUOUS_AUDIO` duty=0.71 / 710/710
 AMBE hold; wrong-slot and encrypted replays stay muted.
 
+Public v0.2.129-experimental:
+https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.129-experimental
+Actions 37448227980 success for a6d1e7a. ZIP SHA256
+48108ba4b131eda0835e463bd8e4b101249440c245116d4c59ebb40c9f2a461b.
+
 This remains an experimental tester build. Live re-prove of the 093930-class
 mid-call dip is required before closing the continuous-audio product gate.

@@ -11,6 +11,9 @@ and 081738 TG10120 `PASS_CONTINUOUS_AUDIO` duty=0.71 / 710/710 AMBE hold;
 wrong-slot and encrypted replays stay muted. Live 093930-class dip re-prove
 is still required.
 
+Public v0.2.129-experimental verified (Actions 37448227980, SHA256
+48108ba4b131eda0835e463bd8e4b101249440c245116d4c59ebb40c9f2a461b).
+
 ## 2026-10-06 - Live forensic of capture 093930 (v0.2.128, 423.35 MHz)
 
 Re-measured from files, not from DEC-0202. Capture `20261006_093930_588`

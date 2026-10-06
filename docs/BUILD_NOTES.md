@@ -17,6 +17,16 @@ speakerDrop=0 (matches 0.2.128). Wrong-slot slot=0 and explicit `enc` both
 uncommitted. Live re-prove of the 093930-class mid-call dip is still required;
 file voicetest does not exercise `p25Phase2PlanLiveHotSearch`.
 
+Public release: https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.129-experimental
+(pre-release, not draft). Actions
+https://github.com/blkph0x/SDR_Town/actions/runs/37448227980 success for
+`a6d1e7ade6a4d5658fc428756308a22c63487e78`. Downloaded
+`SDR_Town-0.2.129-experimental-win64.zip` SHA256
+`48108ba4b131eda0835e463bd8e4b101249440c245116d4c59ebb40c9f2a461b` matches
+sidecar. Extracted `SDR_Town.exe` embeds `0.2.129`; CLI `help` smoke PASS.
+Master Windows CI https://github.com/blkph0x/SDR_Town/actions/runs/37448223838
+also success for the same commit (no release publish on master).
+
 ## 2026-10-06 - v0.2.128 capture 093930 forensic, ISS-0080
 
 Local v0.2.128 (`Starting SDR Town v0.2.128` at 20:39:14) ran capture

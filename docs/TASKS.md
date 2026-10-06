@@ -1,12 +1,13 @@
 # Task list (canonical)
 
-T-0115 | in_progress | P25 locked-lattice empty-hop search (DEC-0203 / ISS-0080) |
+T-0115 | pending_live_acceptance | P25 locked-lattice empty-hop search (DEC-0203 / ISS-0080) |
 Capture 093930: mid-call duty 0.439 sits on empty hops that still have SF+mask
 locked; DEC-0048 then spends cand=16/120 on the next unique-speech window.
 Keep healthy 80/4 on the first locked-lattice empty; escalate on the second
-or when structure is gone. No minFresh/PLC/slot/security change. Local
-Release + Catch 39/7 + 081738 TG10120 duty=0.71/710 AMBE hold. Public
-v0.2.129-experimental and live 093930-class re-prove still required.
+or when structure is gone. No minFresh/PLC/slot/security change. Public
+v0.2.129-experimental verified (Actions 37448227980, SHA256
+48108ba4b131eda0835e463bd8e4b101249440c245116d4c59ebb40c9f2a461b). Live
+093930-class mid-call dip re-prove still required.
 
 T-0114 | classified_no_code | P25 093930 remainder (ISS-0080) |
 v0.2.128 capture 093930 at 423.35 MHz: gapless IQ, CLEAR 88.9 s WAV, audio-open
