@@ -1,5 +1,38 @@
 # Decisions
 
+## DEC-0201 - Require 200 ms fresh IQ for active-clear backlog catch-up (2026-10-06)
+
+Capture `20261006_081738_771` on v0.2.127 is RF-gapless at 2.048 Msps
+(zero ring overruns/gaps/resets) and restores clear audio, but active clear
+epochs still under-run the speaker ring at live duties 0.582 and 0.633.
+The complete pipeline trace has 862 submitted/started jobs, queue latency
+p50 0.02 ms / p95 0.03 ms, DSP p50 76.39 ms / p95 92.92 ms, no
+queue/result/producer drops, no non-monotonic completion, no unsafe or
+mixed-slot speaker output, and no speaker ordinal loss. The dominant active
+worker shape is still 160 ms fresh + 280 ms context.
+
+The same saved IQ was replayed across six clear call intervals at fixed
+160/180/200/220/240 ms fresh hops with the unchanged 280 ms context. Relative
+to 160 ms, 200 ms was the only measured point that preserved or increased
+speaker PCM on every interval: aggregate 35.38 s -> 37.00 s, with speaker
+timeline drops 3 -> 0 and sequencer suppressions remaining zero. A 240 ms
+minimum produced more aggregate PCM (37.84 s) but regressed one TG30302
+interval from 4.52 s to 4.12 s, so it is not selected as a global minimum.
+
+The live speaker WAV has 1,758 aligned 20 ms frames. It contains zero adjacent
+non-silent exact repeats, zero adjacent near-repeats above 0.995 correlation,
+and zero non-silent exact repeats at lags 2-5. The one exact adjacent pair is
+silence. Validation records contain no codec `R` repeat and live `seqDrop=0`.
+The reported repeat is therefore not reproduced as software replay; do not add
+payload-hash de-duplication or reset mbelib.
+
+Decision: retain the proven 240 ms maximum and 280 ms overlap, but require
+200 ms fresh IQ only on the active-speaker clear backlog path. Keep the
+non-active speaker backlog minimum at 160 ms. Do not change slot/security
+gates, hard RF-quality handling, the audio jitter buffer, follow timers, or
+invent PLC. Live multi-call qualification remains required before closing the
+product continuity gate.
+
 ## DEC-0200 - Revert realtime catch-up after AMBE/slot audio collapse (2026-10-06)
 
 Capture `20261006_075758_372` on v0.2.126 is gapless (`ok_gapless`, zero ring

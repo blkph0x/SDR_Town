@@ -1,5 +1,16 @@
 # Development log
 
+## 2026-10-06 - Residual active-clear cadence repair, DEC-0201
+
+v0.2.127 capture `20261006_081738_771` restored clear audio with gapless IQ,
+but live clear epochs still ran at duty 0.582/0.633 on dominant 160+280 eyes.
+The full event trace rules out worker queue delay/drop, result/producer drop,
+slot/security leakage, ordering and speaker-ordinal loss. A six-call
+160/180/200/220/240 ms replay sweep selected active-only 200 ms: every interval
+preserved or increased PCM, aggregate 35.38 s -> 37.00 s, speaker drops 3 -> 0.
+The suspected software repeat was not reproduced in live or replay WAVs.
+Implemented 240/200/280 only for active clear; non-active stays 240/160/280.
+
 ## 2026-10-06 - Revert realtime catch-up after AMBE collapse, DEC-0200
 
 v0.2.126 capture `20261006_075758_372` proved spectrum-off-RX works (gapless)

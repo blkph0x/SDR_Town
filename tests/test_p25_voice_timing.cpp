@@ -3,9 +3,10 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-TEST_CASE("Active-clear speaker backlog catch-up stays on 240/160/280", "[p25][voice-timing]") {
+TEST_CASE("Active-clear speaker backlog catch-up uses measured 240/200/280", "[p25][voice-timing]") {
     REQUIRE(kP25Phase2VoiceDecodeSpeakerBacklogCatchUpChunkSeconds == 0.240);
     REQUIRE(kP25Phase2VoiceDecodeSpeakerBacklogCatchUpMinFreshSeconds == 0.160);
+    REQUIRE(kP25Phase2VoiceDecodeActiveSpeakerBacklogCatchUpMinFreshSeconds == 0.200);
     REQUIRE(kP25Phase2VoiceDecodeSpeakerBacklogCatchUpOverlapSeconds == 0.280);
 
     const auto plan = p25Phase2PlanVoiceDecodeChunk(
@@ -21,11 +22,11 @@ TEST_CASE("Active-clear speaker backlog catch-up stays on 240/160/280", "[p25][v
         /*decodeCursorAdvancedPastStart=*/true);
 
     CHECK(plan.maxChunkSeconds == Catch::Approx(0.240));
-    CHECK(plan.minFreshSeconds == Catch::Approx(0.160));
+    CHECK(plan.minFreshSeconds == Catch::Approx(0.200));
     CHECK(plan.overlapSeconds == Catch::Approx(0.280));
 }
 
-TEST_CASE("Non-active speaker backlog catch-up keeps 240/160/280", "[p25][voice-timing]") {
+TEST_CASE("Non-active speaker backlog catch-up preserves 240/160/280", "[p25][voice-timing]") {
     const auto plan = p25Phase2PlanVoiceDecodeChunk(
         false, true, /*activeSpeakerClearPath=*/false, false, false,
         true, true, false, false, true);

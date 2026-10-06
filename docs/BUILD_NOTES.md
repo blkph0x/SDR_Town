@@ -1,5 +1,37 @@
 # Build notes
 
+## 2026-10-06 - Active-clear 200 ms cadence qualification, DEC-0201
+
+Version 0.2.128. Evidence capture `20261006_081738_771` was made by v0.2.127:
+185.664 s at 2.048 Msps, zero ring overrun/gap/reset, 35.16 s live speaker PCM.
+Full event chronology: 862 submitted/started jobs, queue p50 0.02 ms / p95
+0.03 ms, DSP p50 76.39 ms / p95 92.92 ms, no queue/result/producer drop,
+no non-monotonic completion, unsafe/mixed-slot output or speaker ordinal loss.
+Residual active clear is bucket D: live grant epochs at duty 0.582/0.633 and
+dominant fresh/context 160/280 ms.
+
+Six clear intervals (TG10120, TG10703, TG30302) were replayed at fixed
+160/180/200/220/240 ms fresh with 280 ms context. Aggregate speaker PCM:
+35.38/36.52/37.00/36.72/37.84 s respectively. 200 ms preserves or improves
+every interval versus 160 ms and removes three speaker-filter drops; 240 ms
+regresses one TG30302 interval 4.52 -> 4.12 s and is rejected as the global
+minimum. Main 20 s TG10120 at 200 ms is `PASS_CONTINUOUS_AUDIO`, duty 0.710,
+710/710 AMBE, zero speaker/sequence drops; pre/post patch WAV SHA256 matches.
+Wrong-slot replay and explicit encrypted replay both emit zero speaker PCM.
+
+Repeat audit: live WAV has 1,758 aligned 20 ms frames, zero adjacent non-silent
+exact repeats, zero adjacent correlations above 0.995, and zero non-silent
+exact repeats at lags 2-5. All six 200 ms replay WAVs also have zero exact/
+near adjacent repeats and zero lag-2 repeats. Live validation has no codec
+`R`; sequencer suppression is zero. STT on 160/200 ms main replays yields the
+same partial conversation context; it is supporting evidence, not ground truth.
+
+MSVC Release `SDR_Town` and `sdr_town_tests` build PASS. Focused
+`[p25][voice-timing]` 14 assertions PASS; active geometry verifier, capture
+audit self-test and exact frozen-P25 guard PASS. Full CTest 17/17 PASS (87.18s).
+Unrelated Satcom/SSTV dirty work remains uncommitted. Public CI/asset verification
+and a new live multi-call capture remain required.
+
 ## 2026-10-06 - Revert realtime catch-up, DEC-0200
 
 Version 0.2.127. Remove regressing speaker realtime catch-up; keep spectrum

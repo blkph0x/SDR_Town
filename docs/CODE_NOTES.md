@@ -1,8 +1,15 @@
 # Code notes (tree map)
 
+DEC-0201: `P25VoiceTiming` keeps the DEC-0200 240 ms maximum / 280 ms
+overlap, adds an active-clear-only 200 ms minFresh, and preserves the
+non-active 160 ms minimum. `tests/test_p25_voice_timing.cpp` compiles both
+branches; `verify_p25_phase2_realtime_catchup_geometry.py` also guards the
+spectrum worker and forbids the removed 360 ms realtime profile.
+
 DEC-0200: removed `kP25Phase2VoiceDecodeSpeakerRealtimeCatchUp*`. Active-clear
-and non-active speaker backlog catch-up both use 240/160/280 again. Spectrum
-`spectrumThread` from DEC-0199 remains.
+and non-active speaker backlog catch-up returned to 240/160/280; DEC-0201
+subsequently raises only the active minFresh to 200 ms. Spectrum `spectrumThread`
+from DEC-0199 remains.
 
 DEC-0199: DeviceManager runs spectrum FFT/publication on a dedicated joined
 `spectrumThread` that copies from the IQ ring; `rxThreadFunc` only drains

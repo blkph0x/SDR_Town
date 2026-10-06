@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify DEC-0200 removed the regressing realtime catch-up geometry."""
+"""Verify DEC-0200/0201 safe active-clear catch-up geometry."""
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
@@ -12,12 +12,15 @@ checks = {
         "kP25Phase2VoiceDecodeSpeakerRealtimeCatchUpChunkSeconds" not in timing_h,
     "no realtime catch-up minFresh constant":
         "kP25Phase2VoiceDecodeSpeakerRealtimeCatchUpMinFreshSeconds" not in timing_h,
-    "backlog catch-up stays 240/160/280":
+    "active backlog catch-up is 240/200/280":
         "kP25Phase2VoiceDecodeSpeakerBacklogCatchUpChunkSeconds = 0.240" in timing_h
         and "kP25Phase2VoiceDecodeSpeakerBacklogCatchUpMinFreshSeconds = 0.160" in timing_h
+        and "kP25Phase2VoiceDecodeActiveSpeakerBacklogCatchUpMinFreshSeconds = 0.200" in timing_h
         and "kP25Phase2VoiceDecodeSpeakerBacklogCatchUpOverlapSeconds = 0.280" in timing_h,
-    "planner uses backlog constants only":
+    "planner scopes 200 ms minimum to active clear":
         "kP25Phase2VoiceDecodeSpeakerBacklogCatchUpChunkSeconds" in timing_cpp
+        and "activeSpeakerClearPath" in timing_cpp
+        and "kP25Phase2VoiceDecodeActiveSpeakerBacklogCatchUpMinFreshSeconds" in timing_cpp
         and "kP25Phase2VoiceDecodeSpeakerRealtimeCatchUpChunkSeconds" not in timing_cpp,
     "spectrum worker remains":
         "void DeviceManager::spectrumThreadFunc" in dm_cpp,
@@ -30,6 +33,6 @@ checks = {
 failed = [name for name, ok in checks.items() if not ok]
 if failed:
     raise SystemExit(
-        "P25 Phase 2 realtime catch-up revert regression failed: " + ", ".join(failed)
+        "P25 Phase 2 active catch-up geometry regression failed: " + ", ".join(failed)
     )
-print("P25 Phase 2 realtime catch-up revert regression: PASS")
+print("P25 Phase 2 active catch-up geometry regression: PASS")

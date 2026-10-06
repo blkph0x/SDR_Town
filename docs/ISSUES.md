@@ -1,5 +1,20 @@
 # Issues (canonical)
 
+## ISS-0079 - v0.2.127 residual active-clear speaker gaps (2026-10-06, LOCAL REPAIR / PENDING LIVE)
+
+Capture `20261006_081738_771` restores clear audio and has gapless IQ, but the
+two long clear epochs have live duties 0.582/0.633 with ring underrun climbs.
+This is residual bucket D: dominant workers consume 160 ms fresh + 280 ms
+context while queue/result/producer drops, mixed-slot output, unsafe output,
+speaker ordinal loss and worker reordering are all zero.
+
+DEC-0201's six-call same-IQ sweep found active 200 ms fresh non-regressing
+against 160 ms on every interval (35.38 s -> 37.00 s aggregate speaker PCM;
+speaker drops 3 -> 0). A 240 ms minimum is rejected because one interval loses
+0.40 s. The suspected repeated frame is not reproduced: no non-silent exact or
+near-adjacent 20 ms repeat, no lag 2-5 exact repeat, no codec `R`, `seqDrop=0`.
+Apply only the active-clear 200 ms minimum and require a new live capture.
+
 ## ISS-0078 - v0.2.126 realtime catch-up collapses clear AMBE / speaker audio (2026-10-06, PENDING LIVE RE-PROVE)
 
 After DEC-0199, capture `20261006_075758_372` (v0.2.126) is RF-gapless but

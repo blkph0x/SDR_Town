@@ -213,13 +213,19 @@ inline constexpr double kP25Phase2VoiceDecodeBacklogCatchUpOverlapSeconds = 0.28
 // and advances 240 ms fresh (≥ emit wall~200–230 ms / dsp p50~220) so pace
 // and lock both hold. Idle sustain stays 80+280.
 inline constexpr double kP25Phase2VoiceDecodeSpeakerBacklogCatchUpChunkSeconds = 0.240;
+// DEC-0061 keeps 160 ms available for non-active speaker backlog acquisition.
 inline constexpr double kP25Phase2VoiceDecodeSpeakerBacklogCatchUpMinFreshSeconds = 0.160;
+// DEC-0201 / capture 20261006_081738: once selected-slot clear speaker output
+// is active, waiting for 200 ms fresh (still below the proven 240 ms maximum)
+// improves every one of six same-IQ calls versus 160 ms and removes speaker
+// ordinal drops. 240 ms regressed one call, so it is not the minimum.
+inline constexpr double kP25Phase2VoiceDecodeActiveSpeakerBacklogCatchUpMinFreshSeconds = 0.200;
 inline constexpr double kP25Phase2VoiceDecodeSpeakerBacklogCatchUpOverlapSeconds = 0.280;
 // DEC-0200: removed the DEC-0199/e7870ef live "realtime catch-up" 360/160–280
 // profile. Capture 20261006_075758 on 0.2.126 showed gapless IQ but empty
 // speaker WAV, dominant fresh=327680 (160 ms) hops after first burst eye, and
 // mass Phase 2 AMBE rejected (ambe=N/0) — absent on 0.2.125. Keep the proven
-// 240/160/280 backlog geometry for active-clear catch-up.
+// 240 ms maximum / 280 ms overlap; DEC-0201 only raises active-clear minFresh.
 inline constexpr double kP25Phase2VoicePullWindowSeconds = 0.100;
 inline constexpr int kP25Phase2VoiceDecodeCadenceMs = 10;
 inline constexpr int kP25Phase2VoiceDecodeColdCadenceMs = 8;

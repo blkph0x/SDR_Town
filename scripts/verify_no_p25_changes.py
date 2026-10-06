@@ -227,23 +227,23 @@ P25_TRACE_CONTEXT_DIGESTS = {
 }
 
 
-# DEC-0200: revert regressing realtime 360/160 catch-up after capture
-# 20261006_075758_372 (empty speaker WAV / mass AMBE rejects). Spectrum worker
-# from DEC-0199 stays unchanged vs origin/master, so it is not re-listed here.
-# Digests are f16f036/origin/master (0.2.126) -> this repair.
+# DEC-0201: capture 20261006_081738_771 restores audio after DEC-0200 but
+# measures residual bucket-D ring starvation on dominant 160+280 active-clear
+# windows. Exact digests are 0a3fe41 (0.2.127) -> active-only 200 ms minFresh;
+# 240 ms max / 280 ms overlap and non-active 160 ms stay unchanged.
 P25_EMIT_GAP_DIGESTS = {
     "include/P25VoiceTiming.h": (
-        "369292d758031162364b5b5e1ed9f69f0c5590e3dd3c1de2720775650e95c639",
-        "1f5b679283fd3034ffdc963fb6ef3017f79caa67bd3079d6c7ca5fe57a55577f"),
+        "1f5b679283fd3034ffdc963fb6ef3017f79caa67bd3079d6c7ca5fe57a55577f",
+        "3c25716efce3b52e32287bb2f37b10e093eb7b96a52aa41595463695b71342a4"),
     "src/P25VoiceTiming.cpp": (
-        "799d89583c8b9dd6ee432eccde8ef82d26ed0b8e7403466c1405df639356d588",
-        "2e5f558aec52fb9d3d34cf21c6087203b81b21ea7db2cca3af778d0ee9635d58"),
+        "2e5f558aec52fb9d3d34cf21c6087203b81b21ea7db2cca3af778d0ee9635d58",
+        "a31b89088a261a12880f32c5a2ee6e3c1aefa5aaef26db4be0536e0631273148"),
     "src/tools/verify_p25_phase2_realtime_catchup_geometry.py": (
-        "15a650c2ce5ce65b5bf4ca23f9b30c02285be1f2ae8c237c9cce1adc1f58b6dc",
-        "000d8108bdaeba4c7d03dc25c8280c97c6555a4ee5a3e230d0e4462f304f3356"),
+        "000d8108bdaeba4c7d03dc25c8280c97c6555a4ee5a3e230d0e4462f304f3356",
+        "982f03a6553d04420acba02073d3c7a8ea17d4b9a1ed46eaa42ab61a0e14739d"),
     "tests/test_p25_voice_timing.cpp": (
-        "8cdc11664370220212f5db47f3c8d5999d84ec088950b8815dff23fcd0751e88",
-        "d287d67322171b8b1ff96702863fc85abe9c707c02646045c504e368ca274d41"),
+        "d287d67322171b8b1ff96702863fc85abe9c707c02646045c504e368ca274d41",
+        "6d7517506ff346c0e97ca04d46c623cfec7e5e799671c70481d9c1adf329a5fc"),
 }
 
 
@@ -768,7 +768,7 @@ def main() -> int:
                 continue
         if args.paths is None and path in P25_EMIT_GAP_DIGESTS:
             if infrastructure_text_allowed(path, emit_gap_before_text(args.base, path), git_file_text(args.head, path)):
-                print(f"P25 guard: accepted exact DEC-0200 emit-gap repair: {path}")
+                print(f"P25 guard: accepted exact DEC-0201 emit-gap repair: {path}")
                 continue
         if args.paths is None and path in P25_FOLLOW_LIFECYCLE_DIGESTS:
             if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):

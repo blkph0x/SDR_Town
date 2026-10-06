@@ -1,11 +1,20 @@
 # Task list (canonical)
 
+T-0113 | pending_release_live | P25 residual active-clear gap repair (DEC-0201) |
+Capture 081738 on v0.2.127: gapless IQ and clear audio restored, but active
+epochs duty 0.582/0.633 on dominant 160+280 windows. Six-call replay sweep
+selects active-only 200 ms minimum (all intervals non-regressing; aggregate
+35.38s -> 37.00s; speaker drops 3 -> 0). Implemented active 240/200/280 while
+preserving non-active 240/160/280, slot/security/quality gates and jitter policy.
+Local build/replay/full 17/17 pass; publish v0.2.128-experimental, then require
+live multi-call re-prove.
+
 T-0112 | pending_release | Revert regressing P25 realtime catch-up (DEC-0200) |
 Capture 075758 on 0.2.126: gapless IQ, empty speaker WAV, mass AMBE rejects.
 Removed realtime 360/160 profile; kept spectrum worker. Local 17/17 PASS;
 publish v0.2.127-experimental and live re-prove on the same CC.
 
-T-0111 | in_progress | P25 emit-gap repair (IQ continuity + live cadence) |
+T-0111 | pending_live_acceptance | P25 emit-gap repair (IQ continuity + live cadence) |
 DEC-0199: spectrum worker off Soapy readStream (kept). Realtime 360/160/280
 catch-up caused 075758 AMBE/audio collapse and is reverted by DEC-0200 /
 T-0112. Prior evidence 062201 bucket A overflows.

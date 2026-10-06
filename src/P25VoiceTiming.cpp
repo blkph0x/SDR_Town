@@ -133,12 +133,14 @@ P25Phase2VoiceChunkPlan p25Phase2PlanVoiceDecodeChunk(
         (activeSpeakerClearPath && !wideReacquireWindow &&
         !maskEpochRepairWindow && !unacquiredAcquireWindow && !coldEye)) {
         if (backlogCatchUp) {
-            // Active-clear and non-active speaker backlog share DEC-0061
-            // 240/160/280. DEC-0200 removed the 360 ms realtime catch-up profile
-            // after 0.2.126 produced mass AMBE rejects / empty speaker audio.
+            // DEC-0200 keeps the proven 240 ms max / 280 ms overlap. DEC-0201
+            // raises only active-clear minFresh to measured 200 ms; non-active
+            // acquisition retains DEC-0061's 160 ms floor.
             plan.maxChunkSeconds = kP25Phase2VoiceDecodeSpeakerBacklogCatchUpChunkSeconds;
             plan.overlapSeconds = kP25Phase2VoiceDecodeSpeakerBacklogCatchUpOverlapSeconds;
-            plan.minFreshSeconds = kP25Phase2VoiceDecodeSpeakerBacklogCatchUpMinFreshSeconds;
+            plan.minFreshSeconds = activeSpeakerClearPath
+                ? kP25Phase2VoiceDecodeActiveSpeakerBacklogCatchUpMinFreshSeconds
+                : kP25Phase2VoiceDecodeSpeakerBacklogCatchUpMinFreshSeconds;
             plan.minFreshFloorSamples = 8192.0;
             return plan;
         }

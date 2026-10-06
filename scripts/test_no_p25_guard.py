@@ -55,7 +55,7 @@ def main() -> int:
         assert MODULE.main() == 1
     emit_files = {}
     for path in MODULE.P25_EMIT_GAP_DIGESTS:
-        before = MODULE.emit_gap_before_text("f16f036", path)
+        before = MODULE.emit_gap_before_text("0a3fe41", path)
         after = (ROOT / path).read_text(encoding="utf-8").replace("\r\n", "\n")
         emit_files[("before", path)] = before
         emit_files[("after", path)] = after
