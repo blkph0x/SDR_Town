@@ -227,6 +227,37 @@ P25_TRACE_CONTEXT_DIGESTS = {
 }
 
 
+# DEC-0199: exact spectrum-off-readStream worker + active-clear 360/160/280
+# catch-up repair from capture 20261006_062201_289. Encryption/slot policy and
+# non-active sustain/backlog geometry stay frozen; only these reviewed files move.
+P25_EMIT_GAP_DIGESTS = {
+    "include/DeviceManager.h": (
+        "cc568d765e1fed0759151f91c9f410b30fc4276baea4ecb84e546756bf559e94",
+        "a70e88581206518d5ab3ac94bd9ba7f363e3fa7d29c1281027724f5dc3a01a38"),
+    "src/DeviceManager.cpp": (
+        "99ae844bd9211f0009a9f2e780a7ffdeed47213accaeb1b011df2221d3d71438",
+        "59f538c24323af4e47bb48dd0166117cee3cbb214787e63e3d07fe09b586ede2"),
+    "include/P25VoiceTiming.h": (
+        "d7c6ea19299509e3b791236897f5aba78cd208f5e0d5dfb1299fede707d7e62c",
+        "369292d758031162364b5b5e1ed9f69f0c5590e3dd3c1de2720775650e95c639"),
+    "src/P25VoiceTiming.cpp": (
+        "8293a164cc7a12f4429b287c4af1993d8cb9898118870a1b15aab4b45c043fe3",
+        "799d89583c8b9dd6ee432eccde8ef82d26ed0b8e7403466c1405df639356d588"),
+    "src/MainWindowP25Orchestration.cpp": (
+        "e2266e4f44a134ee3999cb084da4b2d94f44dc779726f0fee51eaf365897de59",
+        "1df151bf7b4df6651145e0829f5a22db8e6586e78c04662312de55ccb4dc3f21"),
+    "src/tools/verify_p25_phase2_playback_ring_target_fill.py": (
+        "561168ebcf3361165edab53dd6f29476d8b84e647bf712fba667eeb8bb7724f4",
+        "a2db81157657f8e61779d79e91ee8cf1382c5edeb58b5585ec329b535321c24e"),
+    "src/tools/verify_p25_phase2_realtime_catchup_geometry.py": (
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "15a650c2ce5ce65b5bf4ca23f9b30c02285be1f2ae8c237c9cce1adc1f58b6dc"),
+    "tests/test_p25_voice_timing.cpp": (
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "8cdc11664370220212f5db47f3c8d5999d84ec088950b8815dff23fcd0751e88"),
+}
+
+
 def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
     actual = (
         hashlib.sha256(before.encode("utf-8")).hexdigest(),
@@ -238,7 +269,7 @@ def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
                       WORKFLOW_SHUTDOWN_DIGESTS.get(path), INMARSAT_SESSION_DIGESTS.get(path),
                       SATELLITE_SESSION_DIGESTS.get(path), DRIVER_IO_ADMISSION_DIGESTS.get(path),
                       P25_OBSERVER_DIGESTS.get(path), P25_FOLLOW_LIFECYCLE_DIGESTS.get(path),
-                      P25_TRACE_CONTEXT_DIGESTS.get(path))
+                      P25_TRACE_CONTEXT_DIGESTS.get(path), P25_EMIT_GAP_DIGESTS.get(path))
 
 
 # DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.
@@ -696,20 +727,26 @@ def default_base() -> str:
     return "origin/master"
 
 
-def trace_before_text(ref: str, path: str) -> str:
+def digest_before_text(ref: str, path: str, digests: dict[str, tuple[str, str]]) -> str:
     try:
         return git_file_text(ref, path)
     except RuntimeError:
-        pair = P25_TRACE_CONTEXT_DIGESTS.get(path)
+        pair = digests.get(path)
         if not pair or pair[0] != hashlib.sha256(b"").hexdigest():
             raise
-        # Only the reviewed additions may have an empty base. A missing Git ref
-        # is an error, never interpreted as a new file.
         result = subprocess.run(["git", "ls-tree", "--name-only", ref, "--", path],
                                 check=True, capture_output=True, text=True, encoding="utf-8")
         if result.stdout.strip():
             raise
         return ""
+
+
+def trace_before_text(ref: str, path: str) -> str:
+    return digest_before_text(ref, path, P25_TRACE_CONTEXT_DIGESTS)
+
+
+def emit_gap_before_text(ref: str, path: str) -> str:
+    return digest_before_text(ref, path, P25_EMIT_GAP_DIGESTS)
 
 
 def parse_args() -> argparse.Namespace:
@@ -739,6 +776,10 @@ def main() -> int:
         if args.paths is None and path in P25_TRACE_CONTEXT_DIGESTS:
             if infrastructure_text_allowed(path, trace_before_text(args.base, path), git_file_text(args.head, path)):
                 print(f"P25 guard: accepted exact DEC-0194 trace/context repair: {path}")
+                continue
+        if args.paths is None and path in P25_EMIT_GAP_DIGESTS:
+            if infrastructure_text_allowed(path, emit_gap_before_text(args.base, path), git_file_text(args.head, path)):
+                print(f"P25 guard: accepted exact DEC-0199 emit-gap repair: {path}")
                 continue
         if args.paths is None and path in P25_FOLLOW_LIFECYCLE_DIGESTS:
             if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
