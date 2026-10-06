@@ -1,5 +1,12 @@
 # Task list (canonical)
 
+T-0111 | in_progress | P25 emit-gap repair (IQ continuity + live cadence) |
+DEC-0199: move spectrum FFT off the Soapy readStream loop into a joined
+per-stream worker; set active-clear catch-up to 360/160/280; add planner and
+hardware-loss lifecycle coverage. Preserve Satcom/SSTV dirty work. Qualify,
+publish v0.2.126-experimental, verify public assets. Capture evidence from
+20261006_062201_289 (bucket A overflows + residual bucket D minFresh).
+
 T-0110 | pending_release | Classic Aero audit validation and hardened recovery |
 DEC-0198: confirm audit claims against source, repair ACARS digit reassembly,
 preserve 8400 codec state across erasures, mute flagged voice words, and add

@@ -1,5 +1,17 @@
 # Build notes
 
+## 2026-10-06 - P25 emit-gap repair, DEC-0199
+
+Version 0.2.126. Scope: DeviceManager spectrum off readStream; P25VoiceTiming
+active-clear catch-up 360/160/280; tests for planner + spectrum lifecycle after
+hardware loss. Capture evidence `20261006_062201_289` (bucket A overflows +
+residual D). Unrelated Satcom/SSTV dirty tree left uncommitted.
+
+Local gates: Release `SDR_Town` + `sdr_town_tests`; focused
+`[p25][voice-timing],[devicemanager][hardware-loss]` 85 assertions PASS;
+full native CTest 17/17 PASS (84.64s); realtime catch-up / DEC-0061 / playback
+ring verifiers PASS.
+
 ## 2026-10-05 - Classic Aero audit hardening, DEC-0198
 
 MSVC14.44/Qt6.11.1 Release build of `sdr_town_tests` passed. The focused

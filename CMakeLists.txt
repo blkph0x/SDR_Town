@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.125 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.126 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -467,6 +467,8 @@ if(BUILD_TESTS)
     tests/test_audioengine.cpp
     tests/test_p25_audio_resampler.cpp
     src/P25AudioResampler.cpp
+    tests/test_p25_voice_timing.cpp
+    src/P25VoiceTiming.cpp
     tests/test_bandplan.cpp
     src/BandPlan.cpp
     tests/test_audiocapture.cpp

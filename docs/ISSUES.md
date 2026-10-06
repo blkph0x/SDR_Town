@@ -1,5 +1,16 @@
 # Issues (canonical)
 
+## ISS-0077 - P25 small audio emit gaps from IQ loss and catch-up cadence (2026-10-06, IN PROGRESS)
+
+Capture `20261006_062201_289` classifies clear-fed emit gaps as bucket A then
+residual D: Soapy `readStream -4` / ring gaps (~1.9M overrun samples, ten cursor
+discontinuities) while spectrum FFT still ran on the RX thread; after e7870ef
+360 ms max catch-up, `minFresh=280 ms` still stretched submissions (~325 ms for
+~280 ms PCM). No B/C/E evidence (queue/result/producer drops zero; clear frames
+track emits). DEC-0199 / T-0111: offload spectrum, restore 160 ms minFresh with
+360/280 geometry. Do not invent PLC or change encryption/slot policy. Live
+2.4 Msps qualification required; this capture's IQ already contains gaps.
+
 ## ISS-0076 - Classic Aero audit findings and deferred protocol hardening (2026-10-05, IN PROGRESS)
 
 The audit against70525b5 confirmed three receive-path defects, repaired under

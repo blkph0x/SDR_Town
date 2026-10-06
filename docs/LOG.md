@@ -1,5 +1,15 @@
 # Development log
 
+## 2026-10-06 - P25 emit-gap repair, DEC-0199
+
+Measured capture `20261006_062201_289` as bucket A (Soapy overflow / ring gaps
+while FFT ran on the read loop) plus residual bucket D (`minFresh=280` after the
+e7870ef 360 ms catch-up). Documented DEC-0199 / T-0111 / ISS-0077. Moved spectrum
+FFT publication to a joined per-stream worker and set active-clear catch-up to
+360/160/280. Planner and hardware-loss lifecycle tests added. Encryption, slot,
+and non-active sustain/backlog geometry unchanged. Live multi-minute qualification
+and public v0.2.126-experimental remain.
+
 ## 2026-10-05 - Classic Aero audit hardening, DEC-0198
 
 Validated the supplied audit against commit70525b5. Repaired ACARS letter/digit

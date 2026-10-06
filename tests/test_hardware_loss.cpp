@@ -116,4 +116,47 @@ TEST_CASE("Hardware overflow creates an epoch boundary without mixing pre-loss I
     REQUIRE(newRf.samples.size() == 1024);
     CHECK(std::all_of(newRf.samples.begin(), newRf.samples.end(), [](auto iq) { return iq == std::complex<float>(4, 0); }));
 }
+
+TEST_CASE("Spectrum worker publishes after start without blocking overflow recovery", "[devicemanager][hardware-loss][spectrum]") {
+    int argc = 1; char name[] = "spectrum-loss-test"; char* argv[] = {name, nullptr};
+    QCoreApplication app(argc, argv); QStandardPaths::setTestModeEnabled(true);
+    app.setOrganizationName("SDRTownTests"); app.setApplicationName("HardwareLossSpectrum");
+    SoapySDR::Registry registry("loss_spectrum_fixture",
+        [](const SoapySDR::Kwargs&) -> SoapySDR::KwargsList { return {{{"driver", "loss_spectrum_fixture"}, {"serial", "test-only"}}}; },
+        [](const SoapySDR::Kwargs&) -> SoapySDR::Device* { return new LossFixture; }, SOAPY_SDR_ABI_VERSION);
+    auto& manager = DeviceManager::instance(); const auto devices = manager.enumerateDevices(false);
+    const auto it = std::find_if(devices.begin(), devices.end(), [](const auto& d) { return d.driver == "loss_spectrum_fixture"; });
+    REQUIRE(it != devices.end()); const size_t index = it - devices.begin();
+    struct Cleanup { DeviceManager& m; size_t i; ~Cleanup() { m.stopStreaming(i); } } cleanup{manager, index};
+    LossFixture::command = 0; LossFixture::completed = 0;
+    REQUIRE(manager.startStreaming(index, true));
+    REQUIRE(awaitLossFixture([&] { return manager.getRuntimeStateLabel(index) == "live hardware"; }));
+    for (int i = 1; i <= 16; ++i) {
+        LossFixture::completed = 0;
+        LossFixture::command = i;
+        REQUIRE(awaitLossFixture([&] { return LossFixture::completed == i; }));
+    }
+    std::vector<float> power;
+    double center = 0.0;
+    double rate = 0.0;
+    REQUIRE(awaitLossFixture([&] {
+        return manager.getLatestSpectrum(index, power, center, rate) && power.size() >= 64;
+    }));
+    CHECK(rate > 0.0);
+    const auto before = manager.getRecentIQWindowWithCursor(index, 4096);
+    LossFixture::completed = 0;
+    LossFixture::command = SOAPY_SDR_OVERFLOW;
+    REQUIRE(awaitLossFixture([&] { return LossFixture::completed == SOAPY_SDR_OVERFLOW; }));
+    CHECK(awaitLossFixture([&] {
+        return manager.getRecentIQWindowWithCursor(index, 4096).streamEpoch > before.streamEpoch;
+    }));
+    LossFixture::completed = 0;
+    LossFixture::command = 20;
+    REQUIRE(awaitLossFixture([&] {
+        return manager.getRecentIQWindowWithCursor(index, 4096).endAbsolute > before.endAbsolute;
+    }));
+    REQUIRE(awaitLossFixture([&] {
+        return manager.getLatestSpectrum(index, power, center, rate) && !power.empty();
+    }));
+}
 #endif

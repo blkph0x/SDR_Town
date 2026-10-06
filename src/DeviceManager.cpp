@@ -1004,6 +1004,7 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
         st.runtimeState = attemptReal ? "opening hardware (stub active)" : "simulated/stub";
     }
     st.rxThread = std::thread(&DeviceManager::rxThreadFunc, this, index, streamGen);
+    st.spectrumThread = std::thread(&DeviceManager::spectrumThreadFunc, this, index, streamGen);
     if (!attemptReal) {
         spdlog::info("Started stub/sim streaming for device {} (safe mode)", index);
         return true;
@@ -1272,6 +1273,21 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
                         try { st.rxThread.join(); } catch (...) { try { st.rxThread.detach(); stubDetached = true; } catch (...) {} }
                     }
                 }
+                if (st.spectrumThread.joinable()) {
+                    auto start = std::chrono::steady_clock::now();
+                    while (st.spectrumThreadRunning.load(std::memory_order_acquire) &&
+                           std::chrono::steady_clock::now() - start < std::chrono::milliseconds(500)) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                    }
+                    if (st.spectrumThreadRunning.load(std::memory_order_acquire)) {
+                        spdlog::warn("spectrumThread for device {} did not stop during real upgrade; detaching.", index);
+                        try { st.spectrumThread.detach(); } catch (...) {}
+                    } else {
+                        try { st.spectrumThread.join(); } catch (...) {
+                            try { st.spectrumThread.detach(); } catch (...) {}
+                        }
+                    }
+                }
                 if (stubDetached) {
                     cleanupLocal();
                     {
@@ -1316,6 +1332,7 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
                 }
 
                 st.rxThread = std::thread(&DeviceManager::rxThreadFunc, this, index, myGen);
+                st.spectrumThread = std::thread(&DeviceManager::spectrumThreadFunc, this, index, myGen);
             }
             {
             // DEC-0184: finish this generation's settings before teardown or
@@ -1454,7 +1471,8 @@ void DeviceManager::stopStreamingImpl(size_t index) {
         soapyIdle = !st.soapyDev;
 #endif
     }
-    if (!activeNow && soapyIdle && !st.realInitThread.joinable() && !st.rxThread.joinable()) return;
+    if (!activeNow && soapyIdle && !st.realInitThread.joinable()
+        && !st.rxThread.joinable() && !st.spectrumThread.joinable()) return;
 
     // P1: bump generation *first* so any in-flight init thread will see the mismatch and refuse to publish/teardown.
     st.sessionGen.fetch_add(1, std::memory_order_acq_rel);
@@ -1465,6 +1483,24 @@ void DeviceManager::stopStreamingImpl(size_t index) {
     if (st.realInitThread.joinable()) {
         // Best-effort: if somehow not yet detached by launcher, detach now without waiting.
         try { st.realInitThread.detach(); } catch (...) {}
+    }
+
+    // Spectrum worker only touches the IQ ring + queueMutex; join it before/with RX teardown.
+    if (st.spectrumThread.joinable()) {
+        auto start = std::chrono::steady_clock::now();
+        while (st.spectrumThreadRunning.load(std::memory_order_acquire)) {
+            if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(300)) {
+                spdlog::warn("spectrumThread for device {} still running after stop — detaching.", index);
+                try { st.spectrumThread.detach(); } catch (...) {}
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(4));
+        }
+        if (st.spectrumThread.joinable()) {
+            try { st.spectrumThread.join(); } catch (...) {
+                try { st.spectrumThread.detach(); } catch (...) {}
+            }
+        }
     }
 
     // For the rxThread (post-activate, our code): still attempt short graceful join because the loop checks stopFlag,
@@ -3279,6 +3315,81 @@ std::vector<float> DeviceManager::computeRealFFTPower(const std::vector<std::com
     return power;
 }
 
+void DeviceManager::spectrumThreadFunc(size_t index, uint64_t expectedGeneration) {
+    auto* stPtr = streamState(index);
+    if (!stPtr) return;
+    auto& st = *stPtr;
+    st.spectrumThreadRunning.store(true, std::memory_order_release);
+    struct RunningGuard {
+        StreamState& st;
+        ~RunningGuard() { st.spectrumThreadRunning.store(false, std::memory_order_release); }
+    } runningGuard{st};
+    const uint64_t myGen = expectedGeneration;
+
+    // DEC-0199: keep Soapy readStream lean. Publish ~12.5 Hz spectrum from the
+    // ring without holding the live driver mutex or blocking IQ append.
+    while (!st.stopFlag.load(std::memory_order_acquire) &&
+           st.sessionGen.load(std::memory_order_acquire) == myGen) {
+        const auto cycleStart = std::chrono::steady_clock::now();
+        size_t fftN = 8192;
+        {
+            std::lock_guard<std::mutex> lk(st.queueMutex);
+            fftN = normalizeSpectrumFftBins(st.spectrumBins);
+        }
+
+        std::vector<std::complex<float>> samples;
+        {
+            std::unique_lock<std::mutex> ringLock(st.ringMutex, std::try_to_lock);
+            if (ringLock.owns_lock()) {
+                const uint64_t total = st.totalSamplesWritten.load(std::memory_order_acquire);
+                const size_t cap = st.ringCapacity;
+                if (cap > 0 && total >= fftN) {
+                    samples.resize(fftN);
+                    const uint64_t start = total - fftN;
+                    const bool powerOfTwoCap = (cap & (cap - 1)) == 0;
+                    const size_t startIdx = powerOfTwoCap
+                        ? static_cast<size_t>(start) & (cap - 1)
+                        : static_cast<size_t>(start % static_cast<uint64_t>(cap));
+                    const size_t firstPart = std::min(fftN, cap - startIdx);
+                    std::copy(st.iqRing.begin() + static_cast<std::ptrdiff_t>(startIdx),
+                              st.iqRing.begin() + static_cast<std::ptrdiff_t>(startIdx + firstPart),
+                              samples.begin());
+                    if (firstPart < fftN) {
+                        std::copy(st.iqRing.begin(),
+                                  st.iqRing.begin() + static_cast<std::ptrdiff_t>(fftN - firstPart),
+                                  samples.begin() + static_cast<std::ptrdiff_t>(firstPart));
+                    }
+                }
+            }
+        }
+
+        if (!samples.empty()) {
+            auto localPower = computeRealFFTPower(samples, fftN, /*useBlackmanHarris=*/true);
+            std::lock_guard<std::mutex> lk(st.queueMutex);
+            if (st.spectrumAvg.size() != localPower.size()) {
+                st.spectrumAvg.assign(localPower.size(), -110.0f);
+                st.spectrumPeak.assign(localPower.size(), -110.0f);
+            }
+            std::vector<float> published(localPower.size(), -120.0f);
+            for (size_t b = 0; b < localPower.size(); ++b) {
+                st.spectrumAvg[b] = st.spectrumAvg[b] * 0.72f + localPower[b] * 0.28f;
+                float decayedPeak = std::max(-180.0f, st.spectrumPeak[b] - 0.8f);
+                st.spectrumPeak[b] = std::max(decayedPeak, localPower[b]);
+                published[b] = std::max(st.spectrumAvg[b], st.spectrumPeak[b] - 4.0f);
+            }
+            st.latestPower = std::move(published);
+        }
+
+        const auto elapsed = std::chrono::steady_clock::now() - cycleStart;
+        const auto period = std::chrono::milliseconds(80);
+        if (elapsed < period) {
+            std::this_thread::sleep_for(period - elapsed);
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+}
+
 void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
     auto* stPtr = streamState(index);
     if (!stPtr) return;
@@ -3336,7 +3447,6 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
 
             uint64_t cursorA = 0, cursorB = 0;
             bool primed = false;
-            auto lastSpectrumTime = std::chrono::steady_clock::now();
             while (!st.stopFlag && st.sessionGen.load(std::memory_order_acquire) == myGen) {
                 // Pick up live phase/mode changes without restarting the stream.
                 SdrplayDiversity::Config cfg = diversityConfig_;
@@ -3384,26 +3494,7 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                     st.currentCenter = sa->currentCenter;
                 }
                 appendIQBlock(index, st, std::move(combined));
-
-                auto now = std::chrono::steady_clock::now();
-                if (now - lastSpectrumTime > std::chrono::milliseconds(50)) {
-                    lastSpectrumTime = now;
-                    auto window = getRecentIQWindow(index, st.spectrumBins);
-                    if (window.size() >= 64) {
-                        auto power = computeRealFFTPower(window, st.spectrumBins, true);
-                        std::lock_guard<std::mutex> lk(st.queueMutex);
-                        st.latestPower = power;
-                        if (st.spectrumAvg.size() != power.size()) {
-                            st.spectrumAvg = power;
-                            st.spectrumPeak = power;
-                        } else {
-                            for (size_t i = 0; i < power.size(); ++i) {
-                                st.spectrumAvg[i] = 0.85f * st.spectrumAvg[i] + 0.15f * power[i];
-                                st.spectrumPeak[i] = std::max(st.spectrumPeak[i] * 0.995f, power[i]);
-                            }
-                        }
-                    }
-                }
+                // DEC-0199: spectrum is published by spectrumThreadFunc from the ring.
             }
             return;
         }
@@ -3422,7 +3513,6 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
         bool realReadFaulted = false;
         // Broad guard: native readStream / USB / driver faults in the background thread must never terminate the process.
         try {
-            auto lastSpectrumTime = std::chrono::steady_clock::now();
             auto lastReadErrorLogTime = std::chrono::steady_clock::now() - std::chrono::seconds(10);
             int consecutiveReadTimeouts = 0;
             int consecutiveReadErrors = 0;
@@ -3459,8 +3549,8 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                             dev->setFrequency(SOAPY_SDR_RX, rxCh, tuneHz);
                             markStreamRetune(st, logicalCenter);
                             st.centerTuneAppliedSeq.store(requestedTuneSeq, std::memory_order_release);
-                            lastSpectrumTime = std::chrono::steady_clock::now();
-                            const auto tuneMs = std::chrono::duration_cast<std::chrono::milliseconds>(lastSpectrumTime - tuneStart).count();
+                            const auto tuneDone = std::chrono::steady_clock::now();
+                            const auto tuneMs = std::chrono::duration_cast<std::chrono::milliseconds>(tuneDone - tuneStart).count();
                             if (tuneMs > 75) {
                                 spdlog::warn("Applied queued center freq {} for device {} in {} ms (hardware tune {}, ppm {}). UI thread was not blocked.", logicalCenter, index, tuneMs, tuneHz, ppm);
                             } else {
@@ -3548,85 +3638,7 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                 if (numRead > 0) {
                     consecutiveReadTimeouts = 0;
                     consecutiveReadErrors = 0;
-                    if (numRead > blockSize) numRead = blockSize;
-
-                    // === State-of-the-art spectrum pipeline (P1 audit + this stabilization) ===
-                    // - Real radix-2 FFT, selectable 4K/8K/16K/64K bins
-                    // - Hann + Blackman-Harris windows (Blackman-Harris for main viz)
-                    // - Window taken from high-quality per-device ring (overlap friendly via ring)
-                    // - Exponential averaging + peak hold (slow decay) maintained in StreamState
-                    // - Throttled (~16-30 Hz) in RX thread to keep readStream lean (future: can move to dedicated spectrum worker thread)
-                    // - Published as high-res latestPower so SpectrumWidget can do true-resolution zoomed waterfall from source history.
-                    auto now = std::chrono::steady_clock::now();
-                    // 80 ms: keep Soapy readStream + P25 ring pulls ahead of FFT.
-                    // try_lock: voice worker memcpy wins if the ring is busy.
-                    if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastSpectrumTime).count() > 80) {
-                        size_t fftN = 8192;
-                        {
-                            std::lock_guard<std::mutex> lk(st.queueMutex);
-                            fftN = st.spectrumBins;
-                        }
-                        std::vector<float> localPower;
-
-                        std::vector<std::complex<float>> samples;
-                        {
-                            std::unique_lock<std::mutex> ringLock(st.ringMutex, std::try_to_lock);
-                            if (ringLock.owns_lock()) {
-                                const uint64_t total = st.totalSamplesWritten.load(std::memory_order_acquire);
-                                const size_t cap = st.ringCapacity;
-                                if (cap > 0 && total >= fftN) {
-                                    samples.resize(fftN);
-                                    const uint64_t start = total - fftN;
-                                    const bool powerOfTwoCap = (cap & (cap - 1)) == 0;
-                                    const size_t startIdx = powerOfTwoCap
-                                        ? static_cast<size_t>(start) & (cap - 1)
-                                        : static_cast<size_t>(start % static_cast<uint64_t>(cap));
-                                    const size_t firstPart = std::min(fftN, cap - startIdx);
-                                    std::copy(st.iqRing.begin() + static_cast<std::ptrdiff_t>(startIdx),
-                                              st.iqRing.begin() + static_cast<std::ptrdiff_t>(startIdx + firstPart),
-                                              samples.begin());
-                                    if (firstPart < fftN) {
-                                        std::copy(st.iqRing.begin(),
-                                                  st.iqRing.begin() + static_cast<std::ptrdiff_t>(fftN - firstPart),
-                                                  samples.begin() + static_cast<std::ptrdiff_t>(firstPart));
-                                    }
-                                }
-                            }
-                        }
-                        if (samples.empty()) {
-                            size_t take = std::min((size_t)numRead, fftN);
-                            for (size_t i = 0; i < take; ++i) samples.push_back(buff[i]);
-                            while (samples.size() < fftN) samples.push_back({0.f, 0.f});
-                        }
-
-                        // Real FFT power (Blackman-Harris primary for clean dynamic range; Hann available)
-                        localPower = computeRealFFTPower(samples, fftN, /*useBlackmanHarris=*/true);
-
-                        double publishedRate = 0.0;
-                        try {
-                            publishedRate = dev->getSampleRate(SOAPY_SDR_RX, 0);
-                        } catch (...) {}
-
-                        // Publish the averaged high-res spectrum (UI can choose peak if wanted later)
-                        {
-                            std::lock_guard<std::mutex> lk(st.queueMutex);
-                            // Exponential avg + peak hold (state lives in StreamState for continuity across calls)
-                            if (st.spectrumAvg.size() != localPower.size()) {
-                                st.spectrumAvg.assign(localPower.size(), -110.0f);
-                                st.spectrumPeak.assign(localPower.size(), -110.0f);
-                            }
-                            std::vector<float> published(localPower.size(), -120.0f);
-                            for (size_t b = 0; b < localPower.size(); ++b) {
-                                st.spectrumAvg[b] = st.spectrumAvg[b] * 0.72f + localPower[b] * 0.28f;
-                                float decayedPeak = std::max(-180.0f, st.spectrumPeak[b] - 0.8f);
-                                st.spectrumPeak[b] = std::max(decayedPeak, localPower[b]);
-                                published[b] = std::max(st.spectrumAvg[b], st.spectrumPeak[b] - 4.0f);
-                            }
-                            st.latestPower = std::move(published); // high bin count vector, avg + fast peak visibility
-                            if (publishedRate > 0.0 && std::isfinite(publishedRate)) st.currentRate = publishedRate;
-                        }
-                        lastSpectrumTime = now;
-                    }
+                    // DEC-0199: spectrum FFT/publication lives in spectrumThreadFunc.
                 }
                 // No unconditional sleep. Only yield if queue is getting very full (backpressure).
                 // P2 audit: decide under the lock, then sleep after releasing it so consumers are never blocked by backpressure.
@@ -3715,10 +3727,6 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
 
         {
             std::lock_guard<std::mutex> lk(st.queueMutex);
-            const size_t bins = std::max<size_t>(64, st.spectrumBins);
-            st.latestPower.assign(bins, -120.0f);
-            st.spectrumAvg.assign(bins, -120.0f);
-            st.spectrumPeak.assign(bins, -120.0f);
             st.currentRate = stubFs;
             st.currentCenter = stubCenterHz;
         }

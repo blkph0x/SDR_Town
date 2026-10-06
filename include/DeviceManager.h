@@ -310,6 +310,10 @@ private:
         std::string runtimeState = "stopped";
         std::thread rxThread;
         std::atomic<bool> rxThreadRunning{false};
+        // DEC-0199: spectrum FFT runs off the Soapy readStream path so P25 IQ
+        // drain is not blocked by radix-2 work on the RX thread.
+        std::thread spectrumThread;
+        std::atomic<bool> spectrumThreadRunning{false};
         std::atomic<int> stubStopTimeoutCount{0};
         std::mutex lifecycleMutex;      // serializes start/stop and async real-hardware handoff
         // CRITICAL (P0 audit shutdown hang + best practice for untrusted SDR drivers):
@@ -399,6 +403,7 @@ private:
     void ensureTxStreamSlot(size_t index);
     void txThreadFunc(size_t index, uint64_t expectedGeneration);
     void rxThreadFunc(size_t index, uint64_t expectedGeneration);  // background RX loop
+    void spectrumThreadFunc(size_t index, uint64_t expectedGeneration);  // FFT/publish off readStream
     // Caller must already hold devicesMutex.
     size_t ensureDiversityCompositeDeviceLocked(size_t deviceIndexHint);
     void restoreDiversityCompositeAfterEnumerate();

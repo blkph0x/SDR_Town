@@ -1,5 +1,13 @@
 # Code notes (tree map)
 
+DEC-0199: DeviceManager runs spectrum FFT/publication on a dedicated joined
+`spectrumThread` that copies from the IQ ring; `rxThreadFunc` only drains
+`readStream` / appends IQ / handles overflow and retune. Active-clear speaker
+catch-up constants in `P25VoiceTiming.h` are 360 ms max / 160 ms min / 280 ms
+overlap (`kP25Phase2VoiceDecodeSpeakerRealtimeCatchUp*`). Planner coverage lives
+in `tests/test_p25_voice_timing.cpp`; hardware-loss tests also require spectrum
+publication after start.
+
 DEC-0198: Classic Aero reassembly accepts both ACARS block-ID alphabets. The
 8400 evidence wrapper treats zero-valid-unit C-frames and codec failures as
 erasures without resetting persistent state; M/E/T words are silenced before

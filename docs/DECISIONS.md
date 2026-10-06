@@ -1,5 +1,27 @@
 # Decisions
 
+## DEC-0199 - Repair measured P25 emit gaps from IQ loss and catch-up cadence (2026-10-06)
+
+Capture `20261006_062201_289` (2.4 Msps, CC 420.350, NAC 2D2) proves two defects
+that produce small clear-P25 audio emit gaps without encryption, wrong-slot, or
+queue/result/producer drops:
+
+1. Bucket A: ten P25 cursor discontinuities and thirteen recording gaps totaling
+   1,906,496 samples; `sdr_town.log` reports `readStream -4` about every eight
+   seconds. Spectrum FFT/rate publication still ran on the Soapy read loop.
+2. Bucket D: after e7870ef raised active-clear catch-up to 360 ms max fresh with
+   280 ms overlap, decode latency improved (p50 94 ms / p95 127 ms) but
+   `minFresh=280 ms` forced roughly 325 ms submissions for about 280 ms of real
+   PCM, leaving measured underrun climbs.
+
+Decision: move spectrum FFT/publication to a joined per-stream worker that reads
+the existing IQ ring, leave retune/driver serialization unchanged, and set the
+active-clear realtime catch-up geometry to 360 ms max / 160 ms minimum / 280 ms
+overlap. Normal sustain and non-active backlog geometry stay unchanged. Do not
+invent PLC, soft-mute encrypted audio, or change slot/security gates. Replay of
+this capture is decoder-only evidence because the saved IQ already contains gaps;
+live multi-minute 2.4 Msps qualification is required for A closure.
+
 ## DEC-0198 - Validate and repair the Classic Aero audit findings (2026-10-05)
 
 The audit was checked against source commit70525b5, not only comments or release
