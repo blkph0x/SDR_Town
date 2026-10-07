@@ -1,14 +1,15 @@
 # Issues (canonical)
 
-## ISS-0082 - GUI open seizes Listen onto SO-50 436.795 MHz (2026-10-07, IN PROGRESS)
+## ISS-0082 - GUI open seizes Listen onto SO-50 436.795 MHz (2026-10-07, PENDING LIVE)
 
 Live report after v0.2.130: opening the app jumps the spectrum to 436.795 MHz
 and frequency/mode controls cannot retune. That is the built-in SO-50 FM
 downlink. Encrypted-grant IQ capture does not set this frequency. Root cause
 is saved `autoCapture=true` plus the hub constructor timer `armPass(force)`
 taking Listen. DEC-0205 disables inherited auto-capture until the operator
-checks the box this session. Confirm after restart that Listen retune works
-while SO-50 is in range and the checkbox is off.
+checks the box this session. Public v0.2.131-experimental verified; confirm
+after restart that Listen retune works while SO-50 is in range and the
+checkbox is off.
 
 ## ISS-0081 - Encrypted grant follow IQ was truncated by skip/return (2026-10-07, IN PROGRESS)
 

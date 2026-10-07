@@ -1,5 +1,15 @@
 # Build notes
 
+## 2026-10-07 - v0.2.131 public asset proof
+
+Public https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.131-experimental
+Actions https://github.com/blkph0x/SDR_Town/actions/runs/37614874125
+commit 2a64dc2, prerelease not draft. ZIP SHA256
+28fd34c892e3aab3c1f840515290b6b33cb82515adf1eaa733d7698227dd1564
+matches sidecar and GitHub asset digest. Extracted `SDR_Town.exe --help`
+and `--version` print `SDR Town 0.2.131`. Live reopen still required to
+confirm Listen retune while SO-50 is in range (ISS-0082).
+
 ## 2026-10-07 - v0.2.130 public asset proof
 
 Public https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.130-experimental

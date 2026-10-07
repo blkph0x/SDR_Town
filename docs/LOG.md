@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-07 - v0.2.131 public ZIP verified
+
+Actions 37614874125 success. Release v0.2.131-experimental public prerelease.
+ZIP SHA256 28fd34c8… matches sidecar; extracted exe is 0.2.131. Live confirm
+that GUI open no longer locks on SO-50 436.795 MHz.
+
 ## 2026-10-07 - v0.2.130 public ZIP verified
 
 Actions 37611289917 success. Release v0.2.130-experimental public prerelease.
