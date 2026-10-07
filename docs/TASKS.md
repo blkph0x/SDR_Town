@@ -5,10 +5,14 @@ Saved autoCapture=true was seizing the radio onto SO-50 436.795 MHz when the
 GUI opened, so Monitor Freq could not retune. Default/named engines now require
 a fresh Auto-capture check this session. No P25/DSP change.
 
-T-0116 | in_progress | Encrypted P25 grant IQ capture button (DEC-0204) |
+T-0116 | pending_live_acceptance | Encrypted P25 grant IQ capture button (DEC-0204) |
 Tools/P25 "Record Enc Grant IQ" starts live IQ, follows known-encrypted grants
 with speaker muted, holds until teardown/carrier-drop, writes timing log.
 Does not decode encrypted audio. Default auto-follow skip/return unchanged.
+Public v0.2.130-experimental verified (Actions 37611289917, SHA256
+1559dd5e4716c63d87cde4e2a92419f7cc9e86d4cafdb82f758ca694cb1cb4dd). Live
+encrypted grant capture on a CC still required. Do not use 0.2.130 if the
+GUI locks on 436.795 MHz; that is ISS-0082 / 0.2.131.
 
 T-0115 | pending_live_acceptance | P25 locked-lattice empty-hop search (DEC-0203 / ISS-0080) |
 Capture 093930: mid-call duty 0.439 sits on empty hops that still have SF+mask

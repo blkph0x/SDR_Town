@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-07 - v0.2.130 public ZIP verified
+
+Actions 37611289917 success. Release v0.2.130-experimental public prerelease.
+ZIP SHA256 1559dd5e… matches sidecar; extracted exe is 0.2.130. Superseded
+for the SO-50 startup lock by 0.2.131 (ISS-0082).
+
 ## 2026-10-07 - Satellite auto-capture no longer seizes Listen at open, DEC-0205
 
 Live: GUI open jumped to SO-50 436.795 MHz and blocked retune. Not the

@@ -1,5 +1,15 @@
 # Build notes
 
+## 2026-10-07 - v0.2.130 public asset proof
+
+Public https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.130-experimental
+Actions https://github.com/blkph0x/SDR_Town/actions/runs/37611289917
+commit 4219bce, prerelease not draft. ZIP SHA256
+1559dd5e4716c63d87cde4e2a92419f7cc9e86d4cafdb82f758ca694cb1cb4dd
+matches sidecar and GitHub asset digest. Extracted `SDR_Town.exe --help`
+and `--version` print `SDR Town 0.2.130`. This build still has ISS-0082
+(SO-50 436.795 auto-capture at open); use 0.2.131 for that repair.
+
 ## 2026-10-07 - v0.2.131 satcom auto-capture session arm, DEC-0205
 
 Intent: opening the GUI must not take Listen onto SO-50 436.795 MHz from a
