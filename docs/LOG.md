@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-07 - Satellite auto-capture no longer seizes Listen at open, DEC-0205
+
+Live: GUI open jumped to SO-50 436.795 MHz and blocked retune. Not the
+encrypted-IQ button. Default hub engine now matches named sessions: auto-capture
+stays off until the operator checks the box this session. P25/audio unchanged.
+
 ## 2026-10-07 - Encrypted grant IQ capture, DEC-0204
 
 GUI Record Enc Grant IQ starts SigMF capture, follows known-encrypted grants

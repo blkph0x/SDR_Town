@@ -1,5 +1,13 @@
 # Build notes
 
+## 2026-10-07 - v0.2.131 satcom auto-capture session arm, DEC-0205
+
+Intent: opening the GUI must not take Listen onto SO-50 436.795 MHz from a
+saved auto-capture flag. Catch `[satcom][dec-0205]` 4 assertions / 2 cases PASS.
+Release `SDR_Town` built. Unrelated Satcom SSTV `finishAll` dirty work remains
+uncommitted. Live: reopen with Auto capture unchecked and confirm Listen retune
+while SO-50 is in range.
+
 ## 2026-10-07 - v0.2.130 encrypted grant IQ capture, DEC-0204
 
 Intent: record SigMF IQ of a known-encrypted P25 grant+follow without opening

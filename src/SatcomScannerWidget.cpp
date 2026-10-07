@@ -219,9 +219,10 @@ void SatcomScannerWidget::buildUi() {
     autoCaptureCheck_ = new QCheckBox("Auto capture selected sats in range");
     autoCaptureCheck_->setChecked(engine_.autoCaptureEnabled());
     autoCaptureCheck_->setToolTip(
-        "Runs in the background: when a selected, supported satellite reaches the configured "
-        "minimum elevation, SDR Town takes the selected receiver, tunes with Doppler, records "
-        "when a signal is present, and runs the available APRS/APT/SSTV decoder.");
+        "Check this session to run in the background. Saved on from last time does not "
+        "seize the radio at startup. When a selected, supported satellite reaches the "
+        "configured minimum elevation, SDR Town takes the selected receiver, tunes with "
+        "Doppler, records when a signal is present, and runs the available APRS/APT/SSTV decoder.");
     armColumn->addWidget(autoCaptureCheck_);
     auto* armButton = new QPushButton("Arm pass");
     auto* sstvButton = new QPushButton("Arm ISS SSTV");

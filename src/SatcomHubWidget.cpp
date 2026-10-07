@@ -84,7 +84,8 @@ SatcomHubWidget::SatcomHubWidget(QWidget* parent)
     root->addWidget(tabs_);
 
     // A lightweight controller runs even before the visual tabs are created.
-    // It only starts hardware when a selected, supported satellite is in range.
+    // DEC-0205: it must not start hardware from a saved autoCapture flag.
+    // The engine constructor now requires a fresh checkbox arm this session.
     autoCaptureTimer_ = new QTimer(this);
     autoCaptureTimer_->setInterval(1000);
     connect(autoCaptureTimer_, &QTimer::timeout, this, &SatcomHubWidget::autoCaptureTick);

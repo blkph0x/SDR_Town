@@ -3,10 +3,10 @@ SDR TOWN — SOURCE OF TRUTH (SoT)
 ================================================================================
 VERSION: 1.0.0
 PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
-CURRENT VERSION IN TREE: 0.2.130 (P25 encrypted-grant IQ capture)
-CURRENT WORK: DEC-0204: GUI button records IQ of a known-encrypted grant+follow
-              with a timing log. Speaker stays muted. Default clear follow
-              still returns immediately on encrypted proof.
+CURRENT VERSION IN TREE: 0.2.131 (satcom auto-capture no longer seizes Listen at open)
+CURRENT WORK: DEC-0205: saved satellite auto-capture must not retune to SO-50
+              436.795 MHz or lock Listen on GUI open. Operator must check
+              Auto capture this session. P25/encrypted-IQ audio unchanged.
 PUBLIC BASELINE: v0.2.123-experimental accepted, Actions37273822180; zero package
                  blockers (commit1b035aa acceptance comment203450320).
 LATEST PACKAGE: DEC-0196 replaces four permanent blocker strings with finite,

@@ -15,8 +15,9 @@ class InmarsatWidget;
 class AircraftMapWidget;
 
 // Single SDR Town dock panel: Satcom | Inmarsat | Aircraft (no floating windows).
-// Satellite auto-capture is intentionally owned here so it remains active while
-// the tab/dock is hidden and before the heavy child tabs are first constructed.
+// Satellite auto-capture is owned here so an already-armed pass stays active
+// while the tab/dock is hidden (DEC-0185). DEC-0205: it does not start from a
+// saved autoCapture flag; the operator must check Auto capture this session.
 class SatcomHubWidget : public QWidget {
     Q_OBJECT
 public:

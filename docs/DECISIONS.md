@@ -1,5 +1,26 @@
 # Decisions
 
+## DEC-0205 - Do not inherit saved satellite auto-capture at process start (2026-10-07)
+
+Opening SDR Town jumped the spectrum to SO-50 FM 436.795 MHz and refused Listen
+retune. That frequency is the built-in selected `so50-fm` downlink, not P25 and
+not the Record Enc Grant IQ control (which never sets 436.795).
+`SatcomScannerConfig.autoCapture` defaults true and is restored from the last
+session. `SatcomHubWidget` starts a 1 s timer in its constructor, even when the
+Listening workspace hides the Satcom dock. `autoCaptureTick` then `armPass(...,
+force=true)` and takes the Listen radio. `canUseDevice(Listen)` fails afterward,
+so Monitor Freq / spectrum clicks cannot change anything.
+
+Named Satcom sessions already forced `autoCapture=false` until a fresh operator
+arm this run. The default hub engine did not. DEC-0176 only suppresses the
+timer during GUI dry-run and explicitly left normal auto-capture unchanged.
+
+Decision: every `SatcomScannerEngine`, including the default hub singleton,
+starts with auto-capture off after loading settings. Checking **Auto capture
+selected sats in range** still enables it for the rest of the session and still
+saves the preference. DEC-0185 still applies once a pass is owned: hiding the
+dock does not stop it. Do not change P25, encrypted mute, or hop timing.
+
 ## DEC-0204 - IQ-only encrypted grant/follow capture, speaker stays muted (2026-10-07)
 
 GUI Start IQ Capture already writes SigMF IQ plus `_p25_log.txt` and

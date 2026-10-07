@@ -1,5 +1,10 @@
 # SDR Town
 
+0.2.131 stops saved satellite auto-capture from seizing the Listen radio at
+startup (SO-50 436.795 MHz). Check **Auto capture selected sats in range**
+this session if you want that behavior. P25/audio DSP is unchanged. See
+[release notes](docs/RELEASE_0.2.131.md).
+
 0.2.125 hardens the Classic Aero/Inmarsat receive path. ACARS fragments now
 reassemble through both letter and digit block cycles, 8400 voice erasures no
 longer reset codec history, flagged codec words are muted before playback, and

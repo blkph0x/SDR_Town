@@ -1,5 +1,10 @@
 # Task list (canonical)
 
+T-0117 | in_progress | Stop satcom auto-capture from locking Listen at open (DEC-0205 / ISS-0082) |
+Saved autoCapture=true was seizing the radio onto SO-50 436.795 MHz when the
+GUI opened, so Monitor Freq could not retune. Default/named engines now require
+a fresh Auto-capture check this session. No P25/DSP change.
+
 T-0116 | in_progress | Encrypted P25 grant IQ capture button (DEC-0204) |
 Tools/P25 "Record Enc Grant IQ" starts live IQ, follows known-encrypted grants
 with speaker muted, holds until teardown/carrier-drop, writes timing log.

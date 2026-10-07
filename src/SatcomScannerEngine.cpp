@@ -185,10 +185,14 @@ SatcomScannerEngine& SatcomScannerEngine::instance() {
 SatcomScannerEngine::SatcomScannerEngine(const std::string& sessionId)
     : sessionId_(normalizedWorkflowSessionId(sessionId)) {
     config_.load(sessionId_);
+    // DEC-0205: never inherit saved autoCapture. The default hub engine used
+    // to load autoCapture=true and seize Listen at GUI open (SO-50 436.795 MHz)
+    // before the operator could retune. Named sessions already required a fresh
+    // arm this run; the default engine now matches. The checkbox still enables
+    // it for the rest of the session and still saves the preference.
+    config_.autoCapture = false;
     if (!sessionId_.empty()) {
         planner_ = std::make_unique<SatPassPlanner>(sessionId_);
-        // Named automatic capture requires a fresh operator arm this run.
-        config_.autoCapture = false;
         config_.logDir = SatcomScannerConfig::defaults().logDir + "/" + sessionId_;
     }
     ax25_ = std::make_unique<Ax25AprsDecoder>();

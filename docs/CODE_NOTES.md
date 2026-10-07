@@ -1,5 +1,9 @@
 # Code notes (tree map)
 
+DEC-0205: `SatcomScannerEngine` constructor always sets `config_.autoCapture =
+false` after load, including the default hub singleton. Saved true no longer
+arms RF at process start. `SatcomScannerWidget` checkbox is the session arm.
+
 DEC-0204: `P25FollowSnapshot.holdEncryptedForIqCapture` skips `ReturnEncrypted`
 so IQ capture can dwell on encrypted traffic. `MainWindow` Tools/P25 button
 arms live IQ + encrypted-grant follow; speaker gates unchanged.

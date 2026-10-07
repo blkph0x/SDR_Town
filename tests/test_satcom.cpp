@@ -6,6 +6,7 @@
 #include "SatcomDoppler.h"
 #include "Demod.h"
 #include "SatcomHostServices.h"
+#include "SatcomScannerEngine.h"
 #include "SdrDeviceCandidate.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -624,4 +625,21 @@ TEST_CASE("Satcom host services forward MainWindow ownership", "[satcom][host]")
     error = "stale";
     CHECK(host.beginReceiverTakeover(token, &error));
     CHECK(error.empty());
+}
+
+TEST_CASE("Saved satellite auto-capture does not arm until this session", "[satcom][dec-0205]") {
+    SatcomScannerConfig saved = SatcomScannerConfig::defaults();
+    saved.autoCapture = true;
+    saved.monitorAudio = false;
+    saved.save("qa-dec0205-autocapture");
+    SatcomScannerEngine engine("qa-dec0205-autocapture");
+    CHECK_FALSE(engine.autoCaptureEnabled());
+    engine.setAutoCaptureEnabled(true);
+    CHECK(engine.autoCaptureEnabled());
+    engine.setAutoCaptureEnabled(false);
+    CHECK_FALSE(engine.autoCaptureEnabled());
+}
+
+TEST_CASE("Default satcom hub engine starts with auto-capture off", "[satcom][dec-0205]") {
+    CHECK_FALSE(SatcomScannerEngine::instance().autoCaptureEnabled());
 }
