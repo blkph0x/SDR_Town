@@ -1,5 +1,10 @@
 # Task list (canonical)
 
+T-0116 | in_progress | Encrypted P25 grant IQ capture button (DEC-0204) |
+Tools/P25 "Record Enc Grant IQ" starts live IQ, follows known-encrypted grants
+with speaker muted, holds until teardown/carrier-drop, writes timing log.
+Does not decode encrypted audio. Default auto-follow skip/return unchanged.
+
 T-0115 | pending_live_acceptance | P25 locked-lattice empty-hop search (DEC-0203 / ISS-0080) |
 Capture 093930: mid-call duty 0.439 sits on empty hops that still have SF+mask
 locked; DEC-0048 then spends cand=16/120 on the next unique-speech window.

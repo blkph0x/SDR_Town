@@ -157,8 +157,12 @@ P25FollowDecision evaluateP25Follow(const P25FollowSnapshot& snapshot)
         grantProvesEncrypted ||
         trustedTrafficEncrypted;
     if (decision.encryptedOnVoice) {
-        decision.action = P25FollowAction::ReturnEncrypted;
-        return decision;
+        // DEC-0204: IQ-only encrypted grant capture may keep the tuner on
+        // traffic until teardown or carrier drop. Speaker mute is unchanged.
+        if (!snapshot.holdEncryptedForIqCapture) {
+            decision.action = P25FollowAction::ReturnEncrypted;
+            return decision;
+        }
     }
 
     if (!snapshot.autoActive) {

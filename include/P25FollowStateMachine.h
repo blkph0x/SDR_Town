@@ -58,6 +58,9 @@ struct P25FollowSnapshot {
     bool phase2TrafficEncrypted = false;
     bool grantEncryptionKnown = false;
     bool grantEncrypted = false;
+    // DEC-0204: stay on encrypted traffic for IQ capture only. Default false
+    // keeps ReturnEncrypted. Must not open speaker audio.
+    bool holdEncryptedForIqCapture = false;
     long long phase2OppositeVoiceCodewords = 0;
 
     // RF carrier detection for robust "transmission ended" even if protocol state lingers or noise fools VCW count.

@@ -539,6 +539,7 @@ Tester builds: https://github.com/Blkph0x/SDR_Town/releases
 | Saved frequencies | Add current / tune / delete / refresh |
 | Capture Training Sample | SigMF + classifier training tile |
 | Start/Stop IQ Capture | Rolling IQ capture for lab/debug (AppData under SDR Town) |
+| Record Enc Grant IQ | Follow a known-encrypted P25 grant with the speaker muted and save IQ + timing log |
 | P25 Control Channels | Scan CC, Monitor CC, **Grant Test**, Add known CC, Refresh, P25 Log |
 | Auto Follow Grants | Follow clear voice grants from control channel |
 | Traffic Source | Independent traffic-source path when available (one-RTL retune semantics) |

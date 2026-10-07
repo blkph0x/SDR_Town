@@ -1,5 +1,26 @@
 # Decisions
 
+## DEC-0204 - IQ-only encrypted grant/follow capture, speaker stays muted (2026-10-07)
+
+GUI Start IQ Capture already writes SigMF IQ plus `_p25_log.txt` and
+`_events.jsonl`. Auto-follow still skips known-encrypted grants
+(`auto-skip-encrypted`) and `evaluateP25Follow` returns immediately on
+encrypted proof (`ReturnEncrypted`). CLI `p25 waitgrant follow` also skips
+known-encrypted TGs. Manual Follow TG can tune a Phase 2 encrypted row, but
+the follow SM still bounces to CC as soon as ESS/grant proves encrypted, so
+the traffic dwell is truncated.
+
+Recording RF of an encrypted grant+follow does not require opening speaker
+audio. Encrypted mute (SoT L1 / REQ-P2.6) stays fail-closed.
+
+Decision: add an explicit GUI control that (1) starts live IQ capture,
+(2) enables auto-follow of **known-encrypted** grants only while armed,
+(3) sets `P25FollowSnapshot.holdEncryptedForIqCapture` so the tuner stays
+on traffic until teardown / carrier-drop / user stop instead of
+`ReturnEncrypted`, and (4) writes timing rows into the capture log/events.
+Do not save decoded WAV, do not soften slot/ESS speaker gates, and do not
+change default clear-follow behavior.
+
 ## DEC-0203 - Keep healthy 80/4 on first locked-lattice empty hop (2026-10-06)
 
 Capture `20261006_093930_588` on v0.2.128 is RF-gapless and listen=CLEAR, but

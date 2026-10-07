@@ -165,6 +165,75 @@ TEST_CASE("P25 follow returns immediately when a voice channel proves encrypted"
     REQUIRE(decision.effectiveTalkgroupId == 101);
 }
 
+TEST_CASE("P25 follow IQ hold stays on encrypted traffic while the call is active", "[p25][follow]")
+{
+    P25FollowSnapshot snapshot;
+    snapshot.autoActive = true;
+    snapshot.phase2Voice = true;
+    snapshot.nowMs = 4'000;
+    snapshot.tunedAtMs = 1'000;
+    snapshot.lastActiveMs = 4'000;
+    snapshot.diagUpdatedMs = 4'000;
+    snapshot.talkgroupId = 12068;
+    snapshot.diag = diag(P25FollowDiagCode::SkippedEncrypted);
+    snapshot.grantEncryptionKnown = true;
+    snapshot.grantEncrypted = true;
+    snapshot.holdEncryptedForIqCapture = true;
+    snapshot.phase2Bursts = 8;
+    snapshot.phase2VoiceCodewords = 8;
+    snapshot.phase2SuperframeBursts = 8;
+    snapshot.phase2MaskedBursts = 8;
+    snapshot.phase2MacCrcValid = 4;
+    snapshot.phase2EssKnown = true;
+    snapshot.phase2EssEncrypted = true;
+    snapshot.phase2TrafficProcessorActive = true;
+    snapshot.phase2TrafficCallActive = true;
+    snapshot.phase2TrafficEncrypted = true;
+    snapshot.currentCallSessionId = 7;
+    snapshot.essCallSessionId = 7;
+    snapshot.phase2TrafficSessionId = 7;
+    snapshot.rfMetricsPopulated = true;
+    snapshot.recentSnrDb = 12.0;
+    snapshot.recentSignalLevelDb = -70.0;
+    snapshot.recentNoiseFloorDb = -95.0;
+
+    const auto decision = evaluateP25Follow(snapshot);
+    REQUIRE(decision.encryptedOnVoice);
+    REQUIRE(decision.action == P25FollowAction::None);
+}
+
+TEST_CASE("P25 follow IQ hold still returns on confirmed encrypted teardown", "[p25][follow]")
+{
+    P25FollowSnapshot snapshot;
+    snapshot.autoActive = true;
+    snapshot.phase2Voice = true;
+    snapshot.nowMs = 20'000;
+    snapshot.tunedAtMs = 1'000;
+    snapshot.lastActiveMs = 18'000;
+    snapshot.diagUpdatedMs = 19'500;
+    snapshot.talkgroupId = 12068;
+    snapshot.diag = diag(P25FollowDiagCode::SkippedEncrypted);
+    snapshot.grantEncryptionKnown = true;
+    snapshot.grantEncrypted = true;
+    snapshot.holdEncryptedForIqCapture = true;
+    snapshot.phase2Bursts = 8;
+    snapshot.phase2VoiceCodewords = 0;
+    snapshot.phase2MacCrcValid = 4;
+    snapshot.phase2EssKnown = true;
+    snapshot.phase2EssEncrypted = true;
+    snapshot.phase2TrafficProcessorActive = true;
+    snapshot.phase2TrafficCallActive = false;
+    snapshot.phase2TrafficTeardownConfirmed = true;
+    snapshot.phase2TrafficEncrypted = true;
+    snapshot.currentCallSessionId = 7;
+    snapshot.essCallSessionId = 7;
+    snapshot.phase2TrafficSessionId = 7;
+
+    const auto decision = evaluateP25Follow(snapshot);
+    REQUIRE(decision.encryptedOnVoice);
+    REQUIRE(decision.action == P25FollowAction::ReturnCallEnded);
+}
+
 TEST_CASE("P25 follow does not bail on SkippedEncrypted when grant security is unknown", "[p25][follow]")
 {
     P25FollowSnapshot snapshot;

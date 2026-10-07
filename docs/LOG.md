@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-07 - Encrypted grant IQ capture, DEC-0204
+
+GUI Record Enc Grant IQ starts SigMF capture, follows known-encrypted grants
+with the speaker muted, and holds the tuner until teardown/carrier-drop or
+user stop. Timing rows go in `encrypted_grant_timing.txt` plus the capture
+P25 log. Default encrypted skip/return is unchanged.
+
 ## 2026-10-06 - Locked-lattice empty-hop search, DEC-0203
 
 ISS-0080 capture 093930 proved mid-call 0.439 windows are empty hops with

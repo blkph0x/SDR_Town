@@ -1,5 +1,11 @@
 # Issues (canonical)
 
+## ISS-0081 - Encrypted grant follow IQ was truncated by skip/return (2026-10-07, IN PROGRESS)
+
+Auto-follow skips known-encrypted grants and the follow SM returns on
+encrypted proof, so Start IQ Capture cannot keep a full encrypted traffic
+dwell. DEC-0204 adds an explicit IQ-only hold. Speaker mute stays fail-closed.
+
 ## ISS-0080 - v0.2.128 capture 093930 remaining holes are extract/PTT-edge, not cadence (2026-10-06, CLASSIFIED)
 
 Capture `20261006_093930_588` (CC 423.35 MHz, 364.72 s, v0.2.128, RTL

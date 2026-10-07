@@ -1,5 +1,9 @@
 # Code notes (tree map)
 
+DEC-0204: `P25FollowSnapshot.holdEncryptedForIqCapture` skips `ReturnEncrypted`
+so IQ capture can dwell on encrypted traffic. `MainWindow` Tools/P25 button
+arms live IQ + encrypted-grant follow; speaker gates unchanged.
+
 DEC-0203: `p25Phase2PlanLiveHotSearch` in `P25VoiceTiming` classifies the next
 live hot search. `MainWindowP25Voice.cpp` applies the plan; first locked-lattice
 empty hop stays 80/4, true lost-eye still 16/120 on streak 1.

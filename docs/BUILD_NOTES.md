@@ -1,5 +1,15 @@
 # Build notes
 
+## 2026-10-07 - v0.2.130 encrypted grant IQ capture, DEC-0204
+
+Intent: record SigMF IQ of a known-encrypted P25 grant+follow without opening
+speaker audio.
+
+Release `SDR_Town` built. Catch `[p25][follow]` 210 assertions / 54 cases PASS
+(includes IQ-hold stay and teardown). P25 guard self-test PASS (DEC-0204 digest
+pair). Unrelated Satcom/SSTV dirty work remains uncommitted. Live encrypted
+grant capture on a CC is still required.
+
 ## 2026-10-06 - v0.2.129 locked-lattice empty-hop search, DEC-0203
 
 Intent: first post-emit empty hop with SF+mask still locked stays healthy 80/4

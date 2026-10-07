@@ -247,6 +247,27 @@ P25_EMIT_GAP_DIGESTS = {
 }
 
 
+# DEC-0204: IQ-only encrypted grant/follow capture. Exact digests are
+# b8e803c (0.2.129) -> holdEncryptedForIqCapture + GUI button.
+P25_ENCRYPTED_GRANT_IQ_DIGESTS = {
+    "include/P25FollowStateMachine.h": (
+        "f0ad755d0f36d99d342053c7cc3e1b54b2bb5ba0946e9c7e15e2a25fffc14eed",
+        "f6a5ee8732f30370d1d62410000c5167a66ef983f8d923ce80c3efa57dfac7da"),
+    "src/P25FollowStateMachine.cpp": (
+        "fff39a851d0252a7c60fe06a99bcb6350d32fd0529d60e4858123ea2e2fb78a8",
+        "40e1d18a77629a7521021afa3ab3d00258069d5d2aac29de4962f7d3f61d9fe3"),
+    "tests/test_p25follow.cpp": (
+        "0a5df977916c127610189b7a2f8f98165617973b1ec03ead8e7e687fe69a4757",
+        "6c97ae8fd86d8e6b3b58c253709aa374be1644c929b3ce00b1b3653a9abc870a"),
+    "include/MainWindow.h": (
+        "f213ced64f4952bfef7e5b300835b9eff06d892f986b9b7df6b2b8afa3046091",
+        "870f4a524fe1065e455cebc21bfdc5627df24dbbca8cbc8ddae00b3de6f1216e"),
+    "src/MainWindow.cpp": (
+        "0d1ab8f8c40321869c8d2ff2621fac732ddba797d131519e01b75fdfb47698e3",
+        "3639563e9f6899e2ec65d5d661660be7c5cc2209bfdd13b1781e2fa0ffff3454"),
+}
+
+
 # DEC-0203 / capture 20261006_093930: first locked-lattice empty hop stays
 # healthy 80/4. Exact digests are 14e1090 (0.2.128) -> planner + live call.
 P25_LOCKED_LATTICE_EMPTY_DIGESTS = {
@@ -283,7 +304,8 @@ def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
                       SATELLITE_SESSION_DIGESTS.get(path), DRIVER_IO_ADMISSION_DIGESTS.get(path),
                       P25_OBSERVER_DIGESTS.get(path), P25_FOLLOW_LIFECYCLE_DIGESTS.get(path),
                       P25_TRACE_CONTEXT_DIGESTS.get(path), P25_EMIT_GAP_DIGESTS.get(path),
-                      P25_LOCKED_LATTICE_EMPTY_DIGESTS.get(path))
+                      P25_LOCKED_LATTICE_EMPTY_DIGESTS.get(path),
+                      P25_ENCRYPTED_GRANT_IQ_DIGESTS.get(path))
 
 
 # DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.
@@ -798,6 +820,10 @@ def main() -> int:
         if args.paths is None and path in P25_LOCKED_LATTICE_EMPTY_DIGESTS:
             if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
                 print(f"P25 guard: accepted exact DEC-0203 locked-lattice empty-hop repair: {path}")
+                continue
+        if args.paths is None and path in P25_ENCRYPTED_GRANT_IQ_DIGESTS:
+            if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
+                print(f"P25 guard: accepted exact DEC-0204 encrypted-grant IQ capture: {path}")
                 continue
         if args.paths is None and path in P25_FOLLOW_LIFECYCLE_DIGESTS:
             if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):

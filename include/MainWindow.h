@@ -460,6 +460,12 @@ private:
     QTextEdit* p25LogText = nullptr;
     QDialog* iqReplayDialog = nullptr;
     QCheckBox* p25AutoFollowCheckBox = nullptr;
+    QPushButton* p25EncryptedGrantIqBtn = nullptr;
+    QAction* p25EncryptedGrantIqAction = nullptr;
+    bool p25EncryptedGrantIqArmed = false;
+    bool p25EncryptedGrantIqOwnsCapture = false;
+    bool p25EncryptedGrantIqFollowed = false;
+    QString p25EncryptedGrantIqDirectory;
     QCheckBox* p25IndependentTrafficCheckBox = nullptr;
     QLabel* p25StatusLabel = nullptr;
     // Sprint 0–2 P25 clear TX shell (mic capture; no RF encode yet).
@@ -587,6 +593,14 @@ private:
     void pollLiveIqCapture(bool finalPoll);
 
     LiveIqCaptureResult stopLiveIqCapture();
+
+    void syncP25EncryptedGrantIqUi();
+
+    void writeP25EncryptedGrantIqTiming(const QString& event, const QString& detail = QString());
+
+    void setP25EncryptedGrantIqCapture(bool armed);
+
+    void stopP25EncryptedGrantIqCapture(const QString& reason);
 
     IqTestCaptureResult captureIqTestWindow(const std::string& label, double seconds, const QDateTime& startedUtc);
 

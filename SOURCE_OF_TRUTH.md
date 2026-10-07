@@ -3,10 +3,10 @@ SDR TOWN — SOURCE OF TRUTH (SoT)
 ================================================================================
 VERSION: 1.0.0
 PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
-CURRENT VERSION IN TREE: 0.2.129 (P25 locked-lattice empty-hop search repair)
-CURRENT WORK: DEC-0203: first locked-lattice empty hop stays healthy 80/4 so
-              mid-call unique speech is not delayed on cand=16/120. True
-              lost-eye still escalates immediately. No hop/PLC/security change.
+CURRENT VERSION IN TREE: 0.2.130 (P25 encrypted-grant IQ capture)
+CURRENT WORK: DEC-0204: GUI button records IQ of a known-encrypted grant+follow
+              with a timing log. Speaker stays muted. Default clear follow
+              still returns immediately on encrypted proof.
 PUBLIC BASELINE: v0.2.123-experimental accepted, Actions37273822180; zero package
                  blockers (commit1b035aa acceptance comment203450320).
 LATEST PACKAGE: DEC-0196 replaces four permanent blocker strings with finite,

@@ -42,6 +42,7 @@
 #include <QCloseEvent>
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QDockWidget>
 #include <QFileInfo>
 #include <QSizePolicy>
@@ -914,6 +915,10 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         QPushButton* p25LogBtn = new QPushButton("P25 Log");
         QCheckBox* p25AutoFollowCheck = new QCheckBox("Auto Follow Grants");
         p25AutoFollowCheck->setToolTip("While monitoring a P25 control channel, automatically follow clear voice grants and return to the control channel when activity drops.");
+        QPushButton* p25EncIqBtn = new QPushButton("Record Enc Grant IQ");
+        p25EncIqBtn->setCheckable(true);
+        p25EncIqBtn->setToolTip("Start IQ capture, wait for a known-encrypted P25 grant, follow it with the speaker muted, and save SigMF IQ plus a timing log. Does not decode encrypted audio.");
+        p25EncryptedGrantIqBtn = p25EncIqBtn;
         QCheckBox* p25IndependentTrafficCheck = new QCheckBox("Traffic Source");
         p25IndependentTrafficCheck->setToolTip("Use an sdrtrunk-style traffic-channel source for P25 grants. With one RTL-SDR this DDCs traffic that is already inside the sampled passband, or temporarily retunes the single tuner to traffic and returns to control after the call. Disable to use the older direct scanner-follow path.");
         p25IndependentTrafficCheck->setChecked(QSettings().value("p25/independentTrafficSource", true).toBool());
@@ -929,6 +934,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
         p25BtnLay->addWidget(p25KnownBtn);
         p25BtnLay->addWidget(p25LogBtn);
         p25BtnLay->addWidget(p25AutoFollowCheck);
+        p25BtnLay->addWidget(p25EncIqBtn);
         p25BtnLay->addWidget(p25IndependentTrafficCheck);
         p25BtnLay->addWidget(p25Status);
         p25BtnLay->addStretch();
@@ -1803,6 +1809,9 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             if (retDur > 250) {
                 appendP25LogLine(QString("P25 return-to-control completed slowly in %1 ms; UI stayed off the DSP lock path.")
                     .arg(retDur));
+            }
+            if (p25EncryptedGrantIqArmed && p25EncryptedGrantIqFollowed) {
+                stopP25EncryptedGrantIqCapture(QStringLiteral("returned-to-control"));
             }
         };
 
@@ -2870,10 +2879,16 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             }
 
             bool probingUnknownPhase2EncryptedHistory = false;
-            const bool followReady = p25PrepareTalkgroupForFollowGrant(
+            bool followReady = p25PrepareTalkgroupForFollowGrant(
                 followTg,
                 event,
                 probingUnknownPhase2EncryptedHistory);
+            // DEC-0204: IQ capture of a known-encrypted grant still retunes; speaker stays muted.
+            if (p25EncryptedGrantIqArmed &&
+                followTg.encryptionKnown && followTg.encrypted &&
+                followTg.lastVoiceFreqHz > 0.0) {
+                followReady = true;
+            }
 
             auto findActiveP25FollowReceiverLocked = [this]() -> std::shared_ptr<Receiver> {
                 if (p25IndependentTrafficActive) {
@@ -2889,7 +2904,27 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 return {};
             };
 
+            if (p25EncryptedGrantIqArmed &&
+                !(followTg.encryptionKnown && followTg.encrypted)) {
+                appendP25LogLineKeyed(QStringLiteral("enc-iq-wait-encrypted"),
+                    QStringLiteral("Encrypted-grant IQ capture is waiting for a known-encrypted voice grant; skipping clear/unknown TGs."),
+                    8000);
+                return reportFollow(false, __LINE__);
+            }
             if (followTg.encryptionKnown && followTg.encrypted) {
+                if (p25EncryptedGrantIqArmed) {
+                    p25EncryptedGrantIqFollowed = true;
+                    writeP25EncryptedGrantIqTiming(
+                        QStringLiteral("grant_follow"),
+                        QString("TG %1 voice=%2MHz slot=%3 phase2=%4")
+                            .arg(followTg.talkgroupId)
+                            .arg(followTg.lastVoiceFreqHz / 1e6, 0, 'f', 5)
+                            .arg(followTg.tdmaSlotKnown ? static_cast<int>(followTg.tdmaSlot) : -1)
+                            .arg(grantLooksPhase2 ? "yes" : "no"));
+                    appendP25LogLine(QString("Encrypted-grant IQ capture following TG %1 on %2MHz; speaker remains muted.")
+                        .arg(followTg.talkgroupId)
+                        .arg(followTg.lastVoiceFreqHz / 1e6, 0, 'f', 5));
+                } else {
                 bool retainFollowDespiteEncryptedCc = false;
                 if (p25FollowAutoActive && p25FollowTalkgroupId == followTg.talkgroupId) {
                     retainFollowDespiteEncryptedCc =
@@ -2943,6 +2978,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     returnP25AutoFollowToControl();
                 }
                 return reportFollow(false, __LINE__);
+                }
             }
             if (grantLooksPhase2 && !event.encryptionKnown) {
                 bool bypassEncryptedHold = false;
@@ -4363,6 +4399,9 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     p25Status->setText(on ? "Auto follow armed" : "Auto follow off");
                 }
             });
+        connect(p25EncIqBtn, &QPushButton::toggled, this, [this](bool on) {
+            setP25EncryptedGrantIqCapture(on);
+        });
         connect(p25IndependentTrafficCheck, &QCheckBox::toggled, this,
             [this, returnP25AutoFollowToControl](bool on) {
                 p25IndependentTrafficEnabled = on;
@@ -6708,6 +6747,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                     followSnapshot.grantEncryptionKnown =
                                         voiceStateClearKnown || voiceStateEncrypted;
                                     followSnapshot.grantEncrypted = voiceStateEncrypted;
+                                    followSnapshot.holdEncryptedForIqCapture = p25EncryptedGrantIqArmed;
                                     followSnapshot.phase2OppositeVoiceCodewords =
                                         voiceDiag.phase2OppositeVoiceCodewords;
 
@@ -6748,8 +6788,12 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                          trafficStatus.callActive &&
                                          trafficStatus.diag.p2vcw > 0) ||
                                         freshFollowAcquireEvidence;
-                                    if (followDecision.voiceStillLooksActive &&
-                                        freshFollowVoiceEvidence) {
+                                    if ((followDecision.voiceStillLooksActive &&
+                                        freshFollowVoiceEvidence) ||
+                                        (p25EncryptedGrantIqArmed &&
+                                         followDecision.encryptedOnVoice &&
+                                         (p2vcw > 0 || p2bursts > 0 ||
+                                          trafficStatus.callActive || p2crc > 0))) {
                                         p25AutoFollowLastActiveMs = nowMs;
                                         if (voiceStatePhase2 && decoded == 0 &&
                                             guiP25AudioLastOutputMs.load(std::memory_order_relaxed) <= 0) {
@@ -6768,6 +6812,12 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                         }
                                     }
                                     if (followDecision.action == P25FollowAction::ReturnEncrypted) {
+                                        if (p25EncryptedGrantIqArmed) {
+                                            appendP25LogLineKeyed(QStringLiteral("enc-iq-hold-encrypted"),
+                                                QString("Encrypted-grant IQ capture holding TG %1 on the traffic channel; speaker remains muted.")
+                                                    .arg(static_cast<long long>(followDecision.effectiveTalkgroupId)),
+                                                5000);
+                                        } else {
                                         P25TalkgroupEntry encryptedHoldTg;
                                         {
                                             auto registry = loadP25Talkgroups();
@@ -6815,8 +6865,11 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                                             .arg(voiceStateEncrypted ? "yes" : "no"));
                                         returnP25AutoFollowToControl();
                                         return;
+                                        }
                                     }
-                                    if (followDecision.action != P25FollowAction::None) {
+                                    if (followDecision.action != P25FollowAction::None &&
+                                        !(p25EncryptedGrantIqArmed &&
+                                          followDecision.action == P25FollowAction::ReturnEncrypted)) {
                                         if (followDecision.action == P25FollowAction::ReturnCallEnded) {
                                             appendP25LogLine(QString("P25 confirmed traffic teardown: TG=%1 session=%2 slot=%3 FACCH_END=%4; selected call ended and playout grace drained, returning directly to CC without warm standby.")
                                                 .arg(followDecision.effectiveTalkgroupId)
@@ -12549,6 +12602,117 @@ TrainingCaptureResult MainWindow::captureTrainingSample(const std::string& label
         return saveTrainingCapture(req);
     }
 
+void MainWindow::syncP25EncryptedGrantIqUi()
+{
+        if (p25EncryptedGrantIqBtn) {
+            const QSignalBlocker block(p25EncryptedGrantIqBtn);
+            p25EncryptedGrantIqBtn->setChecked(p25EncryptedGrantIqArmed);
+        }
+        if (p25EncryptedGrantIqAction) {
+            const QSignalBlocker block(p25EncryptedGrantIqAction);
+            p25EncryptedGrantIqAction->setChecked(p25EncryptedGrantIqArmed);
+        }
+    }
+
+void MainWindow::writeP25EncryptedGrantIqTiming(const QString& event, const QString& detail)
+{
+        const QDateTime nowLocal = QDateTime::currentDateTime();
+        const QString line = QString("[%1 | %2 UTC] %3%4")
+            .arg(nowLocal.toString("HH:mm:ss.zzz"))
+            .arg(nowLocal.toUTC().toString(Qt::ISODateWithMs))
+            .arg(event)
+            .arg(detail.isEmpty() ? QString() : (QStringLiteral(" ") + detail));
+        appendP25LogLine(QString("Encrypted-grant IQ %1%2")
+            .arg(event)
+            .arg(detail.isEmpty() ? QString() : (QStringLiteral(": ") + detail)));
+        if (!p25EncryptedGrantIqDirectory.isEmpty()) {
+            QFile file(QDir(p25EncryptedGrantIqDirectory).filePath(QStringLiteral("encrypted_grant_timing.txt")));
+            if (file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+                file.write(line.toUtf8());
+                file.write("\n");
+            }
+        }
+    }
+
+void MainWindow::setP25EncryptedGrantIqCapture(bool armed)
+{
+        if (armed == p25EncryptedGrantIqArmed) {
+            syncP25EncryptedGrantIqUi();
+            return;
+        }
+        if (!armed) {
+            stopP25EncryptedGrantIqCapture(QStringLiteral("user-stop"));
+            return;
+        }
+
+        p25EncryptedGrantIqArmed = true;
+        p25EncryptedGrantIqFollowed = false;
+        if (p25AutoFollowCheckBox && !p25AutoFollowEnabled) {
+            p25AutoFollowCheckBox->setChecked(true);
+        }
+        if (!liveIqCaptureLogActive.load(std::memory_order_acquire)) {
+            const auto result = startLiveIqCapture("p25_enc_grant");
+            if (!result.ok) {
+                p25EncryptedGrantIqArmed = false;
+                p25EncryptedGrantIqOwnsCapture = false;
+                syncP25EncryptedGrantIqUi();
+                QMessageBox::warning(this, "Encrypted Grant IQ", result.message);
+                return;
+            }
+            p25EncryptedGrantIqOwnsCapture = true;
+            p25EncryptedGrantIqDirectory = result.directory;
+        } else {
+            p25EncryptedGrantIqOwnsCapture = false;
+            p25EncryptedGrantIqDirectory = liveIqCapture.directory;
+        }
+        writeP25EncryptedGrantIqTiming(QStringLiteral("armed"),
+            QString("dir=%1 auto-follow=%2")
+                .arg(p25EncryptedGrantIqDirectory)
+                .arg(p25AutoFollowEnabled ? "on" : "off"));
+        statusBar()->showMessage(
+            QString("Recording encrypted P25 grant IQ. Monitor a control channel; speaker stays muted. %1")
+                .arg(p25EncryptedGrantIqDirectory),
+            10000);
+        syncP25EncryptedGrantIqUi();
+    }
+
+void MainWindow::stopP25EncryptedGrantIqCapture(const QString& reason)
+{
+        const bool wasArmed = p25EncryptedGrantIqArmed;
+        const bool owns = p25EncryptedGrantIqOwnsCapture;
+        p25EncryptedGrantIqArmed = false;
+        p25EncryptedGrantIqOwnsCapture = false;
+        p25EncryptedGrantIqFollowed = false;
+        if (wasArmed) {
+            writeP25EncryptedGrantIqTiming(QStringLiteral("stopped"), reason);
+        }
+        QString directory = p25EncryptedGrantIqDirectory;
+        if (owns) {
+            const auto result = stopLiveIqCapture();
+            if (result.ok) directory = result.directory;
+            statusBar()->showMessage(
+                result.ok
+                    ? QString("Encrypted grant IQ saved: %1").arg(result.directory)
+                    : result.message,
+                10000);
+            if (result.ok) {
+                QMessageBox::information(this, "Encrypted Grant IQ Saved",
+                    result.message + "\n\n" + result.directory
+                    + "\n\nTiming log: encrypted_grant_timing.txt\nSpeaker audio was not recorded.");
+            } else if (wasArmed) {
+                QMessageBox::warning(this, "Encrypted Grant IQ", result.message);
+            }
+        } else if (wasArmed) {
+            statusBar()->showMessage(
+                QString("Encrypted-grant IQ hold stopped (%1). Existing IQ capture is still running.")
+                    .arg(reason),
+                8000);
+        }
+        p25EncryptedGrantIqDirectory.clear();
+        syncP25EncryptedGrantIqUi();
+        (void)directory;
+    }
+
 void MainWindow::writeLiveIqCaptureEvent(const json& row,  bool flushNow)
 {
         if (!liveIqCapture.active || !liveIqCapture.events.is_open()) return;
@@ -13677,6 +13841,12 @@ void MainWindow::createMenus()
         });
         toolsMenu->addAction("P25 Decoder &Log...", this, [this]() {
             showP25LogWindow();
+        });
+        p25EncryptedGrantIqAction = toolsMenu->addAction("Record Encrypted P25 Grant &IQ");
+        p25EncryptedGrantIqAction->setCheckable(true);
+        p25EncryptedGrantIqAction->setToolTip("Start IQ capture, wait for a known-encrypted P25 grant, follow it with the speaker muted, and save SigMF IQ plus a timing log. Does not decode encrypted audio.");
+        connect(p25EncryptedGrantIqAction, &QAction::toggled, this, [this](bool on) {
+            setP25EncryptedGrantIqCapture(on);
         });
         QMenu* settingsMenu = menuBar()->addMenu("&Settings");
         settingsMenu->addAction("Preferences...", [](){});
