@@ -32,7 +32,8 @@ struct GuiRuntimeConfig {
     bool iqReplayClearGrant = false;
     bool iqReplayEncryptedGrant = false;
     bool controlServer = true;
-    bool controlAuthRequired = false;
+    // DEC-0206: empty token is unauthorized. Opt in with --control-allow-unauthenticated.
+    bool controlAuthRequired = true;
     double frequencyHz = 0.0;
     double p25ControlHz = 0.0;
     double iqReplayTargetHz = 0.0;

@@ -1,5 +1,21 @@
 # Task list (canonical)
 
+T-0120 | queued | Quarantine RX USB identity after detach-leak stop (ISS-0085) |
+`stopStreamingImpl` leaks the Soapy handle on `rxDetached` and still
+resets `StreamState`. Next open must not reuse that USB index while
+`readStream` may hold `gSoapyLiveIoMutex`. After T-0119. No unmake-after-detach.
+
+T-0119 | queued | Unstick wedged TX stop from gSoapyLiveIoMutex (ISS-0084) |
+`stopTx` takes the live-IO mutex after detach and can stall the process on
+a wedged `writeStream`. After T-0118. Hardware path is `startToneTx`, not
+the P25 voice stub. No voice heuristics.
+
+T-0118 | done | Default-deny loopback control + constant-time token (DEC-0206 / ISS-0083) |
+Empty token is unauthorized. Health stays open. `/v1/status` and mutating
+routes require Bearer or `x-sdrtown-token` unless
+`--control-allow-unauthenticated`. `RemoteDiagnostics` / `[control]` ctest PASS.
+No P25/DSP change. Public release still required.
+
 T-0117 | pending_live_acceptance | Stop satcom auto-capture from locking Listen at open (DEC-0205 / ISS-0082) |
 Saved autoCapture=true was seizing the radio onto SO-50 436.795 MHz when the
 GUI opened, so Monitor Freq could not retune. Default/named engines now require

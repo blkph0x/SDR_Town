@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-08 - Loopback control default-deny, DEC-0206
+
+Empty token is unauthorized. Tokens compare in constant time. `/v1/health`
+stays open. FUBAR / local clients need `--control-token` or the explicit
+unauthenticated opt-in. P25/audio unchanged. TX mutex stall (ISS-0084) and
+RX USB quarantine (ISS-0085) are next.
+
 ## 2026-10-07 - v0.2.131 public ZIP verified
 
 Actions 37614874125 success. Release v0.2.131-experimental public prerelease.

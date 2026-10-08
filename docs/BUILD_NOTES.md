@@ -1,5 +1,13 @@
 # Build notes
 
+## 2026-10-08 - v0.2.132 loopback control default-deny, DEC-0206
+
+Intent: same-machine `/v1/status` must not disclose frequency/serial without
+a token. `ctest -C Release -R RemoteDiagnostics` PASS (21 cases). Covers
+default Config refuse, empty/wrong token 401, health without token, header
+token, and explicit allowUnauthenticated. No P25/DeviceManager/TX-RX
+teardown change.
+
 ## 2026-10-07 - v0.2.131 public asset proof
 
 Public https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.131-experimental

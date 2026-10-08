@@ -40,6 +40,19 @@ const char* reasonForStatus(int status)
     }
 }
 
+bool tokensEqualConstantTime(const QByteArray& a, const QByteArray& b)
+{
+    const qsizetype n = std::max(a.size(), b.size());
+    unsigned int acc = static_cast<unsigned int>(a.size()) ^
+                       static_cast<unsigned int>(b.size());
+    for (qsizetype i = 0; i < n; ++i) {
+        const unsigned char av = i < a.size() ? static_cast<unsigned char>(a.at(i)) : 0;
+        const unsigned char bv = i < b.size() ? static_cast<unsigned char>(b.at(i)) : 0;
+        acc |= static_cast<unsigned int>(av ^ bv);
+    }
+    return acc == 0;
+}
+
 } // namespace
 
 SdrTownControlServer::SdrTownControlServer(QObject* parent)
@@ -54,12 +67,13 @@ bool SdrTownControlServer::start(const Config& config, QString* error)
 {
     stop();
     m_config = config;
+    m_config.token = m_config.token.trimmed();
     if (config.maxConnections < 1 || config.maxConnections > 128 ||
         config.requestTimeoutMs < 10 || config.requestTimeoutMs > 60000) {
         if (error) *error = QStringLiteral("invalid control connection limits");
         return false;
     }
-    if (!m_config.allowUnauthenticated && m_config.token.trimmed().isEmpty()) {
+    if (!m_config.allowUnauthenticated && m_config.token.isEmpty()) {
         if (error) *error = QStringLiteral("control token is required when unauthenticated control is disabled");
         return false;
     }
@@ -277,13 +291,23 @@ void SdrTownControlServer::handleSocketReadyRead(QTcpSocket* socket)
 
 bool SdrTownControlServer::requestAuthorized(const QJsonObject& headers) const
 {
-    if (m_config.allowUnauthenticated || m_config.token.isEmpty()) return true;
-    const QString bearer = headerValue(headers, QStringLiteral("authorization"));
-    if (bearer.startsWith(QStringLiteral("Bearer "), Qt::CaseInsensitive) &&
-        bearer.mid(7).trimmed() == m_config.token) {
+    // DEC-0206: empty token is unauthorized. Always compare both presented
+    // headers so length/value mismatch does not short-circuit.
+    if (m_config.allowUnauthenticated)
         return true;
-    }
-    return headerValue(headers, QStringLiteral("x-sdrtown-token")) == m_config.token;
+    const QByteArray expected = m_config.token.toUtf8();
+    if (expected.isEmpty())
+        return false;
+
+    QString auth = headerValue(headers, QStringLiteral("authorization"));
+    QByteArray bearer;
+    if (auth.startsWith(QStringLiteral("Bearer "), Qt::CaseInsensitive))
+        bearer = auth.mid(7).trimmed().toUtf8();
+    const QByteArray headerTok =
+        headerValue(headers, QStringLiteral("x-sdrtown-token")).toUtf8();
+    const bool bearerOk = tokensEqualConstantTime(expected, bearer);
+    const bool headerOk = tokensEqualConstantTime(expected, headerTok);
+    return bearerOk || headerOk;
 }
 
 QByteArray SdrTownControlServer::makeHttpResponse(int status,

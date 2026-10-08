@@ -17,7 +17,8 @@ public:
     struct Config {
         quint16 port = 8765;
         QString token;
-        bool allowUnauthenticated = true;
+        // DEC-0206: loopback control is default-deny. Empty token is not authorized.
+        bool allowUnauthenticated = false;
         // DEC-0171: loopback resource limits, independent of radio timing.
         int maxConnections = 16;
         int requestTimeoutMs = 10000;

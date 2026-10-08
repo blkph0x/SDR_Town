@@ -1,5 +1,22 @@
 # Decisions
 
+## DEC-0206 - Loopback control is default-deny (2026-10-08)
+
+`SdrTownControlServer` listened on `127.0.0.1:8765` with
+`allowUnauthenticated = true` and `GuiRuntimeConfig.controlAuthRequired = false`.
+`requestAuthorized` treated an empty token as authorized. `/v1/health` is
+version-only, but `GET /v1/status` returns frequency, mode, and
+`activeDevice.serial` whenever the handler is installed. Same-machine clients
+did not need a wedged driver.
+
+Decision: require a token by default. `Config.allowUnauthenticated` and
+`controlAuthRequired` flip to fail-closed. `start()` still refuses a missing
+token unless the operator passes `--control-allow-unauthenticated`.
+`requestAuthorized` no longer treats an empty token as success. Presented
+Bearer / `x-sdrtown-token` values are compared in constant time over UTF-8
+bytes. `/v1/health` stays unauthenticated. Query-to-body merge is unchanged.
+Do not change P25, TX teardown, or RX detach in this patch.
+
 ## DEC-0205 - Do not inherit saved satellite auto-capture at process start (2026-10-07)
 
 Opening SDR Town jumped the spectrum to SO-50 FM 436.795 MHz and refused Listen

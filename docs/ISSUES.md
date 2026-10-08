@@ -1,5 +1,34 @@
 # Issues (canonical)
 
+## ISS-0085 - RX stop leaks the Soapy handle and can reuse the USB identity (2026-10-08, OPEN)
+
+`stopStreamingImpl` sets `rxDetached` and skips close/`unmake`, leaving the
+Soapy handle alive until process exit. It still nulls `st.soapyDev` and
+`resetStreamBuffers`. `realInitThread` is detached and never joined. The
+next open can reuse the same `StreamState` / USB index while `readStream`
+may still be inside `gSoapyLiveIoMutex`. Patch 3 after DEC-0206 / ISS-0084:
+quarantine that USB identity so the next open cannot reuse it. Do not
+unmake after detach.
+
+## ISS-0084 - Wedged TX stop can stall the process on gSoapyLiveIoMutex (2026-10-08, OPEN)
+
+`stopTx` waits 500 ms, detaches, then takes `gSoapyLiveIoMutex` and
+`unmake`s. A `writeStream` still holding that mutex stalls stop instead of
+racing the free. Hardware emission is `DeviceManager::startToneTx` under
+`hardwareAuthorized`, not the P25 voice stub (`tx-voice-stub`).
+`tests/test_tx_safety.cpp` only covers the settings gate. Patch 2 after
+DEC-0206: do not block process teardown on a wedged write. No P25 voice
+heuristics.
+
+## ISS-0083 - Loopback control default-open disclosed receiver status (2026-10-08, FIXED)
+
+Default `controlAuthRequired = false` and empty token meant
+`requestAuthorized` succeeded. `GET /v1/status` includes frequency, mode,
+and `activeDevice.serial`. `/v1/health` is version-only. DEC-0206
+default-denies the control plane and compares tokens in constant time.
+FUBAR / local clients need `--control-token`, `SDR_TOWN_CONTROL_TOKEN`, or
+an explicit `--control-allow-unauthenticated`.
+
 ## ISS-0082 - GUI open seizes Listen onto SO-50 436.795 MHz (2026-10-07, PENDING LIVE)
 
 Live report after v0.2.130: opening the app jumps the spectrum to 436.795 MHz

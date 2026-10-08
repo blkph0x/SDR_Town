@@ -162,3 +162,68 @@ TEST_CASE("Control queued requests cannot survive connection retirement", "[cont
     CHECK(response.startsWith("HTTP/1.1 200"));
     CHECK(commands == 1);
 }
+
+TEST_CASE("DEC-0206 default Config refuses start without a token", "[control]") {
+    SdrTownControlServer::Config cfg;
+    CHECK(cfg.allowUnauthenticated == false);
+    CHECK(cfg.token.isEmpty());
+    SdrTownControlServer server;
+    QString error;
+    CHECK_FALSE(server.start(cfg, &error));
+    CHECK(error.contains("token"));
+    CHECK_FALSE(server.running());
+
+    cfg.token = QStringLiteral("   ");
+    CHECK_FALSE(server.start(cfg, &error));
+    CHECK_FALSE(server.running());
+}
+
+TEST_CASE("DEC-0206 empty token is 401; health stays open", "[control]") {
+    SdrTownControlServer server;
+    SdrTownControlServer::Config cfg;
+    cfg.port = 0;
+    cfg.token = QStringLiteral("fixture");
+    cfg.allowUnauthenticated = false;
+    REQUIRE(server.start(cfg));
+    int commands = 0;
+    server.setRequestHandler([&](const auto&, const auto&, const auto&) {
+        ++commands;
+        return QJsonObject{{"ok", true}};
+    });
+
+    const auto health = exchange(server, "GET /v1/health HTTP/1.1\r\n\r\n");
+    CHECK(health.startsWith("HTTP/1.1 200"));
+
+    const auto status = exchange(server, "GET /v1/status HTTP/1.1\r\n\r\n");
+    CHECK(status.startsWith("HTTP/1.1 401"));
+
+    const auto missing = exchange(server, "POST /v1/tune HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}");
+    CHECK(missing.startsWith("HTTP/1.1 401"));
+
+    const auto wrong = exchange(server,
+        "POST /v1/tune HTTP/1.1\r\nAuthorization: Bearer wrong-token\r\nContent-Length: 2\r\n\r\n{}");
+    CHECK(wrong.startsWith("HTTP/1.1 401"));
+
+    const auto headerTok = exchange(server,
+        "POST /v1/tune HTTP/1.1\r\nx-sdrtown-token: fixture\r\nContent-Length: 2\r\n\r\n{}");
+    CHECK(headerTok.startsWith("HTTP/1.1 200"));
+
+    // Health skips auth but still reaches the handler; 401s must not.
+    CHECK(commands == 2);
+}
+
+TEST_CASE("DEC-0206 explicit allowUnauthenticated still starts without a token", "[control]") {
+    SdrTownControlServer server;
+    SdrTownControlServer::Config cfg;
+    cfg.port = 0;
+    cfg.allowUnauthenticated = true;
+    REQUIRE(server.start(cfg));
+    int commands = 0;
+    server.setRequestHandler([&](const auto&, const auto&, const auto&) {
+        ++commands;
+        return QJsonObject{{"ok", true}};
+    });
+    const auto response = exchange(server, "GET /v1/status HTTP/1.1\r\n\r\n");
+    CHECK(response.startsWith("HTTP/1.1 200"));
+    CHECK(commands == 1);
+}

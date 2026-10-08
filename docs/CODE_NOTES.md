@@ -1,5 +1,13 @@
 # Code notes (tree map)
 
+DEC-0206: `SdrTownControlServer::Config.allowUnauthenticated` defaults false.
+`GuiRuntimeConfig.controlAuthRequired` defaults true. `start()` trims the
+token and refuses an empty one unless explicitly opted in.
+`requestAuthorized` never treats an empty token as success; Bearer and
+`x-sdrtown-token` are compared in constant time. `/v1/health` remains open.
+`test_control_server` covers default refuse, empty/wrong token 401, header
+token, health, and the opt-in path.
+
 DEC-0205: `SatcomScannerEngine` constructor always sets `config_.autoCapture =
 false` after load, including the default hub singleton. Saved true no longer
 arms RF at process start. `SatcomScannerWidget` checkbox is the session arm.

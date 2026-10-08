@@ -1,5 +1,10 @@
 # SDR Town
 
+0.2.132 requires a token for the loopback control server. `/v1/health` stays
+open; `/v1/status` and mutating routes need `--control-token`,
+`SDR_TOWN_CONTROL_TOKEN`, or an explicit `--control-allow-unauthenticated`.
+P25/audio DSP is unchanged. See [release notes](docs/RELEASE_0.2.132.md).
+
 0.2.131 stops saved satellite auto-capture from seizing the Listen radio at
 startup (SO-50 436.795 MHz). Check **Auto capture selected sats in range**
 this session if you want that behavior. P25/audio DSP is unchanged. See
@@ -354,13 +359,13 @@ gates](docs/AUDIT_20260924.md) and [release notes](docs/RELEASE_0.2.89.md).
 |----------|----------|-------|
 | **Share what you hear** | Demod to VB-CABLE or a hardware line | Capture that feed; **Public website** → phones listen live |
 | **Show live P25 activity** | Monitor CC + auto-follow; keep aliases filled in | Website keeps your typed title; smaller line shows `TG …` + alpha, or `Listening to NSWGRN Control` on the CC |
-| **Let a trusted visitor retune** | Leave local control server running (default) | Enable SDR Town control in FUBAR settings; visitor **Take control** on the site (queued lease) |
+| **Let a trusted visitor retune** | Leave local control running with a shared token | Enable SDR Town control in FUBAR settings; visitor **Take control** on the site (queued lease) |
 | **Log interesting traffic** | Stay on channel / trunk follow | VOX clips land in `%AppData%\Roaming\FUBAR\Vox_captures` |
 
 ### Setup checklist
 
 1. Install or unpack [SDR Town](https://github.com/Blkph0x/SDR_Town/releases) and [FUBAR](https://github.com/blkph0x/FUBAR/releases).
-2. In SDR Town, start the receiver (and P25 Monitor CC / auto-follow if that is your station). Confirm the status bar shows local control on `127.0.0.1:8765` (loopback only).
+2. In SDR Town, start the receiver (and P25 Monitor CC / auto-follow if that is your station). Set `--control-token` or `SDR_TOWN_CONTROL_TOKEN` so the status bar shows local control on `127.0.0.1:8765` (loopback only). From 0.2.132 an empty token does not start the server.
 3. Route SDR Town audio to **VB-CABLE** (or another capture endpoint FUBAR can open).
 4. In FUBAR, select that cable as the input, enable **Public website**, and set **Now playing**.
 5. Place a **matching** `SdrTownControl.dll` next to `FUBAR.exe`. This Town **0.2.96** release ships `SdrTownControl-0.2.96-win64.dll` (rename to `SdrTownControl.dll`). FUBAR was not changed or re-qualified in this SDRplay repair release. See [pairing versions and gaps](docs/FUBAR_PAIRING.md).
@@ -368,6 +373,7 @@ gates](docs/AUDIT_20260924.md) and [release notes](docs/RELEASE_0.2.89.md).
 
 ### Control API notes (for FUBAR and other local clients)
 
+- From **0.2.132**, loopback control is default-deny. Clients send `Authorization: Bearer <token>` or `x-sdrtown-token`. `/v1/health` stays open. Opt in to the old tokenless mode with `--control-allow-unauthenticated`.
 - From **0.2.90**, `POST /v1/sstv/live` accepts `rfMode` (`auto`, `USB`, `LSB`, `NFM`, `AM`), independent of image `mode`. Omitted `rfMode` defaults to Auto. Status includes available/requested/detected RF routes. The FUBAR website does not yet expose a separate RF selector; the Town GUI does.
 - HTTP JSON on **localhost only** (default port **8765**). Not exposed to the LAN.
 - `GET /v1/status` includes monitor state and a `p25` object. From **0.2.63**, `p25.talkgroupStatusLabel` is the clean `TG <id> <alpha>` string (no voice diagnostic suffix). FUBAR uses that for the website subtitle, with an alias-file fallback on older SDR Town builds.

@@ -6,7 +6,7 @@ Evidence-only. Do not treat a GitHub Latest of one app as automatically matching
 
 | App | Role | Control |
 |-----|------|---------|
-| **SDR Town** | RF in, demod / P25 / experimental satcom | Local HTTP JSON on `127.0.0.1:8765` |
+| **SDR Town** | RF in, demod / P25 / experimental satcom | Local HTTP JSON on `127.0.0.1:8765` (token required from 0.2.132) |
 | **FUBAR** | WASAPI capture, VOX WAVs, public website | Loads **`SdrTownControl.dll` beside `FUBAR.exe`** |
 
 Visitors never connect to SDR Town. They use the FUBAR site; FUBAR uses the DLL.
