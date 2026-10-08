@@ -1,5 +1,15 @@
 # Build notes
 
+## 2026-10-08 - v0.2.133 public asset proof
+
+Public https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.133-experimental
+Actions https://github.com/blkph0x/SDR_Town/actions/runs/37735043869
+commit 9eb63eb, prerelease not draft. ZIP SHA256
+997e4cbcbb124d0526e5cdae78c520310f44dc6de44bf353f5ba1b136f09ea04
+matches sidecar and GitHub asset digest. Extracted `SDR_Town.exe --version`
+prints `SDR Town 0.2.133`. `build-info.json` sourceCommit 9eb63eb,
+workflowRun 37735043869.
+
 ## 2026-10-08 - v0.2.133 wedged TX stop, DEC-0207
 
 Intent: process teardown must not block on `gSoapyLiveIoMutex` when

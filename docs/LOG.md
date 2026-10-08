@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-08 - v0.2.133 public ZIP verified
+
+Actions 37735043869 success. Release v0.2.133-experimental public prerelease.
+ZIP SHA256 997e4cbc… matches sidecar; extracted exe is 0.2.133 from
+9eb63eb. Next: USB-identity quarantine for leaked RX and leaked-then-make TX.
+
 ## 2026-10-08 - Wedged TX stop no longer stalls process exit, DEC-0207
 
 `stopTx` try_locks `gSoapyLiveIoMutex`. If `writeStream` holds it, the Soapy

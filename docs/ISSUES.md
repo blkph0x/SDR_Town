@@ -13,25 +13,28 @@ After `requestAuthorized`, query parameters copy into the POST body when the
 key is absent. Token is required first. Not a default-open hole. Outside
 DEC-0206; do not change merge in a TX/RX teardown patch.
 
-## ISS-0085 - RX stop leaks the Soapy handle and can reuse the USB identity (2026-10-08, OPEN)
+## ISS-0085 - Leaked Soapy handles can be reused by the next USB open (2026-10-08, OPEN)
 
 `stopStreamingImpl` sets `rxDetached` and skips close/`unmake`, leaving the
 Soapy handle alive until process exit. It still nulls `st.soapyDev` and
 `resetStreamBuffers`. `realInitThread` is detached and never joined. The
 next open can reuse the same `StreamState` / USB index while `readStream`
-may still be inside `gSoapyLiveIoMutex`. Patch 3 after DEC-0206 / ISS-0084:
-quarantine that USB identity so the next open cannot reuse it. Do not
+may still be inside `gSoapyLiveIoMutex`.
+
+TX half after DEC-0207: `startToneTx` calls `stopTx` then `Device::make`
+even when that stop leaked the previous handle. A second hardware open can
+run while the leaked Soapy device is still live.
+
+Quarantine that USB identity so the next open cannot reuse it. Do not
 unmake after detach.
 
 ## ISS-0084 - Wedged TX stop can stall the process on gSoapyLiveIoMutex (2026-10-08, FIXED)
 
-`stopTx` waits 500 ms, detaches, then takes `gSoapyLiveIoMutex` and
-`unmake`s. A `writeStream` still holding that mutex stalls stop instead of
-racing the free. Hardware emission is `DeviceManager::startToneTx` under
+Public v0.2.133-experimental verified. `stopTx` try_locks and leaks instead
+of waiting forever. Hardware emission is `DeviceManager::startToneTx` under
 `hardwareAuthorized`, not the P25 voice stub (`tx-voice-stub`).
-`tests/test_tx_safety.cpp` only covers the settings gate. Patch 2 after
-DEC-0206: do not block process teardown on a wedged write. No P25 voice
-heuristics.
+`tests/test_tx_safety.cpp` wedges `writeStream` and requires stop to return
+without hanging. No P25 voice heuristics.
 
 ## ISS-0083 - Loopback control default-open disclosed receiver status (2026-10-08, FIXED)
 

@@ -1,15 +1,18 @@
 # Task list (canonical)
 
-T-0120 | queued | Quarantine RX USB identity after detach-leak stop (ISS-0085) |
+T-0120 | queued | Quarantine USB identity after leaked RX/TX Soapy handles (ISS-0085) |
 `stopStreamingImpl` leaks the Soapy handle on `rxDetached` and still
-resets `StreamState`. Next open must not reuse that USB index while
-`readStream` may hold `gSoapyLiveIoMutex`. After T-0119. No unmake-after-detach.
+resets `StreamState`. `startToneTx` can `Device::make` after a leaked
+`stopTx`. Next open must not reuse that USB identity while live IO may
+still hold `gSoapyLiveIoMutex`. After T-0119. No unmake-after-detach.
 
 T-0119 | done | Unstick wedged TX stop from gSoapyLiveIoMutex (ISS-0084 / DEC-0207) |
 `stopTx` try_locks the live-IO mutex after detach. A wedged `writeStream`
 leaks the Soapy handle instead of hanging process exit. Reclaim on a later
 idle stop. Hardware path is `startToneTx`, not the P25 voice stub.
 `[tx-safety]` and DriverIoMutex try_lock tests lock it. No voice heuristics.
+Public v0.2.133-experimental verified (Actions 37735043869, SHA256
+997e4cbcbb124d0526e5cdae78c520310f44dc6de44bf353f5ba1b136f09ea04).
 
 T-0118 | done | Default-deny loopback control + constant-time token (DEC-0206 / ISS-0083) |
 Empty token is unauthorized. Health stays open. `/v1/status` and mutating
