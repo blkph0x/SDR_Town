@@ -1,5 +1,15 @@
 # Build notes
 
+## 2026-10-08 - v0.2.132 public asset proof
+
+Public https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.132-experimental
+Actions https://github.com/blkph0x/SDR_Town/actions/runs/37725002808
+commit ab571b7, prerelease not draft. ZIP SHA256
+0835727e6563e139a82834f5a7ad0121feb812d5cf8e0d94832aba2f2b93ff88
+matches sidecar and GitHub asset digest. Extracted `SDR_Town.exe --help`
+prints `SDR Town 0.2.132` and the DEC-0206 token / allow-unauthenticated
+flags. `build-info.json` sourceCommit ab571b7, workflowRun 37725002808.
+
 ## 2026-10-08 - v0.2.132 loopback control default-deny, DEC-0206
 
 Intent: same-machine `/v1/status` must not disclose frequency/serial without

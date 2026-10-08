@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-08 - v0.2.132 public ZIP verified
+
+Actions 37725002808 success. Release v0.2.132-experimental public prerelease.
+ZIP SHA256 0835727e… matches sidecar; extracted exe is 0.2.132 from
+ab571b7. Default-deny control is in the shipped help text.
+
 ## 2026-10-08 - Loopback control default-deny, DEC-0206
 
 Empty token is unauthorized. Tokens compare in constant time. `/v1/health`

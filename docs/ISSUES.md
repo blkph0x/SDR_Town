@@ -1,5 +1,18 @@
 # Issues (canonical)
 
+## ISS-0087 - --control-allow-unauthenticated with a token still requires the token (2026-10-08, OPEN)
+
+GUI install sets `allowUnauthenticated = !controlAuthRequired && token.isEmpty()`.
+A token plus `--control-allow-unauthenticated` stays token-required. Fail-closed,
+but the flag name does not mean what it says in that combination. Outside
+DEC-0206. Do not weaken default-deny to "fix" the name.
+
+## ISS-0086 - Authenticated control still merges query fields into the JSON body (2026-10-08, OPEN)
+
+After `requestAuthorized`, query parameters copy into the POST body when the
+key is absent. Token is required first. Not a default-open hole. Outside
+DEC-0206; do not change merge in a TX/RX teardown patch.
+
 ## ISS-0085 - RX stop leaks the Soapy handle and can reuse the USB identity (2026-10-08, OPEN)
 
 `stopStreamingImpl` sets `rxDetached` and skips close/`unmake`, leaving the

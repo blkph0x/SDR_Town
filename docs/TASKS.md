@@ -14,7 +14,8 @@ T-0118 | done | Default-deny loopback control + constant-time token (DEC-0206 / 
 Empty token is unauthorized. Health stays open. `/v1/status` and mutating
 routes require Bearer or `x-sdrtown-token` unless
 `--control-allow-unauthenticated`. `RemoteDiagnostics` / `[control]` ctest PASS.
-No P25/DSP change. Public release still required.
+No P25/DSP change. Public v0.2.132-experimental verified (Actions 37725002808,
+SHA256 0835727e6563e139a82834f5a7ad0121feb812d5cf8e0d94832aba2f2b93ff88).
 
 T-0117 | pending_live_acceptance | Stop satcom auto-capture from locking Listen at open (DEC-0205 / ISS-0082) |
 Saved autoCapture=true was seizing the radio onto SO-50 436.795 MHz when the
