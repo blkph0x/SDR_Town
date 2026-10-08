@@ -1,5 +1,21 @@
 # Decisions
 
+## DEC-0207 - stopTx must not wait forever on gSoapyLiveIoMutex (2026-10-08)
+
+`stopTx` waited 500 ms, detached the TX thread, then `lock()`ed
+`gSoapyLiveIoMutex` before `unmake`. `writeStream` holds that same mutex.
+A wedged driver therefore stalled `stopAllTx` in the DeviceManager
+destructor and hung process exit. Hardware emission is `startToneTx`, not
+the P25 voice stub.
+
+Decision: `DriverIoMutex::try_lock` succeeds only when the lock is free and
+no ticket is waiting. It must not take a ticket on failure. `stopTx` uses
+`std::try_to_lock`. If the mutex is busy, detach the Soapy pointers from
+`TxStreamState`, keep the handle on a leak list, and return. A later
+`stopTx` that wins `try_lock` reclaims leaked handles. `writeStream`
+re-checks the pointers under the mutex. No new wait budget. No P25, RX
+detach, or voice-heuristic change.
+
 ## DEC-0206 - Loopback control is default-deny (2026-10-08)
 
 `SdrTownControlServer` listened on `127.0.0.1:8765` with

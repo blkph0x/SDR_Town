@@ -1,5 +1,13 @@
 # Build notes
 
+## 2026-10-08 - v0.2.133 wedged TX stop, DEC-0207
+
+Intent: process teardown must not block on `gSoapyLiveIoMutex` when
+`writeStream` is inside the driver. Catch `[tx-safety]` 47 assertions PASS
+(wedge stop < 2 s, then reclaim). `[satcom][log][ownership]` 9 assertions
+PASS. DeviceManager.cpp change is the exact DEC-0207 digest pair. No
+P25/RX detach change.
+
 ## 2026-10-08 - v0.2.132 public asset proof
 
 Public https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.132-experimental

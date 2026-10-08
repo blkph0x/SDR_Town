@@ -19,6 +19,17 @@ public:
         ready_.notify_all();
     }
 
+    // DEC-0207: succeed only when the lock is free and no ticket is waiting.
+    // Failure must not take a ticket, or a wedged holder plus an abandoned
+    // waiter would stall every later lock().
+    bool try_lock() {
+        std::lock_guard lock(mutex_);
+        if (next_ != serving_)
+            return false;
+        ++next_;
+        return true;
+    }
+
     // Diagnostic snapshot; does not reserve or alter admission order.
     uint64_t waiting() const {
         std::lock_guard lock(mutex_);

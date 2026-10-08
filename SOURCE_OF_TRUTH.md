@@ -3,10 +3,10 @@ SDR TOWN — SOURCE OF TRUTH (SoT)
 ================================================================================
 VERSION: 1.0.0
 PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
-CURRENT VERSION IN TREE: 0.2.132 (loopback control default-deny + constant-time token)
-CURRENT WORK: DEC-0206: local control requires a token by default. Empty token
-              is unauthorized. Health stays open. P25/audio DSP unchanged.
-              Next: wedged TX mutex stall, then RX USB-identity quarantine.
+CURRENT VERSION IN TREE: 0.2.133 (wedged TX stop does not stall on live IO mutex)
+CURRENT WORK: DEC-0207: stopTx try_locks gSoapyLiveIoMutex. If writeStream
+              holds it, leak the Soapy TX handle and return. Reclaim when
+              IO is idle. P25/audio DSP unchanged. Next: RX USB quarantine.
 PUBLIC BASELINE: v0.2.123-experimental accepted, Actions37273822180; zero package
                  blockers (commit1b035aa acceptance comment203450320).
 LATEST PACKAGE: DEC-0196 replaces four permanent blocker strings with finite,

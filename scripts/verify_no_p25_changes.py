@@ -268,6 +268,15 @@ P25_ENCRYPTED_GRANT_IQ_DIGESTS = {
 }
 
 
+# DEC-0207: stopTx try_lock on gSoapyLiveIoMutex; leak handle if writeStream
+# holds it. Exact digests are cdf3ddc (0.2.132) -> TX teardown only.
+TX_STOP_MUTEX_DIGESTS = {
+    "src/DeviceManager.cpp": (
+        "59f538c24323af4e47bb48dd0166117cee3cbb214787e63e3d07fe09b586ede2",
+        "72a1200f40c68bbec130c24c1d5be196644c444f951a9a7604c2c0e959af8c58"),
+}
+
+
 # DEC-0203 / capture 20261006_093930: first locked-lattice empty hop stays
 # healthy 80/4. Exact digests are 14e1090 (0.2.128) -> planner + live call.
 P25_LOCKED_LATTICE_EMPTY_DIGESTS = {
@@ -305,7 +314,8 @@ def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
                       P25_OBSERVER_DIGESTS.get(path), P25_FOLLOW_LIFECYCLE_DIGESTS.get(path),
                       P25_TRACE_CONTEXT_DIGESTS.get(path), P25_EMIT_GAP_DIGESTS.get(path),
                       P25_LOCKED_LATTICE_EMPTY_DIGESTS.get(path),
-                      P25_ENCRYPTED_GRANT_IQ_DIGESTS.get(path))
+                      P25_ENCRYPTED_GRANT_IQ_DIGESTS.get(path),
+                      TX_STOP_MUTEX_DIGESTS.get(path))
 
 
 # DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.
@@ -809,6 +819,10 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
+        if args.paths is None and path in TX_STOP_MUTEX_DIGESTS:
+            if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
+                print(f"P25 guard: accepted exact DEC-0207 TX stop mutex leak: {path}")
+                continue
         if args.paths is None and path in P25_TRACE_CONTEXT_DIGESTS:
             if infrastructure_text_allowed(path, trace_before_text(args.base, path), git_file_text(args.head, path)):
                 print(f"P25 guard: accepted exact DEC-0194 trace/context repair: {path}")

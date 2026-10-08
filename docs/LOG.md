@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-08 - Wedged TX stop no longer stalls process exit, DEC-0207
+
+`stopTx` try_locks `gSoapyLiveIoMutex`. If `writeStream` holds it, the Soapy
+handle is leaked and stop returns. A later idle stop reclaims. P25/RX
+unchanged.
+
 ## 2026-10-08 - v0.2.132 public ZIP verified
 
 Actions 37725002808 success. Release v0.2.132-experimental public prerelease.

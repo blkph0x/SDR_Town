@@ -12,6 +12,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <cstdint>
@@ -22,6 +24,7 @@
 #include <numbers>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 TEST_CASE("Inmarsat host preflight is explicit and fails closed", "[inmarsat][handover]") {
@@ -557,6 +560,30 @@ TEST_CASE("Driver IO admission preserves queued command order", "[satcom][log][o
     REQUIRE(admitted);
     CHECK(order == std::vector<int>{0,1,2,3});
     CHECK(mutex.waiting() == 0);
+}
+
+TEST_CASE("Driver IO try_lock does not take a ticket or barge waiters", "[satcom][log][ownership]") {
+    DriverIoMutex mutex;
+    CHECK(mutex.try_lock());
+    CHECK_FALSE(mutex.try_lock());
+    mutex.unlock();
+    mutex.lock();
+    CHECK_FALSE(mutex.try_lock());
+    std::atomic<bool> waiterReady{false};
+    std::thread waiter([&] {
+        waiterReady.store(true, std::memory_order_release);
+        std::lock_guard lock(mutex);
+    });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while ((!waiterReady.load(std::memory_order_acquire) || mutex.waiting() != 1) &&
+           std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    REQUIRE(mutex.waiting() == 1);
+    CHECK_FALSE(mutex.try_lock());
+    mutex.unlock();
+    waiter.join();
+    CHECK(mutex.try_lock());
+    mutex.unlock();
 }
 
 TEST_CASE("Satcom host services forward MainWindow ownership", "[satcom][host]")

@@ -108,6 +108,24 @@ def main() -> int:
         assert MODULE.main() == 0
         enc_iq_files[("after", "src/P25FollowStateMachine.cpp")] += "\nRF change"
         assert MODULE.main() == 1
+    tx_stop_files = {}
+    for path in MODULE.TX_STOP_MUTEX_DIGESTS:
+        before = subprocess.check_output(
+            ["git", "show", "cdf3ddc:" + path], cwd=ROOT, text=True, encoding="utf-8"
+        )
+        after = (ROOT / path).read_text(encoding="utf-8").replace("\r\n", "\n")
+        tx_stop_files[("before", path)] = before
+        tx_stop_files[("after", path)] = after
+        assert MODULE.infrastructure_text_allowed(path, before, after)
+        assert not MODULE.infrastructure_text_allowed(path, before, after + "\nRF change")
+        assert not MODULE.infrastructure_text_allowed(path, after, before)
+        assert not MODULE.infrastructure_text_allowed("src/AudioEngine.cpp", before, after)
+    with patch.object(MODULE, "parse_args", return_value=SimpleNamespace(base="before", head="after", paths=None)), \
+         patch.object(MODULE, "git_changed_paths", return_value=list(MODULE.TX_STOP_MUTEX_DIGESTS)), \
+         patch.object(MODULE, "git_file_text", side_effect=lambda ref, path: tx_stop_files[(ref, path)]):
+        assert MODULE.main() == 0
+        tx_stop_files[("after", "src/DeviceManager.cpp")] += "\nRF change"
+        assert MODULE.main() == 1
     lifecycle_files = {}
     for path in MODULE.P25_FOLLOW_LIFECYCLE_DIGESTS:
         before = subprocess.check_output(["git", "show", "d3975a3:" + path], cwd=ROOT, text=True, encoding="utf-8")

@@ -6,6 +6,7 @@
 #include <QStandardPaths>
 #include <atomic>
 #include <algorithm>
+#include <chrono>
 #include <thread>
 #include <limits>
 
@@ -32,8 +33,17 @@ struct TxFixture : SoapySDR::Device {
     int activateStream(SoapySDR::Stream*, int, long long, size_t) override { ++activations; return 0; }
     int deactivateStream(SoapySDR::Stream*, int, long long) override { return 0; }
     void closeStream(SoapySDR::Stream*) override {}
+    static inline std::atomic<bool> blockWrite{false};
+    static inline std::atomic<bool> inWrite{false};
     int writeStream(SoapySDR::Stream*, const void* const*, size_t count, int&, long long, long) override {
-        ++writes; return static_cast<int>(count);
+        ++writes;
+        if (blockWrite.load(std::memory_order_acquire)) {
+            inWrite.store(true, std::memory_order_release);
+            while (blockWrite.load(std::memory_order_acquire))
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            inWrite.store(false, std::memory_order_release);
+        }
+        return static_cast<int>(count);
     }
 };
 }
@@ -72,5 +82,28 @@ TEST_CASE("Hardware tone TX cannot activate without confirmed authorized setting
     std::this_thread::sleep_for(std::chrono::milliseconds(80));
     manager.stopTx(index);
     CHECK(TxFixture::activations == 1); CHECK(TxFixture::writes > 0); CHECK(TxFixture::live == 0);
+
+    TxFixture::blockWrite = true; TxFixture::inWrite = false;
+    REQUIRE(manager.startToneTx(index, p));
+    const auto entered = std::chrono::steady_clock::now();
+    while (!TxFixture::inWrite.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() - entered < std::chrono::seconds(2))
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    REQUIRE(TxFixture::inWrite.load(std::memory_order_acquire));
+    const auto stopStart = std::chrono::steady_clock::now();
+    manager.stopTx(index);
+    const auto stopMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - stopStart).count();
+    CHECK(stopMs < 2000);
+    CHECK(TxFixture::live == 1);
+    CHECK(manager.getTxRuntimeState(index) == "io-leaked");
+    TxFixture::blockWrite = false;
+    const auto released = std::chrono::steady_clock::now();
+    while (TxFixture::inWrite.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() - released < std::chrono::seconds(2))
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    manager.stopTx(index);
+    CHECK(TxFixture::live == 0);
+    CHECK(manager.getTxRuntimeState(index) == "idle");
 }
 #endif

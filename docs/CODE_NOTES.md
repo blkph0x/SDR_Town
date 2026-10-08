@@ -1,5 +1,11 @@
 # Code notes (tree map)
 
+DEC-0207: `DriverIoMutex::try_lock` does not take a FIFO ticket on failure.
+`stopTx` uses `try_to_lock`; busy means leak-and-return, not `lock()`.
+Leaked TX handles live in a file-static list and are `unmake`d when a later
+stop wins the mutex. `writeStream` re-checks `soapyDev`/`txStream` under the
+lock. `test_tx_safety` wedges `writeStream` and requires stop < 2 s.
+
 DEC-0206: `SdrTownControlServer::Config.allowUnauthenticated` defaults false.
 `GuiRuntimeConfig.controlAuthRequired` defaults true. `start()` trims the
 token and refuses an empty one unless explicitly opted in.

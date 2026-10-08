@@ -23,7 +23,7 @@ may still be inside `gSoapyLiveIoMutex`. Patch 3 after DEC-0206 / ISS-0084:
 quarantine that USB identity so the next open cannot reuse it. Do not
 unmake after detach.
 
-## ISS-0084 - Wedged TX stop can stall the process on gSoapyLiveIoMutex (2026-10-08, OPEN)
+## ISS-0084 - Wedged TX stop can stall the process on gSoapyLiveIoMutex (2026-10-08, FIXED)
 
 `stopTx` waits 500 ms, detaches, then takes `gSoapyLiveIoMutex` and
 `unmake`s. A `writeStream` still holding that mutex stalls stop instead of

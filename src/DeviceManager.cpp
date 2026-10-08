@@ -41,6 +41,54 @@
 // readStream is active; that race matches the observed hang right after TG follow.
 static DriverIoMutex gSoapyLiveIoMutex;
 
+// DEC-0207: stopTx must not join gSoapyLiveIoMutex if writeStream is inside it.
+// Pointers are already detached from TxStreamState; reclaim when IO is idle.
+struct LeakedSoapyTx {
+    SoapySDR::Device* dev = nullptr;
+    SoapySDR::Stream* stream = nullptr;
+};
+static std::mutex gLeakedTxMutex;
+static std::vector<LeakedSoapyTx> gLeakedTx;
+
+static void closeSoapyTxHandle(SoapySDR::Device* dev, SoapySDR::Stream* stream)
+{
+    if (dev && stream) {
+        try { dev->deactivateStream(stream); } catch (...) {}
+        try { dev->closeStream(stream); } catch (...) {}
+    }
+    if (dev) {
+        try { SoapySDR::Device::unmake(dev); } catch (...) {}
+    }
+}
+
+static void leakSoapyTxHandle(SoapySDR::Device* dev, SoapySDR::Stream* stream)
+{
+    if (!dev)
+        return;
+    std::lock_guard<std::mutex> lk(gLeakedTxMutex);
+    gLeakedTx.push_back({dev, stream});
+}
+
+static void reclaimLeakedTxHandles()
+{
+    std::lock_guard<std::mutex> lk(gLeakedTxMutex);
+    for (auto& leaked : gLeakedTx)
+        closeSoapyTxHandle(leaked.dev, leaked.stream);
+    gLeakedTx.clear();
+}
+
+static bool tryCloseSoapyTxHandle(SoapySDR::Device* dev, SoapySDR::Stream* stream)
+{
+    std::unique_lock<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex, std::try_to_lock);
+    if (!soapyLiveLock.owns_lock()) {
+        leakSoapyTxHandle(dev, stream);
+        return false;
+    }
+    reclaimLeakedTxHandles();
+    closeSoapyTxHandle(dev, stream);
+    return true;
+}
+
 // RSPduo Dual Tuner: one Soapy device, two RX channels/streams.
 struct SharedSdrplayDevice {
     SoapySDR::Device* dev = nullptr;
@@ -3917,7 +3965,11 @@ void DeviceManager::stopTx(size_t index)
     std::unique_lock<std::mutex> life(tx.lifecycleMutex);
     if (!tx.active.load(std::memory_order_acquire) && !tx.txThread.joinable()) {
 #ifdef HAVE_SOAPYSDR
-        if (!tx.soapyDev) return;
+        if (!tx.soapyDev) {
+            if (tryCloseSoapyTxHandle(nullptr, nullptr))
+                tx.runtimeState = "idle";
+            return;
+        }
 #else
         return;
 #endif
@@ -3952,15 +4004,11 @@ void DeviceManager::stopTx(size_t index)
         tx.soapyDev = nullptr;
         tx.txStream = nullptr;
     }
+    bool leaked = false;
     try {
-        if (dev && stream) {
-            std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
-            try { dev->deactivateStream(stream); } catch (...) {}
-            try { dev->closeStream(stream); } catch (...) {}
-            SoapySDR::Device::unmake(dev);
-        } else if (dev) {
-            std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
-            SoapySDR::Device::unmake(dev);
+        if (!tryCloseSoapyTxHandle(dev, stream)) {
+            leaked = true;
+            spdlog::warn("stopTx device {}: live IO mutex busy, leaking Soapy TX handle", index);
         }
     } catch (const std::exception& ex) {
         spdlog::warn("stopTx Soapy teardown: {}", ex.what());
@@ -3968,7 +4016,11 @@ void DeviceManager::stopTx(size_t index)
 #endif
     tx.hardwareActive.store(false, std::memory_order_release);
     tx.active.store(false, std::memory_order_release);
+#ifdef HAVE_SOAPYSDR
+    tx.runtimeState = leaked ? "io-leaked" : "idle";
+#else
     tx.runtimeState = "idle";
+#endif
     spdlog::info("TX stopped on device {} (samples written={})",
                  index, tx.samplesWritten.load(std::memory_order_relaxed));
 }
@@ -4067,6 +4119,8 @@ void DeviceManager::txThreadFunc(size_t index, uint64_t expectedGeneration)
         if (tx.hardwareActive.load(std::memory_order_acquire) && tx.soapyDev && tx.txStream) {
             try {
                 std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
+                if (!tx.soapyDev || !tx.txStream)
+                    break;
                 void* buffs[] = { block.data() };
                 int flags = 0;
                 long long timeNs = 0;

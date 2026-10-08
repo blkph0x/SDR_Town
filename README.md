@@ -1,5 +1,9 @@
 # SDR Town
 
+0.2.133 stops a wedged hardware TX `writeStream` from hanging process exit
+on the live Soapy I/O mutex. P25/audio DSP is unchanged. See
+[release notes](docs/RELEASE_0.2.133.md).
+
 0.2.132 requires a token for the loopback control server. `/v1/health` stays
 open; `/v1/status` and mutating routes need `--control-token`,
 `SDR_TOWN_CONTROL_TOKEN`, or an explicit `--control-allow-unauthenticated`.
