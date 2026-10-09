@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-09 - P25 guard test pinned after 0.2.134 DeviceManager
+
+Windows CI 37903625262 failed: `test_no_p25_guard.py` still compared
+`cdf3ddc` DeviceManager to the live 0.2.134 tree. Pin TX-stop after to
+`9eb63eb` and add the AUDIO_COMBO case.
+
 ## 2026-10-09 - Empty-ring underruns and dual-SDR overflow, DEC-0208
 
 Collector 4988148b showed ~100 WASAPI underruns/s with an empty ring on
