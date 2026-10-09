@@ -892,3 +892,11 @@ if(WIN32)
 endif()
 
 include(CPack)
+
+if(BUILD_TESTS)
+  foreach(regression IN ITEMS hf_audio_filter listen_device_selection spectrum_dc)
+    add_executable(test_${regression} tests/test_${regression}.cpp)
+    target_include_directories(test_${regression} PRIVATE include)
+    add_test(NAME Regression-${regression} COMMAND test_${regression})
+  endforeach()
+endif()

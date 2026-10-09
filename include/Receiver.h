@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Demod.h"
+#include "HfAudioFilter.h"
 #include "RdsMpxDecoder.h"
 #include "CtcssDecoder.h"
 #include "ControlEventLog.h"
@@ -118,6 +119,8 @@ struct Receiver {
     double channelBwHz = 12500.0;
     double lpfHz = 3000.0;
     bool audioLpfEnabled = true;
+    bool hfNoiseFilterEnabled = false;
+    HfAudioFilter hfAudioFilter;
     double squelchDb = -105.0;
 
     // P1 audit: explicit separation (RF is hardware sensitivity on the SDR; audio is post-demod gain; display for viz/spectrum scaling).

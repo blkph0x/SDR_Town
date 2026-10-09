@@ -1,6 +1,7 @@
 #include <QApplication>
 #include <QJsonObject>
 #include <QString>
+#include <QScopeGuard>
 
 #include <spdlog/spdlog.h>
 
@@ -92,6 +93,9 @@ int main(int argc, char *argv[])
     try {
         writeEarlyCrashLog("before-qapp");
         QApplication app(argc, argv);
+        // Stop the remote diagnostics QThread before QApplication deletes its
+        // children, including on exceptional exits. The old post-scope call was too late.
+        const auto diagnosticsShutdown = qScopeGuard([] { remoteDiagnosticsShutdown(); });
         app.setApplicationName("SDR Town");
         app.setOrganizationName("SDR_Town");
         app.setApplicationVersion(SDR_TOWN_VERSION);
