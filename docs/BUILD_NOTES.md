@@ -1,5 +1,11 @@
 # Build notes
 
+## 2026-10-09 - v0.2.134 P25 guard test pins 0.2.133 TX-stop after-blob
+
+Windows CI 37903625262 failed at `test_no_p25_guard.py`: TX-stop still hashed
+`cdf3ddc` against the live DeviceManager tree. Live tree is now DEC-0208.
+Pin that pair to `9eb63eb` and add the 96e6d84 → worktree AUDIO_COMBO case.
+
 ## 2026-10-09 - v0.2.134 audio/combo, DEC-0208
 
 Intent: empty speaker ring and dual-radio Soapy waits. Catch `[audioengine]`
