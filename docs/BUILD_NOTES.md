@@ -1,5 +1,15 @@
 # Build notes
 
+## 2026-10-09 - v0.2.134 public asset proof
+
+Public https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.134-experimental
+Actions https://github.com/blkph0x/SDR_Town/actions/runs/37904016825
+commit f8001f2, prerelease not draft. ZIP SHA256
+b248823f6fd173874700d4daf9aeda54315783f20b88f8d94b42a28de04027bd
+matches sidecar and GitHub asset digest. Extracted `SDR_Town.exe --version`
+prints `SDR Town 0.2.134`. `build-info.json` sourceCommit f8001f2,
+workflowRun 37904016825.
+
 ## 2026-10-09 - v0.2.134 P25 guard test pins 0.2.133 TX-stop after-blob
 
 Windows CI 37903625262 failed at `test_no_p25_guard.py`: TX-stop still hashed

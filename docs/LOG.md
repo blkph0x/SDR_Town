@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-09 - v0.2.134 public ZIP verified
+
+Actions 37904016825 success. Release v0.2.134-experimental public prerelease.
+ZIP SHA256 b248823f… matches sidecar; extracted exe is 0.2.134 from
+f8001f2. Next: USB-identity quarantine for leaked RX and leaked-then-make TX.
+
 ## 2026-10-09 - P25 guard test pinned after 0.2.134 DeviceManager
 
 Windows CI 37903625262 failed: `test_no_p25_guard.py` still compared

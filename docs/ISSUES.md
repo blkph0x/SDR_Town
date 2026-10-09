@@ -1,14 +1,14 @@
 # Issues (canonical)
 
-## ISS-0088 - Speaker ring starves on every mode; dual SDR overflows (2026-10-09, IN PROGRESS)
+## ISS-0088 - Speaker ring starves on every mode; dual SDR overflows (2026-10-09, FIXED)
 
 Collector 4988148b: underruns climb at ~100/s with `ringFillPercent` 0
 before RF starts and through NFM/WFM/USB/LSB. Outputs were HyperX Virtual
 Surround and VB-Audio Virtual Cable. A second live RTL plus RSPdx produced
 `liveIoWaitUs` in the tens of seconds and overflows on both. Not CPU/disk.
-DEC-0208: stereo WASAPI, delayed start until two periods queued, per-USB
-Soapy IO. Do not treat idle silence as a driver bug; do not invent PLC.
-T-0120 USB quarantine stays separate.
+Public v0.2.134-experimental verified. Stereo WASAPI, start after two
+periods, per-USB Soapy IO. Do not treat idle silence as a driver bug; do
+not invent PLC. T-0120 USB quarantine stays separate.
 
 ## ISS-0087 - --control-allow-unauthenticated with a token still requires the token (2026-10-08, OPEN)
 
