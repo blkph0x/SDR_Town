@@ -1,5 +1,12 @@
 # Code notes (tree map)
 
+DEC-0208: `DriverIoMutexTable` keys FIFO locks by USB `stableKey`.
+`Device::make`/`unmake` stay on `gSoapyFactoryMutex`. Live
+read/write/tune/gain use `SoapyDeviceIoLock`. `AudioEngine` opens WASAPI
+stereo 48 kHz, 20 ms period, duplicates mono into every callback channel,
+and starts playback after two periods (min 40 ms) or on a test tone.
+`[audioengine]` and `[satcom][log][ownership]` lock it. No P25 DSP.
+
 DEC-0207: `DriverIoMutex::try_lock` does not take a FIFO ticket on failure.
 `stopTx` uses `try_to_lock`; busy means leak-and-return, not `lock()`.
 Leaked TX handles live in a file-static list and are `unmake`d when a later
@@ -1098,8 +1105,8 @@ become the active REQ.
 | `src/P25FollowStateMachine.cpp` `include/P25FollowStateMachine.h` | P2.5 | DEC-0029 | Stay vs return-to-CC; slot probe. Clear-trusted: 40s speaker grace without live VCW + 15s activity silence (053448 quiet-return thrash). Pure policy |
 | `src/P25TrafficChannelProcessor.cpp` `include/P25TrafficChannelProcessor.h` | P2.5 | — | Observational call-active / audioOpen |
 | `include/P25ReceiverSession.h` | P2.2 | — | Per-RX key, pending AMBE, abs-dedupe, latch |
-| `src/AudioEngine.cpp` `include/AudioEngine.h` | P2.4 | miniaudio | Ring, underrun, digital-voice jitter cap |
-| `src/DeviceManager.cpp` `include/DeviceManager.h` | follow | Soapy/RTL | IQ stream + one-RTL retune |
+| `src/AudioEngine.cpp` `include/AudioEngine.h` | P2.4 | miniaudio | Ring, underrun, digital-voice jitter cap. DEC-0208: stereo WASAPI, start after two periods |
+| `src/DeviceManager.cpp` `include/DeviceManager.h` | follow | Soapy/RTL | IQ stream + one-RTL retune. DEC-0208: per-USB live IO, factory make/unmake |
 | `src/Demod.cpp` `include/Demod.h` | analog | — | WFM/AM/NFM/SSB; keep stable |
 | `src/Receiver.cpp` `include/Receiver.h` | — | — | Logical channel; owns P25 session state |
 | `src/SpectrumWidget.cpp` | GUI | — | FFT/waterfall |

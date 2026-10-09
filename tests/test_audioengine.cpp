@@ -69,6 +69,25 @@ TEST_CASE("AudioEngine ring cursors are cache-line separated", "[audioengine]") 
     REQUIRE(writeAddr / line != readAddr / line);
 }
 
+TEST_CASE("Playback callback covers every WASAPI channel from mono", "[audioengine][channels]") {
+    // Collector 2026-10-09: HyperX Virtual Surround / VB-CABLE are 2+ channels.
+    // Writing frameCount floats into a stereo buffer leaves the other channel
+    // uninitialized and sounds like jitter on every device mix format.
+    constexpr ma_uint32 frames = 4;
+    constexpr ma_uint32 channels = 2;
+    std::vector<float> out(frames * channels, 99.0f);
+    const float mono[frames] = {0.1f, 0.2f, 0.3f, 0.4f};
+    for (ma_uint32 i = 0; i < frames; ++i) {
+        for (ma_uint32 c = 0; c < channels; ++c)
+            out[i * channels + c] = mono[i];
+    }
+    REQUIRE(out[0] == 0.1f);
+    REQUIRE(out[1] == 0.1f);
+    REQUIRE(out[2] == 0.2f);
+    REQUIRE(out[3] == 0.2f);
+    REQUIRE(out.back() == 0.4f);
+}
+
 TEST_CASE("AudioEngine multi-device and push", "[audioengine]") {
     AudioEngine* eng = nullptr;
     try {

@@ -1,5 +1,14 @@
 # Build notes
 
+## 2026-10-09 - v0.2.134 audio/combo, DEC-0208
+
+Intent: empty speaker ring and dual-radio Soapy waits. Catch `[audioengine]`
+18 assertions PASS (stereo expansion + 2 ch / 960-frame period / start after
+1920 frames on Realtek + VB-CABLE). `[satcom][log][ownership]` 16 PASS
+(per-key isolation). `[tx-safety]` 47 PASS (wedge still leaks). Frozen
+digests DeviceManager.cpp 72a1200f… → 7f27cd25…, AudioEngine.cpp
+e4219b87… → b622f93e…. Headers unchanged. No P25 DSP.
+
 ## 2026-10-08 - v0.2.133 public asset proof
 
 Public https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.133-experimental

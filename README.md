@@ -1,5 +1,10 @@
 # SDR Town
 
+0.2.134 opens speakers as stereo WASAPI, starts playback after two periods
+of real audio are queued, and gives each USB radio its own live I/O lock
+so RSPdx+RTL (and other combos) do not overflow each other. P25 DSP is
+unchanged. See [release notes](docs/RELEASE_0.2.134.md).
+
 0.2.133 stops a wedged hardware TX `writeStream` from hanging process exit
 on the live Soapy I/O mutex. P25/audio DSP is unchanged. See
 [release notes](docs/RELEASE_0.2.133.md).

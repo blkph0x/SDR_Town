@@ -1,5 +1,12 @@
 # Task list (canonical)
 
+T-0121 | in_progress | Empty-ring underruns and dual-SDR overflow (ISS-0088 / DEC-0208) |
+Collector: ~100 WASAPI underruns/s with ringFill 0 on HyperX/VB-CABLE, all
+analog modes, including RF stopped; RSPdx+RTL liveIoWaitUs/overflows from
+one global Soapy lock. Stereo callback, start after two periods, per-USB
+IO mutex. No P25 DSP. Tests: `[audioengine]`, `[satcom][log][ownership]`,
+`[tx-safety]`.
+
 T-0120 | queued | Quarantine USB identity after leaked RX/TX Soapy handles (ISS-0085) |
 `stopStreamingImpl` leaks the Soapy handle on `rxDetached` and still
 resets `StreamState`. `startToneTx` can `Device::make` after a leaked

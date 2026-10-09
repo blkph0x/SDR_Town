@@ -24,6 +24,8 @@
 #include <set>
 #include <map>
 #include <memory>
+#include <string>
+#include <vector>
 #include <QCoreApplication>
 #include <cstdlib>
 #ifdef _WIN32
@@ -36,16 +38,40 @@
 #endif
 
 #ifdef HAVE_SOAPYSDR
-// Serialize live Soapy I/O calls that can otherwise race during P25 voice-follow retunes.
-// RTL/USB backends are not always safe when setFrequency/setGain/PPM happens while
-// readStream is active; that race matches the observed hang right after TG follow.
-static DriverIoMutex gSoapyLiveIoMutex;
+// DEC-0208: Device::make/unmake is process-global. Live read/write/tune stays
+// per USB identity so RSPdx+RTL (collector 2026-10-09) do not share one
+// readStream lock. Same serial still serializes retune vs read and TX vs stop.
+static DriverIoMutex gSoapyFactoryMutex;
+static DriverIoMutexTable gSoapyDeviceIo;
 
-// DEC-0207: stopTx must not join gSoapyLiveIoMutex if writeStream is inside it.
+static std::string soapyLiveIoKey(const DeviceInfo& info)
+{
+    if (!info.stableKey.empty())
+        return std::string("usb:") + info.stableKey;
+    if (!info.serial.empty())
+        return info.driver + ":" + info.serial;
+    if (!info.driver.empty())
+        return info.driver + ":unserialed";
+    return {};
+}
+
+class SoapyDeviceIoLock {
+public:
+    explicit SoapyDeviceIoLock(const std::string& key)
+        : mutex_(gSoapyDeviceIo.mutexFor(key)), lock_(*mutex_) {}
+    explicit SoapyDeviceIoLock(const DeviceInfo& info)
+        : SoapyDeviceIoLock(soapyLiveIoKey(info)) {}
+private:
+    std::shared_ptr<DriverIoMutex> mutex_;
+    std::lock_guard<DriverIoMutex> lock_;
+};
+
+// DEC-0207: stopTx must not join the device IO mutex if writeStream is inside it.
 // Pointers are already detached from TxStreamState; reclaim when IO is idle.
 struct LeakedSoapyTx {
     SoapySDR::Device* dev = nullptr;
     SoapySDR::Stream* stream = nullptr;
+    std::string ioKey;
 };
 static std::mutex gLeakedTxMutex;
 static std::vector<LeakedSoapyTx> gLeakedTx;
@@ -57,35 +83,58 @@ static void closeSoapyTxHandle(SoapySDR::Device* dev, SoapySDR::Stream* stream)
         try { dev->closeStream(stream); } catch (...) {}
     }
     if (dev) {
+        std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
         try { SoapySDR::Device::unmake(dev); } catch (...) {}
     }
 }
 
-static void leakSoapyTxHandle(SoapySDR::Device* dev, SoapySDR::Stream* stream)
+static void leakSoapyTxHandle(SoapySDR::Device* dev, SoapySDR::Stream* stream, const std::string& ioKey)
 {
     if (!dev)
         return;
     std::lock_guard<std::mutex> lk(gLeakedTxMutex);
-    gLeakedTx.push_back({dev, stream});
+    gLeakedTx.push_back({dev, stream, ioKey});
 }
 
-static void reclaimLeakedTxHandles()
+static void tryReclaimLeakedTxHandles()
 {
-    std::lock_guard<std::mutex> lk(gLeakedTxMutex);
-    for (auto& leaked : gLeakedTx)
+    std::vector<LeakedSoapyTx> snapshot;
+    {
+        std::lock_guard<std::mutex> lk(gLeakedTxMutex);
+        snapshot.swap(gLeakedTx);
+    }
+    std::vector<LeakedSoapyTx> still;
+    for (auto& leaked : snapshot) {
+        auto liveIo = gSoapyDeviceIo.mutexFor(leaked.ioKey);
+        std::unique_lock<DriverIoMutex> lock(*liveIo, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            still.push_back(leaked);
+            continue;
+        }
         closeSoapyTxHandle(leaked.dev, leaked.stream);
-    gLeakedTx.clear();
+    }
+    if (!still.empty()) {
+        std::lock_guard<std::mutex> lk(gLeakedTxMutex);
+        gLeakedTx.insert(gLeakedTx.end(), still.begin(), still.end());
+    }
 }
 
-static bool tryCloseSoapyTxHandle(SoapySDR::Device* dev, SoapySDR::Stream* stream)
+static bool tryCloseSoapyTxHandle(SoapySDR::Device* dev, SoapySDR::Stream* stream, const std::string& ioKey)
 {
-    std::unique_lock<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex, std::try_to_lock);
+    if (!dev) {
+        tryReclaimLeakedTxHandles();
+        std::lock_guard<std::mutex> lk(gLeakedTxMutex);
+        return gLeakedTx.empty();
+    }
+    auto liveIo = gSoapyDeviceIo.mutexFor(ioKey);
+    std::unique_lock<DriverIoMutex> soapyLiveLock(*liveIo, std::try_to_lock);
     if (!soapyLiveLock.owns_lock()) {
-        leakSoapyTxHandle(dev, stream);
+        leakSoapyTxHandle(dev, stream, ioKey);
         return false;
     }
-    reclaimLeakedTxHandles();
     closeSoapyTxHandle(dev, stream);
+    soapyLiveLock.unlock();
+    tryReclaimLeakedTxHandles();
     return true;
 }
 
@@ -1082,13 +1131,15 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
         std::string shareKey;
         size_t rxCh = 0;
         auto cleanupLocal = [&]() {
-            if (localDev && d.driver == "rtlsdr") {
-                std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
-                RtlBiasT::powerOff(*localDev);
+            const std::string ioKey = soapyLiveIoKey(d);
+            if (localDev) {
+                SoapyDeviceIoLock soapyLiveLock(ioKey);
+                if (d.driver == "rtlsdr")
+                    RtlBiasT::powerOff(*localDev);
+                try {
+                    if (localStream) localDev->closeStream(localStream);
+                } catch (...) {}
             }
-            try {
-                if (localStream && localDev) localDev->closeStream(localStream);
-            } catch (...) {}
             localStream = nullptr;
             if (dualShared && ownsSharedRef) {
                 std::lock_guard<std::mutex> shareLock(gSharedSdrplayMutex);
@@ -1096,6 +1147,7 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
                 if (it != gSharedSdrplayDevices.end()) {
                     it->second.refCount = std::max(0, it->second.refCount - 1);
                     if (it->second.refCount <= 0 && it->second.dev) {
+                        std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
                         try { SoapySDR::Device::unmake(it->second.dev); } catch (...) {}
                         gSharedSdrplayDevices.erase(it);
                     }
@@ -1103,6 +1155,7 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
                 ownsSharedRef = false;
                 localDev = nullptr;
             } else if (localDev) {
+                std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
                 try { SoapySDR::Device::unmake(localDev); } catch (...) {}
                 localDev = nullptr;
             }
@@ -1139,7 +1192,7 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
                 auto& slot = gSharedSdrplayDevices[shareKey];
                 if (!slot.dev) {
                     spdlog::info("Background: Attempting shared Soapy make for SDRplay Dual Tuner {}", shareKey);
-                    std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
+                    std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
                     slot.dev = SoapySDR::Device::make(args);
                     if (!slot.dev) throw std::runtime_error("make returned null");
                     slot.refCount = 0;
@@ -1149,13 +1202,13 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
                 localDev = slot.dev;
             } else {
                 spdlog::info("Background: Attempting Soapy make for device {}", index);
-                std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
+                std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
                 localDev = SoapySDR::Device::make(args);
                 if (!localDev) throw std::runtime_error("make returned null");
             }
 
             {
-                std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
+                SoapyDeviceIoLock soapyLiveLock(liveInfo);
                 if (liveInfo.isSdrplay) enrichSdrplayDeviceInfo(localDev, liveInfo, rxCh);
             }
             if (liveInfo.isSdrplay) {
@@ -1182,7 +1235,7 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
                     liveInfo.rtlBiasT = devices[index].rtlBiasT;
                 }
                 {
-                    std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
+                    SoapyDeviceIoLock soapyLiveLock(liveInfo);
                     RtlBiasT::probe(*localDev, liveInfo.rtlBiasT);
                     if (liveInfo.rtlBiasT.supported)
                         RtlBiasT::apply(*localDev, liveInfo.rtlBiasT, liveInfo.rtlBiasT.enabled);
@@ -1196,7 +1249,7 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
                 spdlog::info("RTL bias-T device={}: {}", index, liveInfo.rtlBiasT.status);
             }
             {
-                std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
+                SoapyDeviceIoLock soapyLiveLock(liveInfo);
                 localDev->setSampleRate(SOAPY_SDR_RX, rxCh, useRate);
                 if (liveInfo.isSdrplay) {
                     const double actualRate = localDev->getSampleRate(SOAPY_SDR_RX, rxCh);
@@ -1228,7 +1281,7 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
             }
 
             {
-                std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
+                SoapyDeviceIoLock soapyLiveLock(applyInfo);
                 if (applyInfo.isSdrplay) {
                     applyInfo.rfgrDb = useGain;
                     applyInfo.gain = useGain;
@@ -1256,7 +1309,7 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
             bool initialCenterApplied = false;
             const double tuneCenterPrep = center;
             {
-                std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
+                SoapyDeviceIoLock soapyLiveLock(applyInfo);
                 try {
                     if (localDev->hasFrequencyCorrection(SOAPY_SDR_RX, rxCh)) {
                         localDev->setFrequencyCorrection(SOAPY_SDR_RX, rxCh, usePpm);
@@ -1502,9 +1555,15 @@ void DeviceManager::stopStreamingImpl(size_t index) {
     auto& st = *stPtr;
     std::unique_lock<std::mutex> lifecycleLock(st.lifecycleMutex);
     bool rtl = false;
+#ifdef HAVE_SOAPYSDR
+    std::string ioKey;
+#endif
     {
         std::lock_guard<std::mutex> lk(devicesMutex);
         rtl = index < devices.size() && devices[index].driver == "rtlsdr";
+#ifdef HAVE_SOAPYSDR
+        if (index < devices.size()) ioKey = soapyLiveIoKey(devices[index]);
+#endif
     }
     bool activeNow = false;
     bool soapyIdle =
@@ -1596,7 +1655,7 @@ void DeviceManager::stopStreamingImpl(size_t index) {
             // is a use-after-free risk. Leak this stuck handle until process exit instead.
             spdlog::warn("Leaving Soapy device {} open because its rxThread was detached while stuck in native code.", index);
         } else if (streamToClose && devToClose) {
-            std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
+            SoapyDeviceIoLock soapyLiveLock(ioKey);
             if (rtl) RtlBiasT::powerOff(*devToClose);
             try { devToClose->deactivateStream(streamToClose); } catch (...) {}
             try { devToClose->closeStream(streamToClose); } catch (...) {}
@@ -1606,15 +1665,17 @@ void DeviceManager::stopStreamingImpl(size_t index) {
                 if (it != gSharedSdrplayDevices.end()) {
                     it->second.refCount = std::max(0, it->second.refCount - 1);
                     if (it->second.refCount <= 0) {
+                        std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
                         try { SoapySDR::Device::unmake(it->second.dev); } catch (...) {}
                         gSharedSdrplayDevices.erase(it);
                     }
                 }
             } else {
+                std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
                 SoapySDR::Device::unmake(devToClose);
             }
         } else if (devToClose) {
-            std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
+            SoapyDeviceIoLock soapyLiveLock(ioKey);
             if (rtl) RtlBiasT::powerOff(*devToClose);
             if (sharedClose) {
                 std::lock_guard<std::mutex> shareLock(gSharedSdrplayMutex);
@@ -1622,11 +1683,13 @@ void DeviceManager::stopStreamingImpl(size_t index) {
                 if (it != gSharedSdrplayDevices.end()) {
                     it->second.refCount = std::max(0, it->second.refCount - 1);
                     if (it->second.refCount <= 0) {
+                        std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
                         try { SoapySDR::Device::unmake(it->second.dev); } catch (...) {}
                         gSharedSdrplayDevices.erase(it);
                     }
                 }
             } else {
+                std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
                 SoapySDR::Device::unmake(devToClose);
             }
         }
@@ -1799,7 +1862,7 @@ bool DeviceManager::setLiveGainImpl(size_t index, double gainDb, std::string* er
         std::lock_guard<std::mutex> stateLock(st.stateMutex);
         if (st.soapyDev && !st.stopFlag) {
             try {
-                std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
+                SoapyDeviceIoLock soapyLiveLock(d);
                 const size_t ch = d.isSdrplay ? d.rxChannel : 0;
                 try { st.soapyDev->setGainMode(SOAPY_SDR_RX, ch, false); } catch (...) {}
                 if (d.isSdrplay) {
@@ -1866,16 +1929,20 @@ void DeviceManager::setFrequencyCorrectionImpl(size_t index, double ppm) {
 #ifdef HAVE_SOAPYSDR
     bool appliedNative = false;
     size_t rxCh = 0;
+    DeviceInfo ppmInfo;
     {
         std::lock_guard<std::mutex> lk(devicesMutex);
-        if (index < devices.size() && devices[index].isSdrplay) rxCh = devices[index].rxChannel;
+        if (index < devices.size()) {
+            ppmInfo = devices[index];
+            if (devices[index].isSdrplay) rxCh = devices[index].rxChannel;
+        }
     }
     {
         std::lock_guard<std::mutex> stateLock(st.stateMutex);
         st.frequencyCorrectionPpm = usePpm;
         st.nativeFrequencyCorrectionActive = false;
         if (st.soapyDev && !st.stopFlag) {
-            std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
+            SoapyDeviceIoLock soapyLiveLock(ppmInfo);
             try {
                 if (st.soapyDev->hasFrequencyCorrection(SOAPY_SDR_RX, rxCh)) {
                     st.soapyDev->setFrequencyCorrection(SOAPY_SDR_RX, rxCh, usePpm);
@@ -1945,7 +2012,7 @@ bool DeviceManager::setDirectSampling(size_t index, int mode, std::string* error
         }
         std::lock_guard<std::mutex> stateLock(st->stateMutex);
         if (st->soapyDev && !st->stopFlag) {
-            std::lock_guard<DriverIoMutex> ioLock(gSoapyLiveIoMutex);
+            SoapyDeviceIoLock ioLock(info);
             try {
                 if (!applySoapyDirectSampling(st->soapyDev, mode, index))
                     throw std::runtime_error("Driver did not confirm direct-sampling mode");
@@ -2480,7 +2547,7 @@ bool DeviceManager::setRtlBiasT(size_t index, bool enabled, std::string* error, 
             std::lock_guard<std::mutex> lk(st->stateMutex);
 #ifdef HAVE_SOAPYSDR
             if (st->isReal && st->soapyDev) {
-                std::lock_guard<DriverIoMutex> io(gSoapyLiveIoMutex);
+                SoapyDeviceIoLock io(std::string("usb:") + identity);
                 if (desired.probed && desired.supported) RtlBiasT::apply(*st->soapyDev, desired, enabled);
                 else {
                     RtlBiasT::powerOff(*st->soapyDev);
@@ -2547,7 +2614,7 @@ bool DeviceManager::changeSdrplay(size_t index, const std::optional<SdrplayContr
         if (auto* st = streamState(index)) {
             std::lock_guard<std::mutex> stateLock(st->stateMutex);
             if (st->soapyDev && !st->stopFlag) {
-                std::lock_guard<DriverIoMutex> ioLock(gSoapyLiveIoMutex);
+                SoapyDeviceIoLock ioLock(desired);
                 if (change) SdrplayControl::applyChange(*st->soapyDev, desired, *change);
                 else SdrplayControl::apply(*st->soapyDev, desired);
                 live = true;
@@ -2634,7 +2701,7 @@ bool DeviceManager::setLiveAntenna(size_t index, const std::string& antenna, std
         std::lock_guard<std::mutex> stateLock(st.stateMutex);
         if (st.soapyDev && !st.stopFlag) {
             try {
-                std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
+                SoapyDeviceIoLock soapyLiveLock(d);
                 st.soapyDev->setAntenna(SOAPY_SDR_RX, 0, antenna);
                 spdlog::info("Live antenna applied to device {}: {}", index, antenna);
             } catch (const std::exception& ex) {
@@ -3557,6 +3624,12 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
         stream = st.rxStream;
     }
     if (dev && stream) {
+        std::string ioKey;
+        {
+            std::lock_guard<std::mutex> lk(devicesMutex);
+            if (index < devices.size()) ioKey = soapyLiveIoKey(devices[index]);
+        }
+        auto liveIo = gSoapyDeviceIo.mutexFor(ioKey);
         std::vector<std::complex<float>> buff(blockSize);
         bool realReadFaulted = false;
         // Broad guard: native readStream / USB / driver faults in the background thread must never terminate the process.
@@ -3593,7 +3666,7 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                         const double tuneHz = nativePpm ? logicalCenter : correctedTuneFrequencyHz(logicalCenter, ppm);
                         const auto tuneStart = std::chrono::steady_clock::now();
                         try {
-                            std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
+                            std::lock_guard<DriverIoMutex> soapyLiveLock(*liveIo);
                             dev->setFrequency(SOAPY_SDR_RX, rxCh, tuneHz);
                             markStreamRetune(st, logicalCenter);
                             st.centerTuneAppliedSeq.store(requestedTuneSeq, std::memory_order_release);
@@ -3623,7 +3696,7 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                 int numElems = 0;
                 {
                     const auto waiting = std::chrono::steady_clock::now();
-                    std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
+                    std::lock_guard<DriverIoMutex> soapyLiveLock(*liveIo);
                     const auto reading = std::chrono::steady_clock::now();
                     st.rxLiveIoWaitUs.fetch_add(std::chrono::duration_cast<std::chrono::microseconds>(reading - waiting).count(), std::memory_order_relaxed);
                     st.rxReads.fetch_add(1, std::memory_order_relaxed);
@@ -3712,9 +3785,11 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
 
         spdlog::warn("Real RX thread for device {} faulted; falling back to safe stub streaming for this session.", index);
         bool rtl = false;
+        std::string faultIoKey;
         {
             std::lock_guard<std::mutex> lk(devicesMutex);
             rtl = index < devices.size() && devices[index].driver == "rtlsdr";
+            if (index < devices.size()) faultIoKey = soapyLiveIoKey(devices[index]);
             if (rtl) {
                 devices[index].rtlBiasT.reported.reset();
                 devices[index].rtlBiasT.status = "Receiver fault; power-off requested. Check driver log";
@@ -3729,13 +3804,18 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
             st.runtimeState = "hardware failed, using stub";
         }
         try {
-            std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
-            if (rtl && dev) RtlBiasT::powerOff(*dev);
-            if (stream && dev) {
-                dev->deactivateStream(stream);
-                dev->closeStream(stream);
+            {
+                SoapyDeviceIoLock soapyLiveLock(faultIoKey);
+                if (rtl && dev) RtlBiasT::powerOff(*dev);
+                if (stream && dev) {
+                    dev->deactivateStream(stream);
+                    dev->closeStream(stream);
+                }
             }
-            if (dev) SoapySDR::Device::unmake(dev);
+            if (dev) {
+                std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
+                SoapySDR::Device::unmake(dev);
+            }
         } catch (const std::exception& ex) {
             spdlog::warn("Recoverable native issue while cleaning faulted Soapy device {}: {}", index, ex.what());
         } catch (...) {
@@ -3848,31 +3928,42 @@ bool DeviceManager::startToneTx(size_t index, const TxParams& params)
     if (p.attemptHardware) {
         SoapySDR::Device* localDev = nullptr;
         SoapySDR::Stream* localStream = nullptr;
-        std::unique_lock<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex, std::defer_lock);
-        const auto discardFailedOpen = [&] {
-            if (localDev && localStream) {
-                try { localDev->deactivateStream(localStream); } catch (...) {}
-                try { localDev->closeStream(localStream); } catch (...) {}
+        DeviceInfo txInfo;
+        std::map<std::string, std::string> args;
+        {
+            std::lock_guard<std::mutex> lk(devicesMutex);
+            if (index < devices.size()) {
+                txInfo = devices[index];
+                args["driver"] = txInfo.driver;
+                if (!txInfo.serial.empty()) args["serial"] = txInfo.serial;
             }
-            if (localDev) { try { SoapySDR::Device::unmake(localDev); } catch (...) {} }
+        }
+        const auto discardFailedOpen = [&] {
+            if (localDev) {
+                SoapyDeviceIoLock io(txInfo);
+                if (localStream) {
+                    try { localDev->deactivateStream(localStream); } catch (...) {}
+                    try { localDev->closeStream(localStream); } catch (...) {}
+                }
+            }
+            if (localDev) {
+                std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
+                try { SoapySDR::Device::unmake(localDev); } catch (...) {}
+            }
             hardwareOk = false;
             tx.soapyDev = nullptr;
             tx.txStream = nullptr;
             tx.hardwareActive.store(false, std::memory_order_release);
         };
         try {
-            std::map<std::string, std::string> args;
+            SoapySDR::Device* dev = nullptr;
             {
-                std::lock_guard<std::mutex> lk(devicesMutex);
-                if (index < devices.size()) {
-                    args["driver"] = devices[index].driver;
-                    if (!devices[index].serial.empty()) args["serial"] = devices[index].serial;
-                }
+                std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
+                dev = SoapySDR::Device::make(args);
             }
-            soapyLiveLock.lock();
-            SoapySDR::Device* dev = SoapySDR::Device::make(args);
             if (!dev) throw std::runtime_error("Soapy Device::make returned null for TX");
             localDev = dev;
+            SoapyDeviceIoLock io(txInfo);
             if (dev->getNumChannels(SOAPY_SDR_TX) == 0)
                 throw std::runtime_error("opened device has no TX channel");
 
@@ -3966,7 +4057,7 @@ void DeviceManager::stopTx(size_t index)
     if (!tx.active.load(std::memory_order_acquire) && !tx.txThread.joinable()) {
 #ifdef HAVE_SOAPYSDR
         if (!tx.soapyDev) {
-            if (tryCloseSoapyTxHandle(nullptr, nullptr))
+            if (tryCloseSoapyTxHandle(nullptr, nullptr, {}))
                 tx.runtimeState = "idle";
             return;
         }
@@ -3998,6 +4089,11 @@ void DeviceManager::stopTx(size_t index)
 #ifdef HAVE_SOAPYSDR
     SoapySDR::Device* dev = nullptr;
     SoapySDR::Stream* stream = nullptr;
+    std::string ioKey;
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (index < devices.size()) ioKey = soapyLiveIoKey(devices[index]);
+    }
     {
         dev = tx.soapyDev;
         stream = tx.txStream;
@@ -4006,7 +4102,7 @@ void DeviceManager::stopTx(size_t index)
     }
     bool leaked = false;
     try {
-        if (!tryCloseSoapyTxHandle(dev, stream)) {
+        if (!tryCloseSoapyTxHandle(dev, stream, ioKey)) {
             leaked = true;
             spdlog::warn("stopTx device {}: live IO mutex busy, leaking Soapy TX handle", index);
         }
@@ -4067,6 +4163,14 @@ void DeviceManager::txThreadFunc(size_t index, uint64_t expectedGeneration)
     if (!txPtr) return;
     auto& tx = *txPtr;
     tx.threadRunning.store(true, std::memory_order_release);
+#ifdef HAVE_SOAPYSDR
+    std::string txIoKey;
+    {
+        std::lock_guard<std::mutex> lk(devicesMutex);
+        if (index < devices.size()) txIoKey = soapyLiveIoKey(devices[index]);
+    }
+    auto txLiveIo = gSoapyDeviceIo.mutexFor(txIoKey);
+#endif
 
     TxParams p;
     {
@@ -4118,7 +4222,7 @@ void DeviceManager::txThreadFunc(size_t index, uint64_t expectedGeneration)
 #ifdef HAVE_SOAPYSDR
         if (tx.hardwareActive.load(std::memory_order_acquire) && tx.soapyDev && tx.txStream) {
             try {
-                std::lock_guard<DriverIoMutex> soapyLiveLock(gSoapyLiveIoMutex);
+                std::lock_guard<DriverIoMutex> soapyLiveLock(*txLiveIo);
                 if (!tx.soapyDev || !tx.txStream)
                     break;
                 void* buffs[] = { block.data() };

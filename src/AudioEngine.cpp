@@ -47,19 +47,79 @@ static void stopAndUninitOutput(const std::shared_ptr<AudioEngine::ActiveOutput>
         act->device.reset();
     }
 }
+
+// Collector 2026-10-09 (RSPdx client 4988148b): HyperX Virtual Surround and
+// VB-CABLE present 2+ WASAPI channels. The callback buffer is
+// frameCount * playback.channels floats, not mono.
+static ma_uint32 playbackChannels(const ma_device* device) noexcept
+{
+    if (!device || device->playback.channels == 0) return 1;
+    return device->playback.channels;
+}
+
+static void fillPlaybackSilence(void* pOutput, ma_uint32 frameCount, ma_uint32 channels) noexcept
+{
+    std::memset(pOutput, 0, static_cast<size_t>(frameCount) * channels * sizeof(float));
+}
+
+static void writeMonoFrame(float* out, ma_uint32 channels, float sample) noexcept
+{
+    for (ma_uint32 c = 0; c < channels; ++c)
+        out[c] = sample;
+}
+
+// Two WASAPI periods and at least 40 ms. Same collector: ~100 empty callbacks
+// per second while ringFillPercent stayed 0, including with RF stopped.
+static size_t playbackStartFloorFrames(const ma_device* device) noexcept
+{
+    const ma_uint32 rate = (device && device->sampleRate != 0) ? device->sampleRate : 48000;
+    const ma_uint32 period = (device && device->playback.internalPeriodSizeInFrames != 0)
+        ? device->playback.internalPeriodSizeInFrames
+        : static_cast<ma_uint32>((rate * 20u) / 1000u);
+    const size_t twoPeriods = static_cast<size_t>(std::max<ma_uint32>(1, period)) * 2;
+    const size_t fortyMs = static_cast<size_t>(rate) * 40u / 1000u;
+    return std::max(twoPeriods, fortyMs);
+}
+
+static void startPlaybackIfReady(AudioEngine::ActiveOutput& act, bool force)
+{
+    if (!act.device || !act.valid.load(std::memory_order_acquire)) return;
+    const ma_device_state state = ma_device_get_state(act.device.get());
+    if (state == ma_device_state_started || state == ma_device_state_starting)
+        return;
+    if (!force) {
+        auto& rb = act.ring;
+        if (rb.capacity == 0) return;
+        const size_t queued = ringDistance(rb.writePos.load(std::memory_order_acquire),
+                                           rb.readPos.load(std::memory_order_relaxed),
+                                           rb.capacity);
+        if (queued < playbackStartFloorFrames(act.device.get()))
+            return;
+    }
+    const ma_result res = ma_device_start(act.device.get());
+    if (res != MA_SUCCESS) {
+        spdlog::error("Failed to start playback device {}", act.deviceName);
+        return;
+    }
+    spdlog::info("Playback started: {} ({} ch, period {} frames)",
+                 act.deviceName,
+                 playbackChannels(act.device.get()),
+                 act.device->playback.internalPeriodSizeInFrames);
+}
 }
 
 static void data_callback(ma_device* pDevice, void* pOutput, const void* /*pInput*/, ma_uint32 frameCount)
 {
+    const ma_uint32 channels = playbackChannels(pDevice);
     // P1: direct pointer from this device's pUserData (set at startDevice time) avoids any m_active walk or find from RT thread.
     auto* myAct = reinterpret_cast<AudioEngine::ActiveOutput*>(pDevice->pUserData);
     if (!myAct) {
-        std::memset(pOutput, 0, frameCount * sizeof(float));
+        fillPlaybackSilence(pOutput, frameCount, channels);
         return;
     }
     AudioEngine* engine = myAct->owningEngine;
     if (!engine) {
-        std::memset(pOutput, 0, frameCount * sizeof(float));
+        fillPlaybackSilence(pOutput, frameCount, channels);
         return;
     }
 
@@ -73,7 +133,8 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* /*pInpu
         float delta = 2.0f * 3.14159265f * freq / engine->getSampleRate();
 
         for (ma_uint32 i = 0; i < frameCount; ++i) {
-            out[i] = muted ? 0.0f : (0.6f * std::sin(phase));
+            writeMonoFrame(out + static_cast<size_t>(i) * channels, channels,
+                           muted ? 0.0f : (0.6f * std::sin(phase)));
             phase += delta;
             if (phase > 2.0f * 3.14159265f) phase -= 2.0f * 3.14159265f;
         }
@@ -98,7 +159,7 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* /*pInpu
             AudioEngine::RingBuffer::ConsumerLease consumer(rb, false);
             if (!consumer.acquired) {
                 engine->controlSilenceFrames.fetch_add(frameCount, std::memory_order_relaxed);
-                std::memset(out, 0, frameCount * sizeof(float));
+                fillPlaybackSilence(out, frameCount, channels);
                 return;
             }
             float master = engine->getMasterVolume();
@@ -109,7 +170,7 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* /*pInpu
             size_t rpos = rb.readPos.load(std::memory_order_relaxed);
             size_t wpos = rb.writePos.load(std::memory_order_acquire);
             if (rb.capacity == 0) {
-                std::memset(out, 0, toRead * sizeof(float));
+                fillPlaybackSilence(out, toRead, channels);
                 return;
             }
             size_t available = ringDistance(wpos, rpos, rb.capacity);
@@ -117,7 +178,8 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* /*pInpu
             size_t canRead = std::min(toRead, available);
 
             for (size_t i = 0; i < canRead; ++i) {
-                out[i] = rb.data[ringWrap(rpos + i, rb.capacity)] * v;
+                writeMonoFrame(out + i * channels, channels,
+                               rb.data[ringWrap(rpos + i, rb.capacity)] * v);
             }
             read += canRead;
             rpos = ringWrap(rpos + canRead, rb.capacity);
@@ -132,10 +194,10 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* /*pInpu
                 engine->zeroFillFrames.fetch_add(toRead - read, std::memory_order_relaxed);
                 if (read == 0) engine->emptyCallbacks.fetch_add(1, std::memory_order_relaxed);
                 else engine->partialCallbacks.fetch_add(1, std::memory_order_relaxed);
-                std::memset(out + read, 0, (toRead - read) * sizeof(float));
+                fillPlaybackSilence(out + read * channels, static_cast<ma_uint32>(toRead - read), channels);
             }
         } else {
-            std::memset(out, 0, frameCount * sizeof(float));
+            fillPlaybackSilence(out, frameCount, channels);
         }
     }
 }
@@ -338,8 +400,12 @@ void AudioEngine::startDevice(size_t enumIndex)
     ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
     cfg.playback.pDeviceID = &m_devices[enumIndex].id;
     cfg.playback.format = ma_format_f32;
-    cfg.playback.channels = 1;
+    // Collector 2026-10-09: HyperX Virtual Surround / VB-CABLE. WASAPI shared
+    // mix is stereo or 7.1; a mono client starves those APOs. Duplicate the
+    // mono ring to every callback channel.
+    cfg.playback.channels = 2;
     cfg.sampleRate = 48000;
+    cfg.periodSizeInMilliseconds = 20;
     cfg.dataCallback = data_callback;
     // The realtime callback reinterpret_casts pUserData as ActiveOutput, so pass
     // the exact ActiveOutput object from the outset rather than the AudioEngine.
@@ -347,6 +413,10 @@ void AudioEngine::startDevice(size_t enumIndex)
 
     auto dev = std::make_unique<ma_device>();
     ma_result res = ma_device_init(&m_context, &cfg, dev.get());
+    if (res != MA_SUCCESS) {
+        cfg.playback.channels = 1;
+        res = ma_device_init(&m_context, &cfg, dev.get());
+    }
     if (res != MA_SUCCESS) {
         spdlog::error("Failed to init playback device {}: {}", m_devices[enumIndex].name, (int)res);
         return;
@@ -361,18 +431,14 @@ void AudioEngine::startDevice(size_t enumIndex)
 
     m_active.push_back(actPtr);
 
-    res = ma_device_start(actPtr->device.get());
-    if (res != MA_SUCCESS) {
-        spdlog::error("Failed to start playback device {}", m_devices[enumIndex].name);
-        actPtr->valid.store(false, std::memory_order_release);
-        if (actPtr->device && actPtr->device->pContext) {
-            ma_device_uninit(actPtr->device.get());
-        }
-        m_active.pop_back();
-        return;
-    }
-
-    spdlog::info("Started audio output: {} @ {} Hz ({} bit float, mono)", m_devices[enumIndex].name, (int)actualRate, 32);
+    // Init here (GUI settle prewarm) so the first analog/P25 push does not pay
+    // WASAPI open latency. Do not start the callback until the ring holds two
+    // periods; idle empty callbacks were ~100 underruns/s with ringFill 0.
+    spdlog::info("Opened audio output: {} @ {} Hz ({} ch, period {} frames). Playback starts after {} frames are queued.",
+                 m_devices[enumIndex].name, (int)actualRate,
+                 playbackChannels(actPtr->device.get()),
+                 actPtr->device->playback.internalPeriodSizeInFrames,
+                 playbackStartFloorFrames(actPtr->device.get()));
     spdlog::info("  All audio block sizes, de-emphasis, 19kHz notch, final LPF are calculated for {} Hz.", (int)actualRate);
 }
 
@@ -513,7 +579,10 @@ void AudioEngine::pushAudio(const float* samples, size_t count)
     std::lock_guard<std::mutex> lk(audioMutex);
 
     for (auto& actPtr : m_active) {
-        if (actPtr) pushAudioToActiveOutputLocked(*actPtr, samples, count, kRingSampleReal);
+        if (actPtr) {
+            pushAudioToActiveOutputLocked(*actPtr, samples, count, kRingSampleReal);
+            startPlaybackIfReady(*actPtr, false);
+        }
     }
 }
 
@@ -532,6 +601,7 @@ void AudioEngine::pushAudioToActiveOutputs(const float* samples, size_t count, c
         if (activeIndex >= m_active.size() || !m_active[activeIndex]) continue;
         if (std::find(pushed.begin(), pushed.end(), activeIndex) != pushed.end()) continue;
         pushAudioToActiveOutputLocked(*m_active[activeIndex], samples, count, kRingSampleReal);
+        startPlaybackIfReady(*m_active[activeIndex], false);
         pushed.push_back(activeIndex);
     }
 }
@@ -542,7 +612,10 @@ void AudioEngine::pushBridgeAudioToActiveOutputs(const float* samples, size_t co
     if (activeOutputIndices.empty()) {
         std::lock_guard<std::mutex> lk(audioMutex);
         for (auto& actPtr : m_active) {
-            if (actPtr) pushAudioToActiveOutputLocked(*actPtr, samples, count, kRingSampleBridge);
+            if (actPtr) {
+                pushAudioToActiveOutputLocked(*actPtr, samples, count, kRingSampleBridge);
+                startPlaybackIfReady(*actPtr, false);
+            }
         }
         return;
     }
@@ -554,6 +627,7 @@ void AudioEngine::pushBridgeAudioToActiveOutputs(const float* samples, size_t co
         if (activeIndex >= m_active.size() || !m_active[activeIndex]) continue;
         if (std::find(pushed.begin(), pushed.end(), activeIndex) != pushed.end()) continue;
         pushAudioToActiveOutputLocked(*m_active[activeIndex], samples, count, kRingSampleBridge);
+        startPlaybackIfReady(*m_active[activeIndex], false);
         pushed.push_back(activeIndex);
     }
 }
@@ -630,10 +704,15 @@ void AudioEngine::playTestTone(size_t activeIndex, float freq, float durationSec
     };
 
     if (activeIndex == size_t(-1)) {
-        for (auto& actPtr : m_active) if (actPtr) setTone(*actPtr);
+        for (auto& actPtr : m_active) {
+            if (!actPtr) continue;
+            setTone(*actPtr);
+            startPlaybackIfReady(*actPtr, true);
+        }
         spdlog::info("Test tone requested on ALL outputs @ {} Hz for {}s", freq, durationSec);
     } else if (activeIndex < m_active.size() && m_active[activeIndex]) {
         setTone(*m_active[activeIndex]);
+        startPlaybackIfReady(*m_active[activeIndex], true);
         spdlog::info("Test tone requested on output {} @ {} Hz for {}s", activeIndex, freq, durationSec);
     } else {
         return;

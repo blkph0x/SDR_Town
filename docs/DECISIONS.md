@@ -1,5 +1,25 @@
 # Decisions
 
+## DEC-0208 - Per-USB live IO and WASAPI prime for all device combos (2026-10-09)
+
+Collector client 4988148b (Ryzen 9 7950X, Win11, RSPdx + two RTL,
+0.2.129–0.2.131): `app.runtime` showed ~100 audio underruns/s with
+`ringFillPercent` 0 and `queuedSamples` 0 while the RSPdx was stopped, then
+the same empty ring through NFM/WFM/USB/LSB. Playback names were HyperX
+Virtual Surround Sound and VB-Audio Virtual Cable. When RSPdx and RTL both
+streamed, `liveIoWaitUs` ran to tens of seconds and both radios overflowed.
+DEC-0190 already named per-physical-device parallel I/O as a later task.
+
+Decision: keep `Device::make`/`unmake` on a process-global factory mutex.
+Key live `readStream`/`writeStream`/tune/gain by USB `stableKey` so different
+radios can run together and the same serial still serializes retune vs read
+and TX `writeStream` vs `stopTx` try_lock. Open WASAPI as stereo 48 kHz with
+a 20 ms period hint, duplicate the mono ring to every callback channel, init
+on prewarm, and start playback only after two periods (at least 40 ms) are
+queued, or immediately for a test tone. Do not invent PLC or change P25
+slot/security/vocoder. Exact frozen-path digests: DeviceManager.cpp
+72a1200f… → 7f27cd25…, AudioEngine.cpp e4219b87… → b622f93e….
+
 ## DEC-0207 - stopTx must not wait forever on gSoapyLiveIoMutex (2026-10-08)
 
 `stopTx` waited 500 ms, detached the TX thread, then `lock()`ed

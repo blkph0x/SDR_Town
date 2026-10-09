@@ -277,6 +277,18 @@ TX_STOP_MUTEX_DIGESTS = {
 }
 
 
+# DEC-0208: per-USB Soapy IO + WASAPI stereo/prime. Exact digests are
+# 96e6d84 (0.2.133) -> audio/combo only. No P25 DSP, vocoder, or speaker gate.
+AUDIO_COMBO_DIGESTS = {
+    "src/DeviceManager.cpp": (
+        "72a1200f40c68bbec130c24c1d5be196644c444f951a9a7604c2c0e959af8c58",
+        "7f27cd25912aa76af4ee3f44b9c45bd474f605918213183a58121958b75389f7"),
+    "src/AudioEngine.cpp": (
+        "e4219b87e4662a4b922ee09a2732416bb9c6c42b7131cd51a6c181b50ea7ec15",
+        "b622f93e4c9b1ecfc8fb8d819c8e7e58807449584870fc1fc6457b5b2ae80757"),
+}
+
+
 # DEC-0203 / capture 20261006_093930: first locked-lattice empty hop stays
 # healthy 80/4. Exact digests are 14e1090 (0.2.128) -> planner + live call.
 P25_LOCKED_LATTICE_EMPTY_DIGESTS = {
@@ -315,7 +327,8 @@ def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
                       P25_TRACE_CONTEXT_DIGESTS.get(path), P25_EMIT_GAP_DIGESTS.get(path),
                       P25_LOCKED_LATTICE_EMPTY_DIGESTS.get(path),
                       P25_ENCRYPTED_GRANT_IQ_DIGESTS.get(path),
-                      TX_STOP_MUTEX_DIGESTS.get(path))
+                      TX_STOP_MUTEX_DIGESTS.get(path),
+                      AUDIO_COMBO_DIGESTS.get(path))
 
 
 # DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.
@@ -822,6 +835,10 @@ def main() -> int:
         if args.paths is None and path in TX_STOP_MUTEX_DIGESTS:
             if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
                 print(f"P25 guard: accepted exact DEC-0207 TX stop mutex leak: {path}")
+                continue
+        if args.paths is None and path in AUDIO_COMBO_DIGESTS:
+            if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
+                print(f"P25 guard: accepted exact DEC-0208 audio/combo repair: {path}")
                 continue
         if args.paths is None and path in P25_TRACE_CONTEXT_DIGESTS:
             if infrastructure_text_allowed(path, trace_before_text(args.base, path), git_file_text(args.head, path)):

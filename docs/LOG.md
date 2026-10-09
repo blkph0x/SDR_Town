@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-10-09 - Empty-ring underruns and dual-SDR overflow, DEC-0208
+
+Collector 4988148b showed ~100 WASAPI underruns/s with an empty ring on
+HyperX/VB-CABLE, including with RF stopped, and RSPdx+RTL overflows from
+the global Soapy lock. Stereo callback, delayed start until two periods
+are queued, per-USB live IO. P25 DSP unchanged. `[audioengine]` 18
+assertions PASS, `[satcom][log][ownership]` 16 PASS, `[tx-safety]` 47 PASS.
+
 ## 2026-10-08 - v0.2.133 public ZIP verified
 
 Actions 37735043869 success. Release v0.2.133-experimental public prerelease.

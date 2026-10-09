@@ -562,6 +562,23 @@ TEST_CASE("Driver IO admission preserves queued command order", "[satcom][log][o
     CHECK(mutex.waiting() == 0);
 }
 
+TEST_CASE("Driver IO table isolates different device keys", "[satcom][log][ownership]") {
+    DriverIoMutexTable table;
+    auto radioA = table.mutexFor("usb:sdrplay:rspdx");
+    auto radioB = table.mutexFor("usb:rtlsdr:00000001");
+    REQUIRE(radioA);
+    REQUIRE(radioB);
+    REQUIRE(radioA.get() != radioB.get());
+    REQUIRE(table.mutexFor("usb:sdrplay:rspdx").get() == radioA.get());
+    REQUIRE(table.mutexFor("").get() == table.mutexFor("unkeyed").get());
+
+    radioA->lock();
+    CHECK(radioB->try_lock());
+    radioB->unlock();
+    CHECK_FALSE(radioA->try_lock());
+    radioA->unlock();
+}
+
 TEST_CASE("Driver IO try_lock does not take a ticket or barge waiters", "[satcom][log][ownership]") {
     DriverIoMutex mutex;
     CHECK(mutex.try_lock());
