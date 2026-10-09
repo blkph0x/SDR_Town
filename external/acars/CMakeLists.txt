@@ -21,7 +21,7 @@ set_target_properties(sdr_miam PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON
 target_include_directories(sdr_miam PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libacars/asn1)
 target_link_libraries(sdr_miam PUBLIC ZLIB::ZLIB jansson::jansson)
-if(MSVC)
+if(WIN32)
     target_compile_definitions(sdr_miam PRIVATE _CRT_SECURE_NO_WARNINGS strdup=_strdup LFIND_NMEMB_SIZE_UINT)
 else()
     target_compile_definitions(sdr_miam PRIVATE _POSIX_C_SOURCE=200809L LFIND_NMEMB_SIZE_SIZE_T)

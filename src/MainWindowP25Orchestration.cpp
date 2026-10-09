@@ -358,6 +358,7 @@ void MainWindow::startP25LiveDecodePipeline()
                     double rfSquelchLevel = std::numeric_limits<double>::quiet_NaN();
                     DemodMode monMode = DemodMode::AUTO;
                     bool monAudioLpfEnabled = true;
+                    bool monHfNoiseFilter = false;
                     bool monP25ControlMute = false;
                     bool monP25VoiceDecode = false;
                     bool monP25VoicePhase2 = false;
@@ -429,6 +430,7 @@ void MainWindow::startP25LiveDecodePipeline()
                         monBw = rx.channelBwHz;
                         monLpf = rx.lpfHz;
                         monAudioLpfEnabled = rx.audioLpfEnabled;
+                        monHfNoiseFilter = rx.hfNoiseFilterEnabled;
                         monSquelch = rx.squelchDb;
                         monGain = rx.audioGain;
                         monWfmDe = rx.wfmDeTauUs;
@@ -1634,6 +1636,7 @@ void MainWindow::startP25LiveDecodePipeline()
                                         audioOutputEngine->trimQueuedAudio(softTarget, rxAudioOutputs);
                                 }
                                 if (audioOutputEngine && !ch.empty()) {
+                                    rx.hfAudioFilter.process(ch, orate, monHfNoiseFilter && monFreq < 30e6 && !monP25VoiceDecode && !monP25ControlMute);
                                     // Bypass 5 ms frame chunking for live NFM — fewer edge clicks.
                                     auto& pending = p25SpeakerPendingFor(pendingAudioByRx, rx).samples;
                                     if (!pending.empty()) {

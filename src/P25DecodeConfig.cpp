@@ -1,4 +1,5 @@
 #include "P25DecodeConfig.h"
+#include <iomanip>
 
 #include "P25AppGlobals.h"
 #include "P25TalkgroupRegistry.h"

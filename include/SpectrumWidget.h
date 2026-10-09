@@ -30,6 +30,7 @@ public:
     double sampleRate() const { return m_sampleRate; }
 
     // Heat map / color range for waterfall and spectrum (user adjustable noise floor / sensitivity display)
+    void setAutoDisplayLevels(bool enabled);
     void setColorRange(double minDb, double maxDb); // e.g. -120 to -10
     void setViewBandwidth(double bwHz); // for zooming the display (independent of device SR for visual fine tuning)
 
@@ -41,11 +42,13 @@ public:
     // Called from the main level timer so the plot can show the current squelch metric and floor.
     void setLiveRms(double rmsDb);
     void setLiveLevels(double signalDb, double noiseFloorDb);
+    void setChannelBandwidth(double hz);
+    void setChannelMode(DemodMode mode);
     void setBandPlanMonitorFrequency(double hz); // GUI-thread overlay target, not hardware LO
     void setBandPlanOverlayEnabled(bool enabled);
 
 signals:
-    void frequencySelected(double freqHz);  // click/drag committed on release
+    void frequencySelected(double freqHz);  // live drag updates and final release
     void bandwidthSelected(double bwHz);    // future drag select
     void squelchThresholdChanged(double db); // user dragged the interactive squelch line/bar on the right side
 
@@ -84,6 +87,8 @@ private:
     // Adjustable heat map range (controls noise floor visibility in waterfall/spectrum colors)
     double m_colorMinDb = -120.0;
     double m_colorMaxDb = -10.0;
+    bool m_autoDisplayLevels = false;
+    bool m_autoLevelsInitialized = false;
 
     QImage m_waterfall;             // scrolling image (height = history, width = bins) - used for fast full-view path
     int m_waterfallPos = 0;
@@ -101,15 +106,21 @@ private:
 
     // interaction
     bool m_dragging = false;
+    QTimer* m_liveTuneTimer = nullptr;
+    double m_lastDragTunedHz = -1;
     int m_lastMouseX = 0;
     double m_dragLowHz = 0, m_dragBwHz = 0, m_dragPreviewHz = 0;
     int m_dragPlotWidth = 1;
+    int m_dragGrabOffset = 0;
+    int tuneMarkerX();
     int m_tuneX = -1;  // last clicked x for visual tune line across full display (incl waterfall)
 
     // Squelch visualization + interactive control (linked to main GUI Squelch spin + receivers)
     double m_squelchThresholdDb = -80.0;
     bool m_squelchDragging = false;
     double m_bandPlanMonitorHz = 0;
+    double m_channelBandwidthHz = 12500;
+    DemodMode m_channelMode = DemodMode::NFM;
     bool m_bandPlanOverlayEnabled = true;
     std::shared_ptr<const BandPlanProfile> m_overlayProfile;
     double m_overlayLow = 0, m_overlayHigh = 0;

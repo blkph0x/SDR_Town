@@ -209,6 +209,7 @@ public:
     // For spectrum: get latest power spectrum (dB) and center/sample info
     bool getLatestSpectrum(size_t index, std::vector<float>& powerDb, double& centerFreq, double& sampleRate);
     void setSpectrumFftBins(size_t index, size_t bins);
+    void setSpectrumDcRemoval(size_t index, bool enabled);
     size_t getSpectrumFftBins(size_t index) const;
 
     // Tune / scanner support
@@ -367,6 +368,7 @@ private:
         std::vector<float> spectrumAvg;   // exponential average per bin (dB)
         std::vector<float> spectrumPeak;  // peak-hold (with slow decay)
         size_t spectrumBins = 8192;       // 4096/8192/16384/65536 precision presets
+        bool spectrumDcRemoval = true;
 
 #ifdef HAVE_SOAPYSDR
         SoapySDR::Device* soapyDev = nullptr;

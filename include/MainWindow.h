@@ -286,6 +286,9 @@ private:
     std::thread p25ControlWorkerThread;
     std::thread p25VoiceWorkerThread;
     GuiRuntimeConfig guiRuntimeConfig;
+    QString listenDeviceKey;
+    size_t displayFftBins = 65536;
+    bool displayDcRemoval = true;
     WorkspaceLayout* workspaceLayout = nullptr;
     QStringList guiRuntimeStartupErrors;
     qint64 guiRuntimeStartupAppliedMs = 0;
@@ -385,6 +388,7 @@ private:
     AutoBandwidthCheck* autoBandwidthCheck = nullptr;
     double monitorLpfHz = 15000;
     bool monitorAudioLpfEnabled = true;
+    bool monitorHfNoiseFilter = true;
     double monitorSquelchDb = -105;
     double monitorRfGainDb = 20.0;
     double monitorMasterVolume = 0.85;
@@ -549,13 +553,14 @@ private:
 
     void showIqReplayWindow();
 
-    size_t guiRuntimeDeviceIndex() const noexcept;
+    size_t guiRuntimeDeviceIndex() const;
 
     void recordGuiRuntimeError(const QString& message);
 
     bool selectDefaultAudioOutputForGuiStartup(const char* reason);
 
     bool startGuiRuntimeDeviceAt(double freqHz, bool p25Defaults);
+    void stopUnusedListenDevices(size_t selected);
 
     bool armGuiRuntimeP25Control(double ccHz, bool grantTest);
 
@@ -612,4 +617,3 @@ private:
     void createMenus();
     void showBandPlanDialog();
 };
-
