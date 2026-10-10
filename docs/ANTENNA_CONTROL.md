@@ -11,7 +11,9 @@ loop. Native serial-driver packaging is not implemented here.
 
 Install Hamlib separately and configure `rotctld` for the actual controller,
 serial port and baud rate. SDR Town connects to its host/port (default
-127.0.0.1:4533). This gives access to Hamlib-supported controllers, not only
+127.0.0.1:4533). The station front-end uses this same controller. Connecting
+either panel while the other is already connected is refused. This gives
+access to Hamlib-supported controllers, not only
 the ten targets below. These are documented compatibility targets, NOT a
 verified popularity ranking or physical-hardware certification.
 

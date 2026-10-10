@@ -24,7 +24,8 @@
 
 #include <algorithm>
 
-EquipmentWizard::EquipmentWizard(QWidget* parent) : QDialog(parent) {
+EquipmentWizard::EquipmentWizard(QWidget* parent)
+    : QDialog(parent), rotor_(sharedRotatorController()) {
     setWindowTitle("Station front-end");
     setObjectName("equipmentWizard");
     auto* form = new QFormLayout;
@@ -132,6 +133,9 @@ EquipmentWizard::EquipmentWizard(QWidget* parent) : QDialog(parent) {
     connect(connectButton, &QPushButton::clicked, this, [this] {
         RotorLimits limits;
         rotor_.connectTo(host_->text(), static_cast<quint16>(port_->value()), limits);
+    });
+    connect(&rotor_, &RotatorController::state, this, [this](const QString& text) {
+        sky_->setText(text);
     });
     connect(armButton, &QPushButton::clicked, this, [this] {
         std::string error;

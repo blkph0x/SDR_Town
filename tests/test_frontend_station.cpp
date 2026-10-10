@@ -1,3 +1,4 @@
+#include "AntennaControlWindow.h"
 #include "frontend/DvbSurvey.h"
 #include "frontend/EquipmentWizard.h"
 #include "frontend/FrontEndMetrics.h"
@@ -23,6 +24,7 @@
 #include <QThread>
 #include <QElapsedTimer>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QRegularExpression>
 #include <filesystem>
 #include <fstream>
@@ -509,4 +511,51 @@ TEST_CASE("Pass folder stores the station profile and metric log") {
     CHECK(profileText.find("trueRfHz") != std::string::npos);
     CHECK(metricText.find("sky.dopplerHz") != std::string::npos);
     std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("Station panel and Tools rotator share one rotctld connection") {
+    QTcpServer server;
+    REQUIRE(server.listen(QHostAddress::LocalHost));
+    int sockets = 0;
+    QObject::connect(&server, &QTcpServer::newConnection, &server, [&] {
+        while (auto* socket = server.nextPendingConnection()) {
+            ++sockets;
+            QObject::connect(socket, &QTcpSocket::readyRead, socket, [socket] {
+                while (socket->canReadLine()) {
+                    const auto cmd = socket->readLine();
+                    QByteArray reply;
+                    if (cmd == "+p\n") reply = "get_pos:\nAzimuth: 180\nElevation: 45\nRPRT 0\n";
+                    else if (cmd.startsWith("+P ")) reply = "set_pos: " + cmd.mid(3).trimmed() + "\nRPRT 0\n";
+                    else if (cmd == "+S\n") reply = "stop:\nRPRT 0\n";
+                    else reply = "RPRT 0\n";
+                    socket->write(reply);
+                }
+            });
+        }
+    });
+    auto waitFor = [](const std::function<bool()>& ready) {
+        QElapsedTimer timer;
+        timer.start();
+        while (!ready() && timer.elapsed() < 2500) {
+            QApplication::processEvents();
+            QThread::msleep(1);
+        }
+        return ready();
+    };
+    EquipmentWizard station;
+    station.findChild<QSpinBox*>("rotatorPort")->setValue(server.serverPort());
+    station.findChild<QPushButton*>("connectRotator")->click();
+    REQUIRE(waitFor([&] { return sharedRotatorController().fresh(); }));
+    CHECK(sockets == 1);
+    AntennaControlWindow tools;
+    tools.show();
+    QApplication::processEvents();
+    REQUIRE(waitFor([&] { return tools.findChild<QLabel*>("rotorPosition")->text().contains("180.0"); }));
+    CHECK(sockets == 1);
+    EquipmentWizard second;
+    second.findChild<QPushButton*>("connectRotator")->click();
+    CHECK(second.findChild<QLabel*>("skyFeed")->text().contains("Disconnect before changing"));
+    CHECK(sockets == 1);
+    sharedRotatorController().disconnectFromController();
+    REQUIRE(waitFor([&] { return !sharedRotatorController().connected(); }));
 }

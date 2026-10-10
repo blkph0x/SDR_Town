@@ -3,9 +3,9 @@
 Tools > Station front-end stores the dish, claimed LNB noise figure, and
 Bias-T rating used by a satellite pass. DEC-0210. Arm is fail-closed.
 The lease and IF checkboxes are operator attestations. They are not a
-radio lease and they do not measure the SDR span. Rotator motion uses the
-panel's own `rotctld` client. Do not connect this panel and Tools >
-Antenna Rotator & SWR to the same `rotctld` at the same time.
+radio lease and they do not measure the SDR span. This panel and Tools >
+Antenna Rotator & SWR share one `rotctld` client. A second Connect is
+refused until Disconnect.
 
 ## Armed pass
 
@@ -54,7 +54,7 @@ gone after a crash.
 
 ## Rotator
 
-`StationPassSession` drives the existing `RotatorController` (`+P`, `+p`,
+`StationPassSession` drives the shared `RotatorController` (`+P`, `+p`,
 `+S`). It does not link Hamlib. Connect, wait until position is fresh, arm
 the rotator, then Arm pass. The session sends one planned position per
 second. Soft limits are 0–360° azimuth and 0–90° elevation in this slice.

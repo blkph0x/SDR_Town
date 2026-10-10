@@ -65,6 +65,10 @@ private:
     bool armed_=false,stopPending_=false,disconnectPending_=false;
 };
 
+// One process-wide client. The Tools window and the station panel both use it.
+// A second connect is refused until this one disconnects.
+RotatorController& sharedRotatorController();
+
 class SwrMonitor : public QObject {
     Q_OBJECT
 public:

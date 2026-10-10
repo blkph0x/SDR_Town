@@ -60,6 +60,11 @@ elevation step. The lead uses the short azimuth path and is clamped to
 the gap between the last two samples. It is not a second SGP4 run.
 Horizontal selects 18 V and high band selects 22 kHz.
 
+The Tools rotator window and the station panel share one
+`RotatorController`. A second connect is refused until that client
+disconnects. Unit tests that construct their own controller stay on that
+private instance.
+
 ## DEC-0209 - Listen identity, unused-stream stop, analog HF filter (2026-10-10)
 
 PR #34 (draft, fubarzi) added Listen persistence, spectrum controls, and an

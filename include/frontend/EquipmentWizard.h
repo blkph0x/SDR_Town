@@ -51,7 +51,7 @@ private:
     QLabel* hint_ = nullptr;
     QLabel* power_ = nullptr;
     QPlainTextEdit* plan_ = nullptr;
-    RotatorController rotor_;
+    RotatorController& rotor_;
     StationPassSession* session_ = nullptr;
 };
 

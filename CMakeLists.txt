@@ -747,7 +747,8 @@ if(BUILD_TESTS)
       src/frontend/EquipmentWizard.cpp
       src/frontend/StationPassSession.cpp include/frontend/StationPassSession.h
       src/frontend/StationSky.cpp include/frontend/StationSky.h
-      src/AntennaControl.cpp include/AntennaControl.h)
+      src/AntennaControl.cpp include/AntennaControl.h
+      src/AntennaControlWindow.cpp)
   target_include_directories(frontend_station_tests PRIVATE include)
   target_link_libraries(frontend_station_tests PRIVATE Catch2::Catch2 Qt6::Widgets Qt6::Network nlohmann_json::nlohmann_json)
   add_test(NAME FrontendStation COMMAND frontend_station_tests)

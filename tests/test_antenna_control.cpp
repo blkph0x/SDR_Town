@@ -114,4 +114,6 @@ TEST_CASE("Antenna GUI connect arm move and close follow the real controller pat
     auto* move=window.findChild<QPushButton*>("rotorMove");REQUIRE(waitFor([&]{return move->isEnabled();}));move->click();
     REQUIRE(waitFor([&]{return fake.commands.contains("+P 210.000 30.000");}));
     window.close();REQUIRE(waitFor([&]{return fake.commands.contains("+S");}));CHECK_FALSE(arm->isChecked());
+    sharedRotatorController().disconnectFromController();
+    REQUIRE(waitFor([&]{return !sharedRotatorController().connected();}));
 }

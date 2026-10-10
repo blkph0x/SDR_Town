@@ -57,6 +57,11 @@ bool number(const QMap<QString,QString>& fields,const QString& key,double& value
     bool ok=false;value=QLocale::c().toDouble(fields.value(key),&ok);return ok&&std::isfinite(value);
 }
 }
+RotatorController& sharedRotatorController() {
+    static auto* rotor = new RotatorController;
+    return *rotor;
+}
+
 RotatorController::RotatorController(QObject* parent):QObject(parent){
     poll_.setInterval(1000);
     connect(&poll_,&QTimer::timeout,this,&RotatorController::poll);

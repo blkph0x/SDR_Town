@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-10 - One rotctld client for the station and Tools
+
+The station panel and Tools > Antenna Rotator & SWR now use
+`sharedRotatorController`. Connecting the second panel is refused while
+the first connection is open. Pass tests that build their own
+`RotatorController` do not take that shared client.
+
 ## 2026-10-10 - LEO lead and Ku polarization
 
 A LEO track with two recent planner samples commands one observed step

@@ -51,7 +51,8 @@ QDoubleSpinBox* angle(QFormLayout* form,const QString& text,const QString& key,d
     box->setValue(QSettings().value("antenna/"+key,fallback).toDouble());form->addRow(text,box);return box;
 }
 }
-AntennaControlWindow::AntennaControlWindow(QWidget* parent):QDialog(parent){
+AntennaControlWindow::AntennaControlWindow(QWidget* parent)
+    : QDialog(parent), rotor_(sharedRotatorController()) {
     setWindowTitle("Antenna Rotator & SWR");resize(720,650);setMinimumSize(560,560);
     auto* root=new QVBoxLayout(this);auto* tabs=new QTabWidget;root->addWidget(tabs);
     auto* pointing=new QWidget;auto* layout=new QVBoxLayout(pointing);

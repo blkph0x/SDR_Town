@@ -541,6 +541,8 @@ one look. GEO box scan uses `planBoxScan` and stops at 49 dwells with no
 peak claim. Manual does not call `moveTo`. `leadSky` aims one observed step ahead
 on the short azimuth path. The wizard mission combo is stored on the
 profile. Horizontal and high-band checkboxes select 18 V and 22 kHz.
+`sharedRotatorController` is the one process client for the Tools window
+and the station panel. A second `connectTo` is refused while it is open.
 D2 demod and commercial decrypt return false.
 
 ## Antenna control (DEC-0140 / T-0068)

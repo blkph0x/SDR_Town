@@ -1,5 +1,12 @@
 # Build notes
 
+## 2026-10-10 - Shared rotctld client
+
+`FrontendStation` Release PASS (7.66 s): one socket for the station panel
+and the Tools rotator window, a position of 180° on the Tools label, and
+a refused second Connect. `AntennaControl` Release PASS (6.02 s) after
+that window releases the shared client on close.
+
 ## 2026-10-10 - LEO sky lead and 18 V high band
 
 `FrontendStation` Release PASS (6.43 s): a one-step lead, a north crossing

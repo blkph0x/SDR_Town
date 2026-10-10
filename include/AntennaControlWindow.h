@@ -16,7 +16,7 @@ protected:
 private:
     void save();
     void log(const QString& message);
-    RotatorController rotor_;
+    RotatorController& rotor_;
     SwrMonitor meter_;
     QLineEdit *host_,*meterHost_;
     QSpinBox *port_,*meterPort_;
