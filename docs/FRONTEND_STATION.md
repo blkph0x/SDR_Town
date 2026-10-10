@@ -46,8 +46,10 @@ is rejected. Radio index -1 leaves the receiver alone. A selected index
 queues that IF on the Satcom lease and, for the internal backend, requests
 RTL or SDRplay Bias-T. A queued tune is not proof the hardware moved.
 An external supply does not toggle the dongle Bias-T; the station asks
-that dongle Bias-T to stay off. Driver acknowledgement is not a measured
-voltage.
+that dongle Bias-T to stay off. A supply port sends `13`, `18`, `13 TONE`,
+`18 TONE`, or `OFF` at 9600 8N1 and waits 500 ms for `OK`. That reply is
+not a measured voltage. An empty port keeps the external backend as a
+commanded state. DVB-S2 demod is not linked. Commercial decrypt is refused.
 
 ## Bias-T
 

@@ -69,7 +69,10 @@ A selected radio index queues the Doppler-corrected IF with the Satcom
 lease and does not force another workflow off that radio. Internal Bias-T
 is a driver request on that index. External Bias-T stays a commanded
 supply state and asks the dongle Bias-T to remain off. Neither request is
-a voltage measurement. DVB-S2 demod remains unimplemented.
+a voltage measurement. An external supply port must answer `OK` to
+`13`, `18`, or `OFF` before the arm stands. That answer is not a
+voltmeter. DVB-S2 demod remains unimplemented because no reviewed codec
+is in the tree. Commercial decrypt stays refused.
 
 ## DEC-0209 - Listen identity, unused-stream stop, analog HF filter (2026-10-10)
 

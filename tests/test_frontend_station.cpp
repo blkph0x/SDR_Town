@@ -10,6 +10,7 @@
 #include "frontend/StationPassSession.h"
 #include "frontend/StationProfile.h"
 #include "frontend/StationRadio.h"
+#include "frontend/StationSupply.h"
 #include "frontend/StationSky.h"
 
 #include <catch2/catch_session.hpp>
@@ -370,6 +371,8 @@ TEST_CASE("Equipment wizard defaults Bias-T off and flags a sub-0.2 dB claim") {
     CHECK_FALSE(wizard.findChild<QCheckBox*>("attestTle")->isChecked());
     CHECK_FALSE(wizard.findChild<QCheckBox*>("followPlanner")->isChecked());
     CHECK(wizard.findChild<QComboBox*>("stationMission")->currentText() == "LEO track");
+    CHECK(wizard.findChild<QLabel*>("dvbStage")->text().contains("demod is not linked"));
+    CHECK(wizard.findChild<QLabel*>("dvbStage")->text().contains("Commercial decrypt is refused"));
     CHECK_FALSE(wizard.findChild<QCheckBox*>("horizontalPol")->isChecked());
     CHECK_FALSE(wizard.findChild<QCheckBox*>("highBand")->isChecked());
     wizard.findChild<QComboBox*>("stationMission")->setCurrentText("GEO park");
@@ -575,6 +578,55 @@ TEST_CASE("A selected radio queues the IF and a rejected tune turns Bias-T back 
     session.abort("test");
     CHECK(seen.releaseLease);
     CHECK_FALSE(seen.biasEnable);
+}
+
+TEST_CASE("External supply arm requires an OK reply and abort sends OFF") {
+    struct Reset {
+        ~Reset() { setExternalSupplyIo(nullptr); }
+    } reset;
+    CHECK(externalSupplyLine(13, false, nullptr) == "13\n");
+    CHECK(externalSupplyLine(18, true, nullptr) == "18 TONE\n");
+    CHECK(externalSupplyLine(0, false, nullptr) == "OFF\n");
+    CHECK(externalSupplyReplyOk("OK\r\n"));
+    CHECK_FALSE(externalSupplyReplyOk("ERR\n"));
+    std::string lines;
+    setExternalSupplyIo([&](const std::string& port, const std::string& line, std::string* reply, std::string*) {
+        CHECK(port == "COM3");
+        lines += line;
+        if (reply) *reply = line == "ERR" ? "ERR\n" : "OK\n";
+        return line != "FAIL\n";
+    });
+    RotatorController rotor;
+    StationPassSession session(rotor);
+    PassChecklist check;
+    check.leaseHeld = true;
+    check.ifInSdrSpan = true;
+    check.tleFreshOrNotRequired = true;
+    check.biasCurrentOk = true;
+    check.rotatorReadyOrOverride = true;
+    check.powerConfirmed = true;
+    StationProfile profile;
+    profile.biasBackend = BiasBackend::External;
+    profile.mission = StationMission::Manual;
+    profile.trueRfHz = 11.7e9;
+    profile.horizontal = true;
+    profile.highBand = true;
+    profile.supplyPort = "COM3";
+    std::string error;
+    REQUIRE(session.arm(check, profile, 10, 20, &error));
+    CHECK(session.power().enabled());
+    CHECK(lines == "18 TONE\n");
+    session.abort("test");
+    CHECK(lines == "18 TONE\nOFF\n");
+    CHECK_FALSE(session.power().enabled());
+
+    setExternalSupplyIo([&](const std::string&, const std::string&, std::string* reply, std::string*) {
+        if (reply) *reply = "ERR\n";
+        return true;
+    });
+    CHECK_FALSE(session.arm(check, profile, 10, 20, &error));
+    CHECK(error == "Supply did not acknowledge");
+    CHECK_FALSE(session.power().enabled());
 }
 
 TEST_CASE("Station panel and Tools rotator share one rotctld connection") {

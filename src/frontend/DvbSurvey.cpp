@@ -93,5 +93,5 @@ ClearTsInventory inventoryClearTransportStream(const std::uint8_t* data, std::si
 bool dvbDemodAvailable() { return false; }
 bool commercialDecryptAvailable() { return false; }
 const char* dvbStageNote() {
-    return "D1 spectrum survey only. Symbol rate, PLS, LDPC and clear TS are not available. Commercial decrypt is refused.";
+    return "D1 spectrum survey only. DVB-S2 demod is not linked. Clear TS inventory reads packets already in hand and does not decrypt. Commercial decrypt is refused.";
 }

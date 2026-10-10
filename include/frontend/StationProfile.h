@@ -22,6 +22,7 @@ struct StationProfile {
     double boxSpanElDeg = 1.0;
     double boxStepDeg = 0.5;
     int radioIndex = -1;
+    std::string supplyPort;
     double trueRfHz = 11.7e9;
     bool horizontal = false;
     bool highBand = false;

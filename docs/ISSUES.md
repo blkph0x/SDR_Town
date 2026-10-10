@@ -10,7 +10,8 @@ snapshot age. GEO park slews once and GEO box scan commands at most 49
 dwells without declaring a peak. Lease and IF boxes are still attestations.
 Bias-T is still not a measured supply. A selected radio can queue the IF
 and request RTL or SDRplay Bias-T; that request is not a voltmeter.
-External 13/18 V hardware is still only a commanded state. The station
+A named supply port sends 13/18/OFF and requires OK; an empty port is
+still commanded state, and OK is not a voltmeter. The station
 panel and Tools rotator share one `rotctld` client. LEO motion can lead one observed
 step; that lead is not a second propagation. DVB-S2 demod remains
 unimplemented. Clear-TS inventory only reads bytes already in hand. Close

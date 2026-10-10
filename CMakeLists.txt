@@ -264,8 +264,10 @@ set(SDR_TOWN_SOURCES
     src/frontend/StationPassSession.cpp include/frontend/StationPassSession.h
     src/frontend/StationSky.cpp include/frontend/StationSky.h
     src/frontend/StationRadio.cpp include/frontend/StationRadio.h
+    src/frontend/StationSupply.cpp include/frontend/StationSupply.h
     src/frontend/PlannerCapture.cpp
     src/frontend/StationRadioBind.cpp
+    src/frontend/StationSupplyBind.cpp
     include/RemoteDiagnostics.h
     src/UpdateManager.cpp   # professional GitHub release + safe in-app updater
     src/UpdateManifestSignature.cpp
@@ -741,7 +743,8 @@ if(BUILD_TESTS)
       src/frontend/EquipmentWizard.cpp
       src/frontend/StationPassSession.cpp include/frontend/StationPassSession.h
       src/frontend/StationSky.cpp include/frontend/StationSky.h
-      src/frontend/StationRadio.cpp include/frontend/StationRadio.h)
+      src/frontend/StationRadio.cpp include/frontend/StationRadio.h
+      src/frontend/StationSupply.cpp include/frontend/StationSupply.h)
   add_executable(frontend_station_tests tests/test_frontend_station.cpp
       src/frontend/LnbConversion.cpp src/frontend/LinkBudgetHint.cpp
       src/frontend/FrontEndPower.cpp src/frontend/RotatorTrack.cpp
@@ -751,6 +754,7 @@ if(BUILD_TESTS)
       src/frontend/StationPassSession.cpp include/frontend/StationPassSession.h
       src/frontend/StationSky.cpp include/frontend/StationSky.h
       src/frontend/StationRadio.cpp include/frontend/StationRadio.h
+      src/frontend/StationSupply.cpp include/frontend/StationSupply.h
       src/AntennaControl.cpp include/AntennaControl.h
       src/AntennaControlWindow.cpp)
   target_include_directories(frontend_station_tests PRIVATE include)

@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-10 - External supply lines and the demod boundary
+
+A supply port sends `13`, `18`, `18 TONE`, or `OFF` and the arm stands
+only after `OK`. Abort sends `OFF`. An empty port stays commanded state.
+DVB-S2 demod is not linked. Clear TS inventory still does not decrypt.
+Commercial decrypt is refused.
+
 ## 2026-10-10 - Station tune and Bias-T request
 
 Radio index -1 leaves the receiver alone. A selected index queues the

@@ -44,6 +44,7 @@ private:
     QLabel* sky_ = nullptr;
     QTimer* followTimer_ = nullptr;
     QLineEdit* host_ = nullptr;
+    QLineEdit* supplyPort_ = nullptr;
     QSpinBox* port_ = nullptr;
     QSpinBox* radioIndex_ = nullptr;
     QDoubleSpinBox* predictAz_ = nullptr;

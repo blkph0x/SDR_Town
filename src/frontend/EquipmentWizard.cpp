@@ -1,5 +1,6 @@
 #include "frontend/EquipmentWizard.h"
 
+#include "frontend/DvbSurvey.h"
 #include "frontend/FrontEndPower.h"
 #include "frontend/LinkBudgetHint.h"
 #include "frontend/PassArming.h"
@@ -45,6 +46,9 @@ EquipmentWizard::EquipmentWizard(QWidget* parent)
     rotorOverride_->setObjectName("rotorOverride");
     host_ = new QLineEdit("127.0.0.1");
     host_->setObjectName("rotatorHost");
+    supplyPort_ = new QLineEdit;
+    supplyPort_->setObjectName("supplyPort");
+    supplyPort_->setPlaceholderText("COM3 sends OFF, 13, or 18");
     port_ = new QSpinBox;
     port_->setObjectName("rotatorPort");
     port_->setRange(1, 65535);
@@ -87,11 +91,15 @@ EquipmentWizard::EquipmentWizard(QWidget* parent)
     hint_ = new QLabel; hint_->setObjectName("linkHint");
     power_ = new QLabel("Bias-T: OFF"); power_->setObjectName("biasState");
     plan_ = new QPlainTextEdit; plan_->setObjectName("armPlan"); plan_->setReadOnly(true);
+    auto* dvb = new QLabel(dvbStageNote());
+    dvb->setObjectName("dvbStage");
+    dvb->setWordWrap(true);
     form->addRow("Dish", dish_);
     form->addRow("Claimed LNB NF", nf_);
     form->addRow("Bias-T rating", supplyMa_);
     form->addRow("LNB max draw", lnbMa_);
     form->addRow("rotctld host", host_);
+    form->addRow("Supply port", supplyPort_);
     form->addRow("rotctld port", port_);
     form->addRow("Radio index", radioIndex_);
     form->addRow("Predicted AZ", predictAz_);
@@ -112,6 +120,7 @@ EquipmentWizard::EquipmentWizard(QWidget* parent)
     root->addWidget(rotorOverride_);
     root->addWidget(confirm_);
     root->addWidget(power_);
+    root->addWidget(dvb);
     auto* buttons = new QHBoxLayout;
     auto* connectButton = new QPushButton("Connect rotator");
     connectButton->setObjectName("connectRotator");
@@ -225,6 +234,7 @@ StationProfile EquipmentWizard::profile() const {
     profile.lnb.maxCurrentMa = lnbMa_->value();
     profile.trueRfHz = rfMHz_->value() * 1e6;
     profile.radioIndex = radioIndex_->value();
+    profile.supplyPort = supplyPort_->text().toStdString();
     profile.horizontal = horizontal_->isChecked();
     profile.highBand = highBand_->isChecked();
     switch (mission_->currentIndex()) {
@@ -244,6 +254,7 @@ void EquipmentWizard::setProfile(const StationProfile& profile) {
     lnbMa_->setValue(profile.lnb.maxCurrentMa);
     rfMHz_->setValue(profile.trueRfHz / 1e6);
     radioIndex_->setValue(profile.radioIndex);
+    supplyPort_->setText(QString::fromStdString(profile.supplyPort));
     horizontal_->setChecked(profile.horizontal);
     highBand_->setChecked(profile.highBand);
     mission_->setCurrentIndex(profile.mission == StationMission::GeoPark ? 1 :

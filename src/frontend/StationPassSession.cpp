@@ -2,7 +2,9 @@
 
 #include "frontend/LnbConversion.h"
 #include "frontend/RotatorTrack.h"
+#include "frontend/DvbSurvey.h"
 #include "frontend/StationRadio.h"
+#include "frontend/StationSupply.h"
 
 #include <chrono>
 #include <cmath>
@@ -81,6 +83,18 @@ bool StationPassSession::arm(const PassChecklist& check, const StationProfile& p
     metrics_.add("lnb.ifHz", tune.ifHz);
     metrics_.add("lnb.voltageV", tune.voltageV);
     tunedIfHz_ = tune.ifHz;
+    metrics_.addText("dvb.stage", dvbStageNote());
+    const bool supplyPort = profile.biasBackend == BiasBackend::External && !profile.supplyPort.empty();
+    if (supplyPort) {
+        std::string supplyError;
+        if (!commandExternalSupply(profile.supplyPort, tune.voltageV, tune.tone22kHz, &supplyError)) {
+            power_.disable("supply-rejected");
+            if (error) *error = supplyError;
+            metrics_.addText("arm.reject", supplyError);
+            return false;
+        }
+        metrics_.addText("supply.command", std::to_string(tune.voltageV) + (tune.tone22kHz ? " tone" : ""));
+    }
     if (profile.radioIndex >= 0) {
         StationRadioRequest radio;
         radio.tune = true;
@@ -92,6 +106,10 @@ bool StationPassSession::arm(const PassChecklist& check, const StationProfile& p
         radio.tone22kHz = tune.tone22kHz;
         std::string radioError;
         if (!commandStationRadio(radio, &radioError)) {
+            if (supplyPort) {
+                std::string ignored;
+                commandExternalSupply(profile.supplyPort, 0, false, &ignored);
+            }
             power_.disable("tune-failed");
             if (error) *error = radioError;
             metrics_.addText("arm.reject", radioError);
@@ -231,6 +249,11 @@ void StationPassSession::finish(const std::string& reason) {
     haveSky_ = false;
     haveSkyPair_ = false;
     timer_.stop();
+    if (profile_.biasBackend == BiasBackend::External && !profile_.supplyPort.empty()) {
+        std::string supplyError;
+        commandExternalSupply(profile_.supplyPort, 0, false, &supplyError);
+        metrics_.addText("supply.off", supplyError.empty() ? "commanded" : supplyError);
+    }
     if (profile_.radioIndex >= 0) {
         StationRadioRequest radio;
         radio.releaseLease = true;

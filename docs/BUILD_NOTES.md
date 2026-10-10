@@ -1,5 +1,12 @@
 # Build notes
 
+## 2026-10-10 - External supply OK and demod refusal
+
+`FrontendStation` Release PASS (7.62 s): `18 TONE` then `OFF`, a non-OK
+reply that leaves Bias-T off, and the panel text that demod is not linked
+and commercial decrypt is refused. `AntennaControl` Release PASS (6.10 s).
+`StationSupplyBind.cpp` compiles into the application target.
+
 ## 2026-10-10 - Station IF queue and Bias-T request
 
 `FrontendStation` Release PASS (7.73 s): a rejected Satcom tune that leaves
