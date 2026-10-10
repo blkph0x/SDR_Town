@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-10 - Promote v0.2.134-experimental to a regular Releases entry
+
+Working tester ZIP. Cleared the GitHub prerelease flag with `make_latest=false`.
+Assets unchanged (SHA256 b248823f…). GitHub Latest / `update.json` stays
+v0.2.119 signed installer. README download link now points at 0.2.134.
+
 ## 2026-10-10 - Extract PR #34 Listen/HF/spectrum without merging
 
 PR #34 is draft and failed frozen P25 + ENC_IQ guard. Took Listen

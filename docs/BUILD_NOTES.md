@@ -1,5 +1,13 @@
 # Build notes
 
+## 2026-10-10 - v0.2.134-experimental promoted off prerelease
+
+`gh api` PATCH release 407743949: prerelease=false, make_latest=false.
+Public ZIP re-download SHA256
+b248823f6fd173874700d4daf9aeda54315783f20b88f8d94b42a28de04027bd
+matches sidecar and the 0.2.134 proof. `/releases/latest/download/update.json`
+still 200 from v0.2.119.
+
 ## 2026-10-10 - v0.2.135 Listen/HF/spectrum extract, DEC-0209
 
 PR #34 not merged. Local extract of Listen identity, unused Listen stop,
