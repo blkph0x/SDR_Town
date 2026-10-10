@@ -1,5 +1,13 @@
 # Build notes
 
+## 2026-10-10 - LEO sky lead and 18 V high band
+
+`FrontendStation` Release PASS (6.43 s): a one-step lead, a north crossing
+from 359° to 1° commanding 3°, the reverse commanding 357°, a 10 s request
+clamped to one step, 18 V on a horizontal high-band arm, and
+`+P 26.000 30.000` after looks at 22° then 24°. `AntennaControl` Release
+PASS (6.03 s). The LEO 1 Hz timer starts again after arm.
+
 ## 2026-10-10 - GEO park, manual hold, and box-scan cap
 
 `FrontendStation` Release PASS (4.50 s): a 15-point raster, rejection of

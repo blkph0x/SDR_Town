@@ -538,7 +538,9 @@ Doppler only. `PlannerCapture.cpp` is linked into the application and
 not into the station tests, so those tests stay on the fail-closed
 default. Save pass log writes the profile JSON and metric JSONL. GEO park commands
 one look. GEO box scan uses `planBoxScan` and stops at 49 dwells with no
-peak claim. Manual does not call `moveTo`.
+peak claim. Manual does not call `moveTo`. `leadSky` aims one observed step ahead
+on the short azimuth path. The wizard mission combo is stored on the
+profile. Horizontal and high-band checkboxes select 18 V and 22 kHz.
 D2 demod and commercial decrypt return false.
 
 ## Antenna control (DEC-0140 / T-0068)

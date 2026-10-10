@@ -68,6 +68,10 @@ EquipmentWizard::EquipmentWizard(QWidget* parent) : QDialog(parent) {
     mission_->addItem("GEO park");
     mission_->addItem("GEO box scan");
     mission_->addItem("Manual");
+    horizontal_ = new QCheckBox("Horizontal / right (18 V)");
+    horizontal_->setObjectName("horizontalPol");
+    highBand_ = new QCheckBox("High band (22 kHz)");
+    highBand_->setObjectName("highBand");
     follow_ = new QCheckBox("Follow armed pass");
     follow_->setObjectName("followPlanner");
     sky_ = new QLabel("No planner sample yet");
@@ -92,6 +96,8 @@ EquipmentWizard::EquipmentWizard(QWidget* parent) : QDialog(parent) {
     root->addWidget(caution_);
     root->addWidget(hint_);
     root->addWidget(sky_);
+    root->addWidget(horizontal_);
+    root->addWidget(highBand_);
     root->addWidget(follow_);
     root->addWidget(lease_);
     root->addWidget(ifSpan_);
@@ -131,9 +137,14 @@ EquipmentWizard::EquipmentWizard(QWidget* parent) : QDialog(parent) {
         std::string error;
         if (!session_->arm(checklist(), profile(), predictAz_->value(), predictEl_->value(), &error))
             plan_->setPlainText(QString::fromStdString(error));
-        else
-            plan_->setPlainText(QString("Pass armed. IF %1 MHz. Bias-T command is not a measured voltage.")
-                                    .arg(session_->tunedIfHz() / 1e6, 0, 'f', 3));
+        else {
+            const StationProfile armed = profile();
+            const QString pol = armed.horizontal ? "18 V horizontal/right" : "13 V vertical/left";
+            const QString tone = armed.highBand ? ", 22 kHz" : "";
+            plan_->setPlainText(QString("Pass armed. IF %1 MHz, %2%3. Bias-T command is not a measured voltage.")
+                                    .arg(session_->tunedIfHz() / 1e6, 0, 'f', 3)
+                                    .arg(pol, tone));
+        }
         power_->setText(session_->power().enabled() ? "Bias-T: commanded ON" : "Bias-T: OFF");
     });
     connect(abortButton, &QPushButton::clicked, this, [this] {
@@ -203,6 +214,8 @@ StationProfile EquipmentWizard::profile() const {
     profile.lnb.noiseFigureDb = nf_->value();
     profile.lnb.maxCurrentMa = lnbMa_->value();
     profile.trueRfHz = rfMHz_->value() * 1e6;
+    profile.horizontal = horizontal_->isChecked();
+    profile.highBand = highBand_->isChecked();
     switch (mission_->currentIndex()) {
     case 1: profile.mission = StationMission::GeoPark; break;
     case 2: profile.mission = StationMission::GeoBoxScan; break;
@@ -210,7 +223,6 @@ StationProfile EquipmentWizard::profile() const {
     default: profile.mission = StationMission::LeoTrack; break;
     }
     profile.biasBackend = BiasBackend::External;
-    profile.mission = StationMission::LeoTrack;
     return profile;
 }
 
@@ -220,6 +232,8 @@ void EquipmentWizard::setProfile(const StationProfile& profile) {
     supplyMa_->setValue(profile.biasSupplyMa);
     lnbMa_->setValue(profile.lnb.maxCurrentMa);
     rfMHz_->setValue(profile.trueRfHz / 1e6);
+    horizontal_->setChecked(profile.horizontal);
+    highBand_->setChecked(profile.highBand);
     mission_->setCurrentIndex(profile.mission == StationMission::GeoPark ? 1 :
                               profile.mission == StationMission::GeoBoxScan ? 2 :
                               profile.mission == StationMission::Manual ? 3 : 0);

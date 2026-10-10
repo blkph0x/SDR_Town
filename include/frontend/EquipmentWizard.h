@@ -38,6 +38,8 @@ private:
     QCheckBox* tle_ = nullptr;
     QCheckBox* rotorOverride_ = nullptr;
     QCheckBox* follow_ = nullptr;
+    QCheckBox* horizontal_ = nullptr;
+    QCheckBox* highBand_ = nullptr;
     QComboBox* mission_ = nullptr;
     QLabel* sky_ = nullptr;
     QTimer* followTimer_ = nullptr;

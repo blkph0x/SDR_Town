@@ -24,6 +24,18 @@ double applyBacklashDeg(double commandedAz, double previousAz, double backlashDe
 // Lead the next SGP4 sample. leadSec is clamped to one sample.
 double feedForwardAz(double azNow, double azNext, double sampleSec, double leadSec);
 
+// One observed step ahead of the latest look. Azimuth takes the short way
+// across north. leadSec is clamped to the time between the two samples, so
+// a glitch cannot be multiplied. This is not a second propagation.
+struct SkyLead {
+    bool led = false;
+    double azimuthDeg = 0.0;
+    double elevationDeg = 0.0;
+};
+
+SkyLead leadSky(double azPrevDeg, double elPrevDeg, double azNowDeg, double elNowDeg,
+                double sampleSec, double leadSec);
+
 TrackPoint planTrackTick(bool armed, bool fresh, bool autoEnabled, bool jogPaused,
                          const TrackLimits& limits, double predictedAz, double predictedEl,
                          double backlashDeg, double previousAz);

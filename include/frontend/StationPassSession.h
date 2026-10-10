@@ -9,6 +9,7 @@
 #include <QObject>
 #include <QTimer>
 
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -53,6 +54,14 @@ private:
     bool finishedAbort_ = false;
     double predictAz_ = 0.0;
     double predictEl_ = 0.0;
+    bool haveSky_ = false;
+    bool haveSkyPair_ = false;
+    double skyPrevAz_ = 0.0;
+    double skyPrevEl_ = 0.0;
+    double skyAz_ = 0.0;
+    double skyEl_ = 0.0;
+    double skyDtSec_ = 0.0;
+    std::chrono::steady_clock::time_point skyTime_{};
     double reportedAz_ = 0.0;
     double reportedEl_ = 0.0;
     bool haveReport_ = false;

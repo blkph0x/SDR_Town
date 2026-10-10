@@ -3,6 +3,7 @@
 #include "frontend/LnbConversion.h"
 #include "frontend/RotatorTrack.h"
 
+#include <chrono>
 #include <cmath>
 
 StationPassSession::StationPassSession(RotatorController& rotor, QObject* parent)
@@ -56,6 +57,8 @@ bool StationPassSession::arm(const PassChecklist& check, const StationProfile& p
     boxAz_.clear();
     boxEl_.clear();
     boxIndex_ = 0;
+    haveSky_ = false;
+    haveSkyPair_ = false;
     std::string powerError;
     if (!power_.selectBackend(profile.biasBackend, &powerError)) {
         if (error) *error = powerError;
@@ -84,9 +87,11 @@ bool StationPassSession::arm(const PassChecklist& check, const StationProfile& p
         boxAz_ = box.azimuthDeg;
         boxEl_ = box.elevationDeg;
         boxScan_ = true;
-        timer_.start();
     }
-    if (tracking_ || boxScan_) tick();
+    if (tracking_ || boxScan_) {
+        timer_.start();
+        tick();
+    }
     else if (profile.mission == StationMission::GeoPark)
         commandLook(predictAz_, predictEl_, "slew-park");
     if (error) error->clear();
@@ -96,10 +101,25 @@ bool StationPassSession::arm(const PassChecklist& check, const StationProfile& p
 void StationPassSession::setPrediction(double az, double el) {
     predictAz_ = az;
     predictEl_ = el;
+    haveSkyPair_ = false;
 }
 
 void StationPassSession::noteSky(double az, double el, double trueRfHz, double dopplerHz) {
-    setPrediction(az, el);
+    const auto now = std::chrono::steady_clock::now();
+    if (haveSky_) {
+        skyDtSec_ = std::chrono::duration<double>(now - skyTime_).count();
+        skyPrevAz_ = skyAz_;
+        skyPrevEl_ = skyEl_;
+        haveSkyPair_ = skyDtSec_ >= 0.2 && skyDtSec_ <= 5.0;
+    } else {
+        haveSkyPair_ = false;
+    }
+    skyAz_ = az;
+    skyEl_ = el;
+    skyTime_ = now;
+    haveSky_ = std::isfinite(az) && std::isfinite(el);
+    predictAz_ = az;
+    predictEl_ = el;
     if (std::isfinite(trueRfHz)) {
         profile_.trueRfHz = trueRfHz;
         metrics_.add("sky.trueRfHz", trueRfHz);
@@ -140,7 +160,18 @@ void StationPassSession::tick() {
         return;
     }
     if (!tracking_) return;
-    commandLook(predictAz_, predictEl_, "track");
+    double az = predictAz_;
+    double el = predictEl_;
+    if (haveSkyPair_) {
+        const auto led = leadSky(skyPrevAz_, skyPrevEl_, skyAz_, skyEl_, skyDtSec_, 1.0);
+        if (led.led) {
+            az = led.azimuthDeg;
+            el = led.elevationDeg;
+            metrics_.add("rotator.leadAz", az);
+            metrics_.add("rotator.leadEl", el);
+        }
+    }
+    commandLook(az, el, "track");
 }
 
 void StationPassSession::abort(const std::string& reason) {
@@ -174,6 +205,8 @@ void StationPassSession::finish(const std::string& reason) {
     tracking_ = false;
     boxScan_ = false;
     passActive_ = false;
+    haveSky_ = false;
+    haveSkyPair_ = false;
     timer_.stop();
     power_.disable(reason);
     metrics_.addText("power-off", reason);

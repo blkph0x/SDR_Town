@@ -367,6 +367,103 @@ TEST_CASE("Equipment wizard defaults Bias-T off and flags a sub-0.2 dB claim") {
     CHECK_FALSE(wizard.findChild<QCheckBox*>("attestTle")->isChecked());
     CHECK_FALSE(wizard.findChild<QCheckBox*>("followPlanner")->isChecked());
     CHECK(wizard.findChild<QComboBox*>("stationMission")->currentText() == "LEO track");
+    CHECK_FALSE(wizard.findChild<QCheckBox*>("horizontalPol")->isChecked());
+    CHECK_FALSE(wizard.findChild<QCheckBox*>("highBand")->isChecked());
+    wizard.findChild<QComboBox*>("stationMission")->setCurrentText("GEO park");
+    wizard.findChild<QCheckBox*>("horizontalPol")->setChecked(true);
+    wizard.findChild<QCheckBox*>("highBand")->setChecked(true);
+    CHECK(wizard.profile().mission == StationMission::GeoPark);
+    CHECK(wizard.profile().horizontal);
+    CHECK(wizard.profile().highBand);
+}
+
+TEST_CASE("Sky lead stays one observed step ahead and crosses north the short way") {
+    const auto ahead = leadSky(10, 20, 12, 21, 1.0, 1.0);
+    REQUIRE(ahead.led);
+    CHECK(ahead.azimuthDeg == 14);
+    CHECK(ahead.elevationDeg == 22);
+    const auto east = leadSky(359, 30, 1, 30, 1.0, 1.0);
+    REQUIRE(east.led);
+    CHECK(east.azimuthDeg == 3);
+    const auto west = leadSky(1, 30, 359, 30, 1.0, 1.0);
+    REQUIRE(west.led);
+    CHECK(west.azimuthDeg == 357);
+    const auto clamped = leadSky(10, 20, 12, 20, 1.0, 10.0);
+    CHECK(clamped.azimuthDeg == 14);
+    const auto stale = leadSky(10, 20, 12, 20, 0.0, 1.0);
+    CHECK_FALSE(stale.led);
+    CHECK(stale.azimuthDeg == 12);
+}
+
+TEST_CASE("Horizontal high band commands 18 V and a LEO lead aims ahead of the last look") {
+    QTcpServer server;
+    REQUIRE(server.listen(QHostAddress::LocalHost));
+    QStringList commands;
+    QObject::connect(&server, &QTcpServer::newConnection, &server, [&] {
+        while (auto* socket = server.nextPendingConnection()) {
+            QObject::connect(socket, &QTcpSocket::readyRead, socket, [&, socket] {
+                while (socket->canReadLine()) {
+                    const auto cmd = socket->readLine();
+                    commands << QString::fromLatin1(cmd).trimmed();
+                    QByteArray reply;
+                    if (cmd == "+p\n") reply = "get_pos:\nAzimuth: 180\nElevation: 45\nRPRT 0\n";
+                    else if (cmd.startsWith("+P ")) reply = "set_pos: " + cmd.mid(3).trimmed() + "\nRPRT 0\n";
+                    else if (cmd == "+S\n") reply = "stop:\nRPRT 0\n";
+                    else FAIL("Unexpected command");
+                    socket->write(reply);
+                }
+            });
+        }
+    });
+    auto waitFor = [](const std::function<bool()>& ready) {
+        QElapsedTimer timer;
+        timer.start();
+        while (!ready() && timer.elapsed() < 5000) {
+            QApplication::processEvents();
+            QThread::msleep(1);
+        }
+        return ready();
+    };
+    RotatorController rotor;
+    rotor.connectTo("127.0.0.1", server.serverPort(), {});
+    REQUIRE(waitFor([&] { return rotor.fresh(); }));
+    REQUIRE(rotor.arm());
+    PassChecklist check;
+    check.leaseHeld = true;
+    check.ifInSdrSpan = true;
+    check.tleFreshOrNotRequired = true;
+    check.biasCurrentOk = true;
+    check.rotatorReadyOrOverride = true;
+    check.powerConfirmed = true;
+    StationProfile profile;
+    profile.biasBackend = BiasBackend::External;
+    profile.mission = StationMission::LeoTrack;
+    profile.trueRfHz = 11.7e9;
+    profile.horizontal = true;
+    profile.highBand = true;
+    profile.parkAz = 0;
+    profile.parkEl = 0;
+    std::string error;
+    StationPassSession session(rotor);
+    REQUIRE(session.arm(check, profile, 20, 30, &error));
+    bool saw18 = false;
+    for (const auto& row : session.metrics().records())
+        if (row.name == "lnb.voltageV" && row.value == 18) saw18 = true;
+    CHECK(saw18);
+    session.noteSky(22, 30, 11.7e9, 0);
+    QThread::msleep(250);
+    QApplication::processEvents();
+    session.noteSky(24, 30, 11.7e9, 0);
+    const bool sawLead = waitFor([&] { return commands.contains("+P 26.000 30.000"); });
+    std::string metricDump;
+    for (const auto& row : session.metrics().records())
+        if (row.name.find("lead") != std::string::npos || row.name == "track" || row.name.find("rotator.command") != std::string::npos)
+            metricDump += row.name + "=" + std::to_string(row.value) + " " + row.text + "\n";
+    INFO(commands.join(" | ").toStdString());
+    INFO(metricDump);
+    REQUIRE(sawLead);
+    session.abort("test");
+    REQUIRE(waitFor([&] { return !session.power().enabled(); }));
 }
 
 TEST_CASE("Sky feed accepts Doppler only for an armed in-mask fresh pass") {

@@ -55,6 +55,11 @@ commands a raster of at most 49 dwells and does not declare a signal
 peak. Manual arms power without moving the rotator. A second arm is
 refused until teardown finishes.
 
+LEO commands may lead the latest look by one observed azimuth and
+elevation step. The lead uses the short azimuth path and is clamped to
+the gap between the last two samples. It is not a second SGP4 run.
+Horizontal selects 18 V and high band selects 22 kHz.
+
 ## DEC-0209 - Listen identity, unused-stream stop, analog HF filter (2026-10-10)
 
 PR #34 (draft, fubarzi) added Listen persistence, spectrum controls, and an

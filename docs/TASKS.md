@@ -7,7 +7,9 @@ power-off, metric JSONL, spectrum survey, clear-TS PID inventory.
 Read/Follow armed pass copies planner AZ/EL and Doppler RF when the look
 and TLE age pass `skyFeedFromPass`. Pass folder is profile JSON plus
 metrics JSONL. GEO park slews once. GEO box scan is capped at 49 dwells
-and does not declare a peak. Manual does not move. Lease/IF boxes stay
+and does not declare a peak. Manual does not move. LEO lead is one
+observed step from the last two planner samples. Horizontal is 18 V and
+high band is 22 kHz. Lease/IF boxes stay
 attestations. No Hamlib link, no P25
 edits, no commercial decrypt. D2 demod not linked. Tests: `frontend_station_tests`.
 

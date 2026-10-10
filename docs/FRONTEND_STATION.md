@@ -39,8 +39,9 @@ usually specified in kelvin. Noise temperature from a noise figure uses
 T = 290 (10^(NF/10) − 1).
 
 Universal Ku defaults are LO 9.75 GHz (low, no 22 kHz) and 10.60 GHz (high,
-22 kHz). Vertical/left is 13 V. Horizontal/right is 18 V. The SDR is tuned
-to the IF after Doppler is applied to the true RF. IF outside 950–2150 MHz
+22 kHz). Vertical/left is 13 V. Horizontal/right is 18 V. The panel checkboxes
+select that voltage and the 22 kHz high-band tone. The arm line shows the
+computed IF and the commanded voltage and tone. IF outside 950–2150 MHz
 is rejected.
 
 ## Bias-T
@@ -58,7 +59,10 @@ gone after a crash.
 the rotator, then Arm pass. The session sends one planned position per
 second. Soft limits are 0–360° azimuth and 0–90° elevation in this slice.
 An override checkbox skips the fresh-position check and is written into
-the metric log. LEO track sends a new position every second. GEO park
+the metric log. LEO track sends a new position every second. After two planner samples
+0.2–5 s apart, the command is one observed step ahead of the latest look,
+taking the short way across north. A hand edit of the angles drops that
+lead. GEO park
 sends the predicted azimuth and elevation once and holds. GEO box scan
 walks a raster of at most 49 dwells around that prediction and logs each
 command. It does not pick a peak. Manual arms power and does not move

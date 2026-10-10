@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-10-10 - LEO lead and Ku polarization
+
+A LEO track with two recent planner samples commands one observed step
+ahead of the latest look, across north the short way. Editing the angles
+by hand drops the lead. The mission combo is the profile mission.
+Horizontal commands 18 V and high band commands 22 kHz. The arm line
+shows that voltage and tone beside the computed IF.
+
 ## 2026-10-10 - GEO park and box scan command the rotator
 
 GEO park slews once to the predicted azimuth and elevation and holds.

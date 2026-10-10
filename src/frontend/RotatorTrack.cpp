@@ -17,6 +17,37 @@ double feedForwardAz(double azNow, double azNext, double sampleSec, double leadS
     return azNow + (azNext - azNow) * (lead / sampleSec);
 }
 
+namespace {
+double shortestAzDelta(double fromDeg, double toDeg) {
+    double delta = toDeg - fromDeg;
+    while (delta > 180.0) delta -= 360.0;
+    while (delta <= -180.0) delta += 360.0;
+    return delta;
+}
+
+double wrap360(double deg) {
+    double wrapped = std::fmod(deg, 360.0);
+    if (wrapped < 0.0) wrapped += 360.0;
+    return wrapped;
+}
+}
+
+SkyLead leadSky(double azPrevDeg, double elPrevDeg, double azNowDeg, double elNowDeg,
+                double sampleSec, double leadSec) {
+    SkyLead lead;
+    lead.azimuthDeg = azNowDeg;
+    lead.elevationDeg = elNowDeg;
+    if (!std::isfinite(azPrevDeg) || !std::isfinite(elPrevDeg) ||
+        !std::isfinite(azNowDeg) || !std::isfinite(elNowDeg) ||
+        !std::isfinite(sampleSec) || !(sampleSec > 0.0) || !std::isfinite(leadSec))
+        return lead;
+    const double scale = std::clamp(leadSec, 0.0, sampleSec) / sampleSec;
+    lead.azimuthDeg = wrap360(azNowDeg + shortestAzDelta(azPrevDeg, azNowDeg) * scale);
+    lead.elevationDeg = elNowDeg + (elNowDeg - elPrevDeg) * scale;
+    lead.led = true;
+    return lead;
+}
+
 TrackPoint planTrackTick(bool armed, bool fresh, bool autoEnabled, bool jogPaused,
                          const TrackLimits& limits, double predictedAz, double predictedEl,
                          double backlashDeg, double previousAz) {
