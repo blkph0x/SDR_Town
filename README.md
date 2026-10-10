@@ -1,5 +1,10 @@
 # SDR Town
 
+0.2.135 keeps the chosen Listen radio by USB identity, stops unused Listen
+streams, adds a 200–2800 Hz HF speech filter below 30 MHz, and removes the
+display DC spike without touching decoder IQ. P25 DSP is unchanged. See
+[release notes](docs/RELEASE_0.2.135.md).
+
 0.2.134 opens speakers as stereo WASAPI, starts playback after two periods
 of real audio are queued, and gives each USB radio its own live I/O lock
 so RSPdx+RTL (and other combos) do not overflow each other. P25 DSP is

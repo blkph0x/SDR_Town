@@ -1,5 +1,14 @@
 # Issues (canonical)
 
+## ISS-0089 - Listen radio follows USB order; unused streams keep overflowing (2026-10-10, OPEN)
+
+Device Manager row 0 is not a physical identity. After unplug/rescan the
+chosen RSPdx can become an RTL, and Tune/Receive still start radio 0.
+Unused Listen-owned streams stay up, so a second dongle keeps overflowing
+after DEC-0208's per-USB lock. HF listening also has no speech-band filter.
+PR #34 drafted a fix but failed frozen-P25 CI and is not mergeable.
+Extracted under DEC-0209 without P25 DSP. Close after public 0.2.135 proof.
+
 ## ISS-0088 - Speaker ring starves on every mode; dual SDR overflows (2026-10-09, FIXED)
 
 Collector 4988148b: underruns climb at ~100/s with `ringFillPercent` 0

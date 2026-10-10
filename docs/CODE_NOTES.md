@@ -1,5 +1,13 @@
 # Code notes (tree map)
 
+DEC-0209: `resolveListenDevice` matches `stableKey` and returns `size_t(-1)`
+on missing or duplicate identity. `MainWindow::stopUnusedListenDevices`
+stops other Listen-owned streams. `HfAudioFilter` is analog playback only
+(200–2800 Hz, blend in/out over 10 ms) and is skipped for P25 voice/control.
+`removeSpectrumDc` edits the spectrum thread's private copy. Display FFT
+bins / auto levels / marker live in `SpectrumWidget`. Diagnostics
+`qScopeGuard` stops the collector thread before `QApplication` teardown.
+
 DEC-0208: `DriverIoMutexTable` keys FIFO locks by USB `stableKey`.
 `Device::make`/`unmake` stay on `gSoapyFactoryMutex`. Live
 read/write/tune/gain use `SoapyDeviceIoLock`. `AudioEngine` opens WASAPI

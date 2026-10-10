@@ -289,6 +289,31 @@ AUDIO_COMBO_DIGESTS = {
 }
 
 
+# DEC-0209: Listen stable identity, stop unused Listen streams, analog HF
+# speech filter, display-only DC. No P25 hop/slot/security/vocoder. Exact
+# digests are cfdb6a3 (0.2.134) -> Listen/HF/spectrum wiring only.
+LISTEN_HF_SPECTRUM_DIGESTS = {
+    "include/DeviceManager.h": (
+        "a70e88581206518d5ab3ac94bd9ba7f363e3fa7d29c1281027724f5dc3a01a38",
+        "10c901cc67cbcb3e16b28783c080f643a91f3c2cb92a7bb63e22e924b35e42bb"),
+    "src/DeviceManager.cpp": (
+        "7f27cd25912aa76af4ee3f44b9c45bd474f605918213183a58121958b75389f7",
+        "a8cb754b83fc4cb101f11e27f3e32ffe9189d8885d25fcd805b38e92f651dde7"),
+    "include/Receiver.h": (
+        "ce4e9583b16ab76709ef7e6855b165591cfcb32042bf912cd083ed05d2a142c3",
+        "8ccc8e1901d19eb0cbc1ba847dba400987617a8540e9803f36d49ee35fc08a88"),
+    "include/MainWindow.h": (
+        "870f4a524fe1065e455cebc21bfdc5627df24dbbca8cbc8ddae00b3de6f1216e",
+        "8b624ee02d0796eb0a7054974f330ce9fc998e960351329ab2fef5d8dfe59c5b"),
+    "src/MainWindow.cpp": (
+        "3639563e9f6899e2ec65d5d661660be7c5cc2209bfdd13b1781e2fa0ffff3454",
+        "af074b7b430e6ea0c07e80b4219afa12d31a94e764b9a2a6465c875ef1d501ac"),
+    "src/MainWindowP25Orchestration.cpp": (
+        "1df151bf7b4df6651145e0829f5a22db8e6586e78c04662312de55ccb4dc3f21",
+        "4c27e96d00456cb4ef530544ac1d7954272f36b322eb33e9fafa938247f11176"),
+}
+
+
 # DEC-0203 / capture 20261006_093930: first locked-lattice empty hop stays
 # healthy 80/4. Exact digests are 14e1090 (0.2.128) -> planner + live call.
 P25_LOCKED_LATTICE_EMPTY_DIGESTS = {
@@ -328,7 +353,8 @@ def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
                       P25_LOCKED_LATTICE_EMPTY_DIGESTS.get(path),
                       P25_ENCRYPTED_GRANT_IQ_DIGESTS.get(path),
                       TX_STOP_MUTEX_DIGESTS.get(path),
-                      AUDIO_COMBO_DIGESTS.get(path))
+                      AUDIO_COMBO_DIGESTS.get(path),
+                      LISTEN_HF_SPECTRUM_DIGESTS.get(path))
 
 
 # DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.
@@ -839,6 +865,10 @@ def main() -> int:
         if args.paths is None and path in AUDIO_COMBO_DIGESTS:
             if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
                 print(f"P25 guard: accepted exact DEC-0208 audio/combo repair: {path}")
+                continue
+        if args.paths is None and path in LISTEN_HF_SPECTRUM_DIGESTS:
+            if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
+                print(f"P25 guard: accepted exact DEC-0209 Listen/HF/spectrum wiring: {path}")
                 continue
         if args.paths is None and path in P25_TRACE_CONTEXT_DIGESTS:
             if infrastructure_text_allowed(path, trace_before_text(args.base, path), git_file_text(args.head, path)):

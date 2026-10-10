@@ -1,5 +1,15 @@
 # Build notes
 
+## 2026-10-10 - v0.2.135 Listen/HF/spectrum extract, DEC-0209
+
+PR #34 not merged. Local extract of Listen identity, unused Listen stop,
+analog HF filter, display DC. Frozen digest pair from cfdb6a3. New header
+tests plus pinned ENC_IQ/AUDIO_COMBO after-blobs to cfdb6a3.
+`python scripts/test_no_p25_guard.py` PASS. Release header tests:
+`test_hf_audio_filter` (50 Hz=0.062, 1 kHz=0.984, 8 kHz=0.011, bypass and
+chunk continuity), `test_listen_device_selection`, `test_spectrum_dc` PASS.
+MSVC Release `SDR_Town.exe --version` prints `SDR Town 0.2.135`.
+
 ## 2026-10-09 - v0.2.134 public asset proof
 
 Public https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.134-experimental

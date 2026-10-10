@@ -1,0 +1,4 @@
+#include "SpectrumDcRemoval.h"
+#include <cmath>
+#include <iostream>
+int main(){std::vector<std::complex<float>> original(65536); for(size_t i=0;i<original.size();++i){double a=2*3.141592653589793*123*i/original.size();original[i]={float(3+std::cos(a)),float(-2+std::sin(a))};} auto display=original;removeSpectrumDc(display);std::complex<double> mean{},tone{};for(size_t i=0;i<display.size();++i){mean+=std::complex<double>(display[i]);double a=-2*3.141592653589793*123*i/display.size();tone+=std::complex<double>(display[i])*std::polar(1.0,a);}mean/=display.size();tone/=display.size();if(std::abs(mean)>1e-5||std::abs(tone-std::complex<double>(1,0))>1e-5||original[0]!=std::complex<float>(4,-2))return 1;std::vector<std::complex<float>> empty;removeSpectrumDc(empty);std::cout<<"PASS: DC removed, narrow tone preserved, original IQ unchanged\n";}

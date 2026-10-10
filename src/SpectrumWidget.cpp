@@ -1,3 +1,4 @@
+#include "WaterfallPalette.h"
 #include "SpectrumWidget.h"
 #include "BandPlan.h"
 
@@ -115,6 +116,14 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     setMinimumHeight(220);
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
+    m_liveTuneTimer = new QTimer(this);
+    m_liveTuneTimer->setInterval(40);
+    connect(m_liveTuneTimer, &QTimer::timeout, this, [this] {
+        if (m_dragging && std::abs(m_dragPreviewHz - m_lastDragTunedHz) >= 1.0) {
+            m_lastDragTunedHz = m_dragPreviewHz;
+            emit frequencySelected(m_dragPreviewHz);
+        }
+    });
 
     // initial waterfall (higher horizontal res for improved detail in heat map / zoomed view)
     m_waterfall = QImage(1024, 200, QImage::Format_RGB32);
@@ -141,26 +150,23 @@ SpectrumWidget::~SpectrumWidget() = default;
 
 void SpectrumWidget::updateSpectrum(const std::vector<float>& powerDb, double centerFreqHz, double sampleRateHz)
 {
-    // Downsample for the UI path so a 8k/16k/64k FFT cannot freeze paint + scroll.
-    std::vector<float> uiPower = powerDb;
-    constexpr size_t kMaxUiBins = 2048;
-    if (uiPower.size() > kMaxUiBins) {
-        std::vector<float> ds(kMaxUiBins, -120.f);
-        for (size_t i = 0; i < kMaxUiBins; ++i) {
-            const size_t a = i * uiPower.size() / kMaxUiBins;
-            const size_t b = (i + 1) * uiPower.size() / kMaxUiBins;
-            float peak = -200.f;
-            for (size_t k = a; k < b && k < uiPower.size(); ++k) {
-                if (std::isfinite(uiPower[k])) peak = std::max(peak, uiPower[k]);
-            }
-            ds[i] = std::isfinite(peak) ? peak : -120.f;
-        }
-        uiPower = std::move(ds);
-    }
+    // Preserve FFT bins so zoom can separate narrow signals. Painting reduces only
+    // the visible span to screen columns; history remains bounded.
+    const auto& uiPower = powerDb;
 
+    std::vector<float> finiteLevels; finiteLevels.reserve(powerDb.size());
+    for(float db:powerDb) if(std::isfinite(db)) finiteLevels.push_back(db);
+    double noiseLevel=-120, strongLevel=-80;
+    if(!finiteLevels.empty()){const size_t floorIndex=finiteLevels.size()/5; std::nth_element(finiteLevels.begin(),finiteLevels.begin()+floorIndex,finiteLevels.end()); noiseLevel=finiteLevels[floorIndex]; strongLevel=*std::max_element(finiteLevels.begin(),finiteLevels.end());}
     QVector<float> powerCopy;
     {
         QMutexLocker lock(&m_dataMutex);
+        if(m_autoDisplayLevels && !finiteLevels.empty()) {
+            const double low=std::clamp(noiseLevel-12.0,-180.0,0.0);
+            const double high=std::clamp(std::max(noiseLevel+38.0,strongLevel+6.0),low+40.0,low+100.0);
+            const double blend=m_autoLevelsInitialized ? .15 : 1.0;
+            m_colorMinDb+=(low-m_colorMinDb)*blend; m_colorMaxDb+=(high-m_colorMaxDb)*blend; m_autoLevelsInitialized=true;
+        }
         const double previousSampleRate = m_sampleRate;
         const double previousViewBandwidth = m_viewBandwidthHz;
         m_powerDb = QVector<float>(uiPower.begin(), uiPower.end());
@@ -180,7 +186,7 @@ void SpectrumWidget::updateSpectrum(const std::vector<float>& powerDb, double ce
             }
         }
 
-        // Keep a downsampled history only — full FFT rows were freezing zoomed paint.
+        // Keep full source bins for precise zoom; bound the number of stored rows.
         if (!uiPower.empty()) {
             m_highResHistory.push_back(uiPower);
             while (m_highResHistory.size() > kMaxHighResHistory) m_highResHistory.pop_front();
@@ -213,6 +219,8 @@ void SpectrumWidget::setFreqRange(double minHz, double maxHz)
     m_maxFreq = maxHz;
     update();
 }
+
+void SpectrumWidget::setAutoDisplayLevels(bool enabled) { QMutexLocker lock(&m_dataMutex); m_autoDisplayLevels=enabled; m_autoLevelsInitialized=false; update(); }
 
 void SpectrumWidget::setColorRange(double minDb, double maxDb)
 {
@@ -290,33 +298,7 @@ void SpectrumWidget::scrollWaterfall(const std::vector<float>& latestPower)
         if (range <= 0.1) range = 100.0;
         float norm = std::clamp( static_cast<float>( (db - m_colorMinDb) / range ) , 0.0f, 1.0f);
 
-        int r, g, b;
-        if (norm < 0.2f) {
-            // dark blue -> cyan (cold / noise floor)
-            float t = norm / 0.2f;
-            r = 10;
-            g = static_cast<int>(80 + 140 * t);
-            b = 180 + static_cast<int>(60 * t);
-        } else if (norm < 0.45f) {
-            // cyan -> green
-            float t = (norm - 0.2f) / 0.25f;
-            r = static_cast<int>(10 * (1-t));
-            g = 220;
-            b = static_cast<int>(240 - 200 * t);
-        } else if (norm < 0.7f) {
-            // green -> yellow
-            float t = (norm - 0.45f) / 0.25f;
-            r = static_cast<int>(255 * t);
-            g = 220;
-            b = static_cast<int>(40 * (1-t));
-        } else {
-            // yellow -> red (hot / strong signals)
-            float t = (norm - 0.7f) / 0.3f;
-            r = 255;
-            g = static_cast<int>(220 - 180 * t);
-            b = static_cast<int>(40 * (1-t));
-        }
-        return qRgb(std::clamp(r,0,255), std::clamp(g,0,255), std::clamp(b,0,255));
+        return waterfallSpectrumColor(norm);
     };
 
     int w = m_waterfall.width();
@@ -443,6 +425,7 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
     QRect specRect(axisW, 0, w - axisW - rightMargin, specH);
     QRect wfRect(axisW, specH, w - axisW - rightMargin, wfH);
 
+    p.fillRect(specRect, QColor(4, 14, 40));
     // Snapshot the contended visual state under one short lock, then paint from
     // those locals so the spectrum curve, waterfall, grid, and labels all share
     // one frequency axis for this frame.
@@ -526,13 +509,17 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
     // Grid now drawn inside the plot area (after left dB axis).
     p.setPen(QColor(70, 75, 80));
     int plotW = specRect.width();
-    for (int i = 0; i <= 10; ++i) {
-        int x = specRect.left() + plotW * i / 10;
+    const double rawStep = viewBwSnap / std::max(2, plotW / 130);
+    const double magnitude = std::pow(10.0, std::floor(std::log10(std::max(1.0, rawStep))));
+    const double normalized = rawStep / magnitude;
+    const double tickStep = magnitude * (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10);
+    const double axisStart = centerSnap - viewBwSnap / 2;
+    const int decimals = std::clamp(static_cast<int>(std::ceil(6 - std::log10(tickStep))), 2, 6);
+    for (double f = std::ceil(axisStart / tickStep) * tickStep; f <= axisStart + viewBwSnap; f += tickStep) {
+        int x = specRect.left() + static_cast<int>((f - axisStart) * plotW / viewBwSnap);
         p.drawLine(x, specRect.top(), x, specRect.bottom());
-        const double f = centerSnap - viewBwSnap / 2.0 +
-            (static_cast<double>(i) / 10.0) * viewBwSnap;
         p.setPen(QColor(140, 145, 150));
-        p.drawText(x + 2, specRect.bottom() - 4, QString::number(f/1e6, 'f', 2) + "M");
+        p.drawText(x + 2, specRect.bottom() - 4, QString::number(f/1e6, 'f', decimals) + "M");
         p.setPen(QColor(70, 75, 80));
     }
 
@@ -566,12 +553,15 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
             // filled (bottom at the spec area bottom)
             QPolygonF fillPoly = poly;
             fillPoly << QPointF(plotLeft + plotWidth, specRect.bottom()) << QPointF(plotLeft, specRect.bottom());
-            p.setBrush(QColor(30, 120, 180, 60));
+            QLinearGradient spectrumFill(0, specRect.top(), 0, specRect.bottom());
+            spectrumFill.setColorAt(0, QColor(30, 110, 255, 220));
+            spectrumFill.setColorAt(1, QColor(8, 45, 155, 160));
+            p.setBrush(spectrumFill);
             p.setPen(Qt::NoPen);
             p.drawPolygon(fillPoly);
 
             // line
-            p.setPen(QPen(QColor(100, 200, 255), 1.5));
+            p.setPen(QPen(QColor(65, 155, 255), 1.5));
             p.drawPolyline(poly);
         }
     } else {
@@ -599,12 +589,7 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
             double range = colorMaxSnap - colorMinSnap;
             if (range <= 0.1) range = 100.0;
             float norm = std::clamp(static_cast<float>((db - colorMinSnap) / range), 0.0f, 1.0f);
-            int r, g, b;
-            if (norm < 0.2f) { float t = norm / 0.2f; r = 10; g = static_cast<int>(80 + 140 * t); b = 180 + static_cast<int>(60 * t); }
-            else if (norm < 0.45f) { float t = (norm - 0.2f) / 0.25f; r = static_cast<int>(10 * (1 - t)); g = 220; b = static_cast<int>(240 - 200 * t); }
-            else if (norm < 0.7f) { float t = (norm - 0.45f) / 0.25f; r = static_cast<int>(255 * t); g = 220; b = static_cast<int>(40 * (1 - t)); }
-            else { float t = (norm - 0.7f) / 0.3f; r = 255; g = static_cast<int>(220 - 180 * t); b = static_cast<int>(40 * (1 - t)); }
-            return qRgb(std::clamp(r,0,255), std::clamp(g,0,255), std::clamp(b,0,255));
+            return waterfallSpectrumColor(norm);
         };
 
         size_t rows = highResSnap.size();
@@ -708,11 +693,27 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
 
     // last clicked tune position - full height line (works for clicks in spectrum OR waterfall area)
     const double markerHz = m_dragging ? m_dragPreviewHz : m_bandPlanMonitorHz;
-    const int markerX = markerHz > 0 && viewBwSnap > 0
+    const int markerX = m_dragging
+        ? kSpectrumAxisWidth + static_cast<int>((markerHz-m_dragLowHz)/m_dragBwHz*m_dragPlotWidth)
+        : markerHz > 0 && viewBwSnap > 0
         ? specRect.left()+static_cast<int>((markerHz-(centerSnap-viewBwSnap/2))/viewBwSnap*specRect.width()) : -1;
     if (markerX >= specRect.left() && markerX <= specRect.right()) {
-        p.setPen(QPen(QColor(255, 120, 120), 1, Qt::DashLine));
+        const double axisBandwidth = m_dragging ? m_dragBwHz : viewBwSnap;
+        const double passbandWidth = std::max(1.0, m_channelBandwidthHz / axisBandwidth * specRect.width());
+        p.save();
+        p.setClipRect(specRect);
+        p.setPen(QPen(QColor(65, 220, 125, 190), 1));
+        p.setBrush(QColor(40, 205, 100, 45));
+        const double passbandLeft = m_channelMode == DemodMode::USB ? markerX :
+            m_channelMode == DemodMode::LSB ? markerX-passbandWidth : markerX-passbandWidth/2;
+        p.drawRect(QRectF(passbandLeft, specRect.top(), passbandWidth, specRect.height()-1));
+        p.restore();
+        p.setPen(QPen(QColor(80, 240, 140), 1, Qt::DashLine));
         p.drawLine(markerX, 0, markerX, h);
+        // An explicit grab handle makes horizontal tuning distinct from squelch.
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(80, 240, 140));
+        p.drawPolygon(QPolygon{QPoint(markerX-8, 0), QPoint(markerX+8, 0), QPoint(markerX, 12)});
     }
 
     // title / info (use snapshot for consistency with the curve/waterfall of this frame)
@@ -767,6 +768,20 @@ void SpectrumWidget::paintEvent(QPaintEvent* /*event*/)
                           .arg(srSnap / 1e6, 0, 'f', 2));
 }
 
+void SpectrumWidget::setChannelMode(DemodMode mode) { if (mode != m_channelMode) { m_channelMode = mode; update(); } }
+
+void SpectrumWidget::setChannelBandwidth(double hz) { if (std::isfinite(hz) && hz > 0 && hz != m_channelBandwidthHz) { m_channelBandwidthHz = hz; update(); } }
+
+int SpectrumWidget::tuneMarkerX()
+{
+    QMutexLocker lock(&m_dataMutex);
+    const double bw = m_viewBandwidthHz > 0 ? m_viewBandwidthHz : m_sampleRate;
+    const double marker = m_bandPlanMonitorHz > 0 ? m_bandPlanMonitorHz : m_centerFreq;
+    if (bw <= 0) return -1;
+    return kSpectrumAxisWidth + static_cast<int>((marker-(m_centerFreq-bw/2))/bw *
+        std::max(1, width()-kSpectrumAxisWidth-kSpectrumRightMargin));
+}
+
 void SpectrumWidget::mousePressEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
@@ -780,8 +795,11 @@ void SpectrumWidget::mousePressEvent(QMouseEvent* event)
         bool nearRightBar = (mx >= ww - 35 && my < specHlocal);
         int currentSqY = yFromSquelchViz(m_squelchThresholdDb, specHlocal);
         bool nearLine = my < specHlocal && std::abs(my - currentSqY) <= 10;
+        const int marker = tuneMarkerX();
+        const bool nearMarker = marker >= kSpectrumAxisWidth && marker < ww-kSpectrumRightMargin &&
+            std::abs(mx-marker) <= 8;
 
-        if (nearRightBar || nearLine) {
+        if (nearRightBar || (nearLine && !nearMarker)) {
             m_squelchDragging = true;
             double db = squelchVizDbFromY(my, specHlocal);
             db = std::clamp(db, -130.0, 40.0);
@@ -800,9 +818,12 @@ void SpectrumWidget::mousePressEvent(QMouseEvent* event)
             m_dragLowHz = m_centerFreq-m_dragBwHz/2;
         }
         m_dragPlotWidth = std::max(1,ww-kSpectrumAxisWidth-kSpectrumRightMargin);
-        m_dragPreviewHz = m_dragLowHz+(mx-kSpectrumAxisWidth)*m_dragBwHz/m_dragPlotWidth;
+        m_dragGrabOffset = nearMarker ? mx-marker : 0;
+        m_dragPreviewHz = m_dragLowHz+(mx-m_dragGrabOffset-kSpectrumAxisWidth)*m_dragBwHz/m_dragPlotWidth;
         m_lastMouseX = mx;
         m_tuneX = mx;
+        m_lastDragTunedHz = nearMarker ? m_dragPreviewHz : -1;
+        m_liveTuneTimer->start();
         update();
     }
 }
@@ -818,7 +839,13 @@ void SpectrumWidget::mouseMoveEvent(QMouseEvent* event)
     // Hover feedback: change cursor when over the right squelch bar or the line (affordance)
     int currentSqY = yFromSquelchViz(m_squelchThresholdDb, specHlocal);
     bool overSquelchZone = my < specHlocal && ((mx >= ww - 35) || (std::abs(my - currentSqY) <= 10));
-    if (overSquelchZone) {
+    const int marker = tuneMarkerX();
+    const bool overMarker = marker >= kSpectrumAxisWidth && marker < ww-kSpectrumRightMargin &&
+        std::abs(mx-marker) <= 8;
+    if (overMarker && !m_squelchDragging) {
+        setCursor(Qt::SplitHCursor);
+        setToolTip("Drag the frequency marker left or right; tunes the selected radio live");
+    } else if (overSquelchZone) {
         setCursor(Qt::SplitVCursor);
     } else if (cursor().shape() != Qt::ArrowCursor) {
         unsetCursor();
@@ -836,7 +863,7 @@ void SpectrumWidget::mouseMoveEvent(QMouseEvent* event)
     }
 
     if (m_dragging) {
-        m_dragPreviewHz = m_dragLowHz + std::clamp(mx-kSpectrumAxisWidth,0,m_dragPlotWidth)*m_dragBwHz/m_dragPlotWidth;
+        m_dragPreviewHz = m_dragLowHz + std::clamp(mx-m_dragGrabOffset-kSpectrumAxisWidth,0,m_dragPlotWidth)*m_dragBwHz/m_dragPlotWidth;
         m_tuneX = std::clamp(mx,kSpectrumAxisWidth,width()-kSpectrumRightMargin);
         setCursor(Qt::CrossCursor);
         setToolTip(QString("%1 MHz").arg(m_dragPreviewHz/1e6,0,'f',5));
@@ -848,13 +875,14 @@ void SpectrumWidget::mouseReleaseEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
         const bool commit = m_dragging;
-        const double selected = m_dragLowHz + std::clamp(event->pos().x()-kSpectrumAxisWidth,0,m_dragPlotWidth)*m_dragBwHz/m_dragPlotWidth;
+        const double selected = m_dragLowHz + std::clamp(event->pos().x()-m_dragGrabOffset-kSpectrumAxisWidth,0,m_dragPlotWidth)*m_dragBwHz/m_dragPlotWidth;
         m_dragging = false;
+        m_liveTuneTimer->stop();
         m_squelchDragging = false;
         unsetCursor();
         // m_tuneX is kept so the dashed tune line remains visible after the click
         update();
-        if (commit) emit frequencySelected(selected);
+        if (commit && std::abs(selected - m_lastDragTunedHz) >= 1.0) emit frequencySelected(selected);
     }
 }
 
@@ -869,7 +897,7 @@ void SpectrumWidget::wheelEvent(QWheelEvent* event)
         const double maxBw = (m_sampleRate > 0.0 && std::isfinite(m_sampleRate))
             ? m_sampleRate
             : 20e6;
-        double newBw = std::clamp(currentBw * factor, 50e3, maxBw);
+        double newBw = std::clamp(currentBw * factor, std::min(1000.0, maxBw), maxBw);
         m_viewBandwidthHz = newBw;
     }
     update();
@@ -919,7 +947,7 @@ void SpectrumWidget::keyPressEvent(QKeyEvent* event)
         update();
     } else if (event->key() == Qt::Key_Up || event->key() == Qt::Key_W) {
         // zoom in (higher resolution view)
-        m_viewBandwidthHz = std::max(20e3, curView * 0.7);
+        m_viewBandwidthHz = std::max(1000.0, curView * 0.7);
         update();
     } else if (event->key() == Qt::Key_Down || event->key() == Qt::Key_S) {
         // zoom out

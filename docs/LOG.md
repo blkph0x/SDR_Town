@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-10 - Extract PR #34 Listen/HF/spectrum without merging
+
+PR #34 is draft and failed frozen P25 + ENC_IQ guard. Took Listen
+`stableKey`, unused-stream stop, analog HF filter, display DC, spectrum
+controls, and diagnostics teardown. Skipped `P25DecodeConfig.cpp`. No P25
+hop/slot/security. Version 0.2.135 / DEC-0209.
+
 ## 2026-10-09 - v0.2.134 public ZIP verified
 
 Actions 37904016825 success. Release v0.2.134-experimental public prerelease.

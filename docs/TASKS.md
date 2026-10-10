@@ -1,5 +1,12 @@
 # Task list (canonical)
 
+T-0122 | in_progress | Listen identity, unused stream stop, HF filter (ISS-0089 / DEC-0209) |
+PR #34 does not merge (draft, frozen P25 CI). Extract Listen `stableKey`
+persist + stop unused Listen streams, analog 200–2800 Hz HF filter below
+30 MHz, display DC/spectrum controls, diagnostics teardown. No P25 DSP.
+Tests: `Regression-hf_audio_filter`, `Regression-listen_device_selection`,
+`Regression-spectrum_dc`, `test_no_p25_guard.py`.
+
 T-0121 | done | Empty-ring underruns and dual-SDR overflow (ISS-0088 / DEC-0208) |
 Collector: ~100 WASAPI underruns/s with ringFill 0 on HyperX/VB-CABLE, all
 analog modes, including RF stopped; RSPdx+RTL liveIoWaitUs/overflows from

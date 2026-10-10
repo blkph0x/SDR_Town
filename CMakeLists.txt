@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.134 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.135 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -587,6 +587,13 @@ if(BUILD_TESTS)
   endif()
 
   add_test(NAME UnitTests COMMAND sdr_town_tests)
+
+  # DEC-0209: header-only Listen identity, HF speech filter, and display DC.
+  foreach(regression IN ITEMS hf_audio_filter listen_device_selection spectrum_dc)
+    add_executable(test_${regression} tests/test_${regression}.cpp)
+    target_include_directories(test_${regression} PRIVATE include)
+    add_test(NAME Regression-${regression} COMMAND test_${regression})
+  endforeach()
 
   # DEC-0122: isolated DLL fixtures never enter bin/deploy staging or packages.
   if(WIN32 AND TARGET SoapySDR)

@@ -1,5 +1,25 @@
 # Decisions
 
+## DEC-0209 - Listen identity, unused-stream stop, analog HF filter (2026-10-10)
+
+PR #34 (draft, fubarzi) added Listen persistence, spectrum controls, and an
+HF speech filter, but it does not merge: draft, frozen-P25 CI fail, and it
+touches `P25DecodeConfig.cpp` plus orchestration without a reviewed digest.
+The useful parts are: persist Listen by `stableKey` so USB reorder cannot
+promote an unrelated RTL; stop other Listen-owned streams so a second radio
+does not keep overflowing; analog 200–2800 Hz speech filter below 30 MHz
+that skips P25 voice/control; display-only DC removal on a private FFT copy;
+stop remote diagnostics before `QApplication` teardown.
+
+Decision: do not merge #34. Extract those fixes onto 0.2.134. Missing or
+duplicate Listen identity returns `size_t(-1)` and refuses start instead of
+falling through to radio 0. Hardware retune stays outside the current span.
+HF filter state is private per Receiver and never sees decoder IQ. Spectrum
+64k/auto-levels/marker/wheel are display only. Exact frozen-path digests:
+DeviceManager.cpp 7f27cd25… → a8cb754b…, MainWindow.cpp 3639563e… →
+af074b7b…, orchestration 1df151bf… → 4c27e96d…. No P25 hop/slot/security
+or unused `P25DecodeConfig` include.
+
 ## DEC-0208 - Per-USB live IO and WASAPI prime for all device combos (2026-10-09)
 
 Collector client 4988148b (Ryzen 9 7950X, Win11, RSPdx + two RTL,

@@ -95,7 +95,9 @@ def main() -> int:
         before = subprocess.check_output(
             ["git", "show", "b8e803c:" + path], cwd=ROOT, text=True, encoding="utf-8"
         )
-        after = (ROOT / path).read_text(encoding="utf-8").replace("\r\n", "\n")
+        after = subprocess.check_output(
+            ["git", "show", "cfdb6a3:" + path], cwd=ROOT, text=True, encoding="utf-8"
+        )
         enc_iq_files[("before", path)] = before
         enc_iq_files[("after", path)] = after
         assert MODULE.infrastructure_text_allowed(path, before, after)
@@ -133,7 +135,9 @@ def main() -> int:
         before = subprocess.check_output(
             ["git", "show", "96e6d84:" + path], cwd=ROOT, text=True, encoding="utf-8"
         )
-        after = (ROOT / path).read_text(encoding="utf-8").replace("\r\n", "\n")
+        after = subprocess.check_output(
+            ["git", "show", "cfdb6a3:" + path], cwd=ROOT, text=True, encoding="utf-8"
+        )
         audio_combo_files[("before", path)] = before
         audio_combo_files[("after", path)] = after
         assert MODULE.infrastructure_text_allowed(path, before, after)
@@ -145,6 +149,24 @@ def main() -> int:
          patch.object(MODULE, "git_file_text", side_effect=lambda ref, path: audio_combo_files[(ref, path)]):
         assert MODULE.main() == 0
         audio_combo_files[("after", "src/AudioEngine.cpp")] += "\nRF change"
+        assert MODULE.main() == 1
+    listen_hf_files = {}
+    for path in MODULE.LISTEN_HF_SPECTRUM_DIGESTS:
+        before = subprocess.check_output(
+            ["git", "show", "cfdb6a3:" + path], cwd=ROOT, text=True, encoding="utf-8"
+        )
+        after = (ROOT / path).read_text(encoding="utf-8").replace("\r\n", "\n")
+        listen_hf_files[("before", path)] = before
+        listen_hf_files[("after", path)] = after
+        assert MODULE.infrastructure_text_allowed(path, before, after)
+        assert not MODULE.infrastructure_text_allowed(path, before, after + "\nRF change")
+        assert not MODULE.infrastructure_text_allowed(path, after, before)
+        assert not MODULE.infrastructure_text_allowed("src/P25LiveDecoder.cpp", before, after)
+    with patch.object(MODULE, "parse_args", return_value=SimpleNamespace(base="before", head="after", paths=None)), \
+         patch.object(MODULE, "git_changed_paths", return_value=list(MODULE.LISTEN_HF_SPECTRUM_DIGESTS)), \
+         patch.object(MODULE, "git_file_text", side_effect=lambda ref, path: listen_hf_files[(ref, path)]):
+        assert MODULE.main() == 0
+        listen_hf_files[("after", "include/Receiver.h")] += "\nRF change"
         assert MODULE.main() == 1
     lifecycle_files = {}
     for path in MODULE.P25_FOLLOW_LIFECYCLE_DIGESTS:

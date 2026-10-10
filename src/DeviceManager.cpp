@@ -1,4 +1,5 @@
 #include "DeviceManager.h"
+#include "SpectrumDcRemoval.h"
 #include "DriverIoMutex.h"
 #include "SdrDeviceCandidate.h"
 #include "Receiver.h"   // for getNewSamplesForReceiver(..., Receiver& rx, ... ) cursor update
@@ -1808,6 +1809,18 @@ void DeviceManager::setSpectrumFftBins(size_t index, size_t bins) {
     spdlog::info("Device {} spectrum FFT bins set to {}", index, fftBins);
 }
 
+void DeviceManager::setSpectrumDcRemoval(size_t index, bool enabled) {
+    auto* state = streamState(index);
+    if (!state) return;
+    std::lock_guard lock(state->queueMutex);
+    if (state->spectrumDcRemoval == enabled) return;
+    state->spectrumDcRemoval = enabled;
+    state->latestPower.clear();
+    state->spectrumAvg.clear();
+    state->spectrumPeak.clear();
+    spdlog::info("Device {} display DC removal {}", index, enabled ? "on" : "off");
+}
+
 size_t DeviceManager::getSpectrumFftBins(size_t index) const {
     auto* stPtr = streamState(index);
     if (!stPtr) return 8192;
@@ -3447,9 +3460,11 @@ void DeviceManager::spectrumThreadFunc(size_t index, uint64_t expectedGeneration
            st.sessionGen.load(std::memory_order_acquire) == myGen) {
         const auto cycleStart = std::chrono::steady_clock::now();
         size_t fftN = 8192;
+        bool removeDc = true;
         {
             std::lock_guard<std::mutex> lk(st.queueMutex);
             fftN = normalizeSpectrumFftBins(st.spectrumBins);
+            removeDc = st.spectrumDcRemoval;
         }
 
         std::vector<std::complex<float>> samples;
@@ -3479,6 +3494,7 @@ void DeviceManager::spectrumThreadFunc(size_t index, uint64_t expectedGeneration
         }
 
         if (!samples.empty()) {
+            if (removeDc) removeSpectrumDc(samples);
             auto localPower = computeRealFFTPower(samples, fftN, /*useBlackmanHarris=*/true);
             std::lock_guard<std::mutex> lk(st.queueMutex);
             if (st.spectrumAvg.size() != localPower.size()) {
