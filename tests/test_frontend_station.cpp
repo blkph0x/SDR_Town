@@ -1,5 +1,6 @@
 #include "AntennaControlWindow.h"
 #include "frontend/DvbDemod.h"
+#include "frontend/DvbFec.h"
 #include "frontend/DvbSurvey.h"
 #include "frontend/EquipmentWizard.h"
 #include "frontend/FrontEndMetrics.h"
@@ -335,6 +336,35 @@ TEST_CASE("BBFRAME extraction and pre-FEC QPSK bits refuse LDPC claims") {
     CHECK_FALSE(sliceQpskAfterPlDescramble(spun.data(), spun.size(), 12).sliced);
 }
 
+TEST_CASE("Short rate 1/2 BCH and LDPC correct injected errors") {
+    std::vector<int> message(7032);
+    for (int i = 0; i < 7032; ++i) message[static_cast<std::size_t>(i)] = (i * 17 + 3) & 1;
+    std::vector<int> bch;
+    REQUIRE(encodeDvbs2ShortBch(message, bch));
+    REQUIRE(bch.size() == 7200);
+    auto damaged = bch;
+    for (int index : {10, 400, 2000}) damaged[static_cast<std::size_t>(index)] ^= 1;
+    std::vector<int> restored;
+    REQUIRE(decodeDvbs2ShortBch(damaged, restored));
+    CHECK(restored == message);
+    for (int i = 0; i < 30; ++i) damaged[static_cast<std::size_t>(i * 200)] ^= 1;
+    CHECK_FALSE(decodeDvbs2ShortBch(damaged, restored));
+
+    std::vector<int> codeword;
+    REQUIRE(encodeDvbs2ShortHalf(message, codeword));
+    REQUIRE(codeword.size() == 16200);
+    for (int index : {10, 100, 1000, 5000, 8000, 12000, 14000, 15000})
+        codeword[static_cast<std::size_t>(index)] ^= 1;
+    const auto decoded = decodeDvbs2ShortHalf(codeword);
+    CHECK(decoded.ldpcConverged);
+    CHECK(decoded.bchOk);
+    CHECK(decoded.iterations >= 1);
+    CHECK(decoded.messageBits == message);
+    CHECK(decoded.note.find("Commercial decrypt is not performed") != std::string::npos);
+    CHECK_FALSE(dvbDemodAvailable());
+    CHECK_FALSE(commercialDecryptAvailable());
+}
+
 TEST_CASE("Pass session commands the rotator then stop and park on abort") {
     QTcpServer server;
     REQUIRE(server.listen(QHostAddress::LocalHost));
@@ -539,7 +569,7 @@ TEST_CASE("Equipment wizard defaults Bias-T off and flags a sub-0.2 dB claim") {
     CHECK_FALSE(wizard.findChild<QCheckBox*>("attestTle")->isChecked());
     CHECK_FALSE(wizard.findChild<QCheckBox*>("followPlanner")->isChecked());
     CHECK(wizard.findChild<QComboBox*>("stationMission")->currentText() == "LEO track");
-    CHECK(wizard.findChild<QLabel*>("dvbStage")->text().contains("demod is not linked"));
+    CHECK(wizard.findChild<QLabel*>("dvbStage")->text().contains("Other rates are not implemented"));
     CHECK(wizard.findChild<QLabel*>("dvbStage")->text().contains("Commercial decrypt is refused"));
     CHECK_FALSE(wizard.findChild<QCheckBox*>("horizontalPol")->isChecked());
     CHECK_FALSE(wizard.findChild<QCheckBox*>("highBand")->isChecked());

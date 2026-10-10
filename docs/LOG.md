@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-10-10 - Short-frame rate 1/2 BCH and LDPC
+
+Nominal rate 1/2 short frames are 7032 information bits, 7200 after BCH
+with t=12, and 16200 after LDPC. The BCH decoder fixes 3 injected errors
+and rejects 30. The LDPC decoder fixes 8 injected errors in the 16200-bit
+word and the BCH check then passes. Other rates are not implemented.
+Commercial decrypt is not performed.
+
 ## 2026-10-10 - BBFRAME transport stream and pre-FEC QPSK bits
 
 The baseband scrambler uses 1+X^14+X^15. A scrambled BBFRAME with a good

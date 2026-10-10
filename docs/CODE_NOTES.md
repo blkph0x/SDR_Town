@@ -549,7 +549,9 @@ their own sink. `detectDvbs2PlHeader` estimates one frequency and one phase,
 then decodes PLS. `scrambleBbFrame` is the 1+X^14+X^15 baseband scrambler.
 `extractClearTsFromBbFrame` checks the BBHEADER CRC-8 and emits only
 unscrambled MPEG-TS packets. `sliceQpskAfterPlDescramble` returns pre-FEC
-hard bits for MODCOD 1..11. LDPC is not applied.
+hard bits for MODCOD 1..11. `encodeDvbs2ShortHalf` and `decodeDvbs2ShortHalf`
+are the short nominal rate 1/2 BCH outer code and LDPC inner code.
+Other rates are not implemented.
 `modulateDvbs2PlHeader` builds that header.
 `writeClearTsForPlayback`
 writes only an unscrambled transport stream; the wizard Play clear TS button

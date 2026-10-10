@@ -261,6 +261,7 @@ set(SDR_TOWN_SOURCES
     src/frontend/StationProfile.cpp include/frontend/StationProfile.h
     src/frontend/DvbSurvey.cpp include/frontend/DvbSurvey.h
     src/frontend/DvbDemod.cpp include/frontend/DvbDemod.h
+    src/frontend/DvbFec.cpp include/frontend/DvbFec.h
     src/frontend/EquipmentWizard.cpp include/frontend/EquipmentWizard.h
     src/frontend/StationPassSession.cpp include/frontend/StationPassSession.h
     src/frontend/StationSky.cpp include/frontend/StationSky.h
@@ -740,7 +741,7 @@ if(BUILD_TESTS)
       src/frontend/LnbConversion.cpp src/frontend/LinkBudgetHint.cpp
       src/frontend/FrontEndPower.cpp src/frontend/RotatorTrack.cpp
       src/frontend/PassArming.cpp src/frontend/FrontEndMetrics.cpp
-      src/frontend/StationProfile.cpp src/frontend/DvbSurvey.cpp src/frontend/DvbDemod.cpp
+      src/frontend/StationProfile.cpp src/frontend/DvbSurvey.cpp src/frontend/DvbDemod.cpp src/frontend/DvbFec.cpp
       src/frontend/EquipmentWizard.cpp
       src/frontend/StationPassSession.cpp include/frontend/StationPassSession.h
       src/frontend/StationSky.cpp include/frontend/StationSky.h
@@ -750,7 +751,7 @@ if(BUILD_TESTS)
       src/frontend/LnbConversion.cpp src/frontend/LinkBudgetHint.cpp
       src/frontend/FrontEndPower.cpp src/frontend/RotatorTrack.cpp
       src/frontend/PassArming.cpp src/frontend/FrontEndMetrics.cpp
-      src/frontend/StationProfile.cpp       src/frontend/DvbSurvey.cpp src/frontend/DvbDemod.cpp
+      src/frontend/StationProfile.cpp       src/frontend/DvbSurvey.cpp src/frontend/DvbDemod.cpp src/frontend/DvbFec.cpp
       src/frontend/EquipmentWizard.cpp
       src/frontend/StationPassSession.cpp include/frontend/StationPassSession.h
       src/frontend/StationSky.cpp include/frontend/StationSky.h

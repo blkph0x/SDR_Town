@@ -1,5 +1,11 @@
 # Build notes
 
+## 2026-10-10 - Short-frame BCH and LDPC
+
+`FrontendStation` Release PASS (7.64 s): BCH fixes 3 errors and rejects
+30, and LDPC fixes 8 errors on a 16200-bit short rate 1/2 word.
+`AntennaControl` Release PASS (6.43 s). Other rates are not implemented.
+
 ## 2026-10-10 - BBFRAME and pre-FEC QPSK
 
 `FrontendStation` Release PASS (7.72 s): one clear packet from a scrambled
