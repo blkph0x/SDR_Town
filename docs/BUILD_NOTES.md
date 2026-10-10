@@ -2,9 +2,13 @@
 
 ## 2026-10-11 - v0.2.136 experimental pre-release
 
-CMake project version is 0.2.136. Release branch
-`release/v0.2.136-experimental`. Signed Latest remains 0.2.134. Public
-asset proof is recorded after Actions finishes.
+Public https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.136-experimental
+Actions https://github.com/blkph0x/SDR_Town/actions/runs/38092353017
+commit 07f4be1, prerelease, not draft. ZIP SHA256
+9deaba4b00b0302be6e322c0937584ba0153598a6d06742cb60188c47dd9ec3f
+matches the public sidecar. Extracted `SDR_Town.exe --version` prints
+`SDR Town 0.2.136`. `build-info.json` sourceCommit 07f4be1, workflowRun
+38092353017. Signed Latest remains v0.2.134.
 
 ## 2026-10-10 - SSTV listen is audible
 
