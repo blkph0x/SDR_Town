@@ -36,6 +36,7 @@
 #include <functional>
 #include <cmath>
 #include <complex>
+#include <initializer_list>
 #include <vector>
 
 int main(int argc, char** argv) {
@@ -388,6 +389,98 @@ TEST_CASE("Short QPSK 1/2 symbols decode through BCH and LDPC") {
     CHECK_FALSE(commercialDecryptAvailable());
 }
 
+TEST_CASE("Every QPSK rate encodes a codeword and selected rates correct errors") {
+    const struct Item { bool normal; int modcod; } items[] = {
+        {false, 1}, {false, 2}, {false, 3}, {false, 4}, {false, 5},
+        {false, 6}, {false, 7}, {false, 8}, {false, 9}, {false, 10},
+        {true, 1}, {true, 2}, {true, 3}, {true, 4}, {true, 5},
+        {true, 6}, {true, 7}, {true, 8}, {true, 9}, {true, 10}, {true, 11},
+    };
+    for (const Item& item : items) {
+        int messageBits = 0;
+        int codeBits = 0;
+        REQUIRE(dvbs2QpskInfoBits(item.normal, item.modcod, messageBits, codeBits));
+        std::vector<int> message(static_cast<std::size_t>(messageBits));
+        for (int i = 0; i < messageBits; ++i) message[static_cast<std::size_t>(i)] = (i * 17 + 3) & 1;
+        std::vector<int> codeword;
+        REQUIRE(encodeDvbs2Qpsk(item.normal, item.modcod, message, codeword));
+        CHECK(static_cast<int>(codeword.size()) == codeBits);
+        const auto decoded = decodeDvbs2Qpsk(item.normal, item.modcod, codeword);
+        CHECK(decoded.ldpcConverged);
+        CHECK(decoded.bchOk);
+        CHECK(decoded.messageBits == message);
+    }
+    std::vector<int> refused;
+    CHECK_FALSE(encodeDvbs2Qpsk(false, 11, std::vector<int>{}, refused));
+
+    auto correct = [](bool normal, int modcod, std::initializer_list<int> flips) {
+        int messageBits = 0;
+        int codeBits = 0;
+        REQUIRE(dvbs2QpskInfoBits(normal, modcod, messageBits, codeBits));
+        std::vector<int> message(static_cast<std::size_t>(messageBits));
+        for (int i = 0; i < messageBits; ++i) message[static_cast<std::size_t>(i)] = (i * 17 + 3) & 1;
+        std::vector<int> codeword;
+        REQUIRE(encodeDvbs2Qpsk(normal, modcod, message, codeword));
+        for (int index : flips) codeword[static_cast<std::size_t>(index)] ^= 1;
+        const auto decoded = decodeDvbs2Qpsk(normal, modcod, codeword);
+        CHECK(decoded.ldpcConverged);
+        CHECK(decoded.bchOk);
+        CHECK(decoded.iterations >= 1);
+        CHECK(decoded.messageBits == message);
+    };
+    correct(false, 1, {3, 100, 2000});
+    correct(false, 10, {4, 800, 14000});
+    correct(true, 4, {10, 1000, 20000, 40000, 60000});
+    correct(true, 11, {5, 100, 5000, 64000});
+
+    int shortBits = 0;
+    int shortCode = 0;
+    REQUIRE(dvbs2QpskInfoBits(false, 1, shortBits, shortCode));
+    std::vector<int> shortMessage(static_cast<std::size_t>(shortBits));
+    for (int i = 0; i < shortBits; ++i) shortMessage[static_cast<std::size_t>(i)] = (i * 17 + 3) & 1;
+    std::vector<int> shortWord;
+    REQUIRE(encodeDvbs2Qpsk(false, 1, shortMessage, shortWord));
+    const auto shortMapped = modulateQpsk(shortWord.data(), shortWord.size());
+    const auto shortScrambled = scramblePlSymbols(shortMapped.data(), shortMapped.size());
+    const auto shortHeader = modulateDvbs2PlHeader(1, true, false);
+    std::vector<std::complex<float>> shortFrame(4 + shortHeader.size() + shortScrambled.size());
+    for (std::size_t i = 0; i < shortHeader.size(); ++i) shortFrame[4 + i] = shortHeader[i];
+    for (std::size_t i = 0; i < shortScrambled.size(); ++i)
+        shortFrame[4 + shortHeader.size() + i] = shortScrambled[i];
+    const auto shortFromSymbols = demodDvbs2QpskFrame(shortFrame.data(), shortFrame.size());
+    CHECK(shortFromSymbols.bchOk);
+    CHECK(shortFromSymbols.messageBits == shortMessage);
+
+    int normalBits = 0;
+    int normalCode = 0;
+    REQUIRE(dvbs2QpskInfoBits(true, 4, normalBits, normalCode));
+    std::vector<int> normalMessage(static_cast<std::size_t>(normalBits));
+    for (int i = 0; i < normalBits; ++i) normalMessage[static_cast<std::size_t>(i)] = (i * 17 + 3) & 1;
+    std::vector<int> normalWord;
+    REQUIRE(encodeDvbs2Qpsk(true, 4, normalMessage, normalWord));
+    const auto normalMapped = modulateQpsk(normalWord.data(), normalWord.size());
+    const auto normalScrambled = scramblePlSymbols(normalMapped.data(), normalMapped.size());
+    const auto normalHeader = modulateDvbs2PlHeader(4, false, false);
+    REQUIRE(normalScrambled.size() == 32400);
+    std::vector<std::complex<float>> normalFrame(4 + normalHeader.size() + normalScrambled.size());
+    for (std::size_t i = 0; i < normalHeader.size(); ++i) normalFrame[4 + i] = normalHeader[i];
+    for (std::size_t i = 0; i < normalScrambled.size(); ++i)
+        normalFrame[4 + normalHeader.size() + i] = normalScrambled[i];
+    for (std::size_t i = 0; i < normalFrame.size(); ++i)
+        normalFrame[i] *= std::polar(1.0f, 0.2f + 0.01f * static_cast<float>(i));
+    const auto normalFromSymbols = demodDvbs2QpskFrame(normalFrame.data(), normalFrame.size());
+    CHECK(normalFromSymbols.ldpcConverged);
+    CHECK(normalFromSymbols.bchOk);
+    CHECK(normalFromSymbols.messageBits == normalMessage);
+
+    const auto pilotHeader = modulateDvbs2PlHeader(4, false, true);
+    std::vector<std::complex<float>> pilotFrame = pilotHeader;
+    pilotFrame.insert(pilotFrame.end(), normalScrambled.begin(), normalScrambled.end());
+    CHECK_FALSE(demodDvbs2QpskFrame(pilotFrame.data(), pilotFrame.size()).bchOk);
+    CHECK_FALSE(commercialDecryptAvailable());
+    CHECK_FALSE(dvbDemodAvailable());
+}
+
 TEST_CASE("Pass session commands the rotator then stop and park on abort") {
     QTcpServer server;
     REQUIRE(server.listen(QHostAddress::LocalHost));
@@ -592,7 +685,7 @@ TEST_CASE("Equipment wizard defaults Bias-T off and flags a sub-0.2 dB claim") {
     CHECK_FALSE(wizard.findChild<QCheckBox*>("attestTle")->isChecked());
     CHECK_FALSE(wizard.findChild<QCheckBox*>("followPlanner")->isChecked());
     CHECK(wizard.findChild<QComboBox*>("stationMission")->currentText() == "LEO track");
-    CHECK(wizard.findChild<QLabel*>("dvbStage")->text().contains("Other rates are not implemented"));
+    CHECK(wizard.findChild<QLabel*>("dvbStage")->text().contains("8PSK and APSK are not implemented"));
     CHECK(wizard.findChild<QLabel*>("dvbStage")->text().contains("Commercial decrypt is refused"));
     CHECK_FALSE(wizard.findChild<QCheckBox*>("horizontalPol")->isChecked());
     CHECK_FALSE(wizard.findChild<QCheckBox*>("highBand")->isChecked());

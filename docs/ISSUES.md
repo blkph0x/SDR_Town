@@ -15,9 +15,10 @@ still commanded state, and OK is not a voltmeter. The station
 panel and Tools rotator share one `rotctld` client. LEO motion can lead one observed
 step; that lead is not a second propagation. Header frequency and phase
 feed PLS. QPSK hard bits are pre-FEC. A BBFRAME can yield a clear
-transport stream and omits scrambled packets. Short QPSK 1/2 with no
-pilots decodes from one sample per symbol. Other rates and pilot removal
-remain unimplemented, so live IQ does not become video. Close
+transport stream and omits scrambled packets. QPSK short and normal
+frames decode from one sample per symbol for every DVB-S2 rate except
+short 9/10. 8PSK, APSK, and pilot removal remain unimplemented, so live
+IQ does not become video. Close
 the motor and power halves after a hardware acceptance pass.
 
 ## ISS-0089 - Listen radio follows USB order; unused streams keep overflowing (2026-10-10, OPEN)

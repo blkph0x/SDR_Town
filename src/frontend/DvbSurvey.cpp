@@ -93,5 +93,5 @@ ClearTsInventory inventoryClearTransportStream(const std::uint8_t* data, std::si
 bool dvbDemodAvailable() { return false; }
 bool commercialDecryptAvailable() { return false; }
 const char* dvbStageNote() {
-    return "A short QPSK 1/2 frame with no pilots can be decoded from one sample per symbol. Other rates are not implemented. Live IQ does not become video. Clear TS playback refuses scrambled packets. Commercial decrypt is refused.";
+    return "QPSK short and normal frames decode from one sample per symbol for every DVB-S2 rate except short 9/10, when there are no pilots. 8PSK and APSK are not implemented. Live IQ does not become video. Clear TS playback refuses scrambled packets. Commercial decrypt is refused.";
 }

@@ -549,14 +549,16 @@ their own sink. `detectDvbs2PlHeader` estimates one frequency and one phase,
 then decodes PLS. `scrambleBbFrame` is the 1+X^14+X^15 baseband scrambler.
 `extractClearTsFromBbFrame` checks the BBHEADER CRC-8 and emits only
 unscrambled MPEG-TS packets. `sliceQpskAfterPlDescramble` returns pre-FEC
-hard bits for MODCOD 1..11. `encodeDvbs2ShortHalf` and `decodeDvbs2ShortHalf`
-are the short nominal rate 1/2 BCH outer code and LDPC inner code.
-`demodDvbs2ShortHalfFrame` runs that decoder on one-sample-per-symbol
-QPSK with no pilots. Other rates are not implemented.
+hard bits for MODCOD 1..11. `encodeDvbs2Qpsk` and `decodeDvbs2Qpsk` are
+the BCH outer code and LDPC inner code for every QPSK rate, short and
+normal. Short rate 9/10 is refused. `demodDvbs2QpskFrame` runs that
+decoder on one-sample-per-symbol QPSK with no pilots, 8100 symbols when
+the header is short and 32400 when it is normal.
+`demodDvbs2ShortHalfFrame` stays the short rate 1/2 entry.
 `modulateDvbs2PlHeader` builds that header.
 `writeClearTsForPlayback`
 writes only an unscrambled transport stream; the wizard Play clear TS button
-opens that file with the OS player. LDPC payload demod is not linked.
+opens that file with the OS player. 8PSK, APSK, and pilot skipping are not linked.
 `StationSupplyBind` writes the external
 supply line at 9600 8N1 and treats `OK` as acknowledgement only.
 D2 demod and commercial decrypt return false.

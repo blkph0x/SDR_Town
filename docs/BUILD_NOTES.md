@@ -1,5 +1,14 @@
 # Build notes
 
+## 2026-10-10 - QPSK rates and the normal 64800-bit frame
+
+`FrontendStation` Release PASS (7.89 s): every QPSK rate except short 9/10
+encodes a codeword whose BCH and LDPC checks pass, short 1/4 and 8/9 and
+normal 1/2 and 9/10 correct injected errors, and a rotated normal QPSK
+1/2 frame returns the 32208 message bits. `AntennaControl` Release PASS
+(5.94 s). 8PSK, APSK, and pilots are not implemented. Signed Latest
+remains 0.2.134.
+
 ## 2026-10-10 - Short QPSK 1/2 symbol frame
 
 `FrontendStation` Release PASS (7.67 s): a rotated short QPSK 1/2 frame

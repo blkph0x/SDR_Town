@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-10-10 - Other QPSK rates and the normal 64800-bit frame
+
+Every DVB-S2 QPSK rate except short 9/10 encodes and decodes. Normal
+frames are 64800 bits over GF(2^16). A normal QPSK 1/2 frame with no
+pilots returns the 32208 message bits from one sample per symbol. 8PSK
+and APSK are not implemented. Pilots are not skipped. Commercial decrypt
+is not performed.
+
 ## 2026-10-10 - Short QPSK 1/2 frame from symbols
 
 A header plus 8100 QPSK symbols, with one constant frequency and phase,
