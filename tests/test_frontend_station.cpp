@@ -9,6 +9,7 @@
 #include "frontend/RotatorTrack.h"
 #include "frontend/StationPassSession.h"
 #include "frontend/StationProfile.h"
+#include "frontend/StationRadio.h"
 #include "frontend/StationSky.h"
 
 #include <catch2/catch_session.hpp>
@@ -511,6 +512,69 @@ TEST_CASE("Pass folder stores the station profile and metric log") {
     CHECK(profileText.find("trueRfHz") != std::string::npos);
     CHECK(metricText.find("sky.dopplerHz") != std::string::npos);
     std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("A selected radio queues the IF and a rejected tune turns Bias-T back off") {
+    struct Reset {
+        ~Reset() { setStationRadio(nullptr); }
+    } reset;
+    StationRadioRequest seen;
+    int calls = 0;
+    setStationRadio([&](const StationRadioRequest& request, std::string* error) {
+        seen = request;
+        ++calls;
+        if (request.tune) {
+            if (error) *error = "satcom lease is held";
+            return false;
+        }
+        return true;
+    });
+    RotatorController rotor;
+    StationPassSession session(rotor);
+    PassChecklist check;
+    check.leaseHeld = true;
+    check.ifInSdrSpan = true;
+    check.tleFreshOrNotRequired = true;
+    check.biasCurrentOk = true;
+    check.rotatorReadyOrOverride = true;
+    check.powerConfirmed = true;
+    StationProfile profile;
+    profile.biasBackend = BiasBackend::SdrInternal;
+    profile.mission = StationMission::Manual;
+    profile.trueRfHz = 11.7e9;
+    profile.radioIndex = 0;
+    std::string error;
+    CHECK_FALSE(session.arm(check, profile, 20, 30, &error));
+    CHECK(error == "satcom lease is held");
+    CHECK_FALSE(session.power().enabled());
+    CHECK(seen.tune);
+    CHECK(seen.ifHz > 1.94e9);
+    CHECK(seen.ifHz < 1.96e9);
+    CHECK(seen.voltageV == 13);
+    CHECK(seen.biasBackend == BiasBackend::SdrInternal);
+    CHECK(calls == 1);
+
+    setStationRadio([&](const StationRadioRequest& request, std::string*) {
+        seen = request;
+        ++calls;
+        return true;
+    });
+    profile.biasBackend = BiasBackend::External;
+    profile.horizontal = true;
+    profile.highBand = true;
+    REQUIRE(session.arm(check, profile, 20, 30, &error));
+    CHECK(seen.ifHz > 1.09e9);
+    CHECK(seen.ifHz < 1.11e9);
+    CHECK(seen.voltageV == 18);
+    CHECK(seen.tone22kHz);
+    CHECK(seen.biasBackend == BiasBackend::External);
+    bool queued = false;
+    for (const auto& row : session.metrics().records())
+        if (row.name == "radio.tune" && row.text == "queued") queued = true;
+    CHECK(queued);
+    session.abort("test");
+    CHECK(seen.releaseLease);
+    CHECK_FALSE(seen.biasEnable);
 }
 
 TEST_CASE("Station panel and Tools rotator share one rotctld connection") {

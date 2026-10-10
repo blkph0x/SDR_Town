@@ -8,9 +8,10 @@ external 13/18 V supply do not. DEC-0210 adds the session, the fail-closed check
 planner AZ/EL and Doppler-corrected RF, and sets the TLE checkbox from
 snapshot age. GEO park slews once and GEO box scan commands at most 49
 dwells without declaring a peak. Lease and IF boxes are still attestations.
-Bias-T is still commanded state, not a measured supply or a Soapy Bias-T
-toggle. The station panel and Tools rotator share one `rotctld` client.
-The computed IF is not tuned on the SDR. LEO motion can lead one observed
+Bias-T is still not a measured supply. A selected radio can queue the IF
+and request RTL or SDRplay Bias-T; that request is not a voltmeter.
+External 13/18 V hardware is still only a commanded state. The station
+panel and Tools rotator share one `rotctld` client. LEO motion can lead one observed
 step; that lead is not a second propagation. DVB-S2 demod remains
 unimplemented. Clear-TS inventory only reads bytes already in hand. Close
 the motor and power halves after a hardware acceptance pass.

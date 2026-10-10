@@ -10,7 +10,9 @@ metrics JSONL. GEO park slews once. GEO box scan is capped at 49 dwells
 and does not declare a peak. Manual does not move. LEO lead is one
 observed step from the last two planner samples. Horizontal is 18 V and
 high band is 22 kHz. The station panel and Tools rotator share one
-`rotctld` client. Lease/IF boxes stay
+`rotctld` client. A selected radio index queues the IF and can request
+internal Bias-T. External Bias-T does not enable the dongle supply.
+Lease/IF boxes stay
 attestations. No Hamlib link, no P25
 edits, no commercial decrypt. D2 demod not linked. Tests: `frontend_station_tests`.
 

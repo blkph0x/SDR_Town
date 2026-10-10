@@ -47,6 +47,7 @@ std::string stationProfileToJson(const StationProfile& profile) {
         {"boxSpanAzDeg", profile.boxSpanAzDeg},
         {"boxSpanElDeg", profile.boxSpanElDeg},
         {"boxStepDeg", profile.boxStepDeg},
+        {"radioIndex", profile.radioIndex},
         {"trueRfHz", profile.trueRfHz},
         {"horizontal", profile.horizontal},
         {"highBand", profile.highBand},
@@ -89,6 +90,7 @@ bool stationProfileFromJson(const std::string& json, StationProfile* profile, st
     next.boxSpanAzDeg = j.value("boxSpanAzDeg", next.boxSpanAzDeg);
     next.boxSpanElDeg = j.value("boxSpanElDeg", next.boxSpanElDeg);
     next.boxStepDeg = j.value("boxStepDeg", next.boxStepDeg);
+    next.radioIndex = j.value("radioIndex", next.radioIndex);
     next.trueRfHz = j.value("trueRfHz", next.trueRfHz);
     next.horizontal = j.value("horizontal", false);
     next.highBand = j.value("highBand", false);

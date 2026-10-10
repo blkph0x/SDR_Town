@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-10-10 - Station tune and Bias-T request
+
+Radio index -1 leaves the receiver alone. A selected index queues the
+corrected IF on the Satcom lease without forcing another workflow off
+the radio. Internal Bias-T requests the RTL or SDRplay driver setting.
+External Bias-T does not turn the dongle supply on. A rejected tune
+commands Bias-T back off. Demod is still not linked.
+
 ## 2026-10-10 - One rotctld client for the station and Tools
 
 The station panel and Tools > Antenna Rotator & SWR now use

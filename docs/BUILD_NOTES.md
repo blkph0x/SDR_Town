@@ -1,5 +1,13 @@
 # Build notes
 
+## 2026-10-10 - Station IF queue and Bias-T request
+
+`FrontendStation` Release PASS (7.73 s): a rejected Satcom tune that leaves
+Bias-T off, a low-band IF near 1.95 GHz at 13 V, a high-band IF near
+1.10 GHz at 18 V with 22 kHz, a queued tune record, and lease release on
+abort. `AntennaControl` Release PASS (5.92 s). `StationRadioBind.cpp`
+compiles into the application target.
+
 ## 2026-10-10 - Shared rotctld client
 
 `FrontendStation` Release PASS (7.66 s): one socket for the station panel

@@ -65,6 +65,12 @@ The Tools rotator window and the station panel share one
 disconnects. Unit tests that construct their own controller stay on that
 private instance.
 
+A selected radio index queues the Doppler-corrected IF with the Satcom
+lease and does not force another workflow off that radio. Internal Bias-T
+is a driver request on that index. External Bias-T stays a commanded
+supply state and asks the dongle Bias-T to remain off. Neither request is
+a voltage measurement. DVB-S2 demod remains unimplemented.
+
 ## DEC-0209 - Listen identity, unused-stream stop, analog HF filter (2026-10-10)
 
 PR #34 (draft, fubarzi) added Listen persistence, spectrum controls, and an

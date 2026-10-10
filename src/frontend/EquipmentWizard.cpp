@@ -49,6 +49,11 @@ EquipmentWizard::EquipmentWizard(QWidget* parent)
     port_->setObjectName("rotatorPort");
     port_->setRange(1, 65535);
     port_->setValue(4533);
+    radioIndex_ = new QSpinBox;
+    radioIndex_->setObjectName("radioIndex");
+    radioIndex_->setRange(-1, 15);
+    radioIndex_->setValue(-1);
+    radioIndex_->setSpecialValueText("do not tune");
     predictAz_ = new QDoubleSpinBox;
     predictAz_->setObjectName("predictAz");
     predictAz_->setRange(0, 360);
@@ -88,6 +93,7 @@ EquipmentWizard::EquipmentWizard(QWidget* parent)
     form->addRow("LNB max draw", lnbMa_);
     form->addRow("rotctld host", host_);
     form->addRow("rotctld port", port_);
+    form->addRow("Radio index", radioIndex_);
     form->addRow("Predicted AZ", predictAz_);
     form->addRow("Predicted EL", predictEl_);
     form->addRow("True RF", rfMHz_);
@@ -218,6 +224,7 @@ StationProfile EquipmentWizard::profile() const {
     profile.lnb.noiseFigureDb = nf_->value();
     profile.lnb.maxCurrentMa = lnbMa_->value();
     profile.trueRfHz = rfMHz_->value() * 1e6;
+    profile.radioIndex = radioIndex_->value();
     profile.horizontal = horizontal_->isChecked();
     profile.highBand = highBand_->isChecked();
     switch (mission_->currentIndex()) {
@@ -236,6 +243,7 @@ void EquipmentWizard::setProfile(const StationProfile& profile) {
     supplyMa_->setValue(profile.biasSupplyMa);
     lnbMa_->setValue(profile.lnb.maxCurrentMa);
     rfMHz_->setValue(profile.trueRfHz / 1e6);
+    radioIndex_->setValue(profile.radioIndex);
     horizontal_->setChecked(profile.horizontal);
     highBand_->setChecked(profile.highBand);
     mission_->setCurrentIndex(profile.mission == StationMission::GeoPark ? 1 :

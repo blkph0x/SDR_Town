@@ -542,7 +542,10 @@ peak claim. Manual does not call `moveTo`. `leadSky` aims one observed step ahea
 on the short azimuth path. The wizard mission combo is stored on the
 profile. Horizontal and high-band checkboxes select 18 V and 22 kHz.
 `sharedRotatorController` is the one process client for the Tools window
-and the station panel. A second `connectTo` is refused while it is open.
+and the station panel. A second `connectTo` is refused while it is open. `StationRadioBind`
+queues the IF through `retuneWithLease` as Satcom, without force, and
+requests RTL or SDRplay Bias-T for the internal backend. Tests install
+their own sink. DVB-S2 demod is not linked.
 D2 demod and commercial decrypt return false.
 
 ## Antenna control (DEC-0140 / T-0068)

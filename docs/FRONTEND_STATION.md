@@ -42,7 +42,12 @@ Universal Ku defaults are LO 9.75 GHz (low, no 22 kHz) and 10.60 GHz (high,
 22 kHz). Vertical/left is 13 V. Horizontal/right is 18 V. The panel checkboxes
 select that voltage and the 22 kHz high-band tone. The arm line shows the
 computed IF and the commanded voltage and tone. IF outside 950–2150 MHz
-is rejected.
+is rejected. Radio index -1 leaves the receiver alone. A selected index
+queues that IF on the Satcom lease and, for the internal backend, requests
+RTL or SDRplay Bias-T. A queued tune is not proof the hardware moved.
+An external supply does not toggle the dongle Bias-T; the station asks
+that dongle Bias-T to stay off. Driver acknowledgement is not a measured
+voltage.
 
 ## Bias-T
 

@@ -2,6 +2,7 @@
 
 #include "frontend/LnbConversion.h"
 #include "frontend/RotatorTrack.h"
+#include "frontend/StationRadio.h"
 
 #include <chrono>
 #include <cmath>
@@ -80,6 +81,28 @@ bool StationPassSession::arm(const PassChecklist& check, const StationProfile& p
     metrics_.add("lnb.ifHz", tune.ifHz);
     metrics_.add("lnb.voltageV", tune.voltageV);
     tunedIfHz_ = tune.ifHz;
+    if (profile.radioIndex >= 0) {
+        StationRadioRequest radio;
+        radio.tune = true;
+        radio.deviceIndex = static_cast<std::size_t>(profile.radioIndex);
+        radio.ifHz = tune.ifHz;
+        radio.biasEnable = true;
+        radio.biasBackend = profile.biasBackend;
+        radio.voltageV = tune.voltageV;
+        radio.tone22kHz = tune.tone22kHz;
+        std::string radioError;
+        if (!commandStationRadio(radio, &radioError)) {
+            power_.disable("tune-failed");
+            if (error) *error = radioError;
+            metrics_.addText("arm.reject", radioError);
+            return false;
+        }
+        metrics_.add("radio.ifHz", tune.ifHz);
+        metrics_.addText("radio.tune", "queued");
+        metrics_.addText("radio.bias", profile.biasBackend == BiasBackend::SdrInternal
+                             ? "internal-request"
+                             : "external-command");
+    }
     for (const auto& step : plan.steps) metrics_.addText("arm.step", step);
     passActive_ = true;
     tracking_ = profile.mission == StationMission::LeoTrack;
@@ -208,6 +231,16 @@ void StationPassSession::finish(const std::string& reason) {
     haveSky_ = false;
     haveSkyPair_ = false;
     timer_.stop();
+    if (profile_.radioIndex >= 0) {
+        StationRadioRequest radio;
+        radio.releaseLease = true;
+        radio.deviceIndex = static_cast<std::size_t>(profile_.radioIndex);
+        radio.biasBackend = profile_.biasBackend;
+        radio.biasEnable = false;
+        std::string radioError;
+        commandStationRadio(radio, &radioError);
+        metrics_.addText("radio.off", radioError.empty() ? "commanded" : radioError);
+    }
     power_.disable(reason);
     metrics_.addText("power-off", reason);
     metrics_.addText("pass-summary", reason);
