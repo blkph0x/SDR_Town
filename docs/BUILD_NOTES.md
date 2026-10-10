@@ -5,8 +5,9 @@
 `sdr_town_tests` Release: "SSTV listen hint names speakers and a virtual
 cable" PASS (8 assertions). `SDR_Town.exe` Release built. Dedicated SSTV
 plays its demod. A virtual-cable-only output also opens the default
-speakers. P25 control mute silences NFM and WFM only. Windows CI for this
-commit was not checked.
+speakers. P25 control mute silences NFM and WFM only. The frozen-P25
+guard accepts that exact window diff as DEC-0211. Windows CI on 0dc4d08
+failed the guard before this allowlist; the repair is a follow-up commit.
 
 ## 2026-10-10 - Pilots, higher constellations, and shaped samples
 

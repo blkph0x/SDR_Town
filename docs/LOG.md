@@ -6,7 +6,8 @@ A dedicated SSTV radio plays its demod on the selected outputs. If those
 outputs are only a virtual cable, the default speakers are opened too and
 the cable stays on. P25 control mute no longer silences USB, LSB, AM, or
 CW. The SSTV window says where the tones are going. P25 voice decode is
-still not shared with SSTV.
+still not shared with SSTV. The frozen-P25 guard accepts the exact
+window diff.
 
 ## 2026-10-10 - Pilots, higher constellations, and shaped samples
 

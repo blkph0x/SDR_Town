@@ -289,6 +289,21 @@ AUDIO_COMBO_DIGESTS = {
 }
 
 
+# DEC-0211: SSTV listen plays its demod and does not let P25 control mute
+# silence USB/LSB/AM/CW. Exact digests are c3a208c -> 0dc4d08. No hop,
+# slot, security, or vocoder change.
+SSTV_LISTEN_DIGESTS = {
+    "src/MainWindow.cpp": (
+        "af074b7b430e6ea0c07e80b4219afa12d31a94e764b9a2a6465c875ef1d501ac",
+        "0aae631f57a8e9ca7dde201d8906a7bd39b7e6d4d174bb994f0dd88541fccf65",
+    ),
+    "src/MainWindowP25Orchestration.cpp": (
+        "4c27e96d00456cb4ef530544ac1d7954272f36b322eb33e9fafa938247f11176",
+        "4b5f7d0fd565051b29667c9a1fe46394ec283c731d1fa9b7b0d1758df98b3bdb",
+    ),
+}
+
+
 # DEC-0209: Listen stable identity, stop unused Listen streams, analog HF
 # speech filter, display-only DC. No P25 hop/slot/security/vocoder. Exact
 # digests are cfdb6a3 (0.2.134) -> Listen/HF/spectrum wiring only.
@@ -338,6 +353,17 @@ P25_LOCKED_LATTICE_EMPTY_DIGESTS = {
 }
 
 
+def text_matches_digest(path: str, before: str, after: str, digests: dict[str, tuple[str, str]]) -> bool:
+    pair = digests.get(path)
+    if pair is None:
+        return False
+    actual = (
+        hashlib.sha256(before.encode("utf-8")).hexdigest(),
+        hashlib.sha256(after.encode("utf-8")).hexdigest(),
+    )
+    return actual == pair
+
+
 def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
     actual = (
         hashlib.sha256(before.encode("utf-8")).hexdigest(),
@@ -354,7 +380,8 @@ def infrastructure_text_allowed(path: str, before: str, after: str) -> bool:
                       P25_ENCRYPTED_GRANT_IQ_DIGESTS.get(path),
                       TX_STOP_MUTEX_DIGESTS.get(path),
                       AUDIO_COMBO_DIGESTS.get(path),
-                      LISTEN_HF_SPECTRUM_DIGESTS.get(path))
+                      LISTEN_HF_SPECTRUM_DIGESTS.get(path),
+                      SSTV_LISTEN_DIGESTS.get(path))
 
 
 # DEC-0160: read-only audio telemetry and consent checks; no DSP/follow edits.
@@ -865,6 +892,10 @@ def main() -> int:
         if args.paths is None and path in AUDIO_COMBO_DIGESTS:
             if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
                 print(f"P25 guard: accepted exact DEC-0208 audio/combo repair: {path}")
+                continue
+        if args.paths is None and path in SSTV_LISTEN_DIGESTS:
+            if text_matches_digest(path, git_file_text(args.base, path), git_file_text(args.head, path), SSTV_LISTEN_DIGESTS):
+                print(f"P25 guard: accepted exact DEC-0211 SSTV listen: {path}")
                 continue
         if args.paths is None and path in LISTEN_HF_SPECTRUM_DIGESTS:
             if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):

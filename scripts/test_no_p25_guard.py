@@ -155,7 +155,10 @@ def main() -> int:
         before = subprocess.check_output(
             ["git", "show", "cfdb6a3:" + path], cwd=ROOT, text=True, encoding="utf-8"
         )
-        after = (ROOT / path).read_text(encoding="utf-8").replace("\r\n", "\n")
+        after_ref = "c3a208c:" + path if path in MODULE.SSTV_LISTEN_DIGESTS else None
+        after = (subprocess.check_output(
+            ["git", "show", after_ref], cwd=ROOT, text=True, encoding="utf-8"
+        ) if after_ref else (ROOT / path).read_text(encoding="utf-8").replace("\r\n", "\n"))
         listen_hf_files[("before", path)] = before
         listen_hf_files[("after", path)] = after
         assert MODULE.infrastructure_text_allowed(path, before, after)
@@ -167,6 +170,27 @@ def main() -> int:
          patch.object(MODULE, "git_file_text", side_effect=lambda ref, path: listen_hf_files[(ref, path)]):
         assert MODULE.main() == 0
         listen_hf_files[("after", "include/Receiver.h")] += "\nRF change"
+        assert MODULE.main() == 1
+    sstv_listen_files = {}
+    for path in MODULE.SSTV_LISTEN_DIGESTS:
+        before = subprocess.check_output(
+            ["git", "show", "c3a208c:" + path], cwd=ROOT, text=True, encoding="utf-8"
+        )
+        after = subprocess.check_output(
+            ["git", "show", "0dc4d08:" + path], cwd=ROOT, text=True, encoding="utf-8"
+        )
+        sstv_listen_files[("before", path)] = before
+        sstv_listen_files[("after", path)] = after
+        assert MODULE.infrastructure_text_allowed(path, before, after)
+        assert not MODULE.infrastructure_text_allowed(path, before, after + "\nRF change")
+        assert not MODULE.infrastructure_text_allowed(path, after, before)
+        assert not MODULE.infrastructure_text_allowed("src/P25LiveDecoder.cpp", before, after)
+    with patch.object(MODULE, "parse_args", return_value=SimpleNamespace(base="before", head="after", paths=None)), \
+         patch.object(MODULE, "git_changed_paths", return_value=list(MODULE.SSTV_LISTEN_DIGESTS)), \
+         patch.object(MODULE, "git_file_text", side_effect=lambda ref, path: sstv_listen_files[(ref, path)]), \
+         patch.object(MODULE, "git_path_diff", return_value="not the accepted SSTV listen diff"):
+        assert MODULE.main() == 0
+        sstv_listen_files[("after", "src/MainWindow.cpp")] += "\nRF change"
         assert MODULE.main() == 1
     lifecycle_files = {}
     for path in MODULE.P25_FOLLOW_LIFECYCLE_DIGESTS:
