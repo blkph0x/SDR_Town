@@ -225,6 +225,28 @@ TEST_CASE("PL header sync finds the SOF and clear playback refuses scrambled TS"
     CHECK(quarter.shortFrame);
     CHECK(quarter.pilots);
 
+    constexpr float omega = 0.2f;
+    std::vector<std::complex<float>> drifting(130);
+    for (std::size_t i = 0; i < header.size(); ++i)
+        drifting[5 + i] = header[i] * std::polar(1.0f, 0.4f + omega * static_cast<float>(i));
+    const auto drift = detectDvbs2PlHeader(drifting.data(), drifting.size());
+    CHECK(drift.found);
+    CHECK(drift.symbolIndex == 5);
+    CHECK(drift.plsErrors == 0);
+    CHECK(drift.modcod == 4);
+    CHECK(std::abs(drift.frequencyRadPerSymbol - omega) < 0.02f);
+
+    constexpr float down = -0.15f;
+    std::vector<std::complex<float>> falling(coded.size());
+    for (std::size_t i = 0; i < coded.size(); ++i)
+        falling[i] = coded[i] * std::polar(1.0f, down * static_cast<float>(i));
+    const auto lowered = detectDvbs2PlHeader(falling.data(), falling.size());
+    CHECK(lowered.plsDecoded);
+    CHECK(lowered.modcod == 18);
+    CHECK(lowered.shortFrame);
+    CHECK(lowered.pilots);
+    CHECK(std::abs(lowered.frequencyRadPerSymbol - down) < 0.02f);
+
     const auto dir = std::filesystem::temp_directory_path() / "sdr-town-dvb-play";
     std::filesystem::create_directories(dir);
     const auto clearPath = (dir / "clear.ts").string();

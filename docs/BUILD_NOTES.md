@@ -1,5 +1,11 @@
 # Build notes
 
+## 2026-10-10 - SOF frequency estimate
+
+`FrontendStation` Release PASS (7.64 s): MODCOD 4 at +0.2 rad/symbol and
+MODCOD 18 at -0.15 rad/symbol. `AntennaControl` Release PASS (6.05 s).
+LDPC payload demod is still not linked.
+
 ## 2026-10-10 - SOF phase estimate
 
 `FrontendStation` Release PASS (7.62 s) on the second run: MODCOD 4 after

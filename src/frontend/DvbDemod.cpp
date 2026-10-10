@@ -124,45 +124,54 @@ PlHeaderHit detectDvbs2PlHeader(const std::complex<float>* symbols, std::size_t 
         step[i - 1] = expected[i] * std::conj(expected[i - 1]);
 
     float bestScore = 0.0f;
+    std::complex<float> bestResidual{};
     std::size_t at = 0;
     for (std::size_t start = 0; start + 26 <= count; ++start) {
-        float score = 0.0f;
+        std::complex<float> residual{};
         for (int i = 1; i < 26; ++i) {
             const auto got = symbols[start + static_cast<std::size_t>(i)]
                 * std::conj(symbols[start + static_cast<std::size_t>(i - 1)]);
-            score += std::real(got * std::conj(step[i - 1]));
+            residual += got * std::conj(step[i - 1]);
         }
+        const float score = std::abs(residual);
         if (score > bestScore) {
             bestScore = score;
+            bestResidual = residual;
             at = start;
         }
     }
     if (bestScore < 10.0f) return hit;
+    const float omega = std::arg(bestResidual);
+    hit.frequencyRadPerSymbol = omega;
+    auto wiped = [&](int index) {
+        return symbols[at + static_cast<std::size_t>(index)]
+            * std::polar(1.0f, -omega * static_cast<float>(index));
+    };
 
     std::complex<float> acc{};
     for (int i = 0; i < 26; ++i)
-        acc += symbols[at + static_cast<std::size_t>(i)] * std::conj(expected[i]);
+        acc += wiped(i) * std::conj(expected[i]);
     const float magnitude = std::abs(acc);
     if (magnitude < 1.0f) return hit;
     const auto derotate = std::conj(acc) / magnitude;
 
     int errors = 0;
     for (int i = 0; i < 26; ++i) {
-        const int bit = hardBit(symbols[at + static_cast<std::size_t>(i)] * derotate, static_cast<std::size_t>(i));
+        const int bit = hardBit(wiped(i) * derotate, static_cast<std::size_t>(i));
         if (bit != kSofBits[i]) ++errors;
     }
     hit.sofErrors = errors;
     hit.symbolIndex = at;
     hit.found = errors <= 4;
     if (!hit.found) return hit;
-    hit.note = "SOF phase estimated. LDPC payload demod is not linked.";
+    hit.note = "SOF frequency and phase estimated. LDPC payload demod is not linked.";
     if (at + 90 > count) return hit;
     int bits[64];
     for (int i = 0; i < 64; ++i)
-        bits[i] = hardBit(symbols[at + 26 + static_cast<std::size_t>(i)] * derotate, static_cast<std::size_t>(26 + i));
+        bits[i] = hardBit(wiped(26 + i) * derotate, static_cast<std::size_t>(26 + i));
     decodePls(bits, hit);
     if (hit.plsDecoded)
-        hit.note = "PLS MODCOD decoded after one SOF phase estimate. LDPC payload demod is not linked.";
+        hit.note = "PLS MODCOD decoded after one SOF frequency estimate. LDPC payload demod is not linked.";
     return hit;
 }
 

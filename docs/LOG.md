@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-10 - One SOF frequency estimate across the header
+
+The 25 SOF phase steps yield one radians-per-symbol offset. That offset
+and one phase are removed across the 90-symbol header. MODCOD 4 decodes
+at +0.2 rad/symbol and MODCOD 18 at -0.15 rad/symbol. This is not a
+payload tracking loop. LDPC payload demod is still not linked.
+
 ## 2026-10-10 - One SOF phase estimate before PLS
 
 Header search uses the SOF phase steps, then one constant phase is
