@@ -1,6 +1,8 @@
 # Task list (canonical)
 
 T-0124 | done | SSTV listen audio and P25 mute (ISS-0091 / DEC-0211) |
+Public experimental portable build is v0.2.136-experimental. Signed Latest
+stays 0.2.134.
 Dedicated SSTV plays its demod on the selected outputs. A virtual-cable-only
 selection also opens the default speakers and keeps the cable. P25 control
 mute silences NFM/WFM only. P25 voice decode is not shared. Tests:

@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-11 - v0.2.136 experimental pre-release
+
+Version 0.2.136. Portable experimental channel only. Signed Latest stays
+0.2.134. The SSTV listen fix is the release. DVB-S2 demod since
+0.2.135-experimental is included and still does not decode pictures.
+
 ## 2026-10-10 - SSTV listen is audible
 
 A dedicated SSTV radio plays its demod on the selected outputs. If those

@@ -1,5 +1,11 @@
 # Build notes
 
+## 2026-10-11 - v0.2.136 experimental pre-release
+
+CMake project version is 0.2.136. Release branch
+`release/v0.2.136-experimental`. Signed Latest remains 0.2.134. Public
+asset proof is recorded after Actions finishes.
+
 ## 2026-10-10 - SSTV listen is audible
 
 `sdr_town_tests` Release: "SSTV listen hint names speakers and a virtual

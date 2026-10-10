@@ -3,10 +3,10 @@ SDR TOWN — SOURCE OF TRUTH (SoT)
 ================================================================================
 VERSION: 1.0.0
 PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
-CURRENT VERSION IN TREE: 0.2.135 (Listen identity + HF filter + display DC)
-CURRENT WORK: DEC-0209: persist Listen by USB stableKey, stop unused Listen
-              streams, analog 200-2800 Hz HF filter below 30 MHz, display-only
-              spectrum DC. P25 DSP/gates unchanged. Next: RX USB quarantine.
+CURRENT VERSION IN TREE: 0.2.136 (audible SSTV listen, experimental)
+CURRENT WORK: DEC-0211: SSTV demod plays on the selected outputs. A virtual
+              cable also opens the default speakers. P25 control mute silences
+              NFM/WFM only. P25 voice decode is not shared. Next: RX USB quarantine.
 PUBLIC BASELINE: v0.2.123-experimental accepted, Actions37273822180; zero package
                  blockers (commit1b035aa acceptance comment203450320).
 LATEST PACKAGE: DEC-0196 replaces four permanent blocker strings with finite,

@@ -1,5 +1,10 @@
 # SDR Town
 
+0.2.136 plays SSTV tones on the selected outputs while you wait for a
+picture. A VB-Audio cable stays available for other SSTV programs, and
+P25 control mute no longer silences USB, LSB, AM, or CW. See
+[release notes](docs/RELEASE_0.2.136.md).
+
 0.2.135 keeps the chosen Listen radio by USB identity, stops unused Listen
 streams, adds a 200–2800 Hz HF speech filter below 30 MHz, and removes the
 display DC spike without touching decoder IQ. P25 DSP is unchanged. See
