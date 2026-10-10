@@ -1,5 +1,13 @@
 # Build notes
 
+## 2026-10-10 - SSTV listen is audible
+
+`sdr_town_tests` Release: "SSTV listen hint names speakers and a virtual
+cable" PASS (8 assertions). `SDR_Town.exe` Release built. Dedicated SSTV
+plays its demod. A virtual-cable-only output also opens the default
+speakers. P25 control mute silences NFM and WFM only. Windows CI for this
+commit was not checked.
+
 ## 2026-10-10 - Pilots, higher constellations, and shaped samples
 
 `FrontendStation` Release PASS (8.14 s): pilots, short 8PSK 3/5, short

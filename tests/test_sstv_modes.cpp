@@ -1,3 +1,4 @@
+#include "SstvListen.h"
 #include "SstvModes.h"
 #include "SstvVis.h"
 #include <catch2/catch_test_macros.hpp>
@@ -39,4 +40,18 @@ TEST_CASE("SSTV Dayton mode table matches VIS and dimensions", "[sstv]")
     REQUIRE(SstvVisDetector::modeName(8) == std::string_view("Robot 36"));
     REQUIRE(SstvVisDetector::modeName(95) == std::string_view("PD 120"));
     REQUIRE(SstvVisDetector::modeName(1) == std::string_view("Unknown"));
+}
+
+TEST_CASE("SSTV listen hint names speakers and a virtual cable", "[sstv]")
+{
+    REQUIRE(sstvNameIsVirtualCable("CABLE Input (VB-Audio Virtual Cable)"));
+    REQUIRE(sstvNameIsVirtualCable("VoiceMeeter Input"));
+    REQUIRE_FALSE(sstvNameIsVirtualCable("Speakers (GSX 1200 Pro Main Audio)"));
+    const auto onlyCable = sstvListenHint({"CABLE Input (VB-Audio Virtual Cable)"});
+    REQUIRE(onlyCable.find("Speakers stay quiet") != std::string::npos);
+    REQUIRE(onlyCable.find("CABLE Input") != std::string::npos);
+    const auto both = sstvListenHint({"Speakers (GSX 1200 Pro Main Audio)", "CABLE Input (VB-Audio Virtual Cable)"});
+    REQUIRE(both.find("You can hear the tones") != std::string::npos);
+    REQUIRE(both.find("other SSTV programs") != std::string::npos);
+    REQUIRE(sstvListenHint({}).find("No playback device") != std::string::npos);
 }

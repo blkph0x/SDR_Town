@@ -1,5 +1,11 @@
 # Task list (canonical)
 
+T-0124 | done | SSTV listen audio and P25 mute (ISS-0091 / DEC-0211) |
+Dedicated SSTV plays its demod on the selected outputs. A virtual-cable-only
+selection also opens the default speakers and keeps the cable. P25 control
+mute silences NFM/WFM only. P25 voice decode is not shared. Tests:
+`SSTV listen hint names speakers and a virtual cable`.
+
 T-0123 | in_progress | Station front-end LNB, Bias-T, rotator arm, D1 survey (DEC-0210) |
 Separate `frontend` session. Claimed NF, IF conversion, fail-closed Bias-T,
 arm checklist, `StationPassSession` 1 Hz `rotctld` ticks, abort stop/park/

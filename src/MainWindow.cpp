@@ -13,6 +13,7 @@
 #include "CwRfSession.h"
 #include "SstvImageFile.h"
 #include "SstvLiveSession.h"
+#include "SstvListen.h"
 #include "SstvRfLiveSession.h"
 #include "SstvRfRouter.h"
 #include "SstvModes.h"
@@ -11282,19 +11283,72 @@ SstvWindow* MainWindow::ensureSstvWindow(const QString& sessionId)
     auto* picker = new ReceiverSourcePicker([this] { std::lock_guard lock(receiversMutex); return receivers; }, window);
     static_cast<QVBoxLayout*>(window->layout())->insertWidget(0, picker);
     refreshDevices(window);
-    window->setLiveSource([picker,window](const std::shared_ptr<std::atomic<bool>>& finish,const QString& rfMode,
+    window->setLiveSource([this,picker,window](const std::shared_ptr<std::atomic<bool>>& finish,const QString& rfMode,
                                 const std::function<void(const QString&)>& routeStatus) -> SstvWindow::Decode {
+        AudioEngine* eng = peekAudioEngineIfReady();
+        if (!eng) eng = ensureAudioOutputActive("SSTV listen");
+        if (eng) {
+            try {
+                const auto listed = eng->enumeratePlaybackDevices();
+                std::vector<size_t> active;
+                bool speaker = false;
+                for (size_t i = 0; i < listed.size(); ++i) {
+                    if (!eng->isDeviceActive(i)) continue;
+                    active.push_back(i);
+                    if (!sstvNameIsVirtualCable(listed[i].name)) speaker = true;
+                }
+                if (!speaker && !active.empty()) {
+                    size_t add = size_t(-1);
+                    for (size_t i = 0; i < listed.size(); ++i)
+                        if (listed[i].isDefault && !sstvNameIsVirtualCable(listed[i].name)) { add = i; break; }
+                    if (add == size_t(-1))
+                        for (size_t i = 0; i < listed.size(); ++i)
+                            if (!sstvNameIsVirtualCable(listed[i].name)) { add = i; break; }
+                    if (add != size_t(-1)) {
+                        active.push_back(add);
+                        eng->setActiveOutputs(active);
+                        spdlog::info("SSTV listen kept the virtual cable and also opened {}", listed[add].name);
+                    }
+                }
+            } catch (const std::exception& ex) {
+                spdlog::warn("SSTV listen could not check playback devices: {}", ex.what());
+            }
+            window->setListenHint(QString::fromStdString(sstvListenHint(eng->getActiveDeviceNameList())));
+        } else {
+            window->setListenHint(QString::fromUtf8(sstvListenHint({}).c_str()));
+        }
+        const auto monitor = [this](const float* samples, size_t count, double rate) {
+            AudioEngine* playback = peekAudioEngineIfReady();
+            if (!playback || playback->isOutputMuted() || !samples || count == 0 || rate < 1000.0) return;
+            const double outRate = playback->getSampleRate();
+            if (outRate < 1000.0 || std::abs(outRate - rate) < 1.0) {
+                playback->pushAudio(samples, count);
+                return;
+            }
+            const double step = rate / outRate;
+            const size_t outCount = static_cast<size_t>(static_cast<double>(count) / step);
+            std::vector<float> pcm(outCount);
+            for (size_t i = 0; i < outCount; ++i) {
+                const double pos = static_cast<double>(i) * step;
+                const size_t idx = std::min(static_cast<size_t>(pos), count - 1);
+                const float frac = static_cast<float>(pos - static_cast<double>(idx));
+                const float a = samples[idx];
+                const float b = samples[std::min(idx + 1, count - 1)];
+                pcm[i] = a * (1.f - frac) + b * frac;
+            }
+            if (!pcm.empty()) playback->pushAudio(pcm.data(), pcm.size());
+        };
         const auto key = window->selectedDeviceKey();
         const auto frequency = window->selectedFrequencyHz();
         if (!key.isEmpty()) {
-            return [key,frequency,finish,rfMode,routeStatus](const QString&, const QString& output, const QString& mode, const auto& cancel, const auto& preview) {
-                return decodeSstvDedicatedRadio(key,frequency,output,mode,rfMode,[finish]{return finish->load();},cancel,preview,routeStatus);
+            return [key,frequency,finish,rfMode,routeStatus,monitor](const QString&, const QString& output, const QString& mode, const auto& cancel, const auto& preview) {
+                return decodeSstvDedicatedRadio(key,frequency,output,mode,rfMode,[finish]{return finish->load();},cancel,preview,routeStatus,monitor);
             };
         }
         auto receiver = picker->selected();
         if (!receiver) throw std::runtime_error("Select an available receiver before receiving SSTV");
-        return [receiver,finish,rfMode,routeStatus](const QString&, const QString& output, const QString& mode, const auto& cancel, const auto& preview) {
-            return decodeSstvRfLive(receiver,output,mode,rfMode,[finish]{return finish->load();},cancel,preview,routeStatus);
+        return [receiver,finish,rfMode,routeStatus,monitor](const QString&, const QString& output, const QString& mode, const auto& cancel, const auto& preview) {
+            return decodeSstvRfLive(receiver,output,mode,rfMode,[finish]{return finish->load();},cancel,preview,routeStatus,monitor);
         };
     });
     return window;

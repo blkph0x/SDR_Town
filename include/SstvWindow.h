@@ -29,6 +29,7 @@ public:
     ~SstvWindow() override;
     bool startDecode(const QString& input, const QString& output, const QString& mode);
     void setLiveSource(LiveOpen open);
+    void setListenHint(const QString& hint);
     void setRfDevices(const std::vector<std::pair<QString, QString>>& devices);
     QString selectedDeviceKey() const;
     double selectedFrequencyHz() const;
@@ -81,4 +82,5 @@ private:
     QImage original_;
     int scanline_ = -1;
     QString resultDirectory_;
+    QString listenHint_;
 };

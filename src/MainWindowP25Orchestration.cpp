@@ -360,6 +360,7 @@ void MainWindow::startP25LiveDecodePipeline()
                     bool monAudioLpfEnabled = true;
                     bool monHfNoiseFilter = false;
                     bool monP25ControlMute = false;
+                    bool controlMuteSilences = false;
                     bool monP25VoiceDecode = false;
                     bool monP25VoicePhase2 = false;
                     bool monP25IndependentTrafficSource = false;
@@ -547,6 +548,11 @@ void MainWindow::startP25LiveDecodePipeline()
                             monBw = 12500.0;
                             monLpf = std::min(monLpf, 3000.0);
                         }
+                        // P25 control mute silences NFM/WFM only. USB, LSB, AM, and CW
+                        // stay audible so HF SSTV is not blocked by a leftover mute.
+                        controlMuteSilences = monP25ControlMute
+                            && monMode != DemodMode::USB && monMode != DemodMode::LSB
+                            && monMode != DemodMode::AM && monMode != DemodMode::CW;
 
                         // Probe RF level at the nominal tune first so strong local HT
                         // can disable spectrum-AFC (AFC hunt → warble/robotic audio).
@@ -1058,10 +1064,10 @@ void MainWindow::startP25LiveDecodePipeline()
                             didWork = true;
                             continue;
                         }
-                        if ((monMode != DemodMode::NFM && monMode != DemodMode::USB && monMode != DemodMode::LSB) || monP25ControlMute || monP25VoiceDecode || rdsSourceGap)
+                        if ((monMode != DemodMode::NFM && monMode != DemodMode::USB && monMode != DemodMode::LSB) || controlMuteSilences || monP25VoiceDecode || rdsSourceGap)
                             rx.sstvFeed->discontinuity(); // Metadata only; never touches the P25/audio decoder.
                         if (p25ShouldSuppressAnalogDemod(monP25VoiceDecode,
-                                                         monP25ControlMute,
+                                                         controlMuteSilences,
                                                          monP25IndependentTrafficSource,
                                                          monP25VoicePhase2) &&
                             !monP25VoiceDecode) {
@@ -1143,9 +1149,9 @@ void MainWindow::startP25LiveDecodePipeline()
                                 const size_t queued = audioOutputEngine->getRingQueuedSamples();
                                 audioStarving = queued < static_cast<size_t>(std::max(1200.0, orate * 0.020));
                             }
-                            const bool decodeRds = monMode == DemodMode::WFM && !monP25ControlMute && !audioStarving;
-                            const bool decodeTones = monMode == DemodMode::NFM && !monP25ControlMute;
-                            const bool decodeSsbSstv = (monMode == DemodMode::USB || monMode == DemodMode::LSB) && !monP25ControlMute;
+                            const bool decodeRds = monMode == DemodMode::WFM && !controlMuteSilences && !audioStarving;
+                            const bool decodeTones = monMode == DemodMode::NFM && !controlMuteSilences;
+                            const bool decodeSsbSstv = (monMode == DemodMode::USB || monMode == DemodMode::LSB) && !controlMuteSilences;
                             const bool decodeData = decodeRds || decodeTones || decodeSsbSstv;
 
                             bool repEnabled = false, repDualWanted = false, repLogDtmf = false,
@@ -1626,7 +1632,11 @@ void MainWindow::startP25LiveDecodePipeline()
                             } else if (!monP25VoiceDecode) {
                                 // Analog demod: push PCM directly. Only trim when the ring is badly
                                 // behind (emergency). Trimming every block caused helicopter chop.
-                                if (audioOutputEngine) {
+                                // A dedicated SSTV lease is the monitor for this radio. Pushing
+                                // the main demod as well stacks a second copy on the speakers.
+                                const bool sstvOwnsRadio = mgr.deviceLeaseOwner(rx.deviceIndex)
+                                    == DeviceManager::DeviceLeaseOwner::Sstv;
+                                if (!sstvOwnsRadio && audioOutputEngine) {
                                     const size_t queued = audioOutputEngine->getRingQueuedSamples();
                                     const size_t emergencyCap = static_cast<size_t>(
                                         std::clamp(orate * 0.350, 8000.0, orate * 0.500));
@@ -1635,10 +1645,10 @@ void MainWindow::startP25LiveDecodePipeline()
                                     if (queued > emergencyCap)
                                         audioOutputEngine->trimQueuedAudio(softTarget, rxAudioOutputs);
                                 }
-                                if (audioOutputEngine && !ch.empty()) {
+                                if (!sstvOwnsRadio && audioOutputEngine && !ch.empty()) {
                                     // DEC-0209: analog speech-band only. Skip P25 voice/control and
                                     // never touch decoder IQ. 200-2800 Hz below 30 MHz.
-                                    rx.hfAudioFilter.process(ch, orate, monHfNoiseFilter && monFreq < 30e6 && !monP25VoiceDecode && !monP25ControlMute);
+                                    rx.hfAudioFilter.process(ch, orate, monHfNoiseFilter && monFreq < 30e6 && !monP25VoiceDecode && !controlMuteSilences);
                                     // Bypass 5 ms frame chunking for live NFM — fewer edge clicks.
                                     auto& pending = p25SpeakerPendingFor(pendingAudioByRx, rx).samples;
                                     if (!pending.empty()) {

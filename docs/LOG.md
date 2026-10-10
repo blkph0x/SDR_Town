@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-10-10 - SSTV listen is audible
+
+A dedicated SSTV radio plays its demod on the selected outputs. If those
+outputs are only a virtual cable, the default speakers are opened too and
+the cable stays on. P25 control mute no longer silences USB, LSB, AM, or
+CW. The SSTV window says where the tones are going. P25 voice decode is
+still not shared with SSTV.
+
 ## 2026-10-10 - Pilots, higher constellations, and shaped samples
 
 QPSK, 8PSK, 16APSK, and 32APSK frames decode, short and normal, with or

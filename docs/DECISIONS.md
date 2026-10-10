@@ -1,5 +1,20 @@
 # Decisions
 
+## DEC-0211 - SSTV listen stays audible (2026-10-10)
+
+A dedicated SSTV radio demodulates for the image decoder and does not
+share that audio with the speakers. A playback device that is only a
+VB-Audio cable is silent on the speakers and is what other SSTV programs
+decode. P25 control mute also silenced USB and LSB.
+
+Decision: while a radio is leased to SSTV, that demod is the monitor and
+the main analog push for that radio does not stack a second copy. If the
+only active outputs are virtual cables, also open the default speakers
+and leave the cable selected. P25 control mute silences NFM and WFM
+only; USB, LSB, AM, and CW stay audible. A receiver that is decoding
+P25 voice is still not shared with SSTV. The SSTV window says which
+outputs are playing.
+
 ## DEC-0210 - Station front-end: LNB, Bias-T, armed rotator tracking (2026-10-10)
 
 The station paper asks for LNB noise-figure profiles, external 13/18 V Bias-T,

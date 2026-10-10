@@ -54,10 +54,13 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent,const QString& sessionId)
     source_=new QComboBox(this); source_->setObjectName("sstvSource");
     source_->addItem("Recording","file"); form->addRow("Source",source_);
     device_=new QComboBox(this); device_->setObjectName("sstvDevice");
-    device_->addItem("Receiver tap",QString()); form->addRow("Radio",device_);
+    device_->addItem("Receiver tap",QString());
+    device_->setToolTip("Receiver tap uses the radio you are already listening to. A named radio is tuned by this window and plays the SSTV tones on the audio outputs named below.");
+    form->addRow("Radio",device_);
     frequency_=new QDoubleSpinBox(this); frequency_->setObjectName("sstvFrequency");
     frequency_->setRange(0.001,6000.0); frequency_->setDecimals(6); frequency_->setSuffix(" MHz");
     frequency_->setValue(QSettings().value(settingsPrefix_+"frequencyMHz",145.8).toDouble());
+    frequency_->setToolTip("Used when a named radio is selected. HF SSTV is usually USB near 7.171 MHz. VHF SSTV is usually NFM.");
     form->addRow("Frequency",frequency_);
     connect(device_,&QComboBox::currentIndexChanged,this,[this]{setBusy(busy());});
     auto row=[&](QLineEdit*& edit,QPushButton*& button,const QString& label,QStyle::StandardPixmap icon) {
@@ -84,11 +87,11 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent,const QString& sessionId)
     rfMode_=new QComboBox(this); rfMode_->setObjectName("sstvRfMode");
     rfMode_->addItem("Auto (USB / LSB / NFM)","auto");
     for(const auto* mode:{"USB","LSB","NFM","AM"}) rfMode_->addItem(mode,mode);
-    rfMode_->setToolTip("Auto requires a classic VIS header. Select a manual RF mode for headerless or extended-VIS transmissions. Does not change speaker mode.");
+    rfMode_->setToolTip("Auto listens in USB, LSB, and NFM until a classic VIS header wins. This does not change the main receiver mode. You should hear the tones on the outputs named in the status line. A VB-Audio cable alone leaves the speakers quiet and lets other SSTV programs decode that cable.");
     form->addRow("RF demodulation",rfMode_);
     rfStatus_=new QLabel("Not receiving",this); rfStatus_->setObjectName("sstvRfStatus");
     form->addRow("Detected RF route",rfStatus_);
-    hint_=new QLabel("Digital STWN is experimental and file-only. Not EasyPal compatible.",this);
+    hint_=new QLabel("Listen in USB on HF or NFM on VHF. You should hear the tones while waiting; the picture appears when a VIS header is found. P25 control mute does not silence this listen. If Audio output is only a VB-Audio cable, the speakers stay quiet and other SSTV programs can decode that cable — add your speakers in Audio settings to hear it here too. Digital STWN is experimental and file-only. Not EasyPal compatible.",this);
     hint_->setWordWrap(true);
     form->addRow(hint_);
     layout->addLayout(form);
@@ -148,6 +151,7 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent,const QString& sessionId)
     setBusy(false);
 }
 
+void SstvWindow::setListenHint(const QString& hint) { listenHint_ = hint; }
 void SstvWindow::setLiveSource(LiveOpen open) {
     if(busy()) return;
     liveOpen_=std::move(open);
@@ -217,7 +221,10 @@ bool SstvWindow::startDecode(const QString& input,const QString& output,const QS
     mode_->setCurrentIndex(mode_->findData(mode));
     images_->clear(); original_=QImage(); resultDirectory_=live?output:QString(); updatePreview();
     rfStatus_->setText(live?"searching":"Audio recording (no RF)");
-    status_->setText(live?"Listening for SSTV...":"Decoding..."); setBusy(true);
+    status_->setText(live
+        ? (listenHint_.isEmpty() ? QStringLiteral("Listening for SSTV...")
+                                 : QStringLiteral("Listening for SSTV... ") + listenHint_)
+        : QStringLiteral("Decoding...")); setBusy(true);
     struct Result {
         nlohmann::json report; QString error;
         std::mutex mutex;

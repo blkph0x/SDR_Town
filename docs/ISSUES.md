@@ -1,5 +1,14 @@
 # Issues (canonical)
 
+## ISS-0091 - SSTV listen is silent while a VB-Audio cable decodes elsewhere (2026-10-10, FIXED)
+
+Waiting for SSTV produced no speaker audio. Sending the same output to
+VB-Audio Virtual Cable let other SSTV programs decode the tones. A
+dedicated SSTV radio never pushed its demod to the playback devices, and
+P25 control mute also silenced USB and LSB. The window now names the
+outputs, keeps a virtual cable, and opens the speakers as well. P25
+voice decode is still not shared with SSTV.
+
 ## ISS-0090 - No LNB, external Bias-T, or rotator tracking on a satellite pass (2026-10-10, OPEN)
 
 Frequency auto-track exists. Motor tracking, LNB IF conversion, and an

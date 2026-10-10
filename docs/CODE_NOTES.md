@@ -1,5 +1,10 @@
 # Code notes (tree map)
 
+DEC-0211: `sstvListenHint` names speakers versus a VB-Audio cable.
+`decodeSstvDedicatedRadio` pushes 48 kHz demod audio while the lease is
+held, and the main analog push skips that radio. P25 control mute
+silences NFM/WFM only. The SSTV window status repeats the output names.
+
 DEC-0209: `resolveListenDevice` matches `stableKey` and returns `size_t(-1)`
 on missing or duplicate identity. `MainWindow::stopUnusedListenDevices`
 stops other Listen-owned streams. `HfAudioFilter` is analog playback only
