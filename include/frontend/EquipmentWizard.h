@@ -7,6 +7,7 @@
 #include <QDialog>
 
 class QCheckBox;
+class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class QLineEdit;
@@ -37,6 +38,7 @@ private:
     QCheckBox* tle_ = nullptr;
     QCheckBox* rotorOverride_ = nullptr;
     QCheckBox* follow_ = nullptr;
+    QComboBox* mission_ = nullptr;
     QLabel* sky_ = nullptr;
     QTimer* followTimer_ = nullptr;
     QLineEdit* host_ = nullptr;

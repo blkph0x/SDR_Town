@@ -536,7 +536,9 @@ Read/Follow armed pass uses `skyFeedFromPass`. Azimuth comes from the
 planner position list because the armed record stores elevation and
 Doppler only. `PlannerCapture.cpp` is linked into the application and
 not into the station tests, so those tests stay on the fail-closed
-default. Save pass log writes the profile JSON and metric JSONL.
+default. Save pass log writes the profile JSON and metric JSONL. GEO park commands
+one look. GEO box scan uses `planBoxScan` and stops at 49 dwells with no
+peak claim. Manual does not call `moveTo`.
 D2 demod and commercial decrypt return false.
 
 ## Antenna control (DEC-0140 / T-0068)

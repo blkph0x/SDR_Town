@@ -58,7 +58,11 @@ gone after a crash.
 the rotator, then Arm pass. The session sends one planned position per
 second. Soft limits are 0–360° azimuth and 0–90° elevation in this slice.
 An override checkbox skips the fresh-position check and is written into
-the metric log. Abort order is: record stop-worker, send stop, arm again,
+the metric log. LEO track sends a new position every second. GEO park
+sends the predicted azimuth and elevation once and holds. GEO box scan
+walks a raster of at most 49 dwells around that prediction and logs each
+command. It does not pick a peak. Manual arms power and does not move
+the rotator. Abort order is: record stop-worker, send stop, arm again,
 move to the saved park angles (default 0, 0), then command Bias-T off.
 A stop reply is not proof the motor is still. The metric log records
 commanded AZ/EL, reported AZ/EL, and AZ error. The app does not claim

@@ -10,6 +10,7 @@
 #include <QTimer>
 
 #include <string>
+#include <vector>
 
 // DEC-0210: one existing RotatorController, 1 Hz planned moves, fail-closed arm.
 // Stop acknowledgement is not proof the motor is still. Park is the saved
@@ -25,11 +26,13 @@ public:
     void setJogPaused(bool paused);
     void abort(const std::string& reason);
     bool tracking() const { return tracking_; }
+    double tunedIfHz() const { return tunedIfHz_; }
     const FrontEndMetrics& metrics() const { return metrics_; }
     const FrontEndPower& power() const { return power_; }
 
 private:
     void tick();
+    bool commandLook(double az, double el, const char* label);
     void beginPark();
     void finish(const std::string& reason);
     RotatorController& rotor_;
@@ -37,8 +40,14 @@ private:
     FrontEndMetrics metrics_;
     StationProfile profile_{};
     QTimer timer_;
+    bool passActive_ = false;
     bool tracking_ = false;
+    bool boxScan_ = false;
     bool jogPaused_ = false;
+    std::vector<double> boxAz_;
+    std::vector<double> boxEl_;
+    std::size_t boxIndex_ = 0;
+    double tunedIfHz_ = 0.0;
     bool aborting_ = false;
     bool parking_ = false;
     bool finishedAbort_ = false;

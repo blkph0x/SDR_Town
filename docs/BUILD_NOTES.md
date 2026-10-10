@@ -1,5 +1,12 @@
 # Build notes
 
+## 2026-10-10 - GEO park, manual hold, and box-scan cap
+
+`FrontendStation` Release PASS (4.50 s): a 15-point raster, rejection of
+a scan larger than 49 dwells with Bias-T still off, one GEO `+P` that
+does not repeat, a manual arm with no `+P`, and a one-point box scan
+that logs `box-scan complete`. `AntennaControl` Release PASS (5.84 s).
+
 ## 2026-10-10 - Station sky feed and pass folder
 
 `FrontendStation` Release PASS (1.58 s): rejected unarmed sample,

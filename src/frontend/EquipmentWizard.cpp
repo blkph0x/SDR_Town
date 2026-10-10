@@ -5,6 +5,7 @@
 #include "frontend/PassArming.h"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDateTime>
 #include <QDir>
 #include <QDoubleSpinBox>
@@ -61,6 +62,12 @@ EquipmentWizard::EquipmentWizard(QWidget* parent) : QDialog(parent) {
     rfMHz_->setDecimals(6);
     rfMHz_->setValue(11700);
     rfMHz_->setSuffix(" MHz");
+    mission_ = new QComboBox;
+    mission_->setObjectName("stationMission");
+    mission_->addItem("LEO track");
+    mission_->addItem("GEO park");
+    mission_->addItem("GEO box scan");
+    mission_->addItem("Manual");
     follow_ = new QCheckBox("Follow armed pass");
     follow_->setObjectName("followPlanner");
     sky_ = new QLabel("No planner sample yet");
@@ -79,6 +86,7 @@ EquipmentWizard::EquipmentWizard(QWidget* parent) : QDialog(parent) {
     form->addRow("Predicted AZ", predictAz_);
     form->addRow("Predicted EL", predictEl_);
     form->addRow("True RF", rfMHz_);
+    form->addRow("Mission", mission_);
     auto* root = new QVBoxLayout(this);
     root->addLayout(form);
     root->addWidget(caution_);
@@ -124,7 +132,8 @@ EquipmentWizard::EquipmentWizard(QWidget* parent) : QDialog(parent) {
         if (!session_->arm(checklist(), profile(), predictAz_->value(), predictEl_->value(), &error))
             plan_->setPlainText(QString::fromStdString(error));
         else
-            plan_->setPlainText("Pass armed. Bias-T command is not a measured voltage.");
+            plan_->setPlainText(QString("Pass armed. IF %1 MHz. Bias-T command is not a measured voltage.")
+                                    .arg(session_->tunedIfHz() / 1e6, 0, 'f', 3));
         power_->setText(session_->power().enabled() ? "Bias-T: commanded ON" : "Bias-T: OFF");
     });
     connect(abortButton, &QPushButton::clicked, this, [this] {
@@ -162,6 +171,9 @@ EquipmentWizard::EquipmentWizard(QWidget* parent) : QDialog(parent) {
         }
     });
     connect(followTimer_, &QTimer::timeout, this, [this] { applySky(true); });
+    connect(mission_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) {
+        refreshHint(predictEl_->value());
+    });
     syncCaution();
     refreshHint(30.0);
 }
@@ -191,6 +203,12 @@ StationProfile EquipmentWizard::profile() const {
     profile.lnb.noiseFigureDb = nf_->value();
     profile.lnb.maxCurrentMa = lnbMa_->value();
     profile.trueRfHz = rfMHz_->value() * 1e6;
+    switch (mission_->currentIndex()) {
+    case 1: profile.mission = StationMission::GeoPark; break;
+    case 2: profile.mission = StationMission::GeoBoxScan; break;
+    case 3: profile.mission = StationMission::Manual; break;
+    default: profile.mission = StationMission::LeoTrack; break;
+    }
     profile.biasBackend = BiasBackend::External;
     profile.mission = StationMission::LeoTrack;
     return profile;
@@ -202,6 +220,9 @@ void EquipmentWizard::setProfile(const StationProfile& profile) {
     supplyMa_->setValue(profile.biasSupplyMa);
     lnbMa_->setValue(profile.lnb.maxCurrentMa);
     rfMHz_->setValue(profile.trueRfHz / 1e6);
+    mission_->setCurrentIndex(profile.mission == StationMission::GeoPark ? 1 :
+                              profile.mission == StationMission::GeoBoxScan ? 2 :
+                              profile.mission == StationMission::Manual ? 3 : 0);
     syncCaution();
 }
 
@@ -246,7 +267,7 @@ void EquipmentWizard::refreshHint(double elevationDeg, bool updatePlan) {
     const auto hint = linkMarginHint(dish_->value(), nf_->value(), elevationDeg, 10.0);
     hint_->setText(QString("Margin hint: %1 (qualitative, not a measured C/N)").arg(linkMarginHintName(hint)));
     if (!updatePlan) return;
-    const auto arm = planPassArm(checklist(), StationMission::LeoTrack);
+    const auto arm = planPassArm(checklist(), profile().mission);
     plan_->setPlainText(arm.accepted ? QString::fromStdString("Arm: " + arm.steps.front()) : QString::fromStdString(arm.reject));
 }
 

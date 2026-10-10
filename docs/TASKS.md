@@ -6,7 +6,9 @@ arm checklist, `StationPassSession` 1 Hz `rotctld` ticks, abort stop/park/
 power-off, metric JSONL, spectrum survey, clear-TS PID inventory.
 Read/Follow armed pass copies planner AZ/EL and Doppler RF when the look
 and TLE age pass `skyFeedFromPass`. Pass folder is profile JSON plus
-metrics JSONL. Lease/IF boxes stay attestations. No Hamlib link, no P25
+metrics JSONL. GEO park slews once. GEO box scan is capped at 49 dwells
+and does not declare a peak. Manual does not move. Lease/IF boxes stay
+attestations. No Hamlib link, no P25
 edits, no commercial decrypt. D2 demod not linked. Tests: `frontend_station_tests`.
 
 T-0122 | in_progress | Listen identity, unused stream stop, HF filter (ISS-0089 / DEC-0209) |

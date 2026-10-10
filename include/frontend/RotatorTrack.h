@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 struct TrackLimits {
     double minAz = 0.0;
@@ -26,3 +27,14 @@ double feedForwardAz(double azNow, double azNext, double sampleSec, double leadS
 TrackPoint planTrackTick(bool armed, bool fresh, bool autoEnabled, bool jogPaused,
                          const TrackLimits& limits, double predictedAz, double predictedEl,
                          double backlashDeg, double previousAz);
+
+// Inclusive raster around a GEO prediction. Each axis is at most 7 points,
+// so a scan is at most 49 dwells. A larger request is rejected.
+struct BoxScan {
+    bool accepted = false;
+    std::string reject;
+    std::vector<double> azimuthDeg;
+    std::vector<double> elevationDeg;
+};
+
+BoxScan planBoxScan(double centerAz, double centerEl, double spanAzDeg, double spanElDeg, double stepDeg);

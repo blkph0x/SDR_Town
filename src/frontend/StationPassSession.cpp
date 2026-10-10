@@ -29,7 +29,7 @@ StationPassSession::StationPassSession(RotatorController& rotor, QObject* parent
 
 bool StationPassSession::arm(const PassChecklist& check, const StationProfile& profile,
                              double predictAz, double predictEl, std::string* error) {
-    if (tracking_ || aborting_) {
+    if (passActive_ || aborting_) {
         if (error) *error = "A pass is already active";
         return false;
     }
@@ -39,10 +39,23 @@ bool StationPassSession::arm(const PassChecklist& check, const StationProfile& p
         metrics_.addText("arm.reject", plan.reject);
         return false;
     }
+    BoxScan box;
+    if (profile.mission == StationMission::GeoBoxScan) {
+        box = planBoxScan(predictAz, predictEl, profile.boxSpanAzDeg, profile.boxSpanElDeg, profile.boxStepDeg);
+        if (!box.accepted) {
+            if (error) *error = box.reject;
+            metrics_.addText("arm.reject", box.reject);
+            return false;
+        }
+    }
     profile_ = profile;
     predictAz_ = predictAz;
     predictEl_ = predictEl;
     finishedAbort_ = false;
+    boxScan_ = false;
+    boxAz_.clear();
+    boxEl_.clear();
+    boxIndex_ = 0;
     std::string powerError;
     if (!power_.selectBackend(profile.biasBackend, &powerError)) {
         if (error) *error = powerError;
@@ -63,10 +76,19 @@ bool StationPassSession::arm(const PassChecklist& check, const StationProfile& p
     }
     metrics_.add("lnb.ifHz", tune.ifHz);
     metrics_.add("lnb.voltageV", tune.voltageV);
+    tunedIfHz_ = tune.ifHz;
     for (const auto& step : plan.steps) metrics_.addText("arm.step", step);
+    passActive_ = true;
     tracking_ = profile.mission == StationMission::LeoTrack;
-    if (tracking_) timer_.start();
-    tick();
+    if (profile.mission == StationMission::GeoBoxScan) {
+        boxAz_ = box.azimuthDeg;
+        boxEl_ = box.elevationDeg;
+        boxScan_ = true;
+        timer_.start();
+    }
+    if (tracking_ || boxScan_) tick();
+    else if (profile.mission == StationMission::GeoPark)
+        commandLook(predictAz_, predictEl_, "slew-park");
     if (error) error->clear();
     return true;
 }
@@ -87,22 +109,44 @@ void StationPassSession::noteSky(double az, double el, double trueRfHz, double d
 
 void StationPassSession::setJogPaused(bool paused) { jogPaused_ = paused; }
 
-void StationPassSession::tick() {
-    if (!tracking_) return;
+bool StationPassSession::commandLook(double az, double el, const char* label) {
     TrackLimits limits;
     const auto point = planTrackTick(rotor_.armed(), rotor_.fresh(), true, jogPaused_, limits,
-                                     predictAz_, predictEl_, profile_.backlashDeg,
-                                     haveReport_ ? reportedAz_ : predictAz_);
-    metrics_.addText("track", point.reason);
-    if (!point.send) return;
+                                     az, el, profile_.backlashDeg,
+                                     haveReport_ ? reportedAz_ : az);
+    metrics_.addText(label, point.reason);
+    if (!point.send) return false;
     metrics_.add("rotator.commandAz", point.az);
     metrics_.add("rotator.commandEl", point.el);
     rotor_.moveTo(point.az, point.el);
+    return true;
+}
+
+void StationPassSession::tick() {
+    if (boxScan_) {
+        if (boxIndex_ >= boxAz_.size()) {
+            timer_.stop();
+            boxScan_ = false;
+            metrics_.addText("box-scan", "complete");
+            return;
+        }
+        if (!commandLook(boxAz_[boxIndex_], boxEl_[boxIndex_], "box-scan")) return;
+        ++boxIndex_;
+        if (boxIndex_ >= boxAz_.size()) {
+            timer_.stop();
+            boxScan_ = false;
+            metrics_.addText("box-scan", "complete");
+        }
+        return;
+    }
+    if (!tracking_) return;
+    commandLook(predictAz_, predictEl_, "track");
 }
 
 void StationPassSession::abort(const std::string& reason) {
     if (finishedAbort_) return;
     tracking_ = false;
+    boxScan_ = false;
     timer_.stop();
     aborting_ = true;
     metrics_.addText("stop-worker", reason.empty() ? "abort" : reason);
@@ -128,6 +172,8 @@ void StationPassSession::finish(const std::string& reason) {
     aborting_ = false;
     parking_ = false;
     tracking_ = false;
+    boxScan_ = false;
+    passActive_ = false;
     timer_.stop();
     power_.disable(reason);
     metrics_.addText("power-off", reason);

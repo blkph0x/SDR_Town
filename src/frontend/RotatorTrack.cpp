@@ -38,3 +38,34 @@ TrackPoint planTrackTick(bool armed, bool fresh, bool autoEnabled, bool jogPause
     out.reason = out.clamped ? "clamped" : "track";
     return out;
 }
+
+BoxScan planBoxScan(double centerAz, double centerEl, double spanAzDeg, double spanElDeg, double stepDeg) {
+    BoxScan scan;
+    if (!std::isfinite(centerAz) || !std::isfinite(centerEl) ||
+        !std::isfinite(spanAzDeg) || !std::isfinite(spanElDeg) || !std::isfinite(stepDeg) ||
+        spanAzDeg < 0.0 || spanElDeg < 0.0 || !(stepDeg > 0.0) ||
+        spanAzDeg > 8.0 || spanElDeg > 8.0) {
+        scan.reject = "Box scan span or step is not usable";
+        return scan;
+    }
+    const auto count = [](double span, double step) {
+        if (span == 0.0) return 1;
+        return static_cast<int>(std::floor(span / step + 1e-6)) + 1;
+    };
+    const int azCount = count(spanAzDeg, stepDeg);
+    const int elCount = count(spanElDeg, stepDeg);
+    if (azCount < 1 || elCount < 1 || azCount > 7 || elCount > 7) {
+        scan.reject = "Box scan is larger than 49 dwells";
+        return scan;
+    }
+    for (int el = 0; el < elCount; ++el) {
+        const double elOffset = elCount == 1 ? 0.0 : (-spanElDeg / 2.0 + el * stepDeg);
+        for (int az = 0; az < azCount; ++az) {
+            const double azOffset = azCount == 1 ? 0.0 : (-spanAzDeg / 2.0 + az * stepDeg);
+            scan.azimuthDeg.push_back(centerAz + azOffset);
+            scan.elevationDeg.push_back(centerEl + elOffset);
+        }
+    }
+    scan.accepted = true;
+    return scan;
+}

@@ -50,6 +50,11 @@ The pass folder is `station-profile.json` plus `metrics.jsonl`. The
 planner reader is installed by the application, not by the unit-test
 binaries.
 
+GEO park commands the predicted azimuth and elevation once. GEO box scan
+commands a raster of at most 49 dwells and does not declare a signal
+peak. Manual arms power without moving the rotator. A second arm is
+refused until teardown finishes.
+
 ## DEC-0209 - Listen identity, unused-stream stop, analog HF filter (2026-10-10)
 
 PR #34 (draft, fubarzi) added Listen persistence, spectrum controls, and an

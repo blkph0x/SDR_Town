@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-10 - GEO park and box scan command the rotator
+
+GEO park slews once to the predicted azimuth and elevation and holds.
+GEO box scan walks at most 49 dwells and does not declare a peak.
+Manual arms Bias-T and does not move. A raster larger than that cap is
+refused before power is commanded. The arm line shows the computed IF.
+
 ## 2026-10-10 - Armed pass feeds the station panel
 
 Read armed pass copies planner azimuth, elevation, and Doppler-corrected

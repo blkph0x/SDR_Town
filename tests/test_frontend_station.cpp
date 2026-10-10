@@ -14,6 +14,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QHostAddress>
@@ -220,6 +221,134 @@ TEST_CASE("Pass session commands the rotator then stop and park on abort") {
     REQUIRE(waitFor([&] { return !session.power().enabled(); }));
 }
 
+TEST_CASE("Box scan rejects a raster larger than 49 dwells") {
+    const auto scan = planBoxScan(180, 40, 2, 1, 0.5);
+    REQUIRE(scan.accepted);
+    CHECK(scan.azimuthDeg.size() == 15);
+    CHECK(scan.azimuthDeg.front() == 179);
+    CHECK(scan.azimuthDeg[4] == 181);
+    CHECK(scan.elevationDeg.front() == 39.5);
+    CHECK(scan.elevationDeg.back() == 40.5);
+    const auto huge = planBoxScan(180, 40, 8, 1, 0.5);
+    CHECK_FALSE(huge.accepted);
+    CHECK(huge.reject == "Box scan is larger than 49 dwells");
+    RotatorController rotor;
+    StationPassSession session(rotor);
+    PassChecklist check;
+    check.leaseHeld = true;
+    check.ifInSdrSpan = true;
+    check.tleFreshOrNotRequired = true;
+    check.biasCurrentOk = true;
+    check.rotatorReadyOrOverride = true;
+    check.powerConfirmed = true;
+    StationProfile profile;
+    profile.biasBackend = BiasBackend::External;
+    profile.mission = StationMission::GeoBoxScan;
+    profile.trueRfHz = 11.7e9;
+    profile.boxSpanAzDeg = 8;
+    profile.boxStepDeg = 0.5;
+    std::string error;
+    CHECK_FALSE(session.arm(check, profile, 180, 40, &error));
+    CHECK(error == "Box scan is larger than 49 dwells");
+    CHECK_FALSE(session.power().enabled());
+}
+
+TEST_CASE("GEO park slews once, manual holds, and a one-point box scan completes") {
+    QTcpServer server;
+    REQUIRE(server.listen(QHostAddress::LocalHost));
+    QStringList commands;
+    QObject::connect(&server, &QTcpServer::newConnection, &server, [&] {
+        while (auto* socket = server.nextPendingConnection()) {
+            QObject::connect(socket, &QTcpSocket::readyRead, socket, [&, socket] {
+                while (socket->canReadLine()) {
+                    const auto cmd = socket->readLine();
+                    commands << QString::fromLatin1(cmd).trimmed();
+                    QByteArray reply;
+                    if (cmd == "+p\n") reply = "get_pos:\nAzimuth: 180\nElevation: 45\nRPRT 0\n";
+                    else if (cmd.startsWith("+P ")) reply = "set_pos: " + cmd.mid(3).trimmed() + "\nRPRT 0\n";
+                    else if (cmd == "+S\n") reply = "stop:\nRPRT 0\n";
+                    else FAIL("Unexpected command");
+                    socket->write(reply);
+                }
+            });
+        }
+    });
+    auto waitFor = [](const std::function<bool()>& ready) {
+        QElapsedTimer timer;
+        timer.start();
+        while (!ready() && timer.elapsed() < 2500) {
+            QApplication::processEvents();
+            QThread::msleep(1);
+        }
+        return ready();
+    };
+    auto positionCommands = [&] {
+        int count = 0;
+        for (const auto& cmd : commands)
+            if (cmd.startsWith("+P ")) ++count;
+        return count;
+    };
+    RotatorController rotor;
+    rotor.connectTo("127.0.0.1", server.serverPort(), {});
+    REQUIRE(waitFor([&] { return rotor.fresh(); }));
+    REQUIRE(rotor.arm());
+    PassChecklist check;
+    check.leaseHeld = true;
+    check.ifInSdrSpan = true;
+    check.tleFreshOrNotRequired = true;
+    check.biasCurrentOk = true;
+    check.rotatorReadyOrOverride = true;
+    check.powerConfirmed = true;
+    StationProfile profile;
+    profile.biasBackend = BiasBackend::External;
+    profile.trueRfHz = 11.7e9;
+    profile.parkAz = 0;
+    profile.parkEl = 0;
+    std::string error;
+    StationPassSession session(rotor);
+
+    profile.mission = StationMission::GeoPark;
+    REQUIRE(session.arm(check, profile, 20, 30, &error));
+    REQUIRE(waitFor([&] { return commands.contains("+P 20.000 30.000"); }));
+    const int afterPark = positionCommands();
+    QElapsedTimer hold;
+    hold.start();
+    while (hold.elapsed() < 200) {
+        QApplication::processEvents();
+        QThread::msleep(1);
+    }
+    CHECK(positionCommands() == afterPark);
+    CHECK(session.tunedIfHz() > 900e6);
+    session.abort("test");
+    REQUIRE(waitFor([&] { return !session.power().enabled(); }));
+
+    profile.mission = StationMission::Manual;
+    const int beforeManual = positionCommands();
+    REQUIRE(session.arm(check, profile, 20, 30, &error));
+    hold.restart();
+    while (hold.elapsed() < 200) {
+        QApplication::processEvents();
+        QThread::msleep(1);
+    }
+    CHECK(positionCommands() == beforeManual);
+    CHECK(session.power().enabled());
+    session.abort("test");
+    REQUIRE(waitFor([&] { return !session.power().enabled(); }));
+
+    profile.mission = StationMission::GeoBoxScan;
+    profile.boxSpanAzDeg = 0;
+    profile.boxSpanElDeg = 0;
+    profile.boxStepDeg = 0.5;
+    REQUIRE(session.arm(check, profile, 15, 25, &error));
+    REQUIRE(waitFor([&] { return commands.contains("+P 15.000 25.000"); }));
+    bool complete = false;
+    for (const auto& row : session.metrics().records())
+        if (row.name == "box-scan" && row.text == "complete") complete = true;
+    CHECK(complete);
+    session.abort("test");
+    REQUIRE(waitFor([&] { return !session.power().enabled(); }));
+}
+
 TEST_CASE("Equipment wizard defaults Bias-T off and flags a sub-0.2 dB claim") {
     EquipmentWizard wizard;
     auto* confirm = wizard.findChild<QCheckBox*>("biasConfirm");
@@ -237,6 +366,7 @@ TEST_CASE("Equipment wizard defaults Bias-T off and flags a sub-0.2 dB claim") {
     CHECK(wizard.findChild<QDoubleSpinBox*>("predictAz")->value() == 180);
     CHECK_FALSE(wizard.findChild<QCheckBox*>("attestTle")->isChecked());
     CHECK_FALSE(wizard.findChild<QCheckBox*>("followPlanner")->isChecked());
+    CHECK(wizard.findChild<QComboBox*>("stationMission")->currentText() == "LEO track");
 }
 
 TEST_CASE("Sky feed accepts Doppler only for an armed in-mask fresh pass") {

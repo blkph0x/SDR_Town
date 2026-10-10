@@ -18,6 +18,9 @@ struct StationProfile {
     double backlashDeg = 0.0;
     double parkAz = 0.0;
     double parkEl = 0.0;
+    double boxSpanAzDeg = 2.0;
+    double boxSpanElDeg = 1.0;
+    double boxStepDeg = 0.5;
     double trueRfHz = 11.7e9;
     bool horizontal = false;
     bool highBand = false;
