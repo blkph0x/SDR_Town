@@ -175,6 +175,178 @@ PlHeaderHit detectDvbs2PlHeader(const std::complex<float>* symbols, std::size_t 
     return hit;
 }
 
+namespace {
+struct BbPrbs {
+    int cell[15] = {1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0};
+    int next() {
+        const int out = cell[14];
+        const int feedback = cell[13] ^ cell[14];
+        for (int i = 14; i > 0; --i) cell[i] = cell[i - 1];
+        cell[0] = feedback;
+        return out;
+    }
+};
+
+std::uint8_t crc8Dvb(const std::uint8_t* data, std::size_t size) {
+    std::uint8_t crc = 0;
+    for (std::size_t i = 0; i < size; ++i) {
+        for (int bit = 7; bit >= 0; --bit) {
+            const int mix = ((crc >> 7) & 1) ^ ((data[i] >> bit) & 1);
+            crc = static_cast<std::uint8_t>(crc << 1);
+            if (mix) crc ^= 0xD5;
+        }
+    }
+    return crc;
+}
+
+int readBe16(const std::uint8_t* data) {
+    return (static_cast<int>(data[0]) << 8) | data[1];
+}
+
+void fillGold(std::vector<std::uint8_t>& x, std::vector<std::uint8_t>& y, int span) {
+    x.assign(static_cast<std::size_t>(span), 0);
+    y.assign(static_cast<std::size_t>(span), 1);
+    x[0] = 1;
+    for (int i = 0; i + 18 < span; ++i) {
+        x[static_cast<std::size_t>(i + 18)] = x[static_cast<std::size_t>(i + 7)] ^ x[static_cast<std::size_t>(i)];
+        y[static_cast<std::size_t>(i + 18)] = y[static_cast<std::size_t>(i + 10)] ^ y[static_cast<std::size_t>(i + 7)]
+            ^ y[static_cast<std::size_t>(i + 5)] ^ y[static_cast<std::size_t>(i)];
+    }
+}
+
+std::complex<float> gold0Symbol(const std::vector<std::uint8_t>& x, const std::vector<std::uint8_t>& y, int index) {
+    constexpr int kPeriod = 262143;
+    const int late = (index + 131072) % kPeriod;
+    const int zn = x[static_cast<std::size_t>(index)] ^ y[static_cast<std::size_t>(index)];
+    const int znLate = x[static_cast<std::size_t>(late)] ^ y[static_cast<std::size_t>(late)];
+    const int rn = 2 * znLate + zn;
+    if (rn == 0) return {1.0f, 0.0f};
+    if (rn == 1) return {0.0f, 1.0f};
+    if (rn == 2) return {-1.0f, 0.0f};
+    return {0.0f, -1.0f};
+}
+}
+
+std::vector<std::uint8_t> scrambleBbFrame(const std::uint8_t* data, std::size_t size) {
+    std::vector<std::uint8_t> out(size);
+    if (!data || size == 0) return out;
+    BbPrbs prbs;
+    for (std::size_t i = 0; i < size; ++i) {
+        int mask = 0;
+        for (int bit = 0; bit < 8; ++bit) mask = (mask << 1) | prbs.next();
+        out[i] = static_cast<std::uint8_t>(data[i] ^ mask);
+    }
+    return out;
+}
+
+BbFrameTs extractClearTsFromBbFrame(const std::uint8_t* data, std::size_t size) {
+    BbFrameTs result;
+    result.reject = "LDPC is not applied. The baseband bytes must already be in hand.";
+    if (!data || size < 10) {
+        result.reject = "BBFRAME is shorter than the header";
+        return result;
+    }
+    const auto clear = scrambleBbFrame(data, size);
+    result.headerCrcOk = crc8Dvb(clear.data(), 9) == clear[9];
+    if (!result.headerCrcOk) {
+        result.reject = "BBHEADER CRC failed";
+        return result;
+    }
+    const int tsGs = (clear[0] >> 6) & 3;
+    const int upl = readBe16(clear.data() + 2);
+    const int dfl = readBe16(clear.data() + 4);
+    const int sync = clear[6];
+    const int syncd = readBe16(clear.data() + 7);
+    if (tsGs != 3 || upl != 188 * 8) {
+        result.reject = "Not a single MPEG transport-stream baseband frame";
+        return result;
+    }
+    if (upl == 0 || (dfl % 8) != 0 || (syncd % 8) != 0) {
+        result.reject = "Baseband field is not byte aligned";
+        return result;
+    }
+    const int dataBytes = dfl / 8;
+    const int offset = syncd / 8;
+    if (10 + dataBytes > static_cast<int>(clear.size()) || offset > dataBytes) {
+        result.reject = "DATA FIELD is truncated";
+        return result;
+    }
+    const int packetBytes = upl / 8;
+    int cursor = offset;
+    while (cursor + packetBytes <= dataBytes) {
+        const std::uint8_t* packet = clear.data() + 10 + cursor;
+        ++result.packets;
+        if (crc8Dvb(packet + 1, static_cast<std::size_t>(packetBytes - 1)) != packet[0]) {
+            result.reject = "User packet CRC failed";
+            cursor += packetBytes;
+            continue;
+        }
+        const int scrambling = packet[3] >> 6;
+        if (scrambling != 0) {
+            ++result.scrambledPackets;
+            cursor += packetBytes;
+            continue;
+        }
+        result.clearTs.push_back(static_cast<std::uint8_t>(sync));
+        result.clearTs.insert(result.clearTs.end(), packet + 1, packet + packetBytes);
+        cursor += packetBytes;
+    }
+    if (!result.clearTs.empty())
+        result.reject.clear();
+    else if (result.scrambledPackets > 0)
+        result.reject = "Scrambled transport packets are not emitted";
+    else if (result.packets == 0)
+        result.reject = "No clear transport packet in the baseband frame";
+    return result;
+}
+
+QpskHardBits sliceQpskAfterPlDescramble(const std::complex<float>* symbols, std::size_t count, int modcod) {
+    QpskHardBits out;
+    out.note = "Pre-FEC QPSK hard bits. LDPC is not applied.";
+    if (modcod < 1 || modcod > 11) {
+        out.note = "Not a QPSK MODCOD. LDPC is not applied.";
+        return out;
+    }
+    if (!symbols || count == 0) return out;
+    const int span = static_cast<int>(count) + 131072 + 20;
+    std::vector<std::uint8_t> x;
+    std::vector<std::uint8_t> y;
+    fillGold(x, y, span);
+    out.bits.reserve(count * 2);
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto symbol = symbols[i] * std::conj(gold0Symbol(x, y, static_cast<int>(i)));
+        out.bits.push_back(symbol.real() < 0.0f ? 1 : 0);
+        out.bits.push_back(symbol.imag() < 0.0f ? 1 : 0);
+    }
+    out.sliced = true;
+    return out;
+}
+
+std::vector<std::complex<float>> modulateQpsk(const int* bits, std::size_t bitCount) {
+    std::vector<std::complex<float>> out;
+    if (!bits || (bitCount % 2) != 0) return out;
+    out.reserve(bitCount / 2);
+    for (std::size_t i = 0; i < bitCount; i += 2) {
+        const float inPhase = bits[i] ? -0.70710678118f : 0.70710678118f;
+        const float quadrature = bits[i + 1] ? -0.70710678118f : 0.70710678118f;
+        out.push_back({inPhase, quadrature});
+    }
+    return out;
+}
+
+std::vector<std::complex<float>> scramblePlSymbols(const std::complex<float>* symbols, std::size_t count) {
+    std::vector<std::complex<float>> out;
+    if (!symbols || count == 0) return out;
+    const int span = static_cast<int>(count) + 131072 + 20;
+    std::vector<std::uint8_t> x;
+    std::vector<std::uint8_t> y;
+    fillGold(x, y, span);
+    out.reserve(count);
+    for (std::size_t i = 0; i < count; ++i)
+        out.push_back(symbols[i] * gold0Symbol(x, y, static_cast<int>(i)));
+    return out;
+}
+
 ClearTsPlayback writeClearTsForPlayback(const std::uint8_t* data, std::size_t size, const std::string& path) {
     ClearTsPlayback out;
     const auto inventory = inventoryClearTransportStream(data, size);

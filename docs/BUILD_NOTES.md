@@ -1,5 +1,11 @@
 # Build notes
 
+## 2026-10-10 - BBFRAME and pre-FEC QPSK
+
+`FrontendStation` Release PASS (7.72 s): one clear packet from a scrambled
+BBFRAME, a scrambled packet omitted, and eight QPSK bits after the PL Gold
+code. `AntennaControl` Release PASS (6.02 s). LDPC is still not linked.
+
 ## 2026-10-10 - SOF frequency estimate
 
 `FrontendStation` Release PASS (7.64 s): MODCOD 4 at +0.2 rad/symbol and

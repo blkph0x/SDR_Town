@@ -267,6 +267,74 @@ TEST_CASE("PL header sync finds the SOF and clear playback refuses scrambled TS"
     std::filesystem::remove_all(dir);
 }
 
+TEST_CASE("BBFRAME extraction and pre-FEC QPSK bits refuse LDPC claims") {
+    std::vector<std::uint8_t> zero(1, 0);
+    const auto prefix = scrambleBbFrame(zero.data(), zero.size());
+    REQUIRE(prefix.size() == 1);
+    CHECK(prefix[0] == 0x01);
+
+    auto crc8 = [](const std::uint8_t* data, std::size_t size) {
+        std::uint8_t crc = 0;
+        for (std::size_t i = 0; i < size; ++i) {
+            for (int bit = 7; bit >= 0; --bit) {
+                const int mix = ((crc >> 7) & 1) ^ ((data[i] >> bit) & 1);
+                crc = static_cast<std::uint8_t>(crc << 1);
+                if (mix) crc ^= 0xD5;
+            }
+        }
+        return crc;
+    };
+    std::vector<std::uint8_t> ts(188, 0x5A);
+    ts[0] = 0x47;
+    ts[1] = 0x00;
+    ts[2] = 0x21;
+    ts[3] = 0x10;
+    std::vector<std::uint8_t> frame(10 + 188, 0);
+    frame[0] = 0xF0;
+    frame[2] = 0x05;
+    frame[3] = 0xE0;
+    frame[4] = 0x05;
+    frame[5] = 0xE0;
+    frame[6] = 0x47;
+    frame[10] = crc8(ts.data() + 1, 187);
+    for (int i = 1; i < 188; ++i) frame[static_cast<std::size_t>(10 + i)] = ts[static_cast<std::size_t>(i)];
+    frame[9] = crc8(frame.data(), 9);
+    const auto scrambledFrame = scrambleBbFrame(frame.data(), frame.size());
+    const auto extracted = extractClearTsFromBbFrame(scrambledFrame.data(), scrambledFrame.size());
+    CHECK(extracted.headerCrcOk);
+    CHECK(extracted.packets == 1);
+    CHECK(extracted.scrambledPackets == 0);
+    REQUIRE(extracted.clearTs.size() == 188);
+    CHECK(extracted.clearTs[0] == 0x47);
+    CHECK(extracted.clearTs[2] == 0x21);
+    CHECK(extracted.clearTs[4] == 0x5A);
+    CHECK_FALSE(dvbDemodAvailable());
+
+    frame[13] = 0xC0;
+    frame[10] = crc8(frame.data() + 11, 187);
+    frame[9] = crc8(frame.data(), 9);
+    const auto blockedFrame = scrambleBbFrame(frame.data(), frame.size());
+    const auto blocked = extractClearTsFromBbFrame(blockedFrame.data(), blockedFrame.size());
+    CHECK(blocked.headerCrcOk);
+    CHECK(blocked.scrambledPackets == 1);
+    CHECK(blocked.clearTs.empty());
+    CHECK(blocked.reject.find("Scrambled") != std::string::npos);
+
+    const int qpskBits[] = {0, 0, 1, 0, 1, 1, 0, 1};
+    const auto clean = modulateQpsk(qpskBits, 8);
+    const auto spun = scramblePlSymbols(clean.data(), clean.size());
+    bool changed = false;
+    for (std::size_t i = 0; i < clean.size(); ++i)
+        if (spun[i] != clean[i]) changed = true;
+    CHECK(changed);
+    const auto sliced = sliceQpskAfterPlDescramble(spun.data(), spun.size(), 4);
+    CHECK(sliced.sliced);
+    REQUIRE(sliced.bits.size() == 8);
+    for (int i = 0; i < 8; ++i) CHECK(sliced.bits[static_cast<std::size_t>(i)] == qpskBits[i]);
+    CHECK(sliced.note.find("LDPC") != std::string::npos);
+    CHECK_FALSE(sliceQpskAfterPlDescramble(spun.data(), spun.size(), 12).sliced);
+}
+
 TEST_CASE("Pass session commands the rotator then stop and park on abort") {
     QTcpServer server;
     REQUIRE(server.listen(QHostAddress::LocalHost));

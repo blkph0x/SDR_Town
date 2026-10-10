@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-10-10 - BBFRAME transport stream and pre-FEC QPSK bits
+
+The baseband scrambler uses 1+X^14+X^15. A scrambled BBFRAME with a good
+header CRC yields one clear MPEG-TS packet, and a scrambled packet is
+omitted. QPSK symbols pass through the n=0 PL Gold code and come back as
+hard bits. Those bits are pre-FEC. LDPC is not applied, and commercial
+decrypt stays refused.
+
 ## 2026-10-10 - One SOF frequency estimate across the header
 
 The 25 SOF phase steps yield one radians-per-symbol offset. That offset

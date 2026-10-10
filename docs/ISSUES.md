@@ -13,11 +13,10 @@ and request RTL or SDRplay Bias-T; that request is not a voltmeter.
 A named supply port sends 13/18/OFF and requires OK; an empty port is
 still commanded state, and OK is not a voltmeter. The station
 panel and Tools rotator share one `rotctld` client. LEO motion can lead one observed
-step; that lead is not a second propagation. One SOF frequency and phase
-estimate feeds PLS MODCOD, frame length, and pilots across the header.
-It is not a payload tracking loop. Clear TS playback refuses scrambled
-packets. LDPC payload demod remains unimplemented, so live IQ does not
-become video. Close
+step; that lead is not a second propagation. Header frequency and phase
+feed PLS. QPSK hard bits are pre-FEC. A BBFRAME can yield a clear
+transport stream and omits scrambled packets. LDPC payload demod remains
+unimplemented, so live IQ does not become video. Close
 the motor and power halves after a hardware acceptance pass.
 
 ## ISS-0089 - Listen radio follows USB order; unused streams keep overflowing (2026-10-10, OPEN)

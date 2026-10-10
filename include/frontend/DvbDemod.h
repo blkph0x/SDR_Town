@@ -33,6 +33,40 @@ std::vector<std::complex<float>> modulateDvbs2PlHeader(int modcod, bool shortFra
 // not a payload tracking loop. LDPC payload is not decoded.
 PlHeaderHit detectDvbs2PlHeader(const std::complex<float>* symbols, std::size_t count);
 
+// ETSI BB scrambler, polynomial 1+X^14+X^15, load 100101010000000.
+// The same function descrambles. This is not conditional-access decryption.
+std::vector<std::uint8_t> scrambleBbFrame(const std::uint8_t* data, std::size_t size);
+
+// Descrambles a BBFRAME, checks the BBHEADER CRC-8, and copies only
+// unscrambled MPEG-TS packets whose user-packet CRC matches. Scrambled
+// packets are counted and omitted. LDPC is not run; the caller supplies
+// the baseband bytes.
+struct BbFrameTs {
+    bool headerCrcOk = false;
+    int packets = 0;
+    int scrambledPackets = 0;
+    std::vector<std::uint8_t> clearTs;
+    std::string reject;
+};
+
+BbFrameTs extractClearTsFromBbFrame(const std::uint8_t* data, std::size_t size);
+
+// PL Gold code n=0, then Gray QPSK hard decisions. MODCOD 1..11 only.
+// These bits are pre-FEC. LDPC and BCH are not applied.
+struct QpskHardBits {
+    bool sliced = false;
+    std::vector<int> bits;
+    std::string note;
+};
+
+QpskHardBits sliceQpskAfterPlDescramble(const std::complex<float>* symbols, std::size_t count, int modcod);
+
+// Gray QPSK, I is the first bit, 00 at angle π/4. Even bit counts only.
+std::vector<std::complex<float>> modulateQpsk(const int* bits, std::size_t bitCount);
+
+// Multiply by the n=0 PL Gold code. Descrambling is the conjugate, inside the slicer.
+std::vector<std::complex<float>> scramblePlSymbols(const std::complex<float>* symbols, std::size_t count);
+
 // Writes a clear MPEG-TS for the OS player. Scrambled packets are refused
 // and are not written. This does not decrypt.
 struct ClearTsPlayback {

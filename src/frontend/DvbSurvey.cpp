@@ -93,5 +93,5 @@ ClearTsInventory inventoryClearTransportStream(const std::uint8_t* data, std::si
 bool dvbDemodAvailable() { return false; }
 bool commercialDecryptAvailable() { return false; }
 const char* dvbStageNote() {
-    return "PL header sync estimates one constant frequency and one phase from the SOF, then decodes PLS MODCOD across that 90-symbol header. It is not a payload tracking loop. DVB-S2 LDPC demod is not linked, so live IQ does not become video. Clear TS playback refuses scrambled packets. Commercial decrypt is refused.";
+    return "PL header sync estimates one frequency and phase, then PLS MODCOD. QPSK symbols can be PL-descrambled into pre-FEC hard bits. A BBFRAME can yield a clear transport stream. DVB-S2 LDPC demod is not linked, so live IQ does not become video. Clear TS playback refuses scrambled packets. Commercial decrypt is refused.";
 }

@@ -51,11 +51,11 @@ that dongle Bias-T to stay off. A supply port sends `13`, `18`, `13 TONE`,
 not a measured voltage. An empty port keeps the external backend as a
 commanded state. Play clear TS opens a transport stream only when every
 packet is unscrambled, then hands that file to the OS player. A scrambled
-packet is refused and is not written. The PL header search uses SOF phase
-steps. One constant frequency, in radians per symbol, and one phase are
-estimated from the SOF and removed across the 90-symbol header before the
-(64,7) PLS code reports MODCOD, frame length, and pilots. That estimate is
-not a payload tracking loop. LDPC payload demod is not linked, so live IQ does not become video.
+packet is refused and is not written. The PL header search estimates one
+frequency and one phase, then the (64,7) PLS code reports MODCOD. QPSK
+payload symbols can be Gold-descrambled into pre-FEC hard bits. A BBFRAME
+can be descrambled into a clear transport stream; a scrambled packet is
+left out. LDPC payload demod is not linked, so live IQ does not become video.
 Commercial decrypt is refused.
 
 ## Bias-T

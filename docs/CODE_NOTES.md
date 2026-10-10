@@ -545,10 +545,11 @@ profile. Horizontal and high-band checkboxes select 18 V and 22 kHz.
 and the station panel. A second `connectTo` is refused while it is open. `StationRadioBind`
 queues the IF through `retuneWithLease` as Satcom, without force, and
 requests RTL or SDRplay Bias-T for the internal backend. Tests install
-their own sink. `detectDvbs2PlHeader` correlates SOF phase steps, estimates
-one radians-per-symbol offset plus one phase, removes both across the
-90-symbol header, and decodes the (64,7) PLS code to MODCOD, frame length,
-and pilots. The same offset is not tracked through the payload.
+their own sink. `detectDvbs2PlHeader` estimates one frequency and one phase,
+then decodes PLS. `scrambleBbFrame` is the 1+X^14+X^15 baseband scrambler.
+`extractClearTsFromBbFrame` checks the BBHEADER CRC-8 and emits only
+unscrambled MPEG-TS packets. `sliceQpskAfterPlDescramble` returns pre-FEC
+hard bits for MODCOD 1..11. LDPC is not applied.
 `modulateDvbs2PlHeader` builds that header.
 `writeClearTsForPlayback`
 writes only an unscrambled transport stream; the wizard Play clear TS button
