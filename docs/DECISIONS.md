@@ -37,6 +37,19 @@ DVB-S2 D1 may report spectrum occupancy only. Symbol-rate, PLS, LDPC, and
 MPEG-TS stay unavailable until a reviewed implementation exists. D2/D3
 must refuse CSA/CISSA/CI+.
 
+The station panel may copy an armed `SatPassPlanner` sample: azimuth and
+elevation from the matching current position, Doppler added to the armed
+nominal RF, and TLE age from the planner snapshot. That sample is used for
+pointing only when the pass is armed, the look is finite, elevation is at
+or above the mask, and the TLE age is known and inside the profile limit.
+A missing pass or a stale TLE while Follow is on aborts the session.
+Elevation under the mask pauses the jog and does not command that point.
+Lease and IF checkboxes stay operator attestations. The TLE checkbox is
+set from this age check when the operator reads or follows the planner.
+The pass folder is `station-profile.json` plus `metrics.jsonl`. The
+planner reader is installed by the application, not by the unit-test
+binaries.
+
 ## DEC-0209 - Listen identity, unused-stream stop, analog HF filter (2026-10-10)
 
 PR #34 (draft, fubarzi) added Listen persistence, spectrum controls, and an

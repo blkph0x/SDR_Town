@@ -2,10 +2,33 @@
 
 Tools > Station front-end stores the dish, claimed LNB noise figure, and
 Bias-T rating used by a satellite pass. DEC-0210. Arm is fail-closed.
-The checkboxes for lease, IF span, and TLE age are operator attestations.
-They are not a radio lease and they do not read a TLE file. Rotator motion
-uses the panel's own `rotctld` client. Do not connect this panel and
-Tools > Antenna Rotator & SWR to the same `rotctld` at the same time.
+The lease and IF checkboxes are operator attestations. They are not a
+radio lease and they do not measure the SDR span. Rotator motion uses the
+panel's own `rotctld` client. Do not connect this panel and Tools >
+Antenna Rotator & SWR to the same `rotctld` at the same time.
+
+## Armed pass
+
+Read armed pass copies azimuth and elevation from the planner position
+that matches the armed satellite, adds Doppler to the armed nominal
+frequency, and stores that true RF. It is accepted only when a pass is
+armed, the look is finite, elevation is at or above the station mask
+(default 10°), and `tleAgeSec` is known and inside the profile limit
+(default 72 h). The TLE checkbox is set from that age check. A rejected
+read clears it and does not move the predicted angles.
+
+Follow armed pass repeats the same check once a second. If the pass is
+no longer armed, or the TLE age is unknown or past the limit, the session
+aborts. Elevation under the mask pauses tracking and does not command
+that point. A missing look leaves the last accepted point in place.
+
+The application installs this reader. A test binary that does not link
+`PlannerCapture.cpp` reports "No armed satellite pass".
+
+Save pass log writes `station-profile.json` and `metrics.jsonl` under the
+application data directory `station-passes/<UTC stamp>`. The log records
+commanded angles, reported angles, Doppler, and the true RF. It does not
+retune the SDR and it does not claim a measured C/N.
 
 ## LNB
 

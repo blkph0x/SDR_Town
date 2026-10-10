@@ -1,5 +1,14 @@
 # Build notes
 
+## 2026-10-10 - Station sky feed and pass folder
+
+`FrontendStation` Release PASS (1.58 s): rejected unarmed sample,
+below-mask sample, stale TLE, unknown TLE age, Doppler-corrected 11.7 GHz
+carrier, and a pass folder with `station-profile.json` plus
+`metrics.jsonl`. The wizard Read button leaves AZ at 180 and shows
+"No armed satellite pass" because the test binary does not link
+`PlannerCapture.cpp`. `AntennaControl` Release PASS (5.86 s).
+
 ## 2026-10-10 - Station pass session against a fake rotctld
 
 `FrontendStation` Release PASS, including arm rejection with no `+P`,

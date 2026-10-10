@@ -3,6 +3,8 @@
 #include "frontend/LnbConversion.h"
 #include "frontend/RotatorTrack.h"
 
+#include <cmath>
+
 StationPassSession::StationPassSession(RotatorController& rotor, QObject* parent)
     : QObject(parent), rotor_(rotor) {
     timer_.setInterval(1000);
@@ -72,6 +74,15 @@ bool StationPassSession::arm(const PassChecklist& check, const StationProfile& p
 void StationPassSession::setPrediction(double az, double el) {
     predictAz_ = az;
     predictEl_ = el;
+}
+
+void StationPassSession::noteSky(double az, double el, double trueRfHz, double dopplerHz) {
+    setPrediction(az, el);
+    if (std::isfinite(trueRfHz)) {
+        profile_.trueRfHz = trueRfHz;
+        metrics_.add("sky.trueRfHz", trueRfHz);
+    }
+    if (std::isfinite(dopplerHz)) metrics_.add("sky.dopplerHz", dopplerHz);
 }
 
 void StationPassSession::setJogPaused(bool paused) { jogPaused_ = paused; }

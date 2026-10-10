@@ -2,6 +2,7 @@
 
 #include "frontend/StationPassSession.h"
 #include "frontend/StationProfile.h"
+#include "frontend/StationSky.h"
 
 #include <QDialog>
 
@@ -11,6 +12,7 @@ class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
 class QSpinBox;
+class QTimer;
 
 // DEC-0210 operator panel. Power stays off until the confirm box is checked.
 class EquipmentWizard : public QDialog {
@@ -18,13 +20,15 @@ public:
     explicit EquipmentWizard(QWidget* parent = nullptr);
     StationProfile profile() const;
     void setProfile(const StationProfile& profile);
-    void refreshHint(double elevationDeg);
+    void refreshHint(double elevationDeg, bool updatePlan = true);
 
 private:
     void syncCaution();
+    void applySky(bool fromFollow);
     PassChecklist checklist() const;
     QDoubleSpinBox* dish_ = nullptr;
     QDoubleSpinBox* nf_ = nullptr;
+    QDoubleSpinBox* rfMHz_ = nullptr;
     QDoubleSpinBox* supplyMa_ = nullptr;
     QDoubleSpinBox* lnbMa_ = nullptr;
     QCheckBox* confirm_ = nullptr;
@@ -32,6 +36,9 @@ private:
     QCheckBox* ifSpan_ = nullptr;
     QCheckBox* tle_ = nullptr;
     QCheckBox* rotorOverride_ = nullptr;
+    QCheckBox* follow_ = nullptr;
+    QLabel* sky_ = nullptr;
+    QTimer* followTimer_ = nullptr;
     QLineEdit* host_ = nullptr;
     QSpinBox* port_ = nullptr;
     QDoubleSpinBox* predictAz_ = nullptr;

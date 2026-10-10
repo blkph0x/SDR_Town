@@ -4,10 +4,12 @@
 
 Frequency auto-track exists. Motor tracking, LNB IF conversion, and an
 external 13/18 V supply do not. DEC-0210 adds the session, the fail-closed checklist, and a
-`rotctld` command path with stop-then-park. The panel's lease/IF/TLE
-boxes are attestations, not a device lease or a TLE read. DVB-S2 demod
-remains unimplemented. Clear-TS inventory only reads bytes already in
-hand. Close the motor and power halves after a hardware acceptance pass.
+`rotctld` command path with stop-then-park. Read/Follow armed pass copies
+planner AZ/EL and Doppler-corrected RF, and sets the TLE checkbox from
+snapshot age. Lease and IF boxes are still attestations. Bias-T is still
+commanded state, not a measured supply or a Soapy Bias-T toggle. DVB-S2
+demod remains unimplemented. Clear-TS inventory only reads bytes already
+in hand. Close the motor and power halves after a hardware acceptance pass.
 
 ## ISS-0089 - Listen radio follows USB order; unused streams keep overflowing (2026-10-10, OPEN)
 

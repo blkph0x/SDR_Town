@@ -8,6 +8,7 @@
 #include "frontend/RotatorTrack.h"
 #include "frontend/StationPassSession.h"
 #include "frontend/StationProfile.h"
+#include "frontend/StationSky.h"
 
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -20,7 +21,11 @@
 #include <QTcpSocket>
 #include <QThread>
 #include <QElapsedTimer>
+#include <QPushButton>
 #include <QRegularExpression>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <functional>
 #include <cmath>
 #include <complex>
@@ -225,4 +230,56 @@ TEST_CASE("Equipment wizard defaults Bias-T off and flags a sub-0.2 dB claim") {
     CHECK(state->text().contains("OFF"));
     wizard.findChild<QDoubleSpinBox*>("lnbNf")->setValue(0.1);
     CHECK(wizard.findChild<QLabel*>("nfCaution")->text().contains("0.2"));
+    auto* read = wizard.findChild<QPushButton*>("readPlanner");
+    REQUIRE(read);
+    read->click();
+    CHECK(wizard.findChild<QLabel*>("skyFeed")->text().contains("No armed satellite pass"));
+    CHECK(wizard.findChild<QDoubleSpinBox*>("predictAz")->value() == 180);
+    CHECK_FALSE(wizard.findChild<QCheckBox*>("attestTle")->isChecked());
+    CHECK_FALSE(wizard.findChild<QCheckBox*>("followPlanner")->isChecked());
+}
+
+TEST_CASE("Sky feed accepts Doppler only for an armed in-mask fresh pass") {
+    const auto rejected = skyFeedFromPass(false, true, 12, 30, 145.8e6, 100, 10, 10, 72);
+    CHECK_FALSE(rejected.accepted);
+    CHECK(rejected.reject == "No armed satellite pass");
+    const auto low = skyFeedFromPass(true, true, 12, 4, 145.8e6, 100, 10, 10, 72);
+    CHECK_FALSE(low.accepted);
+    CHECK(low.reject == "Armed pass is below the elevation mask");
+    const auto stale = skyFeedFromPass(true, true, 12, 30, 145.8e6, 100, 73 * 3600, 10, 72);
+    CHECK_FALSE(stale.accepted);
+    CHECK(stale.reject == "TLE is older than the station limit");
+    const auto unknown = skyFeedFromPass(true, true, 12, 30, 145.8e6, 100, -1, 10, 72);
+    CHECK(unknown.reject == "TLE age is unknown");
+    const auto feed = skyFeedFromPass(true, true, 12.5, 31.0, 11.7e9, -2500, 3600, 10, 72);
+    REQUIRE(feed.accepted);
+    CHECK(feed.tleFresh);
+    CHECK(feed.azimuthDeg == 12.5);
+    CHECK(feed.elevationDeg == 31.0);
+    CHECK(feed.trueRfHz == 11.7e9 - 2500);
+    CHECK(feed.dopplerHz == -2500);
+}
+
+TEST_CASE("Pass folder stores the station profile and metric log") {
+    StationProfile profile;
+    profile.name = "pass-log";
+    profile.trueRfHz = 11.7e9 - 2500;
+    FrontEndMetrics metrics;
+    metrics.add("sky.dopplerHz", -2500);
+    const auto dir = std::filesystem::temp_directory_path() / "sdr-town-pass-log-test";
+    std::filesystem::remove_all(dir);
+    std::string error;
+    REQUIRE(writePassFolder(dir.string(), profile, metrics, &error));
+    std::string profileText;
+    std::string metricText;
+    {
+        std::ifstream profileFile(dir / "station-profile.json");
+        std::ifstream metricFile(dir / "metrics.jsonl");
+        profileText.assign(std::istreambuf_iterator<char>(profileFile), {});
+        metricText.assign(std::istreambuf_iterator<char>(metricFile), {});
+    }
+    CHECK(profileText.find("pass-log") != std::string::npos);
+    CHECK(profileText.find("trueRfHz") != std::string::npos);
+    CHECK(metricText.find("sky.dopplerHz") != std::string::npos);
+    std::filesystem::remove_all(dir);
 }

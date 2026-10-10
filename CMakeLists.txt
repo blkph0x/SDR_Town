@@ -262,6 +262,8 @@ set(SDR_TOWN_SOURCES
     src/frontend/DvbSurvey.cpp include/frontend/DvbSurvey.h
     src/frontend/EquipmentWizard.cpp include/frontend/EquipmentWizard.h
     src/frontend/StationPassSession.cpp include/frontend/StationPassSession.h
+    src/frontend/StationSky.cpp include/frontend/StationSky.h
+    src/frontend/PlannerCapture.cpp
     include/RemoteDiagnostics.h
     src/UpdateManager.cpp   # professional GitHub release + safe in-app updater
     src/UpdateManifestSignature.cpp
@@ -735,7 +737,8 @@ if(BUILD_TESTS)
       src/frontend/PassArming.cpp src/frontend/FrontEndMetrics.cpp
       src/frontend/StationProfile.cpp src/frontend/DvbSurvey.cpp
       src/frontend/EquipmentWizard.cpp
-      src/frontend/StationPassSession.cpp include/frontend/StationPassSession.h)
+      src/frontend/StationPassSession.cpp include/frontend/StationPassSession.h
+      src/frontend/StationSky.cpp include/frontend/StationSky.h)
   add_executable(frontend_station_tests tests/test_frontend_station.cpp
       src/frontend/LnbConversion.cpp src/frontend/LinkBudgetHint.cpp
       src/frontend/FrontEndPower.cpp src/frontend/RotatorTrack.cpp
@@ -743,6 +746,7 @@ if(BUILD_TESTS)
       src/frontend/StationProfile.cpp       src/frontend/DvbSurvey.cpp
       src/frontend/EquipmentWizard.cpp
       src/frontend/StationPassSession.cpp include/frontend/StationPassSession.h
+      src/frontend/StationSky.cpp include/frontend/StationSky.h
       src/AntennaControl.cpp include/AntennaControl.h)
   target_include_directories(frontend_station_tests PRIVATE include)
   target_link_libraries(frontend_station_tests PRIVATE Catch2::Catch2 Qt6::Widgets Qt6::Network nlohmann_json::nlohmann_json)

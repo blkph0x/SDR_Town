@@ -5,6 +5,8 @@
 #include "frontend/PassArming.h"
 
 #include <QCheckBox>
+#include <QDateTime>
+#include <QDir>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -15,7 +17,11 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QStandardPaths>
+#include <QTimer>
 #include <QVBoxLayout>
+
+#include <algorithm>
 
 EquipmentWizard::EquipmentWizard(QWidget* parent) : QDialog(parent) {
     setWindowTitle("Station front-end");
@@ -49,6 +55,17 @@ EquipmentWizard::EquipmentWizard(QWidget* parent) : QDialog(parent) {
     predictEl_->setObjectName("predictEl");
     predictEl_->setRange(0, 90);
     predictEl_->setValue(20);
+    rfMHz_ = new QDoubleSpinBox;
+    rfMHz_->setObjectName("trueRfMHz");
+    rfMHz_->setRange(0, 40000);
+    rfMHz_->setDecimals(6);
+    rfMHz_->setValue(11700);
+    rfMHz_->setSuffix(" MHz");
+    follow_ = new QCheckBox("Follow armed pass");
+    follow_->setObjectName("followPlanner");
+    sky_ = new QLabel("No planner sample yet");
+    sky_->setObjectName("skyFeed");
+    sky_->setWordWrap(true);
     caution_ = new QLabel; caution_->setObjectName("nfCaution"); caution_->setWordWrap(true);
     hint_ = new QLabel; hint_->setObjectName("linkHint");
     power_ = new QLabel("Bias-T: OFF"); power_->setObjectName("biasState");
@@ -61,10 +78,13 @@ EquipmentWizard::EquipmentWizard(QWidget* parent) : QDialog(parent) {
     form->addRow("rotctld port", port_);
     form->addRow("Predicted AZ", predictAz_);
     form->addRow("Predicted EL", predictEl_);
+    form->addRow("True RF", rfMHz_);
     auto* root = new QVBoxLayout(this);
     root->addLayout(form);
     root->addWidget(caution_);
     root->addWidget(hint_);
+    root->addWidget(sky_);
+    root->addWidget(follow_);
     root->addWidget(lease_);
     root->addWidget(ifSpan_);
     root->addWidget(tle_);
@@ -78,9 +98,15 @@ EquipmentWizard::EquipmentWizard(QWidget* parent) : QDialog(parent) {
     armButton->setObjectName("armPass");
     auto* abortButton = new QPushButton("Abort");
     abortButton->setObjectName("abortPass");
+    auto* readButton = new QPushButton("Read armed pass");
+    readButton->setObjectName("readPlanner");
+    auto* saveButton = new QPushButton("Save pass log");
+    saveButton->setObjectName("savePassLog");
     buttons->addWidget(connectButton);
+    buttons->addWidget(readButton);
     buttons->addWidget(armButton);
     buttons->addWidget(abortButton);
+    buttons->addWidget(saveButton);
     root->addLayout(buttons);
     root->addWidget(plan_);
     session_ = new StationPassSession(rotor_, this);
@@ -113,6 +139,29 @@ EquipmentWizard::EquipmentWizard(QWidget* parent) : QDialog(parent) {
         session_->setPrediction(predictAz_->value(), el);
         refreshHint(el);
     });
+    connect(readButton, &QPushButton::clicked, this, [this] { applySky(false); });
+    connect(saveButton, &QPushButton::clicked, this, [this] {
+        QString root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        if (root.isEmpty()) root = QDir::tempPath();
+        const QString dir = root + "/station-passes/" +
+            QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss");
+        std::string error;
+        if (!writePassFolder(dir.toStdString(), profile(), session_->metrics(), &error))
+            sky_->setText(QString::fromStdString(error));
+        else
+            sky_->setText("Pass log: " + dir);
+    });
+    followTimer_ = new QTimer(this);
+    followTimer_->setInterval(1000);
+    connect(follow_, &QCheckBox::toggled, this, [this](bool on) {
+        if (on) {
+            applySky(true);
+            followTimer_->start();
+        } else {
+            followTimer_->stop();
+        }
+    });
+    connect(followTimer_, &QTimer::timeout, this, [this] { applySky(true); });
     syncCaution();
     refreshHint(30.0);
 }
@@ -141,6 +190,7 @@ StationProfile EquipmentWizard::profile() const {
     profile.biasSupplyMa = supplyMa_->value();
     profile.lnb.noiseFigureDb = nf_->value();
     profile.lnb.maxCurrentMa = lnbMa_->value();
+    profile.trueRfHz = rfMHz_->value() * 1e6;
     profile.biasBackend = BiasBackend::External;
     profile.mission = StationMission::LeoTrack;
     return profile;
@@ -151,12 +201,51 @@ void EquipmentWizard::setProfile(const StationProfile& profile) {
     nf_->setValue(profile.lnb.noiseFigureDb);
     supplyMa_->setValue(profile.biasSupplyMa);
     lnbMa_->setValue(profile.lnb.maxCurrentMa);
+    rfMHz_->setValue(profile.trueRfHz / 1e6);
     syncCaution();
 }
 
-void EquipmentWizard::refreshHint(double elevationDeg) {
+void EquipmentWizard::applySky(bool fromFollow) {
+    const StationProfile current = profile();
+    const SkyFeed feed = readArmedSatellite(current.minElevationDeg, current.tleMaxAgeHours);
+    if (!feed.accepted) {
+        sky_->setText(QString::fromStdString(feed.reject));
+        tle_->setChecked(false);
+        if (fromFollow && session_->tracking()) {
+            if (feed.reject == "No armed satellite pass")
+                session_->abort("planner-disarmed");
+            else if (feed.reject == "TLE age is unknown" ||
+                     feed.reject == "TLE is older than the station limit")
+                session_->abort("stale-tle");
+            else if (feed.reject == "Armed pass is below the elevation mask")
+                session_->setJogPaused(true);
+        }
+        return;
+    }
+    if (session_->tracking()) session_->setJogPaused(false);
+    predictAz_->blockSignals(true);
+    predictEl_->blockSignals(true);
+    rfMHz_->blockSignals(true);
+    predictAz_->setValue(std::clamp(feed.azimuthDeg, 0.0, 360.0));
+    predictEl_->setValue(std::clamp(feed.elevationDeg, 0.0, 90.0));
+    rfMHz_->setValue(feed.trueRfHz / 1e6);
+    predictAz_->blockSignals(false);
+    predictEl_->blockSignals(false);
+    rfMHz_->blockSignals(false);
+    session_->noteSky(feed.azimuthDeg, feed.elevationDeg, feed.trueRfHz, feed.dopplerHz);
+    tle_->setChecked(feed.tleFresh);
+    sky_->setText(QString("Planner AZ %1 EL %2, Doppler-corrected RF %3 MHz (%4 Hz)")
+                      .arg(feed.azimuthDeg, 0, 'f', 2)
+                      .arg(feed.elevationDeg, 0, 'f', 2)
+                      .arg(feed.trueRfHz / 1e6, 0, 'f', 6)
+                      .arg(feed.dopplerHz, 0, 'f', 1));
+    refreshHint(feed.elevationDeg, false);
+}
+
+void EquipmentWizard::refreshHint(double elevationDeg, bool updatePlan) {
     const auto hint = linkMarginHint(dish_->value(), nf_->value(), elevationDeg, 10.0);
     hint_->setText(QString("Margin hint: %1 (qualitative, not a measured C/N)").arg(linkMarginHintName(hint)));
+    if (!updatePlan) return;
     const auto arm = planPassArm(checklist(), StationMission::LeoTrack);
     plan_->setPlainText(arm.accepted ? QString::fromStdString("Arm: " + arm.steps.front()) : QString::fromStdString(arm.reject));
 }

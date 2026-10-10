@@ -21,6 +21,7 @@ public:
     bool arm(const PassChecklist& check, const StationProfile& profile,
              double predictAz, double predictEl, std::string* error);
     void setPrediction(double az, double el);
+    void noteSky(double az, double el, double trueRfHz, double dopplerHz);
     void setJogPaused(bool paused);
     void abort(const std::string& reason);
     bool tracking() const { return tracking_; }

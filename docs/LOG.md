@@ -1,5 +1,14 @@
 # Development log
 
+## 2026-10-10 - Armed pass feeds the station panel
+
+Read armed pass copies planner azimuth, elevation, and Doppler-corrected
+RF into the station panel. The sample is rejected when the pass is not
+armed, the look is missing, elevation is under the mask, or the TLE age
+is unknown or past the limit. Follow aborts on a dropped pass or a stale
+TLE and pauses under the mask. Save pass log writes the profile and the
+metric JSONL. The planner reader is not linked into the unit tests.
+
 ## 2026-10-10 - Station pass session drives rotctld
 
 `StationPassSession` arms only after the checklist, commands the existing
