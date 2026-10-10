@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-10-10 - PL header sync and clear TS playback
+
+Play clear TS writes an unscrambled transport stream and opens it with
+the OS player. A scrambled packet is refused and is not written. The
+26-bit SOF can be found in complex symbols. LDPC payload demod is still
+not linked, so a live transponder does not become video. Commercial
+decrypt stays refused.
+
 ## 2026-10-10 - External supply lines and the demod boundary
 
 A supply port sends `13`, `18`, `18 TONE`, or `OFF` and the arm stands

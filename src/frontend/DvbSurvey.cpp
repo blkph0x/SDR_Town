@@ -93,5 +93,5 @@ ClearTsInventory inventoryClearTransportStream(const std::uint8_t* data, std::si
 bool dvbDemodAvailable() { return false; }
 bool commercialDecryptAvailable() { return false; }
 const char* dvbStageNote() {
-    return "D1 spectrum survey only. DVB-S2 demod is not linked. Clear TS inventory reads packets already in hand and does not decrypt. Commercial decrypt is refused.";
+    return "PL header sync is implemented. DVB-S2 LDPC demod is not linked, so live IQ does not become video. Clear TS playback refuses scrambled packets. Commercial decrypt is refused.";
 }

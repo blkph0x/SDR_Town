@@ -1,4 +1,5 @@
 #include "AntennaControlWindow.h"
+#include "frontend/DvbDemod.h"
 #include "frontend/DvbSurvey.h"
 #include "frontend/EquipmentWizard.h"
 #include "frontend/FrontEndMetrics.h"
@@ -165,6 +166,37 @@ TEST_CASE("Clear transport-stream inventory lists PIDs and does not read scrambl
     CHECK(inventory.scrambledPackets == 1);
     CHECK(inventory.pids.size() == 2);
     CHECK_FALSE(dvbDemodAvailable());
+}
+
+TEST_CASE("PL header sync finds the SOF and clear playback refuses scrambled TS") {
+    const auto sof = modulateDvbs2Sof();
+    std::vector<std::complex<float>> symbols(40);
+    for (std::size_t i = 0; i < sof.size(); ++i) symbols[8 + i] = sof[i];
+    const auto hit = detectDvbs2PlHeader(symbols.data(), symbols.size());
+    CHECK(hit.found);
+    CHECK(hit.sofErrors == 0);
+    CHECK(hit.symbolIndex == 8);
+    CHECK(hit.modcod == -1);
+    CHECK_FALSE(dvbDemodAvailable());
+
+    const auto dir = std::filesystem::temp_directory_path() / "sdr-town-dvb-play";
+    std::filesystem::create_directories(dir);
+    const auto clearPath = (dir / "clear.ts").string();
+    std::vector<std::uint8_t> clear(188, 0);
+    clear[0] = 0x47;
+    clear[3] = 0x10;
+    const auto accepted = writeClearTsForPlayback(clear.data(), clear.size(), clearPath);
+    CHECK(accepted.accepted);
+    CHECK(std::filesystem::file_size(clearPath) == 188);
+
+    auto scrambled = clear;
+    scrambled[3] = 0xC0;
+    const auto blockedPath = (dir / "blocked.ts").string();
+    const auto blocked = writeClearTsForPlayback(scrambled.data(), scrambled.size(), blockedPath);
+    CHECK_FALSE(blocked.accepted);
+    CHECK(blocked.reject.find("Scrambled") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(blockedPath));
+    std::filesystem::remove_all(dir);
 }
 
 TEST_CASE("Pass session commands the rotator then stop and park on abort") {

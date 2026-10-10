@@ -545,7 +545,10 @@ profile. Horizontal and high-band checkboxes select 18 V and 22 kHz.
 and the station panel. A second `connectTo` is refused while it is open. `StationRadioBind`
 queues the IF through `retuneWithLease` as Satcom, without force, and
 requests RTL or SDRplay Bias-T for the internal backend. Tests install
-their own sink. DVB-S2 demod is not linked. `StationSupplyBind` writes the external
+their own sink. `detectDvbs2PlHeader` finds the 26-bit SOF. `writeClearTsForPlayback`
+writes only an unscrambled transport stream; the wizard Play clear TS button
+opens that file with the OS player. LDPC payload demod is not linked.
+`StationSupplyBind` writes the external
 supply line at 9600 8N1 and treats `OK` as acknowledgement only.
 D2 demod and commercial decrypt return false.
 

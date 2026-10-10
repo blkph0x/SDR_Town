@@ -71,8 +71,10 @@ is a driver request on that index. External Bias-T stays a commanded
 supply state and asks the dongle Bias-T to remain off. Neither request is
 a voltage measurement. An external supply port must answer `OK` to
 `13`, `18`, or `OFF` before the arm stands. That answer is not a
-voltmeter. DVB-S2 demod remains unimplemented because no reviewed codec
-is in the tree. Commercial decrypt stays refused.
+voltmeter. PL header sync detects the 26-bit SOF. LDPC payload demod
+stays unlinked because no reviewed codec is in the tree, so live IQ does
+not become video. Clear TS playback writes only unscrambled packets and
+does not decrypt. Commercial decrypt stays refused.
 
 ## DEC-0209 - Listen identity, unused-stream stop, analog HF filter (2026-10-10)
 

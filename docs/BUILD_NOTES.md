@@ -1,5 +1,12 @@
 # Build notes
 
+## 2026-10-10 - PL header sync and clear TS playback
+
+`FrontendStation` Release PASS (7.65 s): SOF lock at symbol 8 with zero
+errors, a clear 188-byte TS written for playback, and a scrambled packet
+that is refused and not written. `AntennaControl` Release PASS (6.02 s).
+LDPC payload demod is still not linked.
+
 ## 2026-10-10 - External supply OK and demod refusal
 
 `FrontendStation` Release PASS (7.62 s): `18 TONE` then `OFF`, a non-OK

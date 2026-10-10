@@ -49,7 +49,11 @@ An external supply does not toggle the dongle Bias-T; the station asks
 that dongle Bias-T to stay off. A supply port sends `13`, `18`, `13 TONE`,
 `18 TONE`, or `OFF` at 9600 8N1 and waits 500 ms for `OK`. That reply is
 not a measured voltage. An empty port keeps the external backend as a
-commanded state. DVB-S2 demod is not linked. Commercial decrypt is refused.
+commanded state. Play clear TS opens a transport stream only when every
+packet is unscrambled, then hands that file to the OS player. A scrambled
+packet is refused and is not written. PL header sync can find the 26-bit
+SOF. LDPC payload demod is not linked, so live IQ does not become video.
+Commercial decrypt is refused.
 
 ## Bias-T
 

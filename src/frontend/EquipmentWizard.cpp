@@ -1,5 +1,6 @@
 #include "frontend/EquipmentWizard.h"
 
+#include "frontend/DvbDemod.h"
 #include "frontend/DvbSurvey.h"
 #include "frontend/FrontEndPower.h"
 #include "frontend/LinkBudgetHint.h"
@@ -8,7 +9,11 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDir>
+#include <QFile>
+#include <QFileDialog>
+#include <QUrl>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -24,6 +29,8 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cstdint>
+#include <cstddef>
 
 EquipmentWizard::EquipmentWizard(QWidget* parent)
     : QDialog(parent), rotor_(sharedRotatorController()) {
@@ -132,11 +139,14 @@ EquipmentWizard::EquipmentWizard(QWidget* parent)
     readButton->setObjectName("readPlanner");
     auto* saveButton = new QPushButton("Save pass log");
     saveButton->setObjectName("savePassLog");
+    auto* playButton = new QPushButton("Play clear TS");
+    playButton->setObjectName("playClearTs");
     buttons->addWidget(connectButton);
     buttons->addWidget(readButton);
     buttons->addWidget(armButton);
     buttons->addWidget(abortButton);
     buttons->addWidget(saveButton);
+    buttons->addWidget(playButton);
     root->addLayout(buttons);
     root->addWidget(plan_);
     session_ = new StationPassSession(rotor_, this);
@@ -144,6 +154,27 @@ EquipmentWizard::EquipmentWizard(QWidget* parent)
     connect(confirm_, &QCheckBox::toggled, this, [this](bool) {
         power_->setText(confirm_->isChecked() ? "Bias-T: confirmation armed, still OFF until pass arm" : "Bias-T: OFF");
         refreshHint(predictEl_->value());
+    });
+    connect(playButton, &QPushButton::clicked, this, [this] {
+        const auto path = QFileDialog::getOpenFileName(this, "Clear transport stream", {}, "MPEG-TS (*.ts);;All files (*.*)");
+        if (path.isEmpty()) return;
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly)) {
+            plan_->setPlainText("Could not read the transport stream");
+            return;
+        }
+        const auto bytes = file.readAll();
+        const auto out = QDir::temp().filePath("sdr-town-clear.ts");
+        const auto result = writeClearTsForPlayback(reinterpret_cast<const std::uint8_t*>(bytes.constData()),
+            static_cast<std::size_t>(bytes.size()), out.toStdString());
+        if (!result.accepted) {
+            plan_->setPlainText(QString::fromStdString(result.reject));
+            return;
+        }
+        if (!QDesktopServices::openUrl(QUrl::fromLocalFile(out)))
+            plan_->setPlainText("Clear TS is ready but no player opened: " + out);
+        else
+            plan_->setPlainText("Playing the clear transport stream. Scrambled packets were absent.");
     });
     connect(connectButton, &QPushButton::clicked, this, [this] {
         RotorLimits limits;

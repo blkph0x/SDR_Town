@@ -12,7 +12,8 @@ observed step from the last two planner samples. Horizontal is 18 V and
 high band is 22 kHz. The station panel and Tools rotator share one
 `rotctld` client. A selected radio index queues the IF and can request
 internal Bias-T. External Bias-T does not enable the dongle supply. A supply port must
-answer OK to 13/18/OFF. DVB-S2 demod is not linked.
+answer OK to 13/18/OFF. PL header sync finds the SOF. Play clear TS
+refuses scrambled packets. LDPC payload demod is not linked.
 Lease/IF boxes stay
 attestations. No Hamlib link, no P25
 edits, no commercial decrypt. D2 demod not linked. Tests: `frontend_station_tests`.
