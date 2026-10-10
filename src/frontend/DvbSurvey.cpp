@@ -93,5 +93,5 @@ ClearTsInventory inventoryClearTransportStream(const std::uint8_t* data, std::si
 bool dvbDemodAvailable() { return false; }
 bool commercialDecryptAvailable() { return false; }
 const char* dvbStageNote() {
-    return "PL header sync and PLS MODCOD decode are implemented on phase-aligned header symbols. DVB-S2 LDPC demod is not linked, so live IQ does not become video. Clear TS playback refuses scrambled packets. Commercial decrypt is refused.";
+    return "PL header sync estimates one constant phase from the SOF and decodes PLS MODCOD. A frequency offset is not tracked. DVB-S2 LDPC demod is not linked, so live IQ does not become video. Clear TS playback refuses scrambled packets. Commercial decrypt is refused.";
 }

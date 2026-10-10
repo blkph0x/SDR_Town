@@ -27,8 +27,8 @@ std::vector<std::complex<float>> modulateDvbs2Sof();
 std::vector<std::complex<float>> modulateDvbs2PlHeader(int modcod, bool shortFrame, bool pilots);
 
 // SOF plus the (64,7) PLS code when 90 symbols follow the alignment.
-// Symbols must already sit on the π/2 BPSK axes. A 180 degree flip is accepted.
-// This does not recover a carrier from raw IQ and does not decode LDPC.
+// One constant phase is estimated from the SOF and removed. A frequency
+// offset across the header is not tracked. LDPC payload is not decoded.
 PlHeaderHit detectDvbs2PlHeader(const std::complex<float>* symbols, std::size_t count);
 
 // Writes a clear MPEG-TS for the OS player. Scrambled packets are refused

@@ -51,10 +51,10 @@ that dongle Bias-T to stay off. A supply port sends `13`, `18`, `13 TONE`,
 not a measured voltage. An empty port keeps the external backend as a
 commanded state. Play clear TS opens a transport stream only when every
 packet is unscrambled, then hands that file to the OS player. A scrambled
-packet is refused and is not written. A phase-aligned PL header reports
-the 26-bit SOF plus MODCOD, frame length, and pilots from the (64,7) PLS
-code, including a 180 degree flip. That decode does not recover a carrier
-from raw IQ. LDPC payload demod is not linked, so live IQ does not become video.
+packet is refused and is not written. The PL header search is differential,
+then one constant phase is estimated from the SOF and removed before the
+(64,7) PLS code reports MODCOD, frame length, and pilots. A frequency
+offset across the header is not tracked. LDPC payload demod is not linked, so live IQ does not become video.
 Commercial decrypt is refused.
 
 ## Bias-T

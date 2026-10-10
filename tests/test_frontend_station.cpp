@@ -208,6 +208,23 @@ TEST_CASE("PL header sync finds the SOF and clear playback refuses scrambled TS"
     CHECK(wide.pilots);
     CHECK(modulateDvbs2PlHeader(32, false, false).empty());
 
+    const float theta = 0.7f;
+    const std::complex<float> turn{std::cos(theta), std::sin(theta)};
+    std::vector<std::complex<float>> rotated(110);
+    for (std::size_t i = 0; i < header.size(); ++i) rotated[6 + i] = header[i] * turn;
+    const auto spun = detectDvbs2PlHeader(rotated.data(), rotated.size());
+    CHECK(spun.found);
+    CHECK(spun.symbolIndex == 6);
+    CHECK(spun.plsErrors == 0);
+    CHECK(spun.modcod == 4);
+
+    for (auto& symbol : other) symbol *= std::complex<float>{0.0f, 1.0f};
+    const auto quarter = detectDvbs2PlHeader(other.data(), other.size());
+    CHECK(quarter.plsDecoded);
+    CHECK(quarter.modcod == 18);
+    CHECK(quarter.shortFrame);
+    CHECK(quarter.pilots);
+
     const auto dir = std::filesystem::temp_directory_path() / "sdr-town-dvb-play";
     std::filesystem::create_directories(dir);
     const auto clearPath = (dir / "clear.ts").string();

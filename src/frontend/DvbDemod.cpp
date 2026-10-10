@@ -116,41 +116,53 @@ PlHeaderHit detectDvbs2PlHeader(const std::complex<float>* symbols, std::size_t 
     PlHeaderHit hit;
     hit.note = "PL header sync only. LDPC payload demod is not linked.";
     if (!symbols || count < 26) return hit;
-    int best = 27;
-    bool flip = false;
+    std::complex<float> expected[26];
+    std::complex<float> step[25];
+    for (int i = 0; i < 26; ++i)
+        expected[i] = pi2Bpsk(kSofBits[i], static_cast<std::size_t>(i));
+    for (int i = 1; i < 26; ++i)
+        step[i - 1] = expected[i] * std::conj(expected[i - 1]);
+
+    float bestScore = 0.0f;
     std::size_t at = 0;
     for (std::size_t start = 0; start + 26 <= count; ++start) {
-        int errors = 0;
-        int flipped = 0;
-        for (int i = 0; i < 26; ++i) {
-            const int bit = hardBit(symbols[start + static_cast<std::size_t>(i)], static_cast<std::size_t>(i));
-            if (bit != kSofBits[i]) ++errors;
-            if ((bit ^ 1) != kSofBits[i]) ++flipped;
+        float score = 0.0f;
+        for (int i = 1; i < 26; ++i) {
+            const auto got = symbols[start + static_cast<std::size_t>(i)]
+                * std::conj(symbols[start + static_cast<std::size_t>(i - 1)]);
+            score += std::real(got * std::conj(step[i - 1]));
         }
-        if (errors < best) {
-            best = errors;
-            flip = false;
-            at = start;
-        }
-        if (flipped < best) {
-            best = flipped;
-            flip = true;
+        if (score > bestScore) {
+            bestScore = score;
             at = start;
         }
     }
-    hit.sofErrors = best;
+    if (bestScore < 10.0f) return hit;
+
+    std::complex<float> acc{};
+    for (int i = 0; i < 26; ++i)
+        acc += symbols[at + static_cast<std::size_t>(i)] * std::conj(expected[i]);
+    const float magnitude = std::abs(acc);
+    if (magnitude < 1.0f) return hit;
+    const auto derotate = std::conj(acc) / magnitude;
+
+    int errors = 0;
+    for (int i = 0; i < 26; ++i) {
+        const int bit = hardBit(symbols[at + static_cast<std::size_t>(i)] * derotate, static_cast<std::size_t>(i));
+        if (bit != kSofBits[i]) ++errors;
+    }
+    hit.sofErrors = errors;
     hit.symbolIndex = at;
-    hit.found = best <= 4;
-    if (!hit.found || at + 90 > count) return hit;
+    hit.found = errors <= 4;
+    if (!hit.found) return hit;
+    hit.note = "SOF phase estimated. LDPC payload demod is not linked.";
+    if (at + 90 > count) return hit;
     int bits[64];
-    for (int i = 0; i < 64; ++i) {
-        int bit = hardBit(symbols[at + 26 + static_cast<std::size_t>(i)], static_cast<std::size_t>(26 + i));
-        if (flip) bit ^= 1;
-        bits[i] = bit;
-    }
+    for (int i = 0; i < 64; ++i)
+        bits[i] = hardBit(symbols[at + 26 + static_cast<std::size_t>(i)] * derotate, static_cast<std::size_t>(26 + i));
     decodePls(bits, hit);
     if (hit.plsDecoded)
-        hit.note = "PLS MODCOD decoded. LDPC payload demod is not linked.";
+        hit.note = "PLS MODCOD decoded after one SOF phase estimate. LDPC payload demod is not linked.";
     return hit;
 }
 

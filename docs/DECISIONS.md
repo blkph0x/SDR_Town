@@ -71,12 +71,13 @@ is a driver request on that index. External Bias-T stays a commanded
 supply state and asks the dongle Bias-T to remain off. Neither request is
 a voltage measurement. An external supply port must answer `OK` to
 `13`, `18`, or `OFF` before the arm stands. That answer is not a
-voltmeter. A phase-aligned PL header reports SOF, MODCOD, frame length,
-and pilots from the ETSI (64,7) PLS code. That path does not recover a
-carrier from raw IQ. LDPC payload demod stays unlinked because no reviewed
-codec is in the tree, so live IQ does not become video. Clear TS playback
-writes only unscrambled packets and does not decrypt. Commercial decrypt
-stays refused.
+voltmeter. The PL header search is differential. One constant phase is
+estimated from the SOF and removed before the ETSI (64,7) PLS code reports
+MODCOD, frame length, and pilots. A frequency offset across the header is
+not tracked. LDPC payload demod stays unlinked because no reviewed codec
+is in the tree, so live IQ does not become video. Clear TS playback writes
+only unscrambled packets and does not decrypt. Commercial decrypt stays
+refused.
 
 ## DEC-0209 - Listen identity, unused-stream stop, analog HF filter (2026-10-10)
 

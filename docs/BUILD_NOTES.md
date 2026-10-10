@@ -1,5 +1,13 @@
 # Build notes
 
+## 2026-10-10 - SOF phase estimate
+
+`FrontendStation` Release PASS (7.62 s) on the second run: MODCOD 4 after
+a 0.7 radian rotation and MODCOD 18 after a quarter turn. The first run
+missed the LEO lead `+P` while the rotator client was busy; that case
+passed on the rerun. `AntennaControl` Release PASS (5.92 s). LDPC payload
+demod is still not linked.
+
 ## 2026-10-10 - PLS MODCOD decode
 
 `FrontendStation` Release PASS (7.78 s): MODCOD 4, MODCOD 18 short with

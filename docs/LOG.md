@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-10 - One SOF phase estimate before PLS
+
+Header search uses the SOF phase steps, then one constant phase is
+removed. MODCOD 4 still decodes after a 0.7 radian rotation, and MODCOD
+18 still decodes after a quarter turn. A frequency offset across the
+header is not tracked. LDPC payload demod is still not linked.
+
 ## 2026-10-10 - PLS MODCOD on a phase-aligned header
 
 The (64,7) PLS code reports MODCOD, normal or short frame, and pilots.
