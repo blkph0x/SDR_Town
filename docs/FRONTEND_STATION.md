@@ -52,14 +52,20 @@ not a measured voltage. An empty port keeps the external backend as a
 commanded state. Play clear TS opens a transport stream only when every
 packet is unscrambled, then hands that file to the OS player. A scrambled
 packet is refused and is not written. The PL header search estimates one
-frequency and one phase, then the (64,7) PLS code reports MODCOD. QPSK
-payload symbols can be Gold-descrambled into pre-FEC hard bits. A BBFRAME
-can be descrambled into a clear transport stream; a scrambled packet is
-left out. QPSK short and normal frames decode from one sample per symbol
-through BCH and LDPC for every DVB-S2 rate except short 9/10, when there
-are no pilots. 8PSK and APSK are not implemented, and pilots are not
-skipped, so live IQ does not become video.
-Commercial decrypt is refused.
+frequency and one phase from the start-of-frame. After the (64,7) PLS code
+reports MODCOD, the 90 known header symbols refit that frequency. Pilots
+are removed, and each pilot block corrects the phase of the following
+slots. QPSK, 8PSK, 16APSK, and 32APSK frames decode through BCH and LDPC
+for every DVB-S2 rate except short 9/10, which does not exist. The same
+path accepts root-raised-cosine samples when the symbol rate is known, at
+2 to 8 samples per symbol and roll-off 0.20, 0.25, or 0.35.
+`estimateDvbs2SymbolRateHz` can report a rate from sample power. The D1
+survey still does not measure a symbol rate or detect PLS. A BBFRAME can
+be descrambled into a clear transport stream. Padding past the data field
+is ignored, a packet split across frames is joined, and null-packet
+deletion puts those nulls back. ISSY is rejected. A scrambled packet is
+left out. The app does not decode pictures. Play clear TS hands an
+unscrambled file to the OS player. Commercial decrypt is refused.
 
 ## Bias-T
 

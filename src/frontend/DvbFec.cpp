@@ -516,37 +516,59 @@ ShortHalfFec decodeDvbs2Qpsk(bool normalFrame, int modcod, const std::vector<int
     return decodeCode(*code, hardBits);
 }
 
-ShortHalfFec demodDvbs2QpskFrame(const std::complex<float>* symbols, std::size_t count) {
+ShortHalfFec demodDvbs2Frame(const std::complex<float>* symbols, std::size_t count) {
     const auto header = detectDvbs2PlHeader(symbols, count);
     ShortHalfFec out;
     if (!header.plsDecoded) {
-        out.note = "QPSK frame was not found. 8PSK and APSK are not implemented.";
+        out.note = "PL header was not found.";
         return out;
     }
-    if (header.pilots) {
-        out.note = "Pilots are not skipped. 8PSK and APSK are not implemented.";
+    const auto info = dvbs2Modcod(header.modcod);
+    if (!info.known) {
+        out.note = "That MODCOD is not decoded.";
         return out;
     }
-    if (header.modcod < 1 || header.modcod > 11) {
-        out.note = "Not a QPSK MODCOD. 8PSK and APSK are not implemented.";
-        return out;
-    }
-    if (header.shortFrame && header.modcod == 11) {
+    if (header.shortFrame && info.rateModcod == 11) {
         out.note = "Short frames have no rate 9/10.";
         return out;
     }
-    const std::size_t dataSymbols = header.shortFrame ? 8100 : 32400;
-    const auto payload = extractDvbs2DataSymbols(symbols, count, dataSymbols);
-    if (payload.data.size() != dataSymbols) {
-        out.note = "QPSK payload was shorter than one FECFRAME.";
+    const int payloadSymbols = dvbs2PayloadSymbols(header.modcod, header.shortFrame, header.pilots);
+    const auto payload = extractDvbs2DataSymbols(symbols, count, static_cast<std::size_t>(payloadSymbols));
+    if (static_cast<int>(payload.data.size()) != payloadSymbols) {
+        out.note = "Payload was shorter than one FECFRAME.";
         return out;
     }
-    const auto sliced = sliceQpskAfterPlDescramble(payload.data.data(), payload.data.size(), header.modcod);
-    if (!sliced.sliced || static_cast<int>(sliced.bits.size()) != (header.shortFrame ? 16200 : 64800)) {
-        out.note = "QPSK slice did not produce a FECFRAME.";
+    const auto sliced = sliceDvbs2FecBits(payload.data.data(), payload.data.size(),
+        header.modcod, header.shortFrame, header.pilots);
+    if (!sliced.sliced) {
+        out.note = sliced.note;
         return out;
     }
-    return decodeDvbs2Qpsk(header.shortFrame ? false : true, header.modcod, sliced.bits);
+    auto decoded = decodeDvbs2Qpsk(!header.shortFrame, info.rateModcod, sliced.fecBits);
+    if (decoded.bchOk)
+        decoded.note = "FECFRAME corrected. The app does not decode pictures. Commercial decrypt is not performed.";
+    return decoded;
+}
+
+ShortHalfFec demodDvbs2QpskFrame(const std::complex<float>* symbols, std::size_t count) {
+    const auto header = detectDvbs2PlHeader(symbols, count);
+    if (header.plsDecoded && (header.modcod < 1 || header.modcod > 11)) {
+        ShortHalfFec out;
+        out.note = "Not a QPSK MODCOD.";
+        return out;
+    }
+    return demodDvbs2Frame(symbols, count);
+}
+
+ShortHalfFec demodDvbs2IqFrame(const std::complex<float>* samples, std::size_t count,
+    double sampleRateHz, double symbolRateHz, double rollOff) {
+    const auto timed = recoverDvbs2Symbols(samples, count, sampleRateHz, symbolRateHz, rollOff);
+    if (!timed.locked) {
+        ShortHalfFec out;
+        out.note = timed.note;
+        return out;
+    }
+    return demodDvbs2Frame(timed.symbols.data(), timed.symbols.size());
 }
 
 bool encodeDvbs2ShortBch(const std::vector<int>& message, std::vector<int>& coded) {

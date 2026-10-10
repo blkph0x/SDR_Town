@@ -71,16 +71,21 @@ is a driver request on that index. External Bias-T stays a commanded
 supply state and asks the dongle Bias-T to remain off. Neither request is
 a voltage measurement. An external supply port must answer `OK` to
 `13`, `18`, or `OFF` before the arm stands. That answer is not a
-voltmeter. The PL header estimates one frequency and one phase, then the
-ETSI (64,7) PLS code reports MODCOD. QPSK symbols may be Gold-descrambled
-into pre-FEC hard bits. A supplied BBFRAME may be BB-descrambled into a
-clear transport stream, and a scrambled packet is omitted. QPSK FECFRAMEs,
-short (16200) and normal (64800), use the ETSI BCH polynomials and the
-annex B/C LDPC address tables. A frame with no pilots can be decoded from
-one sample per symbol after the PL Gold code. Short rate 9/10 does not
-exist. 8PSK and APSK are not implemented, pilots are not skipped, and live
-IQ still does not become video. Clear TS playback writes only unscrambled packets and does
-not decrypt. Commercial decrypt stays refused.
+voltmeter. The PL header estimates one frequency and one phase from the
+start-of-frame, then refits that frequency on the 90 known header symbols
+after the ETSI (64,7) PLS code reports MODCOD. Pilots are removed and each
+pilot block corrects the phase of the following slots. QPSK, 8PSK, 16APSK,
+and 32APSK FECFRAMEs, short (16200) and normal (64800), use the ETSI BCH
+polynomials, the annex B/C LDPC address tables, and the constellation and
+bit interleaver in EN 302 307-1. Short rate 9/10 does not exist. The same
+decoder accepts root-raised-cosine samples at a known symbol rate, 2 to 8
+samples per symbol, roll-off 0.20, 0.25, or 0.35. The D1 survey still does
+not measure a symbol rate or detect PLS. A supplied BBFRAME may be
+BB-descrambled into a clear transport stream. Padding is ignored, a split
+packet is joined, null-packet deletion reinserts nulls, and ISSY is
+rejected. A scrambled packet is omitted. The app does not decode pictures.
+Clear TS playback writes only unscrambled packets and the OS player opens
+that file. Commercial decrypt stays refused.
 
 ## DEC-0209 - Listen identity, unused-stream stop, analog HF filter (2026-10-10)
 

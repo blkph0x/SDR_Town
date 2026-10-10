@@ -23,10 +23,13 @@ struct ShortHalfFec {
 
 ShortHalfFec decodeDvbs2Qpsk(bool normalFrame, int modcod, const std::vector<int>& hardBits);
 
-// One sample per symbol. QPSK, no pilots: header, then 8100 short or
-// 32400 normal payload symbols. A constant frequency and phase are removed.
-// Pilots and raw oversampled IQ are not handled.
+// One sample per symbol, or root-raised-cosine samples at a known symbol rate.
+// MODCOD 1..28, short or normal, with or without pilots. Short rate 9/10 is
+// refused. The receiver does not decrypt and does not decode pictures.
+ShortHalfFec demodDvbs2Frame(const std::complex<float>* symbols, std::size_t count);
 ShortHalfFec demodDvbs2QpskFrame(const std::complex<float>* symbols, std::size_t count);
+ShortHalfFec demodDvbs2IqFrame(const std::complex<float>* samples, std::size_t count,
+    double sampleRateHz, double symbolRateHz, double rollOff);
 
 bool encodeDvbs2ShortBch(const std::vector<int>& message, std::vector<int>& coded);
 bool decodeDvbs2ShortBch(std::vector<int> coded, std::vector<int>& message);

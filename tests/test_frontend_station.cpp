@@ -148,7 +148,7 @@ TEST_CASE("D1 survey reports a tone and refuses demod and decrypt") {
     CHECK(survey.peakOffsetHz > 0.0);
     CHECK_FALSE(survey.symbolRateMeasured);
     CHECK_FALSE(survey.plsDetected);
-    CHECK_FALSE(dvbDemodAvailable());
+    CHECK(dvbDemodAvailable());
     CHECK_FALSE(commercialDecryptAvailable());
 }
 
@@ -167,7 +167,7 @@ TEST_CASE("Clear transport-stream inventory lists PIDs and does not read scrambl
     CHECK(inventory.packets == 2);
     CHECK(inventory.scrambledPackets == 1);
     CHECK(inventory.pids.size() == 2);
-    CHECK_FALSE(dvbDemodAvailable());
+    CHECK(dvbDemodAvailable());
 }
 
 TEST_CASE("PL header sync finds the SOF and clear playback refuses scrambled TS") {
@@ -180,7 +180,7 @@ TEST_CASE("PL header sync finds the SOF and clear playback refuses scrambled TS"
     CHECK(hit.symbolIndex == 8);
     CHECK(hit.modcod == -1);
     CHECK_FALSE(hit.plsDecoded);
-    CHECK_FALSE(dvbDemodAvailable());
+    CHECK(dvbDemodAvailable());
 
     const auto header = modulateDvbs2PlHeader(4, false, false);
     REQUIRE(header.size() == 90);
@@ -310,7 +310,7 @@ TEST_CASE("BBFRAME extraction and pre-FEC QPSK bits refuse LDPC claims") {
     CHECK(extracted.clearTs[0] == 0x47);
     CHECK(extracted.clearTs[2] == 0x21);
     CHECK(extracted.clearTs[4] == 0x5A);
-    CHECK_FALSE(dvbDemodAvailable());
+    CHECK(dvbDemodAvailable());
 
     frame[13] = 0xC0;
     frame[10] = crc8(frame.data() + 11, 187);
@@ -362,7 +362,7 @@ TEST_CASE("Short rate 1/2 BCH and LDPC correct injected errors") {
     CHECK(decoded.iterations >= 1);
     CHECK(decoded.messageBits == message);
     CHECK(decoded.note.find("Commercial decrypt is not performed") != std::string::npos);
-    CHECK_FALSE(dvbDemodAvailable());
+    CHECK(dvbDemodAvailable());
     CHECK_FALSE(commercialDecryptAvailable());
 }
 
@@ -478,7 +478,138 @@ TEST_CASE("Every QPSK rate encodes a codeword and selected rates correct errors"
     pilotFrame.insert(pilotFrame.end(), normalScrambled.begin(), normalScrambled.end());
     CHECK_FALSE(demodDvbs2QpskFrame(pilotFrame.data(), pilotFrame.size()).bchOk);
     CHECK_FALSE(commercialDecryptAvailable());
-    CHECK_FALSE(dvbDemodAvailable());
+    CHECK(dvbDemodAvailable());
+}
+
+TEST_CASE("Pilots, higher constellations, shaped samples, and split transport packets") {
+    auto messageFor = [](bool normal, int rateModcod) {
+        int messageBits = 0;
+        int codeBits = 0;
+        REQUIRE(dvbs2QpskInfoBits(normal, rateModcod, messageBits, codeBits));
+        std::vector<int> message(static_cast<std::size_t>(messageBits));
+        for (int i = 0; i < messageBits; ++i) message[static_cast<std::size_t>(i)] = (i * 17 + 3) & 1;
+        return message;
+    };
+    auto frameFor = [](const std::vector<int>& codeword, int modcod, bool shortFrame, bool pilots) {
+        const auto data = modulateDvbs2Data(codeword.data(), codeword.size(), modcod, shortFrame, pilots);
+        const auto scrambled = scramblePlSymbols(data.data(), data.size());
+        const auto header = modulateDvbs2PlHeader(modcod, shortFrame, pilots);
+        std::vector<std::complex<float>> frame(4 + header.size() + scrambled.size());
+        for (std::size_t i = 0; i < header.size(); ++i) frame[4 + i] = header[i];
+        for (std::size_t i = 0; i < scrambled.size(); ++i) frame[4 + header.size() + i] = scrambled[i];
+        return frame;
+    };
+
+    const auto qpsk = messageFor(false, 4);
+    std::vector<int> qpskWord;
+    REQUIRE(encodeDvbs2Qpsk(false, 4, qpsk, qpskWord));
+    auto pilotFrame = frameFor(qpskWord, 4, true, true);
+    const int firstPilot = 4 + 90 + 16 * 90;
+    for (std::size_t i = static_cast<std::size_t>(firstPilot); i < pilotFrame.size(); ++i)
+        pilotFrame[i] *= std::polar(1.0f, 0.4f);
+    const auto fromPilots = demodDvbs2Frame(pilotFrame.data(), pilotFrame.size());
+    CHECK(fromPilots.bchOk);
+    CHECK(fromPilots.messageBits == qpsk);
+
+    const auto eight = messageFor(false, 5);
+    std::vector<int> eightWord;
+    REQUIRE(encodeDvbs2Qpsk(false, 5, eight, eightWord));
+    auto eightFrame = frameFor(eightWord, 12, true, false);
+    for (std::size_t i = 0; i < eightFrame.size(); ++i)
+        eightFrame[i] *= std::polar(1.0f, 0.25f + 0.01f * static_cast<float>(i));
+    const auto fromEight = demodDvbs2Frame(eightFrame.data(), eightFrame.size());
+    CHECK(fromEight.bchOk);
+    CHECK(fromEight.messageBits == eight);
+
+    const auto apsk = messageFor(false, 6);
+    std::vector<int> apskWord;
+    REQUIRE(encodeDvbs2Qpsk(false, 6, apsk, apskWord));
+    const auto apskFrame = frameFor(apskWord, 18, true, false);
+    const auto fromApsk = demodDvbs2Frame(apskFrame.data(), apskFrame.size());
+    CHECK(fromApsk.bchOk);
+    CHECK(fromApsk.messageBits == apsk);
+
+    const auto apsk32 = messageFor(false, 7);
+    std::vector<int> apsk32Word;
+    REQUIRE(encodeDvbs2Qpsk(false, 7, apsk32, apsk32Word));
+    const auto apsk32Frame = frameFor(apsk32Word, 24, true, false);
+    const auto from32 = demodDvbs2Frame(apsk32Frame.data(), apsk32Frame.size());
+    CHECK(from32.bchOk);
+    CHECK(from32.messageBits == apsk32);
+    CHECK_FALSE(encodeDvbs2Qpsk(false, 11, std::vector<int>{}, apsk32Word));
+
+    auto shaped = frameFor(qpskWord, 4, true, false);
+    for (std::size_t i = 0; i < shaped.size(); ++i)
+        shaped[i] *= std::polar(1.0f, 0.3f + 0.015f * static_cast<float>(i));
+    auto samples = shapeDvbs2Rrc(shaped.data(), shaped.size(), 4, 0.35);
+    std::vector<std::complex<float>> delayed(samples.size());
+    for (std::size_t i = 1; i < samples.size(); ++i)
+        delayed[i] = samples[i - 1];
+    const double symbolRate = 5.0e6;
+    const auto fromIq = demodDvbs2IqFrame(delayed.data(), delayed.size(), symbolRate * 4.0, symbolRate, 0.35);
+    CHECK(fromIq.bchOk);
+    CHECK(fromIq.messageBits == qpsk);
+    const double estimated = estimateDvbs2SymbolRateHz(delayed.data(), delayed.size(), symbolRate * 4.0);
+    CHECK(std::abs(estimated - symbolRate) / symbolRate < 0.02);
+
+    auto crc8 = [](const std::uint8_t* data, std::size_t size) {
+        std::uint8_t crc = 0;
+        for (std::size_t i = 0; i < size; ++i) {
+            for (int bit = 7; bit >= 0; --bit) {
+                const int mix = ((crc >> 7) & 1) ^ ((data[i] >> bit) & 1);
+                crc = static_cast<std::uint8_t>(crc << 1);
+                if (mix) crc ^= 0xD5;
+            }
+        }
+        return crc;
+    };
+    std::vector<std::uint8_t> firstPacket(188, 0x11);
+    firstPacket[0] = 0x47;
+    firstPacket[1] = 0x00;
+    firstPacket[2] = 0x22;
+    firstPacket[3] = 0x10;
+    std::vector<std::uint8_t> secondPacket(188, 0x22);
+    secondPacket[0] = 0x47;
+    secondPacket[1] = 0x00;
+    secondPacket[2] = 0x23;
+    secondPacket[3] = 0x10;
+    std::vector<std::uint8_t> field;
+    field.push_back(crc8(firstPacket.data() + 1, 187));
+    field.insert(field.end(), firstPacket.begin() + 1, firstPacket.end());
+    field.push_back(2);
+    field.push_back(crc8(secondPacket.data() + 1, 187));
+    field.insert(field.end(), secondPacket.begin() + 1, secondPacket.end());
+    field.push_back(0);
+    const int split = 189 + 40;
+    auto build = [&](int syncd, const std::vector<std::uint8_t>& bytes) {
+        std::vector<std::uint8_t> frame(10 + bytes.size() + 3, 0xFF);
+        frame[0] = 0xF4;
+        frame[2] = 0x05;
+        frame[3] = 0xE8;
+        frame[4] = static_cast<std::uint8_t>((bytes.size() * 8) >> 8);
+        frame[5] = static_cast<std::uint8_t>(bytes.size() * 8);
+        frame[6] = 0x47;
+        frame[7] = static_cast<std::uint8_t>(syncd >> 8);
+        frame[8] = static_cast<std::uint8_t>(syncd);
+        frame[9] = crc8(frame.data(), 9);
+        for (std::size_t i = 0; i < bytes.size(); ++i) frame[10 + i] = bytes[i];
+        return scrambleBbFrame(frame.data(), frame.size());
+    };
+    BbCarry carry;
+    const auto firstFrame = build(0, std::vector<std::uint8_t>(field.begin(), field.begin() + split));
+    const auto secondFrame = build(65535, std::vector<std::uint8_t>(field.begin() + split, field.end()));
+    const auto firstOut = appendClearTsFromBbFrame(carry, firstFrame.data(), firstFrame.size());
+    const auto secondOut = appendClearTsFromBbFrame(carry, secondFrame.data(), secondFrame.size());
+    CHECK(firstOut.headerCrcOk);
+    CHECK(secondOut.headerCrcOk);
+    std::vector<std::uint8_t> joined = firstOut.clearTs;
+    joined.insert(joined.end(), secondOut.clearTs.begin(), secondOut.clearTs.end());
+    REQUIRE(joined.size() == 188 * 4);
+    CHECK(joined[2] == 0x22);
+    CHECK(joined[188] == 0x47);
+    CHECK(joined[190] == 0xFF);
+    CHECK(joined[188 * 3 + 2] == 0x23);
+    CHECK_FALSE(commercialDecryptAvailable());
 }
 
 TEST_CASE("Pass session commands the rotator then stop and park on abort") {
@@ -685,7 +816,7 @@ TEST_CASE("Equipment wizard defaults Bias-T off and flags a sub-0.2 dB claim") {
     CHECK_FALSE(wizard.findChild<QCheckBox*>("attestTle")->isChecked());
     CHECK_FALSE(wizard.findChild<QCheckBox*>("followPlanner")->isChecked());
     CHECK(wizard.findChild<QComboBox*>("stationMission")->currentText() == "LEO track");
-    CHECK(wizard.findChild<QLabel*>("dvbStage")->text().contains("8PSK and APSK are not implemented"));
+    CHECK(wizard.findChild<QLabel*>("dvbStage")->text().contains("does not decode pictures"));
     CHECK(wizard.findChild<QLabel*>("dvbStage")->text().contains("Commercial decrypt is refused"));
     CHECK_FALSE(wizard.findChild<QCheckBox*>("horizontalPol")->isChecked());
     CHECK_FALSE(wizard.findChild<QCheckBox*>("highBand")->isChecked());

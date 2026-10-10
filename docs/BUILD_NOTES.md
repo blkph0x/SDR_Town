@@ -1,5 +1,14 @@
 # Build notes
 
+## 2026-10-10 - Pilots, higher constellations, and shaped samples
+
+`FrontendStation` Release PASS (8.14 s): pilots, short 8PSK 3/5, short
+16APSK 2/3, short 32APSK 3/4, a split null-deleted transport stream, and a
+shaped short QPSK 1/2 frame with a one-sample delay and a constant
+frequency offset. `AntennaControl` Release PASS (5.90 s). Short rate 9/10
+is refused. The app does not decode pictures. Signed Latest remains 0.2.134.
+Windows CI for this commit was not checked.
+
 ## 2026-10-10 - QPSK rates and the normal 64800-bit frame
 
 `FrontendStation` Release PASS (7.89 s): every QPSK rate except short 9/10

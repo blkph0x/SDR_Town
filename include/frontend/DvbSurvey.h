@@ -20,8 +20,8 @@ struct DvbSurveyResult {
 
 DvbSurveyResult surveyIfCapture(const std::complex<float>* iq, std::size_t count, double sampleRateHz);
 
-// D2 demod is not linked. This only inventories MPEG-TS packets the caller
-// already has. Scrambled packets are counted and their payload is not read.
+// Inventories MPEG-TS packets the caller already has. Scrambled packets are
+// counted and their payload is not read. This function is not a demodulator.
 struct ClearTsInventory {
     bool aligned = false;
     int packets = 0;
@@ -31,7 +31,7 @@ struct ClearTsInventory {
 
 ClearTsInventory inventoryClearTransportStream(const std::uint8_t* data, std::size_t size);
 
-// D2/D3 demod is not linked. Commercial conditional-access decrypt is refused.
+// Supplied-rate demod is implemented. Commercial conditional-access decrypt is refused.
 bool dvbDemodAvailable();
 bool commercialDecryptAvailable();
 const char* dvbStageNote();

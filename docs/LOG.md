@@ -1,5 +1,17 @@
 # Development log
 
+## 2026-10-10 - Pilots, higher constellations, and shaped samples
+
+QPSK, 8PSK, 16APSK, and 32APSK frames decode, short and normal, with or
+without pilots. The 90 known header symbols refit the frequency after the
+start-of-frame estimate. A short QPSK 1/2 frame returns the 7032 message
+bits from root-raised-cosine samples at a known symbol rate, after a
+one-sample timing shift and a constant frequency offset. Short rate 9/10
+does not exist. A split baseband frame rejoins the packet and puts deleted
+nulls back. ISSY is rejected. The app does not decode pictures. Commercial
+decrypt is not performed. The D1 survey still does not measure symbol rate
+or detect PLS.
+
 ## 2026-10-10 - Other QPSK rates and the normal 64800-bit frame
 
 Every DVB-S2 QPSK rate except short 9/10 encodes and decodes. Normal

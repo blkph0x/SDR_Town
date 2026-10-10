@@ -12,15 +12,17 @@ observed step from the last two planner samples. Horizontal is 18 V and
 high band is 22 kHz. The station panel and Tools rotator share one
 `rotctld` client. A selected radio index queues the IF and can request
 internal Bias-T. External Bias-T does not enable the dongle supply. A supply port must
-answer OK to 13/18/OFF. Header frequency and phase feed PLS. QPSK symbols
-become pre-FEC hard bits after the PL Gold code. A BBFRAME can yield a
-clear transport stream and omits scrambled packets. QPSK short and
-normal frames decode from one sample per symbol through BCH and LDPC for
-every DVB-S2 rate except short 9/10. 8PSK, APSK, and pilots are not
-implemented.
+answer OK to 13/18/OFF. Header frequency is refit on the 90 known header
+symbols. Pilots are removed. QPSK, 8PSK, 16APSK, and 32APSK, short and
+normal, decode through BCH and LDPC for every DVB-S2 rate except short
+9/10, from symbols or from root-raised-cosine samples at a known rate.
+The D1 survey does not measure that rate or detect PLS. A BBFRAME can
+yield a clear transport stream, joins a split packet, reinserts deleted
+nulls, rejects ISSY, and omits scrambled packets. The app does not decode
+pictures; the OS player opens a clear TS.
 Lease/IF boxes stay
 attestations. No Hamlib link, no P25
-edits, no commercial decrypt. D2 demod not linked. Tests: `frontend_station_tests`.
+edits, no commercial decrypt. Tests: `frontend_station_tests`.
 
 T-0122 | in_progress | Listen identity, unused stream stop, HF filter (ISS-0089 / DEC-0209) |
 PR #34 does not merge (draft, frozen P25 CI). Extract Listen `stableKey`
