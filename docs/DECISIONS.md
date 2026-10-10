@@ -1,5 +1,42 @@
 # Decisions
 
+## DEC-0210 - Station front-end: LNB, Bias-T, armed rotator tracking (2026-10-10)
+
+The station paper asks for LNB noise-figure profiles, external 13/18 V Bias-T,
+and automatic Hamlib tracking. SDR Town already has frequency-only
+`SatPassPlanner::tickAutoTrack` and a manual `rotctld` bridge (DEC-0140).
+There is no LNB, DiSEqC, or DVB-S2 path. DEC-0140 forbids automatic motion
+and forbids linking Hamlib.
+
+Decision: add a separate `frontend` session. Do not edit the frozen P25
+pipeline. Do not link Hamlib; keep one serialized `rotctld` ERP client
+(`+P` / `+p` / `+S`, 1500 ms deadline). Automatic AZ/EL is allowed only
+after an explicit arm whose checklist passed: radio lease, IF inside the
+SDR span, TLE age within the profile limit (or a logged override), Bias-T
+current rating at least the LNB maximum draw, and a fresh armed rotator
+(or a logged override). Manual Tools pointing stays on that same
+controller. Jog pauses auto-track and does not drop the pass. Default
+park remains move-to-saved AZ/EL after `+S`, not a blind Hamlib PARK.
+Default track rate is 1 Hz. Soft limits clamp before every set. Comms
+loss, excessive error, or abort issues stop then park and does not
+auto-rearm. Report measured command-versus-reported error; do not claim
+sub-degree accuracy.
+
+Bias-T stays default OFF on every process start. Enable requires an
+explicit confirmation. Internal SDR Bias-T and an external supply cannot
+be ON together. LOS, abort, comms loss, sensed over-current, and shutdown
+command OFF. Driver acknowledgement is not a voltage measurement. A crash
+still cannot guarantee DC removal.
+
+LNB noise figure is a manufacturer claim plus an optional calibration
+offset. Values below 0.2 dB are stored as claims and flagged, not as
+measured G/T. The link hint is a qualitative bin from dish size, claimed
+NF, and elevation. It is not a computed C/N. Doppler is applied to true
+RF, then converted to IF with the selected LO. No commercial decrypt.
+DVB-S2 D1 may report spectrum occupancy only. Symbol-rate, PLS, LDPC, and
+MPEG-TS stay unavailable until a reviewed implementation exists. D2/D3
+must refuse CSA/CISSA/CI+.
+
 ## DEC-0209 - Listen identity, unused-stream stop, analog HF filter (2026-10-10)
 
 PR #34 (draft, fubarzi) added Listen persistence, spectrum controls, and an

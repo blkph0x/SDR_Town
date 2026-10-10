@@ -1,4 +1,5 @@
 #include "AntennaControlWindow.h"
+#include "frontend/EquipmentWizard.h"
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QDateTime>
@@ -137,4 +138,5 @@ void installAntennaControlMenu(QMainWindow& window){
     if(!menu)menu=window.menuBar()->addMenu("&Tools");
     auto* panel=new AntennaControlWindow(&window);
     menu->addAction("Antenna Rotator && SWR...",panel,[panel]{panel->show();panel->raise();panel->activateWindow();});
+    installEquipmentWizardMenu(window);
 }

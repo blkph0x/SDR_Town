@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-10 - Station front-end session, DEC-0210
+
+LNB IF conversion, claimed NF caution, Bias-T confirm/interlock, rotator
+tick planner, pass arm checklist, metric JSONL, and a D1 spectrum survey.
+Tools > Station front-end. No P25 pipeline edits. Demod and commercial
+decrypt are not linked.
+
 ## 2026-10-10 - Signed 0.2.134 installer is GitHub Latest
 
 Full NSIS + portable + control DLL + signed `update.json` published as

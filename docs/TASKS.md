@@ -1,5 +1,11 @@
 # Task list (canonical)
 
+T-0123 | in_progress | Station front-end LNB, Bias-T, rotator arm, D1 survey (DEC-0210) |
+Separate `frontend` session. Claimed NF, IF conversion, fail-closed Bias-T,
+arm checklist, tracking tick, metric JSONL, spectrum survey. No Hamlib
+link, no P25 edits, no commercial decrypt. D2/D3 demod not linked.
+Tests: `frontend_station_tests`.
+
 T-0122 | in_progress | Listen identity, unused stream stop, HF filter (ISS-0089 / DEC-0209) |
 PR #34 does not merge (draft, frozen P25 CI). Extract Listen `stableKey`
 persist + stop unused Listen streams, analog 200–2800 Hz HF filter below

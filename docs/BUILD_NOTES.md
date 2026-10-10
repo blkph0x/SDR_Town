@@ -1,5 +1,12 @@
 # Build notes
 
+## 2026-10-10 - Station front-end unit tests, DEC-0210
+
+`frontend_station_tests` Release: LNB 0.3 dB ≈ 21 K, Ku low/high IF,
+Bias-T confirm and over-current off, track clamp, arm/teardown order,
+profile round-trip, D1 tone peak, wizard default OFF. ctest FrontendStation
+PASS. D2/D3 and commercial decrypt stay unavailable.
+
 ## 2026-10-10 - v0.2.134 signed Latest installer
 
 Local `scripts/release.ps1` on worktree cfdb6a3 produced NSIS

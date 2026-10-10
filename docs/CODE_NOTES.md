@@ -520,6 +520,14 @@ controls DSP. FmDiagnosticsLog.cpp samples on a dedicated Qt thread, rotates
 local JSONL, retains inactive sessions and forwards opt-in summaries through
 RemoteDiagnostics. See FM_DIAGNOSTICS.md for fields, privacy and known gaps.
 
+## Station front-end (DEC-0210 / T-0123)
+
+`include/frontend` owns LNB IF math, claimed noise figure, Bias-T state,
+rotator tick planning, pass arm/teardown order, JSONL metrics, station
+profile JSON, and a D1 FFT survey. `EquipmentWizard` is the Tools panel.
+`installAntennaControlMenu` also installs that panel so `MainWindow.cpp`
+stays untouched. D2/D3 and commercial decrypt return false.
+
 ## Antenna control (DEC-0140 / T-0068)
 
 AntennaControl.h/.cpp isolates bounded asynchronous Hamlib ERP transport,

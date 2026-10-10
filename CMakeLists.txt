@@ -252,6 +252,15 @@ set(SDR_TOWN_SOURCES
     src/DiagnosticsObserver.cpp
     src/AntennaControl.cpp include/AntennaControl.h
     src/AntennaControlWindow.cpp
+    src/frontend/LnbConversion.cpp include/frontend/LnbConversion.h
+    src/frontend/LinkBudgetHint.cpp include/frontend/LinkBudgetHint.h
+    src/frontend/FrontEndPower.cpp include/frontend/FrontEndPower.h
+    src/frontend/RotatorTrack.cpp include/frontend/RotatorTrack.h
+    src/frontend/PassArming.cpp include/frontend/PassArming.h
+    src/frontend/FrontEndMetrics.cpp include/frontend/FrontEndMetrics.h
+    src/frontend/StationProfile.cpp include/frontend/StationProfile.h
+    src/frontend/DvbSurvey.cpp include/frontend/DvbSurvey.h
+    src/frontend/EquipmentWizard.cpp include/frontend/EquipmentWizard.h
     include/RemoteDiagnostics.h
     src/UpdateManager.cpp   # professional GitHub release + safe in-app updater
     src/UpdateManifestSignature.cpp
@@ -719,9 +728,25 @@ if(BUILD_TESTS)
 
   # CLI black-box tests via PowerShell harness (run manually or in CI)
   add_executable(antenna_control_tests tests/test_antenna_control.cpp
-      src/AntennaControl.cpp include/AntennaControl.h src/AntennaControlWindow.cpp)
+      src/AntennaControl.cpp include/AntennaControl.h src/AntennaControlWindow.cpp
+      src/frontend/LnbConversion.cpp src/frontend/LinkBudgetHint.cpp
+      src/frontend/FrontEndPower.cpp src/frontend/RotatorTrack.cpp
+      src/frontend/PassArming.cpp src/frontend/FrontEndMetrics.cpp
+      src/frontend/StationProfile.cpp src/frontend/DvbSurvey.cpp
+      src/frontend/EquipmentWizard.cpp)
+  add_executable(frontend_station_tests tests/test_frontend_station.cpp
+      src/frontend/LnbConversion.cpp src/frontend/LinkBudgetHint.cpp
+      src/frontend/FrontEndPower.cpp src/frontend/RotatorTrack.cpp
+      src/frontend/PassArming.cpp src/frontend/FrontEndMetrics.cpp
+      src/frontend/StationProfile.cpp src/frontend/DvbSurvey.cpp
+      src/frontend/EquipmentWizard.cpp)
+  target_include_directories(frontend_station_tests PRIVATE include)
+  target_link_libraries(frontend_station_tests PRIVATE Catch2::Catch2 Qt6::Widgets nlohmann_json::nlohmann_json)
+  add_test(NAME FrontendStation COMMAND frontend_station_tests)
+  set_tests_properties(FrontendStation PROPERTIES TIMEOUT 30
+      ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QWindowsIntegrationPlugin>")
   target_include_directories(antenna_control_tests PRIVATE include)
-  target_link_libraries(antenna_control_tests PRIVATE Catch2::Catch2 Qt6::Widgets Qt6::Network)
+  target_link_libraries(antenna_control_tests PRIVATE Catch2::Catch2 Qt6::Widgets Qt6::Network nlohmann_json::nlohmann_json)
   add_test(NAME AntennaControl COMMAND antenna_control_tests)
   set_tests_properties(AntennaControl PROPERTIES TIMEOUT 40
       ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QWindowsIntegrationPlugin>")

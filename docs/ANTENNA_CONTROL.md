@@ -2,8 +2,10 @@
 
 Open **Tools > Antenna Rotator & SWR**. This first milestone supplies manual
 absolute pointing, hardware readback, configurable soft limits, saved park
-position and a read-only hardware SWR display. Automatic satellite/TLE tracking
-and native serial-driver packaging are not implemented here.
+position and a read-only hardware SWR display. Automatic satellite/TLE
+tracking is the separate Station front-end checklist in
+`docs/FRONTEND_STATION.md` (DEC-0210). This window does not start that
+loop. Native serial-driver packaging is not implemented here.
 
 ## Connection
 
