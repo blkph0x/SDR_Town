@@ -1,5 +1,7 @@
 #include "frontend/DvbFec.h"
 
+#include "frontend/DvbDemod.h"
+
 #include <array>
 #include <cstdint>
 
@@ -366,4 +368,26 @@ ShortHalfFec decodeDvbs2ShortHalf(const std::vector<int>& hardBits) {
     out.bchOk = true;
     out.note = "Short FECFRAME nominal rate 1/2 corrected. Other rates are not implemented. Commercial decrypt is not performed.";
     return out;
+}
+
+ShortHalfFec demodDvbs2ShortHalfFrame(const std::complex<float>* symbols, std::size_t count) {
+    constexpr std::size_t kDataSymbols = 8100;
+    const auto payload = extractDvbs2DataSymbols(symbols, count, kDataSymbols);
+    if (!payload.header.plsDecoded || payload.data.size() != kDataSymbols) {
+        ShortHalfFec out;
+        out.note = "Short QPSK 1/2 frame was not found. Other rates are not implemented.";
+        return out;
+    }
+    if (payload.header.modcod != 4 || !payload.header.shortFrame || payload.header.pilots) {
+        ShortHalfFec out;
+        out.note = "Only short QPSK 1/2 without pilots is decoded. Other rates are not implemented.";
+        return out;
+    }
+    const auto sliced = sliceQpskAfterPlDescramble(payload.data.data(), payload.data.size(), 4);
+    if (!sliced.sliced || sliced.bits.size() != 16200) {
+        ShortHalfFec out;
+        out.note = "QPSK slice did not produce a short FECFRAME. Other rates are not implemented.";
+        return out;
+    }
+    return decodeDvbs2ShortHalf(sliced.bits);
 }

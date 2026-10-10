@@ -551,7 +551,8 @@ then decodes PLS. `scrambleBbFrame` is the 1+X^14+X^15 baseband scrambler.
 unscrambled MPEG-TS packets. `sliceQpskAfterPlDescramble` returns pre-FEC
 hard bits for MODCOD 1..11. `encodeDvbs2ShortHalf` and `decodeDvbs2ShortHalf`
 are the short nominal rate 1/2 BCH outer code and LDPC inner code.
-Other rates are not implemented.
+`demodDvbs2ShortHalfFrame` runs that decoder on one-sample-per-symbol
+QPSK with no pilots. Other rates are not implemented.
 `modulateDvbs2PlHeader` builds that header.
 `writeClearTsForPlayback`
 writes only an unscrambled transport stream; the wizard Play clear TS button

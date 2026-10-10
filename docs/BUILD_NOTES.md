@@ -1,5 +1,11 @@
 # Build notes
 
+## 2026-10-10 - Short QPSK 1/2 symbol frame
+
+`FrontendStation` Release PASS (7.67 s): a rotated short QPSK 1/2 frame
+returns the 7032 message bits. `AntennaControl` Release PASS (5.95 s).
+Other rates are not implemented.
+
 ## 2026-10-10 - Short-frame BCH and LDPC
 
 `FrontendStation` Release PASS (7.64 s): BCH fixes 3 errors and rejects

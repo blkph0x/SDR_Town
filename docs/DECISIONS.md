@@ -74,10 +74,10 @@ a voltage measurement. An external supply port must answer `OK` to
 voltmeter. The PL header estimates one frequency and one phase, then the
 ETSI (64,7) PLS code reports MODCOD. QPSK symbols may be Gold-descrambled
 into pre-FEC hard bits. A supplied BBFRAME may be BB-descrambled into a
-clear transport stream, and a scrambled packet is omitted. Short FECFRAME
-nominal rate 1/2 has a BCH decoder (t=12) and an LDPC decoder on 16200
-hard bits. Other rates are not implemented, and live IQ still does not
-become video. Clear TS playback writes only unscrambled packets and does
+clear transport stream, and a scrambled packet is omitted. Short FECFRAME nominal rate 1/2 has a BCH decoder (t=12) and an LDPC
+decoder. A short QPSK 1/2 frame with no pilots can be decoded from one
+sample per symbol after the PL Gold code. Other rates are not implemented,
+pilots are not skipped, and live IQ still does not become video. Clear TS playback writes only unscrambled packets and does
 not decrypt. Commercial decrypt stays refused.
 
 ## DEC-0209 - Listen identity, unused-stream stop, analog HF filter (2026-10-10)

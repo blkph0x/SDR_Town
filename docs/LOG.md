@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-10 - Short QPSK 1/2 frame from symbols
+
+A header plus 8100 QPSK symbols, with one constant frequency and phase,
+decodes through the PL Gold code, LDPC, and BCH back to the 7032 message
+bits. Pilots are not skipped. Other rates are not implemented. This is
+one sample per symbol, not a raw capture.
+
 ## 2026-10-10 - Short-frame rate 1/2 BCH and LDPC
 
 Nominal rate 1/2 short frames are 7032 information bits, 7200 after BCH

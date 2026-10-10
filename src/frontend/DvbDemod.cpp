@@ -112,10 +112,11 @@ std::vector<std::complex<float>> modulateDvbs2PlHeader(int modcod, bool shortFra
     return out;
 }
 
-PlHeaderHit detectDvbs2PlHeader(const std::complex<float>* symbols, std::size_t count) {
-    PlHeaderHit hit;
-    hit.note = "PL header sync only. LDPC payload demod is not linked.";
-    if (!symbols || count < 26) return hit;
+PlDataSymbols extractDvbs2DataSymbols(const std::complex<float>* symbols, std::size_t count, std::size_t dataSymbols) {
+    PlDataSymbols out;
+    out.header.note = "PL header sync only. LDPC payload demod is not linked.";
+    if (!symbols || count < 26) return out;
+    PlHeaderHit& hit = out.header;
     std::complex<float> expected[26];
     std::complex<float> step[25];
     for (int i = 0; i < 26; ++i)
@@ -140,7 +141,7 @@ PlHeaderHit detectDvbs2PlHeader(const std::complex<float>* symbols, std::size_t 
             at = start;
         }
     }
-    if (bestScore < 10.0f) return hit;
+    if (bestScore < 10.0f) return out;
     const float omega = std::arg(bestResidual);
     hit.frequencyRadPerSymbol = omega;
     auto wiped = [&](int index) {
@@ -152,7 +153,7 @@ PlHeaderHit detectDvbs2PlHeader(const std::complex<float>* symbols, std::size_t 
     for (int i = 0; i < 26; ++i)
         acc += wiped(i) * std::conj(expected[i]);
     const float magnitude = std::abs(acc);
-    if (magnitude < 1.0f) return hit;
+    if (magnitude < 1.0f) return out;
     const auto derotate = std::conj(acc) / magnitude;
 
     int errors = 0;
@@ -163,16 +164,24 @@ PlHeaderHit detectDvbs2PlHeader(const std::complex<float>* symbols, std::size_t 
     hit.sofErrors = errors;
     hit.symbolIndex = at;
     hit.found = errors <= 4;
-    if (!hit.found) return hit;
+    if (!hit.found) return out;
     hit.note = "SOF frequency and phase estimated. LDPC payload demod is not linked.";
-    if (at + 90 > count) return hit;
+    if (at + 90 > count) return out;
     int bits[64];
     for (int i = 0; i < 64; ++i)
         bits[i] = hardBit(wiped(26 + i) * derotate, static_cast<std::size_t>(26 + i));
     decodePls(bits, hit);
     if (hit.plsDecoded)
         hit.note = "PLS MODCOD decoded after one SOF frequency estimate. LDPC payload demod is not linked.";
-    return hit;
+    if (dataSymbols == 0 || at + 90 + dataSymbols > count) return out;
+    out.data.resize(dataSymbols);
+    for (std::size_t i = 0; i < dataSymbols; ++i)
+        out.data[i] = wiped(90 + static_cast<int>(i)) * derotate;
+    return out;
+}
+
+PlHeaderHit detectDvbs2PlHeader(const std::complex<float>* symbols, std::size_t count) {
+    return extractDvbs2DataSymbols(symbols, count, 0).header;
 }
 
 namespace {

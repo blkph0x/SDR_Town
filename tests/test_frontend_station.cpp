@@ -365,6 +365,29 @@ TEST_CASE("Short rate 1/2 BCH and LDPC correct injected errors") {
     CHECK_FALSE(commercialDecryptAvailable());
 }
 
+TEST_CASE("Short QPSK 1/2 symbols decode through BCH and LDPC") {
+    std::vector<int> message(7032);
+    for (int i = 0; i < 7032; ++i) message[static_cast<std::size_t>(i)] = (i * 17 + 3) & 1;
+    std::vector<int> codeword;
+    REQUIRE(encodeDvbs2ShortHalf(message, codeword));
+    const auto mapped = modulateQpsk(codeword.data(), codeword.size());
+    const auto scrambled = scramblePlSymbols(mapped.data(), mapped.size());
+    const auto header = modulateDvbs2PlHeader(4, true, false);
+    REQUIRE(header.size() == 90);
+    REQUIRE(scrambled.size() == 8100);
+    std::vector<std::complex<float>> frame(4 + header.size() + scrambled.size());
+    for (std::size_t i = 0; i < header.size(); ++i) frame[4 + i] = header[i];
+    for (std::size_t i = 0; i < scrambled.size(); ++i) frame[4 + header.size() + i] = scrambled[i];
+    constexpr float omega = 0.02f;
+    for (std::size_t i = 0; i < frame.size(); ++i)
+        frame[i] *= std::polar(1.0f, 0.35f + omega * static_cast<float>(i));
+    const auto fromSymbols = demodDvbs2ShortHalfFrame(frame.data(), frame.size());
+    CHECK(fromSymbols.ldpcConverged);
+    CHECK(fromSymbols.bchOk);
+    CHECK(fromSymbols.messageBits == message);
+    CHECK_FALSE(commercialDecryptAvailable());
+}
+
 TEST_CASE("Pass session commands the rotator then stop and park on abort") {
     QTcpServer server;
     REQUIRE(server.listen(QHostAddress::LocalHost));

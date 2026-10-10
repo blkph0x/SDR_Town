@@ -14,8 +14,9 @@ high band is 22 kHz. The station panel and Tools rotator share one
 internal Bias-T. External Bias-T does not enable the dongle supply. A supply port must
 answer OK to 13/18/OFF. Header frequency and phase feed PLS. QPSK symbols
 become pre-FEC hard bits after the PL Gold code. A BBFRAME can yield a
-clear transport stream and omits scrambled packets. Short-frame nominal
-rate 1/2 BCH and LDPC correct hard bits. Other rates are not implemented.
+clear transport stream and omits scrambled packets. Short QPSK 1/2 with
+no pilots decodes from one sample per symbol through BCH and LDPC. Other
+rates are not implemented.
 Lease/IF boxes stay
 attestations. No Hamlib link, no P25
 edits, no commercial decrypt. D2 demod not linked. Tests: `frontend_station_tests`.

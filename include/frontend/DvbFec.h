@@ -1,5 +1,7 @@
 #pragma once
 
+#include <complex>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -22,3 +24,8 @@ struct ShortHalfFec {
 
 // Hard bits, 0 or 1, length 16200. Channel confidence is fixed.
 ShortHalfFec decodeDvbs2ShortHalf(const std::vector<int>& hardBits);
+
+// One sample per symbol. Short QPSK 1/2, no pilots: header, then 8100
+// payload symbols. A constant frequency and phase are removed. Pilots,
+// other rates, and raw oversampled IQ are not handled.
+ShortHalfFec demodDvbs2ShortHalfFrame(const std::complex<float>* symbols, std::size_t count);

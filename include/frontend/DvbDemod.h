@@ -33,6 +33,15 @@ std::vector<std::complex<float>> modulateDvbs2PlHeader(int modcod, bool shortFra
 // not a payload tracking loop. LDPC payload is not decoded.
 PlHeaderHit detectDvbs2PlHeader(const std::complex<float>* symbols, std::size_t count);
 
+// Symbols after the 90-symbol header, with the SOF frequency and phase removed.
+// They are still physical-layer scrambled. Pilot symbols are not removed.
+struct PlDataSymbols {
+    PlHeaderHit header;
+    std::vector<std::complex<float>> data;
+};
+
+PlDataSymbols extractDvbs2DataSymbols(const std::complex<float>* symbols, std::size_t count, std::size_t dataSymbols);
+
 // ETSI BB scrambler, polynomial 1+X^14+X^15, load 100101010000000.
 // The same function descrambles. This is not conditional-access decryption.
 std::vector<std::uint8_t> scrambleBbFrame(const std::uint8_t* data, std::size_t size);

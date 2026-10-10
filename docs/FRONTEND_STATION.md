@@ -55,8 +55,9 @@ packet is refused and is not written. The PL header search estimates one
 frequency and one phase, then the (64,7) PLS code reports MODCOD. QPSK
 payload symbols can be Gold-descrambled into pre-FEC hard bits. A BBFRAME
 can be descrambled into a clear transport stream; a scrambled packet is
-left out. Short-frame nominal rate 1/2 BCH and LDPC correct a codeword
-that is already hard bits. Other rates are not implemented, so live IQ does not become video.
+left out. A short QPSK 1/2 frame with no pilots decodes from one sample
+per symbol through BCH and LDPC. Other rates are not implemented, and pilots
+are not skipped, so live IQ does not become video.
 Commercial decrypt is refused.
 
 ## Bias-T
