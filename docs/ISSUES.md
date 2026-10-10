@@ -13,8 +13,9 @@ and request RTL or SDRplay Bias-T; that request is not a voltmeter.
 A named supply port sends 13/18/OFF and requires OK; an empty port is
 still commanded state, and OK is not a voltmeter. The station
 panel and Tools rotator share one `rotctld` client. LEO motion can lead one observed
-step; that lead is not a second propagation. PL header sync finds the
-SOF. Clear TS playback refuses scrambled packets. LDPC payload demod
+step; that lead is not a second propagation. Phase-aligned PLS reports
+MODCOD, frame length, and pilots. It does not recover a carrier from raw
+IQ. Clear TS playback refuses scrambled packets. LDPC payload demod
 remains unimplemented, so live IQ does not become video. Close
 the motor and power halves after a hardware acceptance pass.
 

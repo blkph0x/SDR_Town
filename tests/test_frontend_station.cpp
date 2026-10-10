@@ -177,7 +177,36 @@ TEST_CASE("PL header sync finds the SOF and clear playback refuses scrambled TS"
     CHECK(hit.sofErrors == 0);
     CHECK(hit.symbolIndex == 8);
     CHECK(hit.modcod == -1);
+    CHECK_FALSE(hit.plsDecoded);
     CHECK_FALSE(dvbDemodAvailable());
+
+    const auto header = modulateDvbs2PlHeader(4, false, false);
+    REQUIRE(header.size() == 90);
+    std::vector<std::complex<float>> frame(100);
+    for (std::size_t i = 0; i < header.size(); ++i) frame[4 + i] = header[i];
+    const auto pls = detectDvbs2PlHeader(frame.data(), frame.size());
+    CHECK(pls.found);
+    CHECK(pls.symbolIndex == 4);
+    CHECK(pls.plsDecoded);
+    CHECK(pls.plsErrors == 0);
+    CHECK(pls.modcod == 4);
+    CHECK_FALSE(pls.shortFrame);
+    CHECK_FALSE(pls.pilots);
+
+    for (auto& symbol : frame) symbol = -symbol;
+    const auto flipped = detectDvbs2PlHeader(frame.data(), frame.size());
+    CHECK(flipped.plsDecoded);
+    CHECK(flipped.modcod == 4);
+
+    const auto coded = modulateDvbs2PlHeader(18, true, true);
+    std::vector<std::complex<float>> other(coded.size());
+    for (std::size_t i = 0; i < coded.size(); ++i) other[i] = coded[i];
+    const auto wide = detectDvbs2PlHeader(other.data(), other.size());
+    CHECK(wide.plsDecoded);
+    CHECK(wide.modcod == 18);
+    CHECK(wide.shortFrame);
+    CHECK(wide.pilots);
+    CHECK(modulateDvbs2PlHeader(32, false, false).empty());
 
     const auto dir = std::filesystem::temp_directory_path() / "sdr-town-dvb-play";
     std::filesystem::create_directories(dir);

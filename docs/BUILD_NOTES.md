@@ -1,5 +1,11 @@
 # Build notes
 
+## 2026-10-10 - PLS MODCOD decode
+
+`FrontendStation` Release PASS (7.78 s): MODCOD 4, MODCOD 18 short with
+pilots, and MODCOD 4 again after a 180 degree flip. LDPC payload demod is
+still not linked.
+
 ## 2026-10-10 - PL header sync and clear TS playback
 
 `FrontendStation` Release PASS (7.65 s): SOF lock at symbol 8 with zero

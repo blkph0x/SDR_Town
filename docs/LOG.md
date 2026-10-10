@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-10 - PLS MODCOD on a phase-aligned header
+
+The (64,7) PLS code reports MODCOD, normal or short frame, and pilots.
+QPSK 1/2 and 16APSK 2/3 short-with-pilots round-trip, including a 180
+degree symbol flip. The symbols must already sit on the π/2 BPSK axes.
+LDPC payload demod is still not linked. Commercial decrypt stays refused.
+
 ## 2026-10-10 - PL header sync and clear TS playback
 
 Play clear TS writes an unscrambled transport stream and opens it with
