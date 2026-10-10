@@ -182,10 +182,11 @@ antenna control, saved limits/park and hardware-only SWR readback. See the
 [setup and ten-controller compatibility targets](docs/ANTENNA_CONTROL.md).
 Physical controller acceptance and automatic satellite tracking remain open.
 
-**[Download 0.2.134 portable testing release](https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.134-experimental)**
-is the current public tester ZIP (stereo WASAPI prime and per-USB Soapy IO).
-Install the official SDRplay API 3.15+ and service separately. Extract
-the entire ZIP into a fresh folder. This is not a signed installer/in-app updater package.
+**[Download 0.2.134 signed installer](https://github.com/blkph0x/SDR_Town/releases/latest)**
+is the current GitHub Latest / in-app updater release (NSIS setup, portable
+ZIP, signed `update.json`). Channel stays experimental. Install the official
+SDRplay API 3.15+ and service separately. Help > Check for Updates uses
+`/releases/latest/download/update.json`.
 Changing the Aero rate now selects a matching satellite survey frequency;
 Tune/Start applies it and selects the current decoder's constellation. The
 diagram labels its actual frequency/rate. Aero watch supports a user-selected

@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-10-10 - Signed 0.2.134 installer is GitHub Latest
+
+Full NSIS + portable + control DLL + signed `update.json` published as
+https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.134 (`--latest`).
+Channel remains experimental. In-app updater now sees 0.2.134 instead of
+0.2.119. Source cfdb6a3. Did not overwrite v0.2.134-experimental or the
+signing key. 0.2.135 Listen/HF extract stays source-only.
+
 ## 2026-10-10 - Promote v0.2.134-experimental to a regular Releases entry
 
 Working tester ZIP. Cleared the GitHub prerelease flag with `make_latest=false`.

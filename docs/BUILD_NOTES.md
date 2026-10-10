@@ -1,5 +1,24 @@
 # Build notes
 
+## 2026-10-10 - v0.2.134 signed Latest installer
+
+Local `scripts/release.ps1` on worktree cfdb6a3 produced NSIS
+`SDR_Town-0.2.134-win64-setup.exe` SHA256
+78f500fa904da0ff5f69d559ca42eee449c440cd0e3dcf584bb1dac743719425
+(151875437 bytes), portable ZIP
+97d0cf8ad4243d40f2ea3e13b8e6d08e5e1ea645b3a3afd150086b798a135b39,
+control DLL
+aee67f4d481a6023258d7022c3cf007b68824d14f40c28fe6adff5c031f3097e.
+`verify_release.py` PASS; Ed25519 `update.json.sig` verified with the
+embedded public key. Public
+https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.134 is not draft
+and not prerelease. `gh release view` without a tag returns v0.2.134.
+`/releases/latest/download/update.json` matches the signed local
+manifest (installer sha256 78f500fa…). Downloaded Latest portable hash
+matches; extracted `SDR_Town.exe --version` prints `SDR Town 0.2.134`;
+`build-info.json` sourceCommit cfdb6a33df16bca572d763f9970e23dc5d43e6d7.
+Windows CI on release/v0.2.134 commit e2a6b1f is run 38016284497.
+
 ## 2026-10-10 - v0.2.134-experimental promoted off prerelease
 
 `gh api` PATCH release 407743949: prerelease=false, make_latest=false.

@@ -12,8 +12,11 @@ Collector: ~100 WASAPI underruns/s with ringFill 0 on HyperX/VB-CABLE, all
 analog modes, including RF stopped; RSPdx+RTL liveIoWaitUs/overflows from
 one global Soapy lock. Stereo callback, start after two periods, per-USB
 IO mutex. No P25 DSP. Tests: `[audioengine]`, `[satcom][log][ownership]`,
-`[tx-safety]`. Public v0.2.134-experimental verified (Actions 37904016825,
-SHA256 b248823f6fd173874700d4daf9aeda54315783f20b88f8d94b42a28de04027bd).
+`[tx-safety]`. Public signed Latest v0.2.134 verified (tag v0.2.134, source
+cfdb6a3, installer SHA256
+78f500fa904da0ff5f69d559ca42eee449c440cd0e3dcf584bb1dac743719425).
+Portable-only v0.2.134-experimental remains
+b248823f6fd173874700d4daf9aeda54315783f20b88f8d94b42a28de04027bd.
 
 T-0120 | queued | Quarantine USB identity after leaked RX/TX Soapy handles (ISS-0085) |
 `stopStreamingImpl` leaks the Soapy handle on `rxDetached` and still

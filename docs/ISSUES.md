@@ -15,9 +15,10 @@ Collector 4988148b: underruns climb at ~100/s with `ringFillPercent` 0
 before RF starts and through NFM/WFM/USB/LSB. Outputs were HyperX Virtual
 Surround and VB-Audio Virtual Cable. A second live RTL plus RSPdx produced
 `liveIoWaitUs` in the tens of seconds and overflows on both. Not CPU/disk.
-Public v0.2.134-experimental verified. Stereo WASAPI, start after two
-periods, per-USB Soapy IO. Do not treat idle silence as a driver bug; do
-not invent PLC. T-0120 USB quarantine stays separate.
+Public signed Latest v0.2.134 verified (installer SHA256 78f500fa…).
+Stereo WASAPI, start after two periods, per-USB Soapy IO. Do not treat
+idle silence as a driver bug; do not invent PLC. T-0120 USB quarantine
+stays separate.
 
 ## ISS-0087 - --control-allow-unauthenticated with a token still requires the token (2026-10-08, OPEN)
 
