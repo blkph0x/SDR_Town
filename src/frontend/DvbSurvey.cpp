@@ -64,6 +64,32 @@ DvbSurveyResult surveyIfCapture(const std::complex<float>* iq, std::size_t count
     return out;
 }
 
+ClearTsInventory inventoryClearTransportStream(const std::uint8_t* data, std::size_t size) {
+    ClearTsInventory out;
+    if (!data || size < 188) return out;
+    std::size_t start = 0;
+    bool found = false;
+    for (std::size_t i = 0; i < 188 && i < size; ++i) {
+        if (data[i] != 0x47) continue;
+        if (i + 188 < size && data[i + 188] != 0x47) continue;
+        start = i;
+        found = true;
+        break;
+    }
+    if (!found) return out;
+    out.aligned = true;
+    for (std::size_t i = start; i + 188 <= size; i += 188) {
+        if (data[i] != 0x47) break;
+        ++out.packets;
+        const int pid = ((data[i + 1] & 0x1F) << 8) | data[i + 2];
+        const int scramble = (data[i + 3] >> 6) & 0x3;
+        if (scramble != 0) ++out.scrambledPackets;
+        if (out.pids.size() < 64 && std::find(out.pids.begin(), out.pids.end(), pid) == out.pids.end())
+            out.pids.push_back(pid);
+    }
+    return out;
+}
+
 bool dvbDemodAvailable() { return false; }
 bool commercialDecryptAvailable() { return false; }
 const char* dvbStageNote() {

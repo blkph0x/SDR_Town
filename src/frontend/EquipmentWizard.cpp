@@ -7,10 +7,14 @@
 #include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
+#include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMainWindow>
 #include <QMenuBar>
 #include <QPlainTextEdit>
+#include <QPushButton>
+#include <QSpinBox>
 #include <QVBoxLayout>
 
 EquipmentWizard::EquipmentWizard(QWidget* parent) : QDialog(parent) {
@@ -23,6 +27,28 @@ EquipmentWizard::EquipmentWizard(QWidget* parent) : QDialog(parent) {
     lnbMa_ = new QDoubleSpinBox; lnbMa_->setObjectName("lnbMaxMa"); lnbMa_->setRange(0, 2000); lnbMa_->setValue(200); lnbMa_->setSuffix(" mA");
     confirm_ = new QCheckBox("I confirm Bias-T may be enabled for this pass");
     confirm_->setObjectName("biasConfirm");
+    lease_ = new QCheckBox("Radio lease is held for this pass");
+    lease_->setObjectName("attestLease");
+    ifSpan_ = new QCheckBox("Corrected IF is inside the SDR span");
+    ifSpan_->setObjectName("attestIf");
+    tle_ = new QCheckBox("TLE is inside the station age limit");
+    tle_->setObjectName("attestTle");
+    rotorOverride_ = new QCheckBox("Override fresh rotator feedback for this pass");
+    rotorOverride_->setObjectName("rotorOverride");
+    host_ = new QLineEdit("127.0.0.1");
+    host_->setObjectName("rotatorHost");
+    port_ = new QSpinBox;
+    port_->setObjectName("rotatorPort");
+    port_->setRange(1, 65535);
+    port_->setValue(4533);
+    predictAz_ = new QDoubleSpinBox;
+    predictAz_->setObjectName("predictAz");
+    predictAz_->setRange(0, 360);
+    predictAz_->setValue(180);
+    predictEl_ = new QDoubleSpinBox;
+    predictEl_->setObjectName("predictEl");
+    predictEl_->setRange(0, 90);
+    predictEl_->setValue(20);
     caution_ = new QLabel; caution_->setObjectName("nfCaution"); caution_->setWordWrap(true);
     hint_ = new QLabel; hint_->setObjectName("linkHint");
     power_ = new QLabel("Bias-T: OFF"); power_->setObjectName("biasState");
@@ -31,20 +57,75 @@ EquipmentWizard::EquipmentWizard(QWidget* parent) : QDialog(parent) {
     form->addRow("Claimed LNB NF", nf_);
     form->addRow("Bias-T rating", supplyMa_);
     form->addRow("LNB max draw", lnbMa_);
+    form->addRow("rotctld host", host_);
+    form->addRow("rotctld port", port_);
+    form->addRow("Predicted AZ", predictAz_);
+    form->addRow("Predicted EL", predictEl_);
     auto* root = new QVBoxLayout(this);
     root->addLayout(form);
     root->addWidget(caution_);
     root->addWidget(hint_);
+    root->addWidget(lease_);
+    root->addWidget(ifSpan_);
+    root->addWidget(tle_);
+    root->addWidget(rotorOverride_);
     root->addWidget(confirm_);
     root->addWidget(power_);
+    auto* buttons = new QHBoxLayout;
+    auto* connectButton = new QPushButton("Connect rotator");
+    connectButton->setObjectName("connectRotator");
+    auto* armButton = new QPushButton("Arm pass");
+    armButton->setObjectName("armPass");
+    auto* abortButton = new QPushButton("Abort");
+    abortButton->setObjectName("abortPass");
+    buttons->addWidget(connectButton);
+    buttons->addWidget(armButton);
+    buttons->addWidget(abortButton);
+    root->addLayout(buttons);
     root->addWidget(plan_);
+    session_ = new StationPassSession(rotor_, this);
     connect(nf_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double) { syncCaution(); });
     connect(confirm_, &QCheckBox::toggled, this, [this](bool) {
         power_->setText(confirm_->isChecked() ? "Bias-T: confirmation armed, still OFF until pass arm" : "Bias-T: OFF");
-        refreshHint(30.0);
+        refreshHint(predictEl_->value());
+    });
+    connect(connectButton, &QPushButton::clicked, this, [this] {
+        RotorLimits limits;
+        rotor_.connectTo(host_->text(), static_cast<quint16>(port_->value()), limits);
+    });
+    connect(armButton, &QPushButton::clicked, this, [this] {
+        std::string error;
+        if (!session_->arm(checklist(), profile(), predictAz_->value(), predictEl_->value(), &error))
+            plan_->setPlainText(QString::fromStdString(error));
+        else
+            plan_->setPlainText("Pass armed. Bias-T command is not a measured voltage.");
+        power_->setText(session_->power().enabled() ? "Bias-T: commanded ON" : "Bias-T: OFF");
+    });
+    connect(abortButton, &QPushButton::clicked, this, [this] {
+        session_->abort("operator");
+        power_->setText(session_->power().enabled() ? "Bias-T: commanded ON until park completes" : "Bias-T: OFF");
+        plan_->setPlainText("Abort commanded stop, then park, then Bias-T off. A stop reply is not a physical stop.");
+    });
+    connect(predictAz_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double az) {
+        session_->setPrediction(az, predictEl_->value());
+    });
+    connect(predictEl_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double el) {
+        session_->setPrediction(predictAz_->value(), el);
+        refreshHint(el);
     });
     syncCaution();
     refreshHint(30.0);
+}
+
+PassChecklist EquipmentWizard::checklist() const {
+    PassChecklist check;
+    check.leaseHeld = lease_->isChecked();
+    check.ifInSdrSpan = ifSpan_->isChecked();
+    check.tleFreshOrNotRequired = tle_->isChecked();
+    check.biasCurrentOk = biasRatingCoversLnb(supplyMa_->value(), lnbMa_->value());
+    check.rotatorReadyOrOverride = rotorOverride_->isChecked() || (rotor_.armed() && rotor_.fresh());
+    check.powerConfirmed = confirm_->isChecked();
+    return check;
 }
 
 void EquipmentWizard::syncCaution() {
@@ -76,14 +157,7 @@ void EquipmentWizard::setProfile(const StationProfile& profile) {
 void EquipmentWizard::refreshHint(double elevationDeg) {
     const auto hint = linkMarginHint(dish_->value(), nf_->value(), elevationDeg, 10.0);
     hint_->setText(QString("Margin hint: %1 (qualitative, not a measured C/N)").arg(linkMarginHintName(hint)));
-    PassChecklist check;
-    check.leaseHeld = true;
-    check.ifInSdrSpan = true;
-    check.tleFreshOrNotRequired = true;
-    check.biasCurrentOk = biasRatingCoversLnb(supplyMa_->value(), lnbMa_->value());
-    check.rotatorReadyOrOverride = true;
-    check.powerConfirmed = confirm_->isChecked();
-    const auto arm = planPassArm(check, StationMission::LeoTrack);
+    const auto arm = planPassArm(checklist(), StationMission::LeoTrack);
     plan_->setPlainText(arm.accepted ? QString::fromStdString("Arm: " + arm.steps.front()) : QString::fromStdString(arm.reject));
 }
 

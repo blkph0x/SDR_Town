@@ -524,9 +524,15 @@ RemoteDiagnostics. See FM_DIAGNOSTICS.md for fields, privacy and known gaps.
 
 `include/frontend` owns LNB IF math, claimed noise figure, Bias-T state,
 rotator tick planning, pass arm/teardown order, JSONL metrics, station
-profile JSON, and a D1 FFT survey. `EquipmentWizard` is the Tools panel.
+profile JSON, and a D1 FFT survey. `StationPassSession` sends those ticks
+through one `RotatorController` and records commanded, reported, and
+error angles. Abort stops, then moves to the saved park angles, then
+commands Bias-T off. `inventoryClearTransportStream` lists PIDs from
+caller-supplied TS bytes and counts scrambled packets without reading
+their payload. `EquipmentWizard` is the Tools panel.
 `installAntennaControlMenu` also installs that panel so `MainWindow.cpp`
-stays untouched. D2/D3 and commercial decrypt return false.
+stays untouched. Lease, IF, and TLE boxes are attestations, not device
+leases. D2 demod and commercial decrypt return false.
 
 ## Antenna control (DEC-0140 / T-0068)
 

@@ -44,6 +44,9 @@ std::string stationProfileToJson(const StationProfile& profile) {
         {"backlashDeg", profile.backlashDeg},
         {"parkAz", profile.parkAz},
         {"parkEl", profile.parkEl},
+        {"trueRfHz", profile.trueRfHz},
+        {"horizontal", profile.horizontal},
+        {"highBand", profile.highBand},
         {"lnb", {
             {"loLowHz", profile.lnb.loLowHz},
             {"loHighHz", profile.lnb.loHighHz},
@@ -80,6 +83,9 @@ bool stationProfileFromJson(const std::string& json, StationProfile* profile, st
     next.backlashDeg = j.value("backlashDeg", 0.0);
     next.parkAz = j.value("parkAz", 0.0);
     next.parkEl = j.value("parkEl", 0.0);
+    next.trueRfHz = j.value("trueRfHz", next.trueRfHz);
+    next.horizontal = j.value("horizontal", false);
+    next.highBand = j.value("highBand", false);
     if (j.contains("lnb") && j["lnb"].is_object()) {
         const auto& lnb = j["lnb"];
         next.lnb.loLowHz = lnb.value("loLowHz", next.lnb.loLowHz);

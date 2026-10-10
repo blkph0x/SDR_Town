@@ -3,10 +3,11 @@
 ## ISS-0090 - No LNB, external Bias-T, or rotator tracking on a satellite pass (2026-10-10, OPEN)
 
 Frequency auto-track exists. Motor tracking, LNB IF conversion, and an
-external 13/18 V supply do not. DEC-0210 adds the session and the fail-closed
-checklist. DVB-S2 demod and clear TS remain unimplemented. Close the motor
-and power halves after a hardware acceptance pass; leave demod open until
-D2 exists.
+external 13/18 V supply do not. DEC-0210 adds the session, the fail-closed checklist, and a
+`rotctld` command path with stop-then-park. The panel's lease/IF/TLE
+boxes are attestations, not a device lease or a TLE read. DVB-S2 demod
+remains unimplemented. Clear-TS inventory only reads bytes already in
+hand. Close the motor and power halves after a hardware acceptance pass.
 
 ## ISS-0089 - Listen radio follows USB order; unused streams keep overflowing (2026-10-10, OPEN)
 

@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-10 - Station pass session drives rotctld
+
+`StationPassSession` arms only after the checklist, commands the existing
+rotator once per second, and on abort stops, parks at the saved angles,
+then commands Bias-T off. Clear MPEG-TS inventory counts scrambled
+packets and does not demodulate. Lease/IF/TLE boxes are attestations.
+
 ## 2026-10-10 - Station front-end session, DEC-0210
 
 LNB IF conversion, claimed NF caution, Bias-T confirm/interlock, rotator

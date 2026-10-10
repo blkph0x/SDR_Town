@@ -1,8 +1,11 @@
 # Station front-end
 
 Tools > Station front-end stores the dish, claimed LNB noise figure, and
-Bias-T rating used by a satellite pass. DEC-0210. This does not move a
-rotator or apply DC until a later arm step confirms it.
+Bias-T rating used by a satellite pass. DEC-0210. Arm is fail-closed.
+The checkboxes for lease, IF span, and TLE age are operator attestations.
+They are not a radio lease and they do not read a TLE file. Rotator motion
+uses the panel's own `rotctld` client. Do not connect this panel and
+Tools > Antenna Rotator & SWR to the same `rotctld` at the same time.
 
 ## LNB
 
@@ -27,19 +30,26 @@ gone after a crash.
 
 ## Rotator
 
-Automatic AZ/EL uses the existing `rotctld` session. It does not link
-Hamlib. Motion still requires the rotator to be armed with a fresh
-position, or an explicit logged override. Soft limits clamp the command.
-Manual jog pauses tracking. Abort order is: stop the worker, stop the
-rotator, move to the saved park angles, turn Bias-T off, write the pass
-summary. The app reports command-versus-reported error. It does not claim
+`StationPassSession` drives the existing `RotatorController` (`+P`, `+p`,
+`+S`). It does not link Hamlib. Connect, wait until position is fresh, arm
+the rotator, then Arm pass. The session sends one planned position per
+second. Soft limits are 0–360° azimuth and 0–90° elevation in this slice.
+An override checkbox skips the fresh-position check and is written into
+the metric log. Abort order is: record stop-worker, send stop, arm again,
+move to the saved park angles (default 0, 0), then command Bias-T off.
+A stop reply is not proof the motor is still. The metric log records
+commanded AZ/EL, reported AZ/EL, and AZ error. The app does not claim
 sub-degree accuracy.
 
 ## DVB / SIGINT survey
 
 D1 measures capture power, the strongest FFT bin, and bins above the
-median. Symbol rate, PLS, LDPC, and a clear transport stream are not
-implemented. Commercial decrypt is refused.
+median. Symbol rate, PLS, and LDPC are not implemented.
+`inventoryClearTransportStream` only reads MPEG-TS packets the caller
+already has: 188-byte packets, sync `0x47`, PID list, and a scrambled
+count when the transport scrambling bits are not 00. It does not
+demodulate and it does not read scrambled payloads. Commercial decrypt
+is refused.
 
 The margin label (masked, poor, fair, good) is an operator hint from dish
 size, claimed NF, and elevation. It is not a link budget.

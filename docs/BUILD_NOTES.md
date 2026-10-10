@@ -1,5 +1,12 @@
 # Build notes
 
+## 2026-10-10 - Station pass session against a fake rotctld
+
+`FrontendStation` Release PASS, including arm rejection with no `+P`,
+`+P 20.000 30.000` after arm, and abort `+S` then `+P 0.000 0.000`
+before Bias-T is commanded off. Clear TS inventory: 2 packets, 1
+scrambled, 2 PIDs. `dvbDemodAvailable` remains false.
+
 ## 2026-10-10 - Station front-end unit tests, DEC-0210
 
 `frontend_station_tests` Release: LNB 0.3 dB ≈ 21 K, Ku low/high IF,
