@@ -50,6 +50,13 @@ PROTECTED_PATTERNS: tuple[str, ...] = (
 )
 
 SATCOM_MAINWINDOW_PATH = "src/MainWindow.cpp"
+# DEC-0221: exact companion identity selection and authenticated local pairing.
+# No decoder, follow cadence, vocoder, IQ or speaker branches change.
+COMPANION_SELECTION_DIGESTS = {
+    "src/MainWindow.cpp": (
+        "3fe56257844df324890c15a700a7a66b6cf9b3dfaefd3e5850598a15f852e075",
+        "7081f7612f22746ca3d7316b9be44ee93405acd9a91fc1976463d8dec8fceb53"),
+}
 # DEC-0171 / T-0102: reviewed RX hardware-loss boundary and numeric counters,
 # explicit fail-closed tone TX, and opt-in health observers only. No P25 DSP,
 # vocoder, slot/security gate or AudioEngine changes are accepted by this pair.
@@ -895,6 +902,9 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
+        if args.paths is None and path in COMPANION_SELECTION_DIGESTS:
+            if text_matches_digest(path, git_file_text(args.base, path), git_file_text(args.head, path), COMPANION_SELECTION_DIGESTS):
+                continue
         if args.paths is None and path in PAIRED_RELEASE_DIGESTS:
             if text_matches_digest(path, git_file_text(args.base, path), git_file_text(args.head, path), PAIRED_RELEASE_DIGESTS):
                 print(f"P25 guard: accepted exact DEC-0219 paired release: {path}")

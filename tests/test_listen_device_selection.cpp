@@ -20,5 +20,9 @@ int main() {
     radios.push_back({rsp});
     check(resolveListenDevice(radios, rsp, 0) == size_t(-1));
     check(resolveListenDevice(alone, "", 0) == 0);
+    check(resolveListenDevice(alone, "", 1) == size_t(-1));
+    check(resolveListenDevice(std::vector<Radio>{}, "", 0) == size_t(-1));
+    check(resolveListenDevice(missing, "rtlsdr|hardware:RTL-SDR", 0) == size_t(-1));
+    check(resolveListenDevice(missing, "rtlsdr|serial:00000001", 0) == 0);
     std::cout << "PASS: explicit RSP selection, reorder, standalone, missing, duplicate, legacy default\n";
 }

@@ -6,7 +6,7 @@
 // cannot become the first RTL dongle merely because USB enumeration changed.
 template<class Devices>
 size_t resolveListenDevice(const Devices& devices, const std::string& key, size_t fallback) {
-    if (key.empty()) return fallback;
+    if (key.empty()) return fallback < devices.size() ? fallback : size_t(-1);
     size_t match = size_t(-1);
     for (size_t i = 0; i < devices.size(); ++i) {
         if (devices[i].stableKey != key) continue;

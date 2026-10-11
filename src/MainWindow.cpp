@@ -26,6 +26,7 @@
 #include "SdrplayControlsWidget.h"
 #include "RtlBiasTWidget.h"
 #include "ListenDeviceSelection.h"
+#include "LocalControlPairing.h"
 #include <QScrollArea>
 #include "SdrplayDiversity.h"
 #include "SatcomScannerWidget.h"
@@ -10239,6 +10240,11 @@ void MainWindow::installSdrTownControlServer()
             cfg.token = qEnvironmentVariable("SDR_TOWN_CONTROL_TOKEN").trimmed();
         }
         cfg.allowUnauthenticated = !guiRuntimeConfig.controlAuthRequired && cfg.token.isEmpty();
+        if (!cfg.allowUnauthenticated && cfg.token.isEmpty()) {
+            std::string pairedToken;
+            if (localControlPairingToken(pairedToken, true)) cfg.token = QString::fromStdString(pairedToken);
+            else recordGuiRuntimeError("Could not load secure local control pairing; configure a control token explicitly.");
+        }
 
         m_controlServer = std::make_unique<SdrTownControlServer>(this);
         m_controlServer->setRequestHandler([this](const QString& method,
@@ -10363,6 +10369,11 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
         }
         state.insert("activeDevice", activeDevice);
         state.insert("activeDeviceIndex", static_cast<int>(haveActive ? activeIdx : -1));
+        state.insert("listenDeviceKey", listenDeviceKey);
+        state.insert("listenDeviceAvailable", haveActive);
+        state.insert("listenDeviceError", haveActive ? QString() :
+            QStringLiteral("Select an available radio for Tune; the saved listening radio is missing or ambiguous."));
+        if (active) state.insert("activeDeviceKey", QString::fromStdString(active->stableKey));
         QJsonArray workflowDevices;
         for (size_t i = 0; i < devs.size(); ++i) {
             workflowDevices.append(QJsonObject{
@@ -10766,6 +10777,7 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
         caps.insert("setDirectSampling", true);
         caps.insert("listP25ControlChannels", true);
         caps.insert("startP25Control", true);
+        caps.insert("selectListenDevice", true);
         caps.insert("readRds", true);
         caps.insert("readTones", true);
         caps.insert("readSstv", true);
@@ -11058,11 +11070,36 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
         const QString requestedMode = body.value("mode").toString().trimmed().toUpper();
         const bool p25Control = body.value("p25Control").toBool(false) ||
             requestedMode == "P25" || requestedMode == "P25P1" || requestedMode == "P25P2";
-        if (!guiRuntimeConfig.dryRun) {
-            std::string conflict;
-            if (!DeviceManager::instance().canUseDevice(guiRuntimeDeviceIndex(),
-                p25Control ? DeviceOwnership::Owner::P25 : DeviceOwnership::Owner::Listen, &conflict))
-                return {{"ok",false},{"status",409},{"error",QString::fromStdString(conflict)}};
+        // DEC-0221: validate the requested physical identity before changing any
+        // monitor state. Stale saved identities must not silently become radio 0.
+        auto& tuneManager = DeviceManager::instance();
+        const auto tuneDevices = tuneManager.getDevices();
+        const bool explicitDevice = body.contains("deviceKey");
+        const QString requestedKey = explicitDevice ? body.value("deviceKey").toString() : listenDeviceKey;
+        if (explicitDevice && (!body.value("deviceKey").isString() || requestedKey.isEmpty() || requestedKey.size() > 512))
+            return {{"ok",false},{"status",400},{"error","deviceKey must identify an available radio"}};
+        const size_t tuneDevice = resolveListenDevice(tuneDevices, requestedKey.toStdString(),
+            guiRuntimeConfig.deviceIndexSet ? guiRuntimeConfig.deviceIndex : 0u);
+        const auto rejectSelection = [&](const QString& reason) -> QJsonObject {
+            spdlog::warn("Companion tune rejected: reason={} explicitDevice={} availableDevices={}",
+                reason.toStdString(), explicitDevice, tuneDevices.size());
+            return {{"ok",false},{"status",409},{"error",reason}};
+        };
+        if (tuneDevice >= tuneDevices.size())
+            return rejectSelection("Select an available radio for Tune; the saved or requested listening radio is missing or ambiguous.");
+        std::string conflict;
+        if (!tuneManager.canUseDevice(tuneDevice,
+            p25Control ? DeviceOwnership::Owner::P25 : DeviceOwnership::Owner::Listen, &conflict))
+            return rejectSelection(QString::fromStdString(conflict));
+        if (explicitDevice) {
+            std::lock_guard listLock(receiversMutex);
+            if (!receivers.empty() && receivers.front()) {
+                std::lock_guard stateLock(receivers.front()->stateMutex);
+                const auto& rx = *receivers.front();
+                if (rx.deviceIndex != tuneDevice && (rx.p25VoiceDecodeEnabled ||
+                    rx.p25ControlChannelMute || rx.p25IndependentTrafficSource))
+                    return rejectSelection("Stop primary P25 before changing the listening radio");
+            }
         }
         appendP25LogLineKeyed(
             QStringLiteral("sdr-town-control-tune"),
@@ -11080,6 +11117,11 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
                 ? body.value("autoFollow").toBool(false)
                 : body.value("p25AutoFollow").toBool(false);
             guiRuntimeConfig.autoFollow = autoFollow;
+            if (explicitDevice) {
+                listenDeviceKey = requestedKey;
+                if (!guiRuntimeConfig.dryRun) QSettings().setValue("listen/deviceKey", listenDeviceKey);
+                tuneManager.setPreferredListenDeviceIndex(tuneDevice);
+            }
             const bool ok = armGuiRuntimeP25Control(freqHz, false);
             if (!ok) {
                 return {{"ok", false}, {"status", 500}, {"error", "could not arm P25 control monitor"}};
@@ -11112,6 +11154,11 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
                     {"state", sdrTownControlStatusSnapshot()}};
         }
 
+        if (explicitDevice) {
+            listenDeviceKey = requestedKey;
+            if (!guiRuntimeConfig.dryRun) QSettings().setValue("listen/deviceKey", listenDeviceKey);
+            tuneManager.setPreferredListenDeviceIndex(tuneDevice);
+        }
         DemodMode newMode = currentMonitorMode;
         bool newAuto = autoDetectMode;
         if (!requestedMode.isEmpty()) {
@@ -11234,7 +11281,7 @@ QJsonObject MainWindow::applySdrTownControlTune(const QJsonObject& body)
         bool ok = true;
         if (startDevice) {
             ok = startGuiRuntimeDeviceAt(freqHz, false);
-        } else {
+        } else if (!guiRuntimeConfig.dryRun) {
             auto& mgr = DeviceManager::instance();
             const auto index = guiRuntimeDeviceIndex();
             ok = mgr.canUseDevice(index, DeviceOwnership::Owner::Listen) && mgr.setCenterFreq(index, freqHz) != 0;
@@ -11384,7 +11431,7 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
                 std::lock_guard<std::mutex> lk(monitorParamsMutex);
                 tune.insert("frequencyHz", currentMonitorFreq);
             }
-            tune.insert("startDevice", false);
+            tune.insert("startDevice", body.contains("deviceKey"));
             return applySdrTownControlTune(tune);
         }
         if (path == "/v1/rf-gain" && method == "POST") {

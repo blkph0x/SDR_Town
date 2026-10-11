@@ -1,5 +1,31 @@
 # Decisions
 
+## DEC-0221 - Explicit companion Listen identity recovery (2026-10-11)
+
+ISS-0109 is traced from FUBAR Tune through the DLL /v1/tune to unresolved saved
+identity and ownership.allowed(size_t(-1)). Add optional bounded deviceKey on
+the existing JSON tune contract and a primary radio selector on the website.
+Validate unique identity and workflow ownership before mutating selection or
+tune settings; never silently choose a replacement, steal a named lease, or
+switch radios underneath an active primary P25 session. Status exposes selected
+key plus actionable availability; preserve in-progress web edits. Empty/missing
+devices must fail before tune mutation even in dry-run. The stable C DLL ABI
+stays unchanged; FUBAR uses its existing generic JSON request for keyed tunes.
+Native selection remains recoverable through Device Manager. No DSP, voice,
+or driver-lifecycle changes in this bounded repair. Qualify with
+selection unit tests, actual app/DLL/web requests and public paired packages.
+
+Follow-up evidence: ordinary native launches log "control token is required"
+and never listen; FUBAR GUI does not provide a token. Explicit-token tests hid
+this startup gap. Keep token-required loopback service; add a shared Windows
+current-user DPAPI-protected random 256-bit pairing credential, read by the DLL
+only for literal loopback destinations when no explicit credential is supplied.
+Never publish the token in status/logs, never use machine-wide DPAPI protection,
+and do not overwrite corrupt stored credentials. Explicit tokens and explicit
+no-auth development mode retain precedence. Non-Windows builds require explicit
+configuration. This is a same-Windows-user trust boundary, not app attestation.
+Sources: Microsoft CryptProtectData and BCryptGenRandom API documentation.
+
 ## DEC-0220 - Validate outside audits before receiver changes (2026-10-11)
 
 Review baseline44738dc/application8e888dd. Supplied reports mix architectural

@@ -1,5 +1,36 @@
 # Build notes
 
+## 2026-10-11 - DEC-0221 companion selection and pairing
+
+Windows/MSVC19.44/Qt6.11.1, Town0.2.138 + FUBAR1.1.50. Native app, control
+DLL and tests build PASS. Native CTest22/22 PASS (104.05s); freshly rebuilt
+standalone Listen selection PASS. Focused ownership/pairing/P25204 cases,
+83664 assertions PASS. P25 exact-patch/mutation guard self-test PASS.
+No P25 DSP/vocoder/cadence changes. Added standalone regression dependencies
+to the core-test target so CI cannot accidentally use absent/stale executables.
+
+FUBAR CTest4/4 and production-JS draft/selector/permission/error tests PASS.
+Actual FUBAR -> DLL -> GUI authenticated pair PASS with explicit token and
+automatic pairing. Missing radio rejection on Tune/mode/Monitor P25 preserves
+frequency, mode, squelch and selected identity; explicit available radio then
+succeeds. Invalid/null/oversized keys rejected. Unauthenticated status gets401.
+DPAPI concurrent create/read, persistence and corrupt-value fail-closed pass.
+Actual DLL literal-loopback-only implicit credential / explicit override PASS
+(scripts/test_control_pairing.py); no secret printed or saved by fixture.
+
+Browser manual automation of Take control, WFM, 98.1MHz/180kHz Tune confirms
+applied state and draft retention. Screenshot and integration logs in ignored
+FUBAR build/pair-radio-auto. One initial auto-pair fixture failed because CLI
+required the test environment token; repaired CLI to use the same packaged DLL
+default as GUI, rerun PASS, graceful shutdown.
+
+Physical RTL serial00000001 smoke: FUBAR scripts/test_radio_live.py used normal
+(not dry-run) Town, automatic pairing, keyed WFM tune98.1, retune98.2 and back.
+All requests PASS; workflow reports live hardware and logs real Soapy startup.
+Both apps exit0. Saved Listen selection now refers to the actual serial.
+This proves primary RX/tune routing, not a new P25/audio-quality acceptance.
+Release Actions and downloaded-package qualification follow before completion.
+
 ## 2026-10-11 - DEC-0220 supplied-audit validation
 
 Baseline44738dc/app8e888dd. Windows, MSVC19.44, Qt6.11.1. Isolated CMake

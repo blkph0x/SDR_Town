@@ -1,5 +1,12 @@
 # SDR Town
 
+0.2.138 pairs with FUBAR 1.1.50 to repair web tuning. After **Take control**,
+choose **Radio for tuning**, then tune or change mode. A missing saved radio
+is reported explicitly instead of "Invalid device or workflow"; another
+workflow's radio remains protected. Same-Windows-user DLL pairing is automatic
+and authenticated, with a DPAPI-protected local credential. Explicit tokens
+still work. P25 decoding/audio is unchanged. See [release notes](docs/RELEASE_0.2.138.md).
+
 0.2.137 pairs with FUBAR 1.1.49: selected-radio and session-addressed
 satellite, Inmarsat, aircraft and SSTV controls, native downlink profiles,
 safe decoded-image access and independent maps/messages. See the

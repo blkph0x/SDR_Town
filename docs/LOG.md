@@ -1,5 +1,14 @@
 # Development log
 
+## 2026-10-11 - DEC-0221 primary web control recovery
+
+Traced reported Invalid device/workflow to saved hardware-only Listen identity
+no longer present in serial-based enumeration. Added explicit web radio selection
+and actionable rejection before state mutation. Also repaired ordinary startup
+pairing without weakening authentication. Local real-radio web tune and browser
+control now pass; native22/22, FUBAR4/4 and204 focused cases pass. No P25 DSP
+edits, no lease bypass. Version0.2.138 + FUBAR1.1.50; public CI/release pending.
+
 ## 2026-10-11 - DEC-0220 audit reports reconciled with current implementation
 
 Confirmed RX generation contamination and ignored generic activation errors with

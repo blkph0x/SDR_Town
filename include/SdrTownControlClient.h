@@ -24,7 +24,7 @@ enum SdrTownControlResult {
 struct SdrTownControlConfig {
     const char* host;      // null/empty = 127.0.0.1
     uint16_t port;         // 0 = 8765
-    const char* token;     // optional bearer token
+    const char* token;     // explicit bearer, or protected same-user pairing for literal 127.0.0.1
     uint32_t timeoutMs;    // 0 = 2500 ms
 };
 

@@ -1,5 +1,11 @@
 # Task list (canonical)
 
+T-0134 | in-progress | Repair companion primary radio selection (ISS-0109) |
+Reproduce stale Listen identity rejection, expose explicit stable-key selection
+to companion Tune, retain reservation/ownership protection and provide actionable
+status. Test real DLL/HTTP and selection failures without opening RF; preserve
+accepted P25 DSP. Publish qualified paired packages (DEC-0221).
+
 T-0131 | done | Validate supplied implementation audits against released source |
 Audit baseline 44738dc / application 8e888dd (0.2.137). Trace concrete failure
 paths and current regression gates; distinguish confirmed defects, stale claims,

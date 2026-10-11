@@ -1,4 +1,5 @@
 #include "SdrTownControlClient.h"
+#include "LocalControlPairing.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -47,6 +48,9 @@ ResolvedConfig resolveConfig(const SdrTownControlConfig* config)
         if (config->token && config->token[0]) out.token = config->token;
         if (config->timeoutMs != 0) out.timeoutMs = config->timeoutMs;
     }
+    // Never send an automatically loaded local credential to an arbitrary host
+    // or DNS name. Explicit caller credentials retain their existing precedence.
+    if (out.token.empty() && out.host == "127.0.0.1") localControlPairingToken(out.token, false);
     return out;
 }
 

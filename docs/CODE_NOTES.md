@@ -1,5 +1,14 @@
 # Code notes (tree map)
 
+DEC-0221: `MainWindow::applySdrTownControlTune` resolves optional JSON deviceKey
+before mutation and validates the existing per-device ownership policy. Status
+provides availability/identity; the C DLL ABI stays unchanged. Generic Request
+carries new keyed commands. `LocalControlPairing` is shared by server/client:
+Windows per-user DPAPI ciphertext in HKCU, system RNG, serialized provisioning,
+bounded read and corrupt-record fail-closed. Only implicit literal loopback
+requests may load the secret; explicit credentials override. Tests cover
+selection absence/duplicates/reorder, DPAPI and actual paired HTTP/DLL behavior.
+
 DEC-0219: `SatcomScannerWidget::webStatus/webPassControl` are shared by the
 primary and named local-control routes. `SatcomHubWidget` resolves detailed
 satellite/aircraft status and Inmarsat messages/maps by exact session, failing

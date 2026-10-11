@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.137 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.138 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -243,6 +243,7 @@ set(SDR_TOWN_SOURCES
     include/P25TrafficChannelProcessor.h
     src/Receiver.cpp
     src/SdrTownControlServer.cpp
+    src/LocalControlPairing.cpp
     src/DiagnosticsHealthMonitor.cpp
     include/SdrTownControlServer.h
     src/RemoteDiagnostics.cpp
@@ -308,6 +309,7 @@ endif()
 
 add_library(sdrtown_control_client SHARED
     src/SdrTownControlClient.cpp
+    src/LocalControlPairing.cpp
     include/SdrTownControlClient.h
 )
 target_include_directories(sdrtown_control_client PUBLIC
@@ -464,6 +466,8 @@ if(BUILD_TESTS)
   # Simple unit tests for core classes (no full GUI)
   # Link against the implementation sources for the tested classes
   add_executable(sdr_town_tests
+    tests/test_local_control_pairing.cpp
+    src/LocalControlPairing.cpp
     tests/test_rds.cpp
     tests/test_ctcss.cpp
     tests/test_dtmf.cpp
@@ -612,6 +616,7 @@ if(BUILD_TESTS)
   foreach(regression IN ITEMS hf_audio_filter listen_device_selection spectrum_dc)
     add_executable(test_${regression} tests/test_${regression}.cpp)
     target_include_directories(test_${regression} PRIVATE include)
+    add_dependencies(sdr_town_tests test_${regression})
     add_test(NAME Regression-${regression} COMMAND test_${regression})
   endforeach()
 
