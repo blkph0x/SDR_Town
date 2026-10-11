@@ -36,8 +36,9 @@ Measured reproducer using a fake Soapy driver and freshly compiled, unmodified
 
 1. Start a fake real RX normally; wait for `live hardware`.
 2. Hold one read inside a condition variable until after Stop has detached it.
-3. Start a replacement stub session. Its legitimate samples are all zero.
-4. Release the old read with 1024 distinguishable nonzero complex samples.
+3. Start a replacement stub session. It emits bounded synthetic noise (each
+   component is approximately -0.025 to +0.025), not the old read's marker.
+4. Release the old read with 1024 distinguishable `(0.375, -0.125)` samples.
 5. Read the replacement session's ring: **all 1024 old samples are present**.
 
 Three independent runs reproduce this with both test orderings. This proves
@@ -127,7 +128,7 @@ the bound without collection limits is not a complete repair.
 | All these catch-all handlers swallow errors | Overstated. Some log, some rethrow, some are cleanup guards; the specific empty handlers and unchecked results above are real. |
 | Per-device Soapy I/O locking and stable identities | Confirmed (`DeviceManager.cpp:42-67`, `DeviceOwnership.h`). Factory operations remain process-wide. A factory hang may block other opens, not all running radios' reads. |
 | Multi-device ownership generally permits stealing | Not established by these reports. Domain, token and stable-identity checks exist and negative ownership tests pass. This does not complete multiple independent P25 session controllers. |
-| Stub hides hardware failure with a fake carrier | Inaccurate for this tree. `DeviceManager.cpp:3844-3869` produces zeros and logs no-hardware. Device Manager/workflow status exposes runtime state. Some primary actions still misreport success as above. |
+| Stub hides hardware failure with a fake carrier | Overstated. `DeviceManager.cpp:3844-3869` emits bounded synthetic noise, not a carrier, and logs no-hardware. Device Manager/workflow status exposes runtime state. Noise alone is not an adequate operator warning; some primary actions still misreport success as above. |
 | P25 block and streaming have different contracts | Correct (`P25LiveDecoder.cpp:6378-6440`). This alone is not a bug; caller input chronology matters. Default streaming remains opt-in; do not flip it from this report. |
 | Phase search/reset logic necessarily causes present garble | Unproven. Search budgets and retained protocol evidence are real; no supplied capture demonstrates a new bad candidate selection. Preserve accepted code pending a differential reproducer. |
 | Any rejected voice job silently loses one hop | Too broad. `submitP25VoiceDecodeJob` rejects at `MainWindowP25Voice.cpp:645-662`, but rolling IQ is marked submitted only in the success branch (`MainWindowP25Orchestration.cpp:1029-1032`). The failure log's word "dropped" is misleading for retained rolling IQ. Bounded ring eviction is a different loss event. |
