@@ -1,5 +1,26 @@
 # Task list (canonical)
 
+T-0131 | done | Validate supplied implementation audits against released source |
+Audit baseline 44738dc / application 8e888dd (0.2.137). Trace concrete failure
+paths and current regression gates; distinguish confirmed defects, stale claims,
+unsupported hypotheses and field-acceptance limits. Preserve accepted P25 DSP
+and the separately owned station frontend. Record evidence before proposing
+behavioral changes or broad controller extraction. DEC-0220 report completed:
+two driver faults reproduced three times; 227 focused cases and six CTest suites
+pass. Application unchanged. ISS-0105..0108 and next repairs are explicit below.
+
+T-0132 | planned | Generation-safe device teardown and activation (ISS-0105/0106) |
+Turn audit fake-driver failures into permanent tests; guard all post-native-call
+publication and completion against cancellation/replacement. Quarantine stuck
+RX and isolate lifetime, validate activation for all drivers, qualify stop/retry,
+shared devices and multi-radio isolation. Preserve accepted P25 behavior.
+
+T-0133 | planned | Truthful workflow outcomes and failure tests (ISS-0107/0108) |
+Separate start intent from applied readiness; check bool/tune results and give
+bounded structured diagnostics for failures. Split hardware availability skips
+from deterministic tests; unexpected exceptions must fail. Characterize native
+and companion behavior before controller extraction; see DEC-0220 audit plan.
+
 T-0129 | done | Paired receive workflow alignment and Latest releases (DEC-0219) |
 Town 0.2.137 / FUBAR 1.1.49 published and public pair verified; signed installer,
 exact same-stage portable/DLL, Actions 38110086896 / 38114493140. Native 22/22,

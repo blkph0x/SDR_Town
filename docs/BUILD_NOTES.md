@@ -1,5 +1,21 @@
 # Build notes
 
+## 2026-10-11 - DEC-0220 supplied-audit validation
+
+Baseline44738dc/app8e888dd. Windows, MSVC19.44, Qt6.11.1. Isolated CMake
+probe compiles current DeviceManager.cpp unchanged, linking existing Release
+dependencies; does not replace the app or tests. Probe scripts/source and logs:
+build/audit_20261011/. Build PASS. Three fresh process runs each FAIL two expected
+contract assertions (13 prerequisites PASS): generic activation=-2 still reports
+live hardware; delayed pre-Stop read publishes1024 marked IQ into new stub epoch.
+These are confirmed OPEN defects, not an accepted green regression suite.
+
+Existing sdr_town_tests filter [ownership],[hardware-loss],[tx-safety],[sstv-pass],
+[hf],P25*:227 cases/84487 assertions PASS. CTest HF filter, SDRplay controls,
+RTL Bias-T, workflow radio lifecycle, satellite SSTV GUI, frontend station:
+6/6 PASS (22.08s). Production DSP/application and public assets unchanged.
+Full claims/evidence and repair gates: AUDIT_20261011_IMPLEMENTATION_REPORTS.md.
+
 ## 2026-10-11 - DEC-0219 public paired release qualification
 
 Town source 8e888dd76bd948b704f97a10582e6d10d4f4a6de: Windows release run

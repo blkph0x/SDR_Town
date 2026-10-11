@@ -1,5 +1,21 @@
 # Decisions
 
+## DEC-0220 - Validate outside audits before receiver changes (2026-10-11)
+
+Review baseline44738dc/application8e888dd. Supplied reports mix architectural
+observations, stale satellite/DVB claims and hypothetical P25 regressions. Do
+not rewrite accepted P25 or relax gates from this prose. An isolated harness
+compiling the unchanged current DeviceManager reproduces two actual faults:
+activation -2 becomes live hardware and a detached read appends1024 stale IQ
+samples into a replacement session (three runs each). Record these as OPEN,
+not repaired. Existing227 focused cases and six lifecycle/GUI suites pass.
+
+Prioritize a coherent generation/lifetime/activation repair with fault injection,
+then truthful workflow outcomes and bounded logs, companion pagination, and
+characterized controller extraction. File length is not a severity or a gate.
+No application changes or new binary release in this review. Full evidence:
+AUDIT_20261011_IMPLEMENTATION_REPORTS.md; ISS-0105..0108, T-0132/0133.
+
 ## DEC-0219 - Paired companion workflow and public-boundary repair (2026-10-11)
 
 The user accepts current P25 listening and requests full Latest releases of

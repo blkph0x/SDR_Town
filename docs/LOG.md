@@ -1,5 +1,14 @@
 # Development log
 
+## 2026-10-11 - DEC-0220 audit reports reconciled with current implementation
+
+Confirmed RX generation contamination and ignored generic activation errors with
+isolated fake-driver probes; recorded unchecked GUI success and exception-masking
+test paths. Corrected stale satellite and DVB descriptions and the claim that any
+P25 submit refusal consumes rolling IQ. Existing227-case/six-suite gates pass.
+No production code changed and no new binary version: this pass establishes the
+repair evidence and T-0132/0133 plan while preserving accepted P25 audio.
+
 ## 2026-10-11 - DEC-0219 published and public pair tested
 
 Town 0.2.137 and FUBAR 1.1.49 are Latest. Source, Actions, hashes, signed

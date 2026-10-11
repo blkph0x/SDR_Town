@@ -1,5 +1,37 @@
 # Issues (canonical)
 
+## ISS-0105 - Delayed RX read contaminates replacement session (2026-10-11, OPEN)
+
+DEC-0220 review: fake driver holds readStream past stop/detach, replacement stub
+starts, old read returns 1024 marked samples. All 1024 appear in the replacement
+ring in three runs against freshly compiled current DeviceManager.cpp. Loop
+generation check precedes native read; publication lacks an atomic generation
+fence. Related running flags and detached same-generation spectrum handoff also
+need lifetime review. No claim this caused accepted P25 field audio. T-0132;
+full evidence and repair gates: AUDIT_20261011_IMPLEMENTATION_REPORTS.md.
+
+## ISS-0106 - Non-SDRplay activation error becomes live hardware (2026-10-11, OPEN)
+
+DeviceManager.cpp only rejects negative activateStream results for isSdrplay.
+Fake generic driver returns -2 and reaches live hardware in three runs. T-0132
+must validate every driver and publish failure rather than readiness; preserve
+current successful startup paths. No physical transmitter used in the probe.
+
+## ISS-0107 - Primary workflow start paths report unchecked success (2026-10-11, OPEN)
+
+MainWindow.cpp:204 discards startStreaming's bool, catches every exception and
+sets anyStreaming=true. Line5125 similarly reports started/tuned without checking
+results. Audio output catches at217/5138 are empty. T-0133 requires explicit
+requested/opening/ready/failed outcomes and GUI/API tests, not catch-all status
+spam or changes to accepted P25 security/timing.
+
+## ISS-0108 - Legacy basic device test masks unexpected exceptions (2026-10-11, OPEN)
+
+Whole-test catch handlers in test_devicemanager.cpp emit WARN for exceptions
+before contract assertions. Split hardware prerequisite skips from deterministic
+failure tests. Already-recorded Catch2 assertion failures are not erased. T-0133;
+newer ownership/lifecycle tests pass but do not cover ISS-0105/0106.
+
 ## ISS-0104 - Large companion snapshots need pagination (2026-10-11, OPEN)
 
 FUBAR's 64 KiB caller truncation was reproduced with a fragmented 90 KiB real

@@ -12,7 +12,13 @@ CURRENT DELIVERY: DEC-0219 lifts the prior P25 publication hold after the user
                   38110086896, FUBAR Actions 38114493140. Remaining native-only
                   controls/audio buses are explicit; older entries below are
                   historical evidence, not current release status.
-CURRENT AUDIT: DEC-0215/0216, capture013124: repaired cross-slot security
+CURRENT AUDIT: DEC-0220 verifies the supplied implementation reports at44738dc.
+               Reproduced RX generation contamination and ignored activation
+               errors (ISS-0105/0106); GUI/test outcome gaps ISS-0107/0108.
+               227 focused tests and six GUI/lifecycle suites pass. No app or
+               P25 changes. See docs/AUDIT_20261011_IMPLEMENTATION_REPORTS.md;
+               next bounded repairs T-0132/0133, not a wholesale DSP rewrite.
+P25 AUDIT HISTORY: DEC-0215/0216, capture013124: repaired cross-slot security
                inheritance on unbound syncs and SSTV Auto search monitoring.
                Three clear replay WAVs remain identical, two encrypted calls
                remain muted. 260 combined tests and paced SSTV workflow pass.

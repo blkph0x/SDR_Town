@@ -1,8 +1,11 @@
 # SDR Town tracking desk
 
-Current package work: [exact-file inventory and RTL dependency repair](PACKAGE_HARDENING_20261003.md).
-Remaining source/notice materials block new binary publication; source CI uploads
-the hash-based evidence report only until those requirements are resolved.
+Current review: [implementation audit reconciliation](AUDIT_20261011_IMPLEMENTATION_REPORTS.md)
+against 0.2.137, with reproduced RX lifecycle faults, corrected stale claims and
+ordered repair gates. Current paired public releases are Town0.2.137/FUBAR1.1.49;
+signed installer/portable/DLL and paired public verification are in BUILD_NOTES.
+Historical [package hardening](PACKAGE_HARDENING_20261003.md) records the former
+source/notice blockers; those are not a current blanket publication block.
 
 Current repair ledger: [shared infrastructure hardening](INFRASTRUCTURE_HARDENING_20261003.md)
 tracks reproduced defects, local gates, diagnostic contracts and still-open work.
@@ -66,5 +69,6 @@ These stay as capture archaeology. New work is ISSUES + DECISIONS + TASKS.
 
 See [RELEASING.md](RELEASING.md) for current packaging, signature, runtime and
 publication gates, and [SATELLITE_AND_SSTV.md](SATELLITE_AND_SSTV.md) for next work.
-Current portable tester release: [0.2.97 notes](RELEASE_0.2.97.md). Last signed installer: [0.2.96 notes](RELEASE_0.2.96.md). Pairing: [FUBAR_PAIRING.md](FUBAR_PAIRING.md); FUBAR is not changed or re-qualified by this RTL control update.
+Historical RTL update notes: [0.2.97](RELEASE_0.2.97.md), [0.2.96](RELEASE_0.2.96.md).
+Current pairing: [FUBAR_PAIRING.md](FUBAR_PAIRING.md), DEC-0219 and BUILD_NOTES.
 SSTV: [analogue families, HamDRM, live NFM, tests and limits](SSTV.md). Inmarsat: [INMARSAT.md](INMARSAT.md).
