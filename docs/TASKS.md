@@ -1,9 +1,17 @@
 # Task list (canonical)
 
-T-0129 | in_progress | Paired FUBAR/Town alignment and Latest releases (DEC-0219) |
-User accepts current P25 audio; prior publication hold lifted. Audit remote
-workflow coverage, fix session identity/profile/device and privacy mismatches,
-test native/DLL/web routes and publish matched full packages. Preserve DSP.
+T-0129 | done | Paired receive workflow alignment and Latest releases (DEC-0219) |
+Town 0.2.137 / FUBAR 1.1.49 published and public pair verified; signed installer,
+exact same-stage portable/DLL, Actions 38110086896 / 38114493140. Native 22/22,
+companion 4/4, production JS, DLL/session/privacy and 90 KiB response gates pass.
+P25 DSP preserved in this companion pass; user accepted pending receive repairs.
+Host-only controls and future audio buses are not advertised as web features.
+
+T-0130 | planned | Companion remaining parity and large-map pagination |
+Track native-only Auto-BW policy, CW/DTMF configuration, saved-frequency/alias
+import design, per-session audio buses and paged map/message transport above
+the current DLL 256 KiB bound. Preserve local file/consent/TX/rotor boundaries.
+FUBAR docs/ALIGNMENT_20261011.md is the tested coverage matrix.
 
 
 T-0128 | pending_field_acceptance | Satellite SSTV pass automation (DEC-0218) |

@@ -94,6 +94,43 @@ class ReleaseTests(unittest.TestCase):
         self.inventory_gate.assert_called_once_with(self.portable, require_publishable=True)
 
     @patch('verify_release.subprocess.run')
+    def test_ci_layout_requires_exact_identity_and_retains_gates(self, run):
+        self.portable = self.root / f'SDR_Town-{self.version}-win64.zip'
+        self.build_info.update(projectVersion=self.version, branch='release/v1.2.3', workflowRun='1234')
+        self.write_build_info()
+        self.write_portable()
+        self.write_sums()
+        # A local build may differ, but downloaded bytes must match the named CI run.
+        (self.staging / 'SDR_Town.exe').write_bytes(b'unrelated local build')
+        (self.root / 'build/vcpkg_installed/x64-windows/bin/rtlsdr.dll').unlink()
+        verify(self.root, self.version, self.installer,
+               ci_commit=self.build_info['sourceCommit'], ci_run='1234')
+        run.assert_called_once()
+        self.inventory_gate.assert_called_once_with(self.portable, require_publishable=True)
+        for commit, workflow, message in (
+            ('f' * 40, '1234', 'CI source commit mismatch'),
+            (self.build_info['sourceCommit'], '9999', 'CI Actions run mismatch'),
+            (None, '1234', 'exact source commit'),
+            (self.build_info['sourceCommit'], None, 'exact Actions run'),
+        ):
+            with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
+                verify(self.root, self.version, self.installer, ci_commit=commit, ci_run=workflow)
+
+    @patch('verify_release.subprocess.run')
+    def test_ci_wrong_branch_or_version_fails(self, run):
+        self.portable = self.root / f'SDR_Town-{self.version}-win64.zip'
+        for field, value in (('branch', 'master'), ('projectVersion', '9.9.9')):
+            self.build_info.update(projectVersion=self.version, branch='release/v1.2.3', workflowRun='1234')
+            self.build_info[field] = value
+            self.write_build_info()
+            self.write_portable()
+            self.write_sums()
+            with self.assertRaisesRegex(ValueError, 'CI release provenance mismatch'):
+                verify(self.root, self.version, self.installer,
+                       ci_commit=self.build_info['sourceCommit'], ci_run='1234')
+        run.assert_not_called()
+
+    @patch('verify_release.subprocess.run')
     def test_inventory_failure_blocks_signature_and_publication(self, run):
         self.inventory_gate.side_effect = ValueError('Publication blocked: test source kit missing')
         with self.assertRaisesRegex(ValueError, 'Publication blocked'):

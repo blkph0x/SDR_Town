@@ -1,5 +1,44 @@
 # Build notes
 
+## 2026-10-11 - DEC-0219 public paired release qualification
+
+Town source 8e888dd76bd948b704f97a10582e6d10d4f4a6de: Windows release run
+38110086896 and master run 38110086842 PASS; YAML runs 38110086853/38110086801
+PASS. Public portable, NSIS installer and standalone DLL downloaded and verified.
+CI silently installed the public NSIS and compared every staged file; runtime,
+RTL/RDS/DTMF/CLI tests passed. Locally verified exact source/run/inventory,
+Ed25519 signature and public metadata re-download. No local recompilation
+substituted for CI binaries. Release https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.137
+
+SHA256: portable 745cf73ff00915ee81ec41782c9baea6f05481e25bc36de3be7fd3fa748d9f3a;
+installer 18fcda7250aa8ee2e41a13d6e4ac9829920b86b424e5b1bf0c8fd09f2699a29b;
+DLL a3166ce8695e6326be248944d9e6d9ae290f60a3152be2f470245f4234125d20.
+
+FUBAR source 2087a8a4b476001d4a3edb6f28780fd818e0a0c5: Windows builds
+38114297986/38114488968 and release 38114493140 PASS. Public ZIP
+f8a4a3a16e0f12cfbffd01739d7053d70e8d9b4477f6cbf44e1792601046c166;
+matching DLL verified by hash and load probe. Public executable self-test,
+repeated COM enumeration/no-capture startup, fragmented 90 KiB HTTP response
+and full public-to-public Town GUI/DLL/FUBAR session test PASS, both exit 0.
+Release https://github.com/blkph0x/FUBAR/releases/tag/v1.1.49
+
+Failures repaired, not waived: initial FUBAR CI ACCESS_VIOLATION was symbolized
+using ProcDump run38113376195 plus local CDB. IMMDeviceCollection::Release ran
+after CoUninitialize. Scoped COM lifetime repairs enumeration and capture exits.
+Next run measured cold satellite creation exceeding the 2.5 s bridge deadline;
+native GET confirmed creation 1.063 s later. Workspace budget 10 s (no retry),
+with content-free durations; next cold open succeeded at 2535 ms. A fixture
+then assumed dry-run always fails, whereas native code acknowledges a valid
+placeholder without streaming. It now checks exact settings and no RF. Finally
+90 KiB fixture failed before widening FUBAR's caller to the DLL's bounded size,
+then passed. Tag1.1.48 has no public asset and was not rewritten.
+
+Both releases promoted to Latest after verification; Town channel experimental.
+P25 DSP unchanged by companion work. Existing source replay/user listening
+evidence qualifies included receive patches, not all RF modes on all hardware.
+Satellite pass/SSTV field acceptance and T-0130 remain open. No private tokens,
+keys, IQ/audio captures or debugger dumps were put in release assets.
+
 ## 2026-10-11 - DEC-0219 paired companion gates
 
 MSVC Release: Town + native Inmarsat/Aircraft GUI test build passes; two GUI
@@ -21,6 +60,10 @@ restoration fixed the test isolation. No production gate weakened. Guard exact
 digest/mutation tests, 17 signed-release verifier cases and Satcom integration
 contract pass. FUBAR 3/3 passes, including failed-configure/no-start and pure
 Stop payload coverage. Actions/public asset evidence follows after publication.
+
+Downloaded-CI verification added without substituting host build files:
+`python scripts/test_verify_release.py` 19/19 PASS, including mismatched
+commit/run/branch/version negatives and retained inventory/signature gates.
 
 ## 2026-10-11 DEC-0218 satellite worker and repair evidence
 

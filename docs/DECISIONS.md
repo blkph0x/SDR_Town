@@ -24,6 +24,12 @@ their hashes, then verify public bytes before locally signing the update manifes
 Do not recompile a different local executable for Latest, upload signing keys,
 overwrite published assets, or promote a portable-only release to Latest.
 
+The release verifier needs an explicit downloaded-CI mode: require the expected
+source commit, Actions run, release branch and project version, retain inventory,
+asset hashes and Ed25519 verification, and do not compare against a different
+local compilation. Default local-stage verification remains unchanged. This is
+needed because CI-built DLLs are not byte-identical to the host compiler output.
+
 
 ## DEC-0218 - Satellite SSTV profiles and fail-closed pass automation (2026-10-11)
 

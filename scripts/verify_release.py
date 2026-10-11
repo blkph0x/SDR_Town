@@ -25,7 +25,13 @@ def require(condition, message):
         raise ValueError(message)
 
 
-def verify(root, version, installer):
+def verify(root, version, installer, *, ci_commit=None, ci_run=None, public_key=None):
+    ci = ci_commit is not None or ci_run is not None
+    if ci:
+        require(isinstance(ci_commit, str) and re.fullmatch(r'[0-9a-f]{40}', ci_commit),
+                'CI verification requires the exact source commit')
+        require(isinstance(ci_run, str) and re.fullmatch(r'[1-9][0-9]*', ci_run),
+                'CI verification requires the exact Actions run')
     manifest_path = root / 'update.json'
     manifest = json.loads(manifest_path.read_text(encoding='utf-8-sig'))
     require(manifest['version'] == version and manifest['tag'] == f'v{version}', 'Manifest version mismatch')
@@ -34,7 +40,8 @@ def verify(root, version, installer):
     require(manifest['installer']['url'] ==
             f'https://github.com/Blkph0x/SDR_Town/releases/download/v{version}/SDR_Town-{version}-win64-setup.exe',
             'Unexpected installer URL')
-    portable = root / f'SDR_Town-{version}-win64-portable.zip'
+    portable = root / (f'SDR_Town-{version}-win64.zip' if ci else
+                       f'SDR_Town-{version}-win64-portable.zip')
     control = root / f'SdrTownControl-{version}-win64.dll'
     sums = {}
     for line in (root / 'SHA256SUMS.txt').read_text().splitlines():
@@ -71,8 +78,9 @@ def verify(root, version, installer):
                     'licenses/acars/JANSSON-LICENSE.txt', 'licenses/acars/UPSTREAM-README.md')
         for name in required:
             require(name in names, f'Missing runtime: {name}')
-            require(archive.read(name) == (root / 'build/deploy_staging' / name).read_bytes(),
-                    f'Staging mismatch: {name}')
+            if not ci:
+                require(archive.read(name) == (root / 'build/deploy_staging' / name).read_bytes(),
+                        f'Staging mismatch: {name}')
         require(archive.read('SdrTownControl.dll') == control.read_bytes(), 'Standalone control DLL mismatch')
         build_info = json.loads(archive.read('build-info.json').decode('utf-8-sig'))
         require(build_info['version'] == version, 'Build provenance version mismatch')
@@ -80,11 +88,17 @@ def verify(root, version, installer):
                 'Build provenance commit missing')
         require(build_info['executableSha256'] == hashlib.sha256(archive.read('SDR_Town.exe')).hexdigest(),
                 'Executable differs from build provenance')
-        require(archive.read('rtlsdr.dll') ==
-                (root / 'build/vcpkg_installed/x64-windows/bin/rtlsdr.dll').read_bytes(),
-                'RTL runtime differs from configured dependency')
+        if ci:
+            require(build_info.get('sourceCommit') == ci_commit, 'CI source commit mismatch')
+            require(str(build_info.get('workflowRun')) == ci_run, 'CI Actions run mismatch')
+            require(build_info.get('projectVersion') == version and
+                    build_info.get('branch') == f'release/v{version}', 'CI release provenance mismatch')
+        else:
+            require(archive.read('rtlsdr.dll') ==
+                    (root / 'build/vcpkg_installed/x64-windows/bin/rtlsdr.dll').read_bytes(),
+                    'RTL runtime differs from configured dependency')
     verify_inventory_zip(portable, require_publishable=True)
-    key_text = (root / 'resources/update_manifest_ed25519_pub.inc').read_text()
+    key_text = (public_key or root / 'resources/update_manifest_ed25519_pub.inc').read_text()
     match = re.search(r'"([0-9a-fA-F]{64})"', key_text)
     require(match is not None, 'Embedded signing key missing')
     signature = base64.b64decode((root / 'update.json.sig').read_text().strip(), validate=True)
@@ -106,5 +120,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--version', required=True)
     parser.add_argument('--installer', type=Path, required=True)
+    parser.add_argument('--assets-dir', type=Path, help='Downloaded assets; requires exact CI identity')
+    parser.add_argument('--ci-commit')
+    parser.add_argument('--ci-run')
     args = parser.parse_args()
-    verify(Path(__file__).resolve().parents[1], args.version, args.installer.resolve())
+    source = Path(__file__).resolve().parents[1]
+    if args.assets_dir and not (args.ci_commit and args.ci_run):
+        parser.error('--assets-dir requires --ci-commit and --ci-run')
+    verify(args.assets_dir.resolve() if args.assets_dir else source, args.version, args.installer.resolve(),
+           ci_commit=args.ci_commit, ci_run=args.ci_run,
+           public_key=source / 'resources/update_manifest_ed25519_pub.inc')

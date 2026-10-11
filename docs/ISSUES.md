@@ -1,6 +1,14 @@
 # Issues (canonical)
 
-## ISS-0103 - Companion drift and unsafe image scope (2026-10-11, FIXED LOCALLY / RELEASE PENDING)
+## ISS-0104 - Large companion snapshots need pagination (2026-10-11, OPEN)
+
+FUBAR's 64 KiB caller truncation was reproduced with a fragmented 90 KiB real
+DLL fixture and fixed in 1.1.49. The native DLL still caps an HTTP response at
+256 KiB. Larger aircraft/message collections need bounded paged native views
+and explicit size errors; do not replace this with unlimited allocation.
+Tracked as T-0130, not a claim that unbounded remote maps are implemented.
+
+## ISS-0103 - Companion drift and unsafe image scope (2026-10-11, FIXED / PUBLISHED)
 
 FUBAR release pins 0.2.125; current Town is 0.2.136 plus tested pending work.
 Web ISS arm hardcodes the legacy downlink; named Inmarsat selects status but
@@ -11,7 +19,10 @@ repair and requires negative tests before publication.
 
 Native session views and FUBAR routing, capability selectors, bounded opaque
 image registry, recursive request validation and error redaction implemented.
-Paired DLL/HTTP and browser tests pass; package alignment/publishing pending.
+Paired DLL/HTTP and browser tests pass. Town 0.2.137/FUBAR 1.1.49 public assets
+are verified together; exact matching DLL/runtimes, source provenance and
+signed Town updater verified. Both releases are Latest. DEC-0219 BUILD_NOTES
+records clean-runner COM, cold-workspace and payload fixes as well.
 
 
 ## ISS-0102 - Satellite pass automation can act on wrong settings (2026-10-11, FIXED LOCALLY / FIELD OPEN)

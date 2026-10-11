@@ -1,5 +1,17 @@
 # Development log
 
+## 2026-10-11 - DEC-0219 published and public pair tested
+
+Town 0.2.137 and FUBAR 1.1.49 are Latest. Source, Actions, hashes, signed
+updater and full public-pair smoke evidence are in BUILD_NOTES. Preserved
+accepted P25 DSP; companion controls reuse native controllers. Clean-runner
+testing additionally fixed FUBAR COM shutdown order, measured cold-workspace
+timeout and 64 KiB response truncation. No failed release or gate was bypassed.
+Updated the release verifier to check CI identity without depending on different
+host-compiled files (19 positive/negative tests pass). Remaining native-only
+controls, per-session audio streams and paged large maps are explicit T-0130;
+real satellite acceptance stays with the testers.
+
 ## 2026-10-11 - DEC-0219 companion alignment
 
 Repaired native session views, selected satellite profiles/radios and SSTV

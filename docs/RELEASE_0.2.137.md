@@ -1,8 +1,12 @@
-# SDR Town 0.2.137 / FUBAR 1.1.48
+# SDR Town 0.2.137 / FUBAR 1.1.49
 
 Experimental receive release, with installer and portable builds from the same
 qualified Actions stage. Latest promotion requires a separately verified and
 signed updater manifest; the signing key is not distributed to CI.
+Published and verified: Town Actions 38110086896, companion Actions 38114493140.
+Both releases are Latest; Town's updater channel remains experimental.
+FUBAR 1.1.48 was never published: clean-runner tests caught a COM cleanup crash.
+1.1.49 fixes that crash, cold-workspace timeouts and large-response truncation.
 
 ## Companion workflows
 

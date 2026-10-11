@@ -1,6 +1,6 @@
 # SDR Town
 
-0.2.137 pairs with FUBAR 1.1.48: selected-radio and session-addressed
+0.2.137 pairs with FUBAR 1.1.49: selected-radio and session-addressed
 satellite, Inmarsat, aircraft and SSTV controls, native downlink profiles,
 safe decoded-image access and independent maps/messages. See the
 [paired release notes](docs/RELEASE_0.2.137.md). The accepted P25 listening

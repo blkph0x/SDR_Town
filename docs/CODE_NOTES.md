@@ -8,6 +8,9 @@ Companion FUBAR uses structured JSON validation/redaction and a bounded opaque
 image registry. Its real paired test uses authenticated loopback/no-RF startup.
 Windows CI packages NSIS and the DLL from the same qualified portable stage;
 manifest signing remains local with the existing embedded public key.
+`verify_release.py --assets-dir ... --ci-commit ... --ci-run ...` verifies the
+downloaded canonical CI ZIP, exact build identity, inventory, full asset hashes
+and signed update manifest; its default local-staging gate is unchanged.
 
 DEC-0218: `SatCatalogue` retains built-ins and validates up to 32 custom SSTV
 profiles (NORAD, RF/BW/image mode/reference). `SatObserverConfig` explicitly
