@@ -50,12 +50,16 @@ def main() -> int:
             "MainWindow integration markers missing")
     require("SatcomHostServices::instance().install" in main_cpp,
             "MainWindow does not install Satcom host callbacks")
-    require("SatcomScannerEngine::instance().stop();" in main_cpp and
-            "SatcomHostServices::instance().clear();" in main_cpp,
+    shutdown = main_cpp.split("void MainWindow::stopAllStreaming()", 1)[1]
+    shutdown = shutdown.split("// SATCOM_HOST_INTEGRATION_END", 1)[0]
+    require("SatcomScannerEngine::stopAll();" in shutdown and
+            "SatcomHostServices::instance().clear();" in shutdown and
+            shutdown.index("SatcomScannerEngine::stopAll();") <
+            shutdown.index("SatcomHostServices::instance().clear();"),
             "MainWindow shutdown does not stop/clear Satcom first")
     require('ensureAudioOutputActive("Satcom monitor")' in main_cpp,
             "Satcom is not routed through configured MainWindow audio")
-    require("rx->active = false;" in main_cpp and "rx->active = saved.second;" in main_cpp,
+    require("rx->active = false;" in main_cpp and "rx->active = saved.active;" in main_cpp,
             "ordinary Listen receiver pause/restore missing")
 
     require('modeCombo_->addItems({"NFM", "WFM", "AM", "USB", "LSB", "APT", "APRS"});'
@@ -67,6 +71,13 @@ def main() -> int:
 
     require("retuneWithLease(autoDeviceIndex_" not in hub_cpp,
             "hub still performs a second independent receiver restore")
+    require("satcom_->autoCaptureTick();" in hub_cpp and "engine.armPass(" not in hub_cpp,
+            "default hub bypasses the shared automatic capture policy")
+    automatic = widget_cpp.split("void SatcomScannerWidget::updateAutoCapture(", 1)[1]
+    automatic = automatic.split("void SatcomScannerWidget::refreshPassesTable", 1)[0]
+    require("engine.armPass(best->satId, best->downlinkId, true, false, &error)" in automatic and
+            "position.armable" in automatic and "sstvOnly" in automatic,
+            "automatic capture can force takeover or ignore satellite eligibility")
 
     print("Satcom/MainWindow host integration contract passed")
     return 0

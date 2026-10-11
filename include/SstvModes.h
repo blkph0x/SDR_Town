@@ -12,6 +12,7 @@ struct SstvModeSpec {
     int width;
     int height;
     int durationSec; // image body, excluding header
+    unsigned visWord = 0; // QSSTV 16-bit VIS, separate from classic parity VIS.
 };
 
 inline constexpr SstvModeSpec kSstvModes[] = {
@@ -52,18 +53,18 @@ inline constexpr SstvModeSpec kSstvModes[] = {
     {"sc148q", "Wraase SC-1 48Q", 24, 256, 128, 44},
     {"sc196", "Wraase SC-1 96", 28, 256, 256, 88},
     {"fax480", "FAX480", 0, 512, 500, 134},
-    {"mp73", "MP73", 0, 320, 256, 73},
-    {"mp115", "MP115", 0, 320, 256, 115},
-    {"mp140", "MP140", 0, 320, 256, 140},
-    {"mp175", "MP175", 0, 320, 256, 175},
-    {"mr73", "MR73", 0, 320, 256, 73},
-    {"mr90", "MR90", 0, 320, 256, 90},
-    {"mr115", "MR115", 0, 320, 256, 115},
-    {"mr140", "MR140", 0, 320, 256, 140},
-    {"ml180", "ML180", 0, 640, 496, 180},
-    {"ml240", "ML240", 0, 640, 496, 240},
-    {"ml280", "ML280", 0, 640, 496, 280},
-    {"ml320", "ML320", 0, 640, 496, 320},
+    {"mp73", "MP73", 0, 320, 256, 73, 0x2523},
+    {"mp115", "MP115", 0, 320, 256, 115, 0x2923},
+    {"mp140", "MP140", 0, 320, 256, 140, 0x2A23},
+    {"mp175", "MP175", 0, 320, 256, 175, 0x2C23},
+    {"mr73", "MR73", 0, 320, 256, 73, 0x4523},
+    {"mr90", "MR90", 0, 320, 256, 90, 0x4623},
+    {"mr115", "MR115", 0, 320, 256, 115, 0x4923},
+    {"mr140", "MR140", 0, 320, 256, 140, 0x4A23},
+    {"ml180", "ML180", 0, 640, 496, 180, 0x8523},
+    {"ml240", "ML240", 0, 640, 496, 240, 0x8623},
+    {"ml280", "ML280", 0, 640, 496, 280, 0x8923},
+    {"ml320", "ML320", 0, 640, 496, 320, 0x8A23},
     {"hamdrm", "Digital STWN prototype (file only)", 0, 320, 256, 30},
 };
 
@@ -79,7 +80,7 @@ inline const SstvModeSpec* sstvModeById(std::string_view id) {
 inline const SstvModeSpec* sstvModeByVis(unsigned vis) {
     if (vis == 0) return nullptr;
     for (const auto& m : kSstvModes)
-        if (m.vis == vis) return &m;
+        if (m.vis == vis || m.visWord == vis) return &m;
     return nullptr;
 }
 

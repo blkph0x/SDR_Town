@@ -26,6 +26,19 @@ def event():
 
 
 class CollectorTests(unittest.TestCase):
+    def test_sstv_lifecycle_is_stored_as_content_free_telemetry(self):
+        with tempfile.TemporaryDirectory() as d:
+            state=collector.DiagnosticsState(Path(d),"ingest","admin",49152)
+            for kind in ("started","route","health","finished","failed"):
+                item=event();item["type"]="sstv."+kind
+                item["payload"]={"receiveSession":"test-receive-1","imageMode":"auto",
+                                 "rfMode":"auto","route":"NFM","rows":240,"savedImages":1}
+                self.assertTrue(collector.valid_event(item))
+                state.write_event(item)
+                found=state.list_events(event_type=item["type"])["events"]
+                self.assertEqual(len(found),1)
+                self.assertEqual(found[0]["event"]["payload"],item["payload"])
+
     def test_event_history_filters_retention_and_migration(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);legacy=event();legacy["type"]="app.system"

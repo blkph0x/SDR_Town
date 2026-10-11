@@ -18,6 +18,88 @@
 #include <QCoreApplication>
 #include <QDir>
 
+TEST_CASE("Satellite SSTV catalogue round trips named selections and validated profiles", "[satcom][sstv-pass]") {
+    auto catalogue = SatCatalogue::fromJson({{"selected", {"iss-sstv-uhf", "sonate2"}}});
+    const auto roundtrip = SatCatalogue::fromJson(catalogue.toJson());
+    REQUIRE(roundtrip.selectedEntries().size() == 2);
+    CHECK(roundtrip.selectedEntries()[0].id == "iss-sstv-uhf");
+    const auto selected = roundtrip.selectedEntries();
+    CHECK(selected[0].downlinks[0].freqHz == 437550000);
+    CHECK(selected[0].downlinks[0].bandwidthHz == 20000);
+    CHECK(selected[0].downlinks[0].imageMode == "auto");
+    REQUIRE_FALSE(selected[0].downlinks[0].reference.empty());
+    for (const auto& sat : catalogue.entries()) {
+        if (sat.id == "funcube1") { CHECK_FALSE(sat.downlinks[0].armable); CHECK(sat.downlinks[0].role != "sstv"); }
+        if (sat.id.rfind("noaa", 0) == 0) CHECK_FALSE(sat.downlinks[0].armable);
+    }
+    SatCatalogueEntry custom{"custom-qa", "QA satellite", 25544,
+        {{"custom-qa-sstv", "QA SSTV", 145800000, "NFM", "sstv", true, 20000, "mp73", "operator", ""}},
+        true, "test", true};
+    std::string error;
+    REQUIRE(catalogue.upsertSstvProfile(custom, &error));
+    auto restored = SatCatalogue::fromJson(catalogue.toJson());
+    REQUIRE(restored.entries().back().custom);
+    CHECK(restored.entries().back().downlinks[0].imageMode == "mp73");
+    CHECK(restored.entries().back().selected);
+    for (const auto invalid : {"hamdrm", "unknown", "$(execute)"}) {
+        custom.downlinks[0].imageMode = invalid;
+        CHECK_FALSE(catalogue.upsertSstvProfile(custom, &error));
+    }
+    custom.downlinks[0].imageMode = "auto";
+    custom.downlinks[0].freqHz = std::numeric_limits<double>::quiet_NaN();
+    CHECK_FALSE(catalogue.upsertSstvProfile(custom, &error));
+    custom.downlinks[0].freqHz = 145800000; custom.id = "../escape";
+    CHECK_FALSE(catalogue.upsertSstvProfile(custom, &error));
+}
+
+TEST_CASE("Satellite observer rejects nonfinite and partially parsed locations", "[satcom][sstv-pass]") {
+    double value = 42;
+    for (const auto input : {"nan", "inf", "33oops", "-33.8junkS", "91N"})
+        CHECK_FALSE(SatObserverConfig::parseLatLonToken(input, true, &value));
+    CHECK(value == 42);
+    CHECK_FALSE(SatObserverConfig::fromJson({{"latDeg", 100}}).configured);
+    CHECK(SatObserverConfig::fromJson({{"latDeg", 0}, {"lonDeg", 0}, {"configured", true}}).configured);
+}
+
+TEST_CASE("Satellite pass arming and loss use actual orbit epoch and deterministic clock", "[satcom][sstv-pass]") {
+    SatPassPlanner planner("qa-sstv-clock");
+    TleSet t{25544, "ISS", "1 25544U 98067A   21001.00000000  .00002182  00000-0  40864-4 0  9990",
+        "2 25544  51.6456 247.4627 0003000  45.0000 315.0000 15.48900000200000"};
+    TleStore::instance().upsert(t);
+    planner.setCatalogueSelection({"iss-sstv-uhf"});
+    constexpr double epoch = 1609459200;
+    const auto location = planner.currentPositionsAt(epoch).front();
+    SatObserverConfig observer;
+    observer.latDeg = location.latitudeDeg; observer.lonDeg = location.longitudeDeg;
+    observer.minElevationDeg = 5;
+    planner.setObserver(observer);
+    std::string error;
+    CHECK_FALSE(planner.armAt("iss-sstv-uhf", "wrong-downlink", true, epoch, &error));
+    REQUIRE(planner.armAt("iss-sstv-uhf", "iss-sstv-uhf", true, epoch, &error));
+    const auto armed = planner.snapshot().armed;
+    CHECK(armed.freqHz == 437550000);
+    CHECK(armed.losUnix > epoch);
+    CHECK(armed.losUnix < epoch + 900);
+    double tuned = 0;
+    REQUIRE(planner.tickAutoTrackAt(epoch, &tuned));
+    CHECK(std::abs(tuned - armed.freqHz) < 15000);
+    CHECK(planner.snapshot().armed.elevationDeg > 85);
+    planner.setAutoTrack(false);
+    CHECK_FALSE(planner.tickAutoTrackAt(armed.losUnix, &tuned));
+    CHECK_FALSE(planner.snapshot().armed.armed);
+    CHECK_FALSE(planner.armAt("iss-sstv-uhf", "iss-sstv-uhf", true, epoch + 8*86400, &error));
+    CHECK(error.find("epoch") != std::string::npos);
+    CHECK_FALSE(planner.armAt("iss-sstv-uhf", "iss-sstv-uhf", true, epoch - 2*86400, &error));
+    REQUIRE(planner.armAt("iss-sstv-uhf", "iss-sstv-uhf", true, epoch, &error));
+    CHECK_FALSE(planner.tickAutoTrackAt(epoch-2, &tuned));
+    CHECK_FALSE(planner.snapshot().armed.armed);
+    observer.latDeg = -location.latitudeDeg;
+    observer.lonDeg = location.longitudeDeg > 0 ? location.longitudeDeg - 180 : location.longitudeDeg + 180;
+    planner.setObserver(observer);
+    CHECK_FALSE(planner.armAt("iss-sstv-uhf", "iss-sstv-uhf", true, epoch, &error));
+    CHECK(error.find("elevation") != std::string::npos);
+}
+
 TEST_CASE("Satellite scanner ignores stronger out-of-plan carriers and invalid bins", "[satcom][scan]") {
     std::vector<float> power{-10, -80, -60, -90};
     const auto peak = selectSatcomSignalPeak(power, 1000, 400, 950, 1100);

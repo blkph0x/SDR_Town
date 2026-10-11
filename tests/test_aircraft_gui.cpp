@@ -18,6 +18,64 @@
 #include "ObserverMapWidget.h"
 #include <QTabWidget>
 #include <QTemporaryDir>
+#include <QScrollArea>
+#include <QScrollBar>
+
+TEST_CASE("Satellite SSTV controls retain profiles without rearming", "[satcom][gui][sstv-pass]") {
+    {
+        SatcomScannerWidget widget(nullptr,"qa-sstv-profile-persistence");
+        auto& planner = widget.engine().planner();
+        planner.setCatalogueSelection({"iss-sstv-uhf","umka1"});
+        SatCatalogueEntry entry{"custom-save-qa", "QA persisted profile", 25544,
+            {{"custom-save-qa-sstv", "QA SSTV", 145800000, "USB", "sstv", true, 6000, "auto", "test", ""}}, true, "test", true};
+        REQUIRE(planner.saveSstvProfile(entry));
+        auto config = widget.engine().config(); config.sstvOnly = true; config.sstvSaveDir = "C:/qa/images";
+        widget.engine().setConfig(config); widget.engine().setAutoCaptureEnabled(true);
+        REQUIRE(widget.findChild<QComboBox*>("satelliteDownlink"));
+        REQUIRE(widget.findChild<QCheckBox*>("satelliteSstvOnly"));
+        REQUIRE(widget.findChild<QPushButton*>("armSatelliteSstv"));
+        widget.stopSession();
+        CHECK_FALSE(widget.engine().autoCaptureEnabled());
+    }
+    SatcomScannerWidget reopened(nullptr,"qa-sstv-profile-persistence");
+    CHECK_FALSE(reopened.engine().autoCaptureEnabled());
+    CHECK(reopened.engine().config().sstvOnly);
+    CHECK(reopened.engine().config().sstvSaveDir == "C:/qa/images");
+    const auto entries = reopened.engine().planner().catalogue().selectedEntries();
+    REQUIRE(entries.size() == 3);
+    CHECK(entries.back().custom);
+    CHECK(entries.back().downlinks.front().mode == "USB");
+    auto* combo = reopened.findChild<QComboBox*>("satelliteDownlink"); REQUIRE(combo);
+    reopened.resize(1280,1400); reopened.show(); QApplication::processEvents();
+    CHECK(combo->findData("iss-sstv-uhf") >= 0);
+    CHECK(combo->findData("custom-save-qa-sstv") >= 0);
+    const auto dir = qEnvironmentVariable("SDR_TOWN_TEST_VISUAL_DIR");
+    if (!dir.isEmpty()) {
+        REQUIRE(QDir().mkpath(dir));
+        CHECK(reopened.grab().save(dir+"/satellite-sstv.png"));
+    }
+    reopened.resize(1000,720); QApplication::processEvents();
+    auto* scroll = reopened.findChild<QScrollArea*>("satelliteControlsScroll"); REQUIRE(scroll);
+    CHECK(scroll->verticalScrollBar()->maximum() > 0);
+    CHECK(reopened.height() == 720);
+    if (!dir.isEmpty()) CHECK(reopened.grab().save(dir+"/satellite-sstv-compact.png"));
+}
+
+TEST_CASE("Default satellite hub uses the same checked auto capture controller", "[satcom][gui][sstv-pass]") {
+    SatcomHubWidget hub;
+    hub.prepareRemoteWorkspace();
+    auto* satellite = hub.satcom(); REQUIRE(satellite);
+    auto* enabled = satellite->findChild<QCheckBox*>("satelliteAutoCapture"); REQUIRE(enabled);
+    auto* status = satellite->findChild<QLabel*>("satellitePassStatus"); REQUIRE(status);
+    REQUIRE_FALSE(satellite->engine().planner().observer().configured);
+    enabled->setChecked(true);
+    REQUIRE(QMetaObject::invokeMethod(&hub,"autoCaptureTick",Qt::DirectConnection));
+    CHECK(status->text().contains("apply observer location"));
+    CHECK_FALSE(satellite->engine().planner().snapshot().armed.armed);
+    CHECK(satellite->engine().snapshot().state == SatcomScannerState::Idle);
+    satellite->stopSession();
+    CHECK_FALSE(satellite->engine().autoCaptureEnabled());
+}
 
 TEST_CASE("Aircraft sample rate default and applied telemetry are explicit", "[aircraft][gui]") {
     QSettings settings;settings.remove("aircraft/sessions/qa-rate-default");
@@ -153,6 +211,29 @@ TEST_CASE("Aircraft internet control removes sources and persists across windows
         if (!directory.isEmpty()) CHECK(map.grab().save(directory + QString("/aircraft-%1.png").arg(size.width())));
     }
     map.hide();
+}
+
+TEST_CASE("Companion satellite views and pass controls use the addressed session", "[aircraft][gui][companion]") {
+    const auto previousDryRun=qApp->property("sdrtown.guiDryRun");
+    struct RestoreDryRun { QVariant value; ~RestoreDryRun() { qApp->setProperty("sdrtown.guiDryRun",value); } } restore{previousDryRun};
+    qApp->setProperty("sdrtown.guiDryRun",true);
+    SatcomHubWidget hub;
+    auto* a=qobject_cast<SatcomScannerWidget*>(hub.openReceiverSession("satcom","web-a"));
+    auto* b=qobject_cast<SatcomScannerWidget*>(hub.openReceiverSession("satcom","web-b"));
+    REQUIRE(a); REQUIRE(b);
+    auto cfg=a->engine().config();cfg.lowHz=145800000;cfg.highHz=145800000;cfg.sstvOnly=true;a->engine().setConfig(cfg);
+    const auto result=hub.controlReceiverSessions("satcom","GET",{{"sessionId","web-a"},{"view","status"}});
+    REQUIRE(result.value("ok").toBool());
+    const auto status=result.value("satcom").toObject();
+    CHECK(status.value("sessionId").toString()=="web-a");
+    CHECK(status.value("config").toObject().value("sstvOnly").toBool());
+    CHECK_FALSE(status.value("config").toObject().contains("sstvSaveDir"));
+    CHECK(status.value("catalogue").isObject());
+    CHECK_FALSE(hub.controlReceiverSessions("satcom","GET",{{"sessionId","missing"},{"view","status"}}).value("ok").toBool());
+    CHECK_FALSE(a->webPassControl({{"action","automation"},{"autoCapture","true"}}).value("ok").toBool());
+    CHECK_FALSE(a->webPassControl({{"action","arm"},{"satId","iss"},{"downlinkId","iss-sstv"}}).value("ok").toBool());
+    CHECK_FALSE(a->engine().snapshot().passArmed);
+    CHECK_FALSE(b->engine().snapshot().passArmed);
 }
 
 TEST_CASE("Decoder receiver picker follows identity not receiver vector position", "[aircraft][gui][ownership]") {

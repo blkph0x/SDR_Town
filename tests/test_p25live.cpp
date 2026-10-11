@@ -957,7 +957,8 @@ std::vector<std::complex<float>> makeC4fmIq(const std::vector<uint8_t>& bits,
 std::vector<std::complex<float>> makeCqpskIq(const std::vector<uint8_t>& bits,
                                              double sampleRate,
                                              double carrierOffsetHz,
-                                             double fractionalSymbolOffset)
+                                             double fractionalSymbolOffset,
+                                             double symbolRate = P25LiveDecoder::SymbolRate)
 {
     std::vector<int> dibits;
     dibits.reserve(bits.size() / 2);
@@ -971,7 +972,7 @@ std::vector<std::complex<float>> makeCqpskIq(const std::vector<uint8_t>& bits,
         -kTestPi * 0.25,  // 10
         -kTestPi * 0.75,  // 11
     };
-    const double samplesPerSymbol = sampleRate / P25LiveDecoder::SymbolRate;
+    const double samplesPerSymbol = sampleRate / symbolRate;
     const size_t sampleCount = static_cast<size_t>(std::ceil((static_cast<double>(dibits.size()) + 8.0) * samplesPerSymbol));
     std::vector<std::complex<float>> iq;
     iq.reserve(sampleCount);
@@ -1406,6 +1407,99 @@ TEST_CASE("P25 live decoder corrects residual CQPSK carrier offset")
     REQUIRE(result.rawTsbkBlocks.front().crcValid);
 }
 
+TEST_CASE("P25 live decoder keeps CQPSK soft confidence when the envelope dips")
+{
+    auto tsbk = makeTsbk(0x02);
+    writeBitsMsb(tsbk, 16, 16, 0x1001);
+    writeBitsMsb(tsbk, 32, 16, 2001);
+    finishTsbkCrc(tsbk);
+    const auto bits = makeSyntheticTsduFrameBits(0x78b, tsbk);
+
+    constexpr double sampleRate = 2048000.0;
+    constexpr double centerHz = 419112500.0;
+    constexpr double carrierOffsetHz = -7250.0;
+    auto iq = makeCqpskIq(bits, sampleRate, carrierOffsetHz, 0.42);
+    for (size_t n = 0; n < iq.size(); ++n) {
+        const double env = 0.25 + 0.75 * (0.5 + 0.5 * std::sin(
+            2.0 * kTestPi * static_cast<double>(n) / 4000.0));
+        iq[n] *= static_cast<float>(env);
+    }
+
+    P25LiveDecoder decoder;
+    const auto result = decoder.processIq(iq, sampleRate, centerHz, centerHz + carrierOffsetHz);
+
+    INFO("softQ=" << result.stats.softDecisionQuality
+         << " llr=" << result.stats.softBitLlrMean
+         << " low=" << result.stats.softLowConfidenceSymbols
+         << "/" << result.stats.softDecisionSymbols);
+    REQUIRE(result.stats.demodPath.find("CQPSK") != std::string::npos);
+    REQUIRE(result.stats.softDecisionQuality > 0.40);
+    REQUIRE(result.stats.softLowConfidenceSymbols * 2 < result.stats.softDecisionSymbols);
+    REQUIRE_FALSE(result.nids.empty());
+    REQUIRE(result.nids.front().fecValidated);
+    REQUIRE(result.nids.front().nac == 0x78b);
+}
+
+TEST_CASE("P25 CQPSK decoding is invariant to finite input amplitude", "[p25][cqpsk]")
+{
+    auto tsbk = makeTsbk(0x02);
+    writeBitsMsb(tsbk, 16, 16, 0x1001);
+    writeBitsMsb(tsbk, 32, 16, 2001);
+    finishTsbkCrc(tsbk);
+    const auto bits = makeSyntheticTsduFrameBits(0x78b, tsbk);
+    constexpr double rate = 2048000.0;
+    constexpr double center = 419112500.0;
+    constexpr double offset = -7250.0;
+    const double amplitude = GENERATE(1.0, 0.02, 0.005, 0.002);
+    auto iq = makeCqpskIq(bits, rate, offset, 0.42);
+    for (auto& sample : iq) sample *= static_cast<float>(amplitude);
+
+    P25LiveDecoder decoder;
+    const auto result = decoder.processIq(iq, rate, center, center + offset);
+    INFO("amplitude=" << amplitude << " softQ=" << result.stats.softDecisionQuality
+         << " invalid=" << result.stats.softInvalidSymbols
+         << "/" << result.stats.softDecisionSymbols);
+    REQUIRE(result.stats.demodPath.find("CQPSK") != std::string::npos);
+    REQUIRE(result.stats.softDecisionQuality > 0.40);
+    REQUIRE_FALSE(result.nids.empty());
+    REQUIRE(result.nids.front().fecValidated);
+    REQUIRE(result.nids.front().nac == 0x78b);
+    REQUIRE_FALSE(result.rawTsbkBlocks.empty());
+    REQUIRE(result.rawTsbkBlocks.front().crcValid);
+}
+
+TEST_CASE("P25 Phase 2 preserves quiet differential symbols", "[p25][cqpsk]")
+{
+    std::vector<uint8_t> bits;
+    const auto dibits = makeSyntheticPhase2SuperframeWithSacchForTest();
+    for (int repeat = 0; repeat < 2; ++repeat) {
+        for (const int d : dibits) {
+            bits.push_back(static_cast<uint8_t>((d >> 1) & 1));
+            bits.push_back(static_cast<uint8_t>(d & 1));
+        }
+    }
+    P25LiveDecoderConfig config;
+    config.symbolRate = 6000;
+    config.phase2CqpskTrafficDemod = true;
+    config.enablePhase1Decode = false;
+    config.stopCqpskSearchOnHardLock = true;
+    const float amplitude = GENERATE(1.0f, 0.002f);
+    auto iq = makeCqpskIq(bits, 60000, 0, 0.42, 6000);
+    for (auto& sample : iq) sample *= amplitude;
+    P25LiveDecoder decoder(config);
+    const auto result = decoder.processIq(iq, 60000, 421850000, 421850000);
+    INFO("amplitude=" << amplitude << " path=" << result.stats.demodPath
+         << " invalid=" << result.stats.softInvalidSymbols
+         << "/" << result.stats.softDecisionSymbols
+         << " quality=" << result.stats.softDecisionQuality
+         << " bursts=" << result.stats.phase2Bursts);
+    REQUIRE(result.stats.demodPath == "CQPSK-diff");
+    REQUIRE(result.stats.softInvalidSymbols == 0);
+    REQUIRE(result.stats.softDecisionQuality > 0.40);
+    REQUIRE(result.stats.phase2SuperframeBursts >= 12);
+    REQUIRE(result.stats.phase2MacCrcValid > 0);
+}
+
 TEST_CASE("P25 live decoder prefers validated NID branch over more false syncs")
 {
     auto tsbk = makeTsbk(0x02);
@@ -1790,6 +1884,39 @@ TEST_CASE("P25 block decode walks complete bursts beyond its first validated loc
     REQUIRE(empty.phase2Bursts.empty());
 }
 
+TEST_CASE("P25 unbound sync bursts cannot borrow a retained slot security session", "[p25][slot-security]")
+{
+    // DEC-0216: the isolated prefix sync is not part of the later TDMA lattice.
+    auto input = makeSyntheticPhase2Burst(0x0);
+    input.insert(input.end(), 601, 0);
+    const auto masked = maskSyntheticPhase2SuperframeForTest(
+        makeSyntheticPhase2SuperframeWithSacchForTest(), 0x2d2, 0xbee00, 0x2d1, 0);
+    input.insert(input.end(), masked.begin(), masked.end());
+    P25LiveDecoderConfig config;
+    config.realtimeVoiceSearch = true;
+    P25LiveDecoder decoder(config);
+    decoder.setPhase2MaskParameters(0x2d2, 0xbee00, 0x2d1);
+    const auto result = decoder.processHardDibits(input);
+    REQUIRE(result.stats.phase2MacCrcValid > 0);
+    bool unboundSeen = false;
+    bool validClearSeen = false;
+    for (const auto& burst : result.phase2Bursts) {
+        if (burst.grantSlotKnown) {
+            validClearSeen = validClearSeen || burst.essKnown;
+            continue;
+        }
+        unboundSeen = true;
+        INFO("unbound dibit " << burst.dibitOffset);
+        CHECK_FALSE(burst.essKnown);
+        CHECK_FALSE(burst.essEvidence.known);
+        CHECK_FALSE(burst.securityStateFromPtt);
+        CHECK_FALSE(burst.trafficSecurityKnown);
+        CHECK_FALSE(burst.sessionAudioRelease);
+    }
+    REQUIRE(unboundSeen);
+    REQUIRE(validClearSeen);
+}
+
 TEST_CASE("P25 live decoder searches Phase 2 XOR mask phase using MAC CRC evidence")
 {
     constexpr uint16_t nac = 0x2d2;
@@ -1822,6 +1949,10 @@ TEST_CASE("P25 live decoder searches Phase 2 XOR mask phase using MAC CRC eviden
     REQUIRE(burst->macCrcValid);
     REQUIRE(burst->essKnown);
     REQUIRE_FALSE(burst->encrypted);
+    REQUIRE(burst->essEvidence.known);
+    REQUIRE(burst->essEvidence.fecValidated);
+    REQUIRE(burst->essEvidence.algId == 0x80);
+    REQUIRE_FALSE(burst->essEvidence.encrypted);
 
     REQUIRE(burst->grantSlotKnown);
     const uint8_t pttGrantSlot = burst->grantSlot;
@@ -1836,6 +1967,7 @@ TEST_CASE("P25 live decoder searches Phase 2 XOR mask phase using MAC CRC eviden
         REQUIRE(voiceBurst.grantSlotKnown);
         if (voiceBurst.grantSlot != pttGrantSlot) {
             REQUIRE_FALSE(voiceBurst.sessionAudioRelease);
+            REQUIRE_FALSE(voiceBurst.essEvidence.known);
             continue;
         }
         if (voiceBurst.sessionAudioRelease) {
@@ -2551,7 +2683,28 @@ TEST_CASE("P25 Phase 2 6000 baud CQPSK processIq stays inside realtime budget on
         });
     // Wide CQPSK grid on noise should trip the budget (or finish under it).
     REQUIRE((sawBudgetTrip || ms <= cfg.realtimeDecodeBudgetMs + 40));
-    (void)result;
+    REQUIRE(result.stats.phase2MacCrcValid == 0);
+    REQUIRE_FALSE(result.stats.phase2EssKnown);
+    REQUIRE(std::isfinite(result.stats.softDecisionQuality));
+}
+
+TEST_CASE("P25 Phase 2 gain normalization leaves silence untrusted", "[p25][cqpsk]")
+{
+    P25LiveDecoderConfig config;
+    config.symbolRate = 6000;
+    config.phase2CqpskTrafficDemod = true;
+    config.enablePhase1Decode = false;
+    config.realtimeVoiceSearch = true;
+    config.realtimeDecodeBudgetMs = 110;
+    config.maxCqpskSearchCandidates = 36;
+    P25LiveDecoder decoder(config);
+    decoder.setPhase2MaskParameters(0x2d2, 0xbee00, 0x2d1);
+    const std::vector<std::complex<float>> silence(43200);
+    const auto result = decoder.processIq(silence, 60000, 421850000, 421850000);
+    REQUIRE(result.stats.phase2MacCrcValid == 0);
+    REQUIRE_FALSE(result.stats.phase2EssKnown);
+    REQUIRE(result.stats.phase2VoiceCodewords == 0);
+    REQUIRE(result.stats.softDecisionQuality == 0);
 }
 
 TEST_CASE("DEC-0051 realtime budget helpers arm and trip once", "[p25][budget][dec0051]")

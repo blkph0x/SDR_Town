@@ -990,6 +990,21 @@ ComplexSymbolRecovery recoverComplexSymbols(const std::vector<std::complex<float
     }
     removeMean(filtered);
 
+    if (config.phase2CqpskTrafficDemod) {
+        // DEC-0213: SDRTrunk's P25P2DecoderHDQPSK filters, applies block AGC,
+        // then recovers symbols. Without that stage our absolute numerical
+        // cutoffs erased finite quiet symbols (capture 20261011_003958).
+        // Its ComplexGainControl uses unity peak and a 1e-4 envelope floor.
+        // One gain for the block preserves phase and relative envelope; this
+        // is not an SNR boost, per-sample limiter, or permission to play noise.
+        double peak = 1e-4;
+        for (const auto& sample : filtered) {
+            peak = std::max(peak, std::abs(std::complex<double>(sample)));
+        }
+        const float gain = static_cast<float>(1.0 / peak);
+        for (auto& sample : filtered) sample *= gain;
+    }
+
     const double sps = sampleRate / config.symbolRate;
     double level = 0.0;
     size_t levelCount = 0;
@@ -1215,6 +1230,8 @@ struct SoftDibitSequence {
     double meanAbsLlr = 0.0;
     double minAbsLlr = 0.0;
     size_t lowConfidenceSymbols = 0;
+    size_t invalidSymbols = 0;
+    double meanMagnitude = 0.0;
 };
 
 void finalizeSoftDibitStats(SoftDibitSequence& out,
@@ -1256,6 +1273,8 @@ void stampSoftDibitStats(P25LiveDecodeResult& result, const SoftDibitSequence& s
 {
     result.softDibitMinAbsLlr = soft.dibitMinAbsLlr;
     result.stats.softDecisionSymbols = soft.dibits.size();
+    result.stats.softInvalidSymbols = soft.invalidSymbols;
+    result.stats.softSymbolMeanMagnitude = soft.meanMagnitude;
     result.stats.softDecisionQuality = soft.quality;
     result.stats.softBitLlrMean = soft.meanAbsLlr;
     result.stats.softBitLlrMinimum = soft.minAbsLlr;
@@ -1440,6 +1459,8 @@ SoftDibitSequence cqpskSymbolsToSoftDibits(const std::vector<std::complex<double
         }
     }
     level = levelCount > 0 ? level / static_cast<double>(levelCount) : 1.0;
+    out.invalidSymbols = observed.size() - levelCount;
+    out.meanMagnitude = levelCount > 0 ? level : 0.0;
     level = std::max(level, 1e-4);
 
     auto idealForBin = [&](int bin) {
@@ -1449,6 +1470,14 @@ SoftDibitSequence cqpskSymbolsToSoftDibits(const std::vector<std::complex<double
     std::vector<double> residuals;
     residuals.reserve(observed.size());
     out.dibits.reserve(observed.size());
+    // Hard decisions are phase-only. Euclidean LLR was treating the H-DQPSK
+    // envelope dips as symbol errors, so a zero-error sync word still scored
+    // as low confidence and the voice gate concealed the frame.
+    auto phaseNormalized = [&](const std::complex<double>& z) {
+        const double mag = std::abs(z);
+        if (!std::isfinite(mag) || mag < 1e-8) return z;
+        return z * (level / mag);
+    };
     for (const auto& sym : observed) {
         if (!sym.valid) {
             out.dibits.push_back(0);
@@ -1457,7 +1486,8 @@ SoftDibitSequence cqpskSymbolsToSoftDibits(const std::vector<std::complex<double
         }
         const int bin = phaseToQuadrantBin(std::atan2(sym.z.imag(), sym.z.real()), rotation);
         out.dibits.push_back(permutation[static_cast<size_t>(bin)] & 0x03);
-        residuals.push_back(std::norm(sym.z - idealForBin(bin)));
+        const auto z = phaseNormalized(sym.z);
+        residuals.push_back(std::norm(z - idealForBin(bin)));
     }
 
     double sigma2 = 0.0;
@@ -1471,9 +1501,10 @@ SoftDibitSequence cqpskSymbolsToSoftDibits(const std::vector<std::complex<double
             llrs.push_back({0.0, 0.0});
             continue;
         }
+        const auto z = phaseNormalized(sym.z);
         std::array<double, 4> metric{};
         for (int bin = 0; bin < 4; ++bin) {
-            const double dist2 = std::norm(sym.z - idealForBin(bin));
+            const double dist2 = std::norm(z - idealForBin(bin));
             const int dibit = permutation[static_cast<size_t>(bin)] & 0x03;
             metric[static_cast<size_t>(dibit)] = -dist2 / (2.0 * sigma2);
         }
@@ -4591,6 +4622,7 @@ P25Phase2Burst decodePhase2BurstAt(const std::vector<int>& dibits,
     if (session) {
         burst.essKnown = session->ess.known && session->essTrusted;
         burst.essEncrypted = burst.essKnown && session->ess.encrypted;
+        burst.essEvidence = session->ess;
         burst.trafficSecurityKnown = session->trafficSecurityKnown;
         burst.trafficEncrypted = session->trafficEncrypted;
         burst.trafficTalkgroupKnown = session->trafficTalkgroupKnown;
@@ -6257,6 +6289,8 @@ static void restoreSelectedDemodStats(P25LiveDecodeResult& result, const P25Live
     result.stats.symbolRate = selected.symbolRate;
     result.stats.symbolConfidence = selected.symbolConfidence;
     result.stats.softDecisionSymbols = selected.softDecisionSymbols;
+    result.stats.softInvalidSymbols = selected.softInvalidSymbols;
+    result.stats.softSymbolMeanMagnitude = selected.softSymbolMeanMagnitude;
     result.stats.softDecisionQuality = selected.softDecisionQuality;
     result.stats.softBitLlrMean = selected.softBitLlrMean;
     result.stats.softBitLlrMinimum = selected.softBitLlrMinimum;
@@ -8358,7 +8392,6 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
         session.essBHypotheses = useSlotState ? m_phase2SlotEssBHypotheses[ts] : (useGlobalFallback ? m_phase2EssBHypotheses : std::array<std::array<uint8_t, 16>, 5>{});
         session.essBSeenHypotheses = useSlotState ? m_phase2SlotEssBSeenHypotheses[ts] : (useGlobalFallback ? m_phase2EssBSeenHypotheses : std::array<std::array<bool, 4>, 5>{});
     }
-    Phase2SessionState& session = slotSessions[0];
     auto recentlyDecodedAcchBurst = [&](uint64_t streamDibit) {
         constexpr uint64_t kAcchDecodeDibitTolerance = 12;
         for (uint64_t prior : m_phase2RecentAcchDecodeBurstDibits) {
@@ -9291,11 +9324,14 @@ P25Phase2DecodeResult P25LiveDecoder::processPhase2HardDibitsDetailedInternal(
         }
         if (bootstrappedMasked) continue;
 
+        // DEC-0216: an isolated sync has no traffic-slot identity. Passing
+        // slotSessions[0] here painted its clear ESS onto unbound raw bursts,
+        // which could authorize the other slot. Keep structure, not call state.
         auto burst = decodePhase2BurstAt(workingDibits, hit.dibitOffset, hit.errors,
                                          false, 0, 0,
                                          0, 0,
                                           nullptr, 0, 0,
-                                          &session, &out.macPdus,
+                                          nullptr, &out.macPdus,
                                           false,
                                           true,
                                           true,

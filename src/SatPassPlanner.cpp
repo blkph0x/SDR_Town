@@ -119,6 +119,20 @@ SatPassPlanner::~SatPassPlanner() {
     completion_->owner = nullptr;
 }
 
+bool usableElements(const TleSet& tle, double now, Sgp4::Elements* elements, std::string* reason) {
+    if (tle.noradId <= 0 || !Sgp4::parseTle(tle.line1, tle.line2, elements) || elements->satnum != tle.noradId) {
+        if (reason) *reason = "Missing or invalid TLE; refresh or import orbital data";
+        return false;
+    }
+    const double age = (jdFromUnix(now) - elements->epochJd) * 86400.0;
+    // DEC-0218: epoch age, not time since download; predicted elements allowed +1 day.
+    if (!std::isfinite(age) || age > 7 * 86400 || age < -86400) {
+        if (reason) *reason = "TLE epoch outside -1 to +7 day tracking window; refresh orbital data";
+        return false;
+    }
+    return true;
+}
+
 void SatPassPlanner::saveSessionLocked() const {
     const auto base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(base);
@@ -143,9 +157,11 @@ void SatPassPlanner::setUpdateCallback(std::function<void()> cb) {
 }
 
 void SatPassPlanner::setObserver(const SatObserverConfig& obs) {
+    if (!obs.valid()) return;
     {
         std::lock_guard<std::mutex> lk(mutex_);
         observer_ = obs;
+        observer_.configured = true;
         if (sessionId_.empty()) observer_.save(); else saveSessionLocked();
         lastStatus_ = "Saving observer location";
     }
@@ -157,6 +173,17 @@ void SatPassPlanner::setObserver(const SatObserverConfig& obs) {
                       std::to_string(passes_.size()) + " passes)";
     }
     notify();
+}
+
+bool SatPassPlanner::saveSstvProfile(const SatCatalogueEntry& entry, std::string* error) {
+    {
+        std::lock_guard<std::mutex> lk(mutex_);
+        if (armed_.armed) { if (error) *error = "Disarm the current pass before editing profiles"; return false; }
+        if (!catalogue_.upsertSstvProfile(entry, error)) return false;
+        if (sessionId_.empty()) catalogue_.save(); else saveSessionLocked();
+    }
+    refreshPasses(24.0);
+    return true;
 }
 
 SatObserverConfig SatPassPlanner::observer() const {
@@ -277,9 +304,16 @@ std::vector<SatCurrentPosition> SatPassPlanner::currentPositionsLocked(double un
 
         const TleSet tle = TleStore::instance().get(sat.noradId);
         Sgp4::Elements el{};
-        if (tle.noradId <= 0 || !Sgp4::parseTle(tle.line1, tle.line2, &el)) {
+        if (!usableElements(tle, unixSec, &el, &pos.blockedReason)) {
+            pos.armable = false;
             out.push_back(std::move(pos));
             continue;
+        }
+
+        pos.tleEpochAgeSec = (jd - el.epochJd) * 86400.0;
+        if (!observer_.configured || !observer_.valid()) {
+            pos.armable = false;
+            pos.blockedReason = "Set and apply the observer location";
         }
 
         const auto state = Sgp4::propagate(el, Sgp4::minutesSinceEpoch(el, jd));
@@ -314,7 +348,7 @@ void SatPassPlanner::predictLocked(double hoursAhead) {
         const TleSet tle = TleStore::instance().get(sat.noradId);
         if (tle.noradId == 0) continue;
         Sgp4::Elements el{};
-        if (!Sgp4::parseTle(tle.line1, tle.line2, &el)) continue;
+        if (!observer_.configured || !observer_.valid() || !usableElements(tle, t0, &el, nullptr)) continue;
 
         const SatDownlink* dl = preferredDownlink(sat);
         if (!dl || !dl->armable) continue;
@@ -382,7 +416,16 @@ void SatPassPlanner::refreshPasses(double hoursAhead) {
 
 bool SatPassPlanner::arm(const std::string& satId, const std::string& downlinkId, bool autoTrack,
                          std::string* error) {
+    return armAt(satId, downlinkId, autoTrack, unixNow(), error);
+}
+
+bool SatPassPlanner::armAt(const std::string& satId, const std::string& downlinkId, bool autoTrack,
+                          double now, std::string* error) {
     std::lock_guard<std::mutex> lk(mutex_);
+    if (!observer_.configured || !observer_.valid() || !std::isfinite(now)) {
+        if (error) *error = "Set and apply the observer location before arming";
+        return false;
+    }
     const SatCatalogueEntry* sat = nullptr;
     for (const auto& e : catalogue_.entries()) {
         if (e.id == satId) { sat = &e; break; }
@@ -398,7 +441,7 @@ bool SatPassPlanner::arm(const std::string& satId, const std::string& downlinkId
             break;
         }
     }
-    if (!dl) dl = preferredDownlink(*sat);
+    if (!dl && downlinkId.empty()) dl = preferredDownlink(*sat);
     if (!dl) {
         if (error) *error = "No downlink";
         return false;
@@ -409,18 +452,34 @@ bool SatPassPlanner::arm(const std::string& satId, const std::string& downlinkId
         return false;
     }
 
-    double aos = 0, los = 0;
-    for (const auto& p : passes_) {
-        if (p.satId == satId && p.losUnix > unixNow()) {
-            aos = p.aosUnix;
-            los = p.losUnix;
+    Sgp4::Elements elements{};
+    if (!usableElements(TleStore::instance().get(sat->noradId), now, &elements, error)) return false;
+    // Arm is an immediate receive command; waiting for a pass is handled by
+    // auto capture. No synthetic 900-second pass or hours of below-horizon IQ.
+    const auto elevation = [&](double time) {
+        const double jd = jdFromUnix(time);
+        const auto state = Sgp4::propagate(elements, Sgp4::minutesSinceEpoch(elements, jd));
+        if (!state.ok) return -90.0;
+        double el = 0, az = 0, range = 0, rr = 0;
+        Sgp4::lookAnglesTeme(jd, state.r, state.v, observer_.latDeg, observer_.lonDeg,
+                            observer_.altM, &el, &az, &range, &rr);
+        return el;
+    };
+    if (elevation(now) < observer_.minElevationDeg) {
+        if (error) *error = "Satellite below elevation mask; enable Auto capture to wait for a pass";
+        return false;
+    }
+    double aos = now, los = 0;
+    // Same 30-second predictor grid; refine LOS to <=1 second for clean stop.
+    for (double t = now + 30; t <= now + 86400; t += 30) {
+        if (elevation(t) < observer_.minElevationDeg) {
+            double lo = t - 30, hi = t;
+            while (hi - lo > 1) { const double mid = (lo + hi) / 2; if (elevation(mid) >= observer_.minElevationDeg) lo = mid; else hi = mid; }
+            los = hi;
             break;
         }
     }
-    if (los <= 0) {
-        aos = unixNow();
-        los = unixNow() + 900.0;
-    }
+    if (los == 0) { if (error) *error = "No LOS predicted within 24 hours; automatic pass unavailable"; return false; }
 
     armed_ = {};
     armed_.armed = true;
@@ -433,7 +492,12 @@ bool SatPassPlanner::arm(const std::string& satId, const std::string& downlinkId
     armed_.aosUnix = aos;
     armed_.losUnix = los;
     armed_.tunedHz = dl->freqHz;
+    armed_.bandwidthHz = dl->bandwidthHz;
+    armed_.imageMode = dl->imageMode;
     lastStatus_ = "Armed " + sat->name + " " + dl->label;
+    spdlog::info("Satellite pass armed sat={} downlink={} rf={} bw={} image={} aos={} los={} digitalDoppler={}",
+        satId, dl->id, dl->freqHz, dl->bandwidthHz, dl->imageMode, aos, los, autoTrack);
+    if (error) error->clear();
     return true;
 }
 
@@ -449,43 +513,44 @@ void SatPassPlanner::setAutoTrack(bool on) {
 }
 
 bool SatPassPlanner::tickAutoTrack(double* outTunedHz) {
+    return tickAutoTrackAt(unixNow(), outTunedHz);
+}
+
+bool SatPassPlanner::tickAutoTrackAt(double now, double* outTunedHz) {
     std::lock_guard<std::mutex> lk(mutex_);
     if (!armed_.armed) return false;
 
-    const double now = unixNow();
+    const auto stop = [&](const std::string& why) {
+        spdlog::info("Satellite pass stopped sat={} reason={}", armed_.satId, why);
+        armed_.armed = false; lastStatus_ = why; return false;
+    };
+    if (!std::isfinite(now) || now < armed_.aosUnix - 1) return stop("Clock moved backwards - disarmed");
+    if (now >= armed_.losUnix) return stop("Pass ended - disarmed");
     int norad = 0;
     for (const auto& e : catalogue_.entries()) {
         if (e.id == armed_.satId) { norad = e.noradId; break; }
     }
     const TleSet tle = TleStore::instance().get(norad);
     Sgp4::Elements el{};
-    if (tle.noradId == 0 || !Sgp4::parseTle(tle.line1, tle.line2, &el)) {
-        armed_.dopplerHz = 0;
-        armed_.tunedHz = armed_.freqHz;
-        if (outTunedHz) *outTunedHz = armed_.tunedHz;
-        return armed_.autoTrack;
-    }
+    std::string reason;
+    if (!usableElements(tle, now, &el, &reason)) return stop(reason);
 
     const double jd = jdFromUnix(now);
     const auto st = Sgp4::propagate(el, Sgp4::minutesSinceEpoch(el, jd));
+    if (!st.ok) return stop("Orbit propagation failed - disarmed");
     double elDeg = 0, az = 0, range = 0, rr = 0;
     if (st.ok) {
         Sgp4::lookAnglesTeme(jd, st.r, st.v, observer_.latDeg, observer_.lonDeg, observer_.altM,
                              &elDeg, &az, &range, &rr);
     }
     armed_.elevationDeg = elDeg;
+    if (!std::isfinite(elDeg) || !std::isfinite(rr) || elDeg < observer_.minElevationDeg)
+        return stop("Satellite below elevation mask - disarmed");
     const double doppler = Sgp4::dopplerShiftHz(armed_.freqHz, rr);
     armed_.dopplerHz = doppler;
     armed_.tunedHz = armed_.freqHz + doppler;
 
-    if (now > armed_.losUnix + 60.0) {
-        armed_.armed = false;
-        lastStatus_ = "Pass ended — disarmed";
-        return false;
-    }
-
     if (!armed_.autoTrack) return false;
-    if (elDeg < -2.0 && now + 120.0 < armed_.aosUnix) return false;
     if (outTunedHz) *outTunedHz = armed_.tunedHz;
     return true;
 }
@@ -541,6 +606,7 @@ nlohmann::json SatPassPlanner::statusJson() const {
             {"rangeRateKmS", p.rangeRateKmS},
             {"inRange", p.inRange},
             {"armable", p.armable},
+            {"tleEpochAgeSec", p.tleEpochAgeSec}, {"blockedReason", p.blockedReason},
             {"downlinkId", p.downlinkId},
             {"downlinkLabel", p.downlinkLabel},
             {"role", p.role},
@@ -555,6 +621,7 @@ nlohmann::json SatPassPlanner::statusJson() const {
         {"downlinkId", s.armed.downlinkId},
         {"role", s.armed.role},
         {"mode", s.armed.mode},
+        {"bandwidthHz", s.armed.bandwidthHz}, {"imageMode", s.armed.imageMode},
         {"freqHz", s.armed.freqHz},
         {"freqMHz", s.armed.freqHz / 1e6},
         {"aosUnix", s.armed.aosUnix},
@@ -581,8 +648,7 @@ nlohmann::json SatPassPlanner::publicStatusJson() const {
     bool configured = false;
     double minEl = 10.0;
     if (j.contains("observer") && j["observer"].is_object()) {
-        configured = std::abs(j["observer"].value("latDeg", 0.0)) > 1e-9 ||
-                     std::abs(j["observer"].value("lonDeg", 0.0)) > 1e-9;
+        configured = j["observer"].value("configured", false);
         minEl = j["observer"].value("minElevationDeg", 10.0);
     }
     j["observer"] = {{"configured", configured}, {"minElevationDeg", minEl}};

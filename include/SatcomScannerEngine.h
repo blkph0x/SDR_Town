@@ -45,6 +45,8 @@ struct SatcomScannerConfig {
     bool enableAx25 = true;
     bool enableApt = true;
     bool autoCapture = true;
+    bool sstvOnly = false;
+    std::string sstvSaveDir;
     bool monitorAudio = true;
     std::vector<SatcomPreset> presets;
 

@@ -10,11 +10,12 @@
 
 SstvVisDetector::SstvVisDetector(uint32_t rate) : rate_(rate) {
     if (rate < 8000 || rate > 96000) throw std::invalid_argument("SSTV audio rate must be 8..96 kHz");
-    history_.resize(static_cast<size_t>((uint64_t{rate} * 910 + 999) / 1000) + 1);
+    history_.resize(static_cast<size_t>((uint64_t{rate} * 1150 + 999) / 1000) + 1);
 }
 
 void SstvVisDetector::reset() {
     samples_ = nextMs_ = candidates_ = parityRejected_ = framingRejected_ = 0;
+    nextExtendedMs_ = lastEnd_ = 0;
     std::fill(history_.begin(), history_.end(), 0.0f);
 }
 
@@ -49,25 +50,33 @@ int SstvVisDetector::tone(uint64_t start, uint64_t end) const {
     return 2*power[best]/(double(end-start)*energy)>=0.75 && power[best]>2*runner ? frequencies[best] : 0;
 }
 
-bool SstvVisDetector::inspect(uint64_t start, SstvVisEvent& event) {
+bool SstvVisDetector::inspect(uint64_t start, SstvVisEvent& event, bool extended) {
     const auto probe=[&](uint64_t ms) { return tone(atMs(start+ms),atMs(start+ms+10)); };
     // Cheap discriminating anchors first: a continuous 1900 Hz tone must not
     // force sixty redundant leader probes at every candidate position.
     if(probe(0)!=1900 || probe(300)!=1200 || probe(310)!=1900 || probe(620)!=1200) return false;
-    // Check full leader interiors, not just one point that speech might match.
-    for (uint64_t ms=10;ms<300;ms+=10) if(probe(ms)!=1900) return false;
-    for (uint64_t ms=320;ms<610;ms+=10) if(probe(ms)!=1900) return false;
+    // DEC-0217: a short fade outside the VIS must not veto every later bit.
+    // Pinned acquire.rs::read_vis probes leader interiors at 100/200 ms.
+    // Keep both leaders, break, start/stop, bit purity and parity checks.
+    for (uint64_t ms : {100u,200u,410u,510u}) if(probe(ms)!=1900) return false;
     if(probe(610)!=1200 || probe(630)!=1200) return false;
     ++candidates_;
     unsigned bits=0;
-    for (unsigned bit=0;bit<8;++bit) {
+    for (unsigned bit=0;bit<(extended?16u:8u);++bit) {
         const int hz=probe(650+30*bit);
         if(hz!=1100 && hz!=1300) { ++framingRejected_; return false; }
         if(hz==1100) bits|=1u<<bit;
     }
-    if(probe(880)!=1200 || probe(890)!=1200 || probe(900)!=1200) { ++framingRejected_; return false; }
-    if(std::popcount(bits)%2) { ++parityRejected_; return false; }
-    event={atMs(start),atMs(start+910),bits&127u,std::string(modeName(bits&127u))};
+    const unsigned stop=extended?1120:880;
+    if(probe(stop)!=1200 || probe(stop+10)!=1200 || probe(stop+20)!=1200) { ++framingRejected_; return false; }
+    if(extended) {
+        // No invented parity for extended VIS: accept exact published words only.
+        if(!sstvModeByVis(bits) || bits<=127) { ++framingRejected_; return false; }
+    } else {
+        if(std::popcount(bits)%2) { ++parityRejected_; return false; }
+        bits &= 127u;
+    }
+    event={atMs(start),atMs(start+(extended?1150:910)),bits,std::string(modeName(bits))};
     return true;
 }
 
@@ -86,10 +95,19 @@ std::vector<SstvVisEvent> SstvVisDetector::process(std::span<const float> input)
         ++samples_;
         while(atMs(nextMs_+910)<=samples_) {
             SstvVisEvent event;
-            if(inspect(nextMs_,event)) {
+            if(atMs(nextMs_)>=lastEnd_ && inspect(nextMs_,event)) {
+                lastEnd_=event.headerEndSample;
                 result.push_back(std::move(event));
                 nextMs_+=910; // The same header cannot be emitted again on an overlapping search.
             } else ++nextMs_;
+        }
+        while(atMs(nextExtendedMs_+1150)<=samples_) {
+            SstvVisEvent event;
+            if(atMs(nextExtendedMs_)>=lastEnd_ && inspect(nextExtendedMs_,event,true)) {
+                lastEnd_=event.headerEndSample;
+                result.push_back(std::move(event));
+                nextExtendedMs_+=1150;
+            } else ++nextExtendedMs_;
         }
     }
     return result;

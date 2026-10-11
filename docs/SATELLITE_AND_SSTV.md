@@ -1,5 +1,68 @@
 # SSTV and Public Satellite Reception
 
+## Satellite SSTV receive automation (DEC-0218, 2026-10-11)
+
+The Satcom pass workspace now selects a downlink profile, not an ISS-only
+frequency. Choose the radio, apply the observer coordinates/elevation mask,
+refresh CelesTrak elements (or Import TLE), select satellites and enable
+Auto capture. SSTV passes only excludes voice/APRS workflows. The receiver
+must be free: unattended passes never force another workflow off its radio.
+Arming resets off after restart; selections, custom profiles and the image
+directory persist. Manual Disarm disables automatic capture too.
+
+ARISS's recent Oct 2-6 event used **437.550 MHz / Robot36**, not the older
+145.800 MHz / PD120 service. Both profiles remain separately selectable.
+That event has ended; the application predicts visibility, not transmitter
+activation. Verify the operator's schedule before unattended reception.
+Other reviewed profiles include UmKA-1, VIZARD-meteo, UTMN-2, SONATE-2 and
+QMR-KWT-2, GALAPAGOS-UTE-SWSU, SakhaCube-Cholbon, Monitor-3/4 and Lobachevsky.
+These are reception candidates, not always-on or live-qualified
+services. FUNcube-1's 145.935 MHz BPSK telemetry is explicitly NOT SSTV.
+SSDV is also a different protocol and is not passed to the analog decoder.
+
+SSTV profile creates a custom copy of a built-in or edits an existing custom
+profile: name, NORAD ID, downlink MHz, NFM/USB/LSB/AM, receive bandwidth,
+image Auto or a supported analog mode, and operator reference. Select only
+the intended downlink for a satellite on each radio; overlapping passes
+are not preempted. Up to 32 custom profiles are stored per catalogue. The
+current TLE parser accepts numeric NORAD IDs through 99999, not Alpha-5/OMM.
+Built-in profiles remain immutable; user values are labelled unverified.
+The FM 20 kHz setting is a receive-filter default, not a measured occupied
+bandwidth. SSB uses the existing twice-audio-cutoff bandwidth convention.
+
+Arm selected SSTV receives a satellite already above the elevation mask.
+Auto capture waits for entry into that mask. Missing/malformed elements,
+unconfigured observer, or element epoch older than seven days / more than
+one day in the future block arming; downloading old elements does not make
+them fresh. This is a conservative product policy, not an accuracy guarantee.
+At LOS the worker finalizes images and releases its radio. Digital Doppler
+keeps the physical LO and decoder identity stable; approaching range rate
+raises received frequency. Speech LPF/squelch do not gate the SSTV tap.
+
+Image folder selects a reusable parent (default Pictures/SDR Town/SSTV/
+Satellites). Each pass gets a unique folder with PNGs, per-image metadata,
+sstv-report.json and satellite-pass.json. Partial images remain labelled.
+Logs record arming, nominal RF/bandwidth/image mode, LOS/clock/data failures,
+decode sample/image counts and discontinuities. Images, observer coordinates
+and recordings are not automatically uploaded by this feature.
+
+Sources checked 2026-10-11:
+- ARISS event/frequency/mode history: https://www.ariss.org/upcoming-sstv-events.html
+- AMSAT image reception list: https://www.amsat.org/image-transmitting-satellites/
+- AMSAT identifiers: https://satdb.amsat.org/
+- FUNcube operator handbook/downloads: https://funcube.org.uk/working-documents/downloads-summary/
+- QMR-KWT-2 identification: https://db.satnogs.org/satellite/LJWF-6214-5467-0220-8376/
+- Additional identifiers/operator modes: https://spacepi.space/satellites/monitor-4/
+  and https://sputnik.unn.ru/ and https://db.satnogs.org/satellite/67290/
+
+Coverage is extensible, not a claim of every satellite supported. JAMX01's
+published object identification is currently disputed; no guessed NORAD/TLE
+binding is bundled. Add a custom profile only with verified orbital identity.
+Live satellite and antenna/rotator acceptance remains a field test.
+
+The sections below are historical delivery notes; current receive behavior
+and validation are recorded above and in SSTV.md / BUILD_NOTES.md.
+
 Status: staged roadmap, DEC-0083, 2026-09-17. DEC-0091/0092 deliver offline
 VIS inspection and experimental Robot36/Martin1 PNG decoding in 0.2.57;
 see [SSTV.md](SSTV.md). Version 0.2.59 adds experimental live NFM input;

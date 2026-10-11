@@ -31,6 +31,21 @@
 #include <QUuid>
 #include <QRegularExpression>
 #include <stdexcept>
+#include <QElapsedTimer>
+#include <QJsonDocument>
+#include <spdlog/spdlog.h>
+
+namespace {
+QString sstvFailureCode(const QString& error) {
+    for(const auto& [text,code]:std::array<std::pair<const char*,const char*>,8>{{
+        {"outside the captured bandwidth","outside-bandwidth"},{"P25 voice","p25-voice-active"},
+        {"discontinuity","input-gap"},{"Ambiguous","ambiguous-rf"},
+        {"cancelled","cancelled"},{"unavailable","unavailable"},
+        {"changed","source-changed"},{"save","save-failure"}}})
+        if(error.contains(text,Qt::CaseInsensitive)) return code;
+    return "decoder-or-configuration-error";
+}
+}
 
 bool SstvWindow::validSessionId(const QString& id) {
     return id.isEmpty() || QRegularExpression("\\A[A-Za-z0-9_-]{1,64}\\z").match(id).hasMatch();
@@ -87,7 +102,7 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent,const QString& sessionId)
     rfMode_=new QComboBox(this); rfMode_->setObjectName("sstvRfMode");
     rfMode_->addItem("Auto (USB / LSB / NFM)","auto");
     for(const auto* mode:{"USB","LSB","NFM","AM"}) rfMode_->addItem(mode,mode);
-    rfMode_->setToolTip("Auto listens in USB, LSB, and NFM until a classic VIS header wins. This does not change the main receiver mode. You should hear the tones on the outputs named in the status line. A VB-Audio cable alone leaves the speakers quiet and lets other SSTV programs decode that cable.");
+    rfMode_->setToolTip("Auto: USB / LSB / NFM, classic and extended VIS. Headerless FAX requires an explicit RF mode. AM must be selected explicitly.");
     form->addRow("RF demodulation",rfMode_);
     rfStatus_=new QLabel("Not receiving",this); rfStatus_->setObjectName("sstvRfStatus");
     form->addRow("Detected RF route",rfStatus_);
@@ -152,6 +167,21 @@ SstvWindow::SstvWindow(Decode decode,QWidget* parent,const QString& sessionId)
 }
 
 void SstvWindow::setListenHint(const QString& hint) { listenHint_ = hint; }
+QString SstvWindow::newOutputDirectory() const {
+    const auto root = QDir::cleanPath(output_->text().trimmed());
+    if (output_->text().trimmed().isEmpty() || !QDir().mkpath(root)) return {};
+    return QDir(root).filePath(QDateTime::currentDateTimeUtc().toString("yyyyMMdd_HHmmss_zzz") +
+                              "_" + QUuid::createUuid().toString(QUuid::Id128));
+}
+void SstvWindow::diagnostic(const QString& event, QJsonObject fields) {
+    // DEC-0217: no input/output paths, image pixels, device serials or received text.
+    fields["receiveSession"]=diagnosticSession_;
+    fields["source"]=liveSelected()?"live":"file";
+    fields["imageMode"]=selectedMode(); fields["rfMode"]=selectedRfMode();
+    fields["route"]=detectedRfMode(); fields["busy"]=busy();
+    spdlog::info("SSTV {} {}",event.toStdString(),QJsonDocument(fields).toJson(QJsonDocument::Compact).toStdString());
+    emit diagnosticEvent("sstv."+event,fields);
+}
 void SstvWindow::setLiveSource(LiveOpen open) {
     if(busy()) return;
     liveOpen_=std::move(open);
@@ -197,6 +227,7 @@ SstvWindow::~SstvWindow() {
 
 bool SstvWindow::startDecode(const QString& input,const QString& output,const QString& mode) {
     if(busy()) return false;
+    diagnosticSession_=QUuid::createUuid().toString(QUuid::Id128);
     const bool live=source_->currentData()=="live";
     if((!live && input.trimmed().isEmpty()) || output.trimmed().isEmpty() || mode_->findData(mode)<0) {
         status_->setText(live?"Choose a new output folder and a supported mode.":"Choose a recording, a new output folder and a supported mode."); return false;
@@ -212,10 +243,14 @@ bool SstvWindow::startDecode(const QString& input,const QString& output,const QS
         try {
             finish_=std::make_shared<std::atomic<bool>>(false);
             decode=liveOpen_(finish_,selectedRfMode(),[this](const QString& route) {
-                QMetaObject::invokeMethod(this,[this,route]{rfStatus_->setText(route);},Qt::QueuedConnection);
+                QMetaObject::invokeMethod(this,[this,route]{rfStatus_->setText(route);diagnostic("route");},Qt::QueuedConnection);
             });
         }
-        catch(const std::exception& error) {status_->setText(QString::fromUtf8(error.what())); finish_.reset();return false;}
+        catch(const std::exception& error) {
+            status_->setText(QString::fromUtf8(error.what()));
+            spdlog::warn("SSTV open failed: {}",error.what());
+            diagnostic("failed",{{"stage","open"},{"reason",sstvFailureCode(status_->text())}}); finish_.reset();return false;
+        }
     }
     if(!live) input_->setText(input);
     mode_->setCurrentIndex(mode_->findData(mode));
@@ -242,9 +277,14 @@ bool SstvWindow::startDecode(const QString& input,const QString& output,const QS
     });
     worker_->setParent(this);
     auto* timer=new QTimer(this);
-    connect(timer,&QTimer::timeout,this,[this,result] {
+    auto health=std::make_shared<QElapsedTimer>(); health->start();
+    connect(timer,&QTimer::timeout,this,[this,result,health] {
         if(!worker_ || worker_->isInterruptionRequested()) return;
         std::lock_guard lock(result->mutex);
+        if(health->elapsed()>=30000) { // Content-free liveness, not a decoder timeout.
+            diagnostic("health",{{"rows",result->rows},{"detectedImageMode",result->mode}});
+            health->restart();
+        }
         if(!result->pending) return;
         result->pending=false; original_=result->preview; scanline_=result->rows>0?result->rows-1:-1;
         status_->setText(QString("Decoding %1: %2/%3 rows").arg(result->mode).arg(result->rows).arg(original_.height()));
@@ -271,11 +311,21 @@ bool SstvWindow::startDecode(const QString& input,const QString& output,const QS
                 if(images_->count()) images_->setCurrentRow(0);
             } catch(const std::exception& e) {success=false; result->error=QString::fromUtf8(e.what()); images_->clear(); resultDirectory_.clear();}
         }
-        if(!success) {status_->setText(result->error); original_=QImage(); updatePreview();}
+        if(!success) {
+            status_->setText(result->error); original_=QImage(); updatePreview();
+            spdlog::warn("SSTV session failed: {}",result->error.toStdString());
+            // The full local error may contain a file path. Remote gets stage only.
+            diagnostic("failed",{{"stage","decode-or-save"},{"reason",sstvFailureCode(result->error)}});
+        } else {
+            diagnostic("finished",{{"savedImages",qint64(result->report.value("savedImages",uint64_t(images_->count())))},
+                {"inputSamples",qint64(result->report.value("inputSamples",uint64_t(0)))},
+                {"discontinuities",qint64(result->report.value("discontinuities",uint64_t(0)))}});
+        }
         setBusy(false);
         if(closePending_) {closePending_=false; close();}
         emit decodeFinished(success);
     },Qt::QueuedConnection);
+    diagnostic("started",{{"dedicatedRadio",!selectedDeviceKey().isEmpty()}});
     worker_->start(); return true;
 }
 

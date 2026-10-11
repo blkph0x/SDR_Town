@@ -12,6 +12,10 @@ struct SatDownlink {
     std::string mode = "NFM"; // NFM / APT / APRS / USB
     std::string role;        // voice|aprs|sstv|apt|data
     bool armable = true;     // false = bookmark only (no decoder yet)
+    double bandwidthHz = 0.0; // 0 = legacy role default
+    std::string imageMode = "auto";
+    std::string reference;
+    std::string verifiedUtc;
 };
 
 struct SatCatalogueEntry {
@@ -21,6 +25,7 @@ struct SatCatalogueEntry {
     std::vector<SatDownlink> downlinks;
     bool selected = false;
     std::string notes; // honesty / schedule hints
+    bool custom = false;
 };
 
 class SatCatalogue {
@@ -40,6 +45,7 @@ public:
 
     nlohmann::json toJson() const;
     static SatCatalogue fromJson(const nlohmann::json& j);
+    bool upsertSstvProfile(const SatCatalogueEntry& entry, std::string* error = nullptr);
 
 private:
     std::vector<SatCatalogueEntry> entries_;

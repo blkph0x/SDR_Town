@@ -8,7 +8,7 @@
 
 struct SstvVisEvent {
     uint64_t headerStartSample = 0, headerEndSample = 0;
-    unsigned code = 0; // Seven data bits; parity is validated, not part of the ID.
+    unsigned code = 0; // Classic 7-bit parity-validated VIS or known 16-bit VIS word.
     std::string mode;
 };
 struct SstvVisReport {
@@ -29,10 +29,11 @@ public:
 private:
     uint64_t atMs(uint64_t ms) const;
     int tone(uint64_t start, uint64_t end) const;
-    bool inspect(uint64_t startMs, SstvVisEvent& event);
+    bool inspect(uint64_t startMs, SstvVisEvent& event, bool extended = false);
     uint32_t rate_;
     std::vector<float> history_;
     uint64_t samples_ = 0, nextMs_ = 0, candidates_ = 0, parityRejected_ = 0, framingRejected_ = 0;
+    uint64_t nextExtendedMs_ = 0, lastEnd_ = 0;
 };
 
 SstvVisReport inspectSstvAudioFile(const std::string& path, size_t chunkSamples = 4096);

@@ -39,6 +39,7 @@ nlohmann::json saveSstvLiveResult(const SstvStreamResult& result,const QString& 
     nlohmann::json report{{"decoder","sstv-live"},{"images",images},
         {"outputDirectory",QFileInfo(output).absoluteFilePath().toStdString()},
         {"inputRate",result.inputRate},{"inputSamples",result.inputSamples},{"outputSamples",result.outputSamples},
+        {"discontinuities",result.discontinuities},
         {"targetHz",result.targetHz},{"sourceId",result.sourceId},{"epoch",result.epoch},{"generation",result.generation},
         {"autosaved",result.archived},{"savedImages",result.archived?result.savedImages:result.images.size()}};
     report.update(extra);

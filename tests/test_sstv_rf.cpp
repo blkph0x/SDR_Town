@@ -1,5 +1,6 @@
 #include "SstvRfRouter.h"
 #include "SstvVis.h"
+#include "SatcomDoppler.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
 #include <algorithm>
@@ -64,6 +65,45 @@ TEST_CASE("SSTV auto RF selects USB LSB and NFM with retained VIS", "[sstv][sstv
         CHECK(found==1);
     }
 }
+
+TEST_CASE("SSTV auto monitor is live before VIS without releasing image audio", "[sstv][sstv-rf]") {
+    SstvRfRouter router(48000,145800000,145800000);
+    std::vector<float> monitored;
+    router.setMonitor("NFM",[&](std::span<const float> audio,std::string_view mode) {
+        REQUIRE(mode=="NFM");
+        monitored.insert(monitored.end(),audio.begin(),audio.end());
+    });
+    auto iq=rf("NFM",48000,false); iq.resize(4800);
+    CHECK(run(router,iq,137).empty());
+    CHECK(router.selectedMode()=="searching");
+    REQUIRE(!monitored.empty());
+    CHECK(std::any_of(monitored.begin(),monitored.end(),[](float x){return std::abs(x)>0.01f;}));
+    SstvRfRouter manual(48000,145800000,145800000,"NFM");
+    const auto expected=run(manual,iq,137);
+    REQUIRE(monitored==expected);
+    const auto count=monitored.size();
+    CHECK_THROWS(router.process(std::vector<std::complex<float>>(100),4800,17,true));
+    CHECK(monitored.size()==count);
+    CHECK_THROWS(router.setMonitor("auto",{}));
+}
+
+TEST_CASE("SSTV auto monitor never replays VIS pre-roll or changes decoder samples", "[sstv][sstv-rf]") {
+    for(const auto mode:{"USB","LSB","NFM"}) {
+        CAPTURE(mode);
+        const auto iq=rf(mode,48000,true,3000);
+        SstvRfRouter router(48000,14230000,14230000),control(48000,14230000,14230000);
+        size_t monitorSamples=0;
+        std::string lastMode;
+        router.setMonitor("USB",[&](std::span<const float> audio,std::string_view selected) {
+            monitorSamples+=audio.size(); lastMode=selected;
+        });
+        const auto decoded=run(router,iq,137);
+        CHECK(decoded==run(control,iq,137));
+        CHECK(lastMode==mode);
+        CHECK(monitorSamples==iq.size());
+        CHECK(decoded.size()<monitorSamples);
+    }
+}
 TEST_CASE("SSTV manual RF supports AM and does not wait for a header", "[sstv][sstv-rf]") {
     for(const auto mode:{"USB","LSB","NFM","AM"}) {
         CAPTURE(mode);
@@ -72,6 +112,14 @@ TEST_CASE("SSTV manual RF supports AM and does not wait for a header", "[sstv][s
         CHECK(!run(router,iq,137).empty());
         CHECK(router.selectedMode()==mode);
     }
+}
+TEST_CASE("SSTV auto RF tolerates a brief fade in the first leader", "[sstv][sstv-rf]") {
+    auto iq=rf("NFM");
+    // 10 ms carrier fade, 80 ms into the first 300 ms leader. VIS is intact.
+    std::fill(iq.begin()+8640,iq.begin()+9120,std::complex<float>{});
+    SstvRfRouter router(48000,145800000,145800000);
+    CHECK_FALSE(run(router,iq,137).empty());
+    CHECK(router.selectedMode()=="NFM");
 }
 TEST_CASE("SSTV auto RF rejects corrupt headers and ambiguous sidebands", "[sstv][sstv-rf]") {
     SstvRfRouter invalid(48000,14230000,14230000);
@@ -89,6 +137,17 @@ TEST_CASE("SSTV RF refuses discontinuities and invalid sources", "[sstv][sstv-rf
     CHECK_THROWS(router.process(std::vector<std::complex<float>>(100),101,17));
     CHECK_THROWS(router.process(std::vector<std::complex<float>>(100),100,18));
     CHECK_THROWS(router.process(std::vector<std::complex<float>>(100),100,17,true));
+}
+TEST_CASE("SSTV RF explicit loss publishes a new generation before reacquired audio", "[sstv][sstv-rf]") {
+    SstvRfRouter router(48000,145800000,145800000);
+    CHECK_FALSE(run(router,rf("NFM"),4096).empty());
+    router.resetForGap();
+    CHECK(router.selectedMode()=="searching");
+    auto gap=router.pop(); REQUIRE(gap);
+    CHECK(gap->count==0); CHECK(gap->gapReasons!=0); CHECK(gap->generation==2);
+    CHECK_FALSE(router.pop());
+    const auto audio=run(router,rf("NFM"),137);
+    CHECK_FALSE(audio.empty()); CHECK(router.selectedMode()=="NFM");
 }
 
 TEST_CASE("SSTV RF acquisition survives long waits and irregular IQ partitions", "[sstv][sstv-rf]") {
@@ -129,6 +188,11 @@ TEST_CASE("SSTV RF independent recording adapter", "[sstv-rf-recording]") {
     std::ofstream pcm(output,std::ios::binary); REQUIRE(pcm.good());
     const char* requested=std::getenv("SDR_TOWN_SSTV_RF_REQUEST");
     SstvRfRouter router(96000,14230000,14230000,requested?requested:"auto");
+    SatcomDoppler doppler;
+    const char* dopplerValue=std::getenv("SDR_TOWN_SSTV_RF_DOPPLER_HZ");
+    const double maxDoppler=dopplerValue?std::stod(dopplerValue):0;
+    file.seekg(0,std::ios::end); const auto bytes=file.tellg(); file.seekg(0);
+    const uint64_t totalSamples=uint64_t(bytes)/sizeof(std::complex<float>);
     uint64_t first=0;
     for(;;) {
         std::vector<std::complex<float>> iq(router.maxInputSamples());
@@ -136,6 +200,13 @@ TEST_CASE("SSTV RF independent recording adapter", "[sstv-rf-recording]") {
         REQUIRE(file.gcount()%sizeof(iq[0])==0);
         iq.resize(size_t(file.gcount())/sizeof(iq[0]));
         if(iq.empty()) break;
+        if(maxDoppler!=0) {
+            // One-second orbit updates, continuous oscillator, independent TX
+            // sweep in the Python fixture. Residual within a tick is intentional.
+            const double time=std::floor(double(first)/96000);
+            const double offset=maxDoppler*(1-2*time/(double(totalSamples)/96000));
+            REQUIRE(doppler.translate(iq,96000,14230000,14230000+offset,14230000,20000));
+        }
         router.process(iq,first,7); first+=iq.size();
         while(auto block=router.pop()) for(size_t i=0;i<block->count;++i) {
             const int16_t value=int16_t(std::lround(std::clamp(block->samples[i],-1.f,32767.f/32768.f)*32768));

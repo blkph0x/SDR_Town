@@ -1,5 +1,87 @@
 # Code notes (tree map)
 
+DEC-0219: `SatcomScannerWidget::webStatus/webPassControl` are shared by the
+primary and named local-control routes. `SatcomHubWidget` resolves detailed
+satellite/aircraft status and Inmarsat messages/maps by exact session, failing
+when missing. `SstvWindow::newOutputDirectory` owns web-triggered output paths.
+Companion FUBAR uses structured JSON validation/redaction and a bounded opaque
+image registry. Its real paired test uses authenticated loopback/no-RF startup.
+Windows CI packages NSIS and the DLL from the same qualified portable stage;
+manifest signing remains local with the existing embedded public key.
+
+DEC-0218: `SatCatalogue` retains built-ins and validates up to 32 custom SSTV
+profiles (NORAD, RF/BW/image mode/reference). `SatObserverConfig` explicitly
+records an applied, finite observer. `SatPassPlanner::armAt/tickAutoTrackAt`
+provide deterministic epoch/LOS tests; no invented pass or nominal fallback
+on bad elements. `SatcomScannerEngine` consumes those settings in its existing
+continuous decoder worker, bypasses speech filtering and now admits the AM
+data tap into `SstvLiveInput`. Per-pass folders include SSTV and orbital/RF
+context reports. IQ counter includes initial anchoring; decoder discontinuity
+counter measures losses after its stream starts.
+
+`SatcomScannerWidget::autoCaptureTick` is the single policy for both named
+sessions and the default hub's background timer: free radio only, observer/
+fresh-element/armable checks, optional SSTV-only selection, no preemption.
+`SatcomHubWidget` no longer owns a divergent forced-takeover scheduler.
+Profile/folder/TLE controls scroll on smaller screens. `SatelliteSstvGui`
+CTest covers persistence, default-controller delegation and compact layout.
+`test_sstv_virtual_sdr.py --satellite` drives the real Satcom worker at wall
+clock speed with synthetic orbital Doppler and optional `--gap-at` overflow;
+it also checks refusal to take a P25/Listen-owned radio. No RF transmission.
+
+DEC-0217: `SstvVis` retains 1150 ms for classic and exact extended VIS words;
+leader interior probes no longer require sixty perfect windows. `SstvModes`
+records extended IDs separately. `SstvRfRouter::resetForGap` discards all
+candidate histories and publishes a new generation before PCM.
+`SstvRfLiveSession` observes both explicit cursor loss and stream-epoch loss
+after tuning/source validation. `SstvStreamWorker` continuous mode restarts
+its private helper, discards provisional pixels and preserves committed PNGs.
+Finite streams and unannounced identity changes remain strict.
+`SstvWindow` emits bounded path/content-free lifecycle telemetry; MainWindow
+forwards through existing consent-controlled remote diagnostics. Local RF
+health logs contain IQ/read/output/gap counters; reports include gap totals.
+`test_sstv_live_matrix.py` plus helper `--test-signal` exercise all analog
+formats through FM/RF and image Auto. `test_sstv_virtual_sdr.py --gui` uses
+the real SSTV window and live device path; `--gap-at` injects hardware loss.
+
+DEC-0215/0216: `SstvRfRouter::setMonitor` publishes fresh 48 kHz demod
+samples separately from VIS-retained image input. `SstvRfLiveSession`
+uses that callback for dedicated/shared-muted monitoring and logs mode,
+source and sample count. `test_sstv_virtual_sdr` can open its own radio
+through `decodeSstvDedicatedRadio` with `--dedicated` in the Python runner.
+
+`P25Phase2Burst::essEvidence` is a passive per-slot session snapshot.
+`writeP25Phase2ValidationRecord` adds bounded/redacted security evidence
+even for encrypted rejections with no vocoder attempts; receiver clear flags
+are labelled receiver state, not proof of an explicit clear grant. Unbound
+fallbacks in `processPhase2HardDibitsDetailedInternal` no longer receive
+slot 0's session. Both followed-slot evidence loops require `grantSlotKnown`,
+matching the existing hard ownership check before AMBE feed. Known-slot
+ESS retention, security policy and vocoder/audio cadence are unchanged.
+
+DEC-0214 audit map: GUI CC submissions in `MainWindow.cpp` request the latest
+256 ms only; passive `cc_submitted` absolute ranges measure omitted IQ.
+`decodeP25ControlWithOffsetProbe` in `P25DecodeConfig.cpp` retains shared
+static offset trust on NID/any payload; it is not a calibrated PPM estimator.
+`pushP25LiveStreamingAudio` accepts an end-of-stream prime bypass, but
+`pushP25SpeakerAudio` does not expose/pass that flag for live completion.
+`P25TrafficChannelProcessor::isCallStillActive` keeps a 12/15 s activity
+hold and `P25FollowStateMachine` adds follow policy. Do not count their
+latched state as fresh selected-slot RF. No code behavior changed in this audit.
+
+DEC-0213: `recoverComplexSymbols` applies bounded block gain after the
+Phase 2 baseband filter, before Gardner/Costas/dibit decisions, following
+SDRTrunk's filter -> block AGC -> HDQPSK order. Phase 1 recovery is unchanged.
+`softInvalidSymbols` counts erased (non-finite/below-cutoff) symbols;
+`softSymbolMeanMagnitude` is the mean magnitude of valid symbol observations,
+before the soft estimator's numerical floor. Both survive the selected
+candidate/commit copy and appear in the existing Phase 2 validation JSONL.
+These are numerical diagnostics, not SNR/dBm or new audio-release gates.
+
+DEC-0212: `cqpskSymbolsToSoftDibits` normalizes each symbol to the block
+amplitude before the soft distance. The slicer was already phase-only.
+The AMBE quality gate is unchanged.
+
 DEC-0211: `sstvListenHint` names speakers versus a VB-Audio cable.
 `decodeSstvDedicatedRadio` pushes 48 kHz demod audio while the lease is
 held, and the main analog push skips that radio. P25 control mute

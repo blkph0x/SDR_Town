@@ -15,6 +15,7 @@ struct SstvStreamResult {
     double inputRate=0,targetHz=0;
     bool archived=false;
     uint64_t savedImages=0;
+    uint64_t discontinuities=0;
 };
 
 // DEC-0098: synchronous on one non-GUI owner thread. next() must be nonblocking.

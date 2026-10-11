@@ -29,6 +29,12 @@ def main() -> int:
     import subprocess
     import re
     from types import SimpleNamespace
+    for path in MODULE.PAIRED_RELEASE_DIGESTS:
+        before = subprocess.check_output(["git", "show", "1cf9bf9:" + path], cwd=ROOT, text=True, encoding="utf-8")
+        after = (ROOT / path).read_text(encoding="utf-8")
+        assert MODULE.text_matches_digest(path, before, after, MODULE.PAIRED_RELEASE_DIGESTS)
+        assert not MODULE.text_matches_digest(path, before, after + "\nmutation", MODULE.PAIRED_RELEASE_DIGESTS)
+        assert not MODULE.text_matches_digest(path, after, before, MODULE.PAIRED_RELEASE_DIGESTS)
     assert MODULE.trace_before_text("dfd4c68", "include/P25PipelineTrace.h") == ""
     try:
         MODULE.trace_before_text("no-such-p25-test-ref", "include/P25PipelineTrace.h")

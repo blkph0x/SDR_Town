@@ -1,15 +1,25 @@
 # SSTV receive development
 
-Version 0.2.90 includes analogue SSTV (Dayton + handbook/QSSTV formats), an
-experimental private digital STWN file decoder, live audio input and classic
-VIS inspection. This release adds independent RF acquisition
-(DEC-0117). Known-transmission hardware acceptance remains open.
+The current source includes analogue SSTV (Dayton + handbook/QSSTV formats),
+an experimental private digital STWN file decoder, live audio input and VIS
+inspection. DEC-0217 extends independent RF acquisition and gap recovery;
+these changes are locally tested, not yet a published release. Known-
+transmission hardware acceptance remains open.
 
 ## Live RF reception
 
-1. Start and tune the main receiver to the SSTV carrier/dial frequency. P25 monitor
-   and voice-follow must be off. SSTV never tunes or reconfigures the radio.
-2. Open **Tools > SSTV Images**, choose **Live RF - main receiver frequency**,
+For scheduled satellites use the Satellite workspace's **Satcom** tab, with
+observer location, current orbital elements, satellite selection, **SSTV
+passes only**, **Image folder...** and **Auto capture**. The dedicated pass
+worker applies digital Doppler and the profile's RF bandwidth/image mode.
+See [satellite SSTV automation](SATELLITE_AND_SSTV.md) for profiles, safe
+arming and the difference between visibility and transmitter activation.
+
+1. Open **Tools > SSTV Images**. Choose a named **Radio** and its frequency
+   for dedicated reception, or **Receiver tap** to use an already tuned receiver.
+   Dedicated reception opens/tunes that radio. A tap does not retune it and
+   cannot share a receiver currently decoding P25 voice.
+2. Choose **Live RF**,
    **RF demodulation: Auto**, **Image format: Automatic**, and a Save folder.
    The folder is remembered; its default is Pictures/SDR Town/SSTV.
 3. Press **Receive**. A unique session folder is created automatically. Scanlines
@@ -18,8 +28,9 @@ VIS inspection. This release adds independent RF acquisition
    **Cancel** or closing discards the unfinished image, not images already saved.
 
 RF Auto tests USB, LSB and NFM independently for a known classic 7-bit VIS with
-valid framing/parity. It retains the header audio, checks for competing routes
-for another 910 ms, then pins the selected route for this session. **Detected RF
+valid framing/parity or an exact supported MP/MR/ML 16-bit VIS word (DEC-0217).
+It retains the header audio, checks for competing routes
+for another 1150 ms (longest supported header), then pins the selected route until an explicit IQ gap. **Detected RF
 route** shows the result. Multiple valid routes require explicit manual selection;
 AM/DSB can contain valid audio on both sidebands. Auto is not a general modulation
 classifier and does not change the main speaker's mode. It needs the start of
@@ -31,8 +42,11 @@ The independent IQ reader/demods run on the SSTV worker, not the GUI/RF audio
 thread. NFM uses raw discriminator audio; USB/LSB/AM use the HF decoder tap.
 Speaker LPF/EQ/squelch/volume do not affect these taps. The SSB decoder requests
 a 3 kHz one-sided passband (6 kHz in the existing HF demodulator's BW convention).
-A retune, stream gap, overrun or device loss aborts the session rather than
-joining incompatible samples; restart explicitly. As of 0.2.114, live sessions
+A retune or device loss aborts the session rather than joining incompatible
+sources; restart explicitly. An explicitly reported IQ gap/overrun discards
+the interrupted image and resets acquisition and the helper; committed PNGs
+are preserved and continuous reception searches again. Unannounced identity
+changes and malformed blocks still fail closed. As of 0.2.114, live sessions
 have no duration/image-count cap. Only 64 recent image descriptions and the
 current preview are retained in memory. All PNGs stay on disk; disk errors stop
 reception and no saved images are automatically deleted. Partial images
@@ -90,13 +104,16 @@ preview quality is not an RF/protocol correctness guarantee.
 build/bin/Release/SDR_Town.exe --cli --no-control-server --cmd 'sstv decode "C:\recordings\sstv.wav" "C:\recordings\new-images" auto'
 ```
 
-Use `auto` (VIS then HamDRM) or a mode id from Tools → SSTV Images (`robot36`,
+Use `auto` or a mode id from Tools → SSTV Images (`robot36`,
 `martin1`, `scottie3`, `fax480`, `mp73`, `hamdrm`, …). Manual analogue locks on
 1200 Hz line sync if VIS is missing. Auto: 7-bit VIS (Hamming-1), 16-bit
-MP/MR/ML, closest line-sync, then HamDRM Mode B 2.5 kHz. AVT has no line sync.
+MP/MR/ML, closest line-sync, then the private digital STWN fallback for files
+only. This is not interoperable HamDRM. The fallback currently reports an error
+on silence (ISS-0101); live reception does not use it. AVT has no line sync.
 FAX480 has no VIS. Narrow 2172 Hz analogue and EasyPal file-RS are not supported.
 Input is demodulated mono WAV/FLAC at
-8..96 kHz, up to 360 seconds / 128 MiB, not IQ. Parent output directory must
+8..96 kHz, up to 540 seconds / 128 MiB in the host (the finite helper has a
+480-second PCM limit), not IQ. Parent output directory must
 exist; the image directory must be new. PNGs and `sstv-report.json` record mode,
 rows, completeness, PCM/RGB hashes and exact backend revision. Partial pictures
 have `.partial.png` filenames and black missing rows; `complete` means all rows,
@@ -157,13 +174,14 @@ The classic header has two 300 ms 1900 Hz leaders, a 10 ms 1200 Hz break,
 Data tone 1100 Hz is one, 1300 Hz is zero; start/stop are 1200 Hz. Eighteen Dayton-paper VIS codes are named (Robot 36/72, Martin M1/M2, Scottie
 S1/S2/DX, PD50–290, Wraase SC2-180, Pasokon P3/P5/P7). Image decode uses the
 same table. Other parity-valid codes remain `Unknown`.
-Other parity-valid seven-bit codes are reported as Unknown; narrow and extended
-VIS are not supported by the inspector. Image acquisition is delegated to the
+Other parity-valid seven-bit codes are reported as Unknown. The inspector now
+also recognizes the twelve exact MP/MR/ML extended words; narrow VIS remains
+unsupported. Image acquisition is delegated to the
 pinned backend; this is not a promise of arbitrary headerless/late-entry recovery.
 
 ## Implementation and limits
 
-SstvVisDetector consumes bounded blocks on one owner thread, using <=910 ms
+SstvVisDetector consumes bounded blocks on one owner thread, using <=1150 ms
 history plus rounding room. Explicit reset starts a new sample epoch; callers
 must reset on loss, retune or source change. Invalid/non-finite input resets and
 throws instead of splicing a damaged stream. Search runs on a 1 ms sample-clock
@@ -176,6 +194,30 @@ signal specification. Detection positions can differ from true tone transitions
 by the search/measurement resolution; they are not yet image line-sync anchors.
 Rejected counts represent candidate offsets, not unique rejected transmissions.
 No confidence, image quality or RF sensitivity score is invented from these counts.
+
+## Live simulation and diagnostics (DEC-0217)
+
+`scripts/test_sstv_live_matrix.py --out build/sstv-matrix` generates full
+transmissions for all 49 analog modes, FM-modulates them, adds finite noise and
+a 10 ms first-leader fade, runs the production RF router and image Auto, and
+compares decoded pixels against clean PCM. These are same-library synthetic
+round trips, not independent or off-air acceptance. FAX480 has no VIS, so its
+RF mode must be selected explicitly even when image format is Automatic.
+Digital STWN remains file-only and is not counted as an analog live mode.
+
+`scripts/test_sstv_virtual_sdr.py recording.wav --out build/sstv-live --dedicated --gui`
+runs a paced virtual Soapy device through the real SSTV window, radio ownership,
+IQ ring, RF Auto, helper, previews and autosave. `--gap-at 4` injects a 10 ms
+hardware overflow; use a recording with a later complete transmission to test
+reacquisition. Test devices never transmit or select a physical radio.
+
+Local logs include IQ/read/output counters, route changes, helper restarts and
+autosaves. Opted-in remote diagnostics add `sstv.started`, `sstv.route`,
+`sstv.health` (30-second cadence), `sstv.finished`, and `sstv.failed` with a
+random receive-session ID and bounded counts/reason codes. They do not include
+recording paths, pixels, audio, received text or device serials. Remote consent
+and transport budgets are unchanged. No button-click event alone proves that
+reception actually started.
 
 ## Sources and independent validation
 

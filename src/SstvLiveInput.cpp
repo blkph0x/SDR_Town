@@ -31,7 +31,7 @@ void SstvLiveInput::finish() {
 }
 SstvPushResult SstvLiveInput::tryPush(const FmMultiplexBlock& block,uint64_t sourceId,DemodMode mode) {
     if(!active_.load()) return SstvPushResult::Inactive;
-    const bool supportedMode = mode==DemodMode::NFM || mode==DemodMode::USB || mode==DemodMode::LSB;
+    const bool supportedMode = mode==DemodMode::NFM || mode==DemodMode::USB || mode==DemodMode::LSB || mode==DemodMode::AM;
     if(!supportedMode || block.samples.empty() || block.samples.size()>SstvInputEvent::maxSamples ||
        !std::isfinite(block.sampleRate) || block.sampleRate<8000 || block.sampleRate>96000 ||
        !std::isfinite(block.targetHz) || block.targetHz<=0 ||

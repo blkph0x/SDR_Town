@@ -158,6 +158,24 @@ TEST_CASE("SSTV archive report preserves rolling image names", "[sstv-stream-wor
     const auto report=saveSstvLiveResult(result,directory.path());
     CHECK(report.at("images")[0].at("file")=="image-99.png");CHECK(report.at("savedImages")==100);
 }
+TEST_CASE("SSTV continuous worker restarts on an explicit forward gap only", "[sstv-stream-worker]") {
+    requireBackend();
+    for(bool valid:{true,false}) {
+        QTemporaryDir directory; REQUIRE(directory.isValid());
+        auto task=std::async(std::launch::async,[&] {
+            int n=0;
+            return decodeSstvStream([&]()->SstvStreamItem {
+                auto b=validBlock();
+                if(n++==0) return b;
+                if(n==2) {b.count=0;b.gapReasons=uint32_t(SstvInputGap::Overflow);b.generation=valid?2:1;return b;}
+                if(n==3) {b.generation=2;b.epoch=2;return b;}
+                return SstvStreamEnd{};
+            },"auto",{},{},directory.filePath("archive"));
+        });
+        if(valid) {const auto r=task.get();CHECK(r.discontinuities==1);CHECK(r.inputSamples==256);CHECK(r.savedImages==0);}
+        else CHECK_THROWS_WITH(task.get(),Catch::Matchers::ContainsSubstring("advance generation"));
+    }
+}
 
 TEST_CASE("SSTV continuous archive saves repeated images before EOF and survives cancellation", "[.sstv-archive-recording]") {
     requireBackend();

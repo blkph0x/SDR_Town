@@ -9,6 +9,8 @@ struct SatObserverConfig {
     double lonDeg = 0.0;   // +E / -W
     double altM = 0.0;
     double minElevationDeg = 10.0;
+    bool configured = false;
+    bool valid() const;
 
     nlohmann::json toJson() const;
     static SatObserverConfig fromJson(const nlohmann::json& j);

@@ -1,5 +1,379 @@
 # Build notes
 
+## 2026-10-11 - DEC-0219 paired companion gates
+
+MSVC Release: Town + native Inmarsat/Aircraft GUI test build passes; two GUI
+CTest suites pass (13.69 s). FUBAR Release build and three CTest suites pass.
+Actual Town GUI dry-run -> token-authenticated control DLL -> FUBAR HTTP
+pair succeeds: eight named receiver views, separate session creation, invalid
+IDs/rates refused, RF arming refused in dry-run, lease required, arbitrary image
+paths and output-directory injection blocked; both processes exit normally.
+Production JS tests exercise delayed map responses after receiver switches,
+lease/draft handling and nested error display. Browser confirmed catalogue
+profiles include 437.550 MHz SSTV and that native dry-run refusal reaches UI.
+No new P25 DSP modifications in this pass. Prior replay matrices and the user's
+current positive listening report qualify pending DEC-0212/13/16 for publication.
+Remote satellite reception is not claimed from these simulated tests.
+
+Final local CTest: 22/22 PASS, 104.27 s. Initial full run exposed the new
+companion fixture leaving GUI dry-run set for the next Aircraft test; scoped
+restoration fixed the test isolation. No production gate weakened. Guard exact
+digest/mutation tests, 17 signed-release verifier cases and Satcom integration
+contract pass. FUBAR 3/3 passes, including failed-configure/no-start and pure
+Stop payload coverage. Actions/public asset evidence follows after publication.
+
+## 2026-10-11 DEC-0218 satellite worker and repair evidence
+
+Release builds 1-4 pass (`build/oct11_satellite_build*.log`). Initial virtual
+driver test timed out because it deliberately returned no IQ before arm;
+operational-stream validation correctly rejected it. Fixture now provides
+IQ before arming, retaining one second leading silence. Initial Qt command
+omitted its platform-plugin environment; the next exposed pre-show combo
+inspection and nonexistent screenshot directory in the fixture. Corrected
+fixture and added SatelliteSstvGui to CTest; first native rerun passed.
+
+- `test_sstv_virtual_sdr.py build/oct11_robot36.wav --satellite`: complete
+  240-row Robot36, no decoder gaps (`oct11_satellite_virtual_robot36_fixed`).
+- Same with two transmissions and `--gap-at 4`: first image discarded after
+  known 10 ms hardware loss, second complete Robot36, discontinuities=1
+  (`oct11_satellite_virtual_gap`).
+- User's SB SSTV ENCODER WAV, 111.343 s, through satellite worker at 2.4 MS/s:
+  full Scottie1 256 rows, inputSamples=5185077 at 46153.846 Hz, outputSamples=
+  5392481 at 48 kHz, decoder discontinuities=0. Test also refuses both P25-
+  and Listen-owned virtual radios without invalidating their ownership.
+  31 assertions pass (`oct11_satellite_virtual_scottie_final`).
+- Updated core `[satcom]~[network]`: 34 cases/6518 assertions pass. A mistyped
+  second filter `[sstv-live-input]` matched none; reran correct filter below.
+- `[sstv][live-input],P25*`: 199 cases/92153 assertions pass, including AM
+  ingress and unchanged P25. Not proof of live RF audio acceptance.
+
+Final GUI review found the default hub had its own forced-takeover controller.
+Removed that duplicate; hub delegates to named-session policy. Expanded GUI
+test covers delegation and scrollable compact viewport. Final build/test
+result follows below. Physical satellite reception remains unverified.
+
+Final Release build5 passes, including SDR_Town and native GUI fixture.
+`ctest -C Release -R '^(SatelliteSstvGui|AircraftGui|InmarsatLiveGui|InmarsatHostLifecycle)$'`:
+4/4 pass. First combined run had seven screenshot-save failures because the
+optional output directory had not been created before the older Inmarsat
+tests; directory exists on rerun, all pass. This was fixture invocation, not
+an Inmarsat receiver regression. Satellite screenshots inspected at 1280x1400
+and 1000x720; compact view scrolls without enlarging the top-level window.
+
+`[satcom][tle][network]`: 13 assertions pass, live HTTPS CelesTrak ISS parse,
+not a skipped/ignored network failure. Existing static host check initially
+failed on outdated instance().stop and saved.second anchors; code uses the
+multi-session stopAll and saved.active. Corrected anchors after reading the
+real shutdown/restore paths; added single-scheduler checks, all pass.
+
+`scripts/test_workspace_gui.py --output build/oct11_satellite_app_smoke`:
+four actual rebuilt-app profiles pass at 960x720,1280x900,800x700,1600x900,
+no RX, no startup errors/warnings. Scottie1 recovered PNG visually inspected.
+`git diff --check` passes. Final local SDR_Town.exe SHA256:
+2fbb7fe191fd5528c791ce215c9b55480aa911da6e7194211b067c5a5136f049.
+Not committed/published: existing T-0125/126 P25 live qualification hold.
+No private recordings or location data uploaded.
+
+## 2026-10-11 DEC-0218 satellite SSTV initial gates
+
+Windows/MSVC existing pinned build, Release. Core [satcom] excluding live
+network: 34 cases / 6518 assertions pass, including deterministic orbit
+epoch/LOS/backwards clock, profile round-trip and malformed observer input.
+`test_sstv_live_matrix.py --modes robot36 pd120 martin1 mp73 --snr-db 20
+--deviation 5000 --clock-ppm 80 --doppler-hz 11000` passes four complete
+images. Synthetic independent continuous TX frequency sweep +11k to -11k
+and production SatcomDoppler updated at 1 Hz, RF Auto and image Auto.
+Pixel MAE vs clean decoded reference: 2.9264, 2.8594, 1.7214, 3.9827 / 255.
+Evidence: build/oct11_satellite_doppler_matrix/results.json. Same-library
+image encoder roundtrip is not live RF acceptance or an independent codec
+oracle. First GUI command targeted workspace_tests (no matching tests),
+not the actual inmarsat_live_gui_tests target; corrected in final gates.
+
+## 2026-10-11 - SSTV live Auto matrix, gap recovery and observability (DEC-0217)
+
+Windows/MSVC 17.14.40, frozen local CMake Release toolchain. P25 source was not
+edited in this pass; earlier pending changes remain in the working tree.
+
+- Red: `SSTV auto RF tolerates a brief fade...` fails both assertions with
+  intact VIS plus a 10 ms first-leader fade (`build/oct11_sstv_fade_red.log`).
+- Header tests after repair: 34 cases / 9634 assertions pass, including all
+  twelve extended words and bad parity/framing/ambiguous-sideband negatives.
+- Full generated RF matrix: **49/49 analog modes**, 48 RF Auto and explicit NFM
+  for headerless FAX480. All decoded with image Auto, complete dimensions and
+  pixel comparisons. Noise sigma .001 per IQ component, 2.5 kHz FM deviation,
+  10 ms leader fade. Worst RGB MAE **2.7924/255**, gate 12.75. Results in
+  `build/oct11_sstv_mode_matrix/results.json`; synthetic same-library oracle.
+- Stress matrix Robot36/PD120/MP73: 20 dB input IQ SNR, 5 kHz deviation,
+  +80 ppm transmitter clock and leader fade. All complete; RGB MAE
+  2.8966 / 2.8638 / 3.9777 respectively (`build/oct11_sstv_stress`).
+- Independent Robot36 RF reference: USB/LSB/NFM/AM complete 240 rows, MAE
+  4.142 / 4.144 / .867 / 1.614 against clean decoded audio. Provisional noisy
+  tail images explicitly reported, not counted as correct transmissions.
+- Independent Robot36/Martin full and truncated recordings: worker and real
+  GUI/feed/converter tests pass forced/Auto; all saved pixels match references
+  (`build/oct11_sstv_independent_worker.log`).
+- GUI/worker unit gate: 21 cases / 658 assertions, including content-free
+  lifecycle events, restart on forward generation, backwards-gap rejection.
+- Real-time virtual Soapy at 2.4 MS/s first FAILED at injected -4 overflow:
+  hardware epoch changed but cursorDiscontinuity stayed false, aborting SSTV.
+  Read DeviceManager contract; repaired SSTV-only epoch handling. Rerun passes
+  **12258 assertions**, discards interrupted frame, then saves Robot36 240/240
+  in the same GUI session, `discontinuities=1`, `iqGaps=1`.
+  `build/oct11_sstv_gap_gui_pass/decoded` contains report and screenshot.
+- User's 111.343-second SB SSTV ENCODER WAV through paced virtual dedicated SDR
+  and real GUI, both Auto: **30526 assertions**, complete Scottie1 256/256,
+  269591232 IQ samples, zero gaps. Preview visually inspected.
+  `build/oct11_sstv_user_gui/decoded` contains report, PNG and screenshot.
+- Continuous archive: six complete images plus 481 seconds idle, repeated
+  with cancellation; all committed PNGs survive, 41 assertions pass.
+- P25 unchanged-code gate: **190 cases / 83500 assertions pass**.
+- Collector: seven tests pass including new SSTV event validation/storage.
+  No test telemetry or recordings uploaded to the public collector.
+- Actual rebuilt application's CLI gate passes independent Robot36/Martin,
+  forced/Auto, Unicode paths, exact helper pixel parity, no-overwrite,
+  partial images and malformed/rate/size/duration rejection. The pre-existing
+  file-Auto silence error is explicitly printed as a known limitation, not
+  hidden as a successful zero-image decode (`build/oct11_sstv_actual_cli.log`).
+- Test harness corrections: old CLI negative case incorrectly called PD120
+  unsupported and used a stale 360-second limit; now uses an invalid ID and
+  541 seconds. File Auto noisy-tail partials are compared explicitly. Its
+  silence/private-STWN fallback error is tracked separately as ISS-0101.
+- Build repairs: Rust test encoder needed `move` for its iterator lifetime;
+  an intermediate Qt build had stale MOC after a signal declaration edit.
+  Full rebuild regenerated MOC and passed. Offscreen Qt plugin is not bundled;
+  GUI tests were rerun successfully using the installed Windows platform.
+- Final app build: `build/oct11_sstv_epoch_build.log` PASS, executable at
+  `build/bin/Release/SDR_Town.exe`, 7626752 bytes, SHA256
+  `b473e5567d1e6cba7a93f37525b9c1de7e9ec2b93962a0ec7b51c75dcecb8792`.
+  Final test-only fixture rebuild also passes. No GitHub release: inherited
+  T-0125/126 live P25 publication hold remains; SSTV field reception is not
+  established by synthetic tests.
+
+## 2026-10-11 - Capture013124 security isolation and SSTV monitor (DEC-0215/0216)
+
+Windows / MSVC17.14.40 Release, existing frozen CMake toolchain. Detailed
+ledger and remaining gaps: `AUDIT_20261011_P25_SSTV.md`. Original capture
+retained in AppData; all replay IQ/audio/JSONL stay private/ignored locally.
+
+- New `setMonitor` regression initially failed compilation before implementation
+  (missing API), then all 8 SSTV RF cases / 92 assertions passed.
+- `cmake --build build --config Release --target SDR_Town sdr_town_tests
+  --parallel 4` passed. An inadvertently overlapping redundant build was stopped
+  by its exact process tree; the completed first build and subsequent serial
+  `oct11_0215_final_build.log` succeeded. No independent process was terminated.
+- Intermediate combined suite: 259 cases / 92505 assertions PASS. Passive
+  security logging alone preserves suspect replay WAV SHA256
+  `5f4cdcd00845cc306a3e0d718bf083838a22041295f49ffc9dcee9e86d06ec7e`.
+- Dedicated virtual test first rejected a pre-started fixture (`radio already
+  receiving`); test now lets the actual SSTV workflow open its device. Its next
+  run decoded one complete image but failed the mistaken expected count of two.
+  Another invocation rejected a missing output parent directory. Correct fixture
+  count (one), existing parent and fresh child produce PASS: 30621 assertions,
+  monitor before VIS, 269624000 virtual IQ samples, full Scottie1 320x256 image.
+  Log `build/oct11_sstv_dedicated_pass2.log`; no real RF was transmitted.
+- New DEC-0216 isolated-sync regression before repair: 805 assertions,
+  3 expected failures (`essKnown`, `essEvidence.known`, `securityStateFromPtt`
+  incorrectly true on unbound dibit0). `oct11_0216_red_test.log`.
+- After repair: `sdr_town_tests.exe 'P25*,[p25],[sstv]' --reporter compact`
+  PASS 260 cases / 93310 assertions (`oct11_0216_tests.log`).
+- Final serial application build passes (`oct11_0216_final_build.log`). Binary
+  SHA256 `fe81e16e8623875982b98a38eea29279f331a01d10f3bbf452f0bcef95564e2f`.
+  Final follow-up changes only remove unused locals/stale comments and rename
+  the new log fields to receiver state rather than incorrectly implying grant
+  provenance. Real replay below also ran on that final binary.
+- `py scripts/test_p25_timeline.py`: 5/5 PASS. CTest `SstvTransportRust` and
+  `SstvBackendSelftest`: 2/2 PASS. `git diff --check` PASS (CRLF notices only).
+
+All voice replays use the real-time profile, 720 ms initial window / 208 ms
+requested hop, capture's known mask and grant slot/TG, without a forced-clear
+argument. Prior/final binaries use the same input. No device gain or PPM changed.
+
+| Capture / range ms / TG-slot | Before DEC-0216 | After DEC-0216 |
+|---|---|---|
+| 013124 / 100800+12000 / 12068-1 | 380 frames, 7.60 s, wrongly clear | 0 frames, unknown, no target ESS/traffic MAC |
+| 013124 / 233600+900 / 12068-1 | encrypted, 0 PCM | encrypted, 0 PCM |
+| 013124 / 446200+900 / 12068-0 | encrypted, 0 PCM | encrypted, 0 PCM |
+| 013124 / 24000+5000 / 10235-0 | 186 frames, 3.72 s | identical WAV, duty0.744 numerical PASS |
+| 010824 / 149000+22000 / 30003-1 | 586 frames, 11.72 s | identical WAV, still PARTIAL |
+| 010824 / 310000+18000 / 30302-1 | 338 frames, 6.76 s | identical WAV, still PARTIAL |
+| 013124 / 512500+8000 / 10120-0 | no paired baseline | 276 frames, 5.52 s, duty0.69 numerical PASS |
+
+Protected clear WAV SHA256 pairs:
+
+- TG10235: `4a890afaa12fa54b8bde21ec8fcb9f943445dbda186ea6e607bcb2a0984f170`.
+- TG30003: `876554af3e79c7a83e2481901bac379cb9f067d98181bd99d1c96cc64a9acc6f`.
+- TG30302: `88cae6a7e5fe8cd4c836736ed9ceb61ca2cc123ea824401fb91df90880c1ade3`.
+
+The suspect replay's `FAIL_NO_AUDIO` is required fail-closed behavior, not an
+audio recovery claim. Both confirmed encrypted replays are
+`PASS_ENCRYPTED_GATED`. The first known-clear result is a numerical gate, not
+new listening/STT certification. Fresh physical live acceptance is outstanding.
+Public asset remains unchanged; no private capture, audio, or secrets uploaded.
+
+## 2026-10-11 - Forensic audit of live capture 010824, no DSP changes
+
+Capture `20261011_010824_796_iq_NFM_420_35000MHz_420.35000MHz_startstop`:
+01:08:24.796..01:14:22.325 UTC, 357.536 s, 732233728 CF32 samples at
+2.048 Msps. RTL gain 20 dB, PPM 0. Capture/event/speaker files retained
+locally. No ring gaps, resets, storage errors, trace drops or trace ordering
+errors. The inspected binary was built 12:01 local with DEC-0212/0213;
+SHA256 `35027edaac3fb753f3ad735e05e47b153965463a062224eb33de1d8e76e276b1`.
+No new application code or decoder settings changed during this audit.
+
+### Grant ledger and control coverage
+
+| UTC instruction | TG | Voice MHz / slot | Live decision |
+|---|---:|---|---|
+| 01:08:55.869 | 12068 | 418.050 / 0 | Explicit encrypted, skip |
+| 01:08:55.875 | 12068 | 418.050 / 0 | Unknown update, matching encrypted hold |
+| 01:09:05.891 | 12068 | 418.050 / 0 | Unknown update, same hold, age 10022 ms |
+| 01:09:40.336 | 30302 | 416.550 / 0 | Followed; 120 ms decoded, never pushed |
+| 01:10:53.096 | 30003 | 417.550 / 1 | Followed; first push 01:10:54.058 |
+| 01:13:33.977 | 30302 | 416.550 / 1 | Followed; first push 01:13:34.942 |
+
+There are seven evaluate events because the explicit encrypted instruction
+is evaluated twice; six instruction rows, three accepted follows. Every
+decoded non-encrypted/unknown eligible instruction is followed within
+about 12-13 ms of evaluation. No alpha-tag, priority or cooldown rejection
+of these three follows. Grant updates contain no RID. An audit regex's
+inherited `source_hex=0x0032d1` is NOT a real source ID for these updates.
+
+Critically, offline CC replay of 72000..75200 ms recovers earlier CRC-valid
+TG30302 updates at replay windows 72256..72768 and 73536..74048 ms (14
+and 8 corrected dibits). Live only acts on the repeat at offset 75540 ms.
+Thus the earliest replay-proven update is at least 2.772 seconds earlier
+using the end of its window, approximately 3 s by its bit position. The
+grant limit was not the obstacle: both are <=18 corrections. Replay initially
+lacks ID6, then resolves it; live already had that table cached.
+
+Matched 256 ms replay of *exact live job 285* (72304..72560 ms) at nominal
+420.350 MHz recovers raw `02 00 62 8C 76 5E 62 8C 76 5E 2B 5B`, CRC-valid,
+14 corrections. Same IQ and diagnostic profile at target 420.351250 MHz
+does not recover that grant. Live selected +1250 Hz at 01:09:34.135Z.
+This isolates an offset-sensitive decode failure, but the diagnostic profile
+has a broader search than realtime; do not claim an exact GUI replay yet.
+
+Passive timeline: CC enabled 272.088 s; outside passband on traffic 85.355 s.
+497 gaps between CC submissions total 102662144 samples = 50.128 s while
+enabled, median 64 ms / p95 192 ms / max 1328 ms. These are *unsubmitted*,
+not USB drops. A 222500..224300 ms forensic replay of another large gap
+recovers control data but no voice grant. No complete missed-grant census
+is possible while the single tuner is off CC. See ISS-0094.
+
+### Voice and actual playback accounting
+
+| Follow | Worker PCM samples | Final pending tail | Actual output evidence |
+|---|---:|---:|---|
+| 30302 / slot0 | 5760 | 5760 | No speaker push |
+| 30003 / slot1 | 587520 | 5760 | Speech reaches output |
+| 30302 / slot1 | 355200 | 1920 | Speech reaches output |
+
+Total worker PCM 948480 vs captured/consumed 935040 = 13440 missing samples
+(280 ms), exactly the three pending tails. The file contains 19.48 seconds
+of producer PCM, NOT a wall-clock recording of all speaker silence. Direct
+push counts alone omit idle top-ups: 198720 samples are reported there.
+No ring producer drops or partial callbacks. 9443 empty callbacks include
+normal non-voice time; they cannot all be labelled lost speech. No worker
+job/result queue drops. Two stale completions are empty jobs at return.
+No sequencer rejects or talkgroup mismatch evidence. Companion-slot rejects
+and overlapping-window duplicate suppression are not speaker loss.
+
+Worker latency (507 jobs): queue p95 0.029 ms, decode median 87.996 ms /
+p95 115.525 / max 228.807, publication p95 12.974 ms. Control decode
+median 129.209 / p95 309.361 / max 1431.432 ms. No evidence of a minute-long
+UI freeze here. First playable calls reach the ring about 0.96 seconds
+after the validated grant (720 ms initial IQ accumulation plus processing).
+
+Original-IQ paired replay, unknown encryption at start, mask parameters
+NAC2d2 / WACNbee00 / system2d1, stream 720 ms / hop208 ms, realtime profile:
+
+| Capture interval ms / TG | Before DEC-0213 | Current | Current verdict |
+|---|---|---|---|
+| 149000..171000 / 30003 slot1 | 0 frames, no MAC/audio | 586 frames, 11.72 s PCM | PASS_PARTIAL_AUDIO |
+| 310000..328000 / 30302 slot1 | 0 frames, no MAC/audio | 338 frames, 6.76 s PCM | PASS_PARTIAL_AUDIO |
+
+Current quality rejects, sequencer rejects and talkgroup mismatch counts
+are zero in both replay spans. Sequencer/feed gap counters remain 14 and 9;
+these span intermittent selected-slot activity, so not every gap is proven
+lost speech. Offline replay is still partial, not a continuous acceptance
+pass. First short follow replay 75900..79900 produces 12 frames / 240 ms
+versus live six / 120 ms; different slice boundaries, not an exact worker
+reproduction. Auto validation recorded only one post-security anomaly for
+the live session: one rejected frame, softQ 0.542, zero invalid symbols.
+That sparse record cannot establish a session-wide invalid-symbol total.
+
+Offline STT was run on both replay WAVs and the live speaker WAV. Partial
+English is recovered, with uncertain/repeated phrases. No transcript ground
+truth or word-error score; no claim that all speech is clear. No transcripts
+or raw voice are included in repository documentation or uploaded.
+
+Spectral spot checks: 131072-sample Hann FFT once per second, mean PSD in
+target +/-6.5 kHz compared with median PSD 18-40 kHz away. This is NOT
+calibrated SNR/dBm. The active-band excess falls to noise-like values by
+offsets 77, 177, 326 s; return to CC is at 92.428, 188.432, 337.524 s.
+This confirms long quiet tails, not proof that shortening timers is safe.
+See ISS-0096. RF gain requests again fail at invalid device index (ISS-0093).
+The localhost control server also refuses startup for missing token; not
+on the decoded-PCM path. Do not enable unauthenticated control as a remedy.
+
+Verification: existing `P25*,[p25]` tests PASS, 228 cases / 82920 assertions;
+`scripts/test_p25_timeline.py` PASS, 5 tests. Local evidence in ignored
+`build/oct11_010824_*`, `oct11_new_*`, `oct11_cc_job285_*`. CLI CC diagnostic
+replay updates the local talkgroup registry by existing design; future
+read-only audit tooling must isolate that side effect. No public release
+or app rebuild for this audit; T-0125 remains open. The improved binary is
+left intact, with exact missed-update and short-tail cases now available.
+
+## 2026-10-11 - DEC-0213 capture regression, local replay evidence
+
+Host: Windows / VS2022 MSVC 14.44 / Release. Base HEAD `1cf9bf9`, with
+existing uncommitted DEC-0212 phase-normalization work preserved.
+Capture `20261011_003958_372`: 258.688 s, 2.048 Msps CF32, no ring
+overrun/epoch reset, no worker queue/result drops. Only two validated
+group-grant instructions in this capture; no independent on-air grant
+inventory is available. Do not equate a sparse grant log with a follow bug.
+
+Reproduction: `SDR_Town.exe --cli --allow-multiple --cmd "p25 voicetest
+<capture> 421.850 5000 skip=218000 voicecenter=421.838751 slot=0 tg=10120
+nac=0x2d2 wacn=0xbee00 system=0x2d1 clear stream windowms=720 hopms=208
+realtime wav=<output>"`. Same command for skip=209000. Long run: skip=208000,
+duration=35000, omit `clear` (security starts unknown; MAC/ESS must validate).
+
+Before -> after bounded baseband gain normalization, original IQ:
+
+| Replay interval (ms) | Accepted AMBE | Quality rejected | Speaker seconds | Concealment |
+|---|---:|---:|---:|---:|
+| 209000..214000 | 242 -> 242 | 0 -> 0 | 4.84 -> 4.84 | 4 -> 1 |
+| 218000..223000 | 134 -> 188 | 24 -> 0 | 2.96 -> 3.76 | 49 -> 0 |
+| 208000..243000, unknown grant | 684 -> 716 | 62 -> 0 | 14.16 -> 14.32 | 131 -> 11 |
+
+The two short after runs are `PASS_CONTINUOUS_AUDIO`. Both long runs are
+`PASS_PARTIAL_AUDIO`: the interval includes selected-slot inactivity and
+RF tail; do not claim 35 seconds of speech. All listed runs preserve slot
+and ordinal sequencing. 241000..244000 ms, unknown-grant no-signal test:
+zero VCWs, MAC CRCs and speaker samples (`FAIL_NO_AUDIO`, expected here).
+Offline x8 IQ scaling before the code fix reproduced the later fixed result
+(188 frames, 0 quality rejects), proving numerical amplitude dependence.
+Instrumentation-only rebuild reproduced the baseline (134/24).
+
+Build: `cmake --build build --config Release --target sdr_town_tests SDR_Town
+--parallel 4` PASS. Regression `P25 Phase 2 preserves quiet differential
+symbols` failed before normalization: 32 erased symbols at amplitude .002;
+strong control passed. After: `sdr_town_tests.exe "P25*,[p25]"` passes
+228 cases / 82920 assertions, including explicit silence/noise rejection.
+`test_p25_logging_neutrality.py` also passes on 218000..223000 ms:
+normal, validation and deep logging produce byte-identical 721964-byte
+WAVs (SHA256 ea9439faa8477407cd6b17c32b4aaa99f5a02c671aec893d61c4a343bf76a6a2).
+`git diff --check` passes. There has been no new live GUI RF acceptance run.
+STT on short real-IQ WAVs returns partial English, not a complete trusted
+transcript or proof that live speaker output is fully intelligible.
+
+Local artifacts under ignored `build/oct11_*`: paired replay logs/WAVs,
+instrumented baseline, gain experiment and test log. The starting executable
+is preserved as `build/bin/Release/SDR_Town-dec0213-baseline.exe`.
+No captures/transcripts are committed or uploaded. No release: T-0125's
+fresh live listening acceptance is still open.
+
 ## 2026-10-11 - v0.2.136 experimental pre-release
 
 Public https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.136-experimental

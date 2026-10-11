@@ -7,6 +7,16 @@
 #include "ObserverMapWidget.h"
 #include "AdsBTrackStore.h"
 #include "DeviceManager.h"
+#include "SstvModes.h"
+#include "TleStore.h"
+#include <QDialogButtonBox>
+#include <QFileDialog>
+#include <QSpinBox>
+#include <QScrollArea>
+#include <QUuid>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QDir>
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -47,6 +57,81 @@ int autoCapturePriority(const std::string& role) {
 
 } // namespace
 
+QJsonObject SatcomScannerWidget::webStatus() const {
+    const auto s = engine_.snapshot();
+    auto j = engine_.planner().publicStatusJson();
+    j["sessionId"] = engine_.sessionId();
+    j["state"] = engine_.stateName();
+    j["config"] = s.config.toJson();
+    j["config"].erase("sstvSaveDir");
+    j["config"].erase("recordDir");
+    j["config"].erase("logDir");
+    j["config"]["lowMHz"] = s.config.lowHz / 1e6;
+    j["config"]["highMHz"] = s.config.highHz / 1e6;
+    j["config"]["autoCapture"] = engine_.autoCaptureEnabled();
+    j["deviceConnected"] = s.deviceConnected;
+    j["deviceLabel"] = s.deviceLabel;
+    j["lastStatus"] = s.lastStatus;
+    j["passArmed"] = s.passArmed;
+    j["autoTrack"] = s.autoTrack;
+    j["currentHz"] = s.currentHz;
+    j["currentMHz"] = s.currentHz / 1e6;
+    j["tunedMHz"] = s.tunedHz / 1e6;
+    j["dopplerHz"] = s.dopplerHz;
+    j["iqDiscontinuities"] = s.iqDiscontinuities;
+    j["spectrumDb"] = s.spectrumDb;
+    j["spectrumCenterHz"] = s.spectrumCenterHz;
+    j["spectrumRateHz"] = s.spectrumRateHz;
+    j["recentDecodes"] = s.recentDecodes;
+    j["images"] = nlohmann::json::array();
+    // Only completed image outputs of this engine's active pass are shared.
+    if (!s.sstvOutputDir.empty()) {
+        const QDir directory(QString::fromStdString(s.sstvOutputDir));
+        const auto files = directory.entryInfoList({"*.png"}, QDir::Files, QDir::Time);
+        for (int i = 0; i < std::min(32, static_cast<int>(files.size())); ++i)
+            j["images"].push_back({{"path",files[i].absoluteFilePath().toStdString()},
+                                   {"name",files[i].fileName().toStdString()}});
+    }
+    return QJsonDocument::fromJson(QByteArray::fromStdString(j.dump())).object();
+}
+
+QJsonObject SatcomScannerWidget::webPassControl(const QJsonObject& body) {
+    const auto fail = [](const QString& error) { return QJsonObject{{"ok",false},{"status",400},{"error",error}}; };
+    const auto action = body.value("action").toString();
+    for (const auto& key : {"autoTrack", "autoCapture", "sstvOnly"})
+        if (body.contains(key) && !body.value(key).isBool()) return fail("Boolean setting required");
+    if (action == "disarm") onDisarm();
+    else if (action == "autotrack_only") engine_.setAutoTrack(body.value("autoTrack").toBool());
+    else if (action == "automation") {
+        if (QCoreApplication::instance()->property("sdrtown.guiDryRun").toBool() && body.value("autoCapture").toBool())
+            return fail("RF disabled in GUI dry-run");
+        if (body.contains("sstvOnly")) {
+            auto cfg = engine_.config(); cfg.sstvOnly = body.value("sstvOnly").toBool(); engine_.setConfig(cfg);
+        }
+        if (body.contains("autoCapture")) engine_.setAutoCaptureEnabled(body.value("autoCapture").toBool());
+    } else if (action == "arm") {
+        if (QCoreApplication::instance()->property("sdrtown.guiDryRun").toBool()) return fail("RF disabled in GUI dry-run");
+        if (!body.value("satId").isString() || !body.value("downlinkId").isString()) return fail("Satellite and downlink required");
+        std::string error;
+        // Remote pass controls never force another workflow off its SDR.
+        if (!engine_.armPass(body.value("satId").toString().toStdString(), body.value("downlinkId").toString().toStdString(),
+                             body.value("autoTrack").toBool(true), false, &error)) return fail(QString::fromStdString(error));
+    } else if (action == "catalogue") {
+        if (!body.value("selected").isArray()) return fail("Satellite selection array required");
+        std::vector<std::string> ids;
+        for (const auto& id : body.value("selected").toArray()) {
+            if (!id.isString()) return fail("Satellite IDs must be strings");
+            ids.push_back(id.toString().toStdString());
+        }
+        engine_.planner().setCatalogueSelection(ids);
+    } else if (action == "tle_refresh") {
+        std::string error;
+        if (!engine_.planner().refreshTle(&error)) return fail(QString::fromStdString(error));
+    } else return fail("Unknown pass action");
+    reloadSessionControls();
+    return {{"ok",true},{"satcom",webStatus()}};
+}
+
 SatcomScannerWidget::SatcomScannerWidget(QWidget* parent, const QString& sessionId)
     : QWidget(parent),
       ownedEngine_(sessionId.isEmpty() ? nullptr : std::make_unique<SatcomScannerEngine>(sessionId.toStdString())),
@@ -58,8 +143,7 @@ SatcomScannerWidget::SatcomScannerWidget(QWidget* parent, const QString& session
         auto* controller = new QTimer(this);
         controller->setInterval(1000);
         connect(controller, &QTimer::timeout, this, [this] {
-            if (!QCoreApplication::instance()->property("sdrtown.guiDryRun").toBool())
-                updateAutoCapture(engine_.planner().snapshot());
+            autoCaptureTick();
         });
         controller->start();
     }
@@ -112,7 +196,15 @@ void SatcomScannerWidget::reloadSessionControls() {
 
 void SatcomScannerWidget::buildUi() {
     setObjectName("satcomRoot");
-    auto* root = new QVBoxLayout(this);
+    auto* outer = new QVBoxLayout(this);
+    outer->setContentsMargins(0, 0, 0, 0);
+    auto* scroll = new QScrollArea(this);
+    scroll->setObjectName("satelliteControlsScroll");
+    scroll->setWidgetResizable(true);
+    auto* content = new QWidget;
+    scroll->setWidget(content);
+    outer->addWidget(scroll);
+    auto* root = new QVBoxLayout(content);
 
     auto* title = new QLabel("SATCOM SCANNER");
     title->setStyleSheet("font-size: 16px; font-weight: 600;");
@@ -211,26 +303,47 @@ void SatcomScannerWidget::buildUi() {
     passRow->addWidget(passTable_, 1);
     auto* armColumn = new QVBoxLayout();
     downlinkCombo_ = new QComboBox();
+    downlinkCombo_->setObjectName("satelliteDownlink");
+    downlinkCombo_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    downlinkCombo_->setMinimumContentsLength(35);
     armColumn->addWidget(new QLabel("Downlink"));
     armColumn->addWidget(downlinkCombo_);
     autoTrackCheck_ = new QCheckBox("Auto-track Doppler");
     autoTrackCheck_->setChecked(true);
     armColumn->addWidget(autoTrackCheck_);
     autoCaptureCheck_ = new QCheckBox("Auto capture selected sats in range");
+    autoCaptureCheck_->setObjectName("satelliteAutoCapture");
     autoCaptureCheck_->setChecked(engine_.autoCaptureEnabled());
     autoCaptureCheck_->setToolTip(
         "Check this session to run in the background. Saved on from last time does not "
         "seize the radio at startup. When a selected, supported satellite reaches the "
-        "configured minimum elevation, SDR Town takes the selected receiver, tunes with "
+        "configured minimum elevation, SDR Town uses the selected receiver only if free, tunes with "
         "Doppler, records when a signal is present, and runs the available APRS/APT/SSTV decoder.");
     armColumn->addWidget(autoCaptureCheck_);
+    sstvOnlyCheck_ = new QCheckBox("SSTV passes only");
+    sstvOnlyCheck_->setObjectName("satelliteSstvOnly");
+    sstvOnlyCheck_->setChecked(engine_.config().sstvOnly);
+    armColumn->addWidget(sstvOnlyCheck_);
+    connect(sstvOnlyCheck_, &QCheckBox::toggled, this, [this](bool enabled) {
+        auto config = engine_.config(); config.sstvOnly = enabled; engine_.setConfig(config);
+    });
     auto* armButton = new QPushButton("Arm pass");
-    auto* sstvButton = new QPushButton("Arm ISS SSTV");
+    auto* sstvButton = new QPushButton("Arm selected SSTV");
+    sstvButton->setObjectName("armSatelliteSstv");
+    auto* editProfile = new QPushButton("SSTV profile...");
+    editProfile->setObjectName("satelliteSstvProfile");
+    auto* saveFolder = new QPushButton("Image folder...");
+    saveFolder->setToolTip(QString::fromStdString(engine_.config().sstvSaveDir));
+    auto* loadTle = new QPushButton("Import TLE...");
     auto* disarmButton = new QPushButton("Disarm");
     armColumn->addWidget(armButton);
     armColumn->addWidget(sstvButton);
+    armColumn->addWidget(editProfile);
+    armColumn->addWidget(saveFolder);
+    armColumn->addWidget(loadTle);
     armColumn->addWidget(disarmButton);
     passStatusLabel_ = new QLabel("No pass armed");
+    passStatusLabel_->setObjectName("satellitePassStatus");
     passStatusLabel_->setWordWrap(true);
     armColumn->addWidget(passStatusLabel_);
     armColumn->addStretch(1);
@@ -238,6 +351,24 @@ void SatcomScannerWidget::buildUi() {
     root->addLayout(passRow);
     connect(armButton, &QPushButton::clicked, this, &SatcomScannerWidget::onArmSelected);
     connect(sstvButton, &QPushButton::clicked, this, &SatcomScannerWidget::onArmSstv);
+    connect(editProfile, &QPushButton::clicked, this, &SatcomScannerWidget::onEditSstvProfile);
+    connect(saveFolder, &QPushButton::clicked, this, [this, saveFolder] {
+        auto config = engine_.config();
+        const auto folder = QFileDialog::getExistingDirectory(this, "Satellite SSTV images", QString::fromStdString(config.sstvSaveDir));
+        if (!folder.isEmpty()) { config.sstvSaveDir = folder.toStdString(); engine_.setConfig(config); saveFolder->setToolTip(folder); }
+    });
+    connect(loadTle, &QPushButton::clicked, this, [this] {
+        const auto file = QFileDialog::getOpenFileName(this, "Import orbital elements", {}, "TLE files (*.tle *.txt);;All files (*)");
+        if (file.isEmpty()) return;
+        std::string error;
+        if (!TleStore::instance().loadFromFile(file.toStdString(), &error)) QMessageBox::warning(this, "TLE", QString::fromStdString(error));
+        else { TleStore::instance().saveCache(); engine_.planner().refreshPasses(); refreshPassesTable(); }
+    });
+    connect(passTable_, &QTableWidget::itemSelectionChanged, this, [this] {
+        const int row = passTable_->currentRow();
+        if (row >= 0 && passTable_->item(row, 2))
+            downlinkCombo_->setCurrentIndex(downlinkCombo_->findData(passTable_->item(row, 2)->data(Qt::UserRole)));
+    });
     connect(disarmButton, &QPushButton::clicked, this, &SatcomScannerWidget::onDisarm);
     connect(autoTrackCheck_, &QCheckBox::toggled, this, [this](bool enabled) {
         engine_.setAutoTrack(enabled);
@@ -498,13 +629,12 @@ void SatcomScannerWidget::onRefreshTle() {
 
 void SatcomScannerWidget::onArmSelected() {
     if (QCoreApplication::instance()->property("sdrtown.guiDryRun").toBool()) return;
-    const int row = passTable_->currentRow();
-    if (row < 0) {
-        QMessageBox::information(this, "Arm", "Select a pass row first.");
+    const QString satId = downlinkCombo_->currentData(Qt::UserRole + 1).toString();
+    const QString downlinkId = downlinkCombo_->currentData().toString();
+    if (satId.isEmpty()) {
+        QMessageBox::information(this, "Arm", "Select a downlink first.");
         return;
     }
-    const QString satId = passTable_->item(row, 1)->data(Qt::UserRole).toString();
-    const QString downlinkId = passTable_->item(row, 2)->data(Qt::UserRole).toString();
 
     applyFieldsToConfig();
     auto& engine = engine_;
@@ -519,6 +649,9 @@ void SatcomScannerWidget::onArmSelected() {
 }
 
 void SatcomScannerWidget::onDisarm() {
+    // Manual disarm always wins over the background scheduler (DEC-0218).
+    engine_.setAutoCaptureEnabled(false);
+    { QSignalBlocker block(autoCaptureCheck_); autoCaptureCheck_->setChecked(false); }
     if (autoCaptureOwned_) {
         stopAutoCapture(false);
         return;
@@ -530,18 +663,58 @@ void SatcomScannerWidget::onDisarm() {
 
 void SatcomScannerWidget::onArmSstv() {
     if (QCoreApplication::instance()->property("sdrtown.guiDryRun").toBool()) return;
-    applyFieldsToConfig();
-    auto& engine = engine_;
-    std::string error;
-    if (!engine.armPass("iss", "iss-sstv", autoTrackCheck_->isChecked(), true, &error)) {
-        QMessageBox::warning(
-            this, "ISS SSTV", QString::fromStdString(error.empty() ? "Arm failed" : error));
+    if (downlinkCombo_->currentData(Qt::UserRole + 2).toString() != "sstv") {
+        QMessageBox::information(this, "Satellite SSTV", "Select an SSTV downlink. FUNcube BPSK telemetry and SSDV are separate protocols.");
         return;
     }
-    engine.startRecording();
-    recordingUi_ = true;
-    emit requestOpenSstvLive();
-    refreshUi();
+    onArmSelected();
+}
+
+void SatcomScannerWidget::onEditSstvProfile() {
+    SatCatalogueEntry profile;
+    const auto catalogue = engine_.planner().catalogue();
+    for (const auto& entry : catalogue.entries()) for (const auto& dl : entry.downlinks) {
+        if (dl.id == downlinkCombo_->currentData().toString().toStdString() && dl.role == "sstv") profile = entry;
+    }
+    if (profile.downlinks.empty()) {
+        profile.name = "Custom SSTV"; profile.noradId = 25544;
+        SatDownlink d; d.role = "sstv"; d.freqHz = 145.8e6; d.bandwidthHz = 20e3;
+        profile.downlinks.push_back(d);
+    }
+    if (!profile.custom) {
+        profile.id = "custom-" + QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+        profile.name += " (custom)";
+    }
+    profile.custom = true;
+    profile.downlinks.resize(1);
+    auto& link = profile.downlinks.front();
+    link.id = profile.id + "-sstv";
+    QDialog dialog(this); dialog.setWindowTitle("Satellite SSTV profile");
+    auto* form = new QFormLayout(&dialog);
+    auto* name = new QLineEdit(QString::fromStdString(profile.name)); name->setObjectName("sstvProfileName");
+    auto* norad = new QSpinBox; norad->setRange(1,99999); norad->setValue(profile.noradId);
+    auto* frequency = new QDoubleSpinBox; frequency->setDecimals(6); frequency->setRange(.1,6000); frequency->setSuffix(" MHz"); frequency->setValue(link.freqHz/1e6);
+    auto* rf = new QComboBox; rf->addItems({"NFM","USB","LSB","AM"}); rf->setCurrentText(QString::fromStdString(link.mode));
+    auto* bandwidth = new QDoubleSpinBox; bandwidth->setRange(6,50); bandwidth->setSuffix(" kHz"); bandwidth->setValue(link.bandwidthHz/1000);
+    auto* image = new QComboBox; image->addItem("Auto", "auto");
+    for (const auto& mode : kSstvModes) if (std::string_view(mode.id) != "hamdrm") image->addItem(mode.label, mode.id);
+    image->setCurrentIndex(image->findData(QString::fromStdString(link.imageMode)));
+    auto* reference = new QLineEdit(QString::fromStdString(link.reference));
+    auto* selected = new QCheckBox("Include in automatic pass capture"); selected->setChecked(profile.selected);
+    form->addRow("Name", name); form->addRow("NORAD ID", norad); form->addRow("Downlink", frequency);
+    form->addRow("RF mode", rf); form->addRow("Receive bandwidth", bandwidth); form->addRow("Image mode", image);
+    form->addRow("Operator / schedule reference", reference); form->addRow(selected);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save|QDialogButtonBox::Cancel);
+    form->addRow(buttons); connect(buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept); connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
+    if (dialog.exec() != QDialog::Accepted) return;
+    profile.name = name->text().trimmed().toStdString(); profile.noradId = norad->value(); profile.selected = selected->isChecked();
+    link.label = profile.name; link.freqHz = frequency->value()*1e6; link.mode = rf->currentText().toStdString();
+    link.bandwidthHz = bandwidth->value()*1000; link.imageMode = image->currentData().toString().toStdString();
+    link.reference = reference->text().toStdString(); link.verifiedUtc.clear(); // User-entered is not independently verified.
+    profile.notes = "User configured; confirm RF frequency and activation with the operator.";
+    std::string error;
+    if (!engine_.planner().saveSstvProfile(profile,&error)) QMessageBox::warning(this,"Profile",QString::fromStdString(error));
+    else { downlinkCombo_->clear(); refreshPassesTable(); downlinkCombo_->setCurrentIndex(downlinkCombo_->findData(QString::fromStdString(link.id))); }
 }
 
 void SatcomScannerWidget::stopAutoCapture(bool keepHandledKey) {
@@ -557,9 +730,18 @@ void SatcomScannerWidget::stopAutoCapture(bool keepHandledKey) {
     if (!keepHandledKey) autoCapturePassKey_.clear();
 }
 
+void SatcomScannerWidget::autoCaptureTick() {
+    if (QCoreApplication::instance()->property("sdrtown.guiDryRun").toBool()) return;
+    updateAutoCapture(engine_.planner().snapshot());
+}
+
 void SatcomScannerWidget::updateAutoCapture(const SatPassPlannerSnapshot& plan) {
     if (!autoCaptureCheck_ || !engine_.autoCaptureEnabled()) {
         if (autoCaptureOwned_) stopAutoCapture(false);
+        return;
+    }
+    if (!plan.observer.configured || !plan.observer.valid()) {
+        passStatusLabel_->setText("Auto capture waiting: apply observer location");
         return;
     }
 
@@ -578,16 +760,14 @@ void SatcomScannerWidget::updateAutoCapture(const SatPassPlannerSnapshot& plan) 
     auto& engine = engine_;
     if (plan.armed.armed) {
         if (!autoCaptureOwned_) return;
+        if (!handledStillInRange) { stopAutoCapture(true); return; }
         const auto scan = engine.snapshot();
         const bool signalPresent = std::isfinite(scan.audioRmsDb) &&
                                    scan.audioRmsDb >= scan.config.squelchDb;
         if (signalPresent && scan.state != SatcomScannerState::Recording) {
             if (engine.startRecording()) recordingUi_ = true;
         }
-        if (plan.armed.role == "sstv" && !autoSstvRequested_) {
-            autoSstvRequested_ = true;
-            emit requestOpenSstvLive();
-        }
+        // The engine owns continuous SSTV capture; no second main-radio decoder.
         if (!signalPresent && passStatusLabel_) {
             passStatusLabel_->setText(
                 QString("Auto armed %1 — waiting for signal (el %2°)")
@@ -606,7 +786,8 @@ void SatcomScannerWidget::updateAutoCapture(const SatPassPlannerSnapshot& plan) 
     const SatCurrentPosition* best = nullptr;
     double bestScore = -std::numeric_limits<double>::infinity();
     for (const auto& position : plan.positions) {
-        if (!position.tleValid || !position.inRange || position.downlinkId.empty() ||
+        if (!position.tleValid || !position.armable || !position.inRange || position.downlinkId.empty() ||
+            (engine_.config().sstvOnly && position.role != "sstv") ||
             position.freqHz <= 0.0) {
             continue;
         }
@@ -619,22 +800,21 @@ void SatcomScannerWidget::updateAutoCapture(const SatPassPlannerSnapshot& plan) 
             bestScore = score;
         }
     }
-    if (!best) return;
-
-    const auto before = engine.snapshot();
-    autoEngineWasRunning_ = before.state != SatcomScannerState::Idle;
-    if (!engine.start(true)) {
-        autoEngineWasRunning_ = false;
-        autoCaptureRetryAfter_ = now + 30;
-        if (passStatusLabel_) {
-            passStatusLabel_->setText(
-                "Auto capture waiting: " + QString::fromStdString(engine.snapshot().lastStatus));
+    if (!best) {
+        for (const auto& position : plan.positions) if (!position.blockedReason.empty()) {
+            passStatusLabel_->setText("Auto capture waiting: " + QString::fromStdString(position.blockedReason));
+            break;
         }
         return;
     }
 
+    const auto before = engine.snapshot();
+    // Do not race an existing scanner's RF processing/configuration. An explicit
+    // Stop leaves the named controller idle and eligible on the next timer tick.
+    if (before.state != SatcomScannerState::Idle) return;
+    autoEngineWasRunning_ = before.state != SatcomScannerState::Idle;
     std::string error;
-    if (!engine.armPass(best->satId, best->downlinkId, true, true, &error)) {
+    if (!engine.armPass(best->satId, best->downlinkId, true, false, &error)) {
         if (!autoEngineWasRunning_) engine.stop();
         autoEngineWasRunning_ = false;
         autoCaptureRetryAfter_ = now + 30;
@@ -660,13 +840,21 @@ void SatcomScannerWidget::refreshPassesTable() {
         for (const auto& entry : plan.catalogue.entries()) {
             for (const auto& downlink : entry.downlinks) {
                 downlinkCombo_->addItem(
-                    QString("%1 — %2").arg(QString::fromStdString(entry.name),
-                                            QString::fromStdString(downlink.label)),
+                    QString("%1 MHz | %2 | %3").arg(downlink.freqHz / 1e6, 0, 'f', 3)
+                        .arg(QString::fromStdString(downlink.mode), QString::fromStdString(downlink.label)),
                     QString::fromStdString(downlink.id));
+                const int row = downlinkCombo_->count()-1;
+                downlinkCombo_->setItemData(row, QString::fromStdString(entry.id), Qt::UserRole+1);
+                downlinkCombo_->setItemData(row, QString::fromStdString(downlink.role), Qt::UserRole+2);
+                downlinkCombo_->setItemData(row, QString::fromStdString(entry.notes + "\n" + downlink.reference +
+                    "\nVerified: " + downlink.verifiedUtc + " | image: " + downlink.imageMode +
+                    " | BW: " + std::to_string(downlink.bandwidthHz/1000) + " kHz"), Qt::ToolTipRole);
             }
         }
+        downlinkCombo_->setCurrentIndex(downlinkCombo_->findData("iss-sstv"));
     }
 
+    const QSignalBlocker blockPassTable(passTable_);
     passTable_->setRowCount(static_cast<int>(plan.passes.size()));
     for (int i = 0; i < static_cast<int>(plan.passes.size()); ++i) {
         const auto& pass = plan.passes[static_cast<size_t>(i)];

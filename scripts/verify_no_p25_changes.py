@@ -292,6 +292,16 @@ AUDIO_COMBO_DIGESTS = {
 # DEC-0211: SSTV listen plays its demod and does not let P25 control mute
 # silence USB/LSB/AM/CW. Exact digests are c3a208c -> 0dc4d08. No hop,
 # slot, security, or vocoder change.
+# DEC-0219: exact accepted DEC-0212/13/16 receive corrections and companion
+# wiring, from 1cf9bf9. No broad P25 exemption; any byte mutation fails.
+PAIRED_RELEASE_DIGESTS = {
+    "include/P25LiveDecoder.h": ("4c96a5d0a3d29de729cc28cd0eb0bf35a968c7eb1985742ff910e398cbda8be1", "cf2d5833d03d75eff0cae243f8539e2fefb52fcff76e92622657ea96161505b0"),
+    "src/P25LiveDecoder.cpp": ("a4aff819caabee15319331cfc64fa4f4e19a2b3f97e900a10a81d24d2a3b950c", "9a9a0692e0a4c96a8df44c8a000d471b5b8a317d6f35b415423a31d8e5b4f914"),
+    "src/P25VoiceDecode.cpp": ("e40e23bc224d419272c3542cfd7fe8147e99824c52332c6b898bbd5619781e98", "23f7b64b98817946a1d7a807fc34102028f9c4dcd7c842fc5308c5848a70fe55"),
+    "tests/test_p25live.cpp": ("14ca6510c20d911322aeb1f2adc9dbd9c2a3e904edbb33955e796a42b8e519c6", "3d22b76919b1030e6a108265dcf223b48edbf2226ba29aac1af7a99d48eda0b0"),
+    "src/MainWindow.cpp": ("0aae631f57a8e9ca7dde201d8906a7bd39b7e6d4d174bb994f0dd88541fccf65", "3fe56257844df324890c15a700a7a66b6cf9b3dfaefd3e5850598a15f852e075"),
+}
+
 SSTV_LISTEN_DIGESTS = {
     "src/MainWindow.cpp": (
         "af074b7b430e6ea0c07e80b4219afa12d31a94e764b9a2a6465c875ef1d501ac",
@@ -885,6 +895,10 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
+        if args.paths is None and path in PAIRED_RELEASE_DIGESTS:
+            if text_matches_digest(path, git_file_text(args.base, path), git_file_text(args.head, path), PAIRED_RELEASE_DIGESTS):
+                print(f"P25 guard: accepted exact DEC-0219 paired release: {path}")
+                continue
         if args.paths is None and path in TX_STOP_MUTEX_DIGESTS:
             if infrastructure_text_allowed(path, git_file_text(args.base, path), git_file_text(args.head, path)):
                 print(f"P25 guard: accepted exact DEC-0207 TX stop mutex leak: {path}")

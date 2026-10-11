@@ -200,6 +200,24 @@ fn run_selftest_all() -> Result<(), Box<dyn std::error::Error>> {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = env::args_os().collect();
+    // DEC-0217: deterministic full-length PCM fixtures for the live RF test
+    // harness, not a transmit path. Never overwrite a user's recording.
+    if args.len() == 4 && args[1] == "--test-signal" {
+        let mode = parse_mode(args[2].to_str().ok_or("invalid mode")?)?;
+        if mode == Mode::Auto { return Err("choose an explicit fixture mode".into()); }
+        let (w,h) = (mode.image_width() as usize, mode.image_height() as usize);
+        let pixels = (0..w*h).map(move |i| RgbPixel::new(
+            ((i%w)*255/(w-1)) as u8, ((i/w)*255/(h-1)) as u8, 128));
+        let encoder = Encoder::new(mode, pixels)?;
+        let mut out = io::BufWriter::new(fs::OpenOptions::new().write(true).create_new(true).open(&args[3])?);
+        let mut count = 0u64;
+        for sample in Synthesizer::new(encoder, 48_000).chain(std::iter::repeat_n(0i16, 24_000)) {
+            out.write_all(&sample.to_le_bytes())?; count+=1;
+        }
+        out.flush()?;
+        println!("{{\"mode\":\"{}\",\"rate\":48000,\"samples\":{count},\"width\":{w},\"height\":{h}}}", mode_name(mode)?);
+        return Ok(());
+    }
     if args.len() == 2 && args[1] == "--version" {
         println!("sdrtown-sstv/1 {REVISION}");
         return Ok(());

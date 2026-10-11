@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.136 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.137 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -558,7 +558,9 @@ if(BUILD_TESTS)
   )
   # Real Demodulator (full body, member state) is now always linked.
   target_sources(sdr_town_tests PRIVATE tests/test_sstv_virtual_sdr.cpp
-    src/SstvRfLiveSession.cpp src/SstvLiveSession.cpp src/SstvStreamWorker.cpp src/SstvProgress.cpp)
+    src/SstvRfLiveSession.cpp src/SstvLiveSession.cpp src/SstvStreamWorker.cpp src/SstvProgress.cpp
+    src/SstvWindow.cpp include/SstvWindow.h)
+  target_link_libraries(sdr_town_tests PRIVATE Qt6::Widgets)
   target_sources(sdr_town_tests PRIVATE tests/test_inmarsat_tracking.cpp)
   target_sources(sdr_town_tests PRIVATE tests/test_cw.cpp)
   target_link_libraries(sdr_town_tests PRIVATE sdr_town_morse)
@@ -726,12 +728,13 @@ if(BUILD_TESTS)
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test-fixtures/inmarsat-gui")
   add_test(NAME InmarsatLiveGui COMMAND inmarsat_live_gui_tests "[inmarsat][gui]")
   add_test(NAME AircraftGui COMMAND inmarsat_live_gui_tests "[aircraft][gui]")
+  add_test(NAME SatelliteSstvGui COMMAND inmarsat_live_gui_tests "[sstv-pass]")
   # DEC-0189: run real Aircraft GUI-owned radio workers against mock Soapy
   # devices in the native lifecycle suite (GUI-only fixture disables Soapy).
   target_sources(sdr_town_tests PRIVATE src/AircraftMapWidget.cpp include/AircraftMapWidget.h)
   target_link_libraries(sdr_town_tests PRIVATE Qt6::Widgets)
   add_test(NAME InmarsatHostLifecycle COMMAND inmarsat_live_gui_tests "[.inmarsat-host]")
-  set_tests_properties(InmarsatLiveGui InmarsatHostLifecycle AircraftGui PROPERTIES TIMEOUT 60
+  set_tests_properties(InmarsatLiveGui InmarsatHostLifecycle AircraftGui SatelliteSstvGui PROPERTIES TIMEOUT 60
       ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QWindowsIntegrationPlugin>"
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${PROJECT_NAME}>")
 

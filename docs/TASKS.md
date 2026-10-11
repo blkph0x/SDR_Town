@@ -1,5 +1,60 @@
 # Task list (canonical)
 
+T-0129 | in_progress | Paired FUBAR/Town alignment and Latest releases (DEC-0219) |
+User accepts current P25 audio; prior publication hold lifted. Audit remote
+workflow coverage, fix session identity/profile/device and privacy mismatches,
+test native/DLL/web routes and publish matched full packages. Preserve DSP.
+
+
+T-0128 | pending_field_acceptance | Satellite SSTV pass automation (DEC-0218) |
+Sourced/custom profiles, image/RF/BW settings, persistent image directory,
+epoch/observer/LOS gates and one default/named auto-arm controller implemented.
+4-mode impaired Doppler matrix, paced Robot36/Scottie1, overflow/reacquisition,
+P25/Listen ownership negatives, four native GUI suites and four actual-app
+startup profiles pass. 199 P25/ingress cases pass; physical pass acceptance
+and publication remain open. Existing T-0125/126 release hold preserved;
+no P25 or independently owned station frontend edits in this task.
+
+T-0127 | pending_field_acceptance | SSTV live Auto matrix and overnight observability |
+DEC-0217: repaired leader-fade veto, extended VIS exclusion and hardware-loss
+epoch handling. 49 analog RF modes, independent recordings, real-time GUI
+Scottie1 and overflow/reacquisition pass. Lifecycle telemetry and collector
+tests pass. Exact overnight cause still needs fresh field outcomes; previous
+0.2.135 events contain only UI intents. P25 unchanged; T-0125/126 release hold
+remains. Separate file-Auto fallback limitation recorded in ISS-0101.
+
+T-0126 | pending_live_acceptance | Capture security and SSTV searching audio (DEC-0215/0216) |
+Full ledger in `docs/AUDIT_20261011_P25_SSTV.md`. Confirmed unbound fallback
+borrowed slot 0 security and authorized slot 1; failing synthetic test and
+real replay prove repair. Suspect 380 frames -> zero, unknown stays muted.
+Both encrypted calls remain zero; three clear WAVs remain byte-identical.
+P25/SSTV 260 cases pass. SSTV fresh monitor before VIS and one complete
+image pass through paced virtual dedicated-radio workflow. Local rebuilt,
+not released; live listening and public qualification remain open.
+CC coverage, short normal-end tail drain and quiet holds remain ISS-0094/95/96.
+
+T-0125 | pending_live_acceptance | Phase 2 soft score ignores envelope dips (ISS-0092 / DEC-0212) |
+Forensic follow-up `20261011_010824_796`: user hears improvement; paired
+new-capture replay preserves the DEC-0213 gain (old binary no audio versus
+11.72/6.76 s on current). Continuous acceptance is still partial. Confirmed
+earlier missed CC updates / harmful offset choice (ISS-0094), 280 ms of
+stranded live short tails (ISS-0095), and quiet-tail/attribution limits
+(ISS-0096). See latest BUILD_NOTES for the complete ledger and evidence.
+Next bounded work: reproduce job285 with realtime profile and per-radio
+offset state; cover CC sample boundaries; connect authorized normal-end
+tail draining with encryption/generation negative tests. No timer guesses.
+DEC-0213 continues with capture `20261011_003958_372`: confirmed numeric
+erasures fixed by bounded Phase 2 baseband AGC. Quiet-symbol test fails
+before the fix and passes after. Original-IQ paired replay improves;
+existing good slice preserves 242 frames, no-signal tail stays silent.
+Fresh live listening acceptance and ISS-0093 remain open. Do not publish yet.
+CQPSK soft distance is computed after normalizing each symbol to the
+block amplitude. Hard dibits stay phase-only. Quality gate unchanged.
+Local test: `P25 live decoder keeps CQPSK soft confidence when the envelope dips`.
+The 421.850 MHz slice of capture `20261010_234447` goes from soft quality
+about 0.07 with every symbol low confidence to about 0.82. Live clear-call
+listen is still open. Do not publish yet.
+
 T-0124 | done | SSTV listen audio and P25 mute (ISS-0091 / DEC-0211) |
 Public experimental portable build is v0.2.136-experimental. Signed Latest
 stays 0.2.134.

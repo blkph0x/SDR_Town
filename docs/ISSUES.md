@@ -1,5 +1,187 @@
 # Issues (canonical)
 
+## ISS-0103 - Companion drift and unsafe image scope (2026-10-11, FIXED LOCALLY / RELEASE PENDING)
+
+FUBAR release pins 0.2.125; current Town is 0.2.136 plus tested pending work.
+Web ISS arm hardcodes the legacy downlink; named Inmarsat selects status but
+still reads default messages/map. Live SSTV selector ignores capability.live.
+The public sstv-file path accepts arbitrary images under USERPROFILE; raw
+forwarded requests can also carry local outputDirectory. DEC-0219 scopes the
+repair and requires negative tests before publication.
+
+Native session views and FUBAR routing, capability selectors, bounded opaque
+image registry, recursive request validation and error redaction implemented.
+Paired DLL/HTTP and browser tests pass; package alignment/publishing pending.
+
+
+## ISS-0102 - Satellite pass automation can act on wrong settings (2026-10-11, FIXED LOCALLY / FIELD OPEN)
+
+ISS shortcut hardcodes 145.800 although ARISS's recent event used 437.550;
+downlink selector is not read by Arm. Auto uses force takeover and ignores
+armable=false during selection. Planner substitutes 900 seconds for missing
+pass prediction and treats missing TLE as nominal-frequency tracking. Named
+catalogue selection saves satellites[] but reads selected[], losing selections.
+DEC-0218 addresses these without changing P25 or inventing transmission schedules.
+Final trace also removed the default hub's duplicate forced-takeover scheduler;
+both controllers now share checked policy. Tests cover persistence, stale/future
+epochs, actual LOS, both busy-owner refusals and paced complete images with
+orbital Doppler. Four Qt suites and four actual-app smoke profiles pass. No
+claim of on-air qualification, all-satellite coverage or current transmitter
+activation. Publication held with the existing pending P25 work.
+
+## ISS-0101 - File Auto treats absent analog image as private digital attempt (2026-10-11, OPEN)
+
+Actual-app CLI tests find silence errors in Auto because the existing helper
+unconditionally invokes write_hamdrm_image when no analog image was found.
+That private STWN decoder has no typed no-frame vs corrupt-frame result.
+Explicit analog mode returns zero images correctly; live stdin never takes
+the digital fallback. Do not swallow arbitrary codec errors to hide this.
+Future repair: typed acquisition outcome, retain errors for recognized corrupt
+frames, report no images for true absence. Separately, Auto line-sync can emit
+provisional partial images on noisy recording tails; tests report those and
+compare every pixel/metadata record rather than pretending they do not exist.
+
+## ISS-0099 - Live SSTV Auto vetoes decodable headers (2026-10-11, FIXED LOCALLY)
+
+DEC-0217 red test: a 10 ms fade in the first leader, with all VIS bits intact,
+leaves NFM RF Auto searching and emits no decoder audio. Both assertions fail
+before repair. Requiring every leader window was stricter than the pinned
+image decoder. Leader interior probes now follow its 100/200 ms approach;
+break/framing/purity/parity remain. The RF gate also rejected every extended
+MP/MR/ML word by construction. Twelve exact supported words are now recognized.
+49/49 full analog RF round trips pass with noise and leader fade; 48 RF Auto,
+headerless FAX480 explicitly NFM. Independent/paced final gates recorded below
+in BUILD_NOTES. This reproduces defects, not the exact remote overnight incident.
+
+## ISS-0100 - SSTV overnight failure lacks decoder outcomes (2026-10-11, LOCAL FIX / FIELD OPEN)
+
+Stored collector window after 2026-10-10T07:00Z has 952 events from one client,
+including SSTV UI intents on 0.2.135 but no decoder start/lock/save/failure
+events. Public proxy does not expose /api/events (404); no proxy changes made.
+Add content-free lifecycle/health outcomes via existing opt-in uploader.
+Continuous explicit IQ loss now resets the helper and acquisition without
+joining missing samples, preserving committed images. Device changes and
+unannounced source identity changes still abort. Await fresh tester evidence
+to determine whether an IQ gap, header veto or source selection caused that
+specific overnight session. No claim that synthetic tests reproduce its RF.
+
+## ISS-0097 - Unbound Phase 2 sync borrows companion security (2026-10-11, FIXED LOCALLY)
+
+DEC-0216 / capture013124: isolated S-ISCH was decoded with slot0 session,
+then unlabelled ESS was accepted as either selected slot's security. This
+incorrectly promoted TG12068 slot1 to clear although only slot0 had trusted
+ESS and no traffic MAC identified slot1. New test reproduces three failed
+assertions before repair; removing fallback session and requiring labelled
+target evidence passes. Suspect replay goes 380 frames to zero (unknown),
+both confirmed encrypted calls remain silent, three clear-reference WAVs
+are byte-identical. Physical selected-slot encryption is NOT established.
+No public release yet; live acceptance remains open.
+
+## ISS-0098 - Dedicated SSTV Auto is silent before VIS (2026-10-11, FIXED LOCALLY)
+
+DEC-0215: speaker monitoring depended on the image pre-roll queue, which
+does not emit until VIS mode selection. Separate fresh-sample callback now
+monitors before lock, switches to the validated route and never plays old
+image history. Synthetic no-header/mode-switch tests and 112-second paced
+virtual dedicated-device reception pass, including a complete Scottie1 image.
+No physical-speaker acceptance or GitHub publication claimed yet.
+
+013124 follow-up for ISS-0094/95/96: CC-enabled coverage gaps now total
+67.568 s; voice-worker queue p95 only 0.029 ms. Total producer/consumed
+PCM differs by 60 ms; follow7 explicitly strands 40 ms. The remaining
+20 ms is not attributed. Follow6 retains selected VCWs but unknown security;
+do not remove security gates to turn that into an apparent audio success.
+
+## ISS-0094 - Recoverable CC updates missed before a late follow (2026-10-11, OPEN)
+
+Capture `20261011_010824_796`, live CC job 285, IQ 72304..72560 ms:
+nominal-frequency replay recovers CRC-valid TG30302 / channel 0x628c
+with 14 corrected dibits (inside the existing 18-dibit grant limit).
+Same IQ/profile with +1250 Hz target offset loses that update. Live had
+selected +1250 Hz at 01:09:34.135Z and follows a later repeat only at
+01:09:40.336Z. A second earlier update is recovered in 73536..74048 ms.
+`decodeP25ControlWithOffsetProbe` retains offset on NID/any trusted payload;
+it need not compare nominal once that shifted eye decodes other messages.
+This is not an alpha-tag or encrypted-grant rejection in the follow handler.
+The replay diagnostic profile is broader than live: do not equate its runtime
+or all candidate choices with GUI. Exact real-time-profile reproduction and
+per-device offset provenance/selection tests are needed before repair.
+
+Separate measured coverage issue: latest-only 256 ms GUI CC jobs leave
+50.128 s of recorded IQ unsubmitted while CC is enabled (497 gaps, max
+1.328 s). Another 85.355 s is intentionally unavailable while the single
+RTL is tuned outside CC. Do not combine these into a count of missed grants.
+Next: bounded per-radio contiguous/framer-overlap coverage, acquisition
+versus payload-quality scoring, source-epoch fencing and grant-age tests.
+No arbitrary window/timeout increase or global P25 DSP rollback.
+
+## ISS-0095 - Short clear-gated PCM remains stranded below prime (2026-10-11, OPEN)
+
+New capture's first follow has one worker result with six accepted frames /
+5760 samples, `gate=emit`, then no more selected voice. `speaker_queue`
+records all 5760 pending, none pushed, and the speaker file/callback count
+confirms no output. `pushP25LiveStreamingAudio` keeps an empty ring priming
+below 240/320 ms; the live wrapper never passes `endOfStream=true`.
+The three calls end with pending tails 5760, 5760 and 1920 samples. Their
+sum (13440 samples / 280 ms) equals worker PCM minus captured/consumed PCM
+(948480 minus 935040). Existing end-of-stream helper test only proves the
+flag's behavior, not the live teardown connection.
+Next: explicit, session-bound draining of already-authorized short tails on
+confirmed normal completion. Encryption, user stop and wrong generation
+must still discard. Test full producer/consumer accounting and no stale-call
+leak; do not simply lower startup prime or fabricate bridge speech.
+
+## ISS-0096 - Quiet-tail coverage and incomplete voice attribution (2026-10-11, OPEN)
+
+New capture returns from three follows after 16.9, 40.1 and 28.3 seconds.
+One-second spectral samples fall to local noise by offsets 77, 177 and
+326 seconds; returns occur at 92.428, 188.432 and 337.524. This establishes
+roughly 11-15 seconds of dead-RF parking, not that those holds can safely
+be removed. No confirmed FACCH teardown is logged. Preserve existing
+mid-call-fade behavior until selected-slot activity and teardown are replayed.
+All three accepted grants are updates without RID, and all voice trace RIDs
+are unknown. No evidence here proves a radio-ID/alias mix or mixed-slot audio.
+Auto validation only records one post-security anomaly in this live interval;
+it does not provide every burst's DUID/FEC/ISCH or every follow snapshot.
+Need bounded per-window selected-slot, FEC, offset and hold-reason evidence
+before attributing every silent interval to a decoder fault or real silence.
+
+## ISS-0093 - Main RF gain targets an unavailable Listen identity (2026-10-11, OPEN)
+
+During capture `20261011_003958_372`, the hardware applied 20 dB, but
+11:43:03 gain requests were rejected at device `size_t(-1)` with
+`Radio identity is unavailable or ambiguous`. `sdrTownControlActiveDeviceIndex`
+returns a missing saved Listen selection before consulting the running
+P25 receiver. This is separate from the confirmed numeric-erasure bug.
+Do not bypass device ownership or silently pick the first SDR. Next: expose
+the selected workflow's valid device/token for operator gain controls and
+revert the displayed value on rejection, with multi-device GUI tests.
+No evidence establishes that a different gain alone would fix the RF SNR.
+Reproduced again at 12:09:05.476/.606 local in capture `010824`; applied
+gain remains 20 dB. This still needs its own ownership-safe repair.
+
+## ISS-0092 - Phase 2 says decoding and emits no voice (2026-10-11, OPEN)
+
+Follow-up DEC-0213, capture `20261011_003958_372`: partial speech now emits,
+but weak finite CQPSK symbols hit an absolute magnitude cutoff. An x8
+digital scaling of identical IQ restores decoding without changing SNR.
+Bounded Phase 2 baseband block AGC fixes this locally: failing 5-second
+replay goes 134 -> 188 accepted frames and 24 -> 0 quality rejections;
+35-second unknown-grant replay goes 684 -> 716 accepted, 62 -> 0 rejected,
+131 -> 11 concealment frames. Existing good slice retains 242 frames.
+The whole 35 seconds is NOT a continuous-audio acceptance pass. No-signal
+tail produces zero audio. STT is partial, not intelligibility ground truth.
+Live/operator acceptance and the RF-gain UI issue remain open; not published.
+
+Capture `20261010_234447` followed clear Phase 2 TG 30302 at 418.050 MHz.
+MAC CRC and ESS were clear, sync errors were 0, and every AMBE frame was
+`InvalidFrame` (`hard-soft-quality-low`, soft quality about 0.03). The
+speaker gate was `no-decoded-frames`. PCM was silence. Replaying the
+recorded 421.850 MHz slice shows the same thing: sync error 0, frequency
+already removed, and every symbol still low confidence because the soft
+score used amplitude. Phase-only confidence raises that slice from about
+0.07 to about 0.82. Live speech is not yet heard. Not published.
+
 ## ISS-0091 - SSTV listen is silent while a VB-Audio cable decodes elsewhere (2026-10-10, FIXED)
 
 Waiting for SSTV produced no speaker audio. Sending the same output to

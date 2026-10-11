@@ -45,6 +45,8 @@ struct SatCurrentPosition {
     double rangeRateKmS = 0.0;
     bool inRange = false;
     bool armable = false;
+    double tleEpochAgeSec = 0.0;
+    std::string blockedReason;
     std::string downlinkId;
     std::string downlinkLabel;
     std::string role;
@@ -65,6 +67,8 @@ struct SatArmedState {
     double dopplerHz = 0.0;
     double elevationDeg = 0.0;
     double tunedHz = 0.0;
+    double bandwidthHz = 0.0;
+    std::string imageMode = "auto";
 };
 
 struct SatPassPlannerSnapshot {
@@ -90,6 +94,7 @@ public:
 
     SatCatalogue catalogue() const;
     void setCatalogueSelection(const std::vector<std::string>& selectedIds);
+    bool saveSstvProfile(const SatCatalogueEntry& entry, std::string* error = nullptr);
 
     bool refreshTle(std::string* error = nullptr);
     void refreshTleAsync(std::function<void(bool ok, std::string error)> done);
@@ -106,6 +111,10 @@ public:
     // Call ~1 Hz from engine/UI timer: updates Doppler and returns tuned Hz if auto-track active.
     // Returns true if caller should retune device to outTunedHz.
     bool tickAutoTrack(double* outTunedHz);
+    // Deterministic clock entry points also used by replay/automation tests.
+    bool armAt(const std::string& satId, const std::string& downlinkId, bool autoTrack,
+               double unixSec, std::string* error = nullptr);
+    bool tickAutoTrackAt(double unixSec, double* outTunedHz);
 
     SatPassPlannerSnapshot snapshot(double hoursAhead = 24.0) const;
 

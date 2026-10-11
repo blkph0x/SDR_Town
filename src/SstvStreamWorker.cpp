@@ -108,8 +108,28 @@ SstvStreamResult decodeSstvStream(const SstvStreamRead& next,const QString& mode
                 eof=true; end.start(); process.closeWriteChannel();
             } else if(const auto* block=std::get_if<SstvInputEvent>(&item)) {
                 if(block->gapReasons) {
-                    require(block->count==0 && !identity,"SSTV input discontinuity; provisional image discarded");
+                    require(block->count==0 && (!identity || continuous),"SSTV input discontinuity; provisional image discarded");
                     require(!haveGap || block->generation>=gapGeneration,"SSTV gap generation moved backwards");
+                    if(identity) {
+                        require(block->generation>result.generation,"SSTV gap did not advance generation");
+                        // DEC-0217: keep already committed PNGs, discard the partial
+                        // image and helper buffers. A gap is never synthetic audio.
+                        process.kill();
+                        require(process.waitForFinished(5000),"SSTV helper could not stop after input gap");
+                        process.readAllStandardOutput(); process.readAllStandardError();
+                        require(!QFileInfo::exists(rgbPath) || QDir(rgbPath).removeRecursively(),"Cannot clear private SSTV helper scratch directory");
+                        progress=SstvProgress(preview?preview:SstvPreview([](const auto&,const auto&,int){}),archive);
+                        errors.clear(); identity=false; previousPending=0;
+                        process.start(); launch.restart();
+                        while(process.state()==QProcess::Starting) {
+                            cancel(); require(launch.elapsed()<5000,"SSTV helper restart timed out");
+                            process.waitForStarted(20);
+                        }
+                        require(process.state()==QProcess::Running,"SSTV helper failed to restart");
+                        stall.restart(); ++result.discontinuities;
+                        spdlog::warn("SSTV capture gap: generation={} reasons={} interrupted image discarded; searching again; saved={}",
+                            block->generation,block->gapReasons,result.savedImages);
+                    }
                     haveGap=true; gapGeneration=block->generation;
                 } else {
                     require(block->count>0 && block->count<=SstvInputEvent::maxSamples,"Invalid SSTV block size");

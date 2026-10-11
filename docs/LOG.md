@@ -1,5 +1,110 @@
 # Development log
 
+## 2026-10-11 - DEC-0219 companion alignment
+
+Repaired native session views, selected satellite profiles/radios and SSTV
+output routing. FUBAR fixes named maps/messages, live mode capabilities,
+operator-safe stop/start, stale-session replies and unsafe file requests.
+Native/DLL/HTTP/browser tests completed locally; complete Actions publication
+and downloaded installer/portable qualification still in progress. User accepts
+current P25 sound. No companion change edits the accepted P25 DSP.
+
+## 2026-10-11 - Satellite SSTV automation and Doppler qualification (DEC-0218)
+
+Added sourced, dated receive profiles plus validated editable custom profiles;
+FUNcube telemetry and SSDV are not mislabeled SSTV. ARISS VHF/UHF choices are
+separate and event-dependent. Profiles persist frequency/RF/BW/image format;
+unattended captures save unique folders without per-image prompts. Observer,
+fresh orbital epoch and elevation-mask LOS are required; no nominal fallback
+or fabricated pass. Auto never forces another workflow's radio. Removed the
+default hub's divergent scheduler so named/default sessions use one policy.
+Arming remains off after restart. Added local lifecycle/context evidence and
+AM ingress support; scrollable controls display downlink frequency first.
+
+Core orbit/profile and P25/ingress tests pass. Four-mode Doppler/noise/clock
+matrix passes; real-time virtual satellite reception saves full Robot36 and
+the user's Scottie1, rejects busy P25/Listen ownership and recovers after an
+injected overflow. Four native GUI suites and four actual-app startup layouts
+pass, including no-RX checks. See BUILD_NOTES for all failed fixtures and
+corrected reruns. Actual satellite reception remains field acceptance, not
+inferred from simulation. No P25 edits or public release in this task; the
+inherited P25 live-qualification hold remains, and concurrent station work
+was left untouched.
+
+## 2026-10-11 - SSTV live acquisition and overnight recovery (DEC-0217)
+
+User reports another app decoded VB-Cable overnight while Town saved nothing.
+Collector records show SSTV UI use on 0.2.135, not decoder outcomes, so exact
+field cause remains unproven. Reproduced strict-header veto and extended-VIS
+exclusion; repaired both with parity/framing and bounded history retained.
+Paced GUI injection then exposed hardware overflow epoch handling terminating
+the session. SSTV now resets and searches again without splicing missing IQ.
+All 49 analog formats pass generated RF round trips; independent recordings,
+user's Scottie WAV through 2.4 MS/s real-time GUI, injected-overflow recovery,
+continuous autosave and P25 regression tests pass. Lifecycle/health outcomes
+now reach the opt-in diagnostics path without content uploads. See BUILD_NOTES
+for exact evidence, failures, limitations and local binary hash. No P25 edits
+or public release in this task; inherited release hold remains. ISS-0101
+records a separate pre-existing file-Auto private-digital fallback defect.
+
+## 2026-10-11 - Security provenance finds a cross-slot defect (DEC-0215/0216)
+
+Audited all ten follows in capture013124 and compared per-call worker,
+speaker, IQ and control coverage. The two explicitly encrypted visits were
+already silent. New passive ESS snapshots revealed an unbound fallback sync
+borrowing slot0's clear state and promoting unknown slot1 to clear. A failing
+synthetic regression and actual-IQ paired replay confirm the fix: no session
+on an unbound burst; no target security without slot identity. Suspect output
+380 -> 0 frames, encrypted outputs remain zero, three valid clear WAVs stay
+byte-identical. No guessed timer, filter, FEC, vocoder or quality changes.
+
+SSTV dedicated Auto monitor now receives fresh demod samples before VIS and
+never plays retained image pre-roll. Paced virtual device opening through
+the production workflow produces monitor audio and a complete Scottie1 image.
+Final build passes, 260 P25/SSTV test cases pass, 5 timeline and 2 helper tests
+pass. Full evidence, regression limits and remaining CC/tail/identity gaps are
+in AUDIT_20261011_P25_SSTV.md. Local executable rebuilt; physical live hearing
+and public release qualification still open. No public asset replaced.
+
+## 2026-10-11 - New live capture forensic audit (DEC-0214)
+
+Completed capture/event/ring/voice audit of `20261011_010824_796`, targeted
+CC replay and paired before/after voice replay. All three live eligible
+updates followed, but offline recovers TG30302 approximately 3 seconds
+earlier. Exact live job285 decodes that update at nominal and loses it at
+the cached +1250 Hz offset. CC submission gaps total 50.128 s while tuned;
+85.355 s additionally blind on traffic. 280 ms of accepted PCM remains in
+three short pending tails. No IQ/job queue loss, sequencer or TG mismatch
+evidence. User improvement is supported by paired replay, not yet full
+continuous speech. Local STT partial only. ISS-0093 reproduced; added
+ISS-0094/95/96 and evidence/next gates. Existing 228 P25 cases and five
+timeline tests pass. No new app edits, rebuild, capture upload or release;
+the improved binary and reversible prior work are retained unchanged.
+
+## 2026-10-11 - Latest capture numeric-erasure regression (DEC-0213)
+
+Traced `20261011_003958_372` through capture health, worker/audio counters,
+per-AMBE validation and paired original-IQ replay. No IQ or queue loss.
+Confirmed an amplitude-dependent symbol erasure: x8 scaling of the same IQ
+removes all 24 quality rejections in the failing five seconds. Added the
+missing bounded Phase 2 baseband block gain stage (reference SDRTrunk AGC
+ordering), regression tests and invalid-symbol/magnitude JSONL telemetry.
+Good slice preserves 242 frames; failing slice improves 134 -> 188; long
+unknown-grant replay reduces 62 quality rejects to zero and concealments
+131 -> 11. No changes to timers, slots, security, vocoder or speaker buffers.
+RF gain UI requests also fail on an unavailable Listen identity (ISS-0093).
+Fresh live listening remains unverified; neither STT nor partial-audio
+counters close that gate. Local rebuilt executable ready; not published.
+
+## 2026-10-11 - Phase 2 voice frames concealed on a clear grant
+
+Capture `20261010_234447` followed clear TG 30302 at 418.050 MHz. MAC and
+ESS were clear. Every AMBE frame was concealed (`hard-soft-quality-low`).
+The recorded voice slice already had sync error 0 and the carrier removed.
+Euclidean soft scores treated H-DQPSK envelope dips as bad symbols, so
+every symbol was low confidence. Soft distance is now phase-only. Not
+published. Live speech is still to be heard on the next clear grant.
+
 ## 2026-10-11 - v0.2.136 experimental pre-release
 
 Version 0.2.136. Portable experimental channel only. Signed Latest stays

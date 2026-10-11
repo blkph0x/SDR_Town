@@ -81,6 +81,8 @@ SatcomScannerConfig SatcomScannerConfig::defaults() {
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     config.recordDir = (base + "/satcom_recordings").toStdString();
     config.logDir = (base + "/satcom_logs").toStdString();
+    config.sstvSaveDir = (QStandardPaths::writableLocation(QStandardPaths::PicturesLocation) +
+                          "/SDR Town/SSTV/Satellites").toStdString();
     config.presets = {
         {"UHF Scan 420-430", 420e6, 430e6, 12.5e3, 250e3, "NFM", -90.0},
         {"NOAA APT 137.100", 137.05e6, 137.15e6, 5e3, 40e3, "APT", -95.0},
@@ -107,6 +109,8 @@ nlohmann::json SatcomScannerConfig::toJson() const {
     json["enableAx25"] = enableAx25;
     json["enableApt"] = enableApt;
     json["autoCapture"] = autoCapture;
+    json["sstvOnly"] = sstvOnly;
+    json["sstvSaveDir"] = sstvSaveDir;
     json["monitorAudio"] = monitorAudio;
     nlohmann::json entries = nlohmann::json::array();
     for (const auto& preset : presets) {
@@ -137,6 +141,8 @@ SatcomScannerConfig SatcomScannerConfig::fromJson(const nlohmann::json& json) {
     config.enableAx25 = json.value("enableAx25", config.enableAx25);
     config.enableApt = json.value("enableApt", config.enableApt);
     config.autoCapture = json.value("autoCapture", config.autoCapture);
+    config.sstvOnly = json.value("sstvOnly", config.sstvOnly);
+    config.sstvSaveDir = json.value("sstvSaveDir", config.sstvSaveDir);
     config.monitorAudio = json.value("monitorAudio", config.monitorAudio);
     if (json.contains("presets") && json["presets"].is_array()) {
         config.presets.clear();
@@ -983,11 +989,14 @@ SatcomScannerSnapshot SatcomScannerEngine::snapshot() const {
 void SatcomScannerEngine::startSstvCapture(const std::string& satId,
                                            const std::string& downlinkId) {
     finishSstvCapture(false);
-    const QString parent = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
-                           "/satcom_sstv";
+    const auto settings = config();
+    const auto plan = planner().snapshot();
+    const QString parent = QString::fromStdString(settings.sstvSaveDir.empty()
+        ? SatcomScannerConfig::defaults().sstvSaveDir : settings.sstvSaveDir);
     QDir().mkpath(parent);
     const QString output = QDir(parent).filePath(
-        QString::fromStdString(makeCaptureStem(satId, downlinkId)));
+        QString::fromStdString(makeCaptureStem(satId, downlinkId)) + "_" +
+        QUuid::createUuid().toString(QUuid::WithoutBraces));
     {
         std::lock_guard<std::mutex> lock(mutex_);
         sstvOutputDir_ = output.toStdString();
@@ -996,17 +1005,34 @@ void SatcomScannerEngine::startSstvCapture(const std::string& satId,
     sstvCancel_ = false;
     const auto feed = sstvFeed_;
     std::lock_guard<std::mutex> lock(sstvMutex_);
-    sstvThread_ = std::thread([this, feed, output]() {
+    const QString imageMode = QString::fromStdString(plan.armed.imageMode);
+    sstvThread_ = std::thread([this, feed, output, imageMode, plan]() {
         try {
+            spdlog::info("Satellite SSTV started sat={} downlink={} mode={} rf={} bw={}",
+                plan.armed.satId, plan.armed.downlinkId, imageMode.toStdString(), plan.armed.freqHz, plan.armed.bandwidthHz);
             const auto report = decodeSstvLive(
                 feed,
                 []() {},
                 output,
-                "auto",
+                imageMode,
                 [this]() { return sstvFinish_.load(std::memory_order_acquire); },
                 [this]() { return sstvCancel_.load(std::memory_order_acquire); },
-                {});
-            const size_t images = report.value("images", nlohmann::json::array()).size();
+                [this](const QImage&, const QString& mode, int rows) {
+                    // Bounded status, no image bytes or decoded content in logs.
+                    std::lock_guard<std::mutex> stateLock(mutex_);
+                    lastStatus_ = "SSTV " + mode.toStdString() + " rows " + std::to_string(rows);
+                });
+            const size_t images = report.value("savedImages", size_t(0));
+            QSaveFile metadata(QDir(output).filePath("satellite-pass.json"));
+            const auto context = nlohmann::json{{"satId", plan.armed.satId}, {"downlinkId", plan.armed.downlinkId},
+                {"nominalHz", plan.armed.freqHz}, {"bandwidthHz", plan.armed.bandwidthHz},
+                {"rfMode", plan.armed.mode}, {"imageMode", plan.armed.imageMode},
+                {"aosUnix", plan.armed.aosUnix}, {"predictedLosUnix", plan.armed.losUnix},
+                {"digitalDoppler", plan.armed.autoTrack}, {"iqDiscontinuities", iqDiscontinuities_.load()}}.dump(2);
+            if (!metadata.open(QIODevice::WriteOnly) || metadata.write(context.data(), context.size()) != qint64(context.size()) || !metadata.commit())
+                throw std::runtime_error("Cannot save satellite pass metadata");
+            spdlog::info("Satellite SSTV finished sat={} images={} samples={} discontinuities={}",
+                plan.armed.satId, images, report.value("inputSamples", uint64_t(0)), report.value("discontinuities", uint64_t(0)));
             const std::string message = "SSTV session saved: " + output.toStdString() +
                                         " (" + std::to_string(images) + " image(s))";
             {
@@ -1017,6 +1043,7 @@ void SatcomScannerEngine::startSstvCapture(const std::string& satId,
             }
             notifyUpdate();
         } catch (const std::exception& ex) {
+            spdlog::warn("Satellite SSTV failed sat={} reason={}", plan.armed.satId, ex.what());
             if (sstvCancel_.load(std::memory_order_acquire)) return;
             {
                 std::lock_guard<std::mutex> stateLock(mutex_);
@@ -1043,7 +1070,13 @@ void SatcomScannerEngine::finishSstvCapture(bool cancel) {
 
 bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& downlinkId,
                                   bool autoTrack, bool force, std::string* error) {
-    finishSstvCapture(false);
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (passTrackActive_) {
+            if (error) *error = "Disarm the current pass before selecting another downlink";
+            return false;
+        }
+    }
     std::string failure;
     const size_t selectedDevice = resolveDeviceIndex(&failure);
     if (selectedDevice == static_cast<size_t>(-1)) {
@@ -1053,21 +1086,17 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
 
     bool engineWasRunning = run_.load(std::memory_order_acquire);
     if (engineWasRunning) {
-        size_t activeDevice = static_cast<size_t>(-1);
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            activeDevice = activeDeviceIndex_;
-        }
-        if (activeDevice != selectedDevice) {
-            stop();
-            engineWasRunning = false;
-        }
+        // Join the scanner before changing its channel/decoder identity. An
+        // already armed pass is refused above; auto capture only admits Idle.
+        stop();
+        engineWasRunning = false;
     }
 
     if (!planner().arm(satId, downlinkId, autoTrack, &failure)) {
         if (error) *error = failure;
         return false;
     }
+    finishSstvCapture(false);
 
     if (!engineWasRunning && !prepareReceiverForSatcom(selectedDevice, force, &failure)) {
         planner().disarm();
@@ -1089,7 +1118,8 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
             config_.bandwidthHz = 40e3;
         } else if (plan.armed.role == "sstv") {
             // HfDemod's BW is twice the SSB audio cutoff (DEC-0117).
-            config_.bandwidthHz = isSstvSidebandMode(config_.mode) ? 6e3 : 15e3;
+            config_.bandwidthHz = plan.armed.bandwidthHz > 0 ? plan.armed.bandwidthHz :
+                (isSstvSidebandMode(config_.mode) ? 6e3 : 20e3);
         } else if (plan.armed.role == "aprs" || plan.armed.role == "voice") {
             config_.bandwidthHz = 15e3;
         } else {
@@ -1366,6 +1396,7 @@ void SatcomScannerEngine::processLockedAudio() {
     const bool nfmSstv = role == "sstv" && demodMode == DemodMode::NFM;
     const bool ssbSstv = role == "sstv" &&
                          (demodMode == DemodMode::USB || demodMode == DemodMode::LSB);
+    const bool amSstv = role == "sstv" && demodMode == DemodMode::AM;
     double rmsDb = -120.0;
     FmMultiplexBlock multiplex;
     // Request the demodulator's clean pre-squelch decoder block for
@@ -1374,19 +1405,19 @@ void SatcomScannerEngine::processLockedAudio() {
     const bool aprsData = decodeAx25 && (mode == "NFM" || mode == "APRS");
     const bool aptData = decodeApt && (role == "apt" || mode == "APT") && demodMode == DemodMode::NFM;
     FmMultiplexBlock* multiplexOutput =
-        (nfmSstv || ssbSstv || aprsData || aptData) ? &multiplex : nullptr;
+        (nfmSstv || ssbSstv || amSstv || aprsData || aptData) ? &multiplex : nullptr;
     auto audio = demod_->demodulateToAudio(
         input.samples, sampleRate, iqCenterHz, nominalFrequencyHz, demodMode,
         rmsDb, 3000.0, -120.0, 1.0, 75.0, 0.96, bandwidthHz,
         0, 48000.0,
-        std::numeric_limits<double>::quiet_NaN(), true,
+        std::numeric_limits<double>::quiet_NaN(), role != "sstv",
         multiplexOutput, nominalFrequencyHz);
     {
         std::lock_guard<std::mutex> lock(mutex_);
         audioRmsDb_ = rmsDb;
     }
 
-    if ((nfmSstv || ssbSstv) && !multiplex.samples.empty()) {
+    if ((nfmSstv || ssbSstv || amSstv) && !multiplex.samples.empty()) {
         sstvFeed_->publish(multiplex,
                            sstvSourceEpoch_.load(std::memory_order_acquire),
                            demodMode);

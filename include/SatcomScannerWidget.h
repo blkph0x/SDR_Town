@@ -2,6 +2,7 @@
 
 #include <QString>
 #include <QWidget>
+#include <QJsonObject>
 #include <memory>
 
 class SpectrumWidget;
@@ -29,6 +30,9 @@ public:
     SatcomScannerEngine& engine() { return engine_; }
     void reloadSessionControls();
     void stopSession() { onStop(); }
+    void autoCaptureTick();
+    QJsonObject webStatus() const;
+    QJsonObject webPassControl(const QJsonObject& body);
 
 signals:
     void requestOpenSstvLive();
@@ -50,6 +54,7 @@ private slots:
     void onArmSelected();
     void onDisarm();
     void onArmSstv();
+    void onEditSstvProfile();
 
 private:
     std::unique_ptr<SatcomScannerEngine> ownedEngine_;
@@ -93,6 +98,7 @@ private:
     QTableWidget* passTable_ = nullptr;
     QCheckBox* autoTrackCheck_ = nullptr;
     QCheckBox* autoCaptureCheck_ = nullptr;
+    QCheckBox* sstvOnlyCheck_ = nullptr;
     QComboBox* downlinkCombo_ = nullptr;
     ObserverMapWidget* observerMap_ = nullptr;
     QPushButton* refreshTleBtn_ = nullptr;

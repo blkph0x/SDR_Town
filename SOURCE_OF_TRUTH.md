@@ -3,10 +3,36 @@ SDR TOWN — SOURCE OF TRUTH (SoT)
 ================================================================================
 VERSION: 1.0.0
 PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
-CURRENT VERSION IN TREE: 0.2.136 (audible SSTV listen, experimental)
-CURRENT WORK: DEC-0211: SSTV demod plays on the selected outputs. A virtual
-              cable also opens the default speakers. P25 control mute silences
-              NFM/WFM only. P25 voice decode is not shared. Next: RX USB quarantine.
+CURRENT VERSION IN TREE: 0.2.137 (paired FUBAR 1.1.48, experimental)
+CURRENT DELIVERY: DEC-0219 lifts the prior P25 publication hold after the user
+                  accepts listening. Paired native sessions/maps/messages,
+                  downlink/device selection and public image boundary tested.
+                  CI full installer/portable and signed Latest verification
+                  pending; older entries below are historical evidence.
+CURRENT AUDIT: DEC-0215/0216, capture013124: repaired cross-slot security
+               inheritance on unbound syncs and SSTV Auto search monitoring.
+               Three clear replay WAVs remain identical, two encrypted calls
+               remain muted. 260 combined tests and paced SSTV workflow pass.
+               Live qualification/publication still open. Full findings:
+               docs/AUDIT_20261011_P25_SSTV.md. CC gaps/tails remain open.
+CURRENT WORK: DEC-0217 SSTV live Auto: leader fade, extended VIS and stream
+              epoch recovery repaired. 49 analog RF simulations and paced
+              real GUI / injected overflow pass; content-free lifecycle
+              diagnostics added. Field overnight acceptance remains open.
+              DEC-0218 satellite SSTV: sourced/custom RF/BW/image profiles,
+              fresh-epoch Doppler, free-radio-only auto capture, one shared
+              default/named scheduler and persistent image folders. Paced
+              orbital Robot36/Scottie1 and overflow recovery pass; native GUI
+              and actual-app smoke pass. Real satellite pass acceptance open.
+P25 PENDING: DEC-0212/0213: phase soft score plus bounded Phase 2 block
+              gain normalization. Capture 20261011_003958 proves quiet finite
+              symbols were erased by absolute cutoffs; paired replay improves
+              without changing slot/security/timer gates. Not published. Fresh
+              live listening acceptance remains open; see docs/BUILD_NOTES.md.
+              DEC-0214 new-capture audit confirms improvement but identifies
+              missed early CC updates, CC coverage gaps and stranded short
+              PCM tails (ISS-0094/95/96). No additional DSP changes yet.
+              RX USB quarantine remains queued.
 PUBLIC BASELINE: v0.2.123-experimental accepted, Actions37273822180; zero package
                  blockers (commit1b035aa acceptance comment203450320).
 LATEST PACKAGE: DEC-0196 replaces four permanent blocker strings with finite,

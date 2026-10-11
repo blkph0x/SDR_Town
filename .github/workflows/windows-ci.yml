@@ -422,6 +422,25 @@ jobs:
           Add-Content $env:GITHUB_STEP_SUMMARY "- Publication eligible: $publishable"
           foreach ($blocker in $inventory.releaseBlockers) { Add-Content $env:GITHUB_STEP_SUMMARY "- $blocker" }
 
+      - name: Build qualified installer and companion module
+        if: github.event_name == 'push' && startsWith(github.ref_name, 'release/') && env.PACKAGE_PUBLISHABLE == 'true'
+        shell: pwsh
+        run: |
+          $env:PATH += ';C:\Program Files (x86)\NSIS'
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            choco install nsis --no-progress -y
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          cpack -G NSIS -C Release --config build/CPackConfig.cmake -B build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $setup = "SDR_Town-$env:PROJECT_VERSION-win64-setup.exe"
+          $dll = "SdrTownControl-$env:PROJECT_VERSION-win64.dll"
+          Copy-Item build/deploy_staging/SdrTownControl.dll "build/$dll"
+          foreach ($name in @($setup, $dll)) {
+            $hash = (Get-FileHash "build/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $name" | Set-Content "build/$name.sha256" -Encoding ascii
+          }
+
       - name: Upload package inventory evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -466,6 +485,11 @@ jobs:
 
           $asset = Join-Path $env:GITHUB_WORKSPACE "build/$env:PACKAGE_ASSET"
           $checksum = Join-Path $env:GITHUB_WORKSPACE "build/$env:PACKAGE_SHA"
+          $extra = @("build/SDR_Town-$env:PROJECT_VERSION-win64-setup.exe",
+            "build/SDR_Town-$env:PROJECT_VERSION-win64-setup.exe.sha256",
+            "build/SdrTownControl-$env:PROJECT_VERSION-win64.dll",
+            "build/SdrTownControl-$env:PROJECT_VERSION-win64.dll.sha256")
+          foreach ($path in $extra) { if (-not (Test-Path $path)) { throw "Missing full release asset: $path" } }
           if (-not (Test-Path $asset) -or -not (Test-Path $checksum)) {
             throw "release assets are missing"
           }
@@ -480,14 +504,14 @@ jobs:
             $lowerTag = $tag.ToLowerInvariant()
             $isPrerelease = $lowerTag -match '(experimental|alpha|beta|rc|preview|test|pre)'
             if ($isPrerelease) {
-              gh release create $tag $asset $checksum `
+              gh release create $tag $asset $checksum @extra `
                 --repo $env:GITHUB_REPOSITORY `
                 --target $env:GITHUB_SHA `
                 --title "SDR Town $tag" `
                 --notes-file $notes `
                 --prerelease
             } else {
-              gh release create $tag $asset $checksum `
+              gh release create $tag $asset $checksum @extra `
                 --repo $env:GITHUB_REPOSITORY `
                 --target $env:GITHUB_SHA `
                 --title "SDR Town $tag" `
@@ -545,3 +569,24 @@ jobs:
           Add-Content $env:GITHUB_STEP_SUMMARY "Public download, checksum, provenance and CLI smoke test: PASS"
           python scripts/test_rtl_runtime_package.py --stage "$out/extracted"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($name in @("SDR_Town-$env:PROJECT_VERSION-win64-setup.exe", "SdrTownControl-$env:PROJECT_VERSION-win64.dll")) {
+            Invoke-WebRequest "$base/$name" -OutFile "$out/$name" -MaximumRetryCount 3 -RetryIntervalSec 5
+            Invoke-WebRequest "$base/$name.sha256" -OutFile "$out/$name.sha256" -MaximumRetryCount 3 -RetryIntervalSec 5
+            $expected = ((Get-Content "$out/$name.sha256" -Raw).Trim() -split '\s+')[0]
+            if ((Get-FileHash "$out/$name").Hash -ne $expected -or (Get-FileHash "$out/$name").Hash -ne (Get-FileHash "build/$name").Hash) { throw 'Public full-asset hash mismatch' }
+          }
+          if ((Get-FileHash "$out/SdrTownControl-$env:PROJECT_VERSION-win64.dll").Hash -ne (Get-FileHash "$out/extracted/SdrTownControl.dll").Hash) { throw 'Companion DLL does not match portable' }
+          $installed = Join-Path $env:RUNNER_TEMP 'sdr-town-installed-qa'
+          $setup = Start-Process "$out/SDR_Town-$env:PROJECT_VERSION-win64-setup.exe" -ArgumentList "/S /D=$installed" -WindowStyle Hidden -PassThru
+          if (-not $setup.WaitForExit(180000)) { $setup.Kill(); throw 'Installer timed out' }
+          if ($setup.ExitCode -ne 0) { throw 'Installer smoke failed' }
+          if ((Get-FileHash "$installed/SDR_Town.exe").Hash -ne $info.executableSha256) { throw 'Installed executable differs from qualified portable' }
+          $files = Get-ChildItem "$out/extracted" -File -Recurse
+          foreach ($file in $files) {
+            $relative = [IO.Path]::GetRelativePath("$out/extracted", $file.FullName)
+            $destination = Join-Path $installed $relative
+            if (-not (Test-Path $destination) -or (Get-FileHash $destination).Hash -ne (Get-FileHash $file.FullName).Hash) { throw "Installer payload differs: $relative" }
+          }
+          $smoke = Start-Process "$installed/SDR_Town.exe" -ArgumentList '--allow-multiple --cli --no-remote-diagnostics --cmd "help"' -WindowStyle Hidden -Wait -PassThru
+          if ($smoke.ExitCode -ne 0) { throw 'Installed application smoke failed' }
+          Add-Content $env:GITHUB_STEP_SUMMARY 'Public installer and matching control DLL: PASS'

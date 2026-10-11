@@ -4,6 +4,7 @@
 #include <QStandardPaths>
 
 #include <cctype>
+#include <cmath>
 #include <fstream>
 #include <sstream>
 
@@ -19,6 +20,7 @@ nlohmann::json SatObserverConfig::toJson() const {
         {"lonDeg", lonDeg},
         {"altM", altM},
         {"minElevationDeg", minElevationDeg},
+        {"configured", configured},
     };
 }
 
@@ -29,6 +31,8 @@ SatObserverConfig SatObserverConfig::fromJson(const nlohmann::json& j) {
     c.lonDeg = j.value("lonDeg", 0.0);
     c.altM = j.value("altM", 0.0);
     c.minElevationDeg = j.value("minElevationDeg", 10.0);
+    c.configured = j.value("configured", c.latDeg != 0.0 || c.lonDeg != 0.0);
+    if (!c.valid()) { c.configured = false; return SatObserverConfig{}; }
     if (c.latDeg > 90.0) c.latDeg = 90.0;
     if (c.latDeg < -90.0) c.latDeg = -90.0;
     if (c.lonDeg > 180.0) c.lonDeg = 180.0;
@@ -78,7 +82,9 @@ bool SatObserverConfig::parseLatLonToken(const std::string& token, bool isLat, d
     if (s.empty()) return false;
 
     try {
-        double v = std::stod(s);
+        size_t consumed = 0;
+        double v = std::stod(s, &consumed);
+        if (consumed != s.size() || !std::isfinite(v)) return false;
         if (hemi != 0) {
             v = std::abs(v) * static_cast<double>(hemi);
         }
@@ -92,4 +98,11 @@ bool SatObserverConfig::parseLatLonToken(const std::string& token, bool isLat, d
     } catch (...) {
         return false;
     }
+}
+
+bool SatObserverConfig::valid() const {
+    return std::isfinite(latDeg) && std::abs(latDeg) <= 90 &&
+           std::isfinite(lonDeg) && std::abs(lonDeg) <= 180 &&
+           std::isfinite(altM) && altM >= -500 && altM <= 10000 &&
+           std::isfinite(minElevationDeg) && minElevationDeg >= 0 && minElevationDeg < 90;
 }

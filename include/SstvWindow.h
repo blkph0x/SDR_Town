@@ -1,6 +1,7 @@
 #pragma once
 #include <QDialog>
 #include <QImage>
+#include <QJsonObject>
 #include <functional>
 #include <atomic>
 #include <memory>
@@ -43,6 +44,7 @@ public:
     void cancel();
     QString statusMessage() const;
     QString resultDirectory() const { return resultDirectory_; }
+    QString newOutputDirectory() const;
     QStringList imagePaths() const;
     QStringList imageLabels() const;
     bool liveSelected() const;
@@ -51,12 +53,14 @@ public:
     QString detectedRfMode() const;
 signals:
     void decodeFinished(bool success);
+    void diagnosticEvent(const QString& type, const QJsonObject& payload);
 protected:
     void closeEvent(QCloseEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void reject() override;
 private:
     void setBusy(bool value);
+    void diagnostic(const QString& event, QJsonObject fields = {});
     void updatePreview();
     QImage adjustedPreview() const;
     Decode decode_;
@@ -83,4 +87,5 @@ private:
     int scanline_ = -1;
     QString resultDirectory_;
     QString listenHint_;
+    QString diagnosticSession_;
 };

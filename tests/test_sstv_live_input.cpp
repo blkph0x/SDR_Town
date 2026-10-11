@@ -43,8 +43,8 @@ TEST_CASE("SSTV ingress preserves samples and positions across chunks","[sstv][l
     REQUIRE(s.consumedSamples==first); REQUIRE(s.discardedSamples==0);
 }
 
-TEST_CASE("SSTV ingress accepts FM and selected SSB audio sources","[sstv][live-input]") {
-    for(const auto mode:{DemodMode::NFM,DemodMode::USB,DemodMode::LSB}) {
+TEST_CASE("SSTV ingress accepts FM and selected SSB or AM audio sources","[sstv][live-input]") {
+    for(const auto mode:{DemodMode::NFM,DemodMode::USB,DemodMode::LSB,DemodMode::AM}) {
         SstvLiveInput input; start(input);
         REQUIRE(input.tryPush(block(),1,mode)==SstvPushResult::Accepted);
         const auto event=input.pop();

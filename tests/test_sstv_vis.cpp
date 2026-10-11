@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "SstvVis.h"
+#include "SstvModes.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -129,4 +130,28 @@ TEST_CASE("SSTV VIS resets across gaps and rejects invalid blocks","[sstv]") {
     CHECK_THROWS(decoder.process(std::span(&invalid,1)));
     CHECK(decoder.counters().samples==0);
     REQUIRE(feed(decoder,audio,137).size()==1);
+}
+
+TEST_CASE("SSTV extended VIS accepts only known framed words", "[sstv]") {
+    for(const auto& mode:kSstvModes) {
+        if(!mode.visWord) continue;
+        auto audio=header(8); audio.resize(640*8); // Leaders and 30 ms start.
+        double phase=0;
+        for(unsigned bit=0;bit<17;++bit) {
+            const int hz=bit==16?1200:(mode.visWord&(1u<<bit)?1100:1300);
+            for(int n=0;n<240;++n) {
+                audio.push_back(float(.35*std::sin(phase)));
+                phase=std::remainder(phase+2*std::numbers::pi*hz/8000,2*std::numbers::pi);
+            }
+        }
+        SstvVisDetector detector(8000);
+        auto found=feed(detector,audio,137);
+        CAPTURE(mode.id);
+        REQUIRE(found.size()==1);
+        CHECK(found[0].code==mode.visWord);
+        CHECK(found[0].headerEndSample==9200);
+        detector.reset();
+        std::fill(audio.end()-240,audio.end(),0.f);
+        CHECK(feed(detector,audio,137).empty());
+    }
 }

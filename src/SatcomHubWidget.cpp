@@ -31,19 +31,6 @@
 #include <cmath>
 #include <limits>
 
-namespace {
-
-int autoCapturePriority(const std::string& role) {
-    if (role == "sstv") return 0;
-    if (role == "apt") return 1;
-    if (role == "aprs") return 2;
-    if (role == "data") return 3;
-    if (role == "voice") return 4;
-    return 5;
-}
-
-} // namespace
-
 SatcomHubWidget::SatcomHubWidget(QWidget* parent)
     : QWidget(parent)
 {
@@ -221,7 +208,21 @@ QJsonObject SatcomHubWidget::controlReceiverSessions(const QString& workflow, co
         return QJsonObject{{"ok",true},{"sessions",sessions}};
     };
     if (workflow != "satcom" && workflow != "aircraft") return {{"ok",false},{"status",404},{"error","Unknown workflow"}};
-    if (method == "GET") return report();
+    if (method == "GET") {
+        if (!body.contains("view")) return report();
+        const auto id = body.value("sessionId").toString();
+        for (int i = 0; i < tabs_->count(); ++i) {
+            if (workflow == "satcom") {
+                auto* widget = qobject_cast<SatcomScannerWidget*>(tabs_->widget(i));
+                if (widget && QString::fromStdString(widget->engine().sessionId()) == id)
+                    return {{"ok",true},{"satcom",widget->webStatus()}};
+            } else {
+                auto* widget = qobject_cast<AircraftMapWidget*>(tabs_->widget(i));
+                if (widget && widget->webStatus().value("sessionId").toString() == id) return widget->webStatus();
+            }
+        }
+        return {{"ok",false},{"status",404},{"error","Session is not open"}};
+    }
     if (method != "POST") return {{"ok",false},{"status",405},{"error","GET or POST required"}};
     if (!body.value("sessionId").isString() || body.value("sessionId").toString().isEmpty() ||
         (body.contains("action") && !body.value("action").isString()))
@@ -242,7 +243,14 @@ QJsonObject SatcomHubWidget::controlReceiverSessions(const QString& workflow, co
             if (!result.value("ok").toBool()) return result;
         } else if (auto* sat = qobject_cast<SatcomScannerWidget*>(widget)) {
             auto& engine = sat->engine();
+            if (QStringList{"arm","disarm","autotrack_only","automation","catalogue","tle_refresh"}.contains(action))
+                return sat->webPassControl(body);
             if (action == "stop") sat->stopSession();
+            else if (action == "skip") engine.skip();
+            else if (action == "record") {
+                if (!engine.startRecording()) return {{"ok",false},{"status",409},{"error","Recording is unavailable"}};
+            }
+            else if (action == "record_stop") engine.stopRecording();
             else if (action == "start") {
                 if (QCoreApplication::instance()->property("sdrtown.guiDryRun").toBool())
                     return {{"ok",false},{"status",409},{"error","RF disabled in GUI dry-run"}};
@@ -291,7 +299,20 @@ QJsonObject SatcomHubWidget::controlInmarsatSessions(const QString& method, cons
         }
         return QJsonObject{{"ok", true}, {"sessions", result}};
     };
-    if (method == "GET") return report();
+    if (method == "GET") {
+        if (!body.contains("view")) return report();
+        const auto id = body.value("sessionId").toString();
+        for (int i = 0; i < tabs_->count(); ++i) {
+            auto* widget = qobject_cast<InmarsatWidget*>(tabs_->widget(i));
+            if (!widget || QString::fromStdString(widget->engine().sessionId()) != id) continue;
+            if (body.value("view").toString() == "map")
+                return QJsonDocument::fromJson(QByteArray::fromStdString(widget->webMapReport().dump())).object();
+            if (body.value("view").toString() == "messages")
+                return QJsonDocument::fromJson(QByteArray::fromStdString(widget->engine().messageStore().recentJson(100,0).dump())).object();
+            return {{"ok",false},{"status",400},{"error","Unknown session view"}};
+        }
+        return {{"ok",false},{"status",404},{"error","Session is not open"}};
+    }
     if (method != "POST") return {{"ok",false},{"status",405},{"error","GET or POST required"}};
     if (!body.value("sessionId").isString() || body.value("sessionId").toString().isEmpty())
         return {{"ok",false},{"status",400},{"error","A named sessionId is required"}};
@@ -357,113 +378,10 @@ void SatcomHubWidget::hideEvent(QHideEvent* event) {
     spdlog::info("Satellite workspace hidden; receiver ownership and capture continue unchanged.");
 }
 
-void SatcomHubWidget::stopAutoCapture(bool keepHandledKey) {
-    auto& engine = SatcomScannerEngine::instance();
-    engine.stopRecording();
-    engine.disarmPass();
-    if (autoEngineWasRunning_) engine.skip();
-    else engine.stop();
-
-    // SatcomScannerEngine owns the single authoritative device/session restore.
-    // Do not retune a second time here: the host callback reactivates Listen only
-    // after the original hardware centre and stream state are restored.
-
-    autoCaptureOwned_ = false;
-    autoEngineWasRunning_ = false;
-    autoDeviceIndex_ = static_cast<size_t>(-1);
-    autoPreviousCenterHz_ = 0.0;
-    autoPreviousLeaseOwner_ = 0;
-    if (!keepHandledKey) autoCapturePassKey_.clear();
-}
-
 void SatcomHubWidget::autoCaptureTick() {
-    if (!automaticCaptureAllowed_) return;
-    auto& engine = SatcomScannerEngine::instance();
-    if (!engine.autoCaptureEnabled()) {
-        if (autoCaptureOwned_) stopAutoCapture(false);
-        return;
-    }
-
-    const auto plan = SatPassPlanner::instance().snapshot();
-    const qint64 now = QDateTime::currentSecsSinceEpoch();
-
-    bool handledStillInRange = false;
-    for (const auto& position : plan.positions) {
-        const QString key = QString::fromStdString(position.satId + "/" + position.downlinkId);
-        if (position.tleValid && position.inRange && key == autoCapturePassKey_) {
-            handledStillInRange = true;
-            break;
-        }
-    }
-    if (!handledStillInRange && !plan.armed.armed && !autoCaptureOwned_)
-        autoCapturePassKey_.clear();
-
-    if (plan.armed.armed) {
-        if (!autoCaptureOwned_) return; // never replace a manual arm
-        const auto scan = engine.snapshot();
-        const bool signalPresent = std::isfinite(scan.audioRmsDb) &&
-                                   scan.audioRmsDb >= scan.config.squelchDb;
-        if (signalPresent && scan.state != SatcomScannerState::Recording)
-            engine.startRecording();
-        return;
-    }
-
-    if (autoCaptureOwned_) {
-        stopAutoCapture(true);
-        return;
-    }
-    if (now < autoCaptureRetryAfter_) return;
-
-    const SatCurrentPosition* best = nullptr;
-    double bestScore = -std::numeric_limits<double>::infinity();
-    for (const auto& position : plan.positions) {
-        if (!position.tleValid || !position.inRange || !position.armable ||
-            position.downlinkId.empty() || position.freqHz <= 0.0) {
-            continue;
-        }
-        const QString key = QString::fromStdString(position.satId + "/" + position.downlinkId);
-        if (key == autoCapturePassKey_) continue;
-        const double score = 10000.0 - 1000.0 * autoCapturePriority(position.role) +
-                             position.elevationDeg;
-        if (!best || score > bestScore) {
-            best = &position;
-            bestScore = score;
-        }
-    }
-    if (!best) return;
-
-    auto& manager = DeviceManager::instance();
-    std::string deviceError;
-    const size_t deviceIndex = engine.resolveDeviceIndex(&deviceError);
-    if (deviceIndex == static_cast<size_t>(-1)) {
-        autoCaptureRetryAfter_ = now + 15;
-        return;
-    }
-
-    const auto currentOwner = manager.deviceLeaseOwner(deviceIndex);
-    if (!manager.canUseDevice(deviceIndex, DeviceManager::DeviceLeaseOwner::Satcom)) {
-        autoCaptureRetryAfter_ = now + 10;
-        return;
-    }
-
-    const auto before = engine.snapshot();
-    autoEngineWasRunning_ = before.state != SatcomScannerState::Idle;
-    autoDeviceIndex_ = deviceIndex;
-    autoPreviousCenterHz_ = manager.getCurrentCenterFreq(deviceIndex);
-    autoPreviousLeaseOwner_ = static_cast<int>(currentOwner);
-
-    std::string error;
-    if (!engine.armPass(best->satId, best->downlinkId, true, true, &error)) {
-        autoEngineWasRunning_ = false;
-        autoDeviceIndex_ = static_cast<size_t>(-1);
-        autoPreviousCenterHz_ = 0.0;
-        autoPreviousLeaseOwner_ = 0;
-        autoCaptureRetryAfter_ = now + 15;
-        return;
-    }
-
-    autoCaptureOwned_ = true;
-    autoCapturePassKey_ = QString::fromStdString(best->satId + "/" + best->downlinkId);
+    // DEC-0218: one scheduling policy for default and named sessions. Merely
+    // constructing the hub does not initialize tabs or arm any receiver.
+    if (automaticCaptureAllowed_ && satcom_) satcom_->autoCaptureTick();
 }
 
 void SatcomHubWidget::showSatcomTab() {

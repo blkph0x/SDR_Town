@@ -10478,6 +10478,7 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
             QJsonObject dev;
             dev.insert("index", static_cast<int>(i));
             dev.insert("label", QString::fromStdString(devs[i].label));
+            dev.insert("stableKey", QString::fromStdString(devs[i].stableKey));
             dev.insert("driver", QString::fromStdString(devs[i].driver));
             dev.insert("streaming", mgr.isStreaming(i));
             dev.insert("enabled", devs[i].enabled);
@@ -10740,10 +10741,14 @@ QJsonObject MainWindow::sdrTownControlStatusSnapshot()
         }
         QJsonArray sstvSessions;
         for (auto* window : findChildren<SstvWindow*>()) {
+            QJsonArray sessionImages;
+            for (const auto& path : window->imagePaths())
+                sessionImages.append(QJsonObject{{"path",path},{"name",QFileInfo(path).fileName()}});
             sstvSessions.append(QJsonObject{{"sessionId", window->sessionId()},
                 {"visible", window->isVisible()}, {"busy", window->busy()},
                 {"deviceKey", window->selectedDeviceKey()}, {"frequencyHz", window->selectedFrequencyHz()},
                 {"rfMode", window->selectedRfMode()}, {"status", window->statusMessage()},
+                {"mode",window->selectedMode()},{"images",sessionImages},
                 {"outputDirectory", window->resultDirectory()}});
         }
         sstv.insert("sessions", sstvSessions);
@@ -11279,6 +11284,9 @@ SstvWindow* MainWindow::ensureSstvWindow(const QString& sessionId)
     // DEC-0185: bounded UI sessions, not a hardware/decoder channel limit.
     if (findChildren<SstvWindow*>().size() >= 32) return nullptr;
     window = new SstvWindow(decodeSstvImageFile, this, sessionId);
+    connect(window,&SstvWindow::diagnosticEvent,this,[](const QString& type,const QJsonObject& payload) {
+        remoteDiagnosticsSubmit(type,type=="sstv.failed"?"warn":"info",payload);
+    });
     if (!sessionId.isEmpty()) window->setAttribute(Qt::WA_DeleteOnClose);
     auto* picker = new ReceiverSourcePicker([this] { std::lock_guard lock(receiversMutex); return receivers; }, window);
     static_cast<QVBoxLayout*>(window->layout())->insertWidget(0, picker);
@@ -11413,66 +11421,16 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             return applySdrTownControlSdrplay(body);
         }
         if (path == "/v1/satcom/status" && method == "GET") {
-            const auto snap = SatcomScannerEngine::instance().snapshot();
-            QJsonObject sat;
-            sat.insert("state", QString::fromStdString(SatcomScannerEngine::instance().stateName()));
-            sat.insert("currentHz", snap.currentHz);
-            sat.insert("currentMHz", snap.currentHz / 1e6);
-            sat.insert("lockHz", snap.lockHz);
-            sat.insert("lockMHz", snap.lockHz / 1e6);
-            sat.insert("recordHz", snap.recordHz);
-            sat.insert("audioRmsDb", snap.audioRmsDb);
-            sat.insert("deviceLabel", QString::fromStdString(snap.deviceLabel));
-            sat.insert("deviceConnected", snap.deviceConnected);
-            sat.insert("lastStatus", QString::fromStdString(snap.lastStatus));
-            sat.insert("aptPreviewPath", QString::fromStdString(snap.aptPreviewPath));
-            sat.insert("logWritten", static_cast<double>(snap.logWritten));
-            sat.insert("logDropped", static_cast<double>(snap.logDropped));
-            QJsonObject cfg;
-            cfg.insert("lowHz", snap.config.lowHz);
-            cfg.insert("highHz", snap.config.highHz);
-            cfg.insert("lowMHz", snap.config.lowHz / 1e6);
-            cfg.insert("highMHz", snap.config.highHz / 1e6);
-            cfg.insert("stepHz", snap.config.stepHz);
-            cfg.insert("dwellMs", snap.config.dwellMs);
-            cfg.insert("bandwidthHz", snap.config.bandwidthHz);
-            cfg.insert("mode", QString::fromStdString(snap.config.mode));
-            cfg.insert("squelchDb", snap.config.squelchDb);
-            sat.insert("config", cfg);
-            QJsonArray decodes;
-            for (const auto& line : snap.recentDecodes)
-                decodes.append(QString::fromStdString(line));
-            sat.insert("recentDecodes", decodes);
-            QJsonArray spectrum;
-            for (float v : snap.spectrumDb) spectrum.append(v);
-            sat.insert("spectrumDb", spectrum);
-            sat.insert("spectrumCenterHz", snap.spectrumCenterHz);
-            sat.insert("spectrumRateHz", snap.spectrumRateHz);
-            QJsonArray presets;
-            for (const auto& p : snap.config.presets) {
-                QJsonObject pj;
-                pj.insert("name", QString::fromStdString(p.name));
-                pj.insert("lowMHz", p.lowHz / 1e6);
-                pj.insert("highMHz", p.highHz / 1e6);
-                pj.insert("mode", QString::fromStdString(p.mode));
-                presets.append(pj);
-            }
-            sat.insert("presets", presets);
-            sat.insert("passArmed", snap.passArmed);
-            sat.insert("autoTrack", snap.autoTrack);
-            sat.insert("dopplerHz", snap.dopplerHz);
-            sat.insert("tunedHz", snap.tunedHz);
-            sat.insert("tunedMHz", snap.tunedHz / 1e6);
-            sat.insert("armedRole", QString::fromStdString(snap.armedRole));
-            // Pass planner for FUBAR: no home lat/lon (set only in SDR Town GUI/CLI).
-            const QJsonDocument planDoc = QJsonDocument::fromJson(
-                QByteArray::fromStdString(SatPassPlanner::instance().publicStatusJson().dump()));
-            if (planDoc.isObject()) {
-                const QJsonObject plan = planDoc.object();
-                for (auto it = plan.begin(); it != plan.end(); ++it)
-                    sat.insert(it.key(), it.value());
-            }
-            return {{"ok", true}, {"satcom", sat}};
+            auto* hub = findChild<SatcomHubWidget*>(QStringLiteral("satcomHub"));
+            if (!hub) return {{"ok",false},{"status",503},{"error","Satellite workspace unavailable"}};
+            hub->prepareRemoteWorkspace();
+            return {{"ok",true},{"satcom",hub->satcom()->webStatus()}};
+        }
+        if (path == "/v1/satcom/pass-control" && method == "POST") {
+            auto* hub = findChild<SatcomHubWidget*>(QStringLiteral("satcomHub"));
+            if (!hub) return {{"ok",false},{"status",503},{"error","Satellite workspace unavailable"}};
+            hub->prepareRemoteWorkspace();
+            return hub->satcom()->webPassControl(body);
         }
         if (path == "/v1/satcom/observer" && method == "GET") {
             return {{"ok", true}, {"observer", QJsonDocument::fromJson(
@@ -11558,7 +11516,7 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             auto& eng = SatcomScannerEngine::instance();
             const QString action = body.value("action").toString().trimmed().toLower();
             if (body.contains("lowMHz") || body.contains("highMHz") || body.contains("mode") ||
-                body.contains("squelchDb") || body.contains("bandwidthKHz") || body.contains("stepKHz") ||
+                body.contains("squelchDb") || body.contains("bandwidthKHz") || body.contains("stepKHz") || body.contains("deviceStableKey") ||
                 action == "set") {
                 auto cfg = eng.config();
                 if (body.contains("lowMHz")) cfg.lowHz = body.value("lowMHz").toDouble(cfg.lowHz / 1e6) * 1e6;
@@ -11568,6 +11526,11 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
                 if (body.contains("mode")) cfg.mode = body.value("mode").toString().toStdString();
                 if (body.contains("squelchDb")) cfg.squelchDb = body.value("squelchDb").toDouble(cfg.squelchDb);
                 if (body.contains("dwellMs")) cfg.dwellMs = body.value("dwellMs").toInt(cfg.dwellMs);
+                if (body.contains("deviceStableKey")) {
+                    if (!body.value("deviceStableKey").isString() || eng.snapshot().state != SatcomScannerState::Idle)
+                        return {{"ok",false},{"status",409},{"error","Stop the scanner before changing radio"}};
+                    cfg.deviceStableKey = body.value("deviceStableKey").toString().toStdString();
+                }
                 eng.setConfig(cfg);
             }
             if (body.contains("preset"))
@@ -11685,6 +11648,14 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
         }
         if (path == "/v1/inmarsat/control" && method == "POST") {
             const QString action = body.value("action").toString().toLower();
+            if (!QStringList{"start","stop","prepare","watch","set",""}.contains(action))
+                return {{"ok",false},{"status",400},{"error","Unknown Inmarsat action"}};
+            if (body.contains("baud") && (!body.value("baud").isDouble() ||
+                !QList<double>{600,1200,8400,10500}.contains(body.value("baud").toDouble())))
+                return {{"ok",false},{"status",400},{"error","Unsupported bit rate"}};
+            if (body.contains("mode") && (!body.value("mode").isString() ||
+                !QStringList{"aero_msk","aero_oqpsk","aero_voice","aero_burst","egc"}.contains(body.value("mode").toString())))
+                return {{"ok",false},{"status",400},{"error","Unsupported Inmarsat mode"}};
             // SATCOM_HOST_INTEGRATION_BEGIN
             // DEC-0127: same validated, block-boundary watch edit as the GUI.
             if(action=="watch") {
@@ -11701,16 +11672,27 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             }
             // SATCOM_HOST_INTEGRATION_END
             auto cfg = InmarsatEngine::instance().config();
+            if (body.contains("deviceStableKey") &&
+                (!body.value("deviceStableKey").isString() || InmarsatEngine::instance().snapshot().state != InmarsatEngineState::Idle))
+                return {{"ok",false},{"status",409},{"error","Stop Inmarsat before changing radio"}};
             if (body.contains("bandPlanId"))
-                InmarsatEngine::instance().selectBandPlan(body.value("bandPlanId").toString().toStdString());
+                if (!InmarsatEngine::instance().selectBandPlan(body.value("bandPlanId").toString().toStdString()))
+                    return {{"ok",false},{"status",400},{"error","Invalid Inmarsat band plan"}};
             if (body.contains("channelHz") || body.contains("channelMHz")) {
                 double hz = body.value("channelHz").toDouble(0.0);
                 if (hz <= 0.0 && body.contains("channelMHz"))
                     hz = body.value("channelMHz").toDouble(0.0) * 1e6;
                 const QString mode = body.value("mode").toString();
                 const int baud = body.value("baud").toInt(0);
-                if (hz > 0.0)
-                    InmarsatEngine::instance().selectChannel(hz, mode.toStdString(), baud);
+                if (!(hz > 0.0) || !InmarsatEngine::instance().selectChannel(hz, mode.toStdString(), baud))
+                    return {{"ok",false},{"status",400},{"error","Invalid Inmarsat channel or rate"}};
+            }
+            if (body.contains("deviceStableKey")) {
+                if (!body.value("deviceStableKey").isString() || InmarsatEngine::instance().snapshot().state != InmarsatEngineState::Idle)
+                    return {{"ok",false},{"status",409},{"error","Stop Inmarsat before changing radio"}};
+                cfg = InmarsatEngine::instance().config();
+                cfg.deviceStableKey = body.value("deviceStableKey").toString().toStdString();
+                if (!InmarsatEngine::instance().setConfig(cfg)) return {{"ok",false},{"status",400},{"error","Invalid radio configuration"}};
             }
             if (body.contains("voiceFollow") || body.contains("recordVoice") || body.contains("deviceIndex")) {
                 cfg = InmarsatEngine::instance().config();
@@ -11793,9 +11775,8 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             }
             QString output = body.value("outputDirectory").toString().trimmed();
             if (output.isEmpty()) {
-                const QString root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-                const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz") + "-" + QUuid::createUuid().toString(QUuid::WithoutBraces);
-                output = QDir(root).filePath(QStringLiteral("sstv/sstv-%1").arg(stamp));
+                output = window->newOutputDirectory();
+                if (output.isEmpty()) return {{"ok",false},{"status",400},{"error","Cannot create SSTV save folder"}};
             }
             QDir().mkpath(QFileInfo(output).absolutePath());
             window->show();

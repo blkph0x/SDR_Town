@@ -15,8 +15,8 @@ class InmarsatWidget;
 class AircraftMapWidget;
 
 // Single SDR Town dock panel: Satcom | Inmarsat | Aircraft (no floating windows).
-// Satellite auto-capture is owned here so an already-armed pass stays active
-// while the tab/dock is hidden (DEC-0185). DEC-0205: it does not start from a
+// The background timer calls the shared default/named scheduling policy so an
+// armed pass stays active while hidden (DEC-0218). It does not start from a
 // saved autoCapture flag; the operator must check Auto capture this session.
 class SatcomHubWidget : public QWidget {
     Q_OBJECT
@@ -50,7 +50,6 @@ private:
     void ensureTabs();
     void saveInmarsatSessions();
     void saveReceiverSessions();
-    void stopAutoCapture(bool keepHandledKey);
 
     QTabWidget* tabs_ = nullptr;
     QTimer* autoCaptureTimer_ = nullptr;
@@ -59,11 +58,4 @@ private:
     InmarsatWidget* inmarsat_ = nullptr;
     AircraftMapWidget* aircraft_ = nullptr;
 
-    QString autoCapturePassKey_;
-    qint64 autoCaptureRetryAfter_ = 0;
-    bool autoCaptureOwned_ = false;
-    bool autoEngineWasRunning_ = false;
-    size_t autoDeviceIndex_ = static_cast<size_t>(-1);
-    double autoPreviousCenterHz_ = 0.0;
-    int autoPreviousLeaseOwner_ = 0;
 };

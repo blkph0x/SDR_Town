@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QElapsedTimer>
 #include <stdexcept>
+#include <spdlog/spdlog.h>
 
 namespace {void require(bool ok,const char* message){if(!ok) throw std::runtime_error(message);}}
 nlohmann::json decodeSstvDedicatedRadio(const QString& key, double frequencyHz,
@@ -20,6 +21,8 @@ nlohmann::json decodeSstvDedicatedRadio(const QString& key, double frequencyHz,
         [&] { return (cancel && cancel()) || (finish && finish()); });
     auto receiver = std::make_shared<Receiver>();
     receiver->deviceIndex = radio.deviceIndex(); receiver->freqHz = frequencyHz; receiver->active = true;
+    // Listen convention only; Auto still requires a valid VIS to select RF.
+    receiver->mode = frequencyHz < 30e6 ? DemodMode::USB : DemodMode::NFM;
     return decodeSstvRfLive(receiver, output, imageMode, rfMode, finish,
         [&] { return !radio.valid() || (cancel && cancel()); }, preview, routeStatus, monitor);
 }
@@ -29,6 +32,7 @@ nlohmann::json decodeSstvRfLive(const std::shared_ptr<Receiver>& receiver,
     const SstvPreview& preview,const std::function<void(const QString&)>& routeStatus,
     const SstvAudioMonitor& monitor) {
     require(bool(receiver),"Start the main receiver before receiving SSTV");
+    require(imageMode!="fax480" || rfMode!="auto","FAX480 has no VIS header; select USB, LSB, NFM or AM for RF demodulation");
     require(!QFileInfo::exists(output) && QDir(QFileInfo(output).absolutePath()).exists(),"Choose a new SSTV output folder under an existing directory");
     size_t device; double target;
     {std::lock_guard lock(receiver->stateMutex);device=receiver->deviceIndex;target=receiver->freqHz;}
@@ -56,8 +60,20 @@ nlohmann::json decodeSstvRfLive(const std::shared_ptr<Receiver>& receiver,
     manager.setReceiverCursorToLiveEdge(device,cursor);
     QString detected=QString::fromUtf8(router.selectedMode().data(),qsizetype(router.selectedMode().size()));
     if(routeStatus) routeStatus(detected);
-    const auto play=[&](const SstvInputEvent& audio) {
-        if(!monitor || audio.count==0) return;
+    QString listenMode=rfMode;
+    if(rfMode=="auto") {
+        std::lock_guard lock(receiver->stateMutex);
+        listenMode=receiver->mode==DemodMode::LSB?"LSB":
+            receiver->mode==DemodMode::USB?"USB":"NFM";
+    }
+    uint64_t monitorSamples=0;
+    uint64_t iqSamples=0,iqBlocks=0,decoderSamples=0,iqGaps=0;
+    std::optional<uint64_t> receivedEpoch;
+    QElapsedTimer healthLog; healthLog.start();
+    QElapsedTimer monitorLog; monitorLog.start();
+    QString lastListenMode=listenMode;
+    const auto play=[&](std::span<const float> audio,std::string_view mode) {
+        if(!monitor || audio.empty()) return;
         // Dedicated SSTV owns the radio, so the main speaker path stays quiet.
         // A P25 control mute still silences NFM/WFM on a shared receiver; play
         // the SSTV demod then. USB/LSB stay on the main path, so do not play twice.
@@ -67,21 +83,49 @@ nlohmann::json decodeSstvRfLive(const std::shared_ptr<Receiver>& receiver,
             playMonitor=receiver->p25ControlChannelMute &&
                 (receiver->mode==DemodMode::NFM || receiver->mode==DemodMode::WFM);
         }
-        if(playMonitor) monitor(audio.samples.data(),audio.count,audio.sampleRate);
+        if(playMonitor) {
+            monitor(audio.data(),audio.size(),48000);
+            monitorSamples+=audio.size();
+        }
+        const auto current=QString::fromUtf8(mode.data(),qsizetype(mode.size()));
+        if(current!=lastListenMode || monitorLog.elapsed()>=5000) {
+            spdlog::info("SSTV listen: dev={} mode={} rfSelection={} dedicated={} monitorSamples={} rateHz=48000",
+                device,mode,router.selectedMode(),playMonitor,monitorSamples);
+            lastListenMode=current; monitorLog.restart();
+        }
     };
+    router.setMonitor(listenMode.toStdString(),play);
+    spdlog::info("SSTV listen started: dev={} frequencyHz={} requested={} provisional={} (Auto still requires VIS)",
+        device,target,rfMode.toStdString(),listenMode.toStdString());
     const auto result=decodeSstvStream([&]()->SstvStreamItem {
         validate();
-        if(auto audio=router.pop()) {play(*audio); return *audio;}
+        if(auto audio=router.pop()) {decoderSamples+=audio->count;return *audio;}
         if(finish && finish()) return SstvStreamEnd{};
         auto iq=manager.getNewIQWindowForReceiver(device,cursor,router.maxInputSamples());
         validate(); // A concurrent retune must not relabel old IQ with a new center.
-        router.process(iq.samples,iq.startAbsolute,iq.streamEpoch,iq.cursorDiscontinuity);
+        // DEC-0217: DeviceManager reports hardware loss by streamEpoch even
+        // when cursorDiscontinuity is false. Retunes already fail validate().
+        const bool epochChanged=!iq.samples.empty() && receivedEpoch && *receivedEpoch!=iq.streamEpoch;
+        if(iq.cursorDiscontinuity || epochChanged) {
+            ++iqGaps;
+            spdlog::warn("SSTV RF IQ gap: dev={} first={} epoch={}; reset acquisition",device,iq.startAbsolute,iq.streamEpoch);
+            router.resetForGap();
+        }
+        router.process(iq.samples,iq.startAbsolute,iq.streamEpoch);
+        if(!iq.samples.empty()) receivedEpoch=iq.streamEpoch;
+        iqSamples+=iq.samples.size(); if(!iq.samples.empty())++iqBlocks;
+        if(healthLog.elapsed()>=5000) {
+            spdlog::info("SSTV RF health: dev={} iqBlocks={} iqSamples={} decoderSamples={} gaps={} route={} inputRate={}",
+                device,iqBlocks,iqSamples,decoderSamples,iqGaps,router.selectedMode(),rate);
+            healthLog.restart();
+        }
         const auto now=QString::fromUtf8(router.selectedMode().data(),qsizetype(router.selectedMode().size()));
         if(now!=detected) {detected=now;if(routeStatus) routeStatus(now);}
-        if(auto audio=router.pop()) {play(*audio); return *audio;}
+        if(auto audio=router.pop()) {decoderSamples+=audio->count;return *audio;}
         return SstvStreamIdle{};
     },imageMode,cancel,preview,output);
     require(!cancel || !cancel(),"SSTV live session cancelled");
     return saveSstvLiveResult(result,output,{{"rfModeRequested",rfMode.toStdString()},
-        {"rfModeSelected",detected.toStdString()},{"rfAutoEvidence",rfMode=="auto" && detected!="searching"?"classic-VIS-parity":"manual-or-no-lock"}});
+        {"iqSamples",iqSamples},{"iqBlocks",iqBlocks},{"iqGaps",iqGaps},
+        {"rfModeSelected",detected.toStdString()},{"rfAutoEvidence",rfMode=="auto" && detected!="searching"?"framed-classic-or-extended-VIS":"manual-or-no-lock"}});
 }

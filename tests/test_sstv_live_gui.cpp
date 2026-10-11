@@ -168,6 +168,25 @@ TEST_CASE("SSTV GUI separates RF route from image format", "[sstv-live-gui]") {
     if(!screenshot.isEmpty()) CHECK(window.grab().save(screenshot));
 }
 
+TEST_CASE("SSTV lifecycle diagnostics contain outcomes but not private recording paths", "[sstv-live-gui]") {
+    SstvWindow window([](const auto&,const auto&,const auto&,const auto&,const auto&)->nlohmann::json {
+        throw std::runtime_error("cannot open C:/private/received-image.wav");
+    });
+    std::vector<std::pair<QString,QJsonObject>> events;
+    QObject::connect(&window,&SstvWindow::diagnosticEvent,&window,[&](const auto& type,const auto& payload){events.emplace_back(type,payload);});
+    REQUIRE(window.startDecode("C:/private/received-image.wav","C:/private/output","auto"));
+    REQUIRE(wait(window)); REQUIRE(events.size()==2);
+    CHECK(events[0].first=="sstv.started"); CHECK(events[1].first=="sstv.failed");
+    CHECK(events[1].second.value("stage")=="decode-or-save");
+    CHECK(events[0].second.value("receiveSession")==events[1].second.value("receiveSession"));
+    for(const auto& [type,payload]:events) {
+        for(auto it=payload.begin();it!=payload.end();++it) {
+            CHECK_FALSE(it.value().toString().contains("private"));
+            CHECK_FALSE(it.key().contains("path",Qt::CaseInsensitive));
+        }
+    }
+}
+
 TEST_CASE("SSTV save root is remembered and sessions never reuse directories", "[sstv-live-gui]") {
     QTemporaryDir directory;REQUIRE(directory.isValid());
     QSettings settings;const auto previous=settings.value("sstv/saveFolder");

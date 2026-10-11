@@ -1,5 +1,17 @@
 # SDR Town
 
+0.2.137 pairs with FUBAR 1.1.48: selected-radio and session-addressed
+satellite, Inmarsat, aircraft and SSTV controls, native downlink profiles,
+safe decoded-image access and independent maps/messages. See the
+[paired release notes](docs/RELEASE_0.2.137.md). The accepted P25 listening
+build is preserved; full field acceptance of satellite reception stays open.
+
+Satellite SSTV profiles, digital Doppler,
+selected-radio pass automation and persistent image folders are implemented
+under DEC-0218. Use the [satellite SSTV guide](docs/SATELLITE_AND_SSTV.md).
+Profiles describe possible downlinks, not always-on transmitters; confirm the
+operator's activation schedule. FUNcube BPSK telemetry is not analog SSTV.
+
 0.2.136 plays SSTV tones on the selected outputs while you wait for a
 picture. A VB-Audio cable stays available for other SSTV programs, and
 P25 control mute no longer silences USB, LSB, AM, or CW. See
@@ -347,7 +359,7 @@ and the Aero-specific codec remain unfinished. P25 is unchanged. See
 ### 0.2.90 SSTV RF selection
 
 SSTV Images now separates **RF demodulation** from **Image format**. RF Auto
-detects USB/LSB/NFM using a validated classic VIS header; manual USB/LSB/NFM/AM
+detects USB/LSB/NFM using a validated classic or supported extended VIS header; manual USB/LSB/NFM/AM
 routes remain available. The SSTV sideband passband now preserves image tones,
 including satellite sideband reception. No P25 audio changes. See the
 [tester steps and limitations](docs/RELEASE_0.2.90.md) and [SSTV guide](docs/SSTV.md).
@@ -458,7 +470,7 @@ SSTV (**Tools > SSTV Images**, CLI `sstv decode` / `sstv inspect`):
   analogue finds no picture. This is a private STWN prototype, file-only,
   not an interoperable EasyPal/HamDRM implementation.
 - **Live RF (development):** independent USB/LSB/NFM Auto acquisition using a
-  validated classic VIS header, with manual USB/LSB/NFM/AM and separate image-format
+  validated classic/extended VIS header, with manual USB/LSB/NFM/AM and separate image-format
   selection. Receive / Finish and save / Cancel. Does not retune the radio or alter
   speaker/P25 processing. Ambiguous or missing headers require manual RF selection.
   Known-transmission hardware acceptance is still open.

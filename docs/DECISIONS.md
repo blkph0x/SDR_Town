@@ -1,5 +1,180 @@
 # Decisions
 
+## DEC-0219 - Paired companion workflow and public-boundary repair (2026-10-11)
+
+The user accepts current P25 listening and requests full Latest releases of
+Town and FUBAR. This lifts the publication hold, not the outstanding CC/tail
+issues. Preserve the accepted DSP; qualify the pending fixes already measured.
+
+Inspection confirms FUBAR pins Town 0.2.125, hardcodes ISS 145.800, displays
+default Inmarsat messages/maps for named sessions, offers file-only SSTV modes
+as live, and accepts any image under USERPROFILE. Replace divergent workflow
+views with session-addressed native controller data, capability-based selectors,
+and an explicit public bridge boundary. No arbitrary filesystem access, observer
+coordinates, diagnostics consent, TX or physical rotor controls on the website.
+Use pinned MIT nlohmann/json in FUBAR for structured validation/redaction (the
+existing ad-hoc scalar parser cannot validate nested requests). Keep its license.
+Test negative privacy cases, native session isolation, real DLL/HTTP integration,
+browser actions/layout and published package provenance. Retain experimental
+updater channel until field acceptance; Latest must include signed update assets.
+
+Full paired release packaging: CI already qualifies the exact staged runtime and
+portable ZIP. Build NSIS and standalone control DLL from that same stage, publish
+their hashes, then verify public bytes before locally signing the update manifest.
+Do not recompile a different local executable for Latest, upload signing keys,
+overwrite published assets, or promote a portable-only release to Latest.
+
+
+## DEC-0218 - Satellite SSTV profiles and fail-closed pass automation (2026-10-11)
+
+Reuse SatPassPlanner/SGP4, SatcomDoppler and the engine's continuous SSTV
+worker, not a second live receiver. Code inspection found ISS-only shortcut,
+an unused downlink selector, force=true automatic takeover, nominal-frequency
+fallback on missing TLE, fabricated 900-second passes and named-planner
+selection serialization which did not round-trip. These are reproducible
+policy/data defects, not evidence of an on-air decoder failure.
+
+ARISS upcoming-sstv-events.html currently lists 437.550 MHz Robot36 for the
+Oct 2-6 event (now ended), distinct from the traditional 145.800 MHz PD120.
+FUNcube's operator handbook specifies 145.935 MHz 1200 bps BPSK telemetry,
+not SSTV. Use sourced, dated downlink profiles, explicit custom profiles and
+operator schedule confirmation; orbital visibility is not transmitter activity.
+Keep analog image Auto available for all supported modes. SSTV bypasses speech
+LPF/squelch; use persistent digital Doppler, no periodic hardware retunes.
+
+Automation must not force another workflow's lease. Persist profiles, image
+mode, bandwidth and save folder, but keep arming off after restart (DEC-0205).
+Reject missing/invalid orbital data and stale epoch (>7 days, an explicit
+conservative product policy, not a promise of orbital accuracy); permit up to
+one day of future epoch for predicted elements. Validate observer explicitly.
+End at the configured elevation-mask LOS, including with tracking disabled;
+do not invent a pass when none can be predicted. Test deterministic time,
+profile persistence, negative ownership and real decoder input with Doppler.
+No P25 or station frontend changes. Existing P25 publication hold remains.
+
+Final GUI trace found a duplicate default-session scheduler in SatcomHubWidget
+still using force=true. Delegate its background tick to the same checked widget
+controller used by named sessions; remove the divergent policy/state. Show the
+downlink MHz first and scroll the existing controls on shorter displays.
+
+## DEC-0217 - Test SSTV acquisition before changing live gates (2026-10-11)
+
+RF Auto waits on SstvVisDetector's exact 910 ms classic header before the
+streaming backend receives anything. That detector demands every 10 ms of
+both leaders; the pinned backend acquire.rs accepts a shorter leader and
+supports 16-bit VIS. MP/MR/ML have no 7-bit table entry and cannot pass the
+current RF gate. A real IQ discontinuity currently terminates reception.
+Remote stored events (2026-10-10 evening through 2026-10-11 morning) contain
+SSTV UI intents on 0.2.135 but no decoder lifecycle, so they cannot establish
+the specific overnight failure. Public admin API is deliberately unavailable.
+
+First reproduce impaired classic headers and extended headers through the
+production router. Retain parity/framing checks and bounded sample history;
+do not invent an RF winner or weaken P25/security. Reuse the existing pinned
+SSTV encoder to exercise every analog mode, label same-library round trips
+as such, and retain independent recordings as an additional oracle. Include
+real-time paced virtual Soapy and GUI tests, not just file helper selftests.
+Any recovery must discard an interrupted image, never join samples across
+an IQ gap. Instrument lifecycle and sample/header counters without uploading
+images/audio/paths; existing remote consent and budgets remain authoritative.
+
+Measured live GUI overflow test (oct11_sstv_gap_gui): Soapy -4 at 4 seconds
+increments epoch 3->4 but does not set cursorDiscontinuity. DeviceManager's
+getNewIQWindowForReceiver explicitly delegates epoch resets to consumers.
+SSTV missed this contract and aborts with "IQ source/position changed". Treat
+an epoch change on a nonempty block as loss, after the existing retune/device
+validation, without modifying the shared DeviceManager or P25.
+
+## DEC-0216 - Unbound Phase 2 bursts cannot carry a slot's security (2026-10-11)
+
+DEC-0215 per-burst provenance exposes a concrete cross-slot authorization
+path in replay 013124 / 100800..112800 ms: selected slot 1 is unknown;
+slot 0 decodes clear ESS. A fallback S-ISCH burst has no slot or XOR mask,
+but `decodePhase2BurstAt` receives slot 0's session. The audio evidence
+loop treats that unbound sticky ESS as belonging to either selected slot,
+and promotes the call latch to clear. This is not evidence that the selected
+call is encrypted; it IS an unauthorized clear-state promotion.
+
+Match SDRTrunk's per-timeslot P25P2AudioModule ownership: an unbound raw
+burst may report synchronization/structure, but cannot borrow or mutate a
+slot session. Require a decoded slot before counting target security or
+target voice evidence, just as the AMBE feed already requires it. Keep
+valid labelled same-slot retained state, clear/encrypted policy, symbol
+math, timers and buffering unchanged. Prove the failing synthetic fallback
+case, replay the suspect call, two encrypted calls and known clear calls;
+no claim that suppressing unauthorized audio fixes missing valid voice.
+
+## DEC-0215 - Separate SSTV listening from VIS acquisition; audit P25 security (2026-10-11)
+
+Capture `20261011_013124_038` has ten follows. Two TG12068 visits to
+420.100 MHz prove encrypted and produce zero PCM; the 417.550 MHz visit
+emits with voice-ESS clear and no CRC-valid MAC. This does not prove an
+encrypted emit or a correct current-call identity: preserve and replay
+the evidence before changing any P25 security or slot gate.
+
+Confirmed SSTV defect: `SstvRfRouter::pop` returns nothing in Auto until
+VIS selects a candidate, and the live speaker callback is downstream of
+that pop. Add a separate fresh-sample monitor callback, using an explicitly
+labelled provisional listen mode while searching, then the VIS winner.
+Never send acquisition pre-roll to speakers or change decoder input, VIS
+validation, sample ordering, RF ownership or P25 audio. Verify no-header
+audio, mode transition, independent image pre-roll and discontinuity rejection.
+
+## DEC-0214 - Separate CC acquisition, speech production and tail loss (2026-10-11)
+
+Audit `20261011_010824_796` without changing the improved DEC-0213 binary.
+Same-IQ replay confirms the gain improvement but also proves an earlier
+recoverable TG30302 update missed live and 280 ms of PCM stranded below
+startup prime across three follows. Latest-only CC windows omit 50.128 s
+while tuned to CC, separately from 85.355 s of single-tuner traffic dwell.
+Track these as ISS-0094/95/96 rather than another generic audio regression.
+Do not loosen slot/encryption/FEC gates, reset the vocoder, lower prime or
+shorten hold timers based on aggregate duplicate/underrun counters. Next
+repairs need exact real-time-window/offset replay and normal-end short-tail
+accounting with stale/encrypted negative cases. Current audit is evidence,
+not a new application release or full continuous-audio acceptance.
+
+## DEC-0213 - Measure amplitude-dependent P25 erasures before changing gates (2026-10-11)
+
+Capture `20261011_003958_372` is gapless. TG10120/421.850 MHz slot 0
+emits, then loses frames to `hard-soft-quality-low`; duplicate/context
+counters alone do not prove a speaker drop. Replay 209000..214000 ms
+recovers 242 frames / 4.84 seconds; 218000..223000 ms loses 24 frames
+to input quality with the realtime profile. These are replay measurements,
+not a claim of live intelligibility. Fixed symbol magnitude cutoffs remain
+despite DEC-0212 phase normalization. Add an amplitude-scaling regression
+and passive invalid-symbol/magnitude counters to establish whether a
+finite quiet signal is being erased. Do not relax quality/encryption/slot
+gates or retime the speaker to hide the loss.
+
+Confirmed: replaying the same 218000..223000 ms IQ multiplied by eight
+(no SNR change or resampling) recovers 188 vs 134 accepted frames and
+removes all 24 input-quality rejections. Invalid symbol counts rise from
+195/4319 to 1270/2926 in the unscaled replay. The missing gain stage lets
+finite low-amplitude differential symbols hit the fixed `norm(z)<1e-10`
+cutoff and become hard dibit zero/LLR zero. Reference:
+`_codex_refs/sdrtrunk/.../p25/phase2/P25P2DecoderHDQPSK.java::receive`
+filters then calls `mAGC.process` before demodulation;
+`dsp/gain/complex/ComplexGainControl.java::process` normalizes each block
+to a unity peak with a minimum envelope of 0.0001. Add bounded block gain
+normalization after our CQPSK baseband filtering, preserving relative
+amplitudes/phase, then compare original (unscaled) IQ. No radio gain,
+quality threshold, timing loop, retune, or codec changes.
+
+## DEC-0212 - Score Phase 2 soft bits on phase, not envelope (2026-10-11)
+
+Capture `20261010_234447` locked a clear Phase 2 call and concealed every
+voice frame. The dibit slicer is already phase-only, and the recorded
+421.850 MHz slice has sync error 0 with the carrier removed. The soft
+score used Euclidean distance, so normal H-DQPSK loudness changes looked
+like symbol errors. Every symbol fell under the low-confidence line and
+the existing quality gate concealed the AMBE frame. Seeding the Costas
+loop from the baseband mean made that eye worse and is not used.
+
+Decision: normalize each CQPSK symbol to the block amplitude before the
+soft distance. Hard dibits stay phase decisions. Do not lower the AMBE
+quality gate. Do not publish until a live clear call emits speech.
+
 ## DEC-0211 - SSTV listen stays audible (2026-10-10)
 
 A dedicated SSTV radio demodulates for the image decoder and does not

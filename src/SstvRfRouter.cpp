@@ -11,7 +11,7 @@
 
 namespace {
 constexpr uint64_t rate = 48000;
-constexpr uint64_t headerSamples = rate * 910 / 1000; // Classic VIS, DEC-0091.
+constexpr uint64_t headerSamples = rate * 1150 / 1000; // Extended VIS pre-roll, DEC-0217.
 constexpr size_t acquisitionLimit = 2 * headerSamples + rate / 10; // DEC-0117.
 constexpr size_t historyLimit = acquisitionLimit + rate / 10; // Tail of the selecting IQ block.
 constexpr std::array<std::string_view,4> names{"USB","LSB","NFM","AM"};
@@ -36,6 +36,10 @@ struct SstvRfRouter::State {
     bool identity = false;
     int selected = -1;
     bool automatic;
+    uint64_t generation = 1;
+    bool pendingGap = false;
+    int monitorCandidate = 0;
+    Monitor monitor;
 };
 
 bool SstvRfRouter::supports(std::string_view mode) {
@@ -54,6 +58,24 @@ SstvRfRouter::SstvRfRouter(double sr,double center,double target,std::string_vie
     if(!s.automatic) s.selected=int(std::find(names.begin(),names.end(),mode)-names.begin());
 }
 SstvRfRouter::~SstvRfRouter()=default;
+void SstvRfRouter::setMonitor(std::string_view mode, Monitor monitor) {
+    const auto found=std::find(names.begin(),names.end(),mode);
+    require(found!=names.end(),"Choose an explicit SSTV listen mode");
+    require(!state_->automatic || mode!="AM","Auto SSTV listens in USB, LSB or NFM");
+    state_->monitorCandidate=int(found-names.begin());
+    state_->monitor=std::move(monitor);
+}
+void SstvRfRouter::resetForGap() {
+    // Never bridge phase, resampler, VIS or image history across lost IQ.
+    auto fresh=std::make_unique<State>();
+    const auto& old=*state_;
+    require(old.generation<std::numeric_limits<uint64_t>::max(),"SSTV generation overflow");
+    fresh->sr=old.sr; fresh->center=old.center; fresh->target=old.target; fresh->source=old.source;
+    fresh->automatic=old.automatic; fresh->selected=old.automatic?-1:old.selected;
+    fresh->monitorCandidate=old.monitorCandidate; fresh->monitor=std::move(state_->monitor);
+    fresh->generation=old.generation+1; fresh->pendingGap=true;
+    state_=std::move(fresh);
+}
 size_t SstvRfRouter::maxInputSamples() const {
     // 100 ms of IQ or the existing device-reader block cap, whichever is smaller.
     return std::min(size_t{65536},size_t(state_->sr/10));
@@ -91,6 +113,10 @@ void SstvRfRouter::process(const std::vector<std::complex<float>>& iq,uint64_t f
             require(c.inputRate==tap.sampleRate,"SSTV demodulator rate changed");
             const auto audio=c.converter.process(tap.samples);
             require(audio.size()<=SstvInputEvent::maxSamples,"SSTV RF output block exceeds budget");
+            // DEC-0215: the image path waits for VIS and retains history. The
+            // listen path emits each fresh block once, never that history.
+            if(s.monitor && int(i)==(s.selected>=0?s.selected:s.monitorCandidate) && !audio.empty())
+                s.monitor(audio,names[i]);
             c.audio.insert(c.audio.end(),audio.begin(),audio.end()); c.samples+=audio.size();
             if(s.selected<0) {
                 for(const auto& event:c.vis.process(audio)) {
@@ -116,11 +142,17 @@ void SstvRfRouter::process(const std::vector<std::complex<float>>& iq,uint64_t f
 }
 std::optional<SstvInputEvent> SstvRfRouter::pop() {
     auto& s=*state_;
+    if(s.pendingGap) {
+        s.pendingGap=false;
+        SstvInputEvent gap;
+        gap.generation=s.generation; gap.gapReasons=uint32_t(SstvInputGap::Overflow);
+        return gap;
+    }
     if(s.selected<0) return {};
     auto& c=s.candidates[size_t(s.selected)];
     if(c.audio.empty()) return {};
     SstvInputEvent out;
-    out.sourceId=s.source; out.epoch=s.epoch; out.generation=1;
+    out.sourceId=s.source; out.epoch=s.epoch; out.generation=s.generation;
     out.sampleRate=rate; out.targetHz=s.target; out.firstSample=c.beginning;
     out.count=std::min(c.audio.size(),SstvInputEvent::maxSamples);
     for(size_t i=0;i<out.count;++i) {out.samples[i]=c.audio.front(); c.audio.pop_front();}

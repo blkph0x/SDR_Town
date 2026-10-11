@@ -280,6 +280,8 @@ struct P25LiveDecoderStats {
     double symbolRate = 4800.0;
     double symbolConfidence = 0.0;
     size_t softDecisionSymbols = 0;
+    size_t softInvalidSymbols = 0;
+    double softSymbolMeanMagnitude = 0.0;
     double softDecisionQuality = 0.0;
     double softBitLlrMean = 0.0;
     double softBitLlrMinimum = 0.0;
@@ -430,6 +432,8 @@ struct P25Phase2Burst {
     bool essKnown = false;
     bool essEncrypted = false;
     bool encrypted = false;
+    // DEC-0215: passive per-slot provenance, not the aggregate carrier ESS.
+    P25Phase2EssState essEvidence;
     std::vector<int> rawPayloadDibits;
     std::vector<int> maskedPayloadDibits;
     std::vector<P25Phase2VoiceCodeword> voiceCodewords;
