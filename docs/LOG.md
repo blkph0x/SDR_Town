@@ -7,7 +7,9 @@ no longer present in serial-based enumeration. Added explicit web radio selectio
 and actionable rejection before state mutation. Also repaired ordinary startup
 pairing without weakening authentication. Local real-radio web tune and browser
 control now pass; native22/22, FUBAR4/4 and204 focused cases pass. No P25 DSP
-edits, no lease bypass. Version0.2.138 + FUBAR1.1.50; public CI/release pending.
+edits, no lease bypass. Version0.2.138 + FUBAR1.1.50 published as Latest;
+Actions38129155696/38132807766 and downloaded paired GUI/DLL qualification PASS.
+Signed updater verified. Exact source/hash evidence in BUILD_NOTES; T-0134 done.
 
 ## 2026-10-11 - DEC-0220 audit reports reconciled with current implementation
 

@@ -1,5 +1,35 @@
 # Build notes
 
+## 2026-10-11 - DEC-0221 public paired delivery
+
+Town sourcefd000db35996106821ea3591ce8d37c53d5c767a; master Actions38129155437
+and release38129155696 PASS, both YAML checks PASS. Full portable, NSIS installer
+and control DLL published at https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.138.
+Downloaded assets pass package inventory, exact source/run provenance, runtime
+and standalone-DLL identity. Ed25519 updater manifest signed locally, verified,
+uploaded and downloaded again byte-identically; no key uploaded. Channel remains
+experimental. Public Latest API confirms0.2.138, not draft.
+
+SHA256: portable d9fc56c76e3177602109a383f637bbc0f0df50559fe7f37b667d0b3b1027e414;
+installer 00708623bd2583bc9018ab742f978daf8717e3d01391f59e8eba472cca0c3117;
+DLL343d94d85c79b40c41fc68ccae136bc4ba2a5c6fd1e53fddf899ff2f54d54e7d;
+EXE423c3fedc658db1326d52c70b29f04c1cd8bb9bb1d247aa5f7173c825c86f825.
+
+FUBAR sourcec60f99227d9d84bce27eaf4be6752dc1100fce15; main/tag Actions38132803982,
+38132806304 and release38132807766 PASS, including real app explicit-token and
+automatic-pairing tests. Public Latest: https://github.com/blkph0x/FUBAR/releases/tag/v1.1.50.
+Downloaded ZIP da420fc9736c396de5bb4a8d88901b598f0bf38461fab242fcbfecca717eadf4;
+EXEbda77484719cbad6c695c7e655708c71a193494fe54078823d6e35dc49301fa4.
+Bundled DLL exactly matches Town's verified standalone/package DLL. Shipped
+self-test and downloaded-pair automatic-auth GUI/HTTP tests PASS: invalid radio
+refused without mutation, explicit radio Tune/mode succeeds, native unauth401,
+session/privacy protections remain, no RF during dry-run, clean process exits.
+Downloaded-pair explicit-token test also PASS. Shipped Town/FUBAR physical RTL
+smoke PASS: keyed WFM98.1/98.2/98.1MHz tunes, real Soapy hardware readiness and
+normal shutdown. Local evidence: FUBAR build/public-1.1.50 (paired-auto,
+paired-explicit, live-radio) and Town build/public-0.2.138. No claim of new P25
+or SDRplay audio qualification. ISS-0105..0108 remain open. T-0134 complete.
+
 ## 2026-10-11 - DEC-0221 companion selection and pairing
 
 Windows/MSVC19.44/Qt6.11.1, Town0.2.138 + FUBAR1.1.50. Native app, control
@@ -29,7 +59,7 @@ Physical RTL serial00000001 smoke: FUBAR scripts/test_radio_live.py used normal
 All requests PASS; workflow reports live hardware and logs real Soapy startup.
 Both apps exit0. Saved Listen selection now refers to the actual serial.
 This proves primary RX/tune routing, not a new P25/audio-quality acceptance.
-Release Actions and downloaded-package qualification follow before completion.
+Release Actions and downloaded-package qualification completed above.
 
 ## 2026-10-11 - DEC-0220 supplied-audit validation
 

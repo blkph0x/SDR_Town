@@ -1,6 +1,6 @@
 # Issues (canonical)
 
-## ISS-0109 - Companion tune cannot recover stale Listen identity (2026-10-11, FIXED / RELEASE PENDING)
+## ISS-0109 - Companion tune cannot recover stale Listen identity (2026-10-11, FIXED / PUBLISHED)
 
 Host preference listen/deviceKey=rtlsdr|hardware:RTL-SDR while devices.json
 identifies rtlsdr|serial:00000001. resolveListenDevice correctly fails closed,
@@ -10,7 +10,9 @@ capture remains independent. Fix explicit selection, not silent radio-0 fallback
 Current host control server separately lacks its required token; do not weaken
 authentication to repair selection. T-0134 / DEC-0221.
 Explicit selection and protected automatic pairing now pass actual DLL/GUI/web
-and real RTL receive smoke. Remaining release/public-byte gates in BUILD_NOTES.
+and real RTL receive smoke. Published Town0.2.138/FUBAR1.1.50; release/public-byte
+and paired GUI gates PASS. Evidence in BUILD_NOTES; driver-lifecycle issues below
+remain separate open work, not implicitly closed by this companion repair.
 
 ## ISS-0105 - Delayed RX read contaminates replacement session (2026-10-11, OPEN)
 
