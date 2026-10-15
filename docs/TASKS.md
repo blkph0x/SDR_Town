@@ -1,5 +1,12 @@
 # Task list (canonical)
 
+T-0143 | planned | Diagnose intermittent native workflow-open latency |
+ISS-0117: preserve hosted failure38735858277 attempt1 and unchanged passing
+attempt2. Measure dispatch/construction/I/O/reply stages and cold-start/contention
+before selecting a repair. One applied Satcom open exceeded10s; do not repeat
+ambiguous mutations or hide the problem with larger timeouts. Public release
+pair gates passed, but this intermittent performance issue remains open.
+
 T-0141 | done | Repair audit defects and qualify native/companion release |
 DEC-0223 coordinates T-0132/0133/0136..0139 and the transport part of T-0130.
 Promote failing audit probes to regression tests, repair bounded causes, then

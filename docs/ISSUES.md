@@ -5,6 +5,20 @@ DEC-0223 repairs below are published in Town0.2.139/FUBAR1.1.52. Public CI,
 downloaded artifacts and paired checks pass; physical qualification remains
 T-0142. Older "fixed locally" entries outside this pass retain their own gates.
 
+## ISS-0117 - Intermittent slow native session open in hosted pair (2026-10-15, OPEN)
+
+FUBAR documentation CI38735858277 attempt1 passed the negative/browser matrix,
+then the actual pair's Satcom open returned incomplete_response after10010ms.
+A non-mutating native read took4.578s and showed pair_a already created: the
+mutation was not retried. Town logs show Inmarsat plan loading during creation,
+but do not identify the cause of the delay. Both processes were terminated by
+the failing test cleanup, not observed to crash. Unchanged attempt2 passed.
+Separate release/main/tag builds and downloaded pairs also passed; none proves
+this latency fixed. Do not dismiss it as runner load or extend production timeouts
+without evidence. T-0143: instrument GUI dispatch, construction, file/network
+work and response serialization; reproduce cold-start/contention and bound
+operator-visible progress. No P25 DSP change is justified by this observation.
+
 ## ISS-0116 - Older companion refresh overwrites newer session outcome (2026-10-15, FIXED / RELEASED)
 
 Release Actions38730716546 exposed an older aircraft map response replacing a

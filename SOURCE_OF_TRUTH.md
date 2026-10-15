@@ -19,7 +19,9 @@ CURRENT DELIVERY: DEC-0223 receive/audio/map/control/updater repairs published
                   clear replay WAV remains byte-identical to0.2.138; encrypted
                   and suspect fixtures remain muted. No new live-RF acceptance.
                   Remaining physical/full-native-UI and coverage work is tracked
-                  in T-0139/0140/0142. See BUILD_NOTES and repair validation.
+                  in T-0139/0140/0142. ISS-0117/T-0143 retains one intermittent
+                  hosted session-open timeout; an unchanged retry is not a fix.
+                  See BUILD_NOTES and repair validation.
 PREVIOUS DELIVERY: DEC-0221 explicit web Listen radio selection and protected
                   automatic Windows pairing qualified and published as Latest:
                   Town0.2.138 / FUBAR1.1.50. Actions38129155696/38132807766

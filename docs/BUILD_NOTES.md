@@ -1,5 +1,15 @@
 # Build notes
 
+## 2026-10-15 - Companion evidence-source CI intermittent timeout
+
+FUBAR docs12b46488ab4ce9249dbcaaedcbe8c8919c8f45f7 Actions38735858277 attempt1
+failed during actual pair Satcom opening: POST10010ms/incomplete_response, then
+native GET4.578s confirmed pair_a exists. Test cleanup exits1 are not crashes.
+Earlier hardening/browser cases passed. Unchanged attempt2 passes the entire
+job. Failure evidence retained; root cause not established and not attributed
+to runner load. ISS-0117/T-0143 remain open rather than treating retry as repair.
+All application release/main/tag builds and downloaded pair gates above passed.
+
 ## 2026-10-15 - DEC-0223 public-package qualification
 
 Town source a45b2006db79a17ceff1966caca5131806b793f6: master Actions38724105582

@@ -368,6 +368,9 @@ are host-specific and configurable, not a new shared-build CI requirement.
 
 ## Remaining Qualification
 
+- ISS-0117/T-0143: one hosted documentation-CI paired Satcom open exceeded10s
+  after applying the mutation. The unchanged retry passed; root cause remains
+  unknown. Keep this distinct from the passing release and downloaded-pair gates.
 - Test actual RTL and SDRplay receive/stop/restart, unplug/replug, delayed driver
   returns and shared-tuner cleanup while another radio remains active. The absent
   SDRplay service is a real prerequisite, not a passing hardware test. Physical
