@@ -33,6 +33,15 @@ Updater budgets are64KiB manifest,4KiB signature, signed installer size<=512MiB,
 64KiB streaming chunks,30s idle,60s metadata and30min installer deadlines,
 at most5 HTTPS redirects. These are resource policies, never RF timing changes.
 
+Release qualification exposed a companion ordering defect in Actions38730716546:
+an older same-session response could replace a newer map outcome. Independent
+deferred-response probes also reproduced stale Inmarsat status/errors across
+A-to-B-to-A selection and old messages starting a fresh map request. Carry one
+request/session freshness predicate through the complete status/messages/map
+chain, including failures and continuation pages. Reverse completion order in
+unit and real-DLL browser fixtures; do not replace this proof with longer sleeps.
+Keep the unsuccessful1.1.51 source tag immutable; release the repair as1.1.52.
+
 ## DEC-0222 - Source-led reliability and operator-workflow audit (2026-10-15)
 
 The user requests an audit and plan, not an implementation rewrite. Freeze

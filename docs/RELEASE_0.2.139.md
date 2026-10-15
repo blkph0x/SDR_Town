@@ -1,6 +1,9 @@
 # 0.2.139: receive and companion hardening
 
-Paired companion: FUBAR 1.1.51. Experimental field-test release.
+Paired companion: FUBAR 1.1.52. Experimental field-test release.
+No binary assets were published for the initial 1.1.51 companion candidate:
+its hosted browser test exposed a refresh-ordering race, repaired and re-tested
+in 1.1.52. Its source tag is retained.
 
 ## Repairs
 
@@ -31,6 +34,9 @@ the desired radio/session and tune. Draft tuning values remain stable while
 polling. Bounded server-issued control tickets and queue limits prevent
 unbounded status growth; they do not authenticate a human or prevent one person
 using multiple browsers. Existing lease duration/two-extension policy remains.
+Aircraft and Inmarsat refreshes carry a shared request/session generation through
+status, messages and map rendering, so stale successes or errors cannot replace
+the newer view. Changing away from a session and back invalidates its old requests.
 
 ## Validation boundaries
 

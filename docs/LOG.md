@@ -1,5 +1,21 @@
 # Development log
 
+## 2026-10-15 - DEC-0223 paired public delivery
+
+Published and verified Latest Town0.2.139 / FUBAR1.1.52 through Actions. Downloaded
+packages pass provenance/hash, DLL/browser, actual180s pair and automatic-pairing
+checks; Town updater signed locally and re-downloaded byte-identically. P25
+public clear replay is byte-identical to0.2.138 and encrypted/suspect fixtures
+remain muted. No P25 DSP/timer changes or new live-RF acceptance claimed.
+
+Initial FUBAR1.1.51 release CI exposed older refresh results replacing newer
+ones. Independent probes found the related Inmarsat status/messages/session
+chain race. Fixed and qualified in1.1.52 with reversed-completion tests; retained
+the unsuccessful source tag and published no1.1.51 binary. Task/issue/validation
+records distinguish delivered repairs from T-0139/0140/0142 coverage, beginner
+views, physical-radio and full native FUBAR UI work. No credentials/captures
+committed, no remaining test processes or task-created scheduled follow-up.
+
 ## 2026-10-15 - DEC-0223 audit repair and qualification
 
 Implemented generation-fenced receive publication and native-handle retirement,

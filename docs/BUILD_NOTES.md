@@ -1,5 +1,61 @@
 # Build notes
 
+## 2026-10-15 - DEC-0223 public-package qualification
+
+Town source a45b2006db79a17ceff1966caca5131806b793f6: master Actions38724105582
+and release Actions38724109668 PASS; both YAML checks PASS. Public0.2.139 has
+the portable, NSIS installer, standalone control DLL, checksums and locally
+Ed25519-signed experimental-channel updater manifest. No private key uploaded.
+Anonymous re-download of manifest/signature/SHA256SUMS is byte-identical;
+verify_release.py with exact commit/run PASS. Package inventory144 files,
+zero blockers; source/runtime provenance and standalone/portable DLL match.
+
+Public SHA256:
+- ZIP: 77646cf86282cd00ee4af8634b90469bff607f51022a1b3ed58995e0109b8efd
+- Installer: a19cb4acb22d4ccd270f20e773eea50c6d0d0d146d54a266909684c8b5a8380d
+- DLL: 3cb79fc1d46f8119700b22a66ab4901705b6c39fe93e35a86605cb8c642013ba
+- EXE: 2b89048a97202665e61d3e83a3fc5751df26294878a94190a1239fab720bbfb8
+
+Downloaded package evidence:
+D:/SDRTown-ReleaseQA/0.2.139-run38724109668-monitor/qualification.json.
+Version/help, RDS, DTMF, isolated RTL-loader and33 DLL transport cases PASS.
+Four actual GUI profiles PASS with noRX/startup errors; images in gui-profiles.
+These layout checks do not establish every button, DPI or pixel collision.
+Public-to-public eight-run P25 matrix PASS, p25-public-matrix-20261015T115541Z:
+clear186frames/178560samples/duty0.744 and exact baseline WAV SHA256
+4a890afaa12fa54b8bdeb21ec8fcb9f943445dbda186ea6e607bcb2a0984f170;
+both encrypted fixtures gated, suspect fixture zeroPCM. This is not new live
+RF/listening acceptance. Installer hash/signature qualified, not an actual
+installation/rollback test. No physical SDRplay or satellite acceptance claimed.
+
+Companion candidate1.1.51 sourceb291d22 passed main/tag build Actions but release
+38730716546 failed the browser invalid-ok outcome assertion before publication.
+Reproduced old same-session map results overwriting newer outcomes; independent
+probes also exposed stale Inmarsat status/messages/errors across A-B-A selection.
+FUBAR1.1.52 source2b419ec61c538b6693aa11b6efd178dff14df5f9 preserves one request/
+session generation through each complete refresh pipeline. Delayed-response
+unit/browser tests and independent review pass. Source1.1.51 tag retained;
+no1.1.51 binary assets published. Release Actions38733569638 PASS.
+Final downloaded paired-package evidence and Latest promotion are recorded below.
+
+FUBAR1.1.52 main/tag Actions38733568815/38733569167 and publication38733569638
+all PASS, exactsource2b419ec61c538b6693aa11b6efd178dff14df5f9. Downloaded ZIP
+SHA2562d4653cb75617a5ddb34cf69ccbc9448e695586efa04fbceb8966e4de8fd2f66;
+EXE18b43fa004ab4c1caafaa7a3e4d91d660b9f67b059645fd7af09ff2eae92ad0c.
+The bundled DLL matches Town's public DLL above. Embedded provenance pins the
+Town ZIP, commit, workflow and EXE;84 corresponding-source files match the tag.
+Public real-DLL negative/browser matrix and180s actual paired run PASS, normal
+exits0. Evidence: D:/FUBAR-ReleaseQA/1.1.52/public-run38733569638, verification.json,
+hardening/result.json and pair-180/result.json; Town log spans23:28:58..23:31:57.
+No new RF or native FUBAR all-button qualification is implied by the web-only pair.
+
+Downloaded automatic pairing also PASS, pair-auto/result.json, exits0; no Town/
+FUBAR test processes remain. Both releases promoted Latest only after these gates;
+anonymous Latest APIs confirm0.2.139/1.1.52 and Latest update.json is byte-identical
+to the verified signed manifest. No published binary asset or source tag replaced.
+The evidence-only follow-up is pushed separately without a new binary version;
+its source Actions are checked through completion.
+
 ## 2026-10-15 - DEC-0223 repair integration (publication pending)
 
 Final local follow-up: common native cleanup now registers quarantine before
@@ -67,10 +123,10 @@ Guard historical fixture endpoints were fixed to their actual approved commits,
 not the moving current shared files; existing negative mutation checks pass.
 
 Follow-up source review found normal-stop, RX-fault and cancelled-opener cleanup
-could bypass deferred-read quarantine after close failure. Those paths and their
-new fault tests must pass the final rebuild before release. Final exact-patch
-guard, paired duration/shutdown, Actions/public hashes and signed update manifest
-remain publication gates. See AUDIT_20261015_REPAIR_VALIDATION.md for full limits.
+could bypass deferred-read quarantine after close failure. The common-helper
+repair and final integrated passes at the start of this section supersede that
+intermediate state. Public-package evidence is separate above; see
+AUDIT_20261015_REPAIR_VALIDATION.md for the full qualification limits.
 
 ## 2026-10-15 - DEC-0222 source audit, normal gates and negative probes
 

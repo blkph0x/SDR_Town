@@ -3,20 +3,30 @@ SDR TOWN — SOURCE OF TRUTH (SoT)
 ================================================================================
 VERSION: 1.0.0
 PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
-CURRENT VERSION IN TREE: 0.2.139 (paired FUBAR 1.1.51, experimental)
+CURRENT VERSION IN TREE: 0.2.139 (paired FUBAR 1.1.52, experimental)
 CURRENT REPAIR: DEC-0223 / T-0141 implements the DEC-0222 audit repairs.
                 Qualification/publication is tracked in BUILD_NOTES and
                 AUDIT_20261015_REPAIR_VALIDATION.md. No new P25 DSP or follow
                 timer changes. Historical pending-release entries below do not
                 override the latest delivery evidence; physical acceptance and
                 measured line/branch coverage remain explicitly separate.
-CURRENT DELIVERY: DEC-0221 explicit web Listen radio selection and protected
+CURRENT DELIVERY: DEC-0223 receive/audio/map/control/updater repairs published
+                  as Latest Town0.2.139 / FUBAR1.1.52. Town source/release CI
+                  38724105582/38724109668 and companion1.1.52 main/tag/release
+                  38733568815/38733569167/38733569638 PASS. Downloaded package
+                  hashes/provenance, signed experimental updater, browser,
+                  180s actual pair and automatic pairing PASS. Public P25
+                  clear replay WAV remains byte-identical to0.2.138; encrypted
+                  and suspect fixtures remain muted. No new live-RF acceptance.
+                  Remaining physical/full-native-UI and coverage work is tracked
+                  in T-0139/0140/0142. See BUILD_NOTES and repair validation.
+PREVIOUS DELIVERY: DEC-0221 explicit web Listen radio selection and protected
                   automatic Windows pairing qualified and published as Latest:
                   Town0.2.138 / FUBAR1.1.50. Actions38129155696/38132807766
                   PASS, public hashes/provenance and paired GUI/DLL tests PASS;
                   signed installer manifest verified. Local physical RTL tune
                   PASS. No P25 DSP changes. See docs/BUILD_NOTES.md.
-PREVIOUS DELIVERY: DEC-0219 lifts the prior P25 publication hold after the user
+HISTORICAL DELIVERY: DEC-0219 lifts the prior P25 publication hold after the user
                   accepts listening. Paired native sessions/maps/messages,
                   downlink/device selection and public image boundary tested.
                   CI full installer/portable, signed updater and public paired
@@ -121,7 +131,8 @@ UNRELEASED SOURCE: T-0102 infrastructure repairs; local 16/16 gates pass,
                   dry-run; local four-profile no-RX gate passes.
                   T-0106 repairs reproduced control cancellation lifetime
                   failure; local stress/debugger/16-suite gates and92ab955 CI pass.
-ACTIVE PHASE: complete public release materials/qualification at user request; P25 diagnosis remains open
+ACTIVE PHASE: field qualification, measured coverage and beginner workflows;
+              preserve accepted P25 DSP. Historical entries are not current gates.
 METHOD: Athanor / SovereignFoundry process (never guess, evidence, trackers).
          This tree is NOT Athanor. Qt, SoapySDR, mbelib, miniaudio stay.
 DO NOT EDIT: C:\Users\Blkph0x\source\repos\SovereignFoundry

@@ -12,6 +12,10 @@ uses asynchronous bounded stages, a streamed temporary file/hash and signed size
 Typed replay consent is separate from persistent opt-in and recording consent.
 GUI dry-run uses isolated settings and rejects hardware opens at DeviceManager.
 Tests and remaining acceptance are in AUDIT_20261015_REPAIR_VALIDATION.md.
+FUBAR1.1.52 adds beginMapRefresh request/session generations; loadInmarsat
+passes the same predicate through status, paged messages and map, while direct
+map refreshes supersede older chains. Stale errors and successes are ignored;
+the radio/DSP implementation is unchanged.
 
 DEC-0221: `MainWindow::applySdrTownControlTune` resolves optional JSON deviceKey
 before mutation and validates the existing per-device ownership policy. Status

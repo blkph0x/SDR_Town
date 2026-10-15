@@ -1,11 +1,23 @@
 # Task list (canonical)
 
-T-0141 | in_progress | Repair audit defects and qualify native/companion release |
+T-0141 | done | Repair audit defects and qualify native/companion release |
 DEC-0223 coordinates T-0132/0133/0136..0139 and the transport part of T-0130.
 Promote failing audit probes to regression tests, repair bounded causes, then
 exercise actual UI workflows with an explicit control/acceptance matrix. Keep
 P25 demod/slot/security math unchanged. Preserve user settings and distinguish
 hardware/on-air prerequisites from verified tests; publish qualified paired assets.
+Delivered Latest Town0.2.139/FUBAR1.1.52: exact Actions, public hashes/signature,
+downloaded browser/DLL/180s pair/automatic pairing and public P25 matrix PASS.
+T-0139/0140/0142 retain coverage, broader usability and hardware limits; this is
+bounded audit-repair acceptance, not every physical feature certified.
+
+T-0142 | planned | Physical and long-duration qualification matrix |
+Qualify RTL/SDRplay start/stop/unplug/shared-tuner behavior, concurrent radios,
+live speaker playback, independent ADS-B/ADS-C and satellite/SSTV captures.
+Provide isolated native FUBAR preview/testing before all-button qualification;
+its current GUI can autostart recording, prune files and persist settings.
+Preserve operator settings and content consent. Track per-device results/skips,
+not inferred passes from no-RF fixtures. See repair validation remaining checks.
 
 T-0135 | done | Source-led system audit and beginner workflow plan |
 Audit Town a0d4e21 and FUBAR 308a653 from executable paths, not documentation
@@ -16,26 +28,29 @@ Report: AUDIT_20261015_SYSTEM_AND_UX.md;22 Town +4 FUBAR suites, fresh builds,
 four actual GUI profiles and paired app/DLL gates PASS. Negative probes expose
 open faults; no line/branch percentage or new on-air acceptance claimed.
 
-T-0136 | pending_release | Audio cursor exclusion and finite FM stream recovery |
+T-0136 | done | Audio cursor exclusion and finite FM stream recovery |
 ISS-0110/0111: actual callback/trim barrier tests, preserve nonblocking audio;
 reject invalid FM input with explicit discontinuity and recovery. Valid PCM,
 tone/RDS taps and accepted P25 replay must remain unchanged. DEC-0222 F03/F04.
 Implemented/tested under DEC-0223; integrated tests pass and valid FM signatures
-are unchanged. T-0141 owns final replay/public-package confirmation.
+are unchanged. T-0141 public replay/package confirmation passes; field acceptance
+remains explicitly separate in T-0142.
 
-T-0137 | pending_release | Aircraft per-field freshness and missing-value semantics |
+T-0137 | done | Aircraft per-field freshness and missing-value semantics |
 ISS-0112: distinguish presence from position/velocity/altitude observation age,
 source and validity. Unknown altitude is not zero; separately qualify local
 altitude decoding. Coordinate with existing T-0130 bounded web maps. DEC-0222.
 Per-field merge/null/popups now pass deterministic and actual Qt tests;
 independent local altitude decoding and physical acceptance remain separate.
+Public paired transport/GUI checks pass under T-0141.
 
-T-0138 | pending_release | Bound companion admission and updater resources |
+T-0138 | done | Bound companion admission and updater resources |
 ISS-0113/0114: separate bounded commits for control queue admission/fairness and
 async streaming update downloads. Preserve ownership, authentication, signed
 manifest/hash gates and existing valid operations. DEC-0222 F07/F09.
 FUBAR admission/browser fixtures and Town updater fault tests pass; final
-matched-public-artifact acceptance remains T-0141.
+matched-public-artifact acceptance passes under T-0141. Actual installer execution
+and rollback remain separate deployment qualification, not exercised on this host.
 
 T-0139 | planned | Diagnostic consent contracts and measurable test coverage |
 ISS-0115 scoped one-run consent; instrument session/epoch/outcome boundaries with
@@ -68,7 +83,7 @@ behavioral changes or broad controller extraction. DEC-0220 report completed:
 two driver faults reproduced three times; 227 focused cases and six CTest suites
 pass. Application unchanged. ISS-0105..0108 and next repairs are explicit below.
 
-T-0132 | pending_release | Generation-safe device teardown and activation (ISS-0105/0106) |
+T-0132 | done | Generation-safe device teardown and activation (ISS-0105/0106) |
 Turn audit fake-driver failures into permanent tests; guard all post-native-call
 publication and completion against cancellation/replacement. Quarantine stuck
 RX and isolate lifetime, validate activation for all drivers, qualify stop/retry,
@@ -76,8 +91,9 @@ shared devices and multi-radio isolation. Preserve accepted P25 behavior.
 DEC-0223 implements/tests generation fences, handle-bound identity and all-path
 quarantine; final integrated23-suite pass recorded. Physical driver-hang and
 hardware acceptance remain distinct from the controlled fake-driver tests.
+Published/qualified under T-0141; physical matrix retained in T-0142.
 
-T-0133 | pending_release | Truthful workflow outcomes and failure tests (ISS-0107/0108) |
+T-0133 | done | Truthful workflow outcomes and failure tests (ISS-0107/0108) |
 Separate start intent from applied readiness; check bool/tune results and give
 bounded structured diagnostics for failures. Split hardware availability skips
 from deterministic tests; unexpected exceptions must fail. Characterize native
@@ -85,6 +101,7 @@ and companion behavior before controller extraction; see DEC-0220 audit plan.
 Primary starts and unexpected test exceptions are checked under DEC-0223;
 actual native rejection/close and named-session tests pass. Broader beginner
 presentation remains T-0140, not closed by this bounded repair.
+Public native/browser failure checks pass under T-0141.
 
 T-0129 | done | Paired receive workflow alignment and Latest releases (DEC-0219) |
 Town 0.2.137 / FUBAR 1.1.49 published and public pair verified; signed installer,
