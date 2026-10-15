@@ -18,12 +18,14 @@ PREVIOUS DELIVERY: DEC-0219 lifts the prior P25 publication hold after the user
                   38110086896, FUBAR Actions 38114493140. Remaining native-only
                   controls/audio buses are explicit; older entries below are
                   historical evidence, not current release status.
-CURRENT AUDIT: DEC-0220 verifies the supplied implementation reports at44738dc.
-               Reproduced RX generation contamination and ignored activation
-               errors (ISS-0105/0106); GUI/test outcome gaps ISS-0107/0108.
-               227 focused tests and six GUI/lifecycle suites pass. No app or
-               P25 changes. See docs/AUDIT_20261011_IMPLEMENTATION_REPORTS.md;
-               next bounded repairs T-0132/0133, not a wholesale DSP rewrite.
+CURRENT AUDIT: DEC-0222 source-led system/UI review at a0d4e21 / FUBAR308a653.
+               Fresh builds,22 Town +4 FUBAR suites, actual GUI profiles and
+               paired DLL/web gates pass. Negative probes reproduce RX faults,
+               FM non-finite persistence and large-map transport failure;
+               source review records audio-trim, freshness and resource gaps.
+               No production/P25 changes or claim of complete line coverage.
+               See docs/AUDIT_20261015_SYSTEM_AND_UX.md. T-0132/0133 and bounded
+               new repairs precede progressive beginner views; preserve DSP.
 P25 AUDIT HISTORY: DEC-0215/0216, capture013124: repaired cross-slot security
                inheritance on unbound syncs and SSTV Auto search monitoring.
                Three clear replay WAVs remain identical, two encrypted calls

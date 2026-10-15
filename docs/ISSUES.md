@@ -1,5 +1,58 @@
 # Issues (canonical)
 
+## ISS-0110 - Audio emergency trim bypasses consumer exclusion (2026-10-15, OPEN)
+
+AudioEngine.cpp:498 writes readPos while holding audioMutex, but the actual
+callback uses only RingBuffer::ConsumerLease. Trim does not acquire that lease.
+Callback cursor100 -> trim420 -> callback148 is an allowed lost-update schedule;
+discarded audio can reappear and freed storage can be reused during a read.
+Code-proven, not a captured physical race. Analog emergency and Satcom callers
+are confirmed; do not call this a demonstrated P25 decoder failure. T-0136;
+DEC-0222 audit F03 defines actual-callback barrier and nonblocking repair gates.
+
+## ISS-0111 - Malformed FM IQ poisons subsequent clean PCM (2026-10-15, OPEN)
+
+Current NFM and WFM each accept one NaN IQ sample at index100 in a24000-sample,
+240ksps block. Probe returns4780 non-finite PCM values, then48000 during the next
+clean second. HfDemod already has a separate input guard. Reject/reset/gap the
+affected FM stream without changing valid DSP; add finite output diagnostics.
+T-0136 / DEC-0222 F04. Not evidence normal RF creates NaN samples.
+
+## ISS-0112 - Local aircraft position age follows unrelated messages (2026-10-15, OPEN)
+
+AdsBTrackStore.cpp:137 refreshes lastSeenUnix for identification and velocity;
+positionValid has no independent timestamp. visibleTracksLocked retains and
+prefers the local old coordinates while any local traffic continues. Local
+Mode S also never populates altFt, although status serializes its default zero.
+Separate per-field time/validity/provenance and nullable altitude; do not invent
+decoded values. T-0137 / DEC-0222 F08. Distinct from InmarsatTracking aging.
+
+## ISS-0113 - Companion control admission queue is unbounded (2026-10-15, OPEN)
+
+Public FUBAR1.1.50 accepts64 distinct caller-chosen client IDs from one local
+peer; source has no queue cap. Status walks/serializes the full queue under the
+server lock, and stale pruning happens during promotion. Two extensions limit
+one lease, not one person with new IDs. This is resource/fairness exposure, not
+proof of active-token theft. Bounded admission/status, server-issued tickets and
+optional membership policy required. T-0138 / DEC-0222 F07.
+
+## ISS-0114 - Updater buffers before enforcing limits (2026-10-15, OPEN)
+
+UpdateManager reads full manifest/signature/installer replies; installer512MiB
+check happens after buffering. Signed size is not passed to doDownload.
+Signature retrieval uses a nested event loop without an explicit deadline.
+Add bounded async stages, streaming temporary-file hash/size checks, deadlines
+and cancellation; retain fail-closed signature/hash verification. No compromised
+release host observed. T-0138 / DEC-0222 F09.
+
+## ISS-0115 - Replay one-run diagnostics consent loses to stored false (2026-10-15, OPEN)
+
+InmarsatRemoteDiagnostics affirmative sharing appends --diag-url; configuration
+then overwrites requested=true with stored remoteDiagnostics/consent=false.
+Provide an explicit scoped authorization while forced-off still wins; do not
+change persistent consent or recording review policy. This fails closed, not
+an unconsented disclosure. T-0139 / DEC-0222 F10 defines the consent matrix.
+
 ## ISS-0109 - Companion tune cannot recover stale Listen identity (2026-10-11, FIXED / PUBLISHED)
 
 Host preference listen/deviceKey=rtlsdr|hardware:RTL-SDR while devices.json
@@ -16,6 +69,9 @@ remain separate open work, not implicitly closed by this companion repair.
 
 ## ISS-0105 - Delayed RX read contaminates replacement session (2026-10-11, OPEN)
 
+2026-10-15: rebuilt against a0d4e21 and reproduced1024 stale marked samples again;
+normal22-suite CTest still passes. DEC-0222 F01 records the current evidence.
+
 DEC-0220 review: fake driver holds readStream past stop/detach, replacement stub
 starts, old read returns 1024 marked samples. All 1024 appear in the replacement
 ring in three runs against freshly compiled current DeviceManager.cpp. Loop
@@ -25,6 +81,9 @@ need lifetime review. No claim this caused accepted P25 field audio. T-0132;
 full evidence and repair gates: AUDIT_20261011_IMPLEMENTATION_REPORTS.md.
 
 ## ISS-0106 - Non-SDRplay activation error becomes live hardware (2026-10-11, OPEN)
+
+2026-10-15: fresh current-source fake-driver probe again returns live hardware
+after activation=-2. DEC-0222 F02; existing T-0132 remains the repair task.
 
 DeviceManager.cpp only rejects negative activateStream results for isSdrplay.
 Fake generic driver returns -2 and reaches live hardware in three runs. T-0132
@@ -47,6 +106,11 @@ failure tests. Already-recorded Catch2 assertion failures are not erased. T-0133
 newer ownership/lifecycle tests pass but do not cover ISS-0105/0106.
 
 ## ISS-0104 - Large companion snapshots need pagination (2026-10-11, OPEN)
+
+2026-10-15: current InmarsatTracking with512 identities/256 positions serializes
+284750 bytes. Public FUBAR1.1.50 + DLL returns HTTP502 and262143 bytes of truncated
+JSON as error text. This is now reproduced with an actual model-generated valid
+population, not only a future scale concern. DEC-0222 F06; preserve T-0130.
 
 FUBAR's 64 KiB caller truncation was reproduced with a fragmented 90 KiB real
 DLL fixture and fixed in 1.1.49. The native DLL still caps an HTTP response at

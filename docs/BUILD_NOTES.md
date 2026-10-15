@@ -1,5 +1,47 @@
 # Build notes
 
+## 2026-10-15 - DEC-0222 source audit, normal gates and negative probes
+
+Windows/MSVC19.44/Qt6.11.1. Town a0d4e21 (0.2.138), FUBAR308a653 (1.1.50),
+both fetched upstream baselines. No production source or application settings
+changes. Fresh commands/results:
+
+- `cmake --build build --config Release --target sdr_town_tests sdr_town_workspace_tests -j4`: PASS.
+- `cmake --build build --config Release --target SDR_Town -j4`: PASS.
+- `ctest --test-dir build -C Release --output-on-failure --output-log build/audit_20261015_ctest.log`:22/22 PASS,108.97s.
+- Core550 pass/2 skip,244100 assertions; workspace52 pass/6 skip,1056 assertions.
+  Fixture skip reasons are listed in AUDIT_20261015_SYSTEM_AND_UX.md, not counted
+  as acceptance of missing independent recordings or personal alias imports.
+- FUBAR `cmake --build build-fubar-msvc --config Release -j4`: PASS;
+  `ctest --test-dir build-fubar-msvc -C Release --output-on-failure --output-log build/audit_20261015/ctest.log`:4/4 PASS,1.34s.
+- `python scripts/test_workspace_gui.py --exe build/bin/Release/SDR_Town.exe --output build/audit_20261015_gui`:
+  fresh executable, Listening960x720/Trunking1280x900/HF800x700/Analysis1600x900
+  PASS, no RF/startup errors. Inspected screenshots and paired narrow web UI.
+- FUBAR `scripts/test_town_pair.py` with fresh Town/FUBAR and public1.1.50 DLL,
+  `--output build/audit_20261015/pair --duration 180`: PASS, authenticated named
+  workflow views, privacy/ownership/selection negatives and clean shutdown.
+  Dry-run, no physical radio tune. No live P25/STT or RSPdx qualification.
+
+Negative probes compile current unchanged implementations; expected failures
+are evidence of OPEN bugs, not green regression gates:
+
+- Rebuilt `build/audit_20261011/out/Release/audit_probe.exe [audit-probe]`:
+  activation -2 still live hardware; delayed old read publishes1024 samples to
+  replacement.2 cases fail;13/15 assertions pass. `build/audit_20261015_faults.log`.
+- New ignored `build/audit_20261015` fixture uses those same current objects.
+  `[audit-fm],[audit-map]`:2 cases/5 assertions fail. Each FM mode produces4780
+  non-finite PCM samples from a NaN block and48000 in the next clean second.
+  Tracking model512 identities/256 positions produces284750-byte JSON.
+- FUBAR public1.1.50/DLL loopback probe with that synthetic JSON: HTTP502,
+  error contains262143-byte truncated JSON. One peer's64 queued IDs accepted.
+  Evidence `FUBAR/build/audit_20261015/result.json`; no RF, private payload or
+  external collector mutation. Both test applications stopped after probes.
+
+Detailed causes, bounded repair gates and source line references are in the
+audit. No instrumented line/branch coverage or sanitizer run claimed. Audit
+publication is documentation-only; exact pushed commit Actions must be checked
+through completion, with no new version/asset manufactured for this report.
+
 ## 2026-10-11 - DEC-0221 public paired delivery
 
 Town sourcefd000db35996106821ea3591ce8d37c53d5c767a; master Actions38129155437

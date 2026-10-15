@@ -1,5 +1,22 @@
 # Development log
 
+## 2026-10-15 - DEC-0222 system audit and beginner workflow roadmap
+
+Audited current Town and companion source/call paths, rebuilt both apps, ran26
+registered suites and actual native/DLL/web checks. Independently reproduced
+remaining RX lifecycle faults, persistent malformed-FM PCM, oversized map
+transport and unlimited distinct web queue admission. Recorded additional
+source-proven trim/freshness/updater/consent defects with explicit evidence
+limits. ISS-0110..0115 added; existing0104..0108 and T-0132/0133 retained instead
+of duplicating old work. Normal tests pass; negative probes expose untested bugs.
+
+AUDIT_20261015_SYSTEM_AND_UX.md contains the system coverage map, corrected stale
+claims, reproducible cases and bounded repair/UI/instrumentation gates. T-0135
+audit complete; T-0136..0140 planned, not implemented. Proposed beginner pages
+reuse current controllers and preserve expert layouts. No production/P25 edits,
+new RF-quality claim, private captures uploaded or binary release required.
+Standing delivery: push documentation and verify its exact source Actions.
+
 ## 2026-10-11 - DEC-0221 primary web control recovery
 
 Traced reported Invalid device/workflow to saved hardware-only Listen identity

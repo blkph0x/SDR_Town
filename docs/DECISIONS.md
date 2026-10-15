@@ -1,5 +1,22 @@
 # Decisions
 
+## DEC-0222 - Source-led reliability and operator-workflow audit (2026-10-15)
+
+The user requests an audit and plan, not an implementation rewrite. Freeze
+application behavior at Town a0d4e21 / FUBAR 308a653; inspect implementations,
+run fresh normal gates and independent negative probes. Distinguish reproduced
+failures, code-proven interleavings, qualification gaps and design proposals.
+Do not label test-suite success as complete line/branch coverage or on-air
+acceptance. Preserve accepted P25 and existing multi-radio ownership/security.
+
+Record the detailed report in AUDIT_20261015_SYSTEM_AND_UX.md. Prioritize existing
+T-0132/0133 lifecycle/readiness work, consumer-cursor synchronization, malformed
+FM input, bounded companion transport/queues and truthful aircraft freshness.
+Build simpler native/web task views on the existing session controllers; do not
+create a second DSP or ownership engine. Logging must be bounded, attributable
+to a session/epoch and respect separate telemetry/recording consent. No version
+bump or new binary for this documentation-only audit; push and verify source CI.
+
 ## DEC-0221 - Explicit companion Listen identity recovery (2026-10-11)
 
 ISS-0109 is traced from FUBAR Tune through the DLL /v1/tune to unresolved saved

@@ -1,5 +1,42 @@
 # Task list (canonical)
 
+T-0135 | done | Source-led system audit and beginner workflow plan |
+Audit Town a0d4e21 and FUBAR 308a653 from executable paths, not documentation
+claims. Rebuild and run registered gates, isolated fault probes and actual
+native/web workflows. Record evidence, coverage limits and ordered repairs;
+preserve production code and accepted P25. DEC-0222.
+Report: AUDIT_20261015_SYSTEM_AND_UX.md;22 Town +4 FUBAR suites, fresh builds,
+four actual GUI profiles and paired app/DLL gates PASS. Negative probes expose
+open faults; no line/branch percentage or new on-air acceptance claimed.
+
+T-0136 | planned | Audio cursor exclusion and finite FM stream recovery |
+ISS-0110/0111: actual callback/trim barrier tests, preserve nonblocking audio;
+reject invalid FM input with explicit discontinuity and recovery. Valid PCM,
+tone/RDS taps and accepted P25 replay must remain unchanged. DEC-0222 F03/F04.
+
+T-0137 | planned | Aircraft per-field freshness and missing-value semantics |
+ISS-0112: distinguish presence from position/velocity/altitude observation age,
+source and validity. Unknown altitude is not zero; separately qualify local
+altitude decoding. Coordinate with existing T-0130 bounded web maps. DEC-0222.
+
+T-0138 | planned | Bound companion admission and updater resources |
+ISS-0113/0114: separate bounded commits for control queue admission/fairness and
+async streaming update downloads. Preserve ownership, authentication, signed
+manifest/hash gates and existing valid operations. DEC-0222 F07/F09.
+
+T-0139 | planned | Diagnostic consent contracts and measurable test coverage |
+ISS-0115 scoped one-run consent; instrument session/epoch/outcome boundaries with
+bounded content-free metrics and existing privacy gates. Establish first-party
+line/branch baseline and explicit fixture skip ledger; promote negative probes
+to permanent tests. See DEC-0222 sections5/7; coordinate T-0133 exception tests.
+
+T-0140 | planned | Beginner native/web views on shared runtime outcomes |
+After T-0133, expose selected radio, task, actual receive status and audio route
+consistently. Preserve expert layouts; progressive advanced controls, named
+session selectors and mobile task navigation. No second DSP/ownership engine.
+Novice, keyboard, DPI, busy/unplugged/offline and native/web parity gates required.
+DEC-0222 section6 defines the proposed views, not implemented functionality.
+
 T-0134 | done | Repair companion primary radio selection (ISS-0109) |
 Reproduce stale Listen identity rejection, expose explicit stable-key selection
 to companion Tune, retain reservation/ownership protection and provide actionable
