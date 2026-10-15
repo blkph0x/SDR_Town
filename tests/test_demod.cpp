@@ -11,6 +11,206 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
+#include <bit>
+#include <iostream>
+
+namespace {
+struct FmFaultConfig {
+    double rate = 48000, center = 100e6, target = 100001000;
+    double lpf = 3000, squelch = -120, gain = 1, tau = 75, notch = .96;
+    double bandwidth = 12500, outputRate = 48000;
+    double external = std::numeric_limits<double>::quiet_NaN();
+    double identity = std::numeric_limits<double>::quiet_NaN();
+    bool lpfEnabled = true;
+    std::vector<float> run(Demodulator& d, const std::vector<std::complex<float>>& iq,
+                          DemodMode mode, double& rms, FmMultiplexBlock* tap) const {
+        return d.demodulateToAudio(iq, rate, center, target, mode, rms, lpf,
+            squelch, gain, tau, notch, bandwidth, 0, outputRate, external,
+            lpfEnabled, tap, identity);
+    }
+};
+
+void checkFmRecovery(Demodulator& used, const FmFaultConfig& config, DemodMode mode,
+                     uint64_t oldEpoch) {
+    Demodulator fresh;
+    bool published = false;
+    for (size_t n : {size_t(1), size_t(7), size_t(19), size_t(257), size_t(4096)}) {
+        std::vector<std::complex<float>> iq(n);
+        for (size_t i = 0; i < n; ++i)
+            iq[i] = std::polar(.8f, static_cast<float>(.13 * i));
+        double rms = 0, referenceRms = 0;
+        FmMultiplexBlock tap, reference;
+        const auto pcm = config.run(used, iq, mode, rms, &tap);
+        const auto expected = config.run(fresh, iq, mode, referenceRms, &reference);
+        REQUIRE(pcm == expected);
+        REQUIRE(std::isfinite(rms));
+        REQUIRE(rms == referenceRms);
+        REQUIRE(tap.samples == reference.samples);
+        REQUIRE(tap.firstSample == reference.firstSample);
+        if (!tap.samples.empty()) {
+            REQUIRE(tap.epoch > oldEpoch);
+            REQUIRE(tap.discontinuity == reference.discontinuity);
+            if (!published) REQUIRE((tap.resetReasons & (FmMultiplexBlock::InvalidInput
+                | FmMultiplexBlock::InvalidConfiguration | FmMultiplexBlock::NonFiniteOutput)) != 0);
+            else REQUIRE(tap.resetReasons == reference.resetReasons);
+            published = true;
+        }
+    }
+    REQUIRE(published);
+}
+}
+
+TEST_CASE("FM rejects nonfinite IQ as a whole block and recovers fresh state", "[fm-fault]") {
+    const auto mode = GENERATE(DemodMode::NFM, DemodMode::WFM, DemodMode::AUTO);
+    const bool highRate = GENERATE(false, true);
+    const float invalid = GENERATE(std::numeric_limits<float>::quiet_NaN(),
+        std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity());
+    const bool imaginary = GENERATE(false, true);
+    const bool requestedTap = GENERATE(false, true);
+    FmFaultConfig config;
+    config.rate = highRate ? 2400000 : (mode == DemodMode::WFM ? 240000 : 48000);
+    if (mode == DemodMode::WFM) config.bandwidth = 180000;
+    Demodulator demod;
+    double rms = 0;
+    FmMultiplexBlock tap;
+    std::vector<std::complex<float>> iq(512, {1,0});
+    config.run(demod, iq, mode, rms, &tap);
+    const auto epoch = tap.epoch;
+    const auto before = fmDiagnostics::faultSnapshot(mode == DemodMode::WFM);
+    iq.back() = imaginary ? std::complex<float>(0,invalid) : std::complex<float>(invalid,0);
+    const auto pcm = config.run(demod, iq, mode, rms, requestedTap ? &tap : nullptr);
+    REQUIRE(pcm.empty());
+    REQUIRE(std::isfinite(rms));
+    if (requestedTap) {
+        REQUIRE(tap.samples.empty());
+        REQUIRE(tap.discontinuity);
+        REQUIRE((tap.resetReasons & FmMultiplexBlock::InvalidInput) != 0);
+    }
+    const auto after = fmDiagnostics::faultSnapshot(mode == DemodMode::WFM);
+    REQUIRE(after[fmDiagnostics::InvalidInputBlocks] == before[fmDiagnostics::InvalidInputBlocks] + 1);
+    checkFmRecovery(demod, config, mode, epoch);
+}
+
+TEST_CASE("FM validates required configuration and optional NaN sentinels", "[fm-fault]") {
+    const auto mode = GENERATE(DemodMode::NFM, DemodMode::WFM);
+    const double invalid = GENERATE(std::numeric_limits<double>::quiet_NaN(),
+        std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity());
+    double FmFaultConfig::* fields[] = {&FmFaultConfig::rate, &FmFaultConfig::center,
+        &FmFaultConfig::target, &FmFaultConfig::lpf, &FmFaultConfig::squelch,
+        &FmFaultConfig::gain, &FmFaultConfig::tau, &FmFaultConfig::notch,
+        &FmFaultConfig::bandwidth, &FmFaultConfig::outputRate,
+        &FmFaultConfig::external, &FmFaultConfig::identity};
+    for (size_t field = 0; field < std::size(fields); ++field) {
+        if (field >= 10 && std::isnan(invalid)) continue; // Documented defaults.
+        INFO("field=" << field);
+        FmFaultConfig config;
+        if (mode == DemodMode::WFM) { config.rate = 240000; config.bandwidth = 180000; }
+        Demodulator used;
+        FmMultiplexBlock tap;
+        double rms = 0;
+        const std::vector<std::complex<float>> iq(512, {1,0});
+        config.run(used, iq, mode, rms, &tap);
+        const auto epoch = tap.epoch;
+        auto corrupt = config;
+        corrupt.*fields[field] = invalid;
+        const auto before = fmDiagnostics::faultSnapshot(mode == DemodMode::WFM);
+        REQUIRE(corrupt.run(used, iq, mode, rms, &tap).empty());
+        REQUIRE(std::isfinite(rms));
+        REQUIRE(tap.samples.empty());
+        REQUIRE(tap.discontinuity);
+        REQUIRE((tap.resetReasons & FmMultiplexBlock::InvalidConfiguration) != 0);
+        const auto after = fmDiagnostics::faultSnapshot(mode == DemodMode::WFM);
+        REQUIRE(after[fmDiagnostics::InvalidConfigurationBlocks] == before[fmDiagnostics::InvalidConfigurationBlocks] + 1);
+        checkFmRecovery(used, config, mode, epoch);
+    }
+}
+
+TEST_CASE("FM finite arithmetic overflow is a diagnosed gap not persistent poison", "[fm-fault]") {
+    const auto mode = GENERATE(DemodMode::NFM, DemodMode::WFM);
+    FmFaultConfig config;
+    if (mode == DemodMode::WFM) { config.rate = 240000; config.bandwidth = 180000; }
+    Demodulator used;
+    FmMultiplexBlock tap;
+    double rms = 0;
+    const std::vector<std::complex<float>> iq(512, {std::numeric_limits<float>::max(), 0});
+    const auto before = fmDiagnostics::faultSnapshot(mode == DemodMode::WFM);
+    REQUIRE(config.run(used, iq, mode, rms, &tap).empty());
+    REQUIRE(tap.samples.empty());
+    REQUIRE(tap.discontinuity);
+    REQUIRE((tap.resetReasons & FmMultiplexBlock::NonFiniteOutput) != 0);
+    const auto after = fmDiagnostics::faultSnapshot(mode == DemodMode::WFM);
+    REQUIRE(after[fmDiagnostics::NonFiniteOutputBlocks] == before[fmDiagnostics::NonFiniteOutputBlocks] + 1);
+    checkFmRecovery(used, config, mode, tap.epoch);
+}
+
+TEST_CASE("FM gain overflow is caught before clipping and recovers across LPF changes", "[fm-fault]") {
+    const auto mode = GENERATE(DemodMode::NFM, DemodMode::WFM);
+    FmFaultConfig config;
+    if (mode == DemodMode::WFM) { config.rate = 240000; config.bandwidth = 180000; }
+    const std::vector<std::complex<float>> iq(2048, {1,0});
+    Demodulator used;
+    FmMultiplexBlock tap;
+    double rms = 0;
+    config.run(used, iq, mode, rms, &tap);
+    auto corrupt = config;
+    corrupt.gain = std::numeric_limits<double>::max();
+    const auto before = fmDiagnostics::faultSnapshot(mode == DemodMode::WFM);
+    REQUIRE(corrupt.run(used, iq, mode, rms, &tap).empty());
+    REQUIRE((tap.resetReasons & FmMultiplexBlock::NonFiniteOutput) != 0);
+    const auto after = fmDiagnostics::faultSnapshot(mode == DemodMode::WFM);
+    REQUIRE(after[fmDiagnostics::NonFiniteOutputBlocks] == before[fmDiagnostics::NonFiniteOutputBlocks] + 1);
+    Demodulator fresh;
+    for (bool enabled : {false, false, true, true}) {
+        config.lpfEnabled = enabled;
+        double referenceRms = 0;
+        FmMultiplexBlock reference;
+        REQUIRE(config.run(used, iq, mode, rms, &tap)
+                == config.run(fresh, iq, mode, referenceRms, &reference));
+        REQUIRE(tap.samples == reference.samples);
+    }
+}
+
+TEST_CASE("FM invalid rate and unstable notch return an explicit recoverable gap", "[fm-fault]") {
+    const int scenario = GENERATE(0,1,2,3,4);
+    FmFaultConfig config;
+    config.rate = 240000;
+    config.bandwidth = 180000;
+    auto bad = config;
+    if (scenario == 0) bad.rate = 0;
+    if (scenario == 1) bad.rate = -1;
+    if (scenario == 2) bad.rate = std::numeric_limits<double>::denorm_min();
+    if (scenario == 3) bad.notch = 1;
+    if (scenario == 4) bad.notch = -1;
+    Demodulator used;
+    FmMultiplexBlock tap;
+    double rms = 0;
+    REQUIRE(bad.run(used, {{1,0}}, DemodMode::WFM, rms, &tap).empty());
+    REQUIRE(tap.discontinuity);
+    REQUIRE((tap.resetReasons & FmMultiplexBlock::InvalidConfiguration) != 0);
+    checkFmRecovery(used, config, DemodMode::WFM, tap.epoch);
+}
+
+TEST_CASE("FM audit single NaN cannot poison the following clean second", "[fm-fault]") {
+    const auto mode = GENERATE(DemodMode::NFM, DemodMode::WFM);
+    FmFaultConfig config;
+    config.rate = 240000;
+    config.target = config.center;
+    if (mode == DemodMode::WFM) config.bandwidth = 180000;
+    Demodulator demod;
+    double rms = 0;
+    std::vector<std::complex<float>> iq(24000, {1,0});
+    iq[100] = {std::numeric_limits<float>::quiet_NaN(), 0};
+    REQUIRE(config.run(demod, iq, mode, rms, nullptr).empty());
+    iq[100] = {1,0};
+    size_t samples = 0;
+    for (int block = 0; block < 10; ++block) {
+        const auto pcm = config.run(demod, iq, mode, rms, nullptr);
+        REQUIRE(std::all_of(pcm.begin(), pcm.end(), [](float x) { return std::isfinite(x); }));
+        REQUIRE(std::isfinite(rms));
+        samples += pcm.size();
+    }
+    REQUIRE(samples == 48000);
+}
 
 // Helper: generate IQ for a tone at baseband offset (for FM phase ramp or AM).
 std::vector<std::complex<float>> genTone(double sr, double dur, double freqOffset, double amp = 0.8) {
@@ -47,6 +247,44 @@ std::vector<std::complex<float>> genNfmVoice(double sr, double dur, double audio
         iq[i] = std::polar(static_cast<float>(amp), static_cast<float>(phase));
     }
     return iq;
+}
+
+// Same-toolchain before/after oracle. The printed hashes are deliberately not
+// frozen across libm/compiler versions; compare the baseline and repaired build.
+TEST_CASE("FM valid PCM and multiplex byte oracle", "[fm-valid-oracle]") {
+    const auto mode = GENERATE(DemodMode::NFM, DemodMode::WFM);
+    const double rate = GENERATE(192000.0, 2400000.0);
+    const double outputRate = GENERATE(44100.0, 48000.0);
+    const bool lpf = GENERATE(false, true);
+    const auto iq = genNfmVoice(rate, .04, 1100, mode == DemodMode::NFM ? 1800 : 50000);
+    Demodulator d;
+    uint64_t hash = 14695981039346656037ull;
+    const auto add = [&](uint64_t value) {
+        for (int i = 0; i < 8; ++i) { hash ^= (value >> (i * 8)) & 255u; hash *= 1099511628211ull; }
+    };
+    size_t total = 0;
+    for (size_t at = 0; at < iq.size();) {
+        const size_t sizes[]{1,7,19,257,8192};
+        const size_t n = std::min(iq.size() - at, sizes[at % 5]);
+        const std::vector<std::complex<float>> block(iq.begin()+at, iq.begin()+at+n);
+        double rms = 0;
+        FmMultiplexBlock tap;
+        const auto pcm = d.demodulateToAudio(block, rate, 100e6, 100001000, mode,
+            rms, mode == DemodMode::NFM ? 3000 : 15000, -120, .8, 75, .96,
+            mode == DemodMode::NFM ? 12500 : 180000, 123, outputRate,
+            std::numeric_limits<double>::quiet_NaN(), lpf, &tap, 100e6);
+        add(pcm.size());
+        for (float sample : pcm) add(std::bit_cast<uint32_t>(sample));
+        add(tap.samples.size());
+        for (float sample : tap.samples) add(std::bit_cast<uint32_t>(sample));
+        add(tap.epoch); add(tap.firstSample); add(tap.discontinuity); add(tap.resetReasons);
+        total += pcm.size();
+        at += n;
+    }
+    REQUIRE(total > 1000);
+    std::cout << "FM_VALID_ORACLE mode=" << (mode == DemodMode::NFM ? "NFM" : "WFM")
+              << " rate=" << rate << " output=" << outputRate << " lpf=" << lpf
+              << " samples=" << total << " hash=" << hash << '\n';
 }
 
 std::vector<std::complex<float>> genSsbTone(double sr, double dur, double audioHz, bool upperSideband, double amp = 0.25) {

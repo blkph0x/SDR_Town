@@ -90,6 +90,7 @@ TEST_CASE("DeviceManager basic functionality", "[devicemanager]") {
     int argc = 0;
     char* argv[] = {nullptr};
     QCoreApplication app(argc, argv);
+    QStandardPaths::setTestModeEnabled(true);
     app.setApplicationName("SDR Town Test");
     app.setOrganizationName("SDR_Town");
 
@@ -97,7 +98,7 @@ TEST_CASE("DeviceManager basic functionality", "[devicemanager]") {
 
     try {
         SECTION("Enumerate returns devices (stubs or real)") {
-            auto devs = mgr.enumerateDevices();
+            auto devs = mgr.enumerateDevices(false, false);
             REQUIRE(devs.size() >= 1);  // At least stubs or detected hardware
             bool has_rtl_or_stub = false;
             for (const auto& d : devs) {
@@ -110,11 +111,11 @@ TEST_CASE("DeviceManager basic functionality", "[devicemanager]") {
         }
 
         SECTION("Enable/disable and streaming state") {
-            auto devs = mgr.enumerateDevices();
+            auto devs = mgr.enumerateDevices(false, false);
             if (!devs.empty()) {
                 size_t idx = 0;
                 mgr.setEnabled(idx, true);
-                bool started = mgr.startStreaming(idx);
+                bool started = mgr.startStreaming(idx, false);
                 REQUIRE(started);  // Should succeed even for stubs
                 REQUIRE(mgr.isStreaming(idx));
                 mgr.stopStreaming(idx);
@@ -124,7 +125,7 @@ TEST_CASE("DeviceManager basic functionality", "[devicemanager]") {
         }
 
         SECTION("JSON persistence roundtrip") {
-            auto devs = mgr.enumerateDevices();
+            auto devs = mgr.enumerateDevices(false, false);
             if (!devs.empty()) {
                 size_t idx = 0;
                 mgr.setEnabled(idx, true);
@@ -161,9 +162,8 @@ TEST_CASE("DeviceManager basic functionality", "[devicemanager]") {
             }
         }
     } catch (const std::exception& ex) {
-        WARN("DeviceManager test hit environment limitation (headless/Soapy init): " << ex.what() << " - treated as non-fatal for CI");
-        // Do not SUCCEED blindly; let specific tests fail if core paths broken. Real WFM exercised in manual/CLI runs.
+        FAIL("Deterministic DeviceManager test threw: " << ex.what());
     } catch (...) {
-        WARN("DeviceManager test hit unknown environment limitation - treated as non-fatal for CI");
+        FAIL("Deterministic DeviceManager test threw an unknown exception");
     }
 }

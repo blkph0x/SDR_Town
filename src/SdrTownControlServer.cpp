@@ -86,6 +86,8 @@ bool SdrTownControlServer::start(const Config& config, QString* error)
 
 void SdrTownControlServer::stop()
 {
+    ++m_generation;
+    m_snapshots.clear();
     if (m_server.isListening()) m_server.close();
     const auto clients = m_clients;
     m_clients.clear();
@@ -260,6 +262,12 @@ void SdrTownControlServer::handleSocketReadyRead(QTcpSocket* socket)
     QJsonObject response;
     int status = 200;
     const QPointer<QTcpSocket> alive(socket);
+    const QPointer<SdrTownControlServer> owner(this);
+    const auto generation = m_generation;
+    const auto current = [&] {
+        return owner && alive && owner->m_generation == generation && owner->running()
+            && alive->state() != QAbstractSocket::UnconnectedState;
+    };
     if (!m_handler) {
         response = errorResponse(QStringLiteral("control handler is not installed"));
         response.insert(QStringLiteral("status"), 503);
@@ -267,15 +275,41 @@ void SdrTownControlServer::handleSocketReadyRead(QTcpSocket* socket)
     } else {
         try {
             ++m_dispatched;
-            response = m_handler(method, path, body);
+            const bool pageable = path == "/v1/inmarsat/map-status" || path == "/v1/inmarsat/messages"
+                || path == "/v1/aircraft/map-status" || path == "/v1/aircraft/status"
+                || ((path == "/v1/inmarsat/sessions" || path == "/v1/aircraft/sessions") && body.contains("view"));
+            const bool pagedGet = pageable && method == "GET";
+            if (pagedGet) response = ControlSnapshotPager::validateRequest(body);
+            if (response.isEmpty()) {
+                if (pagedGet && body.contains("snapshot")) {
+                    response = m_snapshots.respond(path, body);
+                } else {
+                    // Keep the callable alive even if it replaces itself or
+                    // destroys the server. Do not touch members until fenced.
+                    const auto handler = m_handler;
+                    response = handler(method, path, body);
+                    if (!current()) return;
+                    if (pagedGet) response = m_snapshots.respond(path, body, std::move(response));
+                }
+            }
             status = statusCodeFromBody(response, 200);
+            if (method == "POST" && status >= 200 && status < 300 && response.value("ok").toBool()
+                && QJsonDocument(response).toJson(QJsonDocument::Compact).size() > ControlSnapshotPager::pageBytes) {
+                // The command already ran exactly once. An oversized state
+                // attachment must not turn a successful mutation into a 413.
+                response = {{"ok", true}, {"status", status}, {"stateOmitted", true}};
+            }
         } catch (const std::exception&) {
+            if (!owner) return;
             ++m_handlerErrors;
+            if (!current()) return;
             response = errorResponse(QStringLiteral("control operation failed"));
             response.insert(QStringLiteral("status"), 500);
             status = 500;
         } catch (...) {
+            if (!owner) return;
             ++m_handlerErrors;
+            if (!current()) return;
             response = errorResponse(QStringLiteral("handler exception"));
             response.insert(QStringLiteral("status"), 500);
             status = 500;
@@ -284,7 +318,7 @@ void SdrTownControlServer::handleSocketReadyRead(QTcpSocket* socket)
 
     // A handler may stop the server while processing a nested GUI event, even
     // if it subsequently throws. Never reply through a retired connection.
-    if (!alive || !running() || socket->state() == QAbstractSocket::UnconnectedState) return;
+    if (!current()) return;
     socket->write(makeHttpResponse(status, reasonForStatus(status), response));
     socket->disconnectFromHost();
 }
@@ -314,7 +348,11 @@ QByteArray SdrTownControlServer::makeHttpResponse(int status,
                                                   const char* reason,
                                                   const QJsonObject& body)
 {
-    const QByteArray payload = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    QByteArray payload = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    if (payload.size() > 256 * 1024 - 4096) {
+        status = 413; reason = "Payload Too Large";
+        payload = R"({"ok":false,"status":413,"error":"Control response exceeds transport limit; request a paged view"})";
+    }
     QByteArray response;
     response += "HTTP/1.1 " + QByteArray::number(status) + " " + QByteArray(reason) + "\r\n";
     response += "Content-Type: application/json\r\n";

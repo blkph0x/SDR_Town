@@ -8,6 +8,7 @@
 #include <QSet>
 
 #include <functional>
+#include "ControlSnapshotPager.h"
 
 class QTcpSocket;
 
@@ -53,7 +54,9 @@ private:
     QTcpServer m_server;
     Config m_config;
     RequestHandler m_handler;
+    ControlSnapshotPager m_snapshots;
     QSet<QTcpSocket*> m_clients;
     quint64 m_accepted = 0, m_rejected = 0, m_timeouts = 0;
     quint64 m_dispatched = 0, m_handlerErrors = 0;
+    quint64 m_generation = 0;
 };

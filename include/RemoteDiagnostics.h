@@ -91,8 +91,15 @@ private:
     QString m_hardwareHash;
 };
 
+// DEC-0223 / F10: affirmative UI consent is process-scoped, never persisted and
+// never an authorization to record or upload IQ/audio. Forced-off always wins.
+enum class RemoteDiagnosticsConsent { ProcessDefault, ThisRun };
 RemoteDiagnosticsConfig remoteDiagnosticsConfigFromProcess(int argc, char* argv[], const QString& mode);
+RemoteDiagnosticsConfig remoteDiagnosticsConfigFromProcess(int argc, char* argv[], const QString& mode,
+    RemoteDiagnosticsConsent consent);
 RemoteDiagnosticsClient* remoteDiagnosticsConfigureFromProcess(int argc, char* argv[], QObject* parent, const QString& mode);
+RemoteDiagnosticsClient* remoteDiagnosticsConfigureFromProcess(int argc, char* argv[], QObject* parent, const QString& mode,
+    RemoteDiagnosticsConsent consent);
 void remoteDiagnosticsSubmit(const QString& type, const QString& severity, const QJsonObject& payload);
 void remoteDiagnosticsCheckClientStatus(QObject* context, std::function<void(const QJsonObject&)> callback);
 bool remoteDiagnosticsEnabled();

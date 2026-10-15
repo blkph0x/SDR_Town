@@ -4,23 +4,44 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
 
+enum class AircraftSource { None, LocalAdsb, OpenSky, Adsc };
+
+struct AircraftObservation {
+    AircraftSource source = AircraftSource::None;
+    double unixTime = 0.0;
+    double monotonicTime = 0.0;
+    double ageSec = -1.0;
+    // OpenSky exposes contact time, not individual velocity/identity times.
+    std::string timeBasis;
+};
+
+struct AircraftClockSample {
+    double unixTime = 0.0;
+    double monotonicTime = 0.0;
+};
+
 struct AircraftTrack {
     uint32_t icao = 0;
     std::string icaoHex;
     std::string callsign;
-    double latDeg = 0.0;
-    double lonDeg = 0.0;
-    double altFt = 0.0;
-    double gsKt = 0.0;
-    double trackDeg = 0.0;
+    double latDeg = std::numeric_limits<double>::quiet_NaN();
+    double lonDeg = std::numeric_limits<double>::quiet_NaN();
+    double altFt = std::numeric_limits<double>::quiet_NaN();
+    bool altitudeValid = false;
+    std::string altitudeReference;
+    double gsKt = std::numeric_limits<double>::quiet_NaN();
+    bool groundSpeedValid = false;
+    double trackDeg = std::numeric_limits<double>::quiet_NaN();
     bool trackValid = false;
-    double verticalRateFpm = 0.0;
+    double verticalRateFpm = std::numeric_limits<double>::quiet_NaN();
+    bool verticalRateValid = false;
     std::string squawk;
     std::string reg;
     std::string typeCode;
@@ -31,6 +52,14 @@ struct AircraftTrack {
     bool fromNetwork = false;
     bool fromAdsc = false;
     bool positionValid = false;
+    AircraftObservation presence;
+    AircraftObservation identity;
+    AircraftObservation position;
+    AircraftObservation altitude;
+    AircraftObservation groundSpeed;
+    AircraftObservation heading;
+    AircraftObservation verticalRate;
+    AircraftObservation squawkObservation;
 };
 
 struct AircraftMapSnapshot {
@@ -49,7 +78,9 @@ struct AircraftMapSnapshot {
 class AdsBTrackStore {
 public:
     static AdsBTrackStore& instance();
-    explicit AdsBTrackStore(const std::string& sessionId = {});
+    using Clock = std::function<AircraftClockSample()>;
+    // DEC-0223/F08: replay/tests supply both clocks; expiration never uses UTC.
+    explicit AdsBTrackStore(const std::string& sessionId = {}, Clock clock = {});
     ~AdsBTrackStore();
 
     void setObserver(double latDeg, double lonDeg, double radiusNm = 120.0);
@@ -76,6 +107,8 @@ public:
 
     AircraftMapSnapshot snapshot() const;
     AircraftTrack trackByIcao(uint32_t icao) const;
+    // Shared list/detail wire contract. Callers still handle an unknown ICAO.
+    static nlohmann::json trackJson(const AircraftTrack& track);
     nlohmann::json statusJson() const;
     void observer(double* lat, double* lon, double* radiusNm) const;
 
@@ -83,6 +116,8 @@ public:
 
 private:
     std::string settingsPrefix_;
+    Clock clock_;
+    AircraftClockSample clockOrigin_;
 
     void pruneLocked(double now);
     void notify();
@@ -92,6 +127,7 @@ private:
 
     mutable std::mutex mutex_;
     std::map<uint32_t, AircraftTrack> tracks_;
+    std::map<uint32_t, AircraftTrack> adscTracks_;
     std::map<uint32_t, AircraftTrack> networkTracks_;
     struct CprBuf {
         bool hasEven = false, hasOdd = false;
@@ -103,7 +139,8 @@ private:
     double centerLat_ = -33.87;
     double centerLon_ = 151.21;
     double radiusNm_ = 120.0;
-    int64_t networkUnix_ = 0;
+    double networkMonotonic_ = 0.0;
+    bool hasNetworkReceipt_ = false;
     uint64_t localFrames_ = 0;
     uint64_t localCrcOk_ = 0;
     std::string lastStatus_ = "Aircraft map idle";

@@ -33,14 +33,13 @@ void configureInmarsatReplaySharing(InmarsatReplayDialog& dialog) {
         for (const auto& arg : args) bytes.push_back(arg.toLocal8Bit());
         std::vector<char*> argv;
         for (auto& arg : bytes) argv.push_back(arg.data());
-        const auto cfg = remoteDiagnosticsConfigFromProcess(static_cast<int>(argv.size()), argv.data(), "inmarsat-replay");
+        const auto cfg = remoteDiagnosticsConfigFromProcess(static_cast<int>(argv.size()), argv.data(), "inmarsat-replay",
+            RemoteDiagnosticsConsent::ThisRun);
         if (!cfg.endpoint.isValid() || cfg.endpoint.scheme() != "https" || cfg.endpoint.host().isEmpty()) {
             QMessageBox::warning(&dialog, "Diagnostics unavailable", "No valid HTTPS collector is configured in this build.");
             return false;
         }
-        bytes.push_back("--diag-url"); bytes.push_back(cfg.endpoint.toEncoded());
-        argv.clear(); for (auto& arg : bytes) argv.push_back(arg.data());
         return remoteDiagnosticsConfigureFromProcess(static_cast<int>(argv.size()), argv.data(),
-            QCoreApplication::instance(), "inmarsat-replay") != nullptr;
+            QCoreApplication::instance(), "inmarsat-replay", RemoteDiagnosticsConsent::ThisRun) != nullptr;
     });
 }

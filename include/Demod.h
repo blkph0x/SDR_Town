@@ -14,11 +14,16 @@ enum class DemodMode { NFM, WFM, AM, USB, LSB, CW, AUTO };
 // NFM uses the same channel-bandwidth-derived normalization as its audio path.
 // Caller owns the block; no queue, callbacks or audio-path dependency.
 struct FmMultiplexBlock {
+    // DEC-0223: rejected blocks contain no samples; the reason also survives
+    // until the first recovered tap. Existing bits 0..6 retain their meaning.
+    static constexpr uint32_t InvalidInput = 128u;
+    static constexpr uint32_t InvalidConfiguration = 256u;
+    static constexpr uint32_t NonFiniteOutput = 512u;
     std::vector<float> samples;
     double sampleRate = 0, targetHz = 0;
     uint64_t epoch = 0, firstSample = 0;
     bool discontinuity = true;
-    uint32_t resetReasons = 0; // continuity, explicit DSP, mode, rate, BW, tune, FIR length.
+    uint32_t resetReasons = 0; // continuity, explicit DSP, mode, rate, BW, tune, FIR length, invalid block.
 };
 
 struct P25ControlCandidate {
@@ -73,6 +78,9 @@ public:
 
     // Same signature as the old free function. All previous "static" FIR/IIR/phase/resampler/AGC
     // state is now per-instance member state and is reset on large retune or mode change.
+    // FM rejects non-finite IQ/required configuration as an empty discontinuity,
+    // then restarts speech/data histories. NaN remains the optional sentinel for
+    // externalSquelchLevelDb and dataIdentityHz; infinity is never a sentinel.
     std::vector<float> demodulateToAudio(const std::vector<std::complex<float>>& iq,
                                          double sr, double cf, double target,
                                          DemodMode mode,
@@ -99,6 +107,8 @@ public:
     void resetSquelchGate() { squelchGateNeedsReset = true; }
 
 private:
+    void rejectFmBlock(DemodMode mode, uint32_t reason, double& rmsOut, FmMultiplexBlock* multiplex);
+    uint32_t mpxPendingFault = 0;
     bool mpxContinuous = false;
     double mpxMixerPhase = 0;
     DemodMode mpxMode = DemodMode::AUTO;

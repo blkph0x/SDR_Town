@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <cstdint>
 #include <numbers>
 #include <string>
@@ -247,8 +248,9 @@ struct RestoreAircraftNetwork {
         else settings.remove("aircraft/networkEnabled");
     }
 };
-nlohmann::json networkAircraft(std::string icao, std::string call, double lat = 40) {
-    return nlohmann::json::array({icao, call, "Test", 0, 0, 30, lat, 1000,
+nlohmann::json networkAircraft(std::string icao, std::string call, double lat = 40,
+                              double utc = std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count()) {
+    return nlohmann::json::array({icao, call, "Test", std::floor(utc), std::floor(utc), 30, lat, 1000,
         false, 100, 90, 0, nullptr, 1000, "1200", false, 0});
 }
 }
@@ -316,4 +318,382 @@ TEST_CASE("Aircraft ground track is validated independently of position", "[adsb
     CHECK(store.trackByIcao(0x485020).trackValid);
     CHECK(store.trackByIcao(0x485020).trackDeg==Catch::Approx(182.88).margin(.02));
     store.setNetworkEnabled(false);
+}
+
+namespace {
+// Readdress the reference frames (or alter unavailable-value bits), then encode
+// CRC24 using the Mode-S polynomial already exercised by the reference fixtures.
+std::vector<uint8_t> withAircraftCrc(std::vector<uint8_t> frame, uint32_t icao = 0x40621D) {
+    frame[1] = uint8_t(icao >> 16); frame[2] = uint8_t(icao >> 8); frame[3] = uint8_t(icao);
+    frame[11] = frame[12] = frame[13] = 0;
+    uint32_t remainder = 0;
+    for (int bit = 0; bit < 112; ++bit) {
+        const bool top = (remainder & 0x800000u) != 0;
+        remainder = ((remainder << 1) & 0xFFFFFFu) | ((frame[bit / 8] >> (7 - bit % 8)) & 1u);
+        if (top) remainder ^= 0xFFF409u;
+    }
+    frame[11] = uint8_t(remainder >> 16); frame[12] = uint8_t(remainder >> 8); frame[13] = uint8_t(remainder);
+    REQUIRE(ModeS::crcOk(frame.data(), 14));
+    return frame;
+}
+
+struct AircraftTimeFixture {
+    double utc = 1800000000.0;
+    double monotonic = 0.0;
+    QSettings settings{"SDR_Town", "SDR Town"};
+    QVariant saved = settings.value("aircraft/sessions/qa-freshness/networkEnabled");
+    AdsBTrackStore store{"qa-freshness", [this] { return AircraftClockSample{utc, monotonic}; }};
+
+    AircraftTimeFixture() { store.setNetworkEnabled(false); }
+    ~AircraftTimeFixture() {
+        if (saved.isValid()) settings.setValue("aircraft/sessions/qa-freshness/networkEnabled", saved);
+        else settings.remove("aircraft/sessions/qa-freshness/networkEnabled");
+    }
+    void advance(double seconds) { utc += seconds; monotonic += seconds; }
+    void frame(const char* text) { const auto bytes = withAircraftCrc(hexFrame(text)); store.ingestModeSFrame(bytes.data()); }
+    void position() {
+        frame("8D40621D58C386435CC412692AD6");
+        advance(1);
+        frame("8D40621D58C382D690C8AC2863A7");
+    }
+    void identity() { frame("8D4840D6202CC371C32CE0576098"); }
+    void velocity() { frame("8D485020994409940838175B284F"); }
+    nlohmann::json row() const { return networkAircraft("40621d", "NETWORK", 40, utc); }
+    void network(nlohmann::json row) {
+        store.setNetworkEnabled(true);
+        REQUIRE(store.mergeNetworkJson(nlohmann::json{{"states", {row}}}.dump(), store.networkGeneration()));
+    }
+    AircraftTrack track() const { return store.trackByIcao(0x40621D); }
+};
+}
+
+TEST_CASE("Aircraft cold and position-only frames never manufacture altitude or motion", "[adsb][freshness]") {
+    AircraftTimeFixture f;
+    CHECK(f.store.snapshot().tracks.empty());
+    CHECK(f.store.statusJson()["tracks"].empty());
+    CHECK(f.store.snapshot().networkAgeSec == -1);
+    CHECK_FALSE(f.track().altitudeValid);
+    CHECK(std::isnan(f.track().altFt));
+    f.position();
+    const auto track = f.track();
+    REQUIRE(track.positionValid);
+    CHECK(track.position.source == AircraftSource::LocalAdsb);
+    CHECK(track.position.ageSec == 0);
+    CHECK_FALSE(track.altitudeValid);
+    CHECK_FALSE(track.groundSpeedValid);
+    CHECK_FALSE(track.trackValid);
+    CHECK_FALSE(track.verticalRateValid);
+    const auto row = f.store.statusJson()["tracks"].at(0);
+    for (const auto key : {"altFt", "gsKt", "trackDeg", "vrateFpm"}) CHECK(row[key].is_null());
+    CHECK(row["fields"]["altitude"].is_null());
+    CHECK(row["fields"]["position"]["source"] == "local_adsb");
+}
+
+TEST_CASE("Aircraft identification cannot renew position or velocity", "[adsb][freshness]") {
+    AircraftTimeFixture f;
+    f.position(); f.velocity();
+    const double observed = f.track().position.unixTime;
+    for (int i = 0; i < 4; ++i) { f.advance(30); f.identity(); }
+    CHECK(f.track().positionValid); // Existing retention boundary is inclusive.
+    CHECK(f.track().position.ageSec == 120);
+    f.advance(1); f.identity();
+    const auto track = f.track();
+    REQUIRE(track.icao == 0x40621D);
+    CHECK(track.callsign == "KLM1023");
+    CHECK(track.presence.ageSec == 0);
+    CHECK(track.position.unixTime == observed);
+    CHECK(track.position.ageSec == 121);
+    CHECK_FALSE(track.positionValid);
+    CHECK_FALSE(track.groundSpeedValid);
+    CHECK_FALSE(track.trackValid);
+    CHECK_FALSE(track.verticalRateValid);
+    CHECK(std::isnan(track.latDeg));
+    CHECK(f.store.snapshot().tracks.empty());
+    f.advance(121);
+    CHECK(f.track().icao == 0);
+}
+
+TEST_CASE("Aircraft velocity and identity expire independently of each other and position", "[adsb][freshness]") {
+    AircraftTimeFixture f;
+    f.identity(); f.velocity();
+    f.advance(110); f.position();
+    f.advance(10);
+    const auto track = f.track();
+    CHECK(track.positionValid);
+    CHECK(track.position.ageSec == 10);
+    CHECK(track.callsign.empty());
+    CHECK_FALSE(track.groundSpeedValid);
+    CHECK_FALSE(track.trackValid);
+    CHECK_FALSE(track.verticalRateValid);
+    f.velocity();
+    CHECK(f.track().groundSpeedValid);
+    CHECK(f.track().position.ageSec == 10);
+}
+
+TEST_CASE("Aircraft fresh network position wins despite newer local identity and velocity", "[adsb][freshness]") {
+    AircraftTimeFixture f;
+    f.position();
+    f.advance(10); f.network(f.row());
+    f.advance(1); f.identity(); f.velocity();
+    const auto track = f.track();
+    REQUIRE(track.positionValid);
+    CHECK(track.latDeg == 40);
+    CHECK(track.fromNetwork);
+    CHECK_FALSE(track.fromLocal);
+    CHECK(track.position.source == AircraftSource::OpenSky);
+    CHECK(track.identity.source == AircraftSource::LocalAdsb);
+    CHECK(track.groundSpeed.source == AircraftSource::LocalAdsb);
+    CHECK(track.altitude.source == AircraftSource::OpenSky);
+    CHECK(track.altitudeReference == "barometric");
+    CHECK(track.callsign == "KLM1023");
+    f.store.setNetworkEnabled(false);
+    CHECK(f.track().position.source == AircraftSource::LocalAdsb);
+    CHECK_FALSE(f.track().altitudeValid);
+    f.advance(110); f.identity();
+    CHECK_FALSE(f.track().positionValid);
+    CHECK(f.store.snapshot().tracks.empty());
+}
+
+TEST_CASE("Aircraft network-off removes all enrichment without reviving stale RF coordinates", "[adsb][freshness]") {
+    AircraftTimeFixture f;
+    f.position(); f.advance(120); f.identity(); f.advance(1);
+    f.network(f.row());
+    CHECK(f.track().positionValid);
+    const auto generation = f.store.networkGeneration();
+    const auto body = nlohmann::json{{"states", {f.row()}}}.dump();
+    f.store.setNetworkEnabled(false);
+    CHECK_FALSE(f.track().positionValid);
+    CHECK_FALSE(f.track().altitudeValid);
+    CHECK_FALSE(f.track().groundSpeedValid);
+    CHECK(f.track().squawk.empty());
+    CHECK(f.track().callsign == "KLM1023");
+    CHECK(f.store.statusJson()["tracks"].empty());
+    f.store.setNetworkEnabled(true);
+    CHECK_FALSE(f.store.mergeNetworkJson(body, generation));
+    CHECK_FALSE(f.track().positionValid);
+}
+
+TEST_CASE("Aircraft ADS-C presence and position do not masquerade as local ADS-B", "[adsb][freshness]") {
+    AircraftTimeFixture f;
+    f.store.ingestAdscPosition(0x40621D, -34, 151, {}, "SAT1");
+    f.advance(1); f.identity(); f.velocity();
+    CHECK(f.track().fromAdsc);
+    CHECK_FALSE(f.track().fromLocal);
+    CHECK(f.track().position.source == AircraftSource::Adsc);
+    CHECK(f.track().identity.source == AircraftSource::LocalAdsb);
+    CHECK_FALSE(f.track().altitudeValid);
+    f.advance(120); f.identity();
+    CHECK_FALSE(f.track().positionValid);
+    CHECK_FALSE(f.track().fromAdsc);
+    f.store.ingestAdscPosition(0x40621D, -35, 152);
+    CHECK(f.track().fromAdsc);
+    CHECK(f.track().latDeg == -35);
+}
+
+TEST_CASE("Aircraft lifetime and CPR pairing use monotonic time through UTC jumps", "[adsb][freshness]") {
+    AircraftTimeFixture f;
+    f.position(); f.velocity(); f.network(f.row());
+    f.utc -= 86400;
+    CHECK(f.track().positionValid);
+    CHECK(f.track().position.ageSec == 0);
+    f.advance(121); f.identity();
+    CHECK_FALSE(f.track().positionValid);
+    CHECK_FALSE(f.track().groundSpeedValid);
+    CHECK(f.store.snapshot().networkAgeSec == 121);
+    CHECK_FALSE(f.store.snapshot().networkOnline);
+    f.utc += 172800;
+    f.frame("8D40621D58C382D690C8AC2863A7");
+    CHECK_FALSE(f.track().positionValid); // Old odd CPR cannot be paired after a clock jump.
+    f.advance(1); f.frame("8D40621D58C386435CC412692AD6");
+    CHECK(f.track().positionValid);
+    CHECK(f.track().position.ageSec == 0);
+}
+
+TEST_CASE("Aircraft source timestamps reject stale future and missing network fixes", "[adsb][freshness]") {
+    AircraftTimeFixture f;
+    auto row = f.row(); row[3] = f.utc - 121;
+    f.network(row);
+    CHECK(f.track().icao == 0x40621D);
+    CHECK_FALSE(f.track().positionValid);
+    CHECK(f.store.snapshot().tracks.empty());
+    for (auto stamp : nlohmann::json::array({nullptr, 0, f.utc + 1, "now"})) {
+        row = f.row(); row[3] = stamp; f.network(row);
+        CHECK_FALSE(f.track().positionValid);
+    }
+    row = f.row(); row[4] = f.utc - 121; f.network(row);
+    CHECK(f.track().icao == 0);
+    row = f.row(); row[4] = nullptr; f.network(row);
+    CHECK(f.track().icao == 0);
+    row = f.row(); row[5] = row[6] = nullptr; f.network(row);
+    CHECK(f.track().callsign == "NETWORK");
+    CHECK_FALSE(f.track().positionValid);
+}
+
+TEST_CASE("Aircraft repeated network states do not renew cached telemetry", "[adsb][freshness]") {
+    AircraftTimeFixture f;
+    f.network(f.row());
+    f.advance(60); f.network(f.row());
+    CHECK(f.track().position.ageSec == 0);
+    CHECK(f.track().altitude.ageSec == 60);
+    CHECK(f.track().groundSpeed.ageSec == 60);
+    f.advance(61); f.network(f.row());
+    CHECK(f.track().positionValid);
+    CHECK_FALSE(f.track().altitudeValid);
+    CHECK_FALSE(f.track().groundSpeedValid);
+    CHECK_FALSE(f.track().trackValid);
+    CHECK_FALSE(f.track().verticalRateValid);
+    CHECK(f.track().callsign.empty());
+    auto row = f.row(); row[7] = 1001; row[9] = 101; f.network(row);
+    CHECK(f.track().altitudeValid);
+    CHECK(f.track().groundSpeedValid);
+    CHECK(f.track().altitude.timeBasis == "last_contact");
+    CHECK_FALSE(f.track().trackValid);
+}
+
+TEST_CASE("Aircraft missing network values are null while measured zero is valid", "[adsb][freshness]") {
+    AircraftTimeFixture f;
+    auto row = f.row();
+    for (const int i : {7, 9, 10, 11, 13}) row[i] = nullptr;
+    f.network(row);
+    const auto missing = f.store.statusJson()["tracks"].at(0);
+    for (const auto key : {"altFt", "gsKt", "trackDeg", "vrateFpm"}) CHECK(missing[key].is_null());
+    row[7] = row[9] = row[10] = row[11] = 0;
+    f.advance(1); row[3] = row[4] = f.utc; f.network(row);
+    CHECK(f.track().altitudeValid);
+    CHECK(f.track().groundSpeedValid);
+    CHECK(f.track().trackValid);
+    CHECK(f.track().verticalRateValid);
+    CHECK(f.store.statusJson()["tracks"].at(0)["altFt"] == 0);
+    row[7] = nullptr; row[13] = 50; f.network(row);
+    CHECK(f.track().altitudeValid);
+    CHECK(f.track().altitudeReference == "geometric");
+    CHECK(f.track().altFt == Catch::Approx(50 * 3.28084));
+    row[13] = nullptr; row[9] = -1; row[10] = "0"; row[11] = nullptr; f.network(row);
+    CHECK_FALSE(f.track().altitudeValid);
+    CHECK_FALSE(f.track().groundSpeedValid);
+    CHECK_FALSE(f.track().trackValid);
+    CHECK_FALSE(f.track().verticalRateValid);
+}
+
+TEST_CASE("Aircraft local velocity missing bits do not invent zero rate or north heading", "[adsb][freshness]") {
+    AircraftTimeFixture f;
+    auto bytes = hexFrame("8D485020994409940838175B284F");
+    bytes[8] &= 0xF8; bytes[9] &= 3; // Vertical-rate code 0: unavailable.
+    bytes = withAircraftCrc(bytes); f.store.ingestModeSFrame(bytes.data());
+    CHECK(f.track().groundSpeedValid);
+    CHECK(f.track().trackValid);
+    CHECK_FALSE(f.track().verticalRateValid);
+    bytes[8] |= 0; bytes[9] |= 4; // Code 1: measured zero, not unavailable.
+    bytes = withAircraftCrc(bytes); f.store.ingestModeSFrame(bytes.data());
+    CHECK(f.track().verticalRateValid);
+    CHECK(f.track().verticalRateFpm == 0);
+    bytes[5] &= 0xFC; bytes[6] = 1;
+    bytes[7] &= 0x80; bytes[8] = uint8_t((bytes[8] & 0x1F) | 0x20);
+    bytes = withAircraftCrc(bytes); f.store.ingestModeSFrame(bytes.data());
+    CHECK(f.track().groundSpeedValid);
+    CHECK(f.track().gsKt == 0);
+    CHECK_FALSE(f.track().trackValid);
+    f.advance(121);
+    bytes[5] &= 0xFC; bytes[6] = 0; // No horizontal vector; vertical is still present.
+    bytes = withAircraftCrc(bytes); f.store.ingestModeSFrame(bytes.data());
+    CHECK_FALSE(f.track().groundSpeedValid);
+    CHECK_FALSE(f.track().trackValid);
+    CHECK(f.track().verticalRateValid);
+}
+
+TEST_CASE("Aircraft magnitude to frame to store path shares the injected clock", "[adsb][freshness][ppm]") {
+    AircraftTimeFixture f;
+    for (const char* text : {"8D40621D58C386435CC412692AD6", "8D40621D58C382D690C8AC2863A7"}) {
+        const auto samples = synthesizePpm(hexFrame(text), 2.4e6, 31.37);
+        f.store.processMagnitude(samples.data(), samples.size(), 2.4e6);
+        f.advance(1);
+    }
+    REQUIRE(f.track().positionValid);
+    CHECK(f.store.snapshot().localCrcOk == 2);
+    CHECK(f.track().position.ageSec == 1);
+    f.advance(120); f.identity();
+    CHECK_FALSE(f.track().positionValid);
+    CHECK(f.store.statusJson()["tracks"].empty());
+}
+
+TEST_CASE("Aircraft remote observation ages survive new replies across UTC corrections", "[adsb][freshness]") {
+    AircraftTimeFixture f;
+    auto row = f.row();
+    const double sourceUtc = f.utc;
+    f.network(row);
+    f.advance(30); f.utc -= 86400;
+    f.network(row);
+    CHECK(f.track().positionValid);
+    CHECK(f.track().position.ageSec == 30);
+    CHECK(f.track().presence.ageSec == 30);
+    f.advance(30); f.utc += 172800;
+    row[4] = sourceUtc + 60; f.network(row);
+    CHECK(f.track().presence.ageSec == 0);
+    CHECK(f.track().position.ageSec == 60);
+    CHECK(f.track().groundSpeed.ageSec == 60);
+    f.advance(61); row[4] = sourceUtc + 121; f.network(row);
+    CHECK(f.track().icao == 0x40621D);
+    CHECK_FALSE(f.track().positionValid);
+    CHECK(f.track().position.ageSec == 121);
+    CHECK_FALSE(f.track().groundSpeedValid);
+    row[3] = sourceUtc + 121; f.network(row);
+    CHECK(f.track().positionValid);
+    CHECK(f.track().position.ageSec == 0);
+}
+
+TEST_CASE("Aircraft CPR and presence ignore invalid and unpaired frames", "[adsb][freshness]") {
+    AircraftTimeFixture f;
+    f.frame("8D40621D58C386435CC412692AD6");
+    f.advance(11); f.frame("8D40621D58C382D690C8AC2863A7");
+    CHECK_FALSE(f.track().positionValid);
+    f.advance(1); f.frame("8D40621D58C386435CC412692AD6");
+    REQUIRE(f.track().positionValid);
+    f.advance(121);
+    auto invalid = hexFrame("8D40621D58C386435CC412692AD6"); invalid[7] ^= 1;
+    f.store.ingestModeSFrame(invalid.data());
+    CHECK(f.track().icao == 0);
+    CHECK(f.store.snapshot().localCrcOk == 3);
+}
+
+TEST_CASE("Aircraft detail and map lists share nullable field and provenance contracts", "[adsb][freshness]") {
+    AircraftTimeFixture f;
+    f.position(); f.velocity(); f.identity();
+    REQUIRE(AdsBTrackStore::trackJson(f.track()) == f.store.statusJson()["tracks"].at(0));
+    f.advance(120); f.identity();
+    f.advance(1); f.identity();
+    const auto detail = AdsBTrackStore::trackJson(f.track());
+    CHECK(detail["icao"] == "40621D");
+    CHECK(detail["callsign"] == "KLM1023");
+    for (const auto key : {"lat", "lon", "altFt", "gsKt", "trackDeg", "vrateFpm"}) CHECK(detail[key].is_null());
+    for (const auto key : {"positionValid", "altitudeValid", "groundSpeedValid", "trackValid", "verticalRateValid"})
+        CHECK(detail[key] == false);
+    CHECK(detail["fields"]["position"]["ageSec"] == 121);
+    CHECK(f.store.statusJson()["tracks"].empty());
+}
+
+TEST_CASE("Aircraft partial velocity reports age only the absent components", "[adsb][freshness]") {
+    AircraftTimeFixture f;
+    f.velocity();
+    f.advance(100);
+    auto bytes = hexFrame("8D485020994409940838175B284F");
+    bytes[8] &= 0xF8; bytes[9] &= 3;
+    bytes = withAircraftCrc(bytes); f.store.ingestModeSFrame(bytes.data());
+    CHECK(f.track().groundSpeed.ageSec == 0);
+    CHECK(f.track().verticalRate.ageSec == 100);
+    CHECK(f.track().verticalRateFpm == -832);
+    f.advance(21); f.store.ingestModeSFrame(bytes.data());
+    CHECK(f.track().groundSpeedValid);
+    CHECK_FALSE(f.track().verticalRateValid);
+    CHECK(std::isnan(f.track().verticalRateFpm));
+    bytes = hexFrame("8D485020994409940838175B284F");
+    bytes[5] &= 0xFC; bytes[6] = 0;
+    bytes = withAircraftCrc(bytes);
+    f.advance(100); f.store.ingestModeSFrame(bytes.data());
+    CHECK(f.track().verticalRateValid);
+    CHECK(f.track().verticalRate.ageSec == 0);
+    CHECK(f.track().groundSpeed.ageSec == 100);
+    f.advance(21); f.store.ingestModeSFrame(bytes.data());
+    CHECK_FALSE(f.track().groundSpeedValid);
+    CHECK_FALSE(f.track().trackValid);
+    CHECK(f.track().verticalRateValid);
 }

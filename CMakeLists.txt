@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.138 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.139 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -316,6 +316,7 @@ target_include_directories(sdrtown_control_client PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 target_compile_definitions(sdrtown_control_client PRIVATE SDRTOWN_CONTROL_BUILD)
+target_link_libraries(sdrtown_control_client PRIVATE nlohmann_json::nlohmann_json)
 set_target_properties(sdrtown_control_client PROPERTIES OUTPUT_NAME "SdrTownControl")
 if(WIN32)
     target_compile_definitions(sdrtown_control_client PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
@@ -482,6 +483,7 @@ if(BUILD_TESTS)
     tests/test_device_ownership.cpp
     tests/test_tx_safety.cpp
     tests/test_hardware_loss.cpp
+    tests/test_rx_lifecycle.cpp
     tests/test_sdrplay_profile.cpp
     tests/test_sdrplay_controls.cpp
     tests/test_rtl_bias_t.cpp
@@ -584,6 +586,7 @@ if(BUILD_TESTS)
     sdr_town_sgp4
   )
   target_compile_definitions(sdr_town_tests PRIVATE SDR_TOWN_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\")
+  target_compile_definitions(sdr_town_tests PRIVATE SDR_TOWN_AUDIO_TEST_HOOKS)
   if(SDR_TOWN_BUILD_RDS_DSP)
     add_dependencies(sdr_town_tests rds_runtime)
     target_compile_definitions(sdr_town_tests PRIVATE SDR_TOWN_TEST_RDS_DSP=1
@@ -655,6 +658,7 @@ if(BUILD_TESTS)
 
   add_executable(sdr_town_workspace_tests tests/test_workspace.cpp src/WorkspaceLayout.cpp
     tests/test_inmarsat_replay_gui.cpp src/InmarsatReplayDialog.cpp
+    tests/test_inmarsat_replay_consent.cpp src/InmarsatRemoteDiagnostics.cpp include/RemoteDiagnostics.h
     src/InmarsatReplay.cpp src/InmarsatIqFile.cpp src/InmarsatPipeline.cpp src/InmarsatMessageStore.cpp
     src/InmarsatDiagnosticRecording.cpp
     src/InmarsatDemod.cpp src/InmarsatDiagnostics.cpp
@@ -668,7 +672,7 @@ if(BUILD_TESTS)
     src/BandPlan.cpp src/BandPlanDialog.cpp src/SpectrumWidget.cpp include/SpectrumWidget.h src/RdsStatusWidget.cpp)
   target_include_directories(sdr_town_workspace_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_include_directories(sdr_town_workspace_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/external/miniaudio)
-  target_link_libraries(sdr_town_workspace_tests PRIVATE Catch2::Catch2 Qt6::Widgets nlohmann_json::nlohmann_json spdlog::spdlog sdr_town_tones sdr_inmarsat_native sdr_inmarsat_audio sdr_inmarsat_map)
+  target_link_libraries(sdr_town_workspace_tests PRIVATE Catch2::Catch2 Qt6::Widgets Qt6::Network nlohmann_json::nlohmann_json spdlog::spdlog sdr_town_tones sdr_inmarsat_native sdr_inmarsat_audio sdr_inmarsat_map)
   add_test(NAME WorkspaceTests COMMAND sdr_town_workspace_tests)
   target_sources(sdr_town_workspace_tests PRIVATE tests/test_cw_gui.cpp
     src/CwWindow.cpp include/CwWindow.h src/CwSession.cpp)
@@ -712,6 +716,8 @@ if(BUILD_TESTS)
       src/InmarsatTrackingPanel.cpp tests/test_inmarsat_tracking_gui.cpp
       src/InmarsatWatchUi.cpp src/InmarsatWatchSpectrum.cpp include/InmarsatWatchSpectrum.h
       tests/test_aircraft_gui.cpp src/AircraftMapWidget.cpp include/AircraftMapWidget.h
+      tests/test_aircraft_freshness_gui.cpp
+      tests/test_control_views_gui.cpp
       src/SatcomHubWidget.cpp include/SatcomHubWidget.h
       src/SatcomScannerWidget.cpp include/SatcomScannerWidget.h
       src/SatCatalogueDialog.cpp include/SatCatalogueDialog.h
@@ -721,7 +727,7 @@ if(BUILD_TESTS)
   foreach(property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS)
     get_target_property(value sdr_town_tests ${property})
     if(property STREQUAL "COMPILE_DEFINITIONS")
-      list(REMOVE_ITEM value HAVE_SOAPYSDR)
+      list(REMOVE_ITEM value HAVE_SOAPYSDR SDR_TOWN_AUDIO_TEST_HOOKS)
     endif()
     if(value)
       set_property(TARGET inmarsat_live_gui_tests PROPERTY ${property} "${value}")
@@ -789,6 +795,13 @@ if(BUILD_TESTS)
   set_target_properties(remote_diagnostics_tests PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test-fixtures/diagnostics")
   add_test(NAME RemoteDiagnostics COMMAND remote_diagnostics_tests)
+  add_executable(update_manager_tests tests/test_update_manager.cpp src/UpdateManager.cpp
+      src/UpdateManifestSignature.cpp include/UpdateManager.h)
+  target_include_directories(update_manager_tests PRIVATE include)
+  target_link_libraries(update_manager_tests PRIVATE Catch2::Catch2 Qt6::Core Qt6::Network unofficial-sodium::sodium)
+  add_test(NAME UpdateManager COMMAND update_manager_tests)
+  set_tests_properties(UpdateManager PROPERTIES TIMEOUT 30
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${PROJECT_NAME}>")
   set_tests_properties(RemoteDiagnostics PROPERTIES TIMEOUT 30
       ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QWindowsIntegrationPlugin>"
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${PROJECT_NAME}>")

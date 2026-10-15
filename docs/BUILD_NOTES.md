@@ -1,5 +1,77 @@
 # Build notes
 
+## 2026-10-15 - DEC-0223 repair integration (publication pending)
+
+Final local follow-up: common native cleanup now registers quarantine before
+handle detachment/fallback on normal stop, read fault, failed/cancelled open and
+deferred retirement. Failed shared close/unmake retains ownership. Isolated
+all-path fixture142 assertions/eight scenarios PASS. Native unmake exceptions
+were reviewed, not separately injected. Full rebuilt final targets PASS in
+build/audit_20261015_release_build.log. Final CTest23/23 PASS147.34s in
+build/audit_20261015_release_ctest.log. Exact7-file shared-path guard and negative
+mutations PASS in build/audit_20261015_guard_final.log.
+Final local executableSHA2567563fa005f0acbe9bda9dd9befe9f13886e96fb5e3a028fe7ed8ab6728da23b9;
+DLL SHA256df2a593aa8ee47889570ddd9184da984e6241f7375bf7bad54d049ec03520f14.
+Final core584 pass/2 prerequisite skips,251712 assertions; workspace53 pass/
+6 prerequisite skips,1083 assertions. Final P25 eight-run matrix PASS:
+build/audit_20261015_p25_final_0.2.139_215443/results.json. Clear WAV still matches
+public0.2.138 and earlier saved baseline exactly; encrypted fixtures zeroPCM;
+suspect remains fail-closed with non-identical internal search counters.
+Final180s actual Town0.2.139/FUBAR1.1.51/DLL pair plus production browser PASS:
+D:/FUBAR-qa/20261015-v1.1.51-town0.2.139-final-pair/result.json and provenance.json.
+Both processes exit0, all eight tasks at360/390/1280px pass draft/session/ticket
+checks, noRF observed. Physical RTL smoke was not repeated because the existing
+script cannot restore all saved settings; no fresh on-air acceptance claimed.
+Package/source/materials/diagnostics verifier15 suites/139 tests PASS; workflow
+validation PASS (localPython3.10.10, hostedPython3.12 still to qualify).
+Actual SSTV and Inmarsat/Satcom/Aircraft named-session app tests PASS, isolated
+settings/noRF, D:/SDR-Town-qa/20261015-sstv-sessions and20261015-inmarsat-sessions.
+
+Windows/MSVC19.44/Qt6.11.1, base c684798, Town0.2.139 / FUBAR1.1.51 working
+trees. No P25 DSP/slot/security/follow-timer edits. All source changes remain
+tracked in the repair commit; private captures and credentials are not staged.
+
+- `cmake --build build --config Release --target SDR_Town sdrtown_control_client sdr_town_tests sdr_town_workspace_tests inmarsat_live_gui_tests remote_diagnostics_tests antenna_control_tests update_manager_tests -j4`: PASS.
+  Evidence: build/audit_20261015_final_build.log. This build precedes the final
+  all-path native-close quarantine follow-up; its name is not final qualification.
+- Full CTest:23/23 PASS,138.48s, build/audit_20261015_repair_ctest_preclose.log.
+  Core583 pass/2 prerequisite skips,251569 assertions. Workspace53 pass/6 skips,
+  1083 assertions. Existing optional recording/alias prerequisites remain skips,
+  not acceptance. New actual GUI catalog/message-range cases pass.
+- Actual control DLL:33 loopback tests PASS, including malformed HTTP, incomplete
+  framing, bounds, JSON success semantics and absolute receive deadline. DNS/
+  connect/send are not covered by that receive-deadline claim.
+- RDS CLI reference/malformed/parity checks PASS. DTMF short/repeated/polarity/
+  inverted/shifted/EOF/Unicode/invalid-options checks PASS.
+- Actual GUI four-profile layout/no-RX checks PASS at960x720,1280x900,800x700,
+  1600x900: D:/SDR-Town-qa/20261015-preclose-workspaces.
+- Manual native UI via accessibility/screen tools: Listen Tune rejects in dry-run
+  and remains stopped; Device Manager shows RTL and missing SDRplay service;
+  Inmarsat Start/Take Over rejects and releases lease; aircraft OSM tiles render;
+  SSTV empty-file Decode validates without hanging; both windows close normally,
+  application exit0. build/oct15-native-ui.out/.err. No TX/rotor/bias-power change.
+- Intermediate paired P25 replay: clear TG10235 PASS_CONTINUOUS_AUDIO,
+  186frames/178560samples/duty0.744; WAV exactly matches public0.2.138 SHA256
+  4a890afaa12fa54b8bdeb21ec8fcb9f943445dbda186ea6e607bcb2a0984f170.
+  Two encrypted fixtures remain gated; suspect fixture remains silent but work
+  counters differ. build/audit_20261015_p25_qualification_212245/results.json.
+  This is saved-audio equality, not new listening/STT or live RF acceptance.
+
+Earlier failures were repaired, not waived: cumulative singleton read counters
+made a lifecycle fixture expect zero rather than its before-value; app link was
+blocked by a running paired-test process; a build invocation used the wrong DLL
+target SdrTownControl (correct sdrtown_control_client); C: space exhaustion
+required archiving old generated build folders to D:. Some old folder moves
+reported access errors and left remnants. No user captures/source were deleted.
+Guard historical fixture endpoints were fixed to their actual approved commits,
+not the moving current shared files; existing negative mutation checks pass.
+
+Follow-up source review found normal-stop, RX-fault and cancelled-opener cleanup
+could bypass deferred-read quarantine after close failure. Those paths and their
+new fault tests must pass the final rebuild before release. Final exact-patch
+guard, paired duration/shutdown, Actions/public hashes and signed update manifest
+remain publication gates. See AUDIT_20261015_REPAIR_VALIDATION.md for full limits.
+
 ## 2026-10-15 - DEC-0222 source audit, normal gates and negative probes
 
 Windows/MSVC19.44/Qt6.11.1. Town a0d4e21 (0.2.138), FUBAR308a653 (1.1.50),
@@ -362,7 +434,7 @@ argument. Prior/final binaries use the same input. No device gain or PPM changed
 
 Protected clear WAV SHA256 pairs:
 
-- TG10235: `4a890afaa12fa54b8bde21ec8fcb9f943445dbda186ea6e607bcb2a0984f170`.
+- TG10235: `4a890afaa12fa54b8bdeb21ec8fcb9f943445dbda186ea6e607bcb2a0984f170`.
 - TG30003: `876554af3e79c7a83e2481901bac379cb9f067d98181bd99d1c96cc64a9acc6f`.
 - TG30302: `88cae6a7e5fe8cd4c836736ed9ceb61ca2cc123ea824401fb91df90880c1ade3`.
 

@@ -1,5 +1,14 @@
 # SDR Town
 
+0.2.139 pairs with FUBAR 1.1.51 for receive-lifecycle, audio, map and control
+hardening. Failed radio starts are reported; cancelled reads cannot publish
+into a replacement stream. Aircraft fields carry their own age and source,
+and large web maps use complete, bounded snapshots. Web control admission and
+update downloads are bounded. P25 demodulation, slot/security logic and follow
+timers are unchanged. See [release notes](docs/RELEASE_0.2.139.md) and the
+[validation matrix](docs/AUDIT_20261015_REPAIR_VALIDATION.md) for test scope and
+remaining physical-hardware acceptance.
+
 0.2.138 pairs with FUBAR 1.1.50 to repair web tuning. After **Take control**,
 choose **Radio for tuning**, then tune or change mode. A missing saved radio
 is reported explicitly instead of "Invalid device or workflow"; another

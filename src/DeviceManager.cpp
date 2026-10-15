@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 #include <QCoreApplication>
+#include <QVariant>
 #include <cstdlib>
 #ifdef _WIN32
 #include <windows.h> // for GetFileAttributesA
@@ -54,6 +55,12 @@ static std::string soapyLiveIoKey(const DeviceInfo& info)
     if (!info.driver.empty())
         return info.driver + ":unserialed";
     return {};
+}
+
+static std::string soapyRxQuarantineKey(const DeviceInfo& info)
+{
+    // Match the shared physical ownership domain, independent of tuner/mode.
+    return info.isSdrplay ? "sdrplay|" + info.serial : soapyLiveIoKey(info);
 }
 
 class SoapyDeviceIoLock {
@@ -146,6 +153,108 @@ struct SharedSdrplayDevice {
 };
 static std::mutex gSharedSdrplayMutex;
 static std::map<std::string, SharedSdrplayDevice> gSharedSdrplayDevices;
+
+struct SoapyRxCleanup {
+    SoapySDR::Device* dev = nullptr;
+    SoapySDR::Stream* stream = nullptr;
+    std::string ioKey, shareKey;
+    bool rtl = false, shared = false;
+    std::atomic<bool> closed{false};
+};
+static std::mutex gRetiredRxMutex;
+static std::map<std::string, std::vector<std::shared_ptr<SoapyRxCleanup>>> gRetiredRx;
+
+static std::mutex gNativeRxOpenMutex;
+static std::map<std::string, std::weak_ptr<const std::string>> gNativeRxOpens;
+
+static std::shared_ptr<const std::string> reserveNativeRxOpen(const std::string& key) {
+    std::lock_guard lock(gNativeRxOpenMutex);
+    // DEC-0223: discovery can reorder slots while a cancelled opener is still
+    // native. Its identity reservation lives through worker cleanup, not stop.
+    for (auto it = gNativeRxOpens.begin(); it != gNativeRxOpens.end();) {
+        if (it->second.expired()) it = gNativeRxOpens.erase(it);
+        else ++it;
+    }
+    if (gNativeRxOpens.count(key)) return {};
+    auto reservation = std::make_shared<const std::string>(key);
+    gNativeRxOpens.emplace(key, reservation);
+    return reservation;
+}
+
+static bool rxCleanupPending(const std::string& key) {
+    std::lock_guard lock(gRetiredRxMutex);
+    auto it = gRetiredRx.find(key);
+    if (it == gRetiredRx.end()) return false;
+    std::erase_if(it->second, [](const auto& cleanup) { return cleanup->closed.load(std::memory_order_acquire); });
+    if (!it->second.empty()) return true;
+    gRetiredRx.erase(it);
+    return false;
+}
+
+static std::shared_ptr<SoapyRxCleanup> registerSoapyRxCleanup(
+    SoapySDR::Device* dev, SoapySDR::Stream* stream, const std::string& ioKey,
+    const std::string& quarantineKey, bool rtl, bool shared, const std::string& shareKey) {
+    if (!dev) return {};
+    auto cleanup = std::make_shared<SoapyRxCleanup>();
+    cleanup->dev = dev;
+    cleanup->stream = stream;
+    cleanup->ioKey = ioKey;
+    cleanup->shareKey = shareKey;
+    cleanup->rtl = rtl;
+    cleanup->shared = shared;
+    {
+        std::lock_guard lock(gRetiredRxMutex);
+        // Each tuner owns its retirement; a later successful close must not
+        // erase a sibling's still-pending or failed close on the same device.
+        gRetiredRx[quarantineKey].push_back(cleanup);
+    }
+    return cleanup;
+}
+
+// Register before detaching ownership or publishing fallback, then call this
+// without publication/state locks. Failed native cleanup stays quarantined.
+static void finishSoapyRxCleanup(const std::shared_ptr<SoapyRxCleanup>& cleanup) {
+    if (!cleanup) return;
+    try {
+        SoapyDeviceIoLock io(cleanup->ioKey);
+        if (cleanup->rtl) RtlBiasT::powerOff(*cleanup->dev);
+        if (cleanup->stream) {
+            try { cleanup->dev->deactivateStream(cleanup->stream); } catch (...) {}
+            cleanup->dev->closeStream(cleanup->stream);
+            cleanup->stream = nullptr;
+        }
+        if (cleanup->shared) {
+            std::lock_guard shareLock(gSharedSdrplayMutex);
+            auto it = gSharedSdrplayDevices.find(cleanup->shareKey);
+            if (it == gSharedSdrplayDevices.end() || it->second.dev != cleanup->dev || it->second.refCount <= 0)
+                throw std::runtime_error("RX cleanup lost shared device ownership");
+            if (it->second.refCount == 1) {
+                // Do not commit the last release if native unmake throws.
+                std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
+                SoapySDR::Device::unmake(cleanup->dev);
+                gSharedSdrplayDevices.erase(it);
+            } else {
+                --it->second.refCount;
+            }
+        } else {
+            std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
+            SoapySDR::Device::unmake(cleanup->dev);
+        }
+        cleanup->dev = nullptr;
+        cleanup->closed.store(true, std::memory_order_release);
+    } catch (...) {
+        spdlog::error("RX cleanup failed for {}; keeping device quarantined", cleanup->ioKey);
+    }
+}
+
+static void retireSoapyRx(std::shared_ptr<SoapyRxCleanup> cleanup,
+                         std::shared_ptr<std::atomic<bool>> workerDone) {
+    // The record already protects admission; defer only until native read exits.
+    std::thread([cleanup = std::move(cleanup), workerDone = std::move(workerDone)] {
+        workerDone->wait(false, std::memory_order_acquire);
+        finishSoapyRxCleanup(cleanup);
+    }).detach();
+}
 
 static std::string sdrplayShareKey(const DeviceInfo& d) {
     return d.serial + "@" + (d.sdrplayDuoMode.empty() ? "ST" : d.sdrplayDuoMode);
@@ -975,15 +1084,20 @@ bool DeviceManager::startStreaming(size_t index, bool attemptReal, DeviceLeaseOw
 }
 
 bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
+    if (attemptReal && QCoreApplication::instance()
+        && QCoreApplication::instance()->property("sdrtown.guiDryRun").toBool()) {
+        spdlog::info("Hardware RX request rejected in GUI dry-run: device={}", index);
+        return false;
+    }
     DeviceInfo d;
-    StreamState* stPtr = nullptr;
+    std::shared_ptr<StreamState> stPtr;
     {
         std::lock_guard<std::mutex> lk(devicesMutex);
         if (index >= devices.size()) return false;
         d = devices[index];
         if (streams.size() <= index) streams.resize(index + 1);
-        if (!streams[index]) streams[index] = std::make_unique<StreamState>();
-        stPtr = streams[index].get();
+        if (!streams[index]) streams[index] = std::make_shared<StreamState>();
+        stPtr = streams[index];
     }
     auto& st = *stPtr;
 
@@ -1020,6 +1134,12 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
     }
 
     std::unique_lock<std::mutex> lifecycleLock(st.lifecycleMutex);
+#ifdef HAVE_SOAPYSDR
+    if (attemptReal && rxCleanupPending(soapyRxQuarantineKey(d))) {
+        spdlog::warn("Receiver {} cannot reopen: previous native reader/cleanup is still pending", index);
+        return false;
+    }
+#endif
     {
         bool activeNow = false;
         bool realNow = false;
@@ -1052,12 +1172,26 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
         }
     }
 
+#ifdef HAVE_SOAPYSDR
+    std::shared_ptr<const std::string> nativeOpen;
+    if (attemptReal) {
+        nativeOpen = reserveNativeRxOpen(soapyLiveIoKey(d));
+        if (!nativeOpen) {
+            spdlog::warn("Receiver {} cannot reopen: cancelled native open is still pending", index);
+            return false;
+        }
+    }
+#endif
     // ALWAYS start a fast stub simulation first. This makes every "start" (Add Receiver,
     // Apply, Scan, CLI) return instantly with working spectrum + basic demod + audio routing.
     // No blocking on Soapy make / USB / driver init, which is the source of "hangs then crashes"
     // when the RTL dongle or audio devices are in a bad state.
-    const uint64_t streamGen = st.sessionGen.fetch_add(1, std::memory_order_acq_rel) + 1;
-    st.stopFlag = false;
+    uint64_t streamGen;
+    {
+        std::lock_guard publication(st.publicationMutex);
+        streamGen = st.sessionGen.fetch_add(1, std::memory_order_acq_rel) + 1;
+        st.stopFlag = false;
+    }
     double requestedCenter = 100e6;
     {
         std::lock_guard<std::mutex> lk(st.queueMutex);
@@ -1101,8 +1235,7 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
         st.isReal = false;
         st.runtimeState = attemptReal ? "opening hardware (stub active)" : "simulated/stub";
     }
-    st.rxThread = std::thread(&DeviceManager::rxThreadFunc, this, index, streamGen);
-    st.spectrumThread = std::thread(&DeviceManager::spectrumThreadFunc, this, index, streamGen);
+    launchRxWorkers(index, stPtr, streamGen);
     if (!attemptReal) {
         spdlog::info("Started stub/sim streaming for device {} (safe mode)", index);
         return true;
@@ -1119,9 +1252,7 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
     // SoapySDR::Device::make + USB driver stack can block forever on bad hardware/state. We launch a detached open-worker.
     // All safety is via sessionGen + stopFlag captured at launch time. The worker self-aborts and cleans (unmake) if gen mismatches or stop set.
     // stopStreaming simply bumps gen + stopFlag and never joins this worker. Abandoned make threads are reaped on process exit (acceptable; alternative is out-of-proc probe helper).
-    st.realInitThread = std::thread([this, index, d, useRate, myGen]() mutable {
-        auto* stPtr = streamState(index);
-        if (!stPtr) return;
+    st.realInitThread = std::thread([this, index, d, useRate, myGen, stPtr, nativeOpen]() mutable {
         auto& st = *stPtr;
         if (st.stopFlag) return;
         if (st.sessionGen.load() != myGen) return;
@@ -1132,34 +1263,13 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
         std::string shareKey;
         size_t rxCh = 0;
         auto cleanupLocal = [&]() {
-            const std::string ioKey = soapyLiveIoKey(d);
-            if (localDev) {
-                SoapyDeviceIoLock soapyLiveLock(ioKey);
-                if (d.driver == "rtlsdr")
-                    RtlBiasT::powerOff(*localDev);
-                try {
-                    if (localStream) localDev->closeStream(localStream);
-                } catch (...) {}
-            }
+            auto cleanup = registerSoapyRxCleanup(localDev, localStream, soapyLiveIoKey(d),
+                soapyRxQuarantineKey(d), d.driver == "rtlsdr", dualShared && ownsSharedRef, shareKey);
+            // The registered record now owns the handles even if cleanup fails.
+            localDev = nullptr;
             localStream = nullptr;
-            if (dualShared && ownsSharedRef) {
-                std::lock_guard<std::mutex> shareLock(gSharedSdrplayMutex);
-                auto it = gSharedSdrplayDevices.find(shareKey);
-                if (it != gSharedSdrplayDevices.end()) {
-                    it->second.refCount = std::max(0, it->second.refCount - 1);
-                    if (it->second.refCount <= 0 && it->second.dev) {
-                        std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
-                        try { SoapySDR::Device::unmake(it->second.dev); } catch (...) {}
-                        gSharedSdrplayDevices.erase(it);
-                    }
-                }
-                ownsSharedRef = false;
-                localDev = nullptr;
-            } else if (localDev) {
-                std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
-                try { SoapySDR::Device::unmake(localDev); } catch (...) {}
-                localDev = nullptr;
-            }
+            ownsSharedRef = false;
+            finishSoapyRxCleanup(cleanup);
         };
         try {
             if (d.driver == "rtlsdr") {
@@ -1176,7 +1286,10 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
             DeviceInfo liveInfo = d;
             {
                 std::lock_guard<std::mutex> lk(devicesMutex);
-                if (index < devices.size()) liveInfo = devices[index];
+                if (st.stopFlag || st.sessionGen.load() != myGen || index >= devices.size()
+                    || devices[index].stableKey != d.stableKey)
+                    throw std::runtime_error("Receiver open superseded before native make");
+                liveInfo = devices[index];
             }
             rxCh = liveInfo.isSdrplay ? liveInfo.rxChannel : 0;
             dualShared = liveInfo.isSdrplay && liveInfo.sdrplayDuoMode == "DT";
@@ -1214,6 +1327,7 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
             }
             if (liveInfo.isSdrplay) {
                 std::lock_guard<std::mutex> controlLock(sdrplayControlMutex_);
+                std::lock_guard publication(st.publicationMutex);
                 std::lock_guard<std::mutex> lk(devicesMutex);
                 if (st.stopFlag || st.sessionGen.load() != myGen || index >= devices.size()) {
                     throw std::runtime_error("SDRplay open superseded before capability publication");
@@ -1243,6 +1357,7 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
                     else if (liveInfo.rtlBiasT.enabled)
                         throw std::runtime_error("Saved RTL bias-T ON cannot be applied by this driver");
                 }
+                std::lock_guard publication(st.publicationMutex);
                 std::lock_guard<std::mutex> lk(devicesMutex);
                 if (st.stopFlag || st.sessionGen.load() != myGen || index >= devices.size())
                     throw std::runtime_error("RTL open superseded after bias-T setup");
@@ -1269,7 +1384,8 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
             DeviceInfo applyInfo = liveInfo;
             {
                 std::lock_guard<std::mutex> lk(devicesMutex);
-                if (index < devices.size()) {
+                // Refresh controls only from the identity reserved by this opener.
+                if (index < devices.size() && devices[index].stableKey == d.stableKey) {
                     applyInfo = devices[index];
                     useGain = clampGainForDevice(devices[index], devices[index].gain);
                     useGainName = devices[index].gainName;
@@ -1327,15 +1443,15 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
                 try {
                     localDev->setFrequency(SOAPY_SDR_RX, rxCh, tuneCenter);
                     initialCenterApplied = true;
-                    st.centerTuneAppliedSeq.store(centerTuneSeq, std::memory_order_release);
                 } catch (...) {}
+                if (!initialCenterApplied) throw std::runtime_error("Initial receiver tune failed");
 
                 std::vector<size_t> channels = {rxCh};
                 localStream = localDev->setupStream(SOAPY_SDR_RX, "CF32", channels);
                 if (!localStream) throw std::runtime_error("setupStream null");
                 const int activation = localDev->activateStream(localStream);
-                if (applyInfo.isSdrplay && activation < 0)
-                    throw std::runtime_error("SDRplay stream activation failed: " + std::to_string(activation));
+                if (activation < 0)
+                    throw std::runtime_error("Receiver stream activation failed: " + std::to_string(activation));
             }
 
             if (st.stopFlag || st.sessionGen.load() != myGen) {
@@ -1358,7 +1474,13 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
                     return;
                 }
 
-                st.stopFlag.store(true, std::memory_order_release);
+                {
+                    std::lock_guard publication(st.publicationMutex);
+                    st.stopFlag.store(true, std::memory_order_release);
+                    // The retiring stub/spectrum must never see stopFlag=false
+                    // again with their generation after real-hardware handoff.
+                    myGen = st.sessionGen.fetch_add(1, std::memory_order_acq_rel) + 1;
+                }
                 bool stubDetached = false;
                 if (st.rxThread.joinable()) {
                     auto start = std::chrono::steady_clock::now();
@@ -1405,7 +1527,10 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
 
                 // DEC-0194: IQ metadata describes the successful hardware tune,
                 // not a desired GUI setting or the discarded synthetic ring.
-                if (initialCenterApplied) markStreamRetune(st, center);
+                if (initialCenterApplied) {
+                    markStreamRetune(st, center);
+                    st.centerTuneAppliedSeq.store(centerTuneSeq, std::memory_order_release);
+                }
 
                 bool staleSession = false;
                 {
@@ -1417,6 +1542,9 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
                         st.rxStream = localStream;
                         st.soapyShared = dualShared;
                         st.sdrplayShareKey = shareKey;
+                        st.soapyIoKey = soapyLiveIoKey(d);
+                        st.soapyQuarantineKey = soapyRxQuarantineKey(d);
+                        st.soapyRtl = d.driver == "rtlsdr";
                         st.stopFlag.store(false, std::memory_order_release);
                         st.active = true;
                         st.isReal = true;
@@ -1433,8 +1561,7 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
                     return;
                 }
 
-                st.rxThread = std::thread(&DeviceManager::rxThreadFunc, this, index, myGen);
-                st.spectrumThread = std::thread(&DeviceManager::spectrumThreadFunc, this, index, myGen);
+                launchRxWorkers(index, stPtr, myGen);
             }
             {
             // DEC-0184: finish this generation's settings before teardown or
@@ -1495,6 +1622,7 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
         } catch (const std::exception& ex) {
             spdlog::warn("Background real init failed for device {} ({}). Keeping safe stub.", index, ex.what());
             cleanupLocal();
+            std::lock_guard publication(st.publicationMutex);
             if (!st.stopFlag && st.sessionGen.load(std::memory_order_acquire) == myGen) {
                 if (d.driver == "rtlsdr") {
                     std::lock_guard<std::mutex> lk(devicesMutex);
@@ -1509,6 +1637,7 @@ bool DeviceManager::startStreamingImpl(size_t index, bool attemptReal) {
         } catch (...) {
             spdlog::warn("Background real init failed for device {} with unknown exception (SEH/driver). Keeping safe stub.", index);
             cleanupLocal();
+            std::lock_guard publication(st.publicationMutex);
             if (!st.stopFlag && st.sessionGen.load(std::memory_order_acquire) == myGen) {
                 std::lock_guard<std::mutex> lk(st.stateMutex);
                 st.runtimeState = "hardware failed, using stub";
@@ -1555,17 +1684,6 @@ void DeviceManager::stopStreamingImpl(size_t index) {
     if (!stPtr) return;
     auto& st = *stPtr;
     std::unique_lock<std::mutex> lifecycleLock(st.lifecycleMutex);
-    bool rtl = false;
-#ifdef HAVE_SOAPYSDR
-    std::string ioKey;
-#endif
-    {
-        std::lock_guard<std::mutex> lk(devicesMutex);
-        rtl = index < devices.size() && devices[index].driver == "rtlsdr";
-#ifdef HAVE_SOAPYSDR
-        if (index < devices.size()) ioKey = soapyLiveIoKey(devices[index]);
-#endif
-    }
     bool activeNow = false;
     bool soapyIdle =
 #ifdef HAVE_SOAPYSDR
@@ -1583,8 +1701,11 @@ void DeviceManager::stopStreamingImpl(size_t index) {
         && !st.rxThread.joinable() && !st.spectrumThread.joinable()) return;
 
     // P1: bump generation *first* so any in-flight init thread will see the mismatch and refuse to publish/teardown.
-    st.sessionGen.fetch_add(1, std::memory_order_acq_rel);
-    st.stopFlag = true;
+    {
+        std::lock_guard publication(st.publicationMutex);
+        st.sessionGen.fetch_add(1, std::memory_order_acq_rel);
+        st.stopFlag = true;
+    }
 
     // realInitThread is launched detached (see startStreaming). Never join it here — it is the untrusted open path.
     // The gen bump + stopFlag inside the worker is sufficient for it to self-abort and unmake if it ever wakes.
@@ -1634,16 +1755,17 @@ void DeviceManager::stopStreamingImpl(size_t index) {
 
 #ifdef HAVE_SOAPYSDR
     // Capture and null only when Soapy types are available (fixes no-Soapy build P1).
-    SoapySDR::Device* devToClose = nullptr;
-    SoapySDR::Stream* streamToClose = nullptr;
-    bool sharedClose = false;
-    std::string sharedKey;
+    std::shared_ptr<SoapyRxCleanup> cleanup;
+    bool rtl = false;
+    std::string ioKey;
     {
         std::lock_guard<std::mutex> lk(st.stateMutex);
-        devToClose = st.soapyDev;
-        streamToClose = st.rxStream;
-        sharedClose = st.soapyShared;
-        sharedKey = st.sdrplayShareKey;
+        cleanup = registerSoapyRxCleanup(st.soapyDev, st.rxStream, st.soapyIoKey,
+            st.soapyQuarantineKey, st.soapyRtl, st.soapyShared, st.sdrplayShareKey);
+        ioKey = std::move(st.soapyIoKey);
+        st.soapyQuarantineKey.clear();
+        rtl = st.soapyRtl;
+        st.soapyRtl = false;
         st.soapyDev = nullptr;
         st.rxStream = nullptr;
         st.soapyShared = false;
@@ -1651,49 +1773,10 @@ void DeviceManager::stopStreamingImpl(size_t index) {
     }
 
     try {
-        if (rxDetached && devToClose) {
-            // Closing/unmaking while a detached native readStream may still be using the device
-            // is a use-after-free risk. Leak this stuck handle until process exit instead.
-            spdlog::warn("Leaving Soapy device {} open because its rxThread was detached while stuck in native code.", index);
-        } else if (streamToClose && devToClose) {
-            SoapyDeviceIoLock soapyLiveLock(ioKey);
-            if (rtl) RtlBiasT::powerOff(*devToClose);
-            try { devToClose->deactivateStream(streamToClose); } catch (...) {}
-            try { devToClose->closeStream(streamToClose); } catch (...) {}
-            if (sharedClose) {
-                std::lock_guard<std::mutex> shareLock(gSharedSdrplayMutex);
-                auto it = gSharedSdrplayDevices.find(sharedKey);
-                if (it != gSharedSdrplayDevices.end()) {
-                    it->second.refCount = std::max(0, it->second.refCount - 1);
-                    if (it->second.refCount <= 0) {
-                        std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
-                        try { SoapySDR::Device::unmake(it->second.dev); } catch (...) {}
-                        gSharedSdrplayDevices.erase(it);
-                    }
-                }
-            } else {
-                std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
-                SoapySDR::Device::unmake(devToClose);
-            }
-        } else if (devToClose) {
-            SoapyDeviceIoLock soapyLiveLock(ioKey);
-            if (rtl) RtlBiasT::powerOff(*devToClose);
-            if (sharedClose) {
-                std::lock_guard<std::mutex> shareLock(gSharedSdrplayMutex);
-                auto it = gSharedSdrplayDevices.find(sharedKey);
-                if (it != gSharedSdrplayDevices.end()) {
-                    it->second.refCount = std::max(0, it->second.refCount - 1);
-                    if (it->second.refCount <= 0) {
-                        std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
-                        try { SoapySDR::Device::unmake(it->second.dev); } catch (...) {}
-                        gSharedSdrplayDevices.erase(it);
-                    }
-                }
-            } else {
-                std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
-                SoapySDR::Device::unmake(devToClose);
-            }
-        }
+        if (rxDetached && cleanup) {
+            retireSoapyRx(cleanup, st.rxWorkerDone);
+            spdlog::warn("Quarantined Soapy device {} until its cancelled native reader finishes", index);
+        } else finishSoapyRxCleanup(cleanup);
     } catch (const std::exception& ex) {
         spdlog::warn("Soapy teardown reported a recoverable native issue for device {}: {}", index, ex.what());
     } catch (...) {
@@ -1710,15 +1793,17 @@ void DeviceManager::stopStreamingImpl(size_t index) {
     }
     resetStreamBuffers(st);
     spdlog::info("Stopped streaming for device {}", index);
+#ifdef HAVE_SOAPYSDR
     if (rtl) {
         std::lock_guard<std::mutex> lk(devicesMutex);
-        if (index < devices.size()) {
+        if (index < devices.size() && soapyLiveIoKey(devices[index]) == ioKey) {
             auto& bias = devices[index].rtlBiasT;
             bias.reported.reset();
             bias.status = "Stopped; power-off requested. Saved setting applies on next start";
             if (rxDetached) bias.status = "Driver stuck; disconnect USB to guarantee bias-T power off";
         }
     }
+#endif
 }
 
 bool DeviceManager::isStreaming(size_t index) const {
@@ -1793,7 +1878,7 @@ void DeviceManager::setSpectrumFftBins(size_t index, size_t bins) {
         std::lock_guard<std::mutex> lk(devicesMutex);
         if (index >= devices.size()) return;
         if (streams.size() <= index) streams.resize(index + 1);
-        if (!streams[index]) streams[index] = std::make_unique<StreamState>();
+        if (!streams[index]) streams[index] = std::make_shared<StreamState>();
         stPtr = streams[index].get();
     }
 
@@ -3305,7 +3390,7 @@ uint64_t DeviceManager::queueCenterFreq(size_t index, double freqHz) {
         std::lock_guard<std::mutex> lk(devicesMutex);
         if (index >= devices.size()) return 0;
         if (streams.size() <= index) streams.resize(index + 1);
-        if (!streams[index]) streams[index] = std::make_unique<StreamState>();
+        if (!streams[index]) streams[index] = std::make_shared<StreamState>();
         stPtr = streams[index].get();
         if (devices[index].isDiversityComposite) {
             isComposite = true;
@@ -3443,15 +3528,25 @@ std::vector<float> DeviceManager::computeRealFFTPower(const std::vector<std::com
     return power;
 }
 
-void DeviceManager::spectrumThreadFunc(size_t index, uint64_t expectedGeneration) {
-    auto* stPtr = streamState(index);
-    if (!stPtr) return;
+void DeviceManager::launchRxWorkers(size_t index, const std::shared_ptr<StreamState>& state, uint64_t generation) {
+    // Publish running before launch: a worker that has not been scheduled yet
+    // is still joinable work, not a completed thread. Each exit owns only its ID.
+    state->rxThreadRunning.store(generation, std::memory_order_release);
+    state->rxWorkerDone = std::make_shared<std::atomic<bool>>(false);
+    try { state->rxThread = std::thread(&DeviceManager::rxThreadFunc, this, index, state, generation, state->rxWorkerDone); }
+    catch (...) { state->rxThreadRunning.store(0); throw; }
+    state->spectrumThreadRunning.store(generation, std::memory_order_release);
+    try { state->spectrumThread = std::thread(&DeviceManager::spectrumThreadFunc, this, index, state, generation); }
+    catch (...) { state->spectrumThreadRunning.store(0); throw; }
+}
+
+void DeviceManager::spectrumThreadFunc(size_t index, std::shared_ptr<StreamState> stPtr, uint64_t expectedGeneration) {
     auto& st = *stPtr;
-    st.spectrumThreadRunning.store(true, std::memory_order_release);
     struct RunningGuard {
         StreamState& st;
-        ~RunningGuard() { st.spectrumThreadRunning.store(false, std::memory_order_release); }
-    } runningGuard{st};
+        uint64_t generation;
+        ~RunningGuard() { st.spectrumThreadRunning.compare_exchange_strong(generation, 0, std::memory_order_acq_rel); }
+    } runningGuard{st, expectedGeneration};
     const uint64_t myGen = expectedGeneration;
 
     // DEC-0199: keep Soapy readStream lean. Publish ~12.5 Hz spectrum from the
@@ -3496,6 +3591,8 @@ void DeviceManager::spectrumThreadFunc(size_t index, uint64_t expectedGeneration
         if (!samples.empty()) {
             if (removeDc) removeSpectrumDc(samples);
             auto localPower = computeRealFFTPower(samples, fftN, /*useBlackmanHarris=*/true);
+            std::lock_guard publication(st.publicationMutex);
+            if (st.stopFlag.load() || st.sessionGen.load() != myGen) return;
             std::lock_guard<std::mutex> lk(st.queueMutex);
             if (st.spectrumAvg.size() != localPower.size()) {
                 st.spectrumAvg.assign(localPower.size(), -110.0f);
@@ -3521,16 +3618,25 @@ void DeviceManager::spectrumThreadFunc(size_t index, uint64_t expectedGeneration
     }
 }
 
-void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
-    auto* stPtr = streamState(index);
-    if (!stPtr) return;
+void DeviceManager::rxThreadFunc(size_t index, std::shared_ptr<StreamState> stPtr, uint64_t expectedGeneration,
+                               std::shared_ptr<std::atomic<bool>> done) {
     auto& st = *stPtr;
-    st.rxThreadRunning.store(true, std::memory_order_release);
     struct RunningGuard {
         StreamState& st;
-        ~RunningGuard() { st.rxThreadRunning.store(false, std::memory_order_release); }
-    } runningGuard{st};
+        uint64_t generation;
+        std::shared_ptr<std::atomic<bool>> done;
+        ~RunningGuard() {
+            st.rxThreadRunning.compare_exchange_strong(generation, 0, std::memory_order_acq_rel);
+            done->store(true, std::memory_order_release);
+            done->notify_all();
+        }
+    } runningGuard{st, expectedGeneration, std::move(done)};
     const uint64_t myGen = expectedGeneration;
+    const auto cancelled = [&] {
+        return st.stopFlag.load(std::memory_order_acquire)
+            || st.sessionGen.load(std::memory_order_acquire) != myGen;
+    };
+    if (cancelled()) return;
     const size_t blockSize = 32768; // much larger blocks to sustain 2MS/s+ without overflow. 2048 was only ~1ms of RF at 2.048MS/s.
 
     // Host diversity combiner: pull aligned new IQ from Dual Tuner A/B rings and append.
@@ -3547,6 +3653,8 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
         }
         if (isComposite) {
             {
+                std::lock_guard publication(st.publicationMutex);
+                if (cancelled()) return;
                 std::lock_guard<std::mutex> lk(st.stateMutex);
                 st.isReal = true; // soft-real: combined from hardware (or stub) sources
                 st.runtimeState = "diversity combine";
@@ -3616,6 +3724,8 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                 if (combined.empty()) continue;
 
                 // Mirror source rate/center onto composite for spectrum consumers.
+                std::lock_guard publication(st.publicationMutex);
+                if (cancelled()) return;
                 {
                     std::lock_guard<std::mutex> qa(sa->queueMutex);
                     std::lock_guard<std::mutex> qb(sb->queueMutex);
@@ -3634,17 +3744,14 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
 #ifdef HAVE_SOAPYSDR
     SoapySDR::Device* dev = nullptr;
     SoapySDR::Stream* stream = nullptr;
+    std::string ioKey;
     {
         std::lock_guard<std::mutex> lk(st.stateMutex);
         dev = st.soapyDev;
         stream = st.rxStream;
+        ioKey = st.soapyIoKey;
     }
     if (dev && stream) {
-        std::string ioKey;
-        {
-            std::lock_guard<std::mutex> lk(devicesMutex);
-            if (index < devices.size()) ioKey = soapyLiveIoKey(devices[index]);
-        }
         auto liveIo = gSoapyDeviceIo.mutexFor(ioKey);
         std::vector<std::complex<float>> buff(blockSize);
         bool realReadFaulted = false;
@@ -3683,7 +3790,10 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                         const auto tuneStart = std::chrono::steady_clock::now();
                         try {
                             std::lock_guard<DriverIoMutex> soapyLiveLock(*liveIo);
+                            if (cancelled()) return;
                             dev->setFrequency(SOAPY_SDR_RX, rxCh, tuneHz);
+                            std::lock_guard publication(st.publicationMutex);
+                            if (cancelled()) return;
                             markStreamRetune(st, logicalCenter);
                             st.centerTuneAppliedSeq.store(requestedTuneSeq, std::memory_order_release);
                             const auto tuneDone = std::chrono::steady_clock::now();
@@ -3694,13 +3804,19 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                                 spdlog::debug("Applied queued center freq {} for device {} (hardware tune {}, ppm {}, seq {})", logicalCenter, index, tuneHz, ppm, requestedTuneSeq);
                             }
                         } catch (const std::exception& ex) {
+                            std::lock_guard publication(st.publicationMutex);
+                            if (cancelled()) return;
                             st.centerTuneFailedSeq.store(requestedTuneSeq, std::memory_order_release);
                             spdlog::warn("Queued center retune failed for device {} to {} Hz: {}", index, logicalCenter, ex.what());
                         } catch (...) {
+                            std::lock_guard publication(st.publicationMutex);
+                            if (cancelled()) return;
                             st.centerTuneFailedSeq.store(requestedTuneSeq, std::memory_order_release);
                             spdlog::warn("Queued center retune failed for device {} to {} Hz with unknown native error.", index, logicalCenter);
                         }
                     } else {
+                        std::lock_guard publication(st.publicationMutex);
+                        if (cancelled()) return;
                         st.centerTuneFailedSeq.store(requestedTuneSeq, std::memory_order_release);
                         spdlog::warn("Ignoring invalid queued center freq {} for device {} (seq {})", logicalCenter, index, requestedTuneSeq);
                     }
@@ -3713,11 +3829,16 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                 {
                     const auto waiting = std::chrono::steady_clock::now();
                     std::lock_guard<DriverIoMutex> soapyLiveLock(*liveIo);
+                    if (cancelled()) return;
                     const auto reading = std::chrono::steady_clock::now();
+                    numElems = dev->readStream(stream, buffs, blockSize, flags, timeNs, 100000);
+                    std::lock_guard publication(st.publicationMutex);
+                    if (cancelled()) return;
                     st.rxLiveIoWaitUs.fetch_add(std::chrono::duration_cast<std::chrono::microseconds>(reading - waiting).count(), std::memory_order_relaxed);
                     st.rxReads.fetch_add(1, std::memory_order_relaxed);
-                    numElems = dev->readStream(stream, buffs, blockSize, flags, timeNs, 100000);
                     st.rxReadUs.fetch_add(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - reading).count(), std::memory_order_relaxed);
+                    if (numElems == SOAPY_SDR_TIMEOUT) st.rxTimeouts.fetch_add(1, std::memory_order_relaxed);
+                    else if (numElems < 0) st.rxErrors.fetch_add(1, std::memory_order_relaxed);
                     if (numElems == SOAPY_SDR_OVERFLOW) {
                         // DEC-0171: loss is known, its sample count is not. Publish
                         // the boundary before any post-loss IQ without resetting
@@ -3745,7 +3866,6 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                     const auto msSinceReadErrorLog = std::chrono::duration_cast<std::chrono::milliseconds>(
                         errorNow - lastReadErrorLogTime).count();
                     if (numElems == -1) { // SOAPY_SDR_TIMEOUT: common during retune/stop or USB stalls.
-                        st.rxTimeouts.fetch_add(1, std::memory_order_relaxed);
                         ++consecutiveReadTimeouts;
                         if (consecutiveReadTimeouts == 1 || msSinceReadErrorLog >= 5000) {
                             lastReadErrorLogTime = errorNow;
@@ -3756,7 +3876,6 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                             }
                         }
                     } else {
-                        st.rxErrors.fetch_add(1, std::memory_order_relaxed);
                         consecutiveReadTimeouts = 0;
                         if (consecutiveReadErrors == 1 || msSinceReadErrorLog >= 1000) {
                             lastReadErrorLogTime = errorNow;
@@ -3789,9 +3908,11 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
                 }
             }
         } catch (const std::exception& ex) {
+            if (cancelled()) return;
             spdlog::error("Exception in real rxThread for device {}: {}.", index, ex.what());
             realReadFaulted = true;
         } catch (...) {
+            if (cancelled()) return;
             spdlog::error("Unknown exception in real rxThread for device {} (possible USB/driver fault).", index);
             realReadFaulted = true;
         }
@@ -3802,41 +3923,34 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
         spdlog::warn("Real RX thread for device {} faulted; falling back to safe stub streaming for this session.", index);
         bool rtl = false;
         std::string faultIoKey;
+        std::shared_ptr<SoapyRxCleanup> cleanup;
         {
+            std::lock_guard publication(st.publicationMutex);
+            if (cancelled()) return;
             std::lock_guard<std::mutex> lk(devicesMutex);
-            rtl = index < devices.size() && devices[index].driver == "rtlsdr";
-            if (index < devices.size()) faultIoKey = soapyLiveIoKey(devices[index]);
-            if (rtl) {
+            std::lock_guard<std::mutex> stateLock(st.stateMutex);
+            if (st.soapyDev != dev || st.rxStream != stream) return;
+            cleanup = registerSoapyRxCleanup(dev, stream, st.soapyIoKey,
+                st.soapyQuarantineKey, st.soapyRtl, st.soapyShared, st.sdrplayShareKey);
+            rtl = st.soapyRtl;
+            faultIoKey = std::move(st.soapyIoKey);
+            st.soapyQuarantineKey.clear();
+            st.soapyRtl = false;
+            if (rtl && index < devices.size() && soapyLiveIoKey(devices[index]) == faultIoKey) {
                 devices[index].rtlBiasT.reported.reset();
                 devices[index].rtlBiasT.status = "Receiver fault; power-off requested. Check driver log";
             }
-        }
-        {
-            std::lock_guard<std::mutex> lk(st.stateMutex);
-            if (st.soapyDev == dev) st.soapyDev = nullptr;
-            if (st.rxStream == stream) st.rxStream = nullptr;
+            st.soapyDev = nullptr;
+            st.rxStream = nullptr;
+            st.soapyShared = false;
+            st.sdrplayShareKey.clear();
             st.isReal = false;
             st.active = true;
             st.runtimeState = "hardware failed, using stub";
         }
-        try {
-            {
-                SoapyDeviceIoLock soapyLiveLock(faultIoKey);
-                if (rtl && dev) RtlBiasT::powerOff(*dev);
-                if (stream && dev) {
-                    dev->deactivateStream(stream);
-                    dev->closeStream(stream);
-                }
-            }
-            if (dev) {
-                std::lock_guard<DriverIoMutex> factory(gSoapyFactoryMutex);
-                SoapySDR::Device::unmake(dev);
-            }
-        } catch (const std::exception& ex) {
-            spdlog::warn("Recoverable native issue while cleaning faulted Soapy device {}: {}", index, ex.what());
-        } catch (...) {
-            spdlog::warn("Recoverable non-standard native issue while cleaning faulted Soapy device {}", index);
-        }
+        finishSoapyRxCleanup(cleanup);
+        std::lock_guard publication(st.publicationMutex);
+        if (cancelled()) return;
         resetStreamBuffers(st);
     }
 #endif
@@ -3867,9 +3981,10 @@ void DeviceManager::rxThreadFunc(size_t index, uint64_t expectedGeneration) {
             const float im = (rand() % 1000 - 500) * 0.00005f;
             block[i] = {re, im};
         }
-        appendIQBlock(index, st, std::move(block));
-
         {
+            std::lock_guard publication(st.publicationMutex);
+            if (cancelled()) return;
+            appendIQBlock(index, st, std::move(block));
             std::lock_guard<std::mutex> lk(st.queueMutex);
             st.currentRate = stubFs;
             st.currentCenter = stubCenterHz;

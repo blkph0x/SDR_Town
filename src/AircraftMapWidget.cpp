@@ -506,17 +506,20 @@ void AircraftMapWidget::paintEvent(QPaintEvent*) {
 
     const auto snap = store_.snapshot();
     for (const auto& t : snap.tracks) {
-        if (!t.positionValid) continue;
+        if (!t.positionValid || !std::isfinite(t.latDeg) || !std::isfinite(t.lonDeg)) continue;
         const QPointF pt = latLonToPixel(t.latDeg, t.lonDeg);
+        if (!std::isfinite(pt.x()) || !std::isfinite(pt.y())) continue;
+        const bool hasHeading = t.trackValid && std::isfinite(t.trackDeg) &&
+                                t.trackDeg >= 0.0 && t.trackDeg < 360.0;
         p.save();
         p.translate(pt);
-        if(t.trackValid)p.rotate(t.trackDeg);
+        if (hasHeading) p.rotate(t.trackDeg);
         p.setBrush(t.fromAdsc ? QColor(255, 180, 40)
                               : (t.fromLocal ? QColor(57, 255, 20) : QColor(80, 160, 255)));
         p.setPen(Qt::black);
         QPolygon poly;
         poly << QPoint(0, -8) << QPoint(5, 8) << QPoint(0, 4) << QPoint(-5, 8);
-        if(t.trackValid)p.drawPolygon(poly);
+        if (hasHeading) p.drawPolygon(poly);
         else p.drawEllipse(QPointF(0,0),5,5);
         p.restore();
         p.setPen(Qt::white);
@@ -557,8 +560,9 @@ void AircraftMapWidget::mousePressEvent(QMouseEvent* event) {
     QString best;
     double bestD = 20.0;
     for (const auto& t : snap.tracks) {
-        if (!t.positionValid) continue;
+        if (!t.positionValid || !std::isfinite(t.latDeg) || !std::isfinite(t.lonDeg)) continue;
         const QPointF pt = latLonToPixel(t.latDeg, t.lonDeg);
+        if (!std::isfinite(pt.x()) || !std::isfinite(pt.y())) continue;
         const double d = QLineF(pt, event->position()).length();
         if (d < bestD) {
             bestD = d;
@@ -584,12 +588,16 @@ void AircraftMapWidget::showPopout(const QString& icaoHex) {
     dlg->setAttribute(Qt::WA_DeleteOnClose);
     dlg->setWindowTitle(QString::fromStdString(t.callsign.empty() ? t.icaoHex : t.callsign));
     auto* lay = new QVBoxLayout(dlg);
+    const QString altitude = t.altitudeValid && std::isfinite(t.altFt)
+        ? QString("Alt %1 ft").arg(t.altFt, 0, 'f', 0) : QString("Alt unknown");
+    const QString speed = t.groundSpeedValid && std::isfinite(t.gsKt)
+        ? QString("Speed %1 kt").arg(t.gsKt, 0, 'f', 0) : QString("Speed unknown");
     lay->addWidget(new QLabel(
-        QString("<b>%1</b><br>ICAO %2<br>Alt %3 ft · %4 kt<br>Source: %5%6%7")
+        QString("<b>%1</b><br>ICAO %2<br>%3 · %4<br>Source: %5%6%7")
             .arg(QString::fromStdString(t.callsign.empty() ? "(no callsign)" : t.callsign).toHtmlEscaped())
             .arg(QString::fromStdString(t.icaoHex).toHtmlEscaped())
-            .arg(t.altFt, 0, 'f', 0)
-            .arg(t.gsKt, 0, 'f', 0)
+            .arg(altitude)
+            .arg(speed)
             .arg(t.fromLocal ? "local " : "")
             .arg(t.fromNetwork ? "OpenSky " : "")
             .arg(t.fromAdsc ? "ADS-C" : "")));

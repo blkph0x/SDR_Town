@@ -3,6 +3,7 @@
 #include "AdsBTrackStore.h"
 #include <QApplication>
 #include <QCheckBox>
+#include <QDateTime>
 #include <QDoubleSpinBox>
 #include <QSettings>
 #include <QLabel>
@@ -189,7 +190,10 @@ TEST_CASE("Aircraft internet control removes sources and persists across windows
     CHECK(bandwidth->value() == 2.4);
     CHECK(bandwidth->maximum() == 20);
     const auto generation = store.networkGeneration();
-    REQUIRE(store.mergeNetworkJson(R"({"states":[["a0b022","TEST",null,null,null,151,-34,1000,false,100,90,0]]})", generation));
+    const auto now = QDateTime::currentSecsSinceEpoch();
+    const auto row = nlohmann::json::array({"a0b022", "TEST", nullptr, now, now,
+        151, -34, 1000, false, 100, 90, 0});
+    REQUIRE(store.mergeNetworkJson(nlohmann::json{{"states", {row}}}.dump(), generation));
     REQUIRE(store.trackByIcao(0xa0b022).positionValid);
     check->click();
     CHECK_FALSE(store.networkEnabled());

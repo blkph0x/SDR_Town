@@ -208,7 +208,7 @@ jobs:
         shell: pwsh
         run: |
           cmake --build build --config Release `
-            --target SDR_Town sdr_town_tests sdr_town_workspace_tests inmarsat_live_gui_tests remote_diagnostics_tests antenna_control_tests -j 4
+            --target SDR_Town sdrtown_control_client sdr_town_tests sdr_town_workspace_tests inmarsat_live_gui_tests remote_diagnostics_tests antenna_control_tests update_manager_tests -j 4
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run core unit tests
@@ -229,6 +229,18 @@ jobs:
         shell: pwsh
         run: |
           ctest --test-dir build -C Release -R "SdrplayRuntime|SdrplayControlLifecycle|RtlBiasTLifecycle|WorkflowRadioLifecycle|InmarsatLiveGui|AircraftGui|InmarsatHostLifecycle|RemoteDiagnostics|AntennaControl" --output-on-failure --no-tests=error
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run updater fault tests
+        shell: pwsh
+        run: |
+          ctest --test-dir build -C Release -R "^UpdateManager$" --output-on-failure --no-tests=error
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run native control DLL transport fault tests
+        shell: pwsh
+        run: |
+          python scripts/test_control_client_transport.py --dll build/bin/Release/SdrTownControl.dll
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run Qt workspace and live-decoder tests

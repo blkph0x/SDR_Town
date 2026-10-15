@@ -35,13 +35,18 @@ QJsonObject FmDiagnosticsLog::sample() {
         "resamplerUs","postAudioUs","requestedAudioSamples","hintMismatchBlocks",
         "maxBlockUs","maxFirDelayUs","maxPcmDelayUs"};
     static_assert(std::size(names)==fmDiagnostics::Count);
+    static constexpr const char* faultNames[]{"invalidInputBlocks", "invalidConfigurationBlocks", "nonFiniteOutputBlocks"};
+    static_assert(std::size(faultNames)==fmDiagnostics::FaultCount);
     QJsonObject modes;
     for(int mode=0;mode<2;++mode) {
         const auto s=fmDiagnostics::snapshot(mode!=0);
-        if(s[fmDiagnostics::Blocks]==lastBlocks_[mode])continue;
+        const auto faults=fmDiagnostics::faultSnapshot(mode!=0);
+        if(s[fmDiagnostics::Blocks]==lastBlocks_[mode] && faults==lastFaults_[mode])continue;
         lastBlocks_[mode]=s[fmDiagnostics::Blocks];
+        lastFaults_[mode]=faults;
         QJsonObject counters;
         for(size_t i=0;i<s.size();++i)counters[names[i]]=double(s[i]);
+        for(size_t i=0;i<faults.size();++i)counters[faultNames[i]]=double(faults[i]);
         modes[mode ? "wfm" : "nfm"]=counters;
     }
     if(modes.isEmpty())return {};

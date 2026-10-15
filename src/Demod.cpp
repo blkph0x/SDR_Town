@@ -426,6 +426,50 @@ void Demodulator::resetState() {
     clickFadeGain = 0.0f;
 }
 
+void Demodulator::rejectFmBlock(DemodMode mode, uint32_t reason, double& rmsOut,
+                               FmMultiplexBlock* multiplex) {
+    // DEC-0223 / F04: discard the whole damaged block, including decoder taps.
+    // Reset every FM history now, even when the next block has no PCM yet or
+    // bypasses the audio LPF. A later LPF enable must not revive poisoned state.
+    dspStateNeedsReset = true;
+    ph = 0;
+    prev = {1,0};
+    firDelay.clear();
+    chanTaps.clear();
+    lastBw = lastS = -1;
+    nfmInputDecimator.reset();
+    nfmSpeechFirDelay.clear();
+    nfmSpeechTaps.clear();
+    nfmSpeechLastBw = nfmSpeechLastRate = -1;
+    nfmFirWrite = nfmDecimationPhase = 0;
+    wfmSpeechFir.reset();
+    wfmDecimationPhase = 0;
+    wfmDecimationFactor = 0;
+    nfmPcmClock = {};
+    wfmPcmClock = {};
+    nfmPostAudioReset = wfmPostAudioReset = true;
+    lpA = lpB = dcv = discDc = des = nx1 = nx2 = ny1 = ny2 = flp1 = flp2 = 0;
+    squelchGateGain = clickFadeGain = 0;
+    squelchHangLeft = 0;
+    rmsOut = lastRmsDb = -100;
+    mpxContinuous = false;
+    mpxDelay.clear();
+    mpxWrite = mpxPhase = 0;
+    mpxMixerPhase = 0;
+    mpxPrevious = {1,0};
+    mpxPendingFault |= reason;
+    if (multiplex) {
+        *multiplex = {};
+        multiplex->epoch = mpxEpoch;
+        multiplex->firstSample = mpxSamples;
+        multiplex->resetReasons = mpxPendingFault;
+    }
+    const auto field = reason == FmMultiplexBlock::InvalidInput ? fmDiagnostics::InvalidInputBlocks
+        : reason == FmMultiplexBlock::InvalidConfiguration ? fmDiagnostics::InvalidConfigurationBlocks
+        : fmDiagnostics::NonFiniteOutputBlocks;
+    fmDiagnostics::faults[mode == DemodMode::WFM][field].fetch_add(1, std::memory_order_relaxed);
+}
+
 std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex<float>>& iq,
     double sr, double cf, double target, DemodMode mode, double& rmsOut,
     double lpfHz, double squelchDb, double gain, double wfmDeTauUs, double wfmPilotNotchR,
@@ -451,6 +495,28 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
     }
     // HF_RECEIVE_DELEGATE_END
     rmsOut = -100;
+    const auto reject = [&](uint32_t reason) -> std::vector<float> {
+        rejectFmBlock(mode, reason, rmsOut, multiplex);
+        return {};
+    };
+    // Validate before changing oscillators, coefficient caches, clocks or taps.
+    // NaN is the existing "not supplied" sentinel for the two optional values;
+    // infinity is not a sentinel. Finite <=0 LPF/BW/output defaults stay intact.
+    const double required[]{sr, cf, target, lpfHz, squelchDb, gain, wfmDeTauUs,
+                            wfmPilotNotchR, channelBwHz, outputRate};
+    const double effectiveOutputRate = outputRate <= 0 ? 48000 : outputRate;
+    if (!std::all_of(std::begin(required), std::end(required), [](double x) { return std::isfinite(x); })
+        || sr <= 0 || std::isinf(externalSquelchLevelDb) || std::isinf(dataIdentityHz)
+        || (mode == DemodMode::WFM && std::abs(wfmPilotNotchR) >= 1)
+        || !std::isfinite(2 * M_PI * (target - cf) / sr)
+        // Existing decimator/hang counters and llround must be representable.
+        || sr / 192000.0 >= std::numeric_limits<int>::max()
+        || effectiveOutputRate >= std::numeric_limits<int>::max()
+        || iq.size() / sr * effectiveOutputRate >= static_cast<double>(std::numeric_limits<int64_t>::max()))
+        return reject(FmMultiplexBlock::InvalidConfiguration);
+    if (!std::all_of(iq.begin(), iq.end(), [](const auto& sample) {
+        return std::isfinite(sample.real()) && std::isfinite(sample.imag());
+    })) return reject(FmMultiplexBlock::InvalidInput);
     if (iq.empty()) return {};
     if (sr <= 0.0 || !std::isfinite(sr)) return {};
     fmDiagnostics::Block diagnostic(mode == DemodMode::WFM, iq.size(), sr);
@@ -540,8 +606,8 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         double beta = 0.0;
         if (atten > 50) beta = 0.1102 * (atten - 8.7);
         else if (atten > 21) beta = 0.5842 * std::pow(atten - 21, 0.4) + 0.07886 * (atten - 21);
-        int half = (int)std::ceil(3.3 / (fc * 0.5) + 1);
-        half = std::min(half, 160);
+        // Bound before integer conversion, including finite subnormal BW.
+        int half = static_cast<int>(std::min(std::ceil(3.3 / (fc * 0.5) + 1), 160.0));
         int nTaps = 2 * half + 1;
         chanTaps.resize(nTaps);
         double sum = 0;
@@ -584,7 +650,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
                 (mpxMode != mode ? 4u : 0u) | (mpxRate != rate || mpxInputRate != sr ? 8u : 0u) |
                 (mode != DemodMode::NFM && mpxBandwidth != channelBwHz ? 16u : 0u) |
                 (mpxTarget != identity || mpxCenter != cf ? 32u : 0u) |
-                (mpxDelay.size() != chanTaps.size() ? 64u : 0u);
+                (mpxDelay.size() != chanTaps.size() ? 64u : 0u) | mpxPendingFault;
             ++mpxEpoch; mpxSamples = 0; mpxWrite = mpxPhase = 0;
             mpxMixerPhase = 0;
             mpxPrevious = {1,0}; mpxDelay.assign(chanTaps.size(), {});
@@ -755,6 +821,9 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
     double channelPower = 0.0;
     for (const auto& s : baseband) channelPower += std::norm(s);
     double channelLevelDb = 10.0 * std::log10(channelPower / std::max<size_t>(1, baseband.size()) + 1e-20);
+    // Finite IQ can still overflow float FIR/power arithmetic. Do not let the
+    // limiter hide it or publish a poisoned RDS block already computed above.
+    if (!std::isfinite(channelLevelDb)) return reject(FmMultiplexBlock::NonFiniteOutput);
 
     // Channelizer decimation before demod (non-NFM; NFM already staged above).
     double demodRate = (mode == DemodMode::NFM) ? internalRate : sr;
@@ -861,7 +930,7 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         if (discontinuity) {
             multiplex->resetReasons = (!mpxContinuous ? 1u : 0u) |
                 (mpxMode != mode ? 4u : 0u) | (std::abs(mpxRate - demodRate) > 1.0 ? 8u : 0u) |
-                ((mpxTarget != identity || mpxCenter != cf) ? 32u : 0u);
+                ((mpxTarget != identity || mpxCenter != cf) ? 32u : 0u) | mpxPendingFault;
             ++mpxEpoch;
             mpxSamples = 0;
         }
@@ -914,6 +983,10 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
     }
 
     // Resample (streaming cubic with fractional phase carried between chunks)
+    const auto finiteSamples = [](const std::vector<float>& samples) {
+        return std::all_of(samples.begin(), samples.end(), [](float x) { return std::isfinite(x); });
+    };
+    if (!finiteSamples(base)) return reject(FmMultiplexBlock::NonFiniteOutput);
     diagnosticCheckpoint(fmDiagnostics::DiscriminatorUs);
     std::vector<float> aud;
     if (mode == DemodMode::NFM) {
@@ -1101,6 +1174,8 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
                 s *= gain * squelchGateGain;
             }
         }
+        // Detect overflow before the NFM peak limiter can conceal it.
+        if (!finiteSamples(aud)) return reject(FmMultiplexBlock::NonFiniteOutput);
         // Gentle peak control only — the old tanh compressor made speech sound grit/robotic.
         if (mode == DemodMode::NFM) {
             for (auto &s : aud) {
@@ -1134,6 +1209,11 @@ std::vector<float> Demodulator::demodulateToAudio(const std::vector<std::complex
         }
         dspStateNeedsReset = false;
     }
+    // Last publication guard covers both speech and the independent decoder tap.
+    if (!std::isfinite(rmsOut) || !finiteSamples(aud)
+        || (multiplex && !finiteSamples(multiplex->samples)))
+        return reject(FmMultiplexBlock::NonFiniteOutput);
+    if (multiplex && !multiplex->samples.empty()) mpxPendingFault = 0;
     dspStateNeedsReset = false;
     diagnostic.values[fmDiagnostics::AudioSamples] = aud.size();
     diagnosticCheckpoint(fmDiagnostics::PostAudioUs);

@@ -13,6 +13,11 @@
 #include <cstring>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <chrono>
+#include <charconv>
+#include <cctype>
+#include <nlohmann/json.hpp>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -88,8 +93,8 @@ void copyResponse(const std::string& response, char* out, size_t outBytes)
 
 bool responseOk(const std::string& body)
 {
-    return body.find("\"ok\":true") != std::string::npos ||
-           body.find("\"ok\": true") != std::string::npos;
+    const auto parsed = nlohmann::json::parse(body, nullptr, false);
+    return parsed.is_object() && parsed.contains("ok") && parsed["ok"].is_boolean() && parsed["ok"].get<bool>();
 }
 
 bool sendAll(SOCKET socket, const char* data, int length)
@@ -103,6 +108,27 @@ bool sendAll(SOCKET socket, const char* data, int length)
     return true;
 }
 
+bool httpTokenChar(unsigned char c)
+{
+    return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+        || (c != 0 && std::strchr("!#$%&'*+-.^_`|~", c));
+}
+
+bool httpFieldChar(unsigned char c)
+{
+    return c == '\t' || (c >= 32 && c != 127);
+}
+
+bool parseHttpStatus(std::string_view line, int& status)
+{
+    if (line.size() < 13 || (line.substr(0, 9) != "HTTP/1.1 " && line.substr(0, 9) != "HTTP/1.0 ")
+        || line[12] != ' ' || !std::all_of(line.begin() + 9, line.begin() + 12,
+            [](unsigned char c) { return c >= '0' && c <= '9'; })
+        || !std::all_of(line.begin() + 13, line.end(), httpFieldChar)) return false;
+    status = (line[9] - '0') * 100 + (line[10] - '0') * 10 + line[11] - '0';
+    return status >= 100 && status <= 599;
+}
+
 int requestJson(const SdrTownControlConfig* config,
                 const char* method,
                 const char* path,
@@ -110,7 +136,7 @@ int requestJson(const SdrTownControlConfig* config,
                 char* responseJson,
                 size_t responseJsonBytes)
 {
-    if (!method || !path || path[0] != '/') return SDRTOWN_CONTROL_BAD_ARGUMENT;
+    if (!method || !path || path[0] != '/' || !responseJson || responseJsonBytes < 128) return SDRTOWN_CONTROL_BAD_ARGUMENT;
     const ResolvedConfig cfg = resolveConfig(config);
     WsaSession wsa;
     if (!wsa.ok) {
@@ -164,23 +190,85 @@ int requestJson(const SdrTownControlConfig* config,
     }
 
     std::string response;
+    constexpr size_t maxHeaderBytes = 16384;
+    constexpr size_t maxBodyBytes = 262144;
+    size_t expectedBytes = 0, headerBytes = 0;
+    int httpStatus = 0;
+    bool headerParsed = false, invalid = false, tooLarge = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(std::clamp(cfg.timeoutMs, 100u, 30000u));
     char buf[4096];
     int n = 0;
-    while ((n = recv(socket, buf, sizeof(buf), 0)) > 0) {
+    while (std::chrono::steady_clock::now() < deadline) {
+        DWORD remaining = static_cast<DWORD>(std::max<int64_t>(1, std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count()));
+        setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&remaining), sizeof(remaining));
+        n = recv(socket, buf, sizeof(buf), 0);
+        if (n <= 0) break;
+        if (std::chrono::steady_clock::now() >= deadline) { invalid = true; break; }
+        if (static_cast<size_t>(n) > maxHeaderBytes + maxBodyBytes - response.size()) { tooLarge = true; break; }
         response.append(buf, static_cast<size_t>(n));
-        if (response.size() > 262144) break;
+        if (!headerParsed) {
+            const auto end = response.find("\r\n\r\n");
+            if (end == std::string::npos) {
+                if (response.size() > maxHeaderBytes) { invalid = true; break; }
+                continue;
+            }
+            if (end + 4 > maxHeaderBytes) { invalid = true; break; }
+            headerBytes = end + 4;
+            const auto statusEnd = response.find("\r\n");
+            if (!parseHttpStatus(std::string_view(response.data(), statusEnd), httpStatus)) { invalid = true; break; }
+            bool haveLength = false;
+            for (size_t begin = statusEnd + 2; begin < end;) {
+                const auto finish = response.find("\r\n", begin);
+                const auto colon = response.find(':', begin);
+                if (finish > end || colon == std::string::npos || colon <= begin || colon >= finish
+                    || !std::all_of(response.begin() + begin, response.begin() + colon, httpTokenChar)
+                    || !std::all_of(response.begin() + colon + 1, response.begin() + finish, httpFieldChar)) {
+                    invalid = true; break;
+                }
+                auto key = response.substr(begin, colon - begin);
+                std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+                if (key == "transfer-encoding") { invalid = true; break; }
+                if (key == "content-length") {
+                    if (haveLength) { invalid = true; break; }
+                    auto first = colon + 1;
+                    auto last = finish;
+                    while (first < last && (response[first] == ' ' || response[first] == '\t')) ++first;
+                    while (last > first && (response[last - 1] == ' ' || response[last - 1] == '\t')) --last;
+                    size_t length = 0;
+                    const auto result = std::from_chars(response.data() + first, response.data() + last, length);
+                    if (result.ec != std::errc{} || result.ptr != response.data() + last) { invalid = true; break; }
+                    if (length > maxBodyBytes || length >= responseJsonBytes) { tooLarge = true; break; }
+                    expectedBytes = headerBytes + length;
+                    haveLength = true;
+                }
+                begin = finish + 2;
+            }
+            if (invalid || tooLarge) break;
+            if (!haveLength) { invalid = true; break; }
+            headerParsed = true;
+        }
+        if (response.size() >= expectedBytes) break;
     }
     closesocket(socket);
+
+    if (tooLarge || invalid || !headerParsed || response.size() != expectedBytes) {
+        copyResponse(tooLarge
+            ? "{\"ok\":false,\"errorCode\":\"response_too_large\",\"error\":\"Response exceeds the buffer; use a paged view\"}"
+            : "{\"ok\":false,\"errorCode\":\"incomplete_response\",\"error\":\"Invalid, incomplete or timed-out HTTP response\"}", responseJson, responseJsonBytes);
+        return SDRTOWN_CONTROL_PROTOCOL_ERROR;
+    }
 
     const size_t headerEnd = response.find("\r\n\r\n");
     if (headerEnd == std::string::npos) {
         copyResponse("{\"ok\":false,\"error\":\"invalid HTTP response\"}", responseJson, responseJsonBytes);
         return SDRTOWN_CONTROL_PROTOCOL_ERROR;
     }
-    const std::string statusLine = response.substr(0, response.find("\r\n"));
-    int httpStatus = 0;
-    std::sscanf(statusLine.c_str(), "HTTP/%*s %d", &httpStatus);
     const std::string bodyText = response.substr(headerEnd + 4);
+    const auto parsed = nlohmann::json::parse(bodyText, nullptr, false);
+    if (!parsed.is_object()) {
+        copyResponse("{\"ok\":false,\"errorCode\":\"invalid_json\",\"error\":\"Invalid control response\"}", responseJson, responseJsonBytes);
+        return SDRTOWN_CONTROL_PROTOCOL_ERROR;
+    }
     copyResponse(bodyText, responseJson, responseJsonBytes);
     if (httpStatus < 200 || httpStatus >= 300) return SDRTOWN_CONTROL_HTTP_ERROR;
     return responseOk(bodyText) ? SDRTOWN_CONTROL_OK : SDRTOWN_CONTROL_PROTOCOL_ERROR;

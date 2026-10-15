@@ -94,10 +94,11 @@ int main(int argc,char** argv) {
     return Catch::Session().run(argc,argv);
 }
 namespace {
-RemoteDiagnosticsConfig config(std::initializer_list<QByteArray> input) {
+RemoteDiagnosticsConfig config(std::initializer_list<QByteArray> input,
+    RemoteDiagnosticsConsent consent = RemoteDiagnosticsConsent::ProcessDefault) {
     std::vector<QByteArray> bytes(input);std::vector<char*> args;
     for(auto& b:bytes)args.push_back(b.data());
-    return remoteDiagnosticsConfigFromProcess(int(args.size()),args.data(),"test");
+    return remoteDiagnosticsConfigFromProcess(int(args.size()),args.data(),"test",consent);
 }
 void write(const QString& path,const QByteArray& bytes) {QFile f(path);REQUIRE(f.open(QIODevice::WriteOnly));REQUIRE(f.write(bytes)==bytes.size());}
 bool waitFor(const std::function<bool()>& condition) {
@@ -124,6 +125,92 @@ TEST_CASE("Diagnostics defaults are configured but consent remains explicit") {
     CHECK_FALSE(config({"test", "--diag-url", "https://collector.invalid/ingest"}).enabled);
     settings.remove("remoteDiagnostics/consent");
 }
+TEST_CASE("Explicit this-run consent overrides only stored diagnostics opt-out", "[consent]") {
+    QSettings settings;
+    settings.setValue("remoteDiagnostics/consent", false);
+    const auto before = settings.allKeys();
+    const auto oneRun = RemoteDiagnosticsConsent::ThisRun;
+    CHECK_FALSE(config({"test"}).enabled); // No / canceled prompt: no scoped grant.
+    CHECK(config({"test"}, oneRun).enabled);
+    CHECK_FALSE(settings.value("remoteDiagnostics/consent").toBool());
+    CHECK(settings.allKeys() == before); // No recording or other preference is written.
+    CHECK_FALSE(config({"test"}).enabled); // Restart/default configuration has no grant.
+    for (const auto& off : {"--diag-off", "--diagnostics-off", "--no-remote-diagnostics"}) {
+        CHECK_FALSE(config({"test", off}, oneRun).enabled);
+        CHECK_FALSE(config({"test", off, "--diag-url", "https://collector.invalid/ingest"}, oneRun).enabled);
+        CHECK_FALSE(config({"test", "--diag-url", "https://collector.invalid/ingest", off}, oneRun).enabled);
+    }
+    CHECK_FALSE(config({"test", "--DIAG-OFF=true"}, oneRun).enabled);
+    CHECK_FALSE(config({"test", "--diag-url", "http://collector.invalid/ingest", "--diag-token", "fixture"}, oneRun).enabled);
+    CHECK_FALSE(config({"test", "--diag-url", "not-a-url"}, oneRun).enabled);
+    settings.setValue("remoteDiagnostics/consent", true);
+    CHECK(config({"test"}).enabled);
+    CHECK_FALSE(config({"test", "--diag-off"}, oneRun).enabled);
+    CHECK(settings.value("remoteDiagnostics/consent").toBool());
+    settings.remove("remoteDiagnostics/consent");
+    CHECK(config({"test"}, oneRun).enabled);
+    CHECK_FALSE(settings.contains("remoteDiagnostics/consent"));
+}
+
+TEST_CASE("FM diagnostics report rejected blocks without an accepted audio block", "[fm][diagnostics]") {
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    FmDiagnosticsLog log(directory.path());
+    log.sample();
+    fmDiagnostics::faults[0][fmDiagnostics::InvalidInputBlocks].fetch_add(1);
+    const auto report = log.sample();
+    REQUIRE_FALSE(report.isEmpty());
+    const auto counters = report["modes"].toObject()["nfm"].toObject();
+    REQUIRE(counters["invalidInputBlocks"].toDouble() >= 1);
+    REQUIRE(counters.contains("invalidConfigurationBlocks"));
+    REQUIRE(counters.contains("nonFiniteOutputBlocks"));
+    REQUIRE(log.sample().isEmpty());
+}
+
+TEST_CASE("Withdrawing this-run consent discards queued and in-flight delivery", "[consent]") {
+    QSettings settings; settings.setValue("remoteDiagnostics/consent", false);
+    QTcpServer server; REQUIRE(server.listen(QHostAddress::LocalHost));
+    int requests = 0; QPointer<QTcpSocket> pending;
+    QObject::connect(&server, &QTcpServer::newConnection, &server, [&] {
+        while (auto* socket = server.nextPendingConnection()) {
+            pending = socket;
+            QObject::connect(socket, &QTcpSocket::readyRead, socket, [&, socket] {
+                socket->readAll();
+                if (!socket->property("counted").toBool()) { socket->setProperty("counted", true); ++requests; }
+                // Deliberately withhold acknowledgement until consent is revoked.
+            });
+        }
+    });
+    auto cfg = config({"test"}, RemoteDiagnosticsConsent::ThisRun);
+    REQUIRE(cfg.enabled);
+    cfg.endpoint = QUrl("http://127.0.0.1:" + QString::number(server.serverPort()) + "/ingest");
+    cfg.minIntervalMs = 100;
+    RemoteDiagnosticsClient client; client.configure(cfg);
+    client.submit("fixture.first", "info", {{"synthetic", true}});
+    REQUIRE(waitFor([&] { return requests == 1; }));
+    client.submit("fixture.queued", "info", {{"synthetic", true}});
+    std::thread producer([&] { client.submit("fixture.ingress", "info", {{"synthetic", true}}); });
+    producer.join();
+    REQUIRE(client.deliveryStatistics()["queued"].toInt() == 1);
+    client.stopWithoutSending();
+    REQUIRE_FALSE(client.enabled());
+    if (pending && pending->state() == QAbstractSocket::ConnectedState) {
+        pending->write("HTTP/1.1 202 Accepted\r\nContent-Length: 11\r\n\r\n{\"ok\":true}");
+        pending->disconnectFromHost();
+    }
+    client.configure(config({"test"})); // A new/default run must still respect false.
+    client.submit("fixture.after-revocation", "info", {});
+    QElapsedTimer elapsed; elapsed.start();
+    while (elapsed.elapsed() < 250) { QCoreApplication::processEvents(); QThread::msleep(1); }
+    CHECK(requests == 1);
+    CHECK_FALSE(client.enabled());
+    CHECK(client.deliveryStatistics()["queued"].toInt() == 0);
+    CHECK(client.deliveryStatistics()["acknowledged"].toInt() == 0);
+    CHECK_FALSE(client.deliveryStatistics()["inFlight"].toBool());
+    CHECK_FALSE(settings.value("remoteDiagnostics/consent").toBool());
+    settings.remove("remoteDiagnostics/consent");
+}
+
 TEST_CASE("Diagnostics require an actual acknowledgement and recover after stalled transport") {
     QTcpServer server;REQUIRE(server.listen(QHostAddress::LocalHost));
     int requests=0;bool stall=false;bool validAck=true;

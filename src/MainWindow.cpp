@@ -1,5 +1,6 @@
 #include "LiveFrequencySpinBox.h"
 #include "MainWindow.h"
+#include "ControlMessageRange.h"
 #include "ReceiverTakeoverSessions.h"
 #include "ReceiverSourcePicker.h"
 #include "WorkflowDeviceCombo.h"
@@ -182,9 +183,7 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             }
             syncMonitorVarsToReceiver(0);
             stopUnusedListenDevices(selectedDevice);
-            setReceiverActive(0, true);
             auto& mgr = DeviceManager::instance();
-            bool retunedDevice = false;
             bool anyStreaming = false;
             for (size_t i = 0; i < mgr.getDevices().size(); ++i) {
                 if (i != selectedDevice) continue;
@@ -194,7 +193,6 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     // Hardware retuning inside this span would slide the spectrum.
                     if (std::abs(f - mgr.getCurrentCenterFreq(i)) >= mgr.getCurrentSampleRate(i) / 2.0)
                         mgr.setCenterFreq(i, f);
-                    retunedDevice = true;
                     anyStreaming = true;
                     break;
                 }
@@ -202,8 +200,14 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             if (!anyStreaming && selectedDevice < mgr.getDevices().size() && mgr.canUseDevice(selectedDevice, DeviceManager::DeviceLeaseOwner::Listen)) {
                 // Start only the selected Listen source, never another workflow's radio.
                 mgr.setEnabled(selectedDevice, true);
-                try { mgr.startStreaming(selectedDevice, true /* real SDR - no simulation */); } catch (...) {}
-                anyStreaming = true;
+                try { anyStreaming = mgr.startStreaming(selectedDevice, true); }
+                catch (const std::exception& ex) { spdlog::error("Listen start failed: {}", ex.what()); }
+                catch (...) { spdlog::error("Listen start failed with an unknown driver error"); }
+                if (!anyStreaming) {
+                    setReceiverActive(0, false);
+                    statusBar()->showMessage("Radio could not start. Check Device Manager and the log.", 6000);
+                    return;
+                }
                 // Defer audio output activation (speakers + VAC etc.) like other start paths.
                 QTimer::singleShot(120, this, [this]() {
                     if (auto* eng = getOrCreateAudioEngine()) {
@@ -221,10 +225,11 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 });
                 // Immediately retune the newly started stream
                 mgr.setCenterFreq(selectedDevice, f);
-                retunedDevice = true;
             }
-            QString msg = QString("Tuned monitor to %1 MHz").arg(f/1e6, 0, 'f', 4);
-            if (retunedDevice) msg += anyStreaming ? " (device + demod active)" : "";
+            setReceiverActive(0, anyStreaming);
+            QString msg = anyStreaming
+                ? QString("Monitor request: %1 MHz - %2").arg(f/1e6, 0, 'f', 4).arg(QString::fromStdString(mgr.getRuntimeStateLabel(selectedDevice)))
+                : "No available Listen radio. Select a device in Device Manager.";
             statusBar()->showMessage(msg, 2500);
             spectrum->setBandPlanMonitorFrequency(f);
         });
@@ -407,15 +412,19 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             // S0-7 (P2): "Smart scan" button currently enables + starts *real* streaming on all devices
             // (direct from SDR, no simulation). The old comment claimed "safe stub" — now honest.
             // Full energy-based smart scanner + hits table + promote-to-receiver is post-stabilization work.
+            int started = 0, failed = 0;
             for (size_t i = 0; i < mgr.getDevices().size(); ++i) {
                 if (!mgr.canUseDevice(i, DeviceManager::DeviceLeaseOwner::Listen)) continue;
                 mgr.setEnabled(i, true);
-                try { mgr.startStreaming(i, true /* real SDR - no simulation, direct from hardware */); } catch (...) { spdlog::warn("startStreaming fault in scan (guarded)"); }
+                try { if (mgr.startStreaming(i, true)) ++started; else ++failed; }
+                catch (...) { ++failed; spdlog::error("Scan radio {} could not start", i); }
             }
             syncMonitorVarsToReceiver(0);
-            setReceiverActive(0, true);
-            statusBar()->showMessage("Scan: real streaming started on all devices (full smart scanner + hits table later)", 4000);
-            spdlog::info("Scan: real streaming started on all devices");
+            const auto selected = sdrTownControlActiveDeviceIndex();
+            setReceiverActive(0, mgr.isStreaming(selected) && mgr.canUseDevice(selected, DeviceManager::DeviceLeaseOwner::Listen));
+            statusBar()->showMessage(QString("Radio start requests: %1 accepted, %2 failed. Hardware status is shown in Device Manager.").arg(started).arg(failed), 6000);
+            spdlog::info("Scan radio start: accepted={} failed={}", started, failed);
+            if (!started) return;
             // Defer audio activation (and lazy engine creation) – see Add Receiver.
             QTimer::singleShot(100, this, [this]() {
                 AudioEngine* eng = getOrCreateAudioEngine();
@@ -5107,7 +5116,6 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                 lpfSpin->blockSignals(false);
             }
             syncMonitorVarsToReceiver(0);
-            setReceiverActive(0, true);
             auto& mgr = DeviceManager::instance();
             bool any = false;
             for (size_t i=0; i<mgr.getDevices().size(); ++i) {
@@ -5123,9 +5131,16 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
             if (!any && selectedDevice < mgr.getDevices().size() && mgr.canUseDevice(selectedDevice, DeviceManager::DeviceLeaseOwner::Listen)) {
                 // Auto-start on explicit tune request so user gets audio without separate "Add" click.
                 mgr.setEnabled(selectedDevice, true);
-                mgr.startStreaming(selectedDevice, true /* real from SDR */);
+                try { any = mgr.startStreaming(selectedDevice, true); }
+                catch (const std::exception& ex) { spdlog::error("Tune and Receive failed: {}", ex.what()); }
+                catch (...) { spdlog::error("Tune and Receive failed with an unknown driver error"); }
+                if (!any) {
+                    setReceiverActive(0, false);
+                    statusBar()->showMessage("Radio could not start. Check Device Manager and the log.", 6000);
+                    return;
+                }
                 mgr.setCenterFreq(selectedDevice, tunedHz);
-                statusBar()->showMessage(QString("Started monitor + tuned to %1 MHz").arg(tunedHz/1e6,0,'f',3), 2500);
+                statusBar()->showMessage(QString("Monitor request: %1 MHz - %2").arg(tunedHz/1e6,0,'f',3).arg(QString::fromStdString(mgr.getRuntimeStateLabel(selectedDevice))), 5000);
                 // defer audio outputs
                 QTimer::singleShot(120, this, [this]() {
                     AudioEngine* eng = getOrCreateAudioEngine();
@@ -5140,6 +5155,8 @@ MainWindow::MainWindow(const GuiRuntimeConfig& config,  QWidget* parent)
                     }
                 });
             }
+            setReceiverActive(0, any);
+            if (!any) statusBar()->showMessage("No available Listen radio. Select a device in Device Manager.", 6000);
         });
 
         mainLayout->addWidget(rxBox, 1);
@@ -11639,21 +11656,9 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             if (!ok) return {{"ok", false}, {"error", "icao required"}};
             const auto t = AdsBTrackStore::instance().trackByIcao(icao);
             if (t.icao == 0) return {{"ok", false}, {"error", "unknown aircraft"}};
-            return {{"ok", true},
-                    {"icao", QString::fromStdString(t.icaoHex)},
-                    {"callsign", QString::fromStdString(t.callsign)},
-                    {"lat", t.latDeg},
-                    {"lon", t.lonDeg},
-                    {"altFt", t.altFt},
-                    {"gsKt", t.gsKt},
-                    {"trackDeg", t.trackDeg},
-                    {"squawk", QString::fromStdString(t.squawk)},
-                    {"type", QString::fromStdString(t.typeCode)},
-                    {"route", QString::fromStdString(t.route)},
-                    {"photoUrl", QString::fromStdString(t.photoUrl)},
-                    {"fromLocal", t.fromLocal},
-                    {"fromNetwork", t.fromNetwork},
-                    {"fromAdsc", t.fromAdsc}};
+            auto result = QJsonDocument::fromJson(QByteArray::fromStdString(AdsBTrackStore::trackJson(t).dump())).object();
+            result.insert("ok", true);
+            return result;
         }
         if (path == "/v1/aircraft/refresh" && method == "POST") {
             std::string err;
@@ -11687,8 +11692,9 @@ QJsonObject MainWindow::handleSdrTownControlRequest(const QString& method,
             return doc.object();
         }
         if (path == "/v1/inmarsat/messages" && method == "GET") {
-            const size_t limit = static_cast<size_t>(std::max(1, body.value("limit").toInt(100)));
-            const size_t offset = static_cast<size_t>(std::max(0, body.value("offset").toInt(0)));
+            int limit = 100, offset = 0;
+            if (!controlMessageRange(body, limit, offset))
+                return {{"ok",false},{"status",400},{"error","Invalid message range: limit 1..500 and offset 0..100000 required"}};
             const QJsonDocument doc = QJsonDocument::fromJson(
                 QByteArray::fromStdString(InmarsatMessageStore::instance().recentJson(limit, offset).dump()));
             return doc.object();

@@ -15,5 +15,6 @@ private:
     QString path_;
     std::unique_ptr<QLockFile> lock_;
     std::array<uint64_t,2> lastBlocks_{};
+    std::array<fmDiagnostics::FaultSnapshot,2> lastFaults_{};
 };
 void startFmDiagnostics(QObject* parent);

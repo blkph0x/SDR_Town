@@ -1,6 +1,14 @@
 # Issues (canonical)
 
-## ISS-0110 - Audio emergency trim bypasses consumer exclusion (2026-10-15, OPEN)
+DEC-0223 repair evidence: AUDIT_20261015_REPAIR_VALIDATION.md and BUILD_NOTES.
+"Fixed locally" below is not public-release or physical-radio acceptance.
+
+## ISS-0110 - Audio emergency trim bypasses consumer exclusion (2026-10-15, FIXED LOCALLY)
+
+The production trim now acquires ConsumerLease under the producer mutex;
+the callback still never waits. Actual callback barrier/wraparound tests and
+100 overlap repetitions pass, as does the integrated core suite. T-0141 owns
+final public-package qualification; no P25 DSP change.
 
 AudioEngine.cpp:498 writes readPos while holding audioMutex, but the actual
 callback uses only RingBuffer::ConsumerLease. Trim does not acquire that lease.
@@ -10,7 +18,12 @@ Code-proven, not a captured physical race. Analog emergency and Satcom callers
 are confirmed; do not call this a demonstrated P25 decoder failure. T-0136;
 DEC-0222 audit F03 defines actual-callback barrier and nonblocking repair gates.
 
-## ISS-0111 - Malformed FM IQ poisons subsequent clean PCM (2026-10-15, OPEN)
+## ISS-0111 - Malformed FM IQ poisons subsequent clean PCM (2026-10-15, FIXED LOCALLY)
+
+Invalid input/configuration/output now rejects the damaged block and resets
+only that FM instance, publishing a tap discontinuity and numeric fault counters.
+Recovery tests pass; 16 valid PCM/multiplex signatures match baseline exactly.
+Integrated core, diagnostics, RDS and DTMF checks pass. No new on-air claim.
 
 Current NFM and WFM each accept one NaN IQ sample at index100 in a24000-sample,
 240ksps block. Probe returns4780 non-finite PCM values, then48000 during the next
@@ -18,7 +31,12 @@ clean second. HfDemod already has a separate input guard. Reject/reset/gap the
 affected FM stream without changing valid DSP; add finite output diagnostics.
 T-0136 / DEC-0222 F04. Not evidence normal RF creates NaN samples.
 
-## ISS-0112 - Local aircraft position age follows unrelated messages (2026-10-15, OPEN)
+## ISS-0112 - Local aircraft position age follows unrelated messages (2026-10-15, FIXED LOCALLY)
+
+Per-field age/source/validity now controls merge, retention and serialization.
+Unknown altitude remains null/unknown, not a claimed local altitude decoder.
+Deterministic age/UTC/source tests and native popup/map tests pass; integrated
+AircraftGui/InmarsatLiveGui pass. Physical reference capture acceptance is separate.
 
 AdsBTrackStore.cpp:137 refreshes lastSeenUnix for identification and velocity;
 positionValid has no independent timestamp. visibleTracksLocked retains and
@@ -27,7 +45,12 @@ Mode S also never populates altFt, although status serializes its default zero.
 Separate per-field time/validity/provenance and nullable altitude; do not invent
 decoded values. T-0137 / DEC-0222 F08. Distinct from InmarsatTracking aging.
 
-## ISS-0113 - Companion control admission queue is unbounded (2026-10-15, OPEN)
+## ISS-0113 - Companion control admission queue is unbounded (2026-10-15, FIXED LOCALLY)
+
+FUBAR1.1.51 caps queued tickets32 and public names8, issues random bearer
+tickets, rate-limits admission/commands and preserves expiry/two extensions.
+128-ID/80-concurrent fixtures and production browser tests pass. This is bounded
+anonymous admission, not unique-human authentication or an anti-Sybil guarantee.
 
 Public FUBAR1.1.50 accepts64 distinct caller-chosen client IDs from one local
 peer; source has no queue cap. Status walks/serializes the full queue under the
@@ -36,7 +59,12 @@ one lease, not one person with new IDs. This is resource/fairness exposure, not
 proof of active-token theft. Bounded admission/status, server-issued tickets and
 optional membership policy required. T-0138 / DEC-0222 F07.
 
-## ISS-0114 - Updater buffers before enforcing limits (2026-10-15, OPEN)
+## ISS-0114 - Updater buffers before enforcing limits (2026-10-15, FIXED LOCALLY)
+
+Async metadata stages enforce byte caps; installer chunks go directly to a
+temporary file/hash with exact signed size, idle/absolute deadlines and safe
+cancellation. Ed25519 remains mandatory.12 cases/278 assertions pass including
+destruction, malformed/oversized data, stalls, redirects and launch failures.
 
 UpdateManager reads full manifest/signature/installer replies; installer512MiB
 check happens after buffering. Signed size is not passed to doDownload.
@@ -45,7 +73,12 @@ Add bounded async stages, streaming temporary-file hash/size checks, deadlines
 and cancellation; retain fail-closed signature/hash verification. No compromised
 release host observed. T-0138 / DEC-0222 F09.
 
-## ISS-0115 - Replay one-run diagnostics consent loses to stored false (2026-10-15, OPEN)
+## ISS-0115 - Replay one-run diagnostics consent loses to stored false (2026-10-15, FIXED LOCALLY)
+
+Explicit ThisRun consent is typed/scoped and overrides only stored opt-out;
+forced disable still wins. Persistent and recording consent are unchanged.
+Consent matrix and actual replay Yes/No/unavailable dialog tests pass without
+an external upload. Integrated WorkspaceTests/RemoteDiagnostics pass.
 
 InmarsatRemoteDiagnostics affirmative sharing appends --diag-url; configuration
 then overwrites requested=true with stored remoteDiagnostics/consent=false.
@@ -67,7 +100,14 @@ and real RTL receive smoke. Published Town0.2.138/FUBAR1.1.50; release/public-by
 and paired GUI gates PASS. Evidence in BUILD_NOTES; driver-lifecycle issues below
 remain separate open work, not implicitly closed by this companion repair.
 
-## ISS-0105 - Delayed RX read contaminates replacement session (2026-10-11, OPEN)
+## ISS-0105 - Delayed RX read contaminates replacement session (2026-10-11, FIXED LOCALLY)
+
+DEC-0223 retains stream-state lifetime and fences post-native publication/exit
+by generation. Handle-bound quarantine covers every cleanup path, including
+close failures, rediscovery and shared tuners. Controlled cancellation/reorder
+tests pass; all-path close fixture passes142 assertions/eight scenarios.
+Native unmake exceptions are source-reviewed, not separately fault-injected.
+Physical unplug/replug and driver-hang acceptance remain separate.
 
 2026-10-15: rebuilt against a0d4e21 and reproduced1024 stale marked samples again;
 normal22-suite CTest still passes. DEC-0222 F01 records the current evidence.
@@ -80,7 +120,11 @@ fence. Related running flags and detached same-generation spectrum handoff also
 need lifetime review. No claim this caused accepted P25 field audio. T-0132;
 full evidence and repair gates: AUDIT_20261011_IMPLEMENTATION_REPORTS.md.
 
-## ISS-0106 - Non-SDRplay activation error becomes live hardware (2026-10-11, OPEN)
+## ISS-0106 - Non-SDRplay activation error becomes live hardware (2026-10-11, FIXED LOCALLY)
+
+All negative activateStream results and unsuccessful initial tunes now fail
+opening. Fake-driver rejection/startup controls pass; cancelled startup cannot
+replace or acknowledge a newer session. Final public-package gate is T-0141.
 
 2026-10-15: fresh current-source fake-driver probe again returns live hardware
 after activation=-2. DEC-0222 F02; existing T-0132 remains the repair task.
@@ -90,7 +134,13 @@ Fake generic driver returns -2 and reaches live hardware in three runs. T-0132
 must validate every driver and publish failure rather than readiness; preserve
 current successful startup paths. No physical transmitter used in the probe.
 
-## ISS-0107 - Primary workflow start paths report unchecked success (2026-10-11, OPEN)
+## ISS-0107 - Primary workflow start paths report unchecked success (2026-10-11, FIXED LOCALLY)
+
+Listen Tune/spectrum/scan now check start results, catch/report driver failure
+and label accepted requests with actual runtime status, not unconditional ready.
+Dry-run blocks real RX at DeviceManager's common boundary. Actual GUI Tune and
+Inmarsat takeover reject cleanly and remain stopped; native close exits0.
+This does not claim every controller has been redesigned or hardware qualified.
 
 MainWindow.cpp:204 discards startStreaming's bool, catches every exception and
 sets anyStreaming=true. Line5125 similarly reports started/tuned without checking
@@ -98,14 +148,26 @@ results. Audio output catches at217/5138 are empty. T-0133 requires explicit
 requested/opening/ready/failed outcomes and GUI/API tests, not catch-all status
 spam or changes to accepted P25 security/timing.
 
-## ISS-0108 - Legacy basic device test masks unexpected exceptions (2026-10-11, OPEN)
+## ISS-0108 - Legacy basic device test masks unexpected exceptions (2026-10-11, FIXED LOCALLY)
+
+Unexpected exceptions now fail the test; missing hardware is an explicit
+prerequisite skip. Deterministic fake-driver lifecycle tests are permanent core
+cases rather than skipped physical tests. Integrated core suite passes.
 
 Whole-test catch handlers in test_devicemanager.cpp emit WARN for exceptions
 before contract assertions. Split hardware prerequisite skips from deterministic
 failure tests. Already-recorded Catch2 assertion failures are not erased. T-0133;
 newer ownership/lifecycle tests pass but do not cover ISS-0105/0106.
 
-## ISS-0104 - Large companion snapshots need pagination (2026-10-11, OPEN)
+## ISS-0104 - Large companion snapshots need pagination (2026-10-11, FIXED LOCALLY)
+
+Immutable route/session/view-bound paging now covers primary and named maps
+and messages. Catalogs omit tracks; large successful mutations return a bounded
+acknowledgment, never a false failure. DLL validates complete bounded HTTP/JSON;
+33 transport fixtures pass. Server lifetime/restart cases and actual GUI message
+range/catalog fixtures pass. FUBAR assembles complete snapshots atomically with
+budgets and handles acknowledgments without repeating mutations. Public pair
+qualification remains under T-0141; other T-0130 parity work is still open.
 
 2026-10-15: current InmarsatTracking with512 identities/256 positions serializes
 284750 bytes. Public FUBAR1.1.50 + DLL returns HTTP502 and262143 bytes of truncated

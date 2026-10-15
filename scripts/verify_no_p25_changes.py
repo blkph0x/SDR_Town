@@ -50,6 +50,32 @@ PROTECTED_PATTERNS: tuple[str, ...] = (
 )
 
 SATCOM_MAINWINDOW_PATH = "src/MainWindow.cpp"
+# DEC-0223: exact reviewed audit repair, based on c684798. Shared RX lifetime,
+# callback exclusion, finite FM input and UI outcomes; no P25 math/timer edits.
+# Whole-file pairs plus negative mutations prevent a general RF/audio bypass.
+AUDIT_REPAIR_DIGESTS = {
+    "include/AudioEngine.h": (
+        "71c4a6541a037f356583f78a0efbfbcb8002d86bd34d43040b3f6e5ce33f27c2",
+        "43bead830bb212994e26993a1b07993bda28ddf3007e12aecf87a59aa014671e"),
+    "include/Demod.h": (
+        "ed678b546ef8c06c092b7f2c3d9795c0d447e455d11c3863af84e4094f604eb3",
+        "24e67eee30a9e52000f3e84d173c0e797960fe8a2a8369286c24d7af96f7b10b"),
+    "include/DeviceManager.h": (
+        "10c901cc67cbcb3e16b28783c080f643a91f3c2cb92a7bb63e22e924b35e42bb",
+        "622a7a95ca68c15de44cd382588562b78a3cdb07cc48450bba5aa7441e1fa420"),
+    "src/AudioEngine.cpp": (
+        "b622f93e4c9b1ecfc8fb8d819c8e7e58807449584870fc1fc6457b5b2ae80757",
+        "70098a0a808d9f5ae44302aaf4518ba32f06cd50358971e01fb4a812381b384e"),
+    "src/Demod.cpp": (
+        "5459b7b840d1cdca572438f58143d3d3dfc88b1d6e58a76770dab2e8473126b8",
+        "7a22c37729ec3d7217d8cd5a6ed64011fd9f886be778a54da8d0c832f0ed3567"),
+    "src/DeviceManager.cpp": (
+        "a8cb754b83fc4cb101f11e27f3e32ffe9189d8885d25fcd805b38e92f651dde7",
+        "cfcd7a49580e6cbbe3e05239247f4585854255f2228544a990040ed9d1518404"),
+    "src/MainWindow.cpp": (
+        "7081f7612f22746ca3d7316b9be44ee93405acd9a91fc1976463d8dec8fceb53",
+        "ce8cc81bfbd7fc1693239f3f68372033341073adb5596d884f3bde6c0e9abcab"),
+}
 # DEC-0221: exact companion identity selection and authenticated local pairing.
 # No decoder, follow cadence, vocoder, IQ or speaker branches change.
 COMPANION_SELECTION_DIGESTS = {
@@ -902,6 +928,10 @@ def main() -> int:
 
     blocked = []
     for path, pattern in protected_paths(changed):
+        if args.paths is None and path in AUDIT_REPAIR_DIGESTS:
+            if text_matches_digest(path, git_file_text(args.base, path), git_file_text(args.head, path), AUDIT_REPAIR_DIGESTS):
+                print(f"P25 guard: accepted exact DEC-0223 audit repair: {path}")
+                continue
         if args.paths is None and path in COMPANION_SELECTION_DIGESTS:
             if text_matches_digest(path, git_file_text(args.base, path), git_file_text(args.head, path), COMPANION_SELECTION_DIGESTS):
                 continue

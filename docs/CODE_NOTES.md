@@ -1,5 +1,18 @@
 # Code notes (tree map)
 
+DEC-0223: receive workers retain shared StreamState lifetime and use generation
+fences for IQ/counter/tune publication. Retired native reads retain handles until
+completion; physical-device quarantine prevents unsafe reopen. Audio emergency
+trim shares RingBuffer::ConsumerLease with the actual callback. FM finite guards
+publish discontinuities and bounded fault counters via FmDiagnosticsLog.
+AdsBTrackStore owns per-field freshness/validity/source; trackJson unifies list
+and detail responses. ControlSnapshotPager caches bounded, expiring immutable
+pages; SdrTownControlClient validates complete bounded framing/JSON. UpdateManager
+uses asynchronous bounded stages, a streamed temporary file/hash and signed size.
+Typed replay consent is separate from persistent opt-in and recording consent.
+GUI dry-run uses isolated settings and rejects hardware opens at DeviceManager.
+Tests and remaining acceptance are in AUDIT_20261015_REPAIR_VALIDATION.md.
+
 DEC-0221: `MainWindow::applySdrTownControlTune` resolves optional JSON deviceKey
 before mutation and validates the existing per-device ownership policy. Status
 provides availability/identity; the C DLL ABI stays unchanged. Generic Request

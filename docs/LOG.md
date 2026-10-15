@@ -1,5 +1,18 @@
 # Development log
 
+## 2026-10-15 - DEC-0223 audit repair and qualification
+
+Implemented generation-fenced receive publication and native-handle retirement,
+activation failure checks, truthful native start outcomes, callback/trim
+exclusion, finite FM recovery, per-field aircraft freshness, bounded control
+paging/admission, asynchronous signed updates and explicit one-run diagnostics
+consent. Added deterministic failure tests and actual native/browser workflows.
+Review found and addressed delayed-open index changes, shared close failures,
+large mutation replies and query-string message offsets; these are recorded as
+separate negative cases, not assumed covered by the original green suite.
+No P25 DSP/slot/security/follow timer changes. Qualification and public delivery
+results belong in BUILD_NOTES and the repair matrix, not inferred from this log.
+
 ## 2026-10-15 - DEC-0222 system audit and beginner workflow roadmap
 
 Audited current Town and companion source/call paths, rebuilt both apps, ran26

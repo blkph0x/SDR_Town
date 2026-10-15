@@ -310,13 +310,17 @@ private:
         bool isReal = false;   // true only when we successfully did real Soapy make + activate (not the stub sim)
         std::string runtimeState = "stopped";
         std::thread rxThread;
-        std::atomic<bool> rxThreadRunning{false};
+        std::atomic<uint64_t> rxThreadRunning{0};
+        std::shared_ptr<std::atomic<bool>> rxWorkerDone;
         // DEC-0199: spectrum FFT runs off the Soapy readStream path so P25 IQ
         // drain is not blocked by radix-2 work on the RX thread.
         std::thread spectrumThread;
-        std::atomic<bool> spectrumThreadRunning{false};
+        std::atomic<uint64_t> spectrumThreadRunning{0};
         std::atomic<int> stubStopTimeoutCount{0};
         std::mutex lifecycleMutex;      // serializes start/stop and async real-hardware handoff
+        // DEC-0223: never held across native calls or joins. Cancellation and
+        // post-I/O publication use the same fence, including spectrum/retunes.
+        std::mutex publicationMutex;
         // CRITICAL (P0 audit shutdown hang + best practice for untrusted SDR drivers):
         // realInitThread is intentionally a plain std::thread, not jthread.
         // SoapySDR::Device::make() (and the native USB stack) can block indefinitely.
@@ -375,9 +379,12 @@ private:
         SoapySDR::Stream* rxStream = nullptr;
         bool soapyShared = false; // RSPduo Dual Tuner shared device (do not unmake until last channel)
         std::string sdrplayShareKey;
+        // Handle identity survives discovery reordering; protected by stateMutex.
+        std::string soapyIoKey, soapyQuarantineKey;
+        bool soapyRtl = false;
 #endif
     };
-    std::vector<std::unique_ptr<StreamState>> streams;
+    std::vector<std::shared_ptr<StreamState>> streams;
 
     // Per-device TX session (independent Soapy TX handle when possible).
     struct TxStreamState {
@@ -404,8 +411,10 @@ private:
     const TxStreamState* txStreamState(size_t index) const;
     void ensureTxStreamSlot(size_t index);
     void txThreadFunc(size_t index, uint64_t expectedGeneration);
-    void rxThreadFunc(size_t index, uint64_t expectedGeneration);  // background RX loop
-    void spectrumThreadFunc(size_t index, uint64_t expectedGeneration);  // FFT/publish off readStream
+    void rxThreadFunc(size_t index, std::shared_ptr<StreamState> state, uint64_t expectedGeneration,
+                      std::shared_ptr<std::atomic<bool>> done);
+    void spectrumThreadFunc(size_t index, std::shared_ptr<StreamState> state, uint64_t expectedGeneration);
+    void launchRxWorkers(size_t index, const std::shared_ptr<StreamState>& state, uint64_t generation);
     // Caller must already hold devicesMutex.
     size_t ensureDiversityCompositeDeviceLocked(size_t deviceIndexHint);
     void restoreDiversityCompositeAfterEnumerate();

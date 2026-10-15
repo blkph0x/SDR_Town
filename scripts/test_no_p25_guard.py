@@ -29,6 +29,23 @@ def main() -> int:
     import subprocess
     import re
     from types import SimpleNamespace
+    audit_files = {}
+    for path in MODULE.AUDIT_REPAIR_DIGESTS:
+        before = subprocess.check_output(["git", "show", "c684798:" + path], cwd=ROOT, text=True, encoding="utf-8")
+        after = (ROOT / path).read_text(encoding="utf-8")
+        audit_files[("before", path)] = before
+        audit_files[("after", path)] = after
+        assert MODULE.text_matches_digest(path, before, after, MODULE.AUDIT_REPAIR_DIGESTS)
+        assert not MODULE.text_matches_digest(path, before, after + "\nmutation", MODULE.AUDIT_REPAIR_DIGESTS)
+        assert not MODULE.text_matches_digest(path, before + "\nmutation", after, MODULE.AUDIT_REPAIR_DIGESTS)
+        assert not MODULE.text_matches_digest(path, after, before, MODULE.AUDIT_REPAIR_DIGESTS)
+        assert not MODULE.text_matches_digest("src/P25LiveDecoder.cpp", before, after, MODULE.AUDIT_REPAIR_DIGESTS)
+    with patch.object(MODULE, "parse_args", return_value=SimpleNamespace(base="before", head="after", paths=None)), \
+         patch.object(MODULE, "git_changed_paths", return_value=list(MODULE.AUDIT_REPAIR_DIGESTS)), \
+         patch.object(MODULE, "git_file_text", side_effect=lambda ref, path: audit_files[(ref, path)]):
+        assert MODULE.main() == 0
+        audit_files[("after", "src/DeviceManager.cpp")] += "\nmutation"
+        assert MODULE.main() == 1
     for path in MODULE.PAIRED_RELEASE_DIGESTS:
         before = subprocess.check_output(["git", "show", "1cf9bf9:" + path], cwd=ROOT, text=True, encoding="utf-8")
         after = subprocess.check_output(["git", "show", "8e888dd:" + path], cwd=ROOT, text=True, encoding="utf-8")
@@ -37,7 +54,7 @@ def main() -> int:
         assert not MODULE.text_matches_digest(path, after, before, MODULE.PAIRED_RELEASE_DIGESTS)
     for path in MODULE.COMPANION_SELECTION_DIGESTS:
         before = subprocess.check_output(["git", "show", "85e6264:" + path], cwd=ROOT, text=True, encoding="utf-8")
-        after = (ROOT / path).read_text(encoding="utf-8")
+        after = subprocess.check_output(["git", "show", "fd000db:" + path], cwd=ROOT, text=True, encoding="utf-8")
         assert MODULE.text_matches_digest(path, before, after, MODULE.COMPANION_SELECTION_DIGESTS)
         assert not MODULE.text_matches_digest(path, before, after + "\nmutation", MODULE.COMPANION_SELECTION_DIGESTS)
         assert not MODULE.text_matches_digest(path, after, before, MODULE.COMPANION_SELECTION_DIGESTS)
@@ -167,10 +184,9 @@ def main() -> int:
         before = subprocess.check_output(
             ["git", "show", "cfdb6a3:" + path], cwd=ROOT, text=True, encoding="utf-8"
         )
-        after_ref = "c3a208c:" + path if path in MODULE.SSTV_LISTEN_DIGESTS else None
-        after = (subprocess.check_output(
-            ["git", "show", after_ref], cwd=ROOT, text=True, encoding="utf-8"
-        ) if after_ref else (ROOT / path).read_text(encoding="utf-8").replace("\r\n", "\n"))
+        after = subprocess.check_output(
+            ["git", "show", "c3a208c:" + path], cwd=ROOT, text=True, encoding="utf-8"
+        )
         listen_hf_files[("before", path)] = before
         listen_hf_files[("after", path)] = after
         assert MODULE.infrastructure_text_allowed(path, before, after)

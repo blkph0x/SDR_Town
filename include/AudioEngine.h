@@ -13,6 +13,15 @@
 
 #include "miniaudio.h"
 
+#ifdef SDR_TOWN_AUDIO_TEST_HOOKS
+// DEC-0223: deterministic barriers exist only in the test executable.
+namespace audioEngineTestHooks {
+void consumerWaiting();
+void callbackCursorLoaded();
+void trimLeaseAcquired();
+}
+#endif
+
 // Simple multi-device audio output engine (PR4)
 // Supports duplicating the same PCM stream to N selected playback devices (e.g. speakers + VB-Audio Cable)
 // with independent per-device volume. Designed for 48kHz mono float.
@@ -54,8 +63,8 @@ public:
     size_t dropQueuedBridgeAudio(size_t maxSamples, const std::vector<size_t>& activeOutputIndices = {});
     void clearBuffers();
     // Drop oldest queued PCM so live analog monitoring stays near realtime.
-    // Returns samples discarded. Never touches the realtime callback read path
-    // beyond advancing readPos under audioMutex (same ownership as push).
+    // Returns samples discarded. Control waits for the consumer lease under
+    // audioMutex; the realtime callback only tries the lease, never waits.
     size_t trimQueuedAudio(size_t maxQueuedSamples,
                            const std::vector<size_t>& activeOutputIndices = {});
 
@@ -98,6 +107,8 @@ public:
     struct ActiveOutput;
 
 private:
+    friend struct AudioEngineTestAccess;
+    static void dataCallback(ma_device*, void*, const void*, ma_uint32);
     static constexpr uint8_t kRingSampleReal = 0;
     static constexpr uint8_t kRingSampleBridge = 1;
 
@@ -124,6 +135,9 @@ public:
                 do {
                     acquired = !ring.consumerBusy.test_and_set(std::memory_order_acquire);
                     if (acquired || !wait) break;
+#ifdef SDR_TOWN_AUDIO_TEST_HOOKS
+                    audioEngineTestHooks::consumerWaiting();
+#endif
                     std::this_thread::yield();
                 } while (true);
             }

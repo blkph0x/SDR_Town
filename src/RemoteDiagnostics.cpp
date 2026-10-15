@@ -575,6 +575,12 @@ void RemoteDiagnosticsClient::pump()
 
 RemoteDiagnosticsConfig remoteDiagnosticsConfigFromProcess(int argc, char* argv[], const QString& mode)
 {
+    return remoteDiagnosticsConfigFromProcess(argc, argv, mode, RemoteDiagnosticsConsent::ProcessDefault);
+}
+
+RemoteDiagnosticsConfig remoteDiagnosticsConfigFromProcess(int argc, char* argv[], const QString& mode,
+    RemoteDiagnosticsConsent consent)
+{
     RemoteDiagnosticsConfig cfg;
     cfg.mode = mode;
     bool requested = false;
@@ -639,14 +645,21 @@ RemoteDiagnosticsConfig remoteDiagnosticsConfigFromProcess(int argc, char* argv[
     QSettings settings;
     if (settings.contains("remoteDiagnostics/consent"))
         requested = settings.value("remoteDiagnostics/consent").toBool();
+    if (consent == RemoteDiagnosticsConsent::ThisRun) requested = true;
     cfg.enabled = !forcedOff && requested && diagnosticsConfigUsable(cfg);
     return cfg;
 }
 
 RemoteDiagnosticsClient* remoteDiagnosticsConfigureFromProcess(int argc, char* argv[], QObject* parent, const QString& mode)
 {
+    return remoteDiagnosticsConfigureFromProcess(argc, argv, parent, mode, RemoteDiagnosticsConsent::ProcessDefault);
+}
+
+RemoteDiagnosticsClient* remoteDiagnosticsConfigureFromProcess(int argc, char* argv[], QObject* parent, const QString& mode,
+    RemoteDiagnosticsConsent consent)
+{
     startFmDiagnostics(parent); // Local counters remain available with remote sharing disabled.
-    const RemoteDiagnosticsConfig cfg = remoteDiagnosticsConfigFromProcess(argc, argv, mode);
+    const RemoteDiagnosticsConfig cfg = remoteDiagnosticsConfigFromProcess(argc, argv, mode, consent);
     if (!cfg.enabled) return nullptr;
 
     auto* thread = new QThread(parent);

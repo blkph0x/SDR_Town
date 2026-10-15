@@ -6,6 +6,72 @@
 #include <QTcpSocket>
 #include <QThread>
 #include <stdexcept>
+#include <memory>
+
+#ifdef SDR_TOWN_CONTROL_TEST_MAIN
+#include <catch2/catch_session.hpp>
+int main(int argc, char** argv) {
+    QCoreApplication app(argc, argv);
+    return Catch::Session().run(argc, argv);
+}
+#endif
+
+TEST_CASE("Control map pagination preserves one bounded immutable snapshot", "[control][paging]") {
+    ControlSnapshotPager pager;
+    QJsonArray aircraft, positions;
+    for (int i = 0; i < 512; ++i) {
+        QJsonObject row{{"id", i}, {"callsign", QString(700, 'X')}};
+        aircraft.append(row);
+        if (i < 256) positions.append(row);
+    }
+    int reads = 0;
+    const auto now = ControlSnapshotPager::Clock::now();
+    const auto produce = [&] { ++reads; return QJsonObject{{"ok", true}, {"aircraft", aircraft}, {"positions", positions}, {"revision", reads}}; };
+    auto page = pager.respond("/v1/inmarsat/map-status", {}, produce(), now);
+    const auto snapshot = page.value("page").toObject().value("snapshot").toString();
+    REQUIRE_FALSE(snapshot.isEmpty());
+    QJsonArray allAircraft, allPositions;
+    int expectedOffset = 0;
+    for (;;) {
+        REQUIRE(page.value("ok").toBool());
+        REQUIRE(QJsonDocument(page).toJson(QJsonDocument::Compact).size() <= ControlSnapshotPager::pageBytes);
+        const auto meta = page.value("page").toObject();
+        CHECK(meta.value("snapshot").toString() == snapshot);
+        CHECK(meta.value("offset").toInt() == expectedOffset);
+        CHECK(page.contains("revision") == (expectedOffset == 0));
+        for (const auto& item : page.value("aircraft").toArray()) allAircraft.append(item);
+        for (const auto& item : page.value("positions").toArray()) allPositions.append(item);
+        if (meta.value("nextOffset").isNull()) break;
+        expectedOffset = meta.value("nextOffset").toInt();
+        page = pager.respond("/v1/inmarsat/map-status", {{"snapshot", snapshot}, {"offset", QString::number(expectedOffset)}}, {}, now);
+    }
+    CHECK(reads == 1);
+    CHECK(allAircraft == aircraft); CHECK(allPositions == positions);
+    CHECK(pager.respond("/v1/aircraft/map-status", {{"snapshot", snapshot}}, {}, now).value("status").toInt() == 409);
+    CHECK(pager.respond("/v1/inmarsat/map-status", {{"snapshot", snapshot}, {"offset", "-1"}}, {}, now).value("status").toInt() == 400);
+    CHECK(pager.respond("/v1/inmarsat/map-status", {{"snapshot", snapshot}}, {}, now + std::chrono::seconds(30)).value("status").toInt() == 409);
+    CHECK(reads == 1);
+}
+
+TEST_CASE("Control pages reject oversized records and cannot cross named sessions", "[control][paging]") {
+    ControlSnapshotPager pager;
+    const auto now = ControlSnapshotPager::Clock::now();
+    QJsonArray rows;
+    for (int i = 0; i < 80; ++i) rows.append(QJsonObject{{"id", i}});
+    auto produce = [&] { return QJsonObject{{"ok", true}, {"tracks", rows}}; };
+    const auto first = pager.respond("/v1/inmarsat/sessions", {{"sessionId", "a"}, {"view", "map"}}, produce(), now);
+    const auto id = first.value("page").toObject().value("snapshot").toString();
+    REQUIRE_FALSE(id.isEmpty());
+    CHECK(pager.respond("/v1/inmarsat/sessions", {{"sessionId", "b"}, {"view", "map"}, {"snapshot", id}}, {}, now).value("status").toInt() == 409);
+    rows = QJsonArray{QJsonObject{{"large", QString(300000, 'X')}}};
+    CHECK(pager.respond("/v1/aircraft/status", {}, produce(), now).value("status").toInt() == 413);
+    rows = QJsonArray{QJsonObject{{"small", "one"}}};
+    const auto small = pager.respond("/v1/aircraft/status", {}, produce(), now);
+    CHECK_FALSE(small.contains("page"));
+    CHECK(small.value("tracks").toArray() == rows);
+    pager.clear();
+    CHECK(pager.respond("/v1/inmarsat/sessions", {{"sessionId", "a"}, {"view", "map"}, {"snapshot", id}}, {}, now).value("status").toInt() == 409);
+}
 
 namespace {
 bool until(const std::function<bool()>& ready) {
@@ -25,6 +91,179 @@ QByteArray exchange(SdrTownControlServer& server, const QByteArray& request) {
     response += socket.readAll();
     return response;
 }
+QByteArray getRequest(const QByteArray& path) {
+    return "GET " + path + " HTTP/1.1\r\nAuthorization: Bearer fixture\r\n\r\n";
+}
+QJsonObject responseBody(const QByteArray& response) {
+    const auto separator = response.indexOf("\r\n\r\n");
+    REQUIRE(separator >= 0);
+    QJsonParseError error;
+    const auto document = QJsonDocument::fromJson(response.mid(separator + 4), &error);
+    REQUIRE(error.error == QJsonParseError::NoError);
+    REQUIRE(document.isObject());
+    return document.object();
+}
+QJsonArray largeTracks() {
+    QJsonArray tracks;
+    for (int i = 0; i < 400; ++i) tracks.append(QJsonObject{{"id", i}, {"label", QString(700, 'X')}});
+    return tracks;
+}
+}
+
+TEST_CASE("Control named aircraft HTTP pages preserve metadata scope and one observation", "[control][paging]") {
+    SdrTownControlServer server;
+    SdrTownControlServer::Config cfg;
+    cfg.port = 0; cfg.token = "fixture";
+    REQUIRE(server.start(cfg));
+    const auto tracks = largeTracks();
+    int reads = 0;
+    server.setRequestHandler([&](const auto& method, const auto& path, const auto& body) {
+        ++reads;
+        CHECK(method == "GET"); CHECK(path == "/v1/aircraft/sessions");
+        CHECK(body.value("sessionId").toString() == "air-a");
+        return QJsonObject{{"ok", true}, {"sessionId", "air-a"}, {"revision", reads}, {"tracks", tracks}};
+    });
+    const QByteArray route = "/v1/aircraft/sessions?sessionId=air-a&view=map";
+    QByteArray next = route;
+    QJsonArray reconstructed;
+    QString snapshot;
+    int offset = 0;
+    for (int pages = 0; pages < 20; ++pages) {
+        const auto wire = exchange(server, getRequest(next));
+        REQUIRE(wire.startsWith("HTTP/1.1 200"));
+        const auto body = responseBody(wire);
+        REQUIRE(QJsonDocument(body).toJson(QJsonDocument::Compact).size() <= ControlSnapshotPager::pageBytes);
+        REQUIRE(body.value("tracks").toArray().size() <= 64);
+        CHECK(body.contains("revision") == (offset == 0));
+        CHECK(body.contains("sessionId") == (offset == 0));
+        const auto page = body.value("page").toObject();
+        REQUIRE(page.value("total").toInt() == 400);
+        CHECK(page.value("offset").toInt() == offset);
+        if (snapshot.isEmpty()) snapshot = page.value("snapshot").toString();
+        REQUIRE_FALSE(snapshot.isEmpty());
+        CHECK(page.value("snapshot").toString() == snapshot);
+        for (const auto& row : body.value("tracks").toArray()) reconstructed.append(row);
+        if (page.value("nextOffset").isNull()) break;
+        const int following = page.value("nextOffset").toInt();
+        REQUIRE(following > offset);
+        offset = following;
+        next = route + "&snapshot=" + snapshot.toUtf8() + "&offset=" + QByteArray::number(offset);
+    }
+    CHECK(reconstructed == tracks);
+    CHECK(reads == 1);
+    for (const auto scope : {QByteArray("sessionId=air-b&view=map"), QByteArray("sessionId=air-a&view=status")}) {
+        const auto wire = exchange(server, getRequest("/v1/aircraft/sessions?" + scope + "&snapshot=" + snapshot.toUtf8()));
+        CHECK(wire.startsWith("HTTP/1.1 409"));
+    }
+    const auto unauthorized = exchange(server, "GET " + next + " HTTP/1.1\r\n\r\n");
+    CHECK(unauthorized.startsWith("HTTP/1.1 401"));
+    CHECK(reads == 1);
+}
+
+TEST_CASE("Control initial message selection and cached page offset are separate", "[control][paging]") {
+    SdrTownControlServer server;
+    SdrTownControlServer::Config cfg;
+    cfg.port = 0; cfg.token = "fixture";
+    REQUIRE(server.start(cfg));
+    int reads = 0;
+    server.setRequestHandler([&](const auto&, const auto& path, const auto& body) {
+        ++reads;
+        CHECK(path == "/v1/inmarsat/messages");
+        CHECK(body.value("offset").toString() == "7");
+        CHECK(body.value("limit").toString() == "100");
+        QJsonArray rows;
+        for (int i = 7; i < 107; ++i) rows.append(QJsonObject{{"id", i}});
+        return QJsonObject{{"ok", true}, {"messages", rows}, {"sourceOffset", 7}};
+    });
+    const auto first = responseBody(exchange(server, getRequest("/v1/inmarsat/messages?offset=7&limit=100")));
+    CHECK(first.value("messages").toArray().first().toObject().value("id").toInt() == 7);
+    const auto page = first.value("page").toObject();
+    CHECK(page.value("offset").toInt() == 0);
+    REQUIRE(page.value("nextOffset").toInt() == 64);
+    const auto second = responseBody(exchange(server, getRequest("/v1/inmarsat/messages?snapshot="
+        + page.value("snapshot").toString().toUtf8() + "&offset=64")));
+    CHECK(second.value("messages").toArray().first().toObject().value("id").toInt() == 71);
+    CHECK(second.value("messages").toArray().size() == 36);
+    CHECK_FALSE(second.contains("sourceOffset"));
+    CHECK(reads == 1);
+    for (const auto offset : {"-1", "1.5", "100001", "bogus", "%2B1", "99999999999999999999"}) {
+        CHECK(exchange(server, getRequest(QByteArray("/v1/inmarsat/messages?offset=") + offset)).startsWith("HTTP/1.1 400"));
+    }
+    CHECK(reads == 1);
+}
+
+TEST_CASE("Control oversized successful POST acknowledges one mutation without replay", "[control][paging]") {
+    SdrTownControlServer server;
+    SdrTownControlServer::Config cfg;
+    cfg.port = 0; cfg.token = "fixture";
+    REQUIRE(server.start(cfg));
+    int mutations = 0;
+    const auto tracks = largeTracks();
+    server.setRequestHandler([&](const auto& method, const auto&, const auto&) {
+        CHECK(method == "POST");
+        ++mutations;
+        QCoreApplication::processEvents();
+        return QJsonObject{{"ok", true}, {"tracks", tracks}};
+    });
+    for (const auto path : {"/v1/aircraft/map-control", "/v1/aircraft/sessions"}) {
+        const QByteArray request = QByteArray("POST ") + path
+            + " HTTP/1.1\r\nAuthorization: Bearer fixture\r\nContent-Length: 2\r\n\r\n{}";
+        const int before = mutations;
+        const auto wire = exchange(server, request + request);
+        REQUIRE(wire.startsWith("HTTP/1.1 200"));
+        CHECK(wire.size() < 1024);
+        const auto body = responseBody(wire);
+        CHECK(body.value("ok").toBool()); CHECK(body.value("stateOmitted").toBool());
+        CHECK_FALSE(body.contains("tracks"));
+        CHECK(mutations == before + 1);
+    }
+    server.setRequestHandler([](const auto&, const auto&, const auto&) {
+        return QJsonObject{{"ok", false}, {"status", 409}, {"error", "rejected"}};
+    });
+    CHECK(exchange(server, "POST /v1/aircraft/map-control HTTP/1.1\r\nAuthorization: Bearer fixture\r\n\r\n").startsWith("HTTP/1.1 409"));
+}
+
+TEST_CASE("Control paged handler can destroy its server or restart without publishing stale work", "[control][paging]") {
+    auto server = std::make_unique<SdrTownControlServer>();
+    SdrTownControlServer::Config cfg;
+    cfg.port = 0; cfg.token = "fixture";
+    REQUIRE(server->start(cfg));
+    const QJsonObject document{{"ok", true}, {"tracks", largeTracks()}};
+    bool throws = false;
+    bool restart = false;
+    SECTION("destroy and return") {}
+    SECTION("destroy and throw") { throws = true; }
+    SECTION("stop restart and return") { restart = true; }
+    SECTION("stop restart and throw") { restart = true; throws = true; }
+    int calls = 0;
+    server->setRequestHandler([&](const auto&, const auto&, const auto&) -> QJsonObject {
+        ++calls;
+        const auto result = document;
+        if (restart) {
+            server->stop();
+            REQUIRE(server->start(cfg));
+        } else server.reset();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        if (throws) throw std::runtime_error("cancelled");
+        return result;
+    });
+    CHECK(exchange(*server, getRequest("/v1/aircraft/map-status")).isEmpty());
+    CHECK(calls == 1);
+    if (restart) {
+        server->setRequestHandler([](const auto&, const auto&, const auto&) { return QJsonObject{{"ok", true}, {"fresh", true}}; });
+        const auto body = responseBody(exchange(*server, getRequest("/v1/aircraft/map-status")));
+        CHECK(body.value("fresh").toBool());
+        CHECK_FALSE(body.contains("page"));
+    } else CHECK_FALSE(server);
+}
+
+TEST_CASE("Control snapshot scope cannot collide through embedded separators", "[control][paging]") {
+    ControlSnapshotPager pager;
+    const QJsonObject scope{{"sessionId", "a\nb"}, {"view", "c"}};
+    const auto first = pager.respond("/route", scope, {{"ok", true}, {"tracks", largeTracks()}});
+    const auto id = first.value("page").toObject().value("snapshot");
+    CHECK(pager.respond("/route", {{"sessionId", "a"}, {"view", "b\nc"}, {"snapshot", id}}).value("status").toInt() == 409);
+    CHECK(pager.respond("/route", {{"sessionId", 1}, {"snapshot", id}}).value("status").toInt() == 400);
 }
 
 TEST_CASE("Control stop closes already accepted clients", "[control]") {

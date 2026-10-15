@@ -3,7 +3,13 @@ SDR TOWN — SOURCE OF TRUTH (SoT)
 ================================================================================
 VERSION: 1.0.0
 PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
-CURRENT VERSION IN TREE: 0.2.138 (paired FUBAR 1.1.50, experimental)
+CURRENT VERSION IN TREE: 0.2.139 (paired FUBAR 1.1.51, experimental)
+CURRENT REPAIR: DEC-0223 / T-0141 implements the DEC-0222 audit repairs.
+                Qualification/publication is tracked in BUILD_NOTES and
+                AUDIT_20261015_REPAIR_VALIDATION.md. No new P25 DSP or follow
+                timer changes. Historical pending-release entries below do not
+                override the latest delivery evidence; physical acceptance and
+                measured line/branch coverage remain explicitly separate.
 CURRENT DELIVERY: DEC-0221 explicit web Listen radio selection and protected
                   automatic Windows pairing qualified and published as Latest:
                   Town0.2.138 / FUBAR1.1.50. Actions38129155696/38132807766

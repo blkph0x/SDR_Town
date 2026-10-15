@@ -5,18 +5,16 @@
 #include <QStandardPaths>
 #include <QDir>
 #include <QSettings>
-#include <QMessageBox>
 #include <QProcess>
-#include <QFile>
+#include <QTemporaryFile>
+#include <QTimer>
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QNetworkRequest>
-#include <QDesktopServices>
 #include <QUrl>
-#include <QEventLoop>
 #include <QStringList>
 #include <QVector>
 #include <QRegularExpression>
@@ -26,7 +24,20 @@
 static const QString MANIFEST_URL = "https://github.com/Blkph0x/SDR_Town/releases/latest/download/update.json";
 static const int CHECK_INTERVAL_HOURS = 24;
 
-static std::atomic_bool gUpdateDownloadInFlight{false};
+// DEC-0223 / F09: caps apply before application buffer growth, including when
+// Content-Length is absent or dishonest. Installer size remains signed input.
+static constexpr qint64 kMaxManifestBytes = 64 * 1024;
+static constexpr qint64 kMaxSignatureBytes = 4 * 1024;
+static constexpr qint64 kTransferChunkBytes = 64 * 1024;
+static constexpr qint64 kMaxInstallerBytes = 512ll * 1024 * 1024;
+static constexpr int kMaxRedirects = 5;
+static std::atomic_bool gUpdateInFlight{false};
+
+static bool isHttpsUrl(const QUrl& url)
+{
+    return url.isValid() && url.scheme().compare("https", Qt::CaseInsensitive) == 0 &&
+           !url.host().isEmpty() && url.userInfo().isEmpty();
+}
 
 static QVector<int> parseVersionParts(QString v)
 {
@@ -95,6 +106,72 @@ UpdateManager::UpdateManager(QObject* parent)
     QSettings s;
     m_skippedVersion = s.value("updates/skippedVersion").toString();
     m_lastCheck = s.value("updates/lastCheck").toDateTime();
+
+    m_deadline = new QTimer(this);
+    m_deadline->setSingleShot(true);
+    connect(m_deadline, &QTimer::timeout, this, [this] { fail("Update transfer deadline exceeded."); });
+    m_idleTimer = new QTimer(this);
+    m_idleTimer->setSingleShot(true);
+    connect(m_idleTimer, &QTimer::timeout, this, [this] { fail("Update transfer stalled."); });
+    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, &UpdateManager::cancelUpdate);
+}
+
+UpdateManager::~UpdateManager()
+{
+    resetOperation();
+}
+
+bool UpdateManager::isBusy() const
+{
+    return m_ownsFlight;
+}
+
+bool UpdateManager::beginOperation()
+{
+    bool expected = false;
+    if (!gUpdateInFlight.compare_exchange_strong(expected, true)) return false;
+    m_ownsFlight = true;
+    return true;
+}
+
+void UpdateManager::retireReply()
+{
+    auto* reply = m_reply.data();
+    m_reply.clear();
+    if (!reply) return;
+    // abort() can emit finished synchronously. Retire all callbacks first.
+    reply->disconnect(this);
+    reply->setParent(nullptr); // Owner deletion in a signal must still defer reply deletion.
+    if (!reply->isFinished()) reply->abort();
+    reply->deleteLater();
+}
+
+void UpdateManager::resetOperation()
+{
+    m_deadline->stop();
+    m_idleTimer->stop();
+    retireReply();
+    m_tempFile.reset(); // Auto-removes every partial/unlaunched installer.
+    m_hash.reset();
+    m_payload.clear();
+    m_manifest.clear();
+    m_received = 0;
+    m_stage = Stage::Idle;
+    if (m_ownsFlight) {
+        m_ownsFlight = false;
+        gUpdateInFlight.store(false);
+    }
+}
+
+void UpdateManager::cancelUpdate()
+{
+    resetOperation();
+}
+
+void UpdateManager::fail(const QString& message)
+{
+    resetOperation();
+    emit error(message); // No member access after a potentially destructive slot.
 }
 
 void UpdateManager::checkForUpdates(bool manual)
@@ -106,52 +183,193 @@ void UpdateManager::checkForUpdates(bool manual)
         return; // rate limit (startup / background)
     }
 
+    if (!beginOperation()) return; // Repeated checks cannot overlap any stage.
     m_lastCheckWasManual = manual;
+    m_verifiedInfo = {};
     fetchManifest();
 }
 
 void UpdateManager::fetchManifest()
 {
-    QNetworkRequest req(MANIFEST_URL);
-    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-    QNetworkReply* reply = m_nam->get(req);
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        onManifestReply(reply);
-        reply->deleteLater();
-    });
+    startTransfer(Stage::Manifest, QUrl(MANIFEST_URL), kMaxManifestBytes);
 }
 
-void UpdateManager::onManifestReply(QNetworkReply* reply)
+void UpdateManager::startTransfer(Stage stage, const QUrl& url, qint64 limit)
 {
+    m_stage = stage;
+    m_limit = limit;
+    m_received = 0;
+    m_redirects = 0;
+    m_payload.clear();
+    m_stageDeadlineMs = stage == Stage::Installer ? m_installerDeadlineMs : m_metadataDeadlineMs;
+    m_elapsed.start();
+    m_idleElapsed.start();
+    m_deadline->start(m_stageDeadlineMs);
+    m_idleTimer->start(m_idleTimeoutMs);
+    startRequest(url);
+}
+
+void UpdateManager::startRequest(const QUrl& url)
+{
+    QNetworkRequest request(url);
+    // Manual redirects keep response bodies and redirect loops inside the same
+    // stage budget. As before, HTTPS CDN redirects are allowed; signatures/hash
+    // authenticate bytes independently of the redirect destination.
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+    request.setTransferTimeout(m_idleTimeoutMs);
+    request.setRawHeader("Accept-Encoding", "identity");
+    auto* reply = m_nam->get(request);
+    m_reply = reply;
+    reply->setReadBufferSize(std::min(kTransferChunkBytes, m_limit));
+    connect(reply, &QNetworkReply::metaDataChanged, this, [this, reply] { checkReply(reply); });
+    connect(reply, &QIODevice::readyRead, this, [this, reply] { consumeReply(reply); });
+    connect(reply, &QNetworkReply::finished, this, [this, reply] { finishReply(reply); });
+    if (m_stage == Stage::Installer) {
+        connect(reply, &QNetworkReply::downloadProgress, this, [this, reply](qint64, qint64) {
+            if (m_reply != reply) return;
+            emit downloadProgress(m_received, m_downloadInfo.size);
+        });
+    }
+}
+
+bool UpdateManager::checkReply(QNetworkReply* reply)
+{
+    if (m_reply != reply) return false;
+    // Check monotonic time here too: queued readyRead/finished must not beat a
+    // due timer after the owner thread was busy.
+    if (m_elapsed.elapsed() >= m_stageDeadlineMs || m_idleElapsed.elapsed() >= m_idleTimeoutMs) {
+        fail("Update transfer deadline exceeded.");
+        return false;
+    }
     if (reply->error() != QNetworkReply::NoError) {
-        emit error("Failed to check for updates: " + reply->errorString());
+        fail("Update transfer failed: " + reply->errorString());
+        return false;
+    }
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (status >= 300 && status < 400) {
+        const QUrl target = reply->attribute(QNetworkRequest::RedirectionTargetAttribute).toUrl();
+        const QUrl next = reply->url().resolved(target);
+        if (target.isEmpty() || !isHttpsUrl(next) || ++m_redirects > kMaxRedirects) {
+            fail("Unsafe or excessive update redirects.");
+            return false;
+        }
+        retireReply();
+        startRequest(next); // Does not restart either stage timer.
+        return false;
+    }
+    if (status != 0 && status != 200) {
+        fail("Unexpected update HTTP response.");
+        return false;
+    }
+    const auto lengthHeader = reply->header(QNetworkRequest::ContentLengthHeader);
+    if (lengthHeader.isValid()) {
+        bool ok = false;
+        const qint64 length = lengthHeader.toLongLong(&ok);
+        if (!ok || length < 0 || length > m_limit ||
+            (m_stage == Stage::Installer && length != m_limit)) {
+            fail("Update response length does not match its permitted size.");
+            return false;
+        }
+    }
+    return true;
+}
+
+bool UpdateManager::consumeReply(QNetworkReply* reply)
+{
+    if (!checkReply(reply)) return false;
+    while (reply->bytesAvailable() > 0) {
+        if (m_elapsed.elapsed() >= m_stageDeadlineMs) {
+            fail("Update transfer deadline exceeded.");
+            return false;
+        }
+        const qint64 remaining = m_limit - m_received;
+        if (reply->bytesAvailable() > remaining) {
+            fail("Update response exceeds its permitted size.");
+            return false;
+        }
+        const auto chunk = reply->read(std::min(kTransferChunkBytes, remaining));
+        if (chunk.isEmpty()) {
+            fail("Could not read update response.");
+            return false;
+        }
+        if (m_stage == Stage::Installer) {
+            if (m_tempFile->write(chunk) != chunk.size()) {
+                fail("Update file write was incomplete.");
+                return false;
+            }
+            m_hash->addData(chunk);
+        } else {
+            m_payload.append(chunk);
+        }
+        m_received += chunk.size();
+        m_idleElapsed.restart();
+        m_idleTimer->start(m_idleTimeoutMs);
+    }
+    return true;
+}
+
+void UpdateManager::finishReply(QNetworkReply* reply)
+{
+    if (!consumeReply(reply)) return;
+    if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() != 200) {
+        fail("Update transfer did not return HTTP 200.");
         return;
     }
-
-    QByteArray data = reply->readAll();
-
-    const QString sigUrl = updateManifestSignatureUrlFor(MANIFEST_URL);
-    QByteArray signature;
-    if (!sigUrl.isEmpty()) {
-        QNetworkRequest sigReq(sigUrl);
-        sigReq.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-        QNetworkReply* sigReply = m_nam->get(sigReq);
-        QEventLoop loop;
-        connect(sigReply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-        loop.exec();
-        if (sigReply->error() == QNetworkReply::NoError) {
-            signature = sigReply->readAll().trimmed();
-        }
-        sigReply->deleteLater();
+    retireReply();
+    m_deadline->stop();
+    m_idleTimer->stop();
+    if (m_stage == Stage::Manifest) {
+        m_manifest = std::move(m_payload);
+        startTransfer(Stage::Signature, QUrl(updateManifestSignatureUrlFor(MANIFEST_URL)), kMaxSignatureBytes);
+        return;
     }
-    if (!verifyUpdateManifestSignature(data, signature)) {
-        emit error("Update manifest signature verification failed.");
+    if (m_stage == Stage::Signature) {
+        acceptManifest();
+        return;
+    }
+    if (m_received != m_downloadInfo.size) {
+        fail("Downloaded update size does not match the signed manifest.");
+        return;
+    }
+    if (QString::fromLatin1(m_hash->result().toHex()).compare(m_downloadInfo.sha256, Qt::CaseInsensitive) != 0) {
+        fail("SHA256 verification failed. Update aborted for safety.");
+        return;
+    }
+    if (!m_tempFile->flush()) {
+        fail("Could not flush update file.");
+        return;
+    }
+    const QString path = m_tempFile->fileName() + ".exe";
+    m_tempFile->close();
+    if (!m_tempFile->rename(path)) {
+        fail("Could not finalize verified update file.");
+        return;
+    }
+    m_stage = Stage::ReadyToApply;
+    QPointer<UpdateManager> guard(this);
+    emit downloadFinished(path, true);
+    // A slot may cancel, destroy us, or start another operation after cancel.
+    if (!guard || m_stage != Stage::ReadyToApply || !m_tempFile || m_tempFile->fileName() != path) return;
+    const bool launched = launchInstaller(path, false);
+    if (!guard || m_stage != Stage::ReadyToApply || !m_tempFile || m_tempFile->fileName() != path) return;
+    if (!launched) {
+        fail("Could not launch the verified update installer.");
+        return;
+    }
+    m_tempFile->setAutoRemove(false);
+    resetOperation();
+}
+
+void UpdateManager::acceptManifest()
+{
+    if (!verifyUpdateManifestSignature(m_manifest, m_payload)) {
+        fail("Update manifest signature verification failed.");
         return;
     }
 
     UpdateInfo info;
-    if (!parseUpdateJson(data, info)) {
-        emit error("Update manifest was invalid or empty.");
+    if (!parseUpdateJson(m_manifest, info)) {
+        fail("Update manifest was invalid or empty.");
         return;
     }
 
@@ -160,8 +378,11 @@ void UpdateManager::onManifestReply(QNetworkReply* reply)
     s.setValue("updates/lastCheck", m_lastCheck);
 
     QString current = QCoreApplication::applicationVersion();
+    const bool manual = m_lastCheckWasManual;
+    m_verifiedInfo = info;
+    resetOperation();
     if (compareVersions(info.version, current) <= 0 || info.version == m_skippedVersion) {
-        if (m_lastCheckWasManual) {
+        if (manual) {
             emit upToDate(); // "You are up to date" ONLY for explicit Help -> Check
         }
         return;
@@ -191,11 +412,9 @@ bool UpdateManager::parseUpdateJson(const QByteArray& data, UpdateInfo& out)
     QUrl installer(out.installerUrl);
     QUrl notes(out.notesUrl);
     const bool notesOk = out.notesUrl.isEmpty() || isAllowedNotesUrl(notes);
-    constexpr qint64 kMaxInstallerBytes = 512ll * 1024ll * 1024ll;
     const bool sizeOk = out.size > 0 && out.size <= kMaxInstallerBytes;
     return !out.version.isEmpty() &&
-           installer.isValid() &&
-           installer.scheme().compare("https", Qt::CaseInsensitive) == 0 &&
+           isHttpsUrl(installer) &&
            isAllowedUpdateUrl(installer) &&
            notesOk &&
            sizeOk &&
@@ -204,126 +423,46 @@ bool UpdateManager::parseUpdateJson(const QByteArray& data, UpdateInfo& out)
 
 void UpdateManager::downloadAndApplyUpdate(const UpdateInfo& info)
 {
-    if (info.installerUrl.isEmpty()) {
-        emit error("No installer URL in update manifest.");
+    // Only the exact size/hash/URL authenticated by this manager may download.
+    if (m_verifiedInfo.version.isEmpty() || info.version != m_verifiedInfo.version ||
+        info.installerUrl != m_verifiedInfo.installerUrl || info.size != m_verifiedInfo.size ||
+        info.sha256 != m_verifiedInfo.sha256) {
+        emit error("Update details do not match a verified signed manifest.");
         return;
     }
-
-    doDownload(info.installerUrl, info.sha256);
+    doDownload(info);
 }
 
-void UpdateManager::doDownload(const QString& url, const QString& expectedSha256)
+void UpdateManager::doDownload(const UpdateInfo& info)
 {
-    bool expected = false;
-    if (!gUpdateDownloadInFlight.compare_exchange_strong(expected, true)) {
-        emit error("An update download is already in progress.");
+    if (!beginOperation()) {
+        emit error("An update operation is already in progress.");
         return;
     }
-
-    auto clearInFlight = [] { gUpdateDownloadInFlight.store(false); };
-
-    QUrl updateUrl(url);
-    if (!updateUrl.isValid() || updateUrl.scheme().compare("https", Qt::CaseInsensitive) != 0) {
-        emit error("Update download URL must be valid HTTPS.");
-        clearInFlight();
+    const QUrl updateUrl(info.installerUrl);
+    if (!isHttpsUrl(updateUrl) || !isAllowedUpdateUrl(updateUrl) || !isValidSha256Hex(info.sha256) ||
+        info.size <= 0 || info.size > kMaxInstallerBytes) {
+        fail("Update manifest has an invalid installer URL, size or SHA256 digest.");
         return;
     }
-    if (!isAllowedUpdateUrl(updateUrl)) {
-        emit error("Update download URL is not a trusted SDR_Town GitHub release asset.");
-        clearInFlight();
+    m_downloadInfo = info;
+    m_tempFile = std::make_unique<QTemporaryFile>(m_updatesDir + "/SDR_Town-Update-XXXXXX.part");
+    if (!m_tempFile->open()) {
+        fail("Could not create update temporary file.");
         return;
     }
-    if (!isValidSha256Hex(expectedSha256)) {
-        emit error("Update manifest has an invalid SHA256 digest.");
-        clearInFlight();
-        return;
-    }
-
-    QNetworkRequest req(updateUrl);
-    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-    QNetworkReply* reply = m_nam->get(req);
-
-    connect(reply, &QNetworkReply::downloadProgress, this, &UpdateManager::downloadProgress);
-
-    connect(reply, &QNetworkReply::finished, this, [this, reply, expectedSha256, url]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            emit error("Download failed: " + reply->errorString());
-            reply->deleteLater();
-            gUpdateDownloadInFlight.store(false);
-            return;
-        }
-
-        QByteArray payload = reply->readAll();
-        constexpr qint64 kMaxDownloadedInstallerBytes = 512ll * 1024ll * 1024ll;
-        if (payload.size() <= 0 || static_cast<qint64>(payload.size()) > kMaxDownloadedInstallerBytes) {
-            emit error("Downloaded update payload size is invalid or too large.");
-            reply->deleteLater();
-            gUpdateDownloadInFlight.store(false);
-            return;
-        }
-
-        // Stable downloaded name (versioned preferred; we derive a safe one from URL if possible)
-        QString base = "SDR_Town-Update-Setup";
-        QUrl u(url);
-        QString pathPart = u.path();
-        if (pathPart.contains("SDR_Town-") && pathPart.endsWith(".exe", Qt::CaseInsensitive)) {
-            int idx = pathPart.lastIndexOf('/');
-            if (idx >= 0) base = pathPart.mid(idx + 1);
-            if (base.endsWith(".exe", Qt::CaseInsensitive)) base.chop(4);
-        }
-        QString fileName = m_updatesDir + "/" + base + ".exe";
-        if (QFile::exists(fileName)) QFile::remove(fileName);
-        QFile f(fileName);
-        if (!f.open(QIODevice::WriteOnly)) {
-            emit error("Could not write update file.");
-            reply->deleteLater();
-            gUpdateDownloadInFlight.store(false);
-            return;
-        }
-        const qint64 written = f.write(payload);
-        f.close();
-        reply->deleteLater();
-        if (written != payload.size()) {
-            emit error("Update file write was incomplete.");
-            QFile::remove(fileName);
-            gUpdateDownloadInFlight.store(false);
-            return;
-        }
-
-        bool ok = verifySha256(fileName, expectedSha256);
-        emit downloadFinished(fileName, ok);
-
-        if (ok) {
-            launchInstaller(fileName, /*silent*/ false);
-        } else {
-            emit error("SHA256 verification failed. Update aborted for safety.");
-            QFile::remove(fileName);
-        }
-        gUpdateDownloadInFlight.store(false);
-    });
+    m_hash = std::make_unique<QCryptographicHash>(QCryptographicHash::Sha256);
+    startTransfer(Stage::Installer, updateUrl, info.size);
 }
 
-bool UpdateManager::verifySha256(const QString& path, const QString& expectedHex)
-{
-    QFile f(path);
-    if (!f.open(QIODevice::ReadOnly)) return false;
-
-    QCryptographicHash hash(QCryptographicHash::Sha256);
-    if (!hash.addData(&f)) return false;
-    QString actual = hash.result().toHex();
-    return actual.compare(expectedHex, Qt::CaseInsensitive) == 0;
-}
-
-void UpdateManager::launchInstaller(const QString& path, bool silent)
+bool UpdateManager::launchInstaller(const QString& path, bool silent)
 {
     // Best practice (exact per release pipeline spec): launch the NSIS installer (GUI or /S silent),
     // then immediately quit our process so the installer can overwrite SDR_Town.exe + DLLs etc.
     // NSIS /S is silent install (no prompts, auto "next" through pages, preserves APPDATA\SDR_Town settings).
     QStringList args;
     if (silent) args << "/S";
-    if (!QProcess::startDetached(path, args)) {
-        emit error("Could not launch the verified update installer.");
-        return;
-    }
+    if (!QProcess::startDetached(path, args)) return false;
     QCoreApplication::quit();
+    return true;
 }

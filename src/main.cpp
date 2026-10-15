@@ -2,6 +2,10 @@
 #include <QJsonObject>
 #include <QString>
 #include <QScopeGuard>
+#include <QSettings>
+#include <QStandardPaths>
+#include <QTemporaryDir>
+#include <memory>
 
 #include <spdlog/spdlog.h>
 
@@ -101,6 +105,15 @@ int main(int argc, char *argv[])
         app.setApplicationVersion(SDR_TOWN_VERSION);
         // DEC-0176: background widget automation must honor the parsed dry-run too.
         app.setProperty("sdrtown.guiDryRun", guiConfig.dryRun);
+        std::unique_ptr<QTemporaryDir> dryRunSettings;
+        if (guiConfig.dryRun) {
+            // Actual-widget QA must not overwrite the operator's saved sessions.
+            dryRunSettings = std::make_unique<QTemporaryDir>();
+            if (!dryRunSettings->isValid()) throw std::runtime_error("Could not isolate GUI test settings");
+            QSettings::setDefaultFormat(QSettings::IniFormat);
+            QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dryRunSettings->path());
+            QStandardPaths::setTestModeEnabled(true);
+        }
         remoteDiagnosticsConfigureFromProcess(argc, argv, &app, "gui");
 
         setupLogging();

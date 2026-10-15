@@ -169,6 +169,9 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* /*pInpu
 
             size_t rpos = rb.readPos.load(std::memory_order_relaxed);
             size_t wpos = rb.writePos.load(std::memory_order_acquire);
+#ifdef SDR_TOWN_AUDIO_TEST_HOOKS
+            audioEngineTestHooks::callbackCursorLoaded();
+#endif
             if (rb.capacity == 0) {
                 fillPlaybackSilence(out, toRead, channels);
                 return;
@@ -200,6 +203,11 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* /*pInpu
             fillPlaybackSilence(out, frameCount, channels);
         }
     }
+}
+
+void AudioEngine::dataCallback(ma_device* device, void* output, const void* input, ma_uint32 frames)
+{
+    data_callback(device, output, input, frames);
 }
 
 AudioEngine::AudioEngine()
@@ -505,6 +513,12 @@ size_t AudioEngine::trimQueuedAudio(size_t maxQueuedSamples,
         if (!output.valid.load(std::memory_order_acquire)) return;
         auto& rb = output.ring;
         if (rb.capacity == 0) return;
+        // DEC-0223 / audit F03: audioMutex excludes producers, not callbacks.
+        // Own the consumer cursor before reading it or freeing sample storage.
+        RingBuffer::ConsumerLease control(rb, true);
+#ifdef SDR_TOWN_AUDIO_TEST_HOOKS
+        audioEngineTestHooks::trimLeaseAcquired();
+#endif
         size_t w = rb.writePos.load(std::memory_order_relaxed);
         size_t r = rb.readPos.load(std::memory_order_acquire);
         size_t queued = ringDistance(w, r, rb.capacity);

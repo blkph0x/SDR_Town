@@ -1,5 +1,38 @@
 # Decisions
 
+## DEC-0223 - Bounded audit repairs and actual-workflow qualification (2026-10-15)
+
+The user authorizes implementation after DEC-0222. Use its reproduced failures
+as regression fixtures before fixing them. Scope: session-safe post-driver
+publication/teardown, activation results, audio consumer exclusion, malformed FM
+input, truthful start outcomes, aircraft freshness, bounded companion transport
+and admission, updater resources and scoped diagnostics consent. Test real
+application/UI routes as well as pure functions. Preserve the existing accepted
+P25 DSP and fail-closed slot/security gates; changes to shared boundaries need
+explicit exact-patch review plus current replay/normal regression gates.
+
+No UI test may silently enable transmitter output, rotor movement, bias power
+or remote content sharing. Use isolated settings/loopback/synthetic fixtures
+where appropriate and record which controls are physical-hardware dependent.
+Do not describe every feature as verified merely because a dialog opens. Track
+implemented repairs, test outcomes and remaining qualification separately.
+Release only tested builds through Actions with provenance and public-asset
+verification; retain experimental labeling where field acceptance is outstanding.
+
+Resource policies for this pass: control pages are at most192KiB, cached for
+30s with32 entries/8MiB serialized content per server. Maps use immutable
+snapshots bound to route/session/view. Session catalogs omit track arrays;
+successful large map mutations return bounded acknowledgments, not false errors.
+Message source selection accepts strict numeric or query-string integers,
+limit1..500 (store capacity), offset0..100000. DLL bounds are16KiB headers and
+256KiB bodies; incomplete data never masquerades as a successful truncated JSON.
+FUBAR caps queued tickets at32 and public queue names at8; server-issued bearer
+tickets bound resource use, not human identity. Audio fault counters are numeric
+and sampled off DSP; no new IQ/voice/identifier telemetry is introduced.
+Updater budgets are64KiB manifest,4KiB signature, signed installer size<=512MiB,
+64KiB streaming chunks,30s idle,60s metadata and30min installer deadlines,
+at most5 HTTPS redirects. These are resource policies, never RF timing changes.
+
 ## DEC-0222 - Source-led reliability and operator-workflow audit (2026-10-15)
 
 The user requests an audit and plan, not an implementation rewrite. Freeze

@@ -7,6 +7,7 @@
 #include "InmarsatEngine.h"
 #include "AircraftMapWidget.h"
 #include "WorkflowSessionId.h"
+#include "ControlMessageRange.h"
 #include <QMenu>
 
 #include <QDateTime>
@@ -195,7 +196,12 @@ QJsonObject SatcomHubWidget::controlReceiverSessions(const QString& workflow, co
         QJsonArray sessions;
         for (int i = 0; i < tabs_->count(); ++i) {
             if (workflow == "aircraft") {
-                if (auto* aircraft = qobject_cast<AircraftMapWidget*>(tabs_->widget(i))) sessions.append(aircraft->webStatus());
+                if (auto* aircraft = qobject_cast<AircraftMapWidget*>(tabs_->widget(i))) {
+                    auto summary = aircraft->webStatus();
+                    // Catalogs select sessions; their tracks have a separate paged view.
+                    summary.remove("tracks");
+                    sessions.append(summary);
+                }
             } else if (auto* sat = qobject_cast<SatcomScannerWidget*>(tabs_->widget(i))) {
                 const auto snap = sat->engine().snapshot();
                 sessions.append(QJsonObject{{"sessionId",QString::fromStdString(sat->engine().sessionId())},
@@ -307,8 +313,12 @@ QJsonObject SatcomHubWidget::controlInmarsatSessions(const QString& method, cons
             if (!widget || QString::fromStdString(widget->engine().sessionId()) != id) continue;
             if (body.value("view").toString() == "map")
                 return QJsonDocument::fromJson(QByteArray::fromStdString(widget->webMapReport().dump())).object();
-            if (body.value("view").toString() == "messages")
-                return QJsonDocument::fromJson(QByteArray::fromStdString(widget->engine().messageStore().recentJson(100,0).dump())).object();
+            if (body.value("view").toString() == "messages") {
+                int limit = 100, offset = 0;
+                if (!controlMessageRange(body, limit, offset))
+                    return {{"ok",false},{"status",400},{"error","Invalid message range: limit 1..500 and offset 0..100000 required"}};
+                return QJsonDocument::fromJson(QByteArray::fromStdString(widget->engine().messageStore().recentJson(limit,offset).dump())).object();
+            }
             return {{"ok",false},{"status",400},{"error","Unknown session view"}};
         }
         return {{"ok",false},{"status",404},{"error","Session is not open"}};

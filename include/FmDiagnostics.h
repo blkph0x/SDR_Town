@@ -20,6 +20,16 @@ inline Snapshot snapshot(bool wfm) {
     for (size_t i=0; i<Count; ++i) result[i]=counters[wfm][i].load(std::memory_order_relaxed);
     return result;
 }
+// DEC-0223: separate bounded fault counters preserve the existing health-log
+// schema. No sample data, dynamic history, per-sample logging or allocation.
+enum Fault : size_t { InvalidInputBlocks, InvalidConfigurationBlocks, NonFiniteOutputBlocks, FaultCount };
+using FaultSnapshot = std::array<uint64_t, FaultCount>;
+inline std::array<std::array<std::atomic<uint64_t>, FaultCount>, 2> faults{};
+inline FaultSnapshot faultSnapshot(bool wfm) {
+    FaultSnapshot result{};
+    for (size_t i = 0; i < FaultCount; ++i) result[i] = faults[wfm][i].load(std::memory_order_relaxed);
+    return result;
+}
 inline void maximum(std::atomic<uint64_t>& value, uint64_t candidate) {
     auto old=value.load(std::memory_order_relaxed);
     while (old<candidate && !value.compare_exchange_weak(old,candidate,std::memory_order_relaxed)) {}
