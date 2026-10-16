@@ -1,5 +1,20 @@
 # Decisions
 
+## DEC-0224 - Human-use audit before beginner UI implementation (2026-10-16)
+
+The user requests a full UI audit for intuitive human use. Audit the released
+Town0.2.139 and FUBAR1.1.52, with native no-RF isolated settings and an actual
+loopback companion/DLL pair. Examine first reception, task selection, device
+identity, start/stop, audio routing, empty/error states, keyboard access and
+mobile layout. Source-audit areas unsafe to launch against operator settings,
+including native FUBAR automatic recording/pruning; label these limits explicitly.
+
+Produce AUDIT_20261016_HUMAN_UI.md and refine T-0140, preserving expert access
+and the accepted DSP/ownership/security behavior. Recommendations are not new
+implementation. No version bump or binary release for this documentation-only
+pass; push the report/trackers and check source CI. Do not reclassify previously
+fixed infrastructure defects as current UI defects without new evidence.
+
 ## DEC-0223 - Bounded audit repairs and actual-workflow qualification (2026-10-15)
 
 The user authorizes implementation after DEC-0222. Use its reproduced failures

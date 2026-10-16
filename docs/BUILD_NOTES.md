@@ -1,5 +1,24 @@
 # Build notes
 
+## 2026-10-16 - DEC-0224 released UI walkthrough
+
+No application rebuild or DSP changes. Used downloaded Town0.2.139 and
+FUBAR1.1.52 plus packaged SdrTownControl.dll with `scripts/test_town_pair.py
+--duration 900`. All functional assertions pass; both normal exits0. Native
+Town no-RF isolated walkthrough also exits, with no test processes remaining.
+Evidence: D:/SDRTown-UIAudit-20261016/paired/result.json and sanitized logs.
+SDRplay vendor service unavailable; no physical SDRplay acceptance claimed.
+
+Actual native1100x800 and web390x844/1280x800 reviewed. All eight web task pages,
+control/expiry/release, invalid frequency, idle listening, keyboard arrow tabs,
+and server-disconnected controls inspected. Map tiles render; no live aircraft
+or sound intelligibility claimed. Native FUBAR window source-only due auto-start/
+prune behavior; its web-only CLI process ran in the pair. High-DPI/screen reader/
+novice and physical tests remain separate.
+AUDIT_20261016_HUMAN_UI.md records observed and source-backed findings. Publication
+is documentation-only, with no new binary release/version; source CI is checked
+for the exact pushed commits and reported in the task completion.
+
 ## 2026-10-15 - Companion evidence-source CI intermittent timeout
 
 FUBAR docs12b46488ab4ce9249dbcaaedcbe8c8919c8f45f7 Actions38735858277 attempt1

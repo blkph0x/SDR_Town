@@ -1,5 +1,14 @@
 # Task list (canonical)
 
+T-0144 | done | Human-use UI audit of current paired applications |
+DEC-0224: inspect the public Town0.2.139/FUBAR1.1.52 native/web views and source
+from beginner task journeys. Record observed usability failures, source-backed
+risks, positive controls and qualification limits. Feed prioritized acceptance
+criteria into T-0140; do not change working DSP or claim a UI redesign is shipped.
+Report: AUDIT_20261016_HUMAN_UI.md, HUI-01..20, with companion-specific audit.
+Actual 900s no-RF pair passes and exits normally; native/desktop/mobile web
+inspection distinguishes observed UI from source-only and hardware gaps.
+
 T-0143 | planned | Diagnose intermittent native workflow-open latency |
 ISS-0117: preserve hosted failure38735858277 attempt1 and unchanged passing
 attempt2. Measure dispatch/construction/I/O/reply stages and cold-start/contention
@@ -73,6 +82,10 @@ consistently. Preserve expert layouts; progressive advanced controls, named
 session selectors and mobile task navigation. No second DSP/ownership engine.
 Novice, keyboard, DPI, busy/unplugged/offline and native/web parity gates required.
 DEC-0222 section6 defines the proposed views, not implemented functionality.
+DEC-0224 / AUDIT_20261016_HUMAN_UI.md adds current evidence and concrete gates:
+first fix inert commands, output levels, dismissal/capture state and visible
+device ownership; then task-first panels/mobile forms, accessible field names,
+replay metadata, map details and current help. HUI proposals are not implemented.
 
 T-0134 | done | Repair companion primary radio selection (ISS-0109) |
 Reproduce stale Listen identity rejection, expose explicit stable-key selection

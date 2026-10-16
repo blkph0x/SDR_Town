@@ -1,5 +1,36 @@
 # Issues (canonical)
 
+## ISS-0118 - Enabled no-op commands and misleading operator state (2026-10-16, OPEN)
+
+DEC-0224 HUI-01/02/03/08/09/11: native menu Mute All Outputs, Test Tone (All),
+Start Smart Scan and Preferences have empty handlers. Output dialog sliders
+start at80% rather than actual per-device levels; Apply/Test can overwrite them.
+Assignment UI assumes index0 is Main Listen/P25, receiver selection does not
+scope the main controls, and automatic capture stop does not update persistent
+button/recording state. Source-confirmed; hardware effects were not exercised.
+T-0140 must repair truthful actions/state before cosmetic redesign, with scoped
+multi-receiver, capture-failure and output-reopen regression tests.
+
+## ISS-0119 - Rotator Escape bypasses dismissal cleanup (2026-10-16, OPEN)
+
+AntennaControlWindow.cpp:136 places stop/meter cleanup only in closeEvent.
+Qt6.7.3/6.11.1 reject/done installs CloseEventEater, bypassing that subclass
+handler on Escape. Shared controller remains alive. Source-confirmed, not a
+physical movement test. HUI-14 requires idempotent cleanup for all dismissal
+paths and a mock-controller Escape/window-close/shutdown gate; no real motion.
+
+## ISS-0120 - Beginner task layout and recovery gaps (2026-10-16, OPEN)
+
+DEC-0224 report HUI-04..07/10/12/13/15..19 and companion F01..08 are the
+evidence/acceptance ledger. Observed: specialty views below retained Listen
+controls, advanced fields before mobile Tune, ambiguous native accessible names.
+Source: replay retains prior-file center/target, decoding/start semantics and
+map details need clearer validity, Inmarsat start blocks and discards a cause.
+Native FUBAR auto-start/restart after Stop and synchronous polling are reviewed
+but not exercised against the operator profile. Preserve shared controllers,
+P25, permissions and privacy; T-0140 implements bounded improvements. T-0142
+retains safe native-preview/hardware/novice qualification, not assumed passes.
+
 DEC-0223 repair evidence: AUDIT_20261015_REPAIR_VALIDATION.md and BUILD_NOTES.
 DEC-0223 repairs below are published in Town0.2.139/FUBAR1.1.52. Public CI,
 downloaded artifacts and paired checks pass; physical qualification remains

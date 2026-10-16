@@ -1,11 +1,12 @@
 # SDR Town tracking desk
 
-Current review: [system audit and operator-workflow plan](AUDIT_20261015_SYSTEM_AND_UX.md)
-against Town a0d4e21 / FUBAR308a653. Fresh builds,26 registered suites, native/web
-inspection and isolated negative probes distinguish confirmed faults from test
-gaps and UI proposals. Production/P25 code unchanged; T-0132/0133 remain first.
-Current paired public releases are Town0.2.138/FUBAR1.1.50; signed installer,
-portable/DLL and paired public verification are in BUILD_NOTES.
+Current UI review: [human usability audit](AUDIT_20261016_HUMAN_UI.md) of released
+Town0.2.139/FUBAR1.1.52. Native and desktop/mobile web observations, source-backed
+operator-state defects and ordered acceptance gates feed T-0140. No application
+or P25 behavior changed by this audit. The [system audit](AUDIT_20261015_SYSTEM_AND_UX.md)
+is historical evidence; its bounded repairs were delivered under DEC-0223.
+Current public package verification is in [repair validation](AUDIT_20261015_REPAIR_VALIDATION.md)
+and BUILD_NOTES. New UI findings are not claims those prior repairs failed.
 The [previous reconciliation](AUDIT_20261011_IMPLEMENTATION_REPORTS.md) remains
 historical evidence, not a reason to repeat completed release requirements.
 Historical [package hardening](PACKAGE_HARDENING_20261003.md) records the former

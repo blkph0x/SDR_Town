@@ -1,5 +1,15 @@
 # Development log
 
+## 2026-10-16 - DEC-0224 human-use UI audit
+
+Audited released Town0.2.139/FUBAR1.1.52 with actual native and desktop/mobile
+web journeys plus source review. Recorded HUI-01..20, companion F01..08 and
+ISS-0118..0120. Prioritize truthful mute/start/stop/settings and dismissal safety,
+then task-focused layouts and accessible recovery. T-0144 audit complete;
+T-0140 implementation remains planned. Accepted DSP, P25, settings and releases
+are unchanged. Actual 900s no-RF paired assertions/shutdown pass. No hardware
+motion, real RX, privacy changes or native FUBAR operator-profile launch.
+
 ## 2026-10-15 - DEC-0223 paired public delivery
 
 Published and verified Latest Town0.2.139 / FUBAR1.1.52 through Actions. Downloaded

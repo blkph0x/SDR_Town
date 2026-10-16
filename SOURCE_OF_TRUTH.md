@@ -36,7 +36,13 @@ HISTORICAL DELIVERY: DEC-0219 lifts the prior P25 publication hold after the use
                   38110086896, FUBAR Actions 38114493140. Remaining native-only
                   controls/audio buses are explicit; older entries below are
                   historical evidence, not current release status.
-CURRENT AUDIT: DEC-0222 source-led system/UI review at a0d4e21 / FUBAR308a653.
+CURRENT UI AUDIT: DEC-0224 / AUDIT_20261016_HUMAN_UI.md inspects the released
+               Town0.2.139/FUBAR1.1.52 native/web operator workflows. T-0144
+               audit complete; T-0140 implementation remains planned. Actual
+               900s no-RF pair and shutdown pass. HUI-01..20 distinguish dead
+               actions/state defects from layout/accessibility proposals and
+               physical qualification. No production/P25 changes in this pass.
+PREVIOUS AUDIT: DEC-0222 source-led system/UI review at a0d4e21 / FUBAR308a653.
                Fresh builds,22 Town +4 FUBAR suites, actual GUI profiles and
                paired DLL/web gates pass. Negative probes reproduce RX faults,
                FM non-finite persistence and large-map transport failure;
