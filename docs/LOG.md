@@ -1,5 +1,20 @@
 # Development log
 
+## 2026-10-20 - Receive-only Satcom ranges (DEC-0225 / T-0145)
+
+Added sourced legacy downlink and mixed-service UHF search choices, saved
+custom ranges and separated Range Scan/Passes/Activity tabs. Polling no longer
+discards pending edits; Start applies a validated draft and Pass Arm uses its
+catalogue downlink. Spectrum reflects current RF span and hides the idle
+default axis. Shared web/GUI validation and applied scan diagnostics added.
+
+Local build,24 CTest suites, actual no-RF GUI/API session tests and compact/
+desktop visual review pass. Fixture confirmation failure is retained/closed
+as ISS-0121; existing possible same-carrier reacquisition is ISS-0122, not
+silently claimed solved. No P25/Inmarsat/shared DSP/ownership changes, TX,
+MUOS/DAMA decoding or RF qualification. Version0.2.140 release publication
+must pass the existing Actions/public artifact/signature gates.
+
 ## 2026-10-16 - DEC-0224 human-use UI audit
 
 Audited released Town0.2.139/FUBAR1.1.52 with actual native and desktop/mobile

@@ -101,7 +101,20 @@ def main():
                         assert operation('configure',name,config={'deviceStableKey':'missing-'+name,
                             'lowHz':freq,'highHz':freq,'monitorAudio':False})['ok']
                     initial = named_states()
-                    for config in ({'lowHz':-1},{'stepHz':0},{'lowHz':'bad'},{'mode':'invalid'}, {'unknown':True}):
+                    # DEC-0225: actual GUI server accepts the new UHF draft settings,
+                    # leaves the other radio session unchanged and never starts RX.
+                    assert operation('configure', config={'lowHz':240e6,'highHz':322e6,
+                        'stepHz':25000,'dwellMs':125})['ok']
+                    ranges = named_states()
+                    assert ranges['qa_a']['config']['lowHz'] == 240e6
+                    assert ranges['qa_a']['config']['highHz'] == 322e6
+                    assert ranges['qa_a']['config']['dwellMs'] == 125
+                    assert ranges['qa_a']['state'] == initial['qa_a']['state']
+                    assert ranges['qa_b']['config'] == initial['qa_b']['config']
+                    assert operation('configure', config={key:initial['qa_a']['config'][key]
+                        for key in ('lowHz','highHz','stepHz','dwellMs')})['ok']
+                    for config in ({'lowHz':-1},{'stepHz':0},{'lowHz':'bad'},{'mode':'invalid'}, {'unknown':True},
+                                   {'dwellMs':20.5},{'dwellMs':19},{'dwellMs':5001},{'highHz':100000}):
                         assert operation('configure',config=config)['status']==400
                     assert named_states()['qa_a']['config']==initial['qa_a']['config']
                     assert operation('start')['status']==409

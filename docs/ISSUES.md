@@ -1,5 +1,25 @@
 # Issues (canonical)
 
+## ISS-0121 - Range deletion fixture did not press confirmation (2026-10-20, CLOSED)
+
+DEC-0225 first full CTest run: 23/24 suites pass, SatcomRangeGui deletion
+assertion fails (11 == 10). The fixture called QMessageBox::done(Yes), without
+clicking the standard Yes button used by the static question helper. Drive
+button(No)/button(Yes)->click instead. Focused rerun: all four cases/68 assertions
+pass, including cancel-preserves and confirm-removes. No production deletion
+workaround was added. Evidence: build/satcom-range-ctest.log and the final run.
+
+## ISS-0122 - Sequential scanner acquisition needs separate RF qualification (2026-10-20, OPEN)
+
+The existing worker examines its captured FFT within configured range bounds
+and holds until Skip/Stop. Skip advances currentHz by one step after a detected
+peak; that carrier may remain inside the next captured window and be selected
+again. This is source-confirmed behavior, not a new live measurement. DEC-0225
+does not rewrite acquisition or add silence/voice classification. The guide
+explicitly records sequential coverage, hold behavior and possible reacquisition.
+Next work: deterministic two-carrier/tune-ack fixtures, then measured exclusion/
+resumption rules that do not disturb the separate satellite-pass receive path.
+
 ## ISS-0118 - Enabled no-op commands and misleading operator state (2026-10-16, OPEN)
 
 DEC-0224 HUI-01/02/03/08/09/11: native menu Mute All Outputs, Test Tone (All),
@@ -20,6 +40,10 @@ physical movement test. HUI-14 requires idempotent cleanup for all dismissal
 paths and a mock-controller Escape/window-close/shutdown gate; no real motion.
 
 ## ISS-0120 - Beginner task layout and recovery gaps (2026-10-16, OPEN)
+
+DEC-0225 addresses the Satcom range portion with task tabs, saved ranges,
+draft-safe polling and sticky transport/status. Other HUI findings remain open;
+this is not completion of the whole UI audit.
 
 DEC-0224 report HUI-04..07/10/12/13/15..19 and companion F01..08 are the
 evidence/acceptance ledger. Observed: specialty views below retained Listen

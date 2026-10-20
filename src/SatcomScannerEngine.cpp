@@ -84,6 +84,17 @@ SatcomScannerConfig SatcomScannerConfig::defaults() {
     config.sstvSaveDir = (QStandardPaths::writableLocation(QStandardPaths::PicturesLocation) +
                           "/SDR Town/SSTV/Satellites").toStdString();
     config.presets = {
+        // DEC-0225: receive search aids, not channel allocations or digital decoders.
+        {"Legacy UHF SATCOM downlinks 243-270", 243e6, 270e6, 25e3, 25e3, "NFM", -90.0,
+         "Legacy downlink search; analog NFM starting settings. Digital/encrypted voice is not decoded.",
+         "https://www.ntia.gov/sites/default/files/publications/coast_guard_stategic_spectrum_plan_nov2007_0.pdf"},
+        {"UHF search 240-270", 240e6, 270e6, 25e3, 25e3, "NFM", -90.0,
+         "Broad receive search including the legacy downlink region; mixed services.", ""},
+        {"UHF search 240-322", 240e6, 322e6, 25e3, 25e3, "NFM", -90.0,
+         "Mixed services and link directions; not a downlink-only band.", ""},
+        {"UHF search 335.4-399.9", 335.4e6, 399.9e6, 25e3, 25e3, "NFM", -90.0,
+         "Mixed fixed, mobile and satellite services; not a downlink-only band.",
+         "https://www.ntia.gov/files/ntia/publications/compendium/0335.40-0399.90_01MAY15.pdf"},
         {"UHF Scan 420-430", 420e6, 430e6, 12.5e3, 250e3, "NFM", -90.0},
         {"NOAA APT 137.100", 137.05e6, 137.15e6, 5e3, 40e3, "APT", -95.0},
         {"NOAA APT 137.9125", 137.85e6, 137.95e6, 5e3, 40e3, "APT", -95.0},
@@ -91,6 +102,30 @@ SatcomScannerConfig SatcomScannerConfig::defaults() {
         {"Amateur VHF 145-146", 145e6, 146e6, 5e3, 15e3, "NFM", -92.0},
     };
     return config;
+}
+
+std::string SatcomScannerConfig::scanValidationError() const {
+    // DEC-0225: reject before hardware acquisition; never silently swap limits.
+    if (!std::isfinite(lowHz) || !std::isfinite(highHz) ||
+        lowHz < 100e3 || highHz > 6000e6 || lowHz > highHz)
+        return "Range must be within 0.1-6000 MHz, with From no higher than To";
+    if (!std::isfinite(stepHz) || stepHz < 100.0 || stepHz > 10e6)
+        return "Tune step must be between 0.1 and 10000 kHz";
+    if (!std::isfinite(bandwidthHz) || bandwidthHz < 1000.0 || bandwidthHz > 2e6)
+        return "Channel bandwidth must be between 1 and 2000 kHz";
+    if (dwellMs < 20 || dwellMs > 5000) return "Dwell must be between 20 and 5000 ms";
+    if (!std::isfinite(squelchDb) || squelchDb < -140.0 || squelchDb > 0.0)
+        return "Squelch must be between -140 and 0 dB";
+    if (mode != "NFM" && mode != "WFM" && mode != "AM" && mode != "USB" &&
+        mode != "LSB" && mode != "APT" && mode != "APRS")
+        return "Unsupported Satcom receive mode";
+    return {};
+}
+
+uint64_t SatcomScannerConfig::scanPositionCount() const {
+    if (!scanValidationError().empty()) return 0;
+    // Inclusive start; a high endpoint off the step grid is not an extra tune.
+    return static_cast<uint64_t>(std::floor((highHz - lowHz) / stepHz + 1e-9)) + 1;
 }
 
 nlohmann::json SatcomScannerConfig::toJson() const {
@@ -117,7 +152,8 @@ nlohmann::json SatcomScannerConfig::toJson() const {
         entries.push_back({
             {"name", preset.name}, {"lowHz", preset.lowHz}, {"highHz", preset.highHz},
             {"stepHz", preset.stepHz}, {"bandwidthHz", preset.bandwidthHz},
-            {"mode", preset.mode}, {"squelchDb", preset.squelchDb}
+            {"mode", preset.mode}, {"squelchDb", preset.squelchDb},
+            {"note", preset.note}, {"reference", preset.reference}, {"dwellMs", preset.dwellMs}
         });
     }
     json["presets"] = entries;
@@ -155,7 +191,16 @@ SatcomScannerConfig SatcomScannerConfig::fromJson(const nlohmann::json& json) {
             preset.bandwidthHz = entry.value("bandwidthHz", 250e3);
             preset.mode = entry.value("mode", "NFM");
             preset.squelchDb = entry.value("squelchDb", -90.0);
+            preset.note = entry.value("note", "");
+            preset.reference = entry.value("reference", "");
+            preset.dwellMs = entry.value("dwellMs", 80);
             config.presets.push_back(preset);
+        }
+        // Saved custom presets win by name; upgrades add only missing choices.
+        for (const auto& preset : defaults().presets) {
+            const bool exists = std::any_of(config.presets.begin(), config.presets.end(),
+                [&](const SatcomPreset& saved) { return saved.name == preset.name; });
+            if (!exists) config.presets.push_back(preset);
         }
     }
     return config;
@@ -733,6 +778,12 @@ void SatcomScannerEngine::shutdownAudioOutput() {
 }
 
 bool SatcomScannerEngine::start(bool force) {
+    if (const auto error = config().scanValidationError(); !error.empty()) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        lastStatus_ = error;
+        spdlog::warn("Satcom session={} scan rejected: {}", sessionId_, error);
+        return false;
+    }
     std::string deviceError;
     const size_t selectedDevice = resolveDeviceIndex(&deviceError);
     if (selectedDevice == static_cast<size_t>(-1)) {
@@ -788,8 +839,11 @@ bool SatcomScannerEngine::start(bool force) {
     iqDiscontinuities_.store(0, std::memory_order_release);
     resetChronologicalInput();
     pushLog(SatcomLog::EventType::Start, firstFrequency, "scan start live hardware");
-    spdlog::info("Satcom session={} device={} key={} lease={} started frequencyHz={}",
-        sessionId_, selectedDevice, config().deviceStableKey, leaseToken().id, firstFrequency);
+    const auto scan = config();
+    spdlog::info("Satcom session={} device={} key={} lease={} started frequencyHz={} lowHz={} highHz={} stepHz={} dwellMs={} mode={} bandwidthHz={} nominalPositions={}",
+        sessionId_, selectedDevice, scan.deviceStableKey, leaseToken().id, firstFrequency,
+        scan.lowHz, scan.highHz, scan.stepHz, scan.dwellMs, scan.mode, scan.bandwidthHz,
+        scan.scanPositionCount());
     worker_ = std::thread(&SatcomScannerEngine::workerLoop, this);
     notifyUpdate();
     return true;
@@ -929,6 +983,7 @@ bool SatcomScannerEngine::applyPreset(const std::string& name) {
             config_.bandwidthHz = preset.bandwidthHz;
             config_.mode = preset.mode;
             config_.squelchDb = preset.squelchDb;
+            config_.dwellMs = preset.dwellMs;
             config_.save(sessionId_);
             return true;
         }

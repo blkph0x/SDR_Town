@@ -1,5 +1,29 @@
 # Decisions
 
+## DEC-0225 - Receive-only Satcom range selection (2026-10-20)
+
+User requests intuitive selection of 240-322 MHz and 335.4-399.9 MHz.
+These are search ranges, not a claim of downlink-only spectrum, guaranteed
+traffic, channel raster, or a MUOS decoder. USCG's published Strategic Spectrum
+Plan table5 lists legacy downlinks243-270MHz/uplinks291-318MHz and5/25kHz
+channels: https://www.ntia.gov/sites/default/files/publications/coast_guard_stategic_spectrum_plan_nov2007_0.pdf
+NTIA lists multiple services in335.4-399.9:
+https://www.ntia.gov/files/ntia/publications/compendium/0335.40-0399.90_01MAY15.pdf
+Navy distinguishes legacy and WCDMA payloads:
+https://www.navy.mil/Press-Office/News-Stories/Article/2249912/navy-satellite-system-receives-green-light-for-expanded-operational-use/
+
+Add sourced legacy243-270 and broad240-270/240-322/335.4-399.9 choices;
+custom ranges remain editable. NFM25kHz is an editable analog listening
+starting point, not automatic identification of the transmissions. Existing
+saved ranges/presets must survive migration. Range Scan and Satellite Passes
+use separate tabs on the same engine; Stop/audio/status stay visible. Preserve
+drafts during polling, require explicit Start, and block invalid range/step/
+dwell before acquiring hardware. Bounds follow existing UI0.1-6000MHz and
+1-2000kHz channelBW; step0.1-10000kHz/dwell20-5000ms are operator policy,
+not protocol constants. Show nominal tune positions and dwell-only lower bound;
+retunes/holds add time, and the display shows current captured RF, not the
+entire swept range simultaneously. No TX, encryption, P25 or shared DSP edits.
+
 ## DEC-0224 - Human-use audit before beginner UI implementation (2026-10-16)
 
 The user requests a full UI audit for intuitive human use. Audit the released

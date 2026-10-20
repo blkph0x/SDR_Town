@@ -268,8 +268,11 @@ QJsonObject SatcomHubWidget::controlReceiverSessions(const QString& workflow, co
                 const auto edit = body.value("config").toObject();
                 for (auto it = edit.begin(); it != edit.end(); ++it) {
                     const auto key = it.key();
-                    if (QStringList{"lowHz","highHz","stepHz","bandwidthHz","squelchDb"}.contains(key)) {
+                    if (QStringList{"lowHz","highHz","stepHz","bandwidthHz","squelchDb","dwellMs"}.contains(key)) {
                         if (!it.value().isDouble() || !std::isfinite(it.value().toDouble())) throw std::invalid_argument("Finite number required");
+                        if (key == "dwellMs" && (it.value().toDouble() != std::floor(it.value().toDouble()) ||
+                            it.value().toDouble() < 20 || it.value().toDouble() > 5000))
+                            return {{"ok",false},{"status",400},{"error","Dwell must be a whole number between 20 and 5000 ms"}};
                     } else if (key == "mode" || key == "deviceStableKey") {
                         if (!it.value().isString()) throw std::invalid_argument("String required");
                     } else if (key == "monitorAudio") {
@@ -279,11 +282,8 @@ QJsonObject SatcomHubWidget::controlReceiverSessions(const QString& workflow, co
                 auto json = engine.config().toJson();
                 json.update(nlohmann::json::parse(QJsonDocument(edit).toJson(QJsonDocument::Compact).toStdString()));
                 const auto config = SatcomScannerConfig::fromJson(json);
-                if (config.lowHz < 100000 || config.highHz > 6e9 || config.highHz < config.lowHz ||
-                    config.stepHz < 1 || config.stepHz > 99990 || config.bandwidthHz < 1000 || config.bandwidthHz > 2e6 ||
-                    config.squelchDb < -150 || config.squelchDb > 0 ||
-                    !QStringList{"NFM","WFM","AM","USB","LSB","APT","APRS"}.contains(QString::fromStdString(config.mode)))
-                    throw std::invalid_argument("Invalid scan range or mode");
+                if (const auto error = config.scanValidationError(); !error.empty())
+                    return {{"ok",false},{"status",400},{"error",QString::fromStdString(error)}};
                 engine.setConfig(config); sat->reloadSessionControls();
             } else return {{"ok",false},{"status",400},{"error","Unknown session action"}};
         }

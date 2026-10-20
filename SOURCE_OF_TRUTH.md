@@ -3,14 +3,20 @@ SDR TOWN — SOURCE OF TRUTH (SoT)
 ================================================================================
 VERSION: 1.0.0
 PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
-CURRENT VERSION IN TREE: 0.2.139 (paired FUBAR 1.1.52, experimental)
-CURRENT REPAIR: DEC-0223 / T-0141 implements the DEC-0222 audit repairs.
+CURRENT VERSION IN TREE: 0.2.140 (compatible with FUBAR 1.1.52, experimental)
+CURRENT WORK: DEC-0225 / T-0145 receive-only Satcom range selection, saved
+              presets, separated pass/activity tabs, polling-safe drafts,
+              shared validation and truthful scan timing/capture display.
+              No P25/DSP/ownership changes. See SATCOM_RANGE_SCAN.md and
+              RELEASE_0.2.140.md. BUILD_NOTES records local gates; exact
+              source/release Actions and public assets establish delivery.
+PREVIOUS REPAIR: DEC-0223 / T-0141 implements the DEC-0222 audit repairs.
                 Qualification/publication is tracked in BUILD_NOTES and
                 AUDIT_20261015_REPAIR_VALIDATION.md. No new P25 DSP or follow
                 timer changes. Historical pending-release entries below do not
                 override the latest delivery evidence; physical acceptance and
                 measured line/branch coverage remain explicitly separate.
-CURRENT DELIVERY: DEC-0223 receive/audio/map/control/updater repairs published
+PREVIOUS VERIFIED DELIVERY: DEC-0223 receive/audio/map/control/updater repairs published
                   as Latest Town0.2.139 / FUBAR1.1.52. Town source/release CI
                   38724105582/38724109668 and companion1.1.52 main/tag/release
                   38733568815/38733569167/38733569638 PASS. Downloaded package
@@ -22,7 +28,7 @@ CURRENT DELIVERY: DEC-0223 receive/audio/map/control/updater repairs published
                   in T-0139/0140/0142. ISS-0117/T-0143 retains one intermittent
                   hosted session-open timeout; an unchanged retry is not a fix.
                   See BUILD_NOTES and repair validation.
-PREVIOUS DELIVERY: DEC-0221 explicit web Listen radio selection and protected
+OLDER DELIVERY: DEC-0221 explicit web Listen radio selection and protected
                   automatic Windows pairing qualified and published as Latest:
                   Town0.2.138 / FUBAR1.1.50. Actions38129155696/38132807766
                   PASS, public hashes/provenance and paired GUI/DLL tests PASS;

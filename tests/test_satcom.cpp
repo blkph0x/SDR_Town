@@ -27,6 +27,65 @@
 #include <thread>
 #include <vector>
 
+TEST_CASE("Satcom receive ranges validate and count the inclusive tune grid", "[satcom][range]") {
+    auto config = SatcomScannerConfig::defaults();
+    CHECK(config.lowHz == 243e6);
+    CHECK(config.highHz == 270e6);
+    CHECK(config.scanValidationError().empty());
+    CHECK(config.scanPositionCount() == 1081);
+    config.lowHz = 240e6; config.highHz = 322e6;
+    CHECK(config.scanPositionCount() == 3281);
+    config.highHz = config.lowHz;
+    CHECK(config.scanPositionCount() == 1);
+    config.highHz += 1.5 * config.stepHz;
+    CHECK(config.scanPositionCount() == 2);
+    SECTION("Invalid ranges fail closed") {
+        config.lowHz = 400e6;
+        CHECK_FALSE(config.scanValidationError().empty());
+        CHECK(config.scanPositionCount() == 0);
+    }
+    SECTION("Nonfinite inputs fail closed") {
+        for (auto* field : {&config.lowHz, &config.highHz, &config.stepHz, &config.bandwidthHz, &config.squelchDb}) {
+            const double previous = *field;
+            *field = std::numeric_limits<double>::quiet_NaN();
+            CHECK_FALSE(config.scanValidationError().empty());
+            *field = std::numeric_limits<double>::infinity();
+            CHECK_FALSE(config.scanValidationError().empty());
+            *field = previous;
+        }
+    }
+    SECTION("Tune step dwell and mode are bounded") {
+        config.stepHz = 0; CHECK_FALSE(config.scanValidationError().empty());
+        config.stepHz = 100; CHECK(config.scanValidationError().empty());
+        config.dwellMs = 19; CHECK_FALSE(config.scanValidationError().empty());
+        config.dwellMs = 5001; CHECK_FALSE(config.scanValidationError().empty());
+        config.dwellMs = 80; config.mode = "MUOS"; CHECK_FALSE(config.scanValidationError().empty());
+    }
+}
+
+TEST_CASE("Satcom saved ranges migrate without changing operator settings", "[satcom][range]") {
+    const nlohmann::json legacy = {
+        {"lowHz", 420e6}, {"highHz", 430e6}, {"stepHz", 12.5e3}, {"bandwidthHz", 15e3},
+        {"presets", {{{"name", "My range"}, {"lowHz", 250e6}, {"highHz", 251e6},
+            {"stepHz", 5e3}, {"bandwidthHz", 15e3}, {"mode", "AM"}}}}
+    };
+    const auto config = SatcomScannerConfig::fromJson(legacy);
+    CHECK(config.lowHz == 420e6);
+    CHECK(config.highHz == 430e6);
+    CHECK(config.bandwidthHz == 15e3);
+    CHECK(config.presets.front().name == "My range");
+    CHECK(config.presets.front().mode == "AM");
+    CHECK(config.presets.front().dwellMs == 80);
+    CHECK(config.presets.size() == SatcomScannerConfig::defaults().presets.size() + 1);
+    const auto roundtrip = SatcomScannerConfig::fromJson(config.toJson());
+    CHECK(roundtrip.toJson() == config.toJson());
+    auto edited = roundtrip;
+    edited.presets[1].lowHz = 245e6;
+    edited.presets[1].dwellMs = 123;
+    CHECK(SatcomScannerConfig::fromJson(edited.toJson()).presets[1].lowHz == 245e6);
+    CHECK(SatcomScannerConfig::fromJson(edited.toJson()).presets[1].dwellMs == 123);
+}
+
 TEST_CASE("Inmarsat host preflight is explicit and fails closed", "[inmarsat][handover]") {
     auto& host = SatcomHostServices::instance();
     host.clear();

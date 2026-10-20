@@ -16,11 +16,14 @@ class QPlainTextEdit;
 class QLineEdit;
 class QTableWidget;
 class QCheckBox;
+class QSpinBox;
+class QTabWidget;
 class QShowEvent;
 class QHideEvent;
 class ObserverMapWidget;
 struct SatPassPlannerSnapshot;
 class SatcomScannerEngine;
+struct SatcomScannerConfig;
 
 class SatcomScannerWidget : public QWidget {
     Q_OBJECT
@@ -47,7 +50,7 @@ private slots:
     void onSkip();
     void onRecord();
     void refreshUi();
-    void applyFieldsToConfig();
+    bool applyFieldsToConfig();
     void onSelectSats();
     void onRefreshTle();
     void onApplyObserver();
@@ -55,6 +58,9 @@ private slots:
     void onDisarm();
     void onArmSstv();
     void onEditSstvProfile();
+    void saveRange();
+    void deleteRange();
+    void draftChanged();
 
 private:
     std::unique_ptr<SatcomScannerEngine> ownedEngine_;
@@ -63,7 +69,19 @@ private:
     void refreshPassesTable();
     void updateAutoCapture(const SatPassPlannerSnapshot& plan);
     void stopAutoCapture(bool keepHandledKey);
+    SatcomScannerConfig fieldsConfig() const;
+    void refreshRangeChoices();
+    void updateRangeSummary();
 
+    QTabWidget* taskTabs_ = nullptr;
+    QWidget* scanSettings_ = nullptr;
+    QSpinBox* dwellSpin_ = nullptr;
+    QLabel* rangeSummary_ = nullptr;
+    QLabel* rangeNote_ = nullptr;
+    QLabel* spectrumEmpty_ = nullptr;
+    QPushButton* saveRangeBtn_ = nullptr;
+    QPushButton* deleteRangeBtn_ = nullptr;
+    bool draftDirty_ = false;
     SpectrumWidget* spectrum_ = nullptr;
     QDoubleSpinBox* lowSpin_ = nullptr;
     QDoubleSpinBox* highSpin_ = nullptr;

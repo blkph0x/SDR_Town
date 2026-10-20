@@ -1,5 +1,19 @@
 # Code notes (tree map)
 
+## 2026-10-20 - Satcom range workflow (DEC-0225)
+
+SatcomScannerConfig owns scanValidationError/scanPositionCount for GUI, engine
+and named-session API. New presets carry informational notes/references/dwell;
+saved presets win by name during additive migration. Validation precedes radio
+acquisition. Scan-start diagnostics include applied bounds/step/dwell/mode/BW.
+
+SatcomScannerWidget separates Range Scan, Satellite Passes and Activity.
+draftDirty_ protects edits against 500ms polling; Start alone applies a valid
+draft. Save persists a preset without applying pending RF settings. Pass Arm
+uses its catalogue downlink independently. Source/transport/status remain
+outside scrolling tabs; spectrum uses snapshot center/rate, not search bounds.
+No P25, shared demodulator or device-ownership changes.
+
 DEC-0223: receive workers retain shared StreamState lifetime and use generation
 fences for IQ/counter/tune publication. Retired native reads retain handles until
 completion; physical-device quarantine prevents unsafe reopen. Audio emergency

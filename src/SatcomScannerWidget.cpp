@@ -40,6 +40,10 @@
 #include <QVBoxLayout>
 #include <QCoreApplication>
 #include <QSignalBlocker>
+#include <QTabWidget>
+#include <QToolButton>
+#include <QInputDialog>
+#include <QStyle>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -164,7 +168,7 @@ SatcomScannerWidget::SatcomScannerWidget(QWidget* parent, const QString& session
 void SatcomScannerWidget::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);
     if (refreshTimer_ && !refreshTimer_->isActive()) refreshTimer_->start(500);
-    engine_.planner().ensureTleLoaded();
+    if (taskTabs_->currentIndex() == 1) engine_.planner().ensureTleLoaded();
     refreshPassesTable();
     refreshUi();
 }
@@ -181,8 +185,11 @@ SatcomScannerWidget::~SatcomScannerWidget() {
 }
 
 void SatcomScannerWidget::reloadSessionControls() {
+    // DEC-0225: polling or a remote read must not discard an unfinished local edit.
+    if (draftDirty_) return;
     const auto config = engine_.config();
-    const QSignalBlocker a(lowSpin_), b(highSpin_), c(stepSpin_), d(bwSpin_), e(modeCombo_), f(squelchSpin_), g(monitorAudioCheck_);
+    const QSignalBlocker a(lowSpin_), b(highSpin_), c(stepSpin_), d(bwSpin_), e(modeCombo_), f(squelchSpin_), g(monitorAudioCheck_),
+        h(dwellSpin_), i(squelchSlider_), j(deviceCombo_);
     lowSpin_->setValue(config.lowHz / 1e6);
     highSpin_->setValue(config.highHz / 1e6);
     stepSpin_->setValue(config.stepHz / 1e3);
@@ -190,7 +197,10 @@ void SatcomScannerWidget::reloadSessionControls() {
     modeCombo_->setCurrentText(QString::fromStdString(config.mode));
     squelchSpin_->setValue(config.squelchDb);
     monitorAudioCheck_->setChecked(config.monitorAudio);
+    dwellSpin_->setValue(config.dwellMs);
+    squelchSlider_->setValue(static_cast<int>(config.squelchDb * 10));
     refreshWorkflowDeviceCombo(*deviceCombo_, DeviceOwnership::Owner::Satcom, QString::fromStdString(config.deviceStableKey));
+    updateRangeSummary();
 }
 
 
@@ -198,63 +208,133 @@ void SatcomScannerWidget::buildUi() {
     setObjectName("satcomRoot");
     auto* outer = new QVBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
-    auto* scroll = new QScrollArea(this);
-    scroll->setObjectName("satelliteControlsScroll");
-    scroll->setWidgetResizable(true);
-    auto* content = new QWidget;
-    scroll->setWidget(content);
-    outer->addWidget(scroll);
-    auto* root = new QVBoxLayout(content);
-
-    auto* title = new QLabel("SATCOM SCANNER");
+    auto* title = new QLabel("Satcom - Receive only");
     title->setStyleSheet("font-size: 16px; font-weight: 600;");
-    root->addWidget(title);
+    outer->addWidget(title);
+    deviceCombo_ = new QComboBox();
+    deviceCombo_->setObjectName("satcomDevice");
+    deviceCombo_->setAccessibleName("Satcom radio");
+    deviceCombo_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    deviceCombo_->setMinimumContentsLength(18);
+    deviceCombo_->setToolTip("Radio for this Satcom session. Start/Arm may take over ordinary Listen and restore it on Stop. P25 is never interrupted.");
+    auto* radioForm = new QFormLayout;
+    radioForm->addRow("Radio", deviceCombo_);
+    outer->addLayout(radioForm);
+    taskTabs_ = new QTabWidget;
+    taskTabs_->setObjectName("satcomTasks");
+    outer->addWidget(taskTabs_, 1);
+    auto* scanScroll = new QScrollArea;
+    scanScroll->setWidgetResizable(true);
+    auto* content = new QWidget;
+    scanScroll->setWidget(content);
+    taskTabs_->addTab(scanScroll, "Range Scan");
+    auto* root = new QVBoxLayout(content);
+    scanSettings_ = new QWidget;
+    auto* settings = new QVBoxLayout(scanSettings_);
+    settings->setContentsMargins(0, 0, 0, 0);
+    root->addWidget(scanSettings_);
+    auto* rangeRow = new QHBoxLayout;
+    presetCombo_ = new QComboBox;
+    presetCombo_->setObjectName("satcomRangePreset");
+    presetCombo_->setAccessibleName("Saved receive range");
+    presetCombo_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    presetCombo_->setMinimumContentsLength(22);
+    rangeRow->addWidget(presetCombo_, 1);
+    saveRangeBtn_ = new QPushButton(style()->standardIcon(QStyle::SP_DialogSaveButton), "Save range...");
+    saveRangeBtn_->setObjectName("satcomSaveRange");
+    deleteRangeBtn_ = new QPushButton(style()->standardIcon(QStyle::SP_TrashIcon), "");
+    deleteRangeBtn_->setObjectName("satcomDeleteRange");
+    deleteRangeBtn_->setAccessibleName("Remove saved range");
+    deleteRangeBtn_->setToolTip("Remove selected custom range");
+    rangeRow->addWidget(saveRangeBtn_);
+    rangeRow->addWidget(deleteRangeBtn_);
+    settings->addLayout(rangeRow);
+    rangeNote_ = new QLabel;
+    rangeNote_->setObjectName("satcomRangeNote");
+    rangeNote_->setWordWrap(true);
+    settings->addWidget(rangeNote_);
 
     auto* top = new QHBoxLayout();
     auto makeFrequency = [&](const QString& label, QDoubleSpinBox*& spin) {
         auto* box = new QFrame();
         box->setObjectName("satcomBox");
         auto* layout = new QVBoxLayout(box);
-        layout->addWidget(new QLabel(label));
+        auto* fieldLabel = new QLabel(label);
+        layout->addWidget(fieldLabel);
         spin = new QDoubleSpinBox();
         spin->setDecimals(3);
         spin->setRange(0.1, 6000.0);
         spin->setSuffix(" MHz");
+        spin->setAccessibleName(label + " frequency in MHz");
+        fieldLabel->setBuddy(spin);
         layout->addWidget(spin);
         layout->addStretch();
         top->addWidget(box);
     };
-    makeFrequency("LOW FREQUENCY", lowSpin_);
-    makeFrequency("HIGH FREQUENCY", highSpin_);
+    makeFrequency("From", lowSpin_);
+    makeFrequency("To", highSpin_);
+    lowSpin_->setObjectName("satcomRangeLow");
+    highSpin_->setObjectName("satcomRangeHigh");
+    settings->addLayout(top);
 
+    auto* advanced = new QToolButton;
+    advanced->setText("Advanced scan settings");
+    advanced->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    advanced->setArrowType(Qt::RightArrow);
+    advanced->setCheckable(true);
+    advanced->setObjectName("satcomAdvanced");
+    settings->addWidget(advanced);
     auto* options = new QFrame();
+    options->hide();
     options->setObjectName("satcomBox");
     auto* optionsLayout = new QFormLayout(options);
     bwSpin_ = new QDoubleSpinBox();
     bwSpin_->setDecimals(1);
     bwSpin_->setRange(1.0, 2000.0);
     bwSpin_->setSuffix(" kHz");
+    bwSpin_->setObjectName("satcomChannelBandwidth");
+    bwSpin_->setAccessibleName("Channel bandwidth in kHz");
     modeCombo_ = new QComboBox();
     modeCombo_->addItems({"NFM", "WFM", "AM", "USB", "LSB", "APT", "APRS"});
-    deviceCombo_ = new QComboBox();
-    deviceCombo_->setObjectName("satcomDevice");
-    deviceCombo_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-    deviceCombo_->setMinimumContentsLength(18);
-    deviceCombo_->setToolTip(
-        "Choose the SDR used by Satcom. Select a second receiver to keep the main Listen receiver "
-        "running. If you choose the active Listen receiver, START/ARM automatically takes it over "
-        "and restores it when Satcom stops. P25 is never interrupted.");
+    modeCombo_->setObjectName("satcomMode");
+    modeCombo_->setAccessibleName("Receive mode");
     stepSpin_ = new QDoubleSpinBox();
     stepSpin_->setDecimals(3);
     stepSpin_->setSuffix(" kHz");
-    presetCombo_ = new QComboBox();
-    optionsLayout->addRow("SATCOM RX DEVICE", deviceCombo_);
-    optionsLayout->addRow("BANDWIDTH", bwSpin_);
-    optionsLayout->addRow("MODE", modeCombo_);
-    optionsLayout->addRow("STEP", stepSpin_);
-    optionsLayout->addRow("PRESET", presetCombo_);
-    top->addWidget(options, 1);
-    root->addLayout(top);
+    stepSpin_->setRange(0.1, 10000);
+    stepSpin_->setObjectName("satcomTuneStep");
+    stepSpin_->setAccessibleName("Tune step in kHz");
+    stepSpin_->setToolTip("Distance between sequential tuner positions, not a guaranteed channel spacing.");
+    dwellSpin_ = new QSpinBox;
+    dwellSpin_->setRange(20, 5000);
+    dwellSpin_->setSuffix(" ms");
+    dwellSpin_->setObjectName("satcomDwell");
+    dwellSpin_->setAccessibleName("Dwell per tune in milliseconds");
+    optionsLayout->addRow("Channel bandwidth", bwSpin_);
+    optionsLayout->addRow("Receive mode", modeCombo_);
+    optionsLayout->addRow("Tune step", stepSpin_);
+    optionsLayout->addRow("Dwell per tune", dwellSpin_);
+    settings->addWidget(options);
+    connect(advanced, &QToolButton::toggled, this, [options, advanced](bool open) {
+        options->setVisible(open);
+        advanced->setArrowType(open ? Qt::DownArrow : Qt::RightArrow);
+    });
+    rangeSummary_ = new QLabel;
+    rangeSummary_->setObjectName("satcomRangeSummary");
+    rangeSummary_->setWordWrap(true);
+    root->addWidget(rangeSummary_);
+
+    auto* scroll = new QScrollArea;
+    scroll->setObjectName("satelliteControlsScroll");
+    scroll->setWidgetResizable(true);
+    auto* passPage = new QWidget;
+    scroll->setWidget(passPage);
+    auto* passRoot = new QVBoxLayout(passPage);
+    taskTabs_->addTab(scroll, "Satellite Passes");
+    connect(taskTabs_, &QTabWidget::currentChanged, this, [this](int index) {
+        if (index == 1) { engine_.planner().ensureTleLoaded(); refreshPassesTable(); }
+        updateRangeSummary();
+    });
 
     auto* observerBox = new QFrame();
     observerBox->setObjectName("satcomBox");
@@ -288,7 +368,7 @@ void SatcomScannerWidget::buildUi() {
     observerMap_ = new ObserverMapWidget(this);
     observerMap_->setMinimumHeight(280);
     observerLayout->addWidget(observerMap_, 3, 0, 1, 4);
-    root->addWidget(observerBox);
+    passRoot->addWidget(observerBox);
     connect(applyObserver, &QPushButton::clicked, this, &SatcomScannerWidget::onApplyObserver);
     connect(selectSatellites, &QPushButton::clicked, this, &SatcomScannerWidget::onSelectSats);
     connect(refreshTleBtn_, &QPushButton::clicked, this, &SatcomScannerWidget::onRefreshTle);
@@ -348,7 +428,7 @@ void SatcomScannerWidget::buildUi() {
     armColumn->addWidget(passStatusLabel_);
     armColumn->addStretch(1);
     passRow->addLayout(armColumn);
-    root->addLayout(passRow);
+    passRoot->addLayout(passRow);
     connect(armButton, &QPushButton::clicked, this, &SatcomScannerWidget::onArmSelected);
     connect(sstvButton, &QPushButton::clicked, this, &SatcomScannerWidget::onArmSstv);
     connect(editProfile, &QPushButton::clicked, this, &SatcomScannerWidget::onEditSstvProfile);
@@ -380,6 +460,7 @@ void SatcomScannerWidget::buildUi() {
     });
     connect(deviceCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int row) {
         if (row < 0) return;
+        // Radio selection is shared with pass Arm, but never starts reception.
         auto config = engine_.config();
         config.deviceIndex = size_t(-1);
         config.deviceStableKey = deviceCombo_->itemData(row).toString().toStdString();
@@ -391,18 +472,26 @@ void SatcomScannerWidget::buildUi() {
     });
 
     spectrum_ = new SpectrumWidget(this);
-    spectrum_->setMinimumHeight(240);
+    spectrum_->setMinimumHeight(180);
     spectrum_->setColorRange(-120.0, -20.0);
+    spectrum_->hide();
     root->addWidget(spectrum_, 1);
+    spectrumEmpty_ = new QLabel("No live capture");
+    spectrumEmpty_->setObjectName("satcomSpectrumEmpty");
+    spectrumEmpty_->setAlignment(Qt::AlignCenter);
+    spectrumEmpty_->setMinimumHeight(180);
+    root->addWidget(spectrumEmpty_, 1);
 
     auto* transport = new QHBoxLayout();
-    startBtn_ = new QPushButton("START / TAKE OVER");
+    startBtn_ = new QPushButton(style()->standardIcon(QStyle::SP_MediaPlay), "Start scan");
+    startBtn_->setObjectName("satcomStartScan");
     startBtn_->setToolTip(
         "Start Satcom on the selected receiver. An ordinary active Listen session is taken over "
         "automatically and restored after STOP. P25 ownership is never interrupted.");
-    skipBtn_ = new QPushButton("FREQUENCY SKIP");
-    recordBtn_ = new QPushButton("RECORD");
-    stopBtn_ = new QPushButton("STOP");
+    skipBtn_ = new QPushButton(style()->standardIcon(QStyle::SP_MediaSkipForward), "Next signal");
+    recordBtn_ = new QPushButton("Record audio");
+    stopBtn_ = new QPushButton(style()->standardIcon(QStyle::SP_MediaStop), "Stop");
+    stopBtn_->setObjectName("satcomStop");
     transport->addWidget(startBtn_);
     transport->addWidget(skipBtn_);
     transport->addWidget(recordBtn_);
@@ -411,13 +500,17 @@ void SatcomScannerWidget::buildUi() {
     auto* squelchBox = new QFrame();
     squelchBox->setObjectName("satcomBox");
     auto* squelchLayout = new QHBoxLayout(squelchBox);
-    squelchLayout->addWidget(new QLabel("SQUELCH"));
+    squelchLayout->addWidget(new QLabel("Signal threshold"));
     squelchSpin_ = new QDoubleSpinBox();
     squelchSpin_->setRange(-140.0, 0.0);
     squelchSpin_->setDecimals(1);
+    squelchSpin_->setSuffix(" dB");
+    squelchSpin_->setAccessibleName("Signal detection threshold in relative dB");
+    squelchSpin_->setObjectName("satcomSquelch");
     squelchSlider_ = new QSlider(Qt::Horizontal);
     squelchSlider_->setRange(-1400, 0);
-    monitorAudioCheck_ = new QCheckBox("MONITOR AUDIO");
+    squelchSlider_->setAccessibleName("Signal detection threshold");
+    monitorAudioCheck_ = new QCheckBox("Listen");
     monitorAudioCheck_->setToolTip(
         "Route the active satellite demodulator through the configured SDR Town playback output. "
         "If Satcom selected the active Listen receiver, ordinary Listen audio is parked and restored "
@@ -425,8 +518,8 @@ void SatcomScannerWidget::buildUi() {
     squelchLayout->addWidget(squelchSpin_);
     squelchLayout->addWidget(squelchSlider_, 1);
     squelchLayout->addWidget(monitorAudioCheck_);
-    transport->addWidget(squelchBox, 1);
-    root->addLayout(transport);
+    outer->addLayout(transport);
+    outer->addWidget(squelchBox);
 
     auto* status = new QHBoxLayout();
     statusDevice_ = new QLabel("DEVICE —");
@@ -437,18 +530,19 @@ void SatcomScannerWidget::buildUi() {
     status->addWidget(statusScan_, 1);
     status->addWidget(statusRec_);
     status->addWidget(audioMeter_);
-    root->addLayout(status);
+    statusDevice_->setWordWrap(true);
+    statusScan_->setWordWrap(true);
+    outer->addLayout(status);
 
     statusHealth_ = new QLabel("STREAM: stopped   AUDIO: off   IQ DISCONTINUITIES: 0");
     statusHealth_->setWordWrap(true);
-    root->addWidget(statusHealth_);
+    outer->addWidget(statusHealth_);
 
     logView_ = new QPlainTextEdit();
     logView_->setReadOnly(true);
     logView_->setMaximumBlockCount(500);
     logView_->setPlaceholderText("Satcom decode / scan log");
-    logView_->setMaximumHeight(120);
-    root->addWidget(logView_);
+    taskTabs_->addTab(logView_, "Activity");
 
     connect(startBtn_, &QPushButton::clicked, this, &SatcomScannerWidget::onStart);
     connect(stopBtn_, &QPushButton::clicked, this, &SatcomScannerWidget::onStop);
@@ -466,13 +560,32 @@ void SatcomScannerWidget::buildUi() {
         squelchSpin_->blockSignals(true);
         squelchSpin_->setValue(value / 10.0);
         squelchSpin_->blockSignals(false);
+        draftChanged();
     });
-    connect(presetCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+    connect(presetCombo_, QOverload<int>::of(&QComboBox::activated), this, [this](int) {
         const QString name = presetCombo_->currentText();
-        if (name.isEmpty()) return;
-        engine_.applyPreset(name.toStdString());
-        refreshUi();
+        const auto config = engine_.config();
+        for (const auto& preset : config.presets) if (name.toStdString() == preset.name) {
+            lowSpin_->setValue(preset.lowHz / 1e6); highSpin_->setValue(preset.highHz / 1e6);
+            stepSpin_->setValue(preset.stepHz / 1e3); bwSpin_->setValue(preset.bandwidthHz / 1e3);
+            modeCombo_->setCurrentText(QString::fromStdString(preset.mode));
+            squelchSpin_->setValue(preset.squelchDb);
+            dwellSpin_->setValue(preset.dwellMs);
+            break;
+        }
+        draftChanged();
     });
+    connect(saveRangeBtn_, &QPushButton::clicked, this, &SatcomScannerWidget::saveRange);
+    connect(deleteRangeBtn_, &QPushButton::clicked, this, &SatcomScannerWidget::deleteRange);
+    refreshRangeChoices();
+    reloadSessionControls();
+    for (auto* spin : {lowSpin_, highSpin_, stepSpin_, bwSpin_, squelchSpin_}) {
+        connect(spin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &SatcomScannerWidget::draftChanged);
+        connect(spin->findChild<QLineEdit*>(), &QLineEdit::textEdited, this, &SatcomScannerWidget::draftChanged);
+    }
+    connect(modeCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &SatcomScannerWidget::draftChanged);
+    connect(dwellSpin_, QOverload<int>::of(&QSpinBox::valueChanged), this, &SatcomScannerWidget::draftChanged);
+    connect(dwellSpin_->findChild<QLineEdit*>(), &QLineEdit::textEdited, this, &SatcomScannerWidget::draftChanged);
 
     const auto observer = engine_.planner().observer();
     latEdit_->setText(QString::number(observer.latDeg, 'f', 5));
@@ -487,7 +600,7 @@ void SatcomScannerWidget::buildUi() {
     });
 }
 
-void SatcomScannerWidget::applyFieldsToConfig() {
+SatcomScannerConfig SatcomScannerWidget::fieldsConfig() const {
     auto config = engine_.config();
     config.lowHz = lowSpin_->value() * 1e6;
     config.highHz = highSpin_->value() * 1e6;
@@ -495,17 +608,125 @@ void SatcomScannerWidget::applyFieldsToConfig() {
     config.bandwidthHz = bwSpin_->value() * 1e3;
     config.mode = modeCombo_->currentText().toStdString();
     config.squelchDb = squelchSpin_->value();
+    config.dwellMs = dwellSpin_->value();
     config.monitorAudio = monitorAudioCheck_ && monitorAudioCheck_->isChecked();
     if (deviceCombo_ && deviceCombo_->currentIndex() >= 0) {
         const auto key = deviceCombo_->currentData().toString().toStdString();
         if (key != config.deviceStableKey) { config.deviceStableKey = key; config.deviceIndex = size_t(-1); }
     }
+    return config;
+}
+
+bool SatcomScannerWidget::applyFieldsToConfig() {
+    const auto config = fieldsConfig();
+    if (!config.scanValidationError().empty()) { updateRangeSummary(); return false; }
     engine_.setConfig(config);
+    draftDirty_ = false;
+    updateRangeSummary();
+    return true;
+}
+
+void SatcomScannerWidget::refreshRangeChoices() {
+    const QSignalBlocker blocker(presetCombo_);
+    presetCombo_->clear();
+    presetCombo_->addItem("Custom range");
+    for (const auto& preset : engine_.config().presets)
+        presetCombo_->addItem(QString::fromStdString(preset.name));
+}
+
+void SatcomScannerWidget::draftChanged() {
+    draftDirty_ = true;
+    updateRangeSummary();
+}
+
+void SatcomScannerWidget::updateRangeSummary() {
+    if (!rangeSummary_ || !squelchSpin_) return;
+    const auto draft = fieldsConfig();
+    const auto error = draft.scanValidationError();
+    const auto snapshot = engine_.snapshot();
+    const bool active = snapshot.state != SatcomScannerState::Idle || snapshot.passArmed;
+    const auto selectedName = presetCombo_->currentText().toStdString();
+    int match = 0;
+    QString note;
+    QString reference;
+    for (const auto& p : draft.presets) {
+        if (std::abs(p.lowHz - draft.lowHz) < 1 && std::abs(p.highHz - draft.highHz) < 1 &&
+            std::abs(p.stepHz - draft.stepHz) < 1 && std::abs(p.bandwidthHz - draft.bandwidthHz) < 1 &&
+            p.mode == draft.mode && std::abs(p.squelchDb - draft.squelchDb) < .01 &&
+            p.dwellMs == draft.dwellMs && (match == 0 || p.name == selectedName)) {
+            match = presetCombo_->findText(QString::fromStdString(p.name));
+            note = QString::fromStdString(p.note);
+            reference = QString::fromStdString(p.reference);
+            if (p.name == selectedName) break;
+        }
+    }
+    { const QSignalBlocker blocker(presetCombo_); presetCombo_->setCurrentIndex(std::max(0, match)); }
+    rangeNote_->setText(note);
+    rangeNote_->setVisible(!note.isEmpty());
+    rangeNote_->setToolTip(reference);
+    bool matchedBuiltin = false;
+    for (const auto& p : SatcomScannerConfig::defaults().presets)
+        if (p.name == presetCombo_->currentText().toStdString()) matchedBuiltin = true;
+    deleteRangeBtn_->setEnabled(!active && match > 0 && !matchedBuiltin);
+    saveRangeBtn_->setEnabled(!active && error.empty());
+    startBtn_->setEnabled(!active && error.empty() && taskTabs_->currentIndex() == 0);
+    if (!error.empty()) {
+        rangeSummary_->setText(QString::fromStdString(error));
+        rangeSummary_->setStyleSheet("color: #ee7777;");
+        return;
+    }
+    rangeSummary_->setStyleSheet({});
+    const uint64_t positions = draft.scanPositionCount();
+    const double seconds = static_cast<double>(positions) * draft.dwellMs / 1000.;
+    rangeSummary_->setText(QString("%1%2 MHz span | %3 tunes | Dwell only: %4 s | %5 / %6 kHz")
+        .arg(draftDirty_ ? "Pending - " : "")
+        .arg((draft.highHz-draft.lowHz)/1e6, 0, 'f', 3)
+        .arg(static_cast<qulonglong>(positions)).arg(seconds, 0, 'f', 1)
+        .arg(QString::fromStdString(draft.mode)).arg(draft.bandwidthHz/1000, 0, 'f', 1));
+    rangeSummary_->setToolTip("Sequential receive scan, not simultaneous full-range coverage. Retune delays and signal holds add time. Detection holds until Next signal or Stop. The spectrum shows only the current capture. NFM does not decode MUOS WCDMA, DAMA or encrypted traffic.");
+}
+
+void SatcomScannerWidget::saveRange() {
+    const auto draft = fieldsConfig();
+    if (!draft.scanValidationError().empty()) { updateRangeSummary(); return; }
+    bool accepted = false;
+    const QString name = QInputDialog::getText(this, "Save receive range", "Name",
+        QLineEdit::Normal, {}, &accepted).trimmed();
+    if (!accepted || name.isEmpty()) return;
+    auto config = engine_.config();
+    if (name.size() > 80 || config.presets.size() >= 128) {
+        QMessageBox::warning(this, "Range", "Use a name of at most 80 characters and fewer than 128 saved ranges.");
+        return;
+    }
+    for (const auto& p : config.presets) if (QString::fromStdString(p.name).compare(name, Qt::CaseInsensitive) == 0) {
+        QMessageBox::warning(this, "Range", "That name is already in use. Choose another name.");
+        return;
+    }
+    config.presets.push_back({name.toStdString(), draft.lowHz, draft.highHz, draft.stepHz,
+        draft.bandwidthHz, draft.mode, draft.squelchDb, "Custom receive range", "", draft.dwellMs});
+    engine_.setConfig(config); // Save the preset without applying pending RF settings.
+    refreshRangeChoices();
+    presetCombo_->setCurrentText(name);
+    updateRangeSummary();
+}
+
+void SatcomScannerWidget::deleteRange() {
+    if (!deleteRangeBtn_->isEnabled()) return;
+    const auto name = presetCombo_->currentText().toStdString();
+    if (QMessageBox::question(this, "Remove saved range",
+        "Remove " + QString::fromStdString(name) + "?",
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) return;
+    auto config = engine_.config();
+    config.presets.erase(std::remove_if(config.presets.begin(), config.presets.end(),
+        [&](const SatcomPreset& p) { return p.name == name; }), config.presets.end());
+    engine_.setConfig(config);
+    refreshRangeChoices();
+    updateRangeSummary();
 }
 
 void SatcomScannerWidget::onStart() {
+    if (!applyFieldsToConfig()) return;
     if (QCoreApplication::instance()->property("sdrtown.guiDryRun").toBool()) return;
-    applyFieldsToConfig();
     if (!engine_.start(true)) {
         QMessageBox::warning(
             this, "Satcom",
@@ -636,8 +857,11 @@ void SatcomScannerWidget::onArmSelected() {
         return;
     }
 
-    applyFieldsToConfig();
+    // The pass uses its catalogue downlink, not an unfinished Range Scan draft.
     auto& engine = engine_;
+    auto config = engine.config();
+    config.squelchDb = squelchSpin_->value();
+    engine.setConfig(config);
     std::string error;
     if (!engine.armPass(satId.toStdString(), downlinkId.toStdString(),
                         autoTrackCheck_->isChecked(), true, &error)) {
@@ -922,37 +1146,24 @@ void SatcomScannerWidget::refreshUi() {
     const auto& config = snapshot.config;
     const bool refreshPasses = (++passTableThrottle_ % 4) == 0;
 
-    refreshWorkflowDeviceCombo(*deviceCombo_, DeviceOwnership::Owner::Satcom,
-        QString::fromStdString(config.deviceStableKey));
-
-    if (!lowSpin_->hasFocus()) lowSpin_->setValue(config.lowHz / 1e6);
-    if (!highSpin_->hasFocus()) highSpin_->setValue(config.highHz / 1e6);
-    if (!stepSpin_->hasFocus()) stepSpin_->setValue(config.stepHz / 1e3);
-    if (!bwSpin_->hasFocus()) bwSpin_->setValue(config.bandwidthHz / 1e3);
-    if (!modeCombo_->hasFocus()) {
-        const int index = modeCombo_->findText(QString::fromStdString(config.mode));
-        if (index >= 0) modeCombo_->setCurrentIndex(index);
-    }
-    if (!squelchSpin_->hasFocus()) {
-        squelchSpin_->setValue(config.squelchDb);
-        squelchSlider_->setValue(static_cast<int>(config.squelchDb * 10.0));
-    }
+    reloadSessionControls();
     if (monitorAudioCheck_) {
         monitorAudioCheck_->blockSignals(true);
         monitorAudioCheck_->setChecked(config.monitorAudio);
         monitorAudioCheck_->blockSignals(false);
     }
 
-    if (presetCombo_->count() == 0) {
-        const QSignalBlocker blocker(presetCombo_);
-        for (const auto& preset : config.presets)
-            presetCombo_->addItem(QString::fromStdString(preset.name));
-    }
-
-    if (!snapshot.spectrumDb.empty()) {
+    const bool showSpectrum = snapshot.deviceConnected && snapshot.state != SatcomScannerState::Idle &&
+        !snapshot.spectrumDb.empty() && std::isfinite(snapshot.spectrumRateHz) && snapshot.spectrumRateHz > 0;
+    spectrum_->setVisible(showSpectrum);
+    spectrumEmpty_->setVisible(!showSpectrum);
+    if (showSpectrum) {
         spectrum_->updateSpectrum(
             snapshot.spectrumDb, snapshot.spectrumCenterHz, snapshot.spectrumRateHz);
-        spectrum_->setFreqRange(config.lowHz, config.highHz);
+        // The FFT is a single tuned capture, not an 82 MHz stitched survey.
+        spectrum_->setFreqRange(snapshot.spectrumCenterHz - snapshot.spectrumRateHz/2,
+                                snapshot.spectrumCenterHz + snapshot.spectrumRateHz/2);
+        spectrum_->setSquelchThreshold(config.squelchDb);
     }
 
     const QString streamState = QString::fromStdString(
@@ -976,7 +1187,7 @@ void SatcomScannerWidget::refreshUi() {
     } else if (snapshot.state == SatcomScannerState::Locked ||
                snapshot.state == SatcomScannerState::Recording) {
         statusScan_->setText(
-            QString("Locked %1 MHz").arg(snapshot.lockHz / 1e6, 0, 'f', 3));
+            QString("Signal hold: %1 MHz").arg(snapshot.lockHz / 1e6, 0, 'f', 3));
     } else {
         statusScan_->setText(
             QString::fromStdString(snapshot.lastStatus.empty() ? "Idle" : snapshot.lastStatus));
@@ -1006,16 +1217,16 @@ void SatcomScannerWidget::refreshUi() {
             .arg(streamState)
             .arg(snapshot.audioMonitoring
                 ? (snapshot.sharedMainAudio ? "ON (SDR TOWN)" : "ON (STANDALONE)")
-                : (config.monitorAudio ? "UNAVAILABLE" : "OFF"))
+                : (snapshot.state == SatcomScannerState::Idle ? "OFF" : (config.monitorAudio ? "UNAVAILABLE" : "OFF")))
             .arg(static_cast<qulonglong>(snapshot.iqDiscontinuities))
             .arg(static_cast<qulonglong>(snapshot.logDropped))
             .arg(outputDetail));
     const bool active = snapshot.state != SatcomScannerState::Idle || snapshot.passArmed;
     const bool healthy = !active ||
                          (snapshot.deviceConnected && snapshot.streamState == "live hardware");
-    statusHealth_->setStyleSheet(healthy
-        ? "color: #39FF14; font-weight: 700;"
-        : "color: #ff4d4d; font-weight: 900;");
+    statusHealth_->setStyleSheet(!active ? QString() : (healthy
+        ? "color: #7cce91;"
+        : "color: #ff7777;"));
 
     if (!snapshot.recentDecodes.empty()) {
         QString all;
@@ -1027,12 +1238,15 @@ void SatcomScannerWidget::refreshUi() {
     }
 
     deviceCombo_->setEnabled(!active);
-    startBtn_->setEnabled(!active);
+    scanSettings_->setEnabled(!active);
+    squelchSpin_->setEnabled(!active);
+    squelchSlider_->setEnabled(!active);
     stopBtn_->setEnabled(active);
     skipBtn_->setEnabled(active && !snapshot.passArmed);
     recordBtn_->setEnabled(snapshot.state == SatcomScannerState::Locked ||
                            snapshot.state == SatcomScannerState::Recording || snapshot.passArmed);
-    recordBtn_->setText(recordingUi_ ? "STOP REC" : "RECORD");
+    recordBtn_->setText(recordingUi_ ? "Stop recording" : "Record audio");
+    updateRangeSummary();
 
     if (refreshPasses) refreshPassesTable();
 }

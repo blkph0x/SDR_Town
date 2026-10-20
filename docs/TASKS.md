@@ -1,5 +1,16 @@
 # Task list (canonical)
 
+T-0145 | done | Receive-only Satcom range workflow |
+DEC-0225: separate Range Scan from Satellite Passes, provide sourced legacy
+downlink and explicitly mixed-service UHF range presets, persistent custom
+ranges, truthful sweep cost and pending settings. Validate ranges before any
+device acquisition; retain existing ownership and DSP. Test actual widgets,
+configuration round trips, malformed inputs, pass controls and packaged UI.
+Local release build, 24/24 suites, compact/desktop Qt captures and actual
+no-RF application/API session checks pass. Source/release Actions and public
+asset qualification remain delivery gates, not inferred from local tests.
+ISS-0122 tracks subsequent scan-acquisition work; no DSP changes in this task.
+
 T-0144 | done | Human-use UI audit of current paired applications |
 DEC-0224: inspect the public Town0.2.139/FUBAR1.1.52 native/web views and source
 from beginner task journeys. Record observed usability failures, source-backed

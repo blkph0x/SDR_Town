@@ -28,14 +28,17 @@ struct SatcomPreset {
     double bandwidthHz = 250e3;
     std::string mode = "NFM";
     double squelchDb = -90.0;
+    std::string note;
+    std::string reference;
+    int dwellMs = 80;
 };
 
 struct SatcomScannerConfig {
-    double lowHz = 420e6;
-    double highHz = 430e6;
-    double stepHz = 12.5e3;
+    double lowHz = 243e6;
+    double highHz = 270e6;
+    double stepHz = 25e3;
     int dwellMs = 80;
-    double bandwidthHz = 250e3;
+    double bandwidthHz = 25e3;
     std::string mode = "NFM";
     double squelchDb = -90.0;
     size_t deviceIndex = 0;
@@ -51,6 +54,8 @@ struct SatcomScannerConfig {
     std::vector<SatcomPreset> presets;
 
     static SatcomScannerConfig defaults();
+    std::string scanValidationError() const;
+    uint64_t scanPositionCount() const;
     nlohmann::json toJson() const;
     static SatcomScannerConfig fromJson(const nlohmann::json& j);
     void load(const std::string& sessionId = {});

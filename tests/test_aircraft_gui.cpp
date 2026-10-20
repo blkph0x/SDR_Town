@@ -47,6 +47,8 @@ TEST_CASE("Satellite SSTV controls retain profiles without rearming", "[satcom][
     CHECK(entries.back().custom);
     CHECK(entries.back().downlinks.front().mode == "USB");
     auto* combo = reopened.findChild<QComboBox*>("satelliteDownlink"); REQUIRE(combo);
+    auto* tasks = reopened.findChild<QTabWidget*>("satcomTasks"); REQUIRE(tasks);
+    tasks->setCurrentIndex(1);
     reopened.resize(1280,1400); reopened.show(); QApplication::processEvents();
     CHECK(combo->findData("iss-sstv-uhf") >= 0);
     CHECK(combo->findData("custom-save-qa-sstv") >= 0);

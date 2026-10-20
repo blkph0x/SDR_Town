@@ -1,5 +1,13 @@
 # SDR Town
 
+0.2.140 adds a receive-only **Satcom Range Scan** workspace: select a saved
+UHF range or enter From/To in MHz, select a radio, then Start scan. Satellite
+pass planning and Activity have their own tabs. Pending edits survive refresh;
+custom ranges can be saved for later. Advanced settings expose mode, channel
+bandwidth, tune step and dwell. See [range scanning](docs/SATCOM_RANGE_SCAN.md).
+This is sequential analog reception, not a MUOS/DAMA or encrypted-voice decoder.
+P25, Inmarsat and shared demodulation code are unchanged.
+
 0.2.139 pairs with FUBAR 1.1.52 for receive-lifecycle, audio, map and control
 hardening. Failed radio starts are reported; cancelled reads cannot publish
 into a replacement stream. Aircraft fields carry their own age and source,

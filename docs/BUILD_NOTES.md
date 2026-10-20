@@ -1,5 +1,41 @@
 # Build notes
 
+## 2026-10-20 - DEC-0225 Satcom range UI
+
+Windows local build, VS2022/MSVC14.44, Qt6.11.1. `cmake --build build --config
+Release --target SDR_Town sdr_town_tests inmarsat_live_gui_tests -j 4` PASS.
+Final widget/test incremental builds PASS. Existing mbelib CMake deprecation
+warning only; no new compiler warnings/errors found in these build logs.
+Evidence: build/satcom-range-{build,final-build,incremental-build,confirmation-build}.log.
+
+First full `ctest --test-dir build -C Release --output-on-failure`: 23/24,
+148.33s. SatcomRangeGui test used QMessageBox::done instead of clicking the
+standard confirmation button; deletion remained cancelled (11 == 10). Fixed
+fixture to click actual No/Yes. Focused rerun PASS. Final full suite: 24/24,
+144.67s, build/satcom-range-final-ctest.log. No production workaround for the
+test harness failure. ISS-0121 records the closed fixture issue.
+
+Actual Qt fixtures: pending drafts, range/mode/dwell validation, explicit
+dry-run Start, save/reopen/cancel/remove custom ranges, built-in protection,
+named API settings and invalid range rejection before radio lookup PASS.
+Screenshots reviewed at960x720 and1280x800; satellite pass at1000x720 remains
+scrollable with transport visible. Idle plot shows No live capture, not its
+default100MHz axis. Evidence D:/SDRTown-UIAudit-20261020.
+
+`scripts/test_workspace_gui.py --exe build/bin/Release/SDR_Town.exe` PASS all
+four actual GUI profiles with no RX/startup errors; production-gui subfolder.
+`scripts/test_inmarsat_sessions_gui.py` PASS actual authenticated GUI server,
+independent Inmarsat/Satcom/Aircraft controllers, new240-322MHz/dwell settings,
+rejected invalid values, reopen and no RF; production-sessions subfolder.
+Workflow YAML validation PASS. Changed-path P25 guard PASS; no protected RF/
+audio/DSP files touched. These gates are not on-air MILSAT, physical antenna,
+satellite-pass intelligibility or human novice acceptance.
+
+Version0.2.140 publication uses the existing exact-commit master/release Actions
+gates, public downloads, provenance/hash checks and signed updater. Hosted
+results are authoritative for package publication; local success is not a
+substitute. Release notes and SATCOM_RANGE_SCAN.md include remaining limits.
+
 ## 2026-10-16 - DEC-0224 released UI walkthrough
 
 No application rebuild or DSP changes. Used downloaded Town0.2.139 and
