@@ -4,6 +4,7 @@
 
 #include "SatcomAsyncLog.h"
 #include "SatcomIqCursor.h"
+#include "SatcomScanPolicy.h"
 #include <QObject>
 
 #include <atomic>
@@ -51,6 +52,12 @@ struct SatcomScannerConfig {
     bool sstvOnly = false;
     std::string sstvSaveDir;
     bool monitorAudio = true;
+    bool smartScan = true;
+    bool autoSquelch = true;
+    double squelchMarginDb = 12;
+    int quietHoldMs = 600;
+    double smartVolume = 0.8;
+    std::vector<SatcomWatchChannel> watchChannels;
     std::vector<SatcomPreset> presets;
 
     static SatcomScannerConfig defaults();
@@ -99,6 +106,12 @@ struct SatcomScannerSnapshot {
     double tunedHz = 0.0;
     std::string armedRole;
     size_t activeDeviceIndex = std::numeric_limits<size_t>::max();
+    std::vector<SatcomWatchStatus> watchStatus;
+    uint64_t scanTiles = 0;
+    uint64_t foregroundSwitches = 0;
+    uint64_t scanInputSamples = 0;
+    uint64_t scanProcessingUs = 0;
+    uint64_t scanSlowBlocks = 0;
 };
 
 class Ax25AprsDecoder;
@@ -151,6 +164,9 @@ public:
     bool startRecording();
     void stopRecording();
     bool applyPreset(const std::string& name);
+    bool setWatchChannel(const SatcomWatchChannel& channel, std::string* error = nullptr);
+    bool removeWatchChannel(double frequencyHz);
+    void setSmartVolume(double volume);
 
     bool armPass(const std::string& satId, const std::string& downlinkId, bool autoTrack = true,
                  bool force = false, std::string* error = nullptr);
@@ -174,13 +190,15 @@ private:
     };
 
     void workerLoop();
+    void smartScanLoop(size_t deviceIndex);
     bool refreshSpectrum(size_t deviceIndex, double* peakHz = nullptr, double* peakDb = nullptr);
     bool detectActivity(size_t deviceIndex, double& peakHz, double& peakDb);
     void processLockedAudio();
     void resetChronologicalInput();
     SatcomIqCursor::Result pullNewIq(size_t deviceIndex, size_t maxSamples);
     bool prepareReceiverForSatcom(size_t deviceIndex, bool force, std::string* error);
-    bool tuneAndConfirm(size_t deviceIndex, double frequencyHz, int timeoutMs, std::string* error);
+    bool tuneAndConfirm(size_t deviceIndex, double frequencyHz, int timeoutMs, std::string* error,
+                        bool cancellable = false);
     bool waitForOperationalStream(size_t deviceIndex, int timeoutMs, std::string* error);
     bool ensureAudioOutput(std::string* error = nullptr);
     bool beginHostTakeover(size_t deviceIndex, std::string* error);
@@ -223,6 +241,13 @@ private:
     bool skipRequested_ = false;
     bool recordRequested_ = false;
     bool recording_ = false;
+    std::vector<SatcomWatchStatus> watchStatus_;
+    uint64_t scanTiles_ = 0;
+    uint64_t foregroundSwitches_ = 0;
+    uint64_t scanInputSamples_ = 0;
+    uint64_t scanProcessingUs_ = 0;
+    uint64_t scanSlowBlocks_ = 0;
+    bool smartAudio_ = false;
     bool passTrackActive_ = false;
     bool passStartedEngine_ = false;
     double lastTrackHz_ = 0.0;

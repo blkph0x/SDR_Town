@@ -119,6 +119,19 @@ std::string SatcomScannerConfig::scanValidationError() const {
     if (mode != "NFM" && mode != "WFM" && mode != "AM" && mode != "USB" &&
         mode != "LSB" && mode != "APT" && mode != "APRS")
         return "Unsupported Satcom receive mode";
+    if (!std::isfinite(squelchMarginDb) || squelchMarginDb < 3 || squelchMarginDb > 30 ||
+        quietHoldMs < 100 || quietHoldMs > 5000)
+        return "Automatic squelch needs 3-30 dB margin and 100-5000 ms quiet hold";
+    if (!std::isfinite(smartVolume) || smartVolume < 0 || smartVolume > 1)
+        return "Smart monitor volume must be between 0 and 1";
+    if (watchChannels.size() > SatcomScanPolicy::maxChannels)
+        return "At most 128 channels can be remembered";
+    for (size_t i = 0; i < watchChannels.size(); ++i) {
+        if (!SatcomScanPolicy::validChannel(watchChannels[i])) return "Invalid watched channel";
+        for (size_t k = 0; k < i; ++k)
+            if (std::abs(watchChannels[k].frequencyHz - watchChannels[i].frequencyHz) < 1)
+                return "Duplicate watched channel";
+    }
     return {};
 }
 
@@ -147,6 +160,15 @@ nlohmann::json SatcomScannerConfig::toJson() const {
     json["sstvOnly"] = sstvOnly;
     json["sstvSaveDir"] = sstvSaveDir;
     json["monitorAudio"] = monitorAudio;
+    json["smartScan"] = smartScan;
+    json["autoSquelch"] = autoSquelch;
+    json["squelchMarginDb"] = squelchMarginDb;
+    json["quietHoldMs"] = quietHoldMs;
+    json["smartVolume"] = smartVolume;
+    json["watchChannels"] = nlohmann::json::array();
+    for (const auto& c : watchChannels)
+        json["watchChannels"].push_back({{"frequencyHz", c.frequencyHz}, {"label", c.label},
+                                         {"priority", c.priority}, {"enabled", c.enabled}});
     nlohmann::json entries = nlohmann::json::array();
     for (const auto& preset : presets) {
         entries.push_back({
@@ -180,6 +202,26 @@ SatcomScannerConfig SatcomScannerConfig::fromJson(const nlohmann::json& json) {
     config.sstvOnly = json.value("sstvOnly", config.sstvOnly);
     config.sstvSaveDir = json.value("sstvSaveDir", config.sstvSaveDir);
     config.monitorAudio = json.value("monitorAudio", config.monitorAudio);
+    config.smartScan = json.value("smartScan", config.smartScan);
+    config.autoSquelch = json.value("autoSquelch", config.autoSquelch);
+    config.squelchMarginDb = json.value("squelchMarginDb", config.squelchMarginDb);
+    config.quietHoldMs = json.value("quietHoldMs", config.quietHoldMs);
+    config.smartVolume = json.value("smartVolume", config.smartVolume);
+    if (json.contains("watchChannels") && json["watchChannels"].is_array()) {
+        for (const auto& c : json["watchChannels"]) {
+            if (config.watchChannels.size() == SatcomScanPolicy::maxChannels) break;
+            if (!c.is_object() || !c.contains("frequencyHz") || !c["frequencyHz"].is_number() ||
+                (c.contains("label") && !c["label"].is_string()) ||
+                (c.contains("priority") && !c["priority"].is_number_integer()) ||
+                (c.contains("enabled") && !c["enabled"].is_boolean())) continue;
+            SatcomWatchChannel channel{c.value("frequencyHz", 0.0), c.value("label", ""),
+                                      c.value("priority", 1), c.value("enabled", true)};
+            if (SatcomScanPolicy::validChannel(channel) &&
+                std::none_of(config.watchChannels.begin(), config.watchChannels.end(),
+                    [&](const auto& old) { return std::abs(old.frequencyHz - channel.frequencyHz) < 1; }))
+                config.watchChannels.push_back(std::move(channel));
+        }
+    }
     if (json.contains("presets") && json["presets"].is_array()) {
         config.presets.clear();
         for (const auto& entry : json["presets"]) {
@@ -294,6 +336,50 @@ void SatcomScannerEngine::setConfig(const SatcomScannerConfig& config) {
 SatcomScannerConfig SatcomScannerEngine::config() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return config_;
+}
+
+bool SatcomScannerEngine::setWatchChannel(const SatcomWatchChannel& channel, std::string* error) {
+    std::lock_guard lock(mutex_);
+    if (!SatcomScanPolicy::validChannel(channel)) {
+        if (error) *error = "Channel needs a valid MHz frequency, short name and High/Medium/Low priority";
+        return false;
+    }
+    auto it = std::find_if(config_.watchChannels.begin(), config_.watchChannels.end(),
+        [&](const auto& c) { return std::abs(c.frequencyHz - channel.frequencyHz) < 1; });
+    if (it != config_.watchChannels.end()) *it = channel;
+    else {
+        if (config_.watchChannels.size() >= SatcomScanPolicy::maxChannels) {
+            if (error) *error = "Channel list is full (128)";
+            return false;
+        }
+        config_.watchChannels.push_back(channel);
+    }
+    config_.save(sessionId_);
+    if (error) error->clear();
+    return true;
+}
+
+bool SatcomScannerEngine::removeWatchChannel(double frequencyHz) {
+    std::lock_guard lock(mutex_);
+    const auto before = config_.watchChannels.size();
+    std::erase_if(config_.watchChannels, [&](const auto& c) { return std::abs(c.frequencyHz - frequencyHz) < 1; });
+    if (before == config_.watchChannels.size()) return false;
+    config_.save(sessionId_);
+    return true;
+}
+
+void SatcomScannerEngine::setSmartVolume(double volume) {
+    if (!std::isfinite(volume)) return;
+    bool smart = false;
+    {
+        std::lock_guard lock(mutex_);
+        config_.smartVolume = std::clamp(volume, 0.0, 1.0);
+        config_.save(sessionId_);
+        smart = smartAudio_;
+    }
+    std::lock_guard lock(audioMutex_);
+    if (smart && audio_ && !usingSharedAudio_.load())
+        audio_->setMasterVolume(static_cast<float>(std::clamp(volume, 0.0, 1.0)));
 }
 
 void SatcomScannerEngine::setAutoCaptureEnabled(bool enabled) {
@@ -568,7 +654,7 @@ bool SatcomScannerEngine::prepareReceiverForSatcom(size_t deviceIndex, bool forc
 }
 
 bool SatcomScannerEngine::tuneAndConfirm(size_t deviceIndex, double frequencyHz,
-                                        int timeoutMs, std::string* error) {
+                                        int timeoutMs, std::string* error, bool cancellable) {
     auto& manager = DeviceManager::instance();
     std::string tuneError;
     const auto token = leaseToken();
@@ -581,6 +667,10 @@ bool SatcomScannerEngine::tuneAndConfirm(size_t deviceIndex, double frequencyHz,
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds(std::max(250, timeoutMs));
     while (std::chrono::steady_clock::now() < deadline) {
+        if (cancellable && !run_.load(std::memory_order_acquire)) {
+            if (error) *error = "Scan stopped";
+            return false;
+        }
         if (manager.getRuntimeStateLabel(deviceIndex) != "live hardware") {
             if (error) {
                 *error = "Satcom receiver left live hardware mode while tuning: " +
@@ -665,22 +755,25 @@ bool SatcomScannerEngine::waitForOperationalStream(size_t deviceIndex, int timeo
 
 bool SatcomScannerEngine::ensureAudioOutput(std::string* error) {
     bool enabled = true;
+    bool smart = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         enabled = config_.monitorAudio;
+        smart = smartAudio_;
         if (!enabled) audioMonitoring_ = false;
     }
     if (!enabled) return true;
 
     std::lock_guard<std::mutex> lock(audioMutex_);
-    if (audio_ && audio_->activeOutputCount() > 0) {
+    if (audio_ && audio_->activeOutputCount() > 0 &&
+        (!smart || !usingSharedAudio_.load())) {
         std::lock_guard<std::mutex> stateLock(mutex_);
         audioMonitoring_ = true;
         return true;
     }
 
     std::string hostError;
-    if (AudioEngine* shared = sessionId_.empty() ?
+    if (AudioEngine* shared = !smart && sessionId_.empty() ?
             SatcomHostServices::instance().acquireAudioEngine(&hostError) : nullptr) {
         if (shared->activeOutputCount() == 0) {
             if (error) *error = hostError.empty()
@@ -704,7 +797,7 @@ bool SatcomScannerEngine::ensureAudioOutput(std::string* error) {
 
     // DEC-0189: named sessions own separate PCM queues, never append to P25's
     // primary output. The OS mixer combines explicitly enabled session outputs.
-    if (sessionId_.empty() && SatcomHostServices::instance().installed()) {
+    if (!smart && sessionId_.empty() && SatcomHostServices::instance().installed()) {
         if (error) *error = hostError.empty()
             ? "SDR Town playback output could not be activated"
             : hostError;
@@ -715,6 +808,7 @@ bool SatcomScannerEngine::ensureAudioOutput(std::string* error) {
 
     try {
         auto candidate = std::make_unique<AudioEngine>();
+        if (smart) candidate->setMasterVolume(static_cast<float>(config().smartVolume));
         const auto outputs = candidate->enumeratePlaybackDevices();
         if (outputs.empty()) {
             if (error) *error = "No playback device is available for satellite audio";
@@ -741,6 +835,7 @@ bool SatcomScannerEngine::ensureAudioOutput(std::string* error) {
         usingSharedAudio_ = false;
         std::lock_guard<std::mutex> stateLock(mutex_);
         audioMonitoring_ = true;
+        if (smart) lastStatus_ = "Smart scan audio: default playback device (independent queue)";
         return true;
     } catch (const std::exception& ex) {
         if (error) *error = std::string("Satellite audio output: ") + ex.what();
@@ -807,10 +902,24 @@ bool SatcomScannerEngine::start(bool force) {
     if (worker_.joinable()) stop();
     if (!prepareReceiverForSatcom(selectedDevice, force, &deviceError)) return false;
 
+    const auto initial = config();
+    const bool smartRequested = initial.smartScan && initial.mode != "APT" && initial.mode != "APRS";
+    const double stride = SatcomScanPolicy::tileStride(DeviceManager::instance().getCurrentSampleRate(selectedDevice), initial.bandwidthHz);
+    if (smartRequested && !stride) {
+        restorePreviousDeviceState();
+        endHostTakeover();
+        std::lock_guard lock(mutex_);
+        lastStatus_ = "Smart scan needs a sample rate of at least nine channel bandwidths";
+        return false;
+    }
     double firstFrequency = 0.0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        firstFrequency = config_.lowHz;
+        firstFrequency = config_.lowHz + (smartRequested ? stride * .5 : 0);
+        smartAudio_ = smartRequested;
+        watchStatus_.clear();
+        scanTiles_ = foregroundSwitches_ = 0;
+        scanInputSamples_ = scanProcessingUs_ = scanSlowBlocks_ = 0;
     }
     if (!tuneAndConfirm(selectedDevice, firstFrequency, 3000, &deviceError)) {
         {
@@ -865,6 +974,8 @@ void SatcomScannerEngine::stop() {
         deviceConnected_ = false;
         streamState_ = "stopped";
         lastStatus_ = "Stopped";
+        for (auto& w : watchStatus_) { w.active = w.listening = w.inBand = false; }
+        config_.save(sessionId_);
     }
     resetChronologicalInput();
     restorePreviousDeviceState();
@@ -1030,6 +1141,12 @@ SatcomScannerSnapshot SatcomScannerEngine::snapshot() const {
         snapshot.lastStatus = lastStatus_;
         snapshot.armedRole = armedRole_;
         snapshot.activeDeviceIndex = activeDeviceIndex_;
+        snapshot.watchStatus = watchStatus_;
+        snapshot.scanTiles = scanTiles_;
+        snapshot.foregroundSwitches = foregroundSwitches_;
+        snapshot.scanInputSamples = scanInputSamples_;
+        snapshot.scanProcessingUs = scanProcessingUs_;
+        snapshot.scanSlowBlocks = scanSlowBlocks_;
     }
     snapshot.iqDiscontinuities = iqDiscontinuities_.load(std::memory_order_acquire);
     const auto armed = planner().snapshot().armed;
@@ -1164,6 +1281,7 @@ bool SatcomScannerEngine::armPass(const std::string& satId, const std::string& d
     {
         std::lock_guard<std::mutex> lock(mutex_);
         passTrackActive_ = true;
+        smartAudio_ = false;
         passStartedEngine_ = !engineWasRunning;
         armedRole_ = plan.armed.role;
         config_.mode = plan.armed.mode.empty() ? "NFM" : plan.armed.mode;
@@ -1528,6 +1646,350 @@ void SatcomScannerEngine::processLockedAudio() {
     }
 }
 
+void SatcomScannerEngine::smartScanLoop(size_t deviceIndex) {
+    // DEC-0226: one chronological IQ reader, independent demodulators, exactly
+    // one foreground PCM producer. No P25/shared audio-ring mutations.
+    struct Watcher {
+        SatcomScanPolicy::Gate gate;
+        std::unique_ptr<Demodulator> demod;
+        uint64_t decodedEnd = 0;
+        uint64_t hits = 0;
+        bool present = false;
+    };
+    auto& manager = DeviceManager::instance();
+    std::map<double, Watcher> watchers;
+    SatcomIqCursor cursor;
+    std::vector<std::complex<float>> analysis;
+    double rate = manager.getCurrentSampleRate(deviceIndex);
+    auto settings = config();
+    double stride = SatcomScanPolicy::tileStride(rate, settings.bandwidthHz);
+    if (!stride) {
+        std::lock_guard lock(mutex_);
+        lastStatus_ = "Smart scan needs a sample rate of at least nine channel bandwidths";
+        run_.store(false);
+        return;
+    }
+    double center = settings.lowHz + stride * .5;
+    double sweepCenter = center;
+    double foreground = 0;
+    double tileSeconds = 0;
+    double outputFraction = 0;
+    size_t revisit = 0;
+    bool revisitNext = false;
+    bool needTune = true;
+    bool haveInput = false;
+    bool decoderCapReported = false;
+    std::vector<double> skipped;
+    auto lastIq = std::chrono::steady_clock::now();
+    auto lastNotify = lastIq;
+    const auto clearOwnAudio = [&] {
+        std::lock_guard lock(audioMutex_);
+        if (audio_ && !usingSharedAudio_.load()) audio_->clearBuffers();
+    };
+    while (run_.load(std::memory_order_acquire)) {
+        if (!manager.ownsDevice(leaseToken()) ||
+            manager.getRuntimeStateLabel(deviceIndex) != "live hardware") {
+            pushLog(SatcomLog::EventType::Info, center, "smart scan lost hardware/ownership");
+            std::lock_guard lock(mutex_);
+            lastStatus_ = "Smart scan stopped: receiver or ownership lost";
+            break;
+        }
+        settings = config();
+        bool skip = false;
+        {
+            std::lock_guard lock(mutex_);
+            skip = std::exchange(skipRequested_, false);
+        }
+        if (skip && foreground != 0) {
+            skipped.push_back(foreground);
+            watchers.erase(foreground);
+            clearOwnAudio();
+        }
+        const double newRate = manager.getCurrentSampleRate(deviceIndex);
+        if (newRate != rate) {
+            rate = newRate;
+            stride = SatcomScanPolicy::tileStride(rate, settings.bandwidthHz);
+            if (!stride) {
+                std::lock_guard lock(mutex_);
+                lastStatus_ = "Smart scan stopped: sample rate is too low for channel bandwidth";
+                break;
+            }
+            center = sweepCenter = settings.lowHz + stride * .5;
+            needTune = true;
+        }
+        if (needTune) {
+            std::string error;
+            if (!tuneAndConfirm(deviceIndex, center, 3000, &error, true)) {
+                std::lock_guard lock(mutex_);
+                lastStatus_ = error;
+                break;
+            }
+            cursor.reset();
+            analysis.clear();
+            watchers.clear();
+            foreground = 0;
+            haveInput = false;
+            outputFraction = tileSeconds = 0;
+            clearOwnAudio();
+            lastIq = std::chrono::steady_clock::now();
+            needTune = false;
+            {
+                std::lock_guard lock(mutex_);
+                ++scanTiles_;
+                currentHz_ = center;
+                lockHz_ = 0;
+                state_ = SatcomScannerState::Scanning;
+                lastStatus_ = "Searching captured band";
+            }
+            pushLog(SatcomLog::EventType::Info, center, "smart tile tune acknowledged");
+        }
+        // The display FFT has no acquisition epoch. Never use it as lock proof.
+        if (std::chrono::steady_clock::now() - lastIq > std::chrono::seconds(3)) {
+            clearOwnAudio();
+            std::lock_guard lock(mutex_);
+            lastStatus_ = "Smart scan stopped: no fresh current-tuning IQ for 3 seconds";
+            break;
+        }
+        const auto window = manager.getRecentIQWindowWithCursor(deviceIndex, 524288, true);
+        if (!std::isfinite(window.appliedCenterHz) ||
+            std::abs(window.appliedCenterHz - center) > 100 ||
+            window.startAbsolute < window.retuneStartAbsolute) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+        auto input = cursor.consume(window.samples, window.startAbsolute, window.endAbsolute,
+                                    window.streamEpoch, window.cursorDiscontinuity);
+        if (input.samples.empty()) {
+            // DEC-0226: no stale activity/audio during a stalled USB stream.
+            if (std::chrono::steady_clock::now() - lastIq > std::chrono::seconds(3)) {
+                clearOwnAudio();
+                std::lock_guard lock(mutex_);
+                lastStatus_ = "Smart scan stopped: no fresh IQ for 3 seconds";
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+        lastIq = std::chrono::steady_clock::now();
+        const auto processingStart = lastIq;
+        const double iqCenter = window.appliedCenterHz;
+        if (input.discontinuity) {
+            if (haveInput) {
+                iqDiscontinuities_.fetch_add(1);
+                pushLog(SatcomLog::EventType::Info, center, "smart IQ gap; watchers reset");
+            }
+            analysis.clear();
+            watchers.clear();
+            ax25_->reset();
+            outputFraction = 0;
+            clearOwnAudio();
+        }
+        haveInput = true;
+        const double seconds = input.samples.size() / rate;
+        tileSeconds += seconds;
+        const double exactFrames = seconds * 48000 + outputFraction;
+        const size_t frames = static_cast<size_t>(std::floor(exactFrames));
+        outputFraction = exactFrames - frames;
+        analysis.insert(analysis.end(), input.samples.begin(), input.samples.end());
+        if (analysis.size() > 8192) analysis.erase(analysis.begin(), analysis.end() - 8192);
+        const auto power = SatcomScanPolicy::spectrum(analysis);
+        if (power.empty()) {
+            if (analysis.size() < 8192) continue;
+            clearOwnAudio();
+            std::lock_guard lock(mutex_);
+            lastStatus_ = "Smart scan stopped: non-finite IQ";
+            break;
+        }
+        bool discovered = false;
+        const auto candidates = SatcomScanPolicy::discover(power, iqCenter, rate,
+            settings.lowHz, settings.highHz, settings.stepHz, settings.bandwidthHz,
+            settings.autoSquelch, settings.squelchMarginDb, settings.squelchDb);
+        {
+            std::lock_guard lock(mutex_);
+            for (const double f : candidates) {
+                if (config_.watchChannels.size() >= SatcomScanPolicy::maxChannels) break;
+                const bool known = std::any_of(config_.watchChannels.begin(), config_.watchChannels.end(),
+                    [&](const auto& c) { return std::abs(c.frequencyHz - f) < settings.bandwidthHz; });
+                if (!known) {
+                    config_.watchChannels.push_back({f, "", 1, true});
+                    discovered = true;
+                }
+            }
+            settings.watchChannels = config_.watchChannels;
+        }
+        if (discovered) {
+            // File I/O stays off the IQ worker; Qt cancels this when destroyed.
+            QMetaObject::invokeMethod(this, [this] {
+                std::lock_guard lock(mutex_);
+                config_.save(sessionId_);
+            }, Qt::QueuedConnection);
+            pushLog(SatcomLog::EventType::Info, center, "new activity channels remembered");
+        }
+        std::vector<SatcomWatchStatus> statuses;
+        std::map<double, bool> present;
+        for (const auto& channel : settings.watchChannels) {
+            SatcomWatchStatus status;
+            status.channel = channel;
+            status.inBand = channel.frequencyHz >= settings.lowHz && channel.frequencyHz <= settings.highHz &&
+                SatcomScanPolicy::observable(channel.frequencyHz, iqCenter, rate, settings.bandwidthHz);
+            if (status.inBand && channel.enabled &&
+                std::find(skipped.begin(), skipped.end(), channel.frequencyHz) == skipped.end()) {
+                const auto measurement = SatcomScanPolicy::measure(power, iqCenter, rate,
+                    channel.frequencyHz, settings.bandwidthHz);
+                auto& watcher = watchers[channel.frequencyHz];
+                const bool wasActive = watcher.gate.active;
+                watcher.present = watcher.gate.update(measurement, seconds, settings.autoSquelch,
+                    settings.squelchMarginDb, settings.squelchDb, settings.quietHoldMs / 1000.0);
+                if (watcher.gate.active && !wasActive) {
+                    ++watcher.hits;
+                    pushLog(SatcomLog::EventType::Lock, channel.frequencyHz, "channel activity acquired");
+                }
+                if (wasActive && !watcher.gate.active)
+                    pushLog(SatcomLog::EventType::Unlock, channel.frequencyHz, "channel quiet");
+                status.active = watcher.gate.active;
+                status.signalDb = measurement.signalDb;
+                status.noiseDb = measurement.noiseDb;
+                status.hits = watcher.hits;
+                present[channel.frequencyHz] = watcher.present;
+            }
+            statuses.push_back(status);
+        }
+        std::erase_if(watchers, [&](const auto& item) { return !present.contains(item.first); });
+        const double selected = SatcomScanPolicy::selectForeground(statuses, foreground);
+        if (selected != foreground) {
+            stopRecording();
+            clearOwnAudio();
+            ax25_->reset();
+            foreground = selected;
+            {
+                std::lock_guard lock(mutex_);
+                ++foregroundSwitches_;
+                recordPath_.clear();
+                recordSatId_ = "scan";
+                recordDownlinkId_ = "activity";
+                armedRole_.clear();
+            }
+            pushLog(SatcomLog::EventType::Info, selected, "priority foreground changed");
+        }
+        std::vector<size_t> admitted;
+        for (size_t i = 0; i < statuses.size(); ++i)
+            if (statuses[i].active) admitted.push_back(i);
+        std::stable_sort(admitted.begin(), admitted.end(), [&](size_t a, size_t b) {
+            if (a == b) return false;
+            if (statuses[a].channel.frequencyHz == foreground) return true;
+            if (statuses[b].channel.frequencyHz == foreground) return false;
+            return statuses[a].channel.priority > statuses[b].channel.priority;
+        });
+        const bool decoderCap = admitted.size() > SatcomScanPolicy::maxDecoders;
+        if (decoderCap && !decoderCapReported)
+            pushLog(SatcomLog::EventType::Info, foreground,
+                    "decoder budget: highest-priority 8 demodulated; other channels power-watched");
+        decoderCapReported = decoderCap;
+        if (decoderCap) admitted.resize(SatcomScanPolicy::maxDecoders);
+        for (auto& [f, watcher] : watchers) {
+            if (std::none_of(admitted.begin(), admitted.end(), [&](size_t i) { return statuses[i].channel.frequencyHz == f; }))
+                watcher.demod.reset();
+        }
+        std::vector<float> speaker;
+        double rms = -120;
+        for (auto i : admitted) {
+            auto& status = statuses[i];
+            auto& watcher = watchers.at(status.channel.frequencyHz);
+            if (!watcher.demod) watcher.demod = std::make_unique<Demodulator>();
+            else if (watcher.decodedEnd != input.startAbsolute) watcher.demod->resetState();
+            watcher.decodedEnd = input.endAbsolute;
+            double level = -120;
+            FmMultiplexBlock multiplex;
+            const bool aprsData = settings.enableAx25 && settings.mode == "NFM" &&
+                status.channel.frequencyHz == foreground;
+            auto pcm = watcher.demod->demodulateToAudio(input.samples, rate, iqCenter,
+                status.channel.frequencyHz, modeFromString(settings.mode), level,
+                3000.0, -120.0, 1.0, 75.0, .96, settings.bandwidthHz,
+                frames, 48000.0, std::numeric_limits<double>::quiet_NaN(), true,
+                aprsData ? &multiplex : nullptr, status.channel.frequencyHz);
+            // Retain the existing NFM foreground AX.25 tap, never interleaving
+            // samples from independent watched conversations.
+            if (aprsData && !multiplex.samples.empty()) {
+                for (const auto& decoded : ax25_->processAudio(multiplex.samples.data(),
+                        multiplex.samples.size(), multiplex.sampleRate)) {
+                    pushLog(SatcomLog::EventType::DecodeOk, foreground, decoded.c_str());
+                    std::lock_guard lock(mutex_);
+                    recentDecodes_.push_back(decoded);
+                    if (recentDecodes_.size() > 100) recentDecodes_.erase(recentDecodes_.begin());
+                }
+            }
+            if (status.channel.frequencyHz == foreground) {
+                status.listening = watcher.present;
+                rms = level;
+                if (watcher.present) speaker = std::move(pcm);
+            }
+        }
+        if (!speaker.empty()) {
+            pushMonitorAudio(speaker.data(), speaker.size());
+            std::string recordingPath;
+            {
+                std::lock_guard lock(mutex_);
+                if (recording_ && recordHz_ == foreground) recordingPath = recordPath_;
+            }
+            if (!recordingPath.empty()) {
+                std::ofstream out(recordingPath, std::ios::binary | std::ios::app);
+                if (out) out.write(reinterpret_cast<const char*>(speaker.data()),
+                                   static_cast<std::streamsize>(speaker.size() * sizeof(float)));
+            }
+        }
+        {
+            std::lock_guard lock(mutex_);
+            watchStatus_ = statuses;
+            audioRmsDb_ = rms;
+            lockHz_ = foreground;
+            state_ = foreground ? (recording_ ? SatcomScannerState::Recording : SatcomScannerState::Locked)
+                                : SatcomScannerState::Scanning;
+            spectrumDb_ = power;
+            spectrumCenterHz_ = iqCenter;
+            spectrumRateHz_ = rate;
+            lastStatus_ = foreground ? "Priority listening - other in-band channels watched" :
+                "Searching captured band";
+            const auto us = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - processingStart).count();
+            scanInputSamples_ += input.samples.size();
+            scanProcessingUs_ += static_cast<uint64_t>(us);
+            if (us > seconds * 1e6) {
+                ++scanSlowBlocks_;
+                if (scanSlowBlocks_ == 1 || scanSlowBlocks_ % 100 == 0)
+                    spdlog::warn("Satcom smart session={} slowBlocks={} inputSamples={} processingUs={} admitted={}",
+                        sessionId_, scanSlowBlocks_, input.samples.size(), us, admitted.size());
+            }
+        }
+        if (!foreground && tileSeconds >= settings.dwellMs / 1000.0) {
+            // Alternate a full-coverage tile and a saved-channel revisit.
+            // Priority affects revisit order, never starves broad discovery.
+            std::vector<SatcomWatchChannel> saved;
+            for (const auto& c : settings.watchChannels)
+                if (c.enabled && c.frequencyHz >= settings.lowHz && c.frequencyHz <= settings.highHz)
+                    saved.push_back(c);
+            std::stable_sort(saved.begin(), saved.end(), [](const auto& a, const auto& b) { return a.priority > b.priority; });
+            if (revisitNext && !saved.empty()) {
+                center = saved[revisit++ % saved.size()].frequencyHz + stride * .5;
+            } else {
+                const double previous = sweepCenter;
+                sweepCenter = SatcomScanPolicy::nextTile(sweepCenter, settings.lowHz,
+                    settings.highHz, rate, settings.bandwidthHz);
+                if (sweepCenter < previous) skipped.clear();
+                center = sweepCenter;
+            }
+            revisitNext = !revisitNext;
+            needTune = true;
+        }
+        if (std::chrono::steady_clock::now() - lastNotify >= std::chrono::milliseconds(200)) {
+            notifyUpdate();
+            lastNotify = std::chrono::steady_clock::now();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    clearOwnAudio();
+    run_.store(false, std::memory_order_release);
+}
+
 void SatcomScannerEngine::workerLoop() {
     auto& manager = DeviceManager::instance();
     bool lostHardware = false;
@@ -1552,6 +2014,28 @@ void SatcomScannerEngine::workerLoop() {
         if (!passTrackActive_) currentHz_ = config_.lowHz;
     }
 
+    bool smart = false;
+    {
+        std::lock_guard lock(mutex_);
+        smart = smartAudio_ && !passTrackActive_;
+    }
+    if (smart) {
+        try {
+            smartScanLoop(deviceIndex);
+        } catch (const std::exception& ex) {
+            spdlog::error("Satcom smart session={} stopped: {}", sessionId_, ex.what());
+            std::lock_guard lock(mutex_);
+            lastStatus_ = "Smart scan stopped: processing error (see activity log)";
+            run_.store(false, std::memory_order_release);
+        } catch (...) {
+            spdlog::error("Satcom smart session={} stopped: unknown processing error", sessionId_);
+            std::lock_guard lock(mutex_);
+            lastStatus_ = "Smart scan stopped: processing error (see activity log)";
+            run_.store(false, std::memory_order_release);
+        }
+        // Stop may already be joining us and perform the same lease cleanup.
+        lostHardware = true;
+    }
     while (run_.load(std::memory_order_acquire)) {
         SatcomScannerConfig config;
         bool skip = false;
@@ -1661,10 +2145,16 @@ void SatcomScannerEngine::workerLoop() {
         // Host restore may invoke GUI callbacks. Never wait on the GUI from a
         // worker that the same GUI can be joining (DEC-0189).
         const auto failedLease = leaseToken();
-        QMetaObject::invokeMethod(this, [this, failedLease] {
+        const auto failure = snapshot().lastStatus;
+        QMetaObject::invokeMethod(this, [this, failedLease, failure] {
             if (!run_.load() && leaseToken().id == failedLease.id) {
                 planner().disarm();
                 stop();
+                {
+                    std::lock_guard lock(mutex_);
+                    lastStatus_ = failure;
+                }
+                notifyUpdate();
             }
         }, Qt::QueuedConnection);
     }

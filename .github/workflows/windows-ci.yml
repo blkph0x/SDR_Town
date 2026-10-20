@@ -465,6 +465,9 @@ jobs:
             build/qt-replacement-qa/*-config.summary
             build/qt-replacement-qa/gui/
             build/qt-replacement-qa/gui-native/
+            build/qt-replacement-qa/failure-*/evidence.json
+            build/qt-replacement-qa/failure-*/launch.log
+            build/qt-replacement-qa/failure-*/portable.zip
             build/usb-replacement-qa/*.log
             build/usb-replacement-qa/result.json
             build/sstv-session-ci/result.json

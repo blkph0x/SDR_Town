@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SDR_Town VERSION 0.2.140 LANGUAGES CXX)
+project(SDR_Town VERSION 0.2.141 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -695,7 +695,7 @@ if(BUILD_TESTS)
 
   # DEC-0123: real widget/engine with a hardware-free DeviceManager backend.
   target_sources(sdr_town_tests PRIVATE src/WorkflowRadioSession.cpp tests/test_workflow_radio_session.cpp
-      src/SatcomScannerEngine.cpp)
+      src/SatcomScannerEngine.cpp tests/test_satcom_smart_lifecycle.cpp)
   if(TARGET SoapySDR)
     add_test(NAME WorkflowRadioLifecycle COMMAND sdr_town_tests "[.ownership-live]")
     set_tests_properties(WorkflowRadioLifecycle PROPERTIES TIMEOUT 60)

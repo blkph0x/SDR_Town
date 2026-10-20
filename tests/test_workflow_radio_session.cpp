@@ -217,6 +217,7 @@ TEST_CASE("Five independent RF workflows retain ownership through real manager l
     // DEC-0189: independent satellite engines use actual manager/worker paths.
     SatcomScannerEngine satA("worker-sat-a"), satB("worker-sat-b"), satConflict("worker-sat-conflict");
     auto scan = SatcomScannerConfig::defaults();
+    scan.smartScan = false; // This existing test covers exact-centre legacy/pass ownership.
     scan.monitorAudio = false; scan.autoCapture = false;
     scan.lowHz = scan.highHz = 145.8e6;
     scan.deviceIndex = first; scan.deviceStableKey = devices[first].stableKey;

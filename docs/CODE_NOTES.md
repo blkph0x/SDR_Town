@@ -1375,3 +1375,21 @@ scripts/qualify_distribution.py binds compact passing Qt/USB results to the
 package executable, source archives and runtime set. package_inventory.py
 now clears finite blockers only after these checks, retaining original
 source/notice/signature/ZIP safety gates. No P25/receive/audio code changes.
+# DEC-0226 - Smart Satcom scan and channel list
+
+- `SatcomScanPolicy.h`: pure tile coverage, detector-only8192-bin periodogram,
+  channel mean power/local median noise, sample-clock quiet gate and stable
+  priority arbitration. Limits/policies are recorded in DEC-0226.
+- `SatcomScannerEngine`: current-tuning chronological IQ, at most eight
+  per-channel demodulators, one owned foreground audio queue, persistent saved
+  channels, quiet sweep/revisit and stale-input cleanup. Foreground AX.25 kept;
+  pass/APT/APRS legacy workers and all shared DSP/P25 files unchanged.
+- `SatcomScannerWidget`/`SatcomHubWidget`: polling-safe channel editors and
+  named-session controls/status. Smart-only volume never changes Listen/P25.
+- `test_satcom`, `test_satcom_smart_lifecycle`, `test_satcom_range_gui`:
+  independent carrier rejection, full DC/boundary coverage, real mock-Soapy
+  worker and actual widget/API/persistence gates. These are not on-air proof.
+- `test_qt_replacement.py`/harness: failure-only prepared-runtime archive,
+  optional matching PDB, early feature/hash evidence and private-TEMP sanitized
+  launch markers. Packaging workflow retains them; the original failure stays
+  failed. ISS-0124 remains a diagnostic issue, not a repaired startup defect.

@@ -1,5 +1,16 @@
 # Task list (canonical)
 
+T-0146 | in-progress | Smart Satcom discovery and saved channel priorities |
+DEC-0226 / ISS-0122: fresh-IQ wideband tiles, noise-relative automatic squelch,
+DC-region revisit, bounded channel list with High/Medium/Low and stable
+foreground arbitration, automatic quiet resume and isolated analog watchers.
+Keep pass reception/P25 unchanged; prove planner coverage, freshness, multi-
+carrier selection, priority edits/persistence, silence and malformed-input
+behavior before publication. Physical reception remains a separate gate.
+Local recovered-source Release,24/24suites, actual GUI/API and synthetic
+worker pass. ISS-0123/0125 repaired; ISS-0124 evidence preserved, not guessed.
+Exact-commit CI/public delivery still in progress.
+
 T-0145 | done | Receive-only Satcom range workflow |
 DEC-0225: separate Range Scan from Satellite Passes, provide sourced legacy
 downlink and explicitly mixed-service UHF range presets, persistent custom

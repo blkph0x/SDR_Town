@@ -1,5 +1,59 @@
 # Issues (canonical)
 
+## ISS-0126 - Development C: volume exhausted during edit (2026-10-20, MITIGATED)
+
+C: reached0free and an apply_patch save truncated SatcomScannerEngine.cpp.
+Recovered the committed base plus the recorded reviewed diff and later fixes;
+the recovered source compiles in all three targets. Archived only inactive,
+generated build/public-0.2.137 and public-0.2.138 downloads to
+D:/SDRTown-Archived-QA-20261020, recovering about960MB. No captures, private
+keys or user configuration removed. Source/diff backups, QA output and new
+compiler/test temporary files now use D:. Full regression rerun follows
+recovery. C: remains low; this is not a claim of general disk cleanup.
+
+## ISS-0125 - Peak-bin auto-squelch holds after transmitters stop (2026-10-20, CLOSED)
+
+The new actual smart-worker mock-Soapy fixture follows both priority changes
+but does not resume after5s of noise-only IQ. Instrumented snapshot reports
+no IQ gaps, one tile, and five held channels: signal peaks8-11dB above
+neighbouring median noise. Max-of-many-bin bias continually refreshes the8dB
+close gate. Replace the channel maximum with mean linear channel-bin power;
+keep the noise reference and operator margin explicit, and rerun the same
+failing fixture plus pure noise/carrier tests. No timer inflation.
+After repair, combined smart gates pass3912assertions/6cases, including the
+same actual worker fixture, background noise after both carriers stop, priority
+switch and stale-IQ shutdown. Full-suite rerun is recorded in BUILD_NOTES.
+
+## ISS-0124 - Hosted rebuilt-Qt GUI startup access violation (2026-10-20, OPEN)
+
+v0.2.140 source Actions39373980940 reaches rebuilt Qt6.7.3 native workspace
+startup, then the listening dry-run exits3221225477 (access violation).
+The last application log follows device enumeration; no stack was captured.
+Ordinary source tests and earlier local Qt6.11.1 workspace checks pass.
+Artifact package-inventory-620-5d720166d840abf309a69a8c022fa43e097d004f
+contains gui-native.log and listening.log. No cause is inferred from the
+exit code alone. Preserve this evidence and diagnose before claiming release
+qualification; do not weaken the replacement/runtime gate.
+The same-commit release run39373981026 passes this gate. This does not
+establish the intermittent failure's cause. Add failure-only bounded runtime,
+hash, symbol and sanitized launch-marker evidence before temporary cleanup.
+Current-release source and release CI remain mandatory; no automatic retry
+turns a failed run into a pass.
+
+## ISS-0123 - First smart tile DC exclusion leaves a coverage hole (2026-10-20, CLOSED)
+
+New DEC-0226 synthetic coverage test fails at the beginning of the range:
+the first LO has no preceding tile to cover the lower half of its central
+exclusion. Half-stride overlap still fails with a full-channel-width DC guard
+at256kHz/25kHz. Require rate>=9*channelBW and a2/3-stride second tile:
+stride=.4*rate-.5*BW>=3.1*BW, so adjacent DC guards cannot overlap, while the
+second usable window covers the first guard's lower half. Keep the conservative
+guard (no channel filter touching the DC spike);
+retain a complete boundary/DC coverage test at256k/2.048M/10M sample rates.
+This was caught before production build/publication. Corrected geometry passes
+the complete 256k/2.048M/10M range/DC fixture: all5 smart cases and3816 assertions
+pass on the isolated MSVC Release core build. See DEC-0226 and BUILD_NOTES.
+
 ## ISS-0121 - Range deletion fixture did not press confirmation (2026-10-20, CLOSED)
 
 DEC-0225 first full CTest run: 23/24 suites pass, SatcomRangeGui deletion

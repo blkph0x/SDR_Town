@@ -3056,3 +3056,20 @@ exact-source attribution review and independently rebuilt USB replacement QA.
 Local qualification/unit/RDS evidence recorded in BUILD_NOTES. Final build,
 CI/publication and downloaded-asset checks pending. P25 code/timing untouched;
 T-0108 remains open after this release-priority task.
+# 2026-10-20 - Smart Satcom channel qualification
+
+DEC-0226 adds fresh-IQ wideband search, persisted channel priorities, independent
+demodulators and foreground-only audio. Synthetic coverage and real mock-driver
+tests exposed and repaired DC-boundary coverage and peak-noise squelch hold.
+All24local suites pass, actual workspace/session checks pass and0.2.141 was
+reopened for the operator. No protected P25/shared DSP files changed.
+
+C: filled during work; recovered the interrupted source save, moved only old
+generated public-release QA downloads toD:, rebuilt and reran all tests.
+ISS-0126 records this; the disk remains low. Native Computer Use was stopped
+by Escape; remaining checks used the application's own isolated Qt/CLI tests.
+
+The prior source CI had a rebuilt-Qt startup access violation while its
+same-commit release job passed. ISS-0124 stays open with failure evidence;
+the new harness preserves bounded binaries/hashes/sanitized launch markers.
+No speculative startup change or test waiver. Current public delivery pending.

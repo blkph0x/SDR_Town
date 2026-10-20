@@ -6,18 +6,43 @@
    **Add receiver session** to open a separate Satcom session.
 2. Select the **Radio** and open **Range Scan**.
 3. Select a saved range or enter **From / To** in MHz.
-4. Expand **Advanced scan settings** if needed to set mode, channel bandwidth,
-   tune step and dwell. Set the signal detection threshold.
+4. Smart wideband scan and automatic squelch are enabled by default.
+   Expand **Advanced scan settings** to set mode, channel bandwidth, channel
+   search step, dwell, noise margin, quiet hold and the separate monitor volume.
 5. Press **Start scan**. Selecting or saving a range does not start reception.
    **Listen** controls playback; **Record audio** records the held channel.
-   **Next signal** resumes the existing scan; **Stop** ends it and disarms
+   **Next signal** skips the foreground channel until the next range sweep;
+   **Stop** ends it and disarms
    automatic pass capture for that session.
 
-The scan holds a detected signal until Next signal or Stop; this release does
-not add voice classification or automatic silence-based resumption. Detection
-uses the captured spectrum, so resuming near a strong carrier can reacquire it.
-The threshold is relative signal power, not calibrated dBm or speaker volume.
+The smart scan holds the captured band while an enabled channel is active and
+resumes when all watched activity has been quiet for the configured hold.
+Activity is RF power above local noise, not confirmed intelligible speech.
+A continuous carrier can hold the scan; skip it or turn off its Watch checkbox.
+Automatic squelch defaults to 12 dB above local noise, with 4 dB hysteresis.
+These are relative levels, not calibrated dBm or speaker volume.
 Range controls are disabled while receiving. Stop before changing them.
+
+## Saved Channels
+
+**Channels** lists discovered and manually added frequencies with an editable
+label, **High / Medium / Low** priority, **Watch** checkbox and current status.
+Edits apply while receiving and survive reopening. Newly found activity is saved
+at Medium priority. Up to 128 channels are remembered; at most eight active
+current-passband channels have independent demodulators.
+
+The highest active priority is heard. Equal priorities keep the current
+conversation; after it becomes quiet, another active channel can take over.
+Other channels remain visible. Audio is one foreground mono stream, not a
+mixture of conversations or left/right stereo. A background demodulator does
+not queue old audio for later playback. Smart audio uses the default playback
+device and its own volume/queue; P25 and Listen queues are untouched.
+
+Remove forgets an entry, so discovery can add it again. Turn **Watch** off to
+keep a persistent exclusion. Frequencies outside the search range stay saved
+but are not monitored. Frequencies outside the current captured band are
+explicitly marked: one SDR cannot receive them while holding another band.
+Separate receiver sessions can use separate SDRs.
 
 **Save range...** stores the current draft with a name without applying it to
 the radio. The trash button removes a selected custom range after confirmation.
@@ -50,23 +75,36 @@ It does not transmit.
 
 ## Timing and Display
 
-The scanner sequentially retunes one selected SDR. It does not capture an
-82 MHz range simultaneously. The displayed tune count is the inclusive nominal
-grid; an off-grid upper endpoint is not an extra tune. The dwell-only time is a
-lower bound excluding retuning, processing and signal holds. For example,
-240-322 MHz at 25 kHz/80 ms is 3,281 nominal positions and 262.5 seconds of
-dwell alone. Narrower ranges are more practical for known signals.
+Smart scan covers one SDR's range in overlapping wideband captures, alternating
+new coverage with saved-channel revisits. Search step is the channel raster
+inside each capture, not the hardware tuning step. The actual sample rate
+determines coverage. An 82 MHz range is not received simultaneously.
+The centre spike and outer capture edges are excluded from activity detection;
+overlap makes those frequencies observable off-centre on another tile.
+The sample rate must be at least nine times the channel bandwidth.
+
+Turning Smart wideband scan off retains the earlier sequential scanner.
+Its displayed tune count is the nominal inclusive grid and dwell-only time
+excludes retuning, processing and holds. That legacy mode holds until Skip/Stop.
 
 The spectrum shows the current captured RF span, not the full selected search
 range. The status identifies the scan/held frequency. **Satellite Passes**
 retains the existing catalogue, observer, Doppler and SSTV automation; its
 downlink is independent of an unfinished Range Scan draft. **Activity** retains
-bounded session messages. Logs now include applied range, mode, bandwidth,
-step, dwell, nominal positions, device and ownership lease at scan start.
+bounded session messages. Logs include applied range, mode, bandwidth,
+step, dwell, device and ownership lease at scan start, plus smart tile
+acknowledgments, activity changes, foreground switches and discontinuities.
+Session status exposes sample counts, processing time and slow-block counts.
+Three seconds without fresh current-tuning IQ stops the smart scan with an
+error; old display spectra cannot keep a channel locked.
 
 GUI and named-session web configuration use the same range validation.
 The existing `configure` action additionally accepts integer `dwellMs`
-(20-5000); frequencies remain Hz on the API. No new network permissions,
+(20-5000), `smartScan`, `autoSquelch`, `squelchMarginDb`, `quietHoldMs` and
+`smartVolume`. `watch_set` accepts `frequencyHz`, `label`, integer priority
+(0 Low, 1 Medium, 2 High) and `enabled`; `watch_remove` removes a frequency.
+`smart_volume` changes only this session's monitor volume.
+Frequencies remain Hz on the API. No new network permissions,
 automatic transmission, external telemetry or background RF starts are added.
 
 ## Verification Scope

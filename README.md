@@ -1,11 +1,21 @@
 # SDR Town
 
+0.2.141 adds **Smart Satcom scan**: overlapping wideband discovery, automatic
+noise-relative squelch, quiet resumption and a saved **Channels** list with
+High/Medium/Low priority. Multiple in-band channels have independent demodulators;
+one priority conversation plays at a time. Watch, label and priority changes
+persist and can be made while listening. The centre spike is excluded and
+revisited off-centre. Smart monitoring has its own volume and playback queue.
+RF activity is not confirmed speech; one radio cannot monitor outside its
+captured band. See [the guide](docs/SATCOM_RANGE_SCAN.md) and
+[release notes](docs/RELEASE_0.2.141.md). P25/shared DSP is unchanged.
+
 0.2.140 adds a receive-only **Satcom Range Scan** workspace: select a saved
 UHF range or enter From/To in MHz, select a radio, then Start scan. Satellite
 pass planning and Activity have their own tabs. Pending edits survive refresh;
 custom ranges can be saved for later. Advanced settings expose mode, channel
 bandwidth, tune step and dwell. See [range scanning](docs/SATCOM_RANGE_SCAN.md).
-This is sequential analog reception, not a MUOS/DAMA or encrypted-voice decoder.
+The earlier sequential mode remains available; neither mode is a MUOS/DAMA or encrypted-voice decoder.
 P25, Inmarsat and shared demodulation code are unchanged.
 
 0.2.139 pairs with FUBAR 1.1.52 for receive-lifecycle, audio, map and control

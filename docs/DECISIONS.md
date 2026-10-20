@@ -1,5 +1,64 @@
 # Decisions
 
+## DEC-0226 - Bounded wideband activity discovery and priority listening (2026-10-20)
+
+User requests fast range coverage, auto squelch, remembered channels and
+simultaneous watchers; latest clarification selects a High/Medium/Low channel
+list. Implement one priority foreground conversation, not concatenated voices
+in the mono AudioEngine. Equal priorities retain the incumbent; a higher active
+priority can preempt. Other current-passband channels remain visible. Stereo
+mixing is a separate future audio-bus change, not an implied capability.
+
+Source evidence: Satcom worker retunes by channel step and holds until Skip;
+refreshSpectrum reads DeviceManager's display spectrum without an acquisition
+epoch. pullNewIq currently requests historical ring samples. New smart receive
+must instead analyze chronological current-tuning IQ and fence applied center,
+epoch and cursor. Separate it from satellite passes, APT/APRS and P25.
+Use the existing per-instance Demodulator for each admitted analog channel.
+Frequency translation plus anti-alias decimation follows the existing analog
+pipeline and GNU Radio's documented frequency-translating FIR model:
+https://wiki.gnuradio.org/index.php/Frequency_Xlating_FIR_Filter
+
+Operator policies, not RF protocol constants: at most128 remembered channels
+and8 simultaneously demodulated channels; medium default priority;12dB local
+noise-margin opening,8dB closing;600ms quiet hold, editable. Use a Hann8192-bin
+fresh-IQ periodogram, mean removal for detection only, local median noise
+outside the channel guard. Search channel centres on the configured raster.
+Exclude a central radius of one channel-width/three bins and the outer10% per
+side; overlap tiles by half their usable width so excluded centre frequencies
+are revisited off-centre. ISS-0123 requires rate>=9*BW and a2/3-stride second
+tile at the range start; the coverage inequalities are tested, not guessed.
+Three seconds without fresh current-tuning IQ stops this new scanner, matching
+its existing3s tune-ack deadline; stopping cancels scan-side acknowledgment waits.
+Do not claim this identifies voice or decrypts data.
+Save discovered activity separately from explicit user labels/priority.
+
+One SDR holds its captured band while watched activity is present; it cannot
+observe channels outside that band simultaneously. Separate named Satcom
+sessions may use separate radios under existing leases. Keep search/focus
+selection, fresh-IQ fencing, noise gates and priority arbitration deterministic
+and unit-testable. Log tune acknowledgments, stale/gap rejection, acquisitions,
+quiet returns, priority switches and resource caps, not every sample.
+Use an owned playback queue for smart scan; never clear or append several
+independent streams to P25/shared Listen's queue. No shared DSP/P25 changes.
+
+Actual mock-Soapy worker test exposed peak-bin squelch bias: after both
+transmitters stop, channel maxima remain8-11dB above the median noise and
+continually renew the8dB close gate (ISS-0125). Use mean linear power across
+the channel bins, not their maximum. The neighbouring median remains a
+robust local reference; this relative threshold is not a calibrated SNR
+estimator (Gaussian single-periodogram median is below its mean).
+No change to shared demod squelch. Gate with both deterministic white noise
+and the original failing worker fixture; preserve narrow-carrier discovery.
+
+ISS-0124: source CI of the preceding patch crashes during rebuilt-Qt startup,
+while the same-commit release run passes. Add failure-only QA evidence before
+temporary cleanup: prepared binary hashes, optional GUID/age-matched PDB,
+early feature differences and only known sanitized launch markers from a
+private test TEMP. Exclude settings, source kits, environment and received
+content. Evidence failures must not mask the original failing gate; do not
+retry or promote a failure automatically. This does not claim a runtime fix.
+
 ## DEC-0225 - Receive-only Satcom range selection (2026-10-20)
 
 User requests intuitive selection of 240-322 MHz and 335.4-399.9 MHz.

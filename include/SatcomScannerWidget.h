@@ -3,6 +3,7 @@
 #include <QString>
 #include <QWidget>
 #include <QJsonObject>
+#include <functional>
 #include <memory>
 
 class SpectrumWidget;
@@ -24,6 +25,8 @@ class ObserverMapWidget;
 struct SatPassPlannerSnapshot;
 class SatcomScannerEngine;
 struct SatcomScannerConfig;
+struct SatcomScannerSnapshot;
+struct SatcomWatchChannel;
 
 class SatcomScannerWidget : public QWidget {
     Q_OBJECT
@@ -43,6 +46,7 @@ signals:
 protected:
     void showEvent(QShowEvent* event) override;
     void hideEvent(QHideEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private slots:
     void onStart();
@@ -61,6 +65,8 @@ private slots:
     void saveRange();
     void deleteRange();
     void draftChanged();
+    void addWatchChannel();
+    void removeWatchChannel();
 
 private:
     std::unique_ptr<SatcomScannerEngine> ownedEngine_;
@@ -72,10 +78,25 @@ private:
     SatcomScannerConfig fieldsConfig() const;
     void refreshRangeChoices();
     void updateRangeSummary();
+    void refreshChannels(const SatcomScannerSnapshot& snapshot);
+    bool editWatchChannel(double frequencyHz, const std::function<void(SatcomWatchChannel&)>& edit);
 
     QTabWidget* taskTabs_ = nullptr;
+    QWidget* channelsPage_ = nullptr;
+    QTableWidget* channelsTable_ = nullptr;
+    QDoubleSpinBox* channelFrequencySpin_ = nullptr;
+    QPushButton* addChannelBtn_ = nullptr;
+    QPushButton* removeChannelBtn_ = nullptr;
+    QLabel* channelsSummary_ = nullptr;
+    QLabel* channelError_ = nullptr;
     QWidget* scanSettings_ = nullptr;
     QSpinBox* dwellSpin_ = nullptr;
+    QCheckBox* smartScanCheck_ = nullptr;
+    QCheckBox* autoSquelchCheck_ = nullptr;
+    QDoubleSpinBox* squelchMarginSpin_ = nullptr;
+    QSpinBox* quietHoldSpin_ = nullptr;
+    QSlider* smartVolumeSlider_ = nullptr;
+    QLabel* smartVolumeValue_ = nullptr;
     QLabel* rangeSummary_ = nullptr;
     QLabel* rangeNote_ = nullptr;
     QLabel* spectrumEmpty_ = nullptr;

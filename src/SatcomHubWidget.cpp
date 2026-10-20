@@ -261,6 +261,29 @@ QJsonObject SatcomHubWidget::controlReceiverSessions(const QString& workflow, co
                 if (QCoreApplication::instance()->property("sdrtown.guiDryRun").toBool())
                     return {{"ok",false},{"status",409},{"error","RF disabled in GUI dry-run"}};
                 if (!engine.start()) return {{"ok",false},{"status",409},{"error",QString::fromStdString(engine.snapshot().lastStatus)}};
+            } else if (action == "watch_set" || action == "watch_remove") {
+                if (!body.value("frequencyHz").isDouble() || !std::isfinite(body.value("frequencyHz").toDouble()))
+                    throw std::invalid_argument("Finite channel frequency required");
+                const double hz = body.value("frequencyHz").toDouble();
+                if (action == "watch_remove") {
+                    if (!engine.removeWatchChannel(hz))
+                        return {{"ok",false},{"status",404},{"error","Channel not found"}};
+                } else {
+                    const auto priority = body.value("priority");
+                    if (!priority.isDouble() || priority.toDouble() < 0 || priority.toDouble() > 2 ||
+                        priority.toDouble() != std::floor(priority.toDouble()) ||
+                        !body.value("enabled").isBool() || !body.value("label").isString())
+                        throw std::invalid_argument("Channel label, enabled and priority 0..2 required");
+                    std::string error;
+                    if (!engine.setWatchChannel({hz, body.value("label").toString().toStdString(),
+                            priority.toInt(), body.value("enabled").toBool()}, &error))
+                        return {{"ok",false},{"status",400},{"error",QString::fromStdString(error)}};
+                }
+            } else if (action == "smart_volume") {
+                if (!body.value("volume").isDouble() || !std::isfinite(body.value("volume").toDouble()) ||
+                    body.value("volume").toDouble() < 0 || body.value("volume").toDouble() > 1)
+                    throw std::invalid_argument("Volume 0..1 required");
+                engine.setSmartVolume(body.value("volume").toDouble());
             } else if (action == "configure") {
                 if (engine.snapshot().state != SatcomScannerState::Idle)
                     return {{"ok",false},{"status",409},{"error","Stop this session before configuring it"}};
@@ -268,14 +291,18 @@ QJsonObject SatcomHubWidget::controlReceiverSessions(const QString& workflow, co
                 const auto edit = body.value("config").toObject();
                 for (auto it = edit.begin(); it != edit.end(); ++it) {
                     const auto key = it.key();
-                    if (QStringList{"lowHz","highHz","stepHz","bandwidthHz","squelchDb","dwellMs"}.contains(key)) {
+                    if (QStringList{"lowHz","highHz","stepHz","bandwidthHz","squelchDb","dwellMs",
+                                    "squelchMarginDb","quietHoldMs","smartVolume"}.contains(key)) {
                         if (!it.value().isDouble() || !std::isfinite(it.value().toDouble())) throw std::invalid_argument("Finite number required");
                         if (key == "dwellMs" && (it.value().toDouble() != std::floor(it.value().toDouble()) ||
                             it.value().toDouble() < 20 || it.value().toDouble() > 5000))
                             return {{"ok",false},{"status",400},{"error","Dwell must be a whole number between 20 and 5000 ms"}};
+                        if (key == "quietHoldMs" && (it.value().toDouble() != std::floor(it.value().toDouble()) ||
+                            it.value().toDouble() < 100 || it.value().toDouble() > 5000))
+                            return {{"ok",false},{"status",400},{"error","Quiet hold must be a whole number between 100 and 5000 ms"}};
                     } else if (key == "mode" || key == "deviceStableKey") {
                         if (!it.value().isString()) throw std::invalid_argument("String required");
-                    } else if (key == "monitorAudio") {
+                    } else if (key == "monitorAudio" || key == "smartScan" || key == "autoSquelch") {
                         if (!it.value().isBool()) throw std::invalid_argument("Boolean required");
                     } else throw std::invalid_argument("Unknown setting");
                 }

@@ -1,6 +1,7 @@
 """DEC-0179: rebuild pinned Qt runtimes in isolation and test actual app replacement."""
 import argparse
 import ctypes
+import hashlib
 import io
 import os
 from pathlib import Path
@@ -13,9 +14,195 @@ import tempfile
 import time
 import zipfile
 
-from package_inventory import component, json_bytes, require, sha256, tree_files
+from package_inventory import MAX_BYTES, MAX_FILES, component, json_bytes, require, sha256, tree_files
 from qt_sources import CONFIG_FILES, KIT, archive_name, verify
 from stage_runtime import config, plain
+
+
+# ISS-0124: reuse the package resource budget and AppBootstrap's 8 KiB launch
+# tail budget. Evidence excludes settings, source kits and raw launch extras.
+LAUNCH_LOG_LIMIT = 8192
+LAUNCH_STAGES = (
+    'main-entry', 'cli-path', 'before-qapp', 'before-mainwindow', 'entering-exec',
+    'gui-startup-settled', 'gui-audio-prewarm-ok', 'gui-audio-prewarm-no-output',
+    'gui-audio-prewarm-failed', 'seh-unhandled', 'std-exception', 'unknown-exception',
+    'shutdown-std-exception', 'shutdown-unknown-exception',
+)
+
+
+def optional_evidence(operation):
+    """An evidence failure must never replace the original QA exception."""
+    try:
+        return operation()
+    except BaseException as exc:
+        # Exception messages can contain paths, command arguments or secrets.
+        return {'status': 'unavailable', 'errorType': type(exc).__name__}
+
+
+def launch_log_state(path):
+    if not path.exists() and not path.is_symlink():
+        return {'exists': False}
+    stat = plain(path).stat()
+    return {'exists': True, 'identity': (stat.st_dev, stat.st_ino), 'size': stat.st_size}
+
+
+def preserve_launch_log(path, baseline, started_ns, output):
+    if 'exists' not in baseline:
+        return {'status': 'omitted', 'reason': 'no-safe-baseline'}
+    if not path.exists():
+        return {'status': 'omitted', 'reason': 'missing'}
+    path = plain(path)
+    with path.open('rb') as source:
+        stat = os.fstat(source.fileno())
+        if stat.st_mtime_ns < started_ns:
+            return {'status': 'omitted', 'reason': 'predates-run'}
+        offset = baseline.get('size', 0)
+        if baseline['exists'] and (
+                baseline['identity'] != (stat.st_dev, stat.st_ino) or stat.st_size < offset):
+            return {'status': 'omitted', 'reason': 'replaced-or-truncated'}
+        begin = max(offset, stat.st_size - LAUNCH_LOG_LIMIT)
+        source.seek(begin)
+        data = source.read(stat.st_size - begin)
+        after = os.fstat(source.fileno())
+        if (after.st_size, after.st_mtime_ns) != (stat.st_size, stat.st_mtime_ns):
+            return {'status': 'omitted', 'reason': 'changed-during-read'}
+    if begin > offset:
+        data = data.partition(b'\n')[2]  # Never treat a partial tail as a marker.
+    markers = []
+    pattern = rb'\[(\d{1,20})\] stage=(' + b'|'.join(s.encode('ascii') for s in LAUNCH_STAGES) + rb')(?: extra=(.*))?'
+    for line in data.splitlines(keepends=True):
+        if not line.endswith(b'\n'):
+            continue
+        match = re.fullmatch(pattern, line.rstrip(b'\r\n'))
+        if not match:
+            continue
+        stamp, stage, extra = match.groups()
+        marker = b'[' + stamp + b'] stage=' + stage
+        if extra is not None:
+            # Only numeric SEH codes are safe; free-form text is discarded.
+            code = re.fullmatch(rb'code=(\d{1,10})', extra) if stage == b'seh-unhandled' else None
+            marker += b' extra=' + (extra if code and int(code[1]) <= 0xffffffff else b'[redacted]')
+        markers.append(marker + b'\n')
+    while sum(map(len, markers)) > LAUNCH_LOG_LIMIT:
+        markers.pop(0)
+    if not markers:
+        return {'status': 'omitted', 'reason': 'no-new-markers'}
+    target = plain(output, directory=True) / 'launch.log'
+    with target.open('xb') as destination:
+        destination.write(b''.join(markers))
+    return {'status': 'saved', 'file': target.name, 'bytes': target.stat().st_size,
+            'scope': 'new known launch markers only; free-form extras redacted'}
+
+
+def symbol_identity(path):
+    # Microsoft SYMSRV_INDEX_INFOW: local PE/PDB GUID and age, no symbol server.
+    # https://learn.microsoft.com/windows/win32/api/dbghelp/ns-dbghelp-symsrv_index_infow
+    # This harness calls DbgHelp serially, as required by that API.
+    require(os.name == 'nt', 'PDB inspection requires Windows')
+
+    class Guid(ctypes.Structure):
+        _fields_ = [('data1', ctypes.c_uint32), ('data2', ctypes.c_uint16),
+                    ('data3', ctypes.c_uint16), ('data4', ctypes.c_ubyte * 8)]
+
+    class IndexInfo(ctypes.Structure):
+        _fields_ = [('sizeofstruct', ctypes.c_uint32), ('file', ctypes.c_wchar * 261),
+                    ('stripped', ctypes.c_int32), ('timestamp', ctypes.c_uint32),
+                    ('size', ctypes.c_uint32), ('dbgfile', ctypes.c_wchar * 261),
+                    ('pdbfile', ctypes.c_wchar * 261), ('guid', Guid),
+                    ('sig', ctypes.c_uint32), ('age', ctypes.c_uint32)]
+
+    library = plain(Path(os.environ['SYSTEMROOT']) / 'System32/DbgHelp.dll')
+    api = ctypes.WinDLL(str(library), use_last_error=True).SymSrvGetFileIndexInfoW
+    api.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(IndexInfo), ctypes.c_uint32]
+    api.restype = ctypes.c_int32
+    info = IndexInfo()
+    info.sizeofstruct = ctypes.sizeof(info)
+    require(api(str(plain(path)), ctypes.byref(info), 0), 'Symbol identity unavailable')
+    require(any(bytes(info.guid)) and info.sig == 0, 'Modern PDB identity unavailable')
+    return bytes(info.guid), info.age
+
+
+def prepare_app_pdb(doc, portable):
+    # Only the declared build's adjacent PDB is considered, never a directory search.
+    executable = plain(Path(doc['builtFiles']['SDR_Town.exe']))
+    candidate = executable.with_suffix('.pdb')
+    if not candidate.exists() and not candidate.is_symlink():
+        return {'status': 'omitted', 'reason': 'not-built'}
+    candidate = plain(candidate)
+    portable = plain(portable, directory=True)
+    application = plain(portable / 'SDR_Town.exe')
+    require(sha256(executable) == sha256(application), 'Build executable does not match prepared runtime')
+    files = tree_files(portable)
+    size = candidate.stat().st_size
+    require(len(files) < MAX_FILES and sum(p.stat().st_size for p in files.values()) + size <= MAX_BYTES,
+            'Symbols exceed evidence resource limit')
+    identity = symbol_identity(application)
+    require(identity == symbol_identity(candidate), 'PDB GUID/age mismatch')
+    target = portable / 'SDR_Town.pdb'
+    with candidate.open('rb') as source, target.open('xb') as destination:
+        count = 0
+        for block in iter(lambda: source.read(1024 * 1024), b''):
+            count += len(block)
+            require(count <= size, 'PDB grew during preparation')
+            destination.write(block)
+    require(count == size, 'PDB size changed during preparation')
+    require(symbol_identity(target) == identity, 'Prepared PDB GUID/age mismatch')
+    return {'status': 'matched', 'sha256': sha256(target)}
+
+
+def prepared_runtime(portable, include_pdb=False):
+    files = tree_files(plain(portable, directory=True))
+    return {name: {'sha256': sha256(path), 'bytes': path.stat().st_size}
+            for name, path in files.items()
+            if path.suffix.lower() in ('.exe', '.dll') or name == 'qt.conf'
+            or (include_pdb and name == 'SDR_Town.pdb')}
+
+
+def archive_failure_runtime(root, portable, prepared, output):
+    root = plain(root, directory=True)
+    portable = plain(portable, directory=True)
+    output = plain(output, directory=True)
+    require(root.name.startswith('qt-replacement-') and portable == root / 'portable',
+            'Evidence must use the prepared temporary portable tree')
+    require(not output.is_relative_to(root), 'Evidence output must be outside the disposable runtime')
+    files = tree_files(portable)  # Reject links/reparse entries and unsafe or oversized trees.
+    require('SDR_Town.exe' in prepared and len(prepared) <= MAX_FILES, 'Missing prepared runtime')
+    require(sum(entry['bytes'] for entry in prepared.values()) <= MAX_BYTES, 'Evidence resource limit exceeded')
+    for name, entry in prepared.items():
+        require(name in files and (Path(name).suffix.lower() in ('.exe', '.dll')
+                or name in ('qt.conf', 'SDR_Town.pdb')), 'Unprepared evidence file')
+        require(files[name].stat().st_size == entry['bytes'], 'Prepared runtime size changed')
+    temporary = output / 'portable.zip.partial'
+    with zipfile.ZipFile(temporary, 'x', compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, entry in sorted(prepared.items()):
+            path = plain(files[name])
+            require(path.is_relative_to(portable), 'Evidence file escaped portable tree')
+            digest, count = hashlib.sha256(), 0
+            with path.open('rb') as source, archive.open(name, 'w') as destination:
+                for block in iter(lambda: source.read(1024 * 1024), b''):
+                    count += len(block)
+                    require(count <= entry['bytes'], 'Prepared runtime grew during archival')
+                    digest.update(block)
+                    destination.write(block)
+            require(count == entry['bytes'] and digest.hexdigest() == entry['sha256'],
+                    'Prepared runtime contents changed')
+    target = output / 'portable.zip'
+    require(not target.exists() and not target.is_symlink(), 'Evidence archive already exists')
+    temporary.rename(target)
+    return {'status': 'saved', 'file': target.name, 'sha256': sha256(target), 'files': prepared}
+
+
+def preserve_failure_evidence(root, portable, prepared, output, launch_path, baseline, started_ns):
+    output = plain(output, directory=True)
+    directory = Path(tempfile.mkdtemp(prefix='failure-', dir=output))
+    require(plain(directory, directory=True).parent == output, 'Unsafe evidence directory')
+    metadata = {
+        'runtime': optional_evidence(lambda: archive_failure_runtime(root, portable, prepared, directory))
+            if prepared else {'status': 'omitted', 'reason': 'runtime-not-prepared'},
+        'launchLog': optional_evidence(lambda: preserve_launch_log(launch_path, baseline, started_ns, directory)),
+    }
+    (directory / 'evidence.json').write_bytes(json_bytes(metadata))
+    return {'directory': directory.name, **metadata}
 
 
 def run(command, log, env=None, timeout=900):
@@ -156,7 +343,10 @@ def test(doc, stage, output, repo, full=False, work_root=None, openssl_root=None
         raise
     finally:
         result['elapsedSeconds'] = round(time.monotonic() - started, 3)
-        result_path.write_bytes(json_bytes(result))
+        if result['status'] == 'failed':
+            optional_evidence(lambda: result_path.write_bytes(json_bytes(result)))
+        else:
+            result_path.write_bytes(json_bytes(result))
 
 
 def perform_test(doc, stage, output, repo, full, work_root, result, openssl_root, headless_layout):
@@ -206,8 +396,16 @@ def perform_test(doc, stage, output, repo, full, work_root, result, openssl_root
     root = Path(temporary.name).resolve()
     # Validate the exact absolute cleanup target before TemporaryDirectory owns it.
     require(root.parent == work_root and root.name.startswith('qt-replacement-'), 'Unsafe temporary build path')
+    install, portable = root / 'install', root / 'portable'
+    prepared = None
+    failed = False
+    # A private child TEMP prevents collecting an operator's or another run's
+    # launch log. Both Windows GetTempPath and Qt's temporary settings use it.
+    runtime_temp = root / 'runtime-temp'
+    launch_path = runtime_temp / 'sdr_town_launch.log'
+    baseline = {'exists': False}
+    started_ns = time.time_ns()
     try:
-        install, portable = root / 'install', root / 'portable'
         cmake_options = ['-G', 'Ninja', f'-DCMAKE_MAKE_PROGRAM={ninja}',
                          f'-DCMAKE_C_COMPILER={doc["compiler"]}',
                          f'-DCMAKE_CXX_COMPILER={doc["compiler"]}',
@@ -240,6 +438,8 @@ def perform_test(doc, stage, output, repo, full, work_root, result, openssl_root
                 for leaf in ('config.summary', 'CMakeCache.txt'):
                     if (build / leaf).is_file():
                         shutil.copyfile(build / leaf, output / f'{module}-{leaf}')
+        if full:
+            result['sdkFeatureDifferences'] = feature_differences(qt, install)
         for name, path in files.items():
             if name == 'package-inventory.json':
                 continue
@@ -247,20 +447,26 @@ def perform_test(doc, stage, output, repo, full, work_root, result, openssl_root
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(path, target)
         replacements = replacement_files(files, install, full)
-        rebuilt = {}
+        rebuilt = result['rebuiltSha256'] = {}
         for name, path in replacements.items():
             plain(path)
             shutil.copyfile(path, portable / name)
-            rebuilt[name] = sha256(path)
+            rebuilt[name] = sha256(portable / name)
+        result['applicationSymbols'] = optional_evidence(lambda: prepare_app_pdb(doc, portable))
         probe = root / 'probe'
         run(['cmake', '-S', repo / 'tests/qt_replacement_probe', '-B', probe,
              *cmake_options, f'-DCMAKE_PREFIX_PATH={install}' if full else f'-DCMAKE_PREFIX_PATH={install};{qt}',
              f'-DQt6Svg_DIR={install}/lib/cmake/Qt6Svg'], output / 'probe-configure.log', build_env)
         run(['cmake', '--build', probe, '--config', 'Release', '-j', '4'], output / 'probe-build.log', build_env)
         shutil.copyfile(probe / 'qt_replacement_probe.exe', portable / 'qt_replacement_probe.exe')
+        prepared = prepared_runtime(portable, result['applicationSymbols']['status'] == 'matched')
         # The portable package intentionally ships qwindows, not qoffscreen.
         # No window is shown by the probe; rasterization runs on QImages.
         env = runtime_environment(portable)
+        runtime_temp.mkdir()
+        env.update(TEMP=str(runtime_temp), TMP=str(runtime_temp))
+        baseline = optional_evidence(lambda: launch_log_state(launch_path))
+        started_ns = time.time_ns()
         run([portable / 'qt_replacement_probe.exe'], output / 'probe.log', env, timeout=30)
         run([portable / 'SDR_Town.exe', '--allow-multiple', '--no-control-server',
              '--no-remote-diagnostics', '--cli', '--cmd', 'help'], output / 'cli.log', env, timeout=45)
@@ -276,6 +482,7 @@ def perform_test(doc, stage, output, repo, full, work_root, result, openssl_root
                 # This auxiliary plugin is deliberately NOT part of the original package.
                 plugin = plain(install / 'plugins/platforms/qoffscreen.dll')
                 shutil.copyfile(plugin, portable / 'platforms/qoffscreen.dll')
+                prepared = prepared_runtime(portable, result['applicationSymbols']['status'] == 'matched')
                 result['auxiliaryQaPlugins'] = {'platforms/qoffscreen.dll': sha256(plugin)}
                 # Qt's generic offscreen font database uses QT_QPA_FONTDIR,
                 # otherwise a portable copy has no fonts and renders tofu.
@@ -285,7 +492,6 @@ def perform_test(doc, stage, output, repo, full, work_root, result, openssl_root
             result['applicationGuiBackend'] = env['QT_QPA_PLATFORM']
             run([sys.executable, repo / 'scripts/test_workspace_gui.py', '--exe', portable / 'SDR_Town.exe',
                  '--output', output / 'gui'], output / 'gui.log', env, timeout=240)
-            result['sdkFeatureDifferences'] = feature_differences(qt, install)
         require(before == {n: sha256(p) for n, p in tree_files(stage).items()},
                 'Replacement test modified original package')
         result.update(status='pass', rebuiltSha256=rebuilt, rendererAndPlugins='pass',
@@ -294,8 +500,16 @@ def perform_test(doc, stage, output, repo, full, work_root, result, openssl_root
                       originalPackageUnchanged=True, fullQtRebuildVerified=full,
                       rebuildScope='packaged qtbase/qtsvg runtime; not qttools or all Qt modules')
         print(f'PASS: Qt {doc["qtVersion"]} {result["requestedScope"]}; original package unchanged')
+    except BaseException:
+        failed = True
+        result['failureEvidence'] = optional_evidence(lambda: preserve_failure_evidence(
+            root, portable, prepared, output, launch_path, baseline, started_ns))
+        raise
     finally:
-        temporary.cleanup()
+        if failed:
+            result['temporaryCleanup'] = optional_evidence(temporary.cleanup)
+        else:
+            temporary.cleanup()
 
 
 if __name__ == '__main__':

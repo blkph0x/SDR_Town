@@ -5400,3 +5400,43 @@ GCC14.2 RDS build and scripts/test_rds_cli.py PASS. No DSP source modification.
 Distribution tests9/9, inventory20/20, release verifier17/17 PASS.
 Qt6.7.3/6.11.1 exact-source attribution review63/91 records PASS.
 Final source-stamped build, complete package qualification and Actions follow.
+# 2026-10-20 - DEC-0226 smart scan local qualification
+
+- Recovered-source Release build PASS in all app/core/GUI targets. C: disk
+  exhaustion interrupted one edit and CTest launch; ISS-0126 records recovery
+  and archive-only space mitigation. New logs/TEMP/QA use D:.
+- Final `ctest --test-dir build -C Release --output-on-failure`:
+  **24/24 PASS,152.91s**, including actual mock-Soapy smart worker, existing
+  ownership/lifecycle suites, analog/P25 unit gates, Satcom UI and pass controls.
+  Evidence D:/SDRTown-SmartQA-20261020/final-ctest.log and recovery-build.log.
+- Actual executable four-workspace startup/exit and named Inmarsat/Satcom/
+  Aircraft GUI/API smoke PASS; results under workspaces-final/ and sessions/.
+  Compact Channels/Advanced screenshots visually inspected. No native Computer
+  Use after physical Escape; Qt fixtures exercised the controls.
+- Smart-only combined gates PASS3912assertions/6cases after ISS-0125 repair.
+  A direct GUI fixture launch with the plugin parent directory failed before
+  test output; the configured CTest platform directory passes both focused and
+  full runs. No app fallback or disabled test was added.
+- Operator app reopened from build/bin/Release:0.2.141 startup log reaches
+  Main window shown and process33680 reports Responding=True. This is startup
+  proof, not a live satellite audio acceptance result.
+- Exact-commit source/release CI and downloaded public assets remain pending.
+- Failure-evidence harness: agent combined package/Qt checks66PASS; parent
+  standalone Qt harness29PASS0.726s. Workflow YAML validator3filesPASS.
+  Matching live PDB and real failure collection remain CI-dependent; no
+  diagnostic archive was fabricated from the older failed job.
+
+- Windows/MSVC19.44, Qt6.11.1, normal frozen build and isolated
+  D:/SDRTown-SmartQA-20261020. Pure smart gates: first geometry failed
+  beginning-of-range DC coverage; ISS-0123 records both failures and repair.
+  Final isolated core `[smart]`:5cases/3816assertions PASS, including two
+  independent synthetic NFM carriers and measured cross-tone rejection.
+- Agent UI-only Release gate: `[range-scan]`9cases/407assertions and
+  `[sstv-pass]`2cases/27assertions PASS. Parent full-suite result above.
+- Added actual mock-Soapy worker lifecycle, not RF acceptance. First compile
+  fails C2653 DeviceManager undeclared in the new test; add the missing
+  DeviceManager.h include. No production workaround. Final run passes.
+- Previous v0.2.140 source CI39373980940 fails rebuilt-Qt native startup
+  with3221225477; preserved artifact and issueISS-0124. Same-commit release run
+  39373981026 passes; that does not diagnose the intermittent source failure
+  or qualify the new smart code. These entries are not a current publication claim.

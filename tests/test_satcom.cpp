@@ -22,10 +22,156 @@
 #include <fstream>
 #include <limits>
 #include <numbers>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
+
+TEST_CASE("Smart scan tiles cover boundaries and centre exclusions", "[satcom][smart]") {
+    for (double rate : {256e3, 2.048e6, 10e6}) {
+        const double lo = 240e6, hi = 243e6, bw = 25e3;
+        const double stride = SatcomScanPolicy::tileStride(rate, bw);
+        REQUIRE(stride > 0);
+        double center = lo + stride * .5;
+        const double first = center;
+        std::vector<double> centers;
+        do {
+            centers.push_back(center);
+            center = SatcomScanPolicy::nextTile(center, lo, hi, rate, bw);
+            REQUIRE(centers.size() < 200);
+        } while (center != first);
+        for (double frequency = lo; frequency <= hi; frequency += 2500) {
+            INFO("rate=" << rate << " frequency=" << frequency);
+            REQUIRE(std::any_of(centers.begin(), centers.end(), [&](double c) {
+                return SatcomScanPolicy::observable(frequency, c, rate, bw);
+            }));
+        }
+    }
+    CHECK(SatcomScanPolicy::tileStride(48e3, 25e3) == 0);
+    CHECK_FALSE(SatcomScanPolicy::observable(250e6, 250e6, 2.048e6, 25e3));
+}
+
+TEST_CASE("Smart scan noise relative detection excludes DC and finds separate carriers", "[satcom][smart]") {
+    constexpr double rate = 2.048e6, center = 250e6;
+    std::mt19937 random(48);
+    std::normal_distribution<float> noise(0, .0002f);
+    std::vector<std::complex<float>> iq(8192);
+    for (size_t i = 0; i < iq.size(); ++i) {
+        iq[i] = std::complex<float>(noise(random), noise(random)) + std::complex<float>(.8f, .4f);
+        iq[i] += .02f * std::polar(1.0f, float(2 * std::numbers::pi * -300e3 * i / rate));
+        iq[i] += .01f * std::polar(1.0f, float(2 * std::numbers::pi * 250e3 * i / rate));
+    }
+    auto power = SatcomScanPolicy::spectrum(iq);
+    REQUIRE(power.size() == 8192);
+    auto found = SatcomScanPolicy::discover(power, center, rate, 249e6, 251e6, 25e3, 25e3, true, 12, -90);
+    REQUIRE(found.size() == 2);
+    CHECK(std::find(found.begin(), found.end(), center - 300e3) != found.end());
+    CHECK(std::find(found.begin(), found.end(), center + 250e3) != found.end());
+    CHECK(std::find(found.begin(), found.end(), center) == found.end());
+    for (auto& s : iq) s = {noise(random), noise(random)};
+    power = SatcomScanPolicy::spectrum(iq);
+    CHECK(SatcomScanPolicy::discover(power, center, rate, 249e6, 251e6, 25e3, 25e3, true, 12, -90).empty());
+    SatcomScanPolicy::Gate previouslyActive;
+    previouslyActive.active = true;
+    for (int block = 0; block < 40; ++block) {
+        for (auto& s : iq) s = {noise(random), noise(random)};
+        const auto m = SatcomScanPolicy::measure(SatcomScanPolicy::spectrum(iq), center, rate, center + 250e3, 25e3);
+        REQUIRE(m.valid);
+        CHECK_FALSE(previouslyActive.update(m, .02, true, 12, -90, .6));
+    }
+    CHECK_FALSE(previouslyActive.active);
+    iq[20] = {std::numeric_limits<float>::quiet_NaN(), 0};
+    CHECK(SatcomScanPolicy::spectrum(iq).empty());
+}
+
+TEST_CASE("Smart priorities preserve conversation and return after measured quiet", "[satcom][smart]") {
+    SatcomScanPolicy::Gate gate;
+    CHECK(gate.update({true, -65, -90}, .02, true, 12, -90, .6));
+    CHECK(gate.active);
+    for (int i = 0; i < 29; ++i) {
+        CHECK_FALSE(gate.update({true, -90, -90}, .02, true, 12, -90, .6));
+        CHECK(gate.active);
+    }
+    gate.update({true, -90, -90}, .021, true, 12, -90, .6);
+    CHECK_FALSE(gate.active);
+    std::vector<SatcomWatchStatus> states(3);
+    for (int i = 0; i < 3; ++i) {
+        states[i].channel = {250e6 + i * 25e3, "", 1, true};
+        states[i].inBand = states[i].active = true;
+    }
+    CHECK(SatcomScanPolicy::selectForeground(states, states[1].channel.frequencyHz) == states[1].channel.frequencyHz);
+    states[2].channel.priority = 2;
+    CHECK(SatcomScanPolicy::selectForeground(states, states[1].channel.frequencyHz) == states[2].channel.frequencyHz);
+    states[2].channel.enabled = false;
+    CHECK(SatcomScanPolicy::selectForeground(states, states[1].channel.frequencyHz) == states[1].channel.frequencyHz);
+    states[1].active = false;
+    CHECK(SatcomScanPolicy::selectForeground(states, states[1].channel.frequencyHz) == states[0].channel.frequencyHz);
+    states[0].inBand = false;
+    CHECK(SatcomScanPolicy::selectForeground(states, 0) == 0);
+    gate.update({}, .02, true, 12, -90, .6);
+    CHECK_FALSE(gate.active);
+}
+
+TEST_CASE("Smart channel priorities survive configuration and reject invalid inputs", "[satcom][smart]") {
+    auto config = SatcomScannerConfig::defaults();
+    config.watchChannels = {{250e6, "Local", 2, true}, {251e6, "Muted", 0, false}};
+    auto restored = SatcomScannerConfig::fromJson(config.toJson());
+    REQUIRE(restored.watchChannels.size() == 2);
+    CHECK(restored.watchChannels[0].priority == 2);
+    CHECK(restored.watchChannels[0].label == "Local");
+    CHECK_FALSE(restored.watchChannels[1].enabled);
+    CHECK(restored.smartScan);
+    auto malformed = config.toJson();
+    malformed["watchChannels"].push_back(nullptr);
+    malformed["watchChannels"].push_back({{"frequencyHz", "bad"}});
+    malformed["watchChannels"].push_back({{"frequencyHz", 245e6}, {"priority", "High"}});
+    CHECK(SatcomScannerConfig::fromJson(malformed).watchChannels.size() == config.watchChannels.size());
+    CHECK(restored.autoSquelch);
+    config.watchChannels[1].priority = 7;
+    CHECK_FALSE(config.scanValidationError().empty());
+    config.watchChannels.clear();
+    config.squelchMarginDb = std::numeric_limits<double>::quiet_NaN();
+    CHECK_FALSE(config.scanValidationError().empty());
+}
+
+TEST_CASE("Independent smart channel demods preserve clocks and reject the other voice", "[satcom][smart][dsp]") {
+    constexpr double rate = 256000, center = 250e6;
+    constexpr size_t block = 8192, blocks = 40;
+    Demodulator left, right;
+    std::vector<float> first, second;
+    for (size_t b = 0; b < blocks; ++b) {
+        std::vector<std::complex<float>> iq(block);
+        for (size_t i = 0; i < block; ++i) {
+            const double t = (b * block + i) / rate;
+            const double a = 2 * std::numbers::pi * (-50e3) * t +
+                2.5 * std::sin(2 * std::numbers::pi * 1000 * t);
+            const double c = 2 * std::numbers::pi * 50e3 * t +
+                (2500.0 / 1700) * std::sin(2 * std::numbers::pi * 1700 * t);
+            iq[i] = .25f * std::polar(1.0f, static_cast<float>(a)) +
+                    .35f * std::polar(1.0f, static_cast<float>(c));
+        }
+        double level = 0;
+        auto a = left.demodulateToAudio(iq, rate, center, center - 50e3, DemodMode::NFM,
+            level, 3000, -120, 1, 75, .96, 12500, 1536, 48000);
+        auto c = right.demodulateToAudio(iq, rate, center, center + 50e3, DemodMode::NFM,
+            level, 3000, -120, 1, 75, .96, 12500, 1536, 48000);
+        REQUIRE(a.size() == 1536);
+        REQUIRE(c.size() == 1536);
+        first.insert(first.end(), a.begin(), a.end());
+        second.insert(second.end(), c.begin(), c.end());
+    }
+    const auto amplitude = [](const auto& pcm, double frequency) {
+        std::complex<double> sum{};
+        for (size_t i = 4800; i < pcm.size(); ++i)
+            sum += double(pcm[i]) * std::polar(1.0, -2 * std::numbers::pi * frequency * i / 48000);
+        return std::abs(sum) / (pcm.size() - 4800);
+    };
+    REQUIRE(amplitude(first, 1000) > .001);
+    REQUIRE(amplitude(second, 1700) > .001);
+    CHECK(amplitude(first, 1700) < amplitude(first, 1000) * .05);
+    CHECK(amplitude(second, 1000) < amplitude(second, 1700) * .05);
+}
 
 TEST_CASE("Satcom receive ranges validate and count the inclusive tune grid", "[satcom][range]") {
     auto config = SatcomScannerConfig::defaults();
