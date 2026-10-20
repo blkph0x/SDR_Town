@@ -3073,3 +3073,20 @@ The prior source CI had a rebuilt-Qt startup access violation while its
 same-commit release job passed. ISS-0124 stays open with failure evidence;
 the new harness preserves bounded binaries/hashes/sanitized launch markers.
 No speculative startup change or test waiver. Current public delivery pending.
+
+## 2026-10-20 - Smart Satcom public delivery completed
+
+0.2.141 implementation3fddc2556d2478cd837978cd6788ad2844c5bb70 passes source
+Actions39380022721 and release39380022533; YAML checks also pass. Published
+Actions installer/portable/control DLL, added existing-key signed experimental
+updater and hashes, downloaded all nine assets anonymously and verified exact
+hashes/source/runtime provenance/signature. Public EXE CLI, four actual GUI
+workspaces and named Inmarsat/Satcom/Aircraft session/API gates pass without RF.
+Promoted https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.141 to Latest;
+experimental label/channel retained. BUILD_NOTES records hashes and evidence.
+
+Operator app reopened and left running/responding. Hardware satellite
+acceptance and earlier intermittent Qt-startup cause remain open, not hidden
+by the new successful checks. No P25/shared DSP changes. C: remains low after
+archive-only mitigation; new download/test artifacts use D:. This final tracker
+update does not change the released binary or manufacture another version.

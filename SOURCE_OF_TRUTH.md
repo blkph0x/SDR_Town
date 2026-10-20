@@ -4,12 +4,17 @@ SDR TOWN — SOURCE OF TRUTH (SoT)
 VERSION: 1.0.0
 PRODUCT: Windows SDR receiver (brand: SDR Town; on-disk folder: maulaudio_pro)
 CURRENT VERSION IN TREE: 0.2.141 (compatible with FUBAR 1.1.52, experimental)
-CURRENT WORK: DEC-0226 / T-0146 smart Satcom overlapping wideband discovery,
-              auto squelch, saved High/Medium/Low priorities, bounded
-              independent analog watchers and foreground-only playback.
-              No P25/shared-DSP/ownership changes. See SATCOM_RANGE_SCAN.md
-              and RELEASE_0.2.141.md. BUILD_NOTES records local gates; exact
-              source/release Actions and public assets establish delivery.
+CURRENT DELIVERY: DEC-0226 / T-0146 smart Satcom overlapping discovery, auto
+              squelch, saved High/Medium/Low priorities and foreground-only
+              playback published as Latest0.2.141 (experimental).
+              Binary source3fddc2556d2478cd837978cd6788ad2844c5bb70;
+              source/release Actions39380022721/39380022533 PASS.
+              Anonymous public hashes/provenance, signed updater, four actual
+              GUI workspaces and independent GUI/API sessions PASS. No P25/
+              shared-DSP/ownership changes. Physical satellite acceptance
+              remains open; activity is not confirmed voice. ISS-0124 remains
+              an undiagnosed prior intermittent startup failure, not a waived
+              current gate. See BUILD_NOTES and RELEASE_0.2.141.md.
 PREVIOUS REPAIR: DEC-0223 / T-0141 implements the DEC-0222 audit repairs.
                 Qualification/publication is tracked in BUILD_NOTES and
                 AUDIT_20261015_REPAIR_VALIDATION.md. No new P25 DSP or follow

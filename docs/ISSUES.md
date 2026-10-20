@@ -8,8 +8,9 @@ the recovered source compiles in all three targets. Archived only inactive,
 generated build/public-0.2.137 and public-0.2.138 downloads to
 D:/SDRTown-Archived-QA-20261020, recovering about960MB. No captures, private
 keys or user configuration removed. Source/diff backups, QA output and new
-compiler/test temporary files now use D:. Full regression rerun follows
-recovery. C: remains low; this is not a claim of general disk cleanup.
+compiler/test temporary files now use D:. Recovered-source full regression
+rerun passes24/24suites; exact source/release CI and public0.2.141 checks pass.
+C: remains low; this is not a claim of general disk cleanup.
 
 ## ISS-0125 - Peak-bin auto-squelch holds after transmitters stop (2026-10-20, CLOSED)
 
@@ -39,6 +40,10 @@ establish the intermittent failure's cause. Add failure-only bounded runtime,
 hash, symbol and sanitized launch-marker evidence before temporary cleanup.
 Current-release source and release CI remain mandatory; no automatic retry
 turns a failed run into a pass.
+New source3fddc2556d2478cd837978cd6788ad2844c5bb70 passes both source/release
+Actions39380022721/39380022533, including rebuilt-Qt checks. This qualifies
+the new package but does not establish the old failure's cause; issue remains
+open, with bounded failure evidence enabled for a future recurrence.
 
 ## ISS-0123 - First smart tile DC exclusion leaves a coverage hole (2026-10-20, CLOSED)
 
@@ -73,6 +78,13 @@ does not rewrite acquisition or add silence/voice classification. The guide
 explicitly records sequential coverage, hold behavior and possible reacquisition.
 Next work: deterministic two-carrier/tune-ack fixtures, then measured exclusion/
 resumption rules that do not disturb the separate satellite-pass receive path.
+DEC-0226/0.2.141 implements and qualifies these software gates: chronological
+current-tuning IQ, overlapping DC-safe coverage, priority arbitration, quiet
+resume, persistent Watch exclusion and stale-IQ stop. Actual mock-driver,
+synthetic IQ and public GUI/API tests pass. Physical satellite reception,
+interference/voice discrimination and intelligibility remain unproven; this
+issue remains open for those measurements rather than relabelling RF activity
+as speech. Legacy sequential mode remains explicitly separate.
 
 ## ISS-0118 - Enabled no-op commands and misleading operator state (2026-10-16, OPEN)
 

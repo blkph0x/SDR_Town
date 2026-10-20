@@ -1,6 +1,6 @@
 # Task list (canonical)
 
-T-0146 | in-progress | Smart Satcom discovery and saved channel priorities |
+T-0146 | done | Smart Satcom discovery and saved channel priorities |
 DEC-0226 / ISS-0122: fresh-IQ wideband tiles, noise-relative automatic squelch,
 DC-region revisit, bounded channel list with High/Medium/Low and stable
 foreground arbitration, automatic quiet resume and isolated analog watchers.
@@ -9,7 +9,10 @@ carrier selection, priority edits/persistence, silence and malformed-input
 behavior before publication. Physical reception remains a separate gate.
 Local recovered-source Release,24/24suites, actual GUI/API and synthetic
 worker pass. ISS-0123/0125 repaired; ISS-0124 evidence preserved, not guessed.
-Exact-commit CI/public delivery still in progress.
+Delivered Latest0.2.141 from3fddc2556d2478cd837978cd6788ad2844c5bb70:
+source/release Actions39380022721/39380022533 PASS, nine anonymous public
+assets verified, signed experimental updater and shipped GUI/API gates PASS.
+Physical satellite acceptance stays open under T-0142/ISS-0122.
 
 T-0145 | done | Receive-only Satcom range workflow |
 DEC-0225: separate Range Scan from Satellite Passes, provide sourced legacy
@@ -18,8 +21,9 @@ ranges, truthful sweep cost and pending settings. Validate ranges before any
 device acquisition; retain existing ownership and DSP. Test actual widgets,
 configuration round trips, malformed inputs, pass controls and packaged UI.
 Local release build, 24/24 suites, compact/desktop Qt captures and actual
-no-RF application/API session checks pass. Source/release Actions and public
-asset qualification remain delivery gates, not inferred from local tests.
+no-RF application/API session checks pass. Included in the qualified0.2.141
+delivery above; the preceding0.2.140 source job failed (ISS-0124), so its
+passing release job alone was not treated as complete qualification.
 ISS-0122 tracks subsequent scan-acquisition work; no DSP changes in this task.
 
 T-0144 | done | Human-use UI audit of current paired applications |

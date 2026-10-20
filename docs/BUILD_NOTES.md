@@ -1,5 +1,44 @@
 # Build notes
 
+## 2026-10-20 - DEC-0226 public0.2.141 delivery
+
+Binary source3fddc2556d2478cd837978cd6788ad2844c5bb70, master Windows
+Actions39380022721 and release Windows Actions39380022533 both PASS on their
+first attempt, including rebuilt-Qt replacement tests. Exact-commit YAML runs
+39380022709/39380022475 PASS. Earlier0.2.140 source failure39373980940 is
+preserved under ISS-0124 and is not rewritten as a pass or a diagnosed repair.
+
+Release https://github.com/blkph0x/SDR_Town/releases/tag/v0.2.141 is public,
+not draft, and independently verified through the unauthenticated Latest API.
+Nine assets include Actions-built installer/portable/control DLL, sidecars,
+SHA256SUMS and locally signed update.json/update.json.sig. Experimental label
+and updater channel retained. Existing embedded Ed25519 key matches the signer;
+no trust-anchor rotation or private-key upload.
+
+Downloaded once through gh and again anonymously through public HTTPS into
+D:/SDRTown-ReleaseQA/0.2.141-public-anonymous. Both verify_release.py calls with
+exact source/run PASS: signature, hashes, runtime/source inventory/provenance,
+and standalone control DLL parity. Public SHA256:
+- Installer:2104573762f57e8deff181b64b1c0e00e1d1607b567ad024aa2ac3b13f482603
+- ZIP:e38fa69310393fa0fe3e49b9e2142fccd2981d1cba38e30148817f925581340d
+- DLL:0b34a8537ab673439a8933f73ca74d2208515f6ae4b7a0ccb0de7bbb80dd85fb
+- EXE:663761d66a118b7fb0242e3ecda69d139e56c2a0b36dd2a4963c53cd37817499
+
+Actual public EXE CLI help exits0, skips device enumeration. Shipped native
+workspace tests PASS listening960x720, trunking1280x900, hf800x700 and
+analysis1600x900 with no RX/startup errors. Public named-session GUI/API gate
+PASS independent Inmarsat/Satcom/Aircraft controllers, reopen/persistence and
+invalid/stale command rejection; no hardware RX. Outputs in public download
+folder workspaces/ and sessions/. Operator0.2.141 process33680 remains separate.
+No local reinstall over the running operator app; hosted installer checks pass.
+No additional on-air satellite, stereo, speech-classification or all-button
+manual acceptance is claimed. P25/shared DSP protected paths remain unchanged.
+
+This delivery-evidence update is documentation-only; shipped assets retain
+the exact3fddc25 source and39380022533 provenance. Its pushed source CI is
+checked separately, not a reason to change the binary version or overwrite
+immutable release assets.
+
 ## 2026-10-20 - DEC-0225 Satcom range UI
 
 Windows local build, VS2022/MSVC14.44, Qt6.11.1. `cmake --build build --config

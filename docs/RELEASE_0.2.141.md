@@ -42,4 +42,16 @@ from simulated IQ. Hardware acceptance remains a tester task.
 
 ISS-0124 separately preserves an intermittent rebuilt-Qt startup failure from
 the preceding source CI run; no unproven app repair or weakened gate is claimed.
-The current exact-commit source/release checks must pass before promotion.
+Source commit3fddc2556d2478cd837978cd6788ad2844c5bb70 passes both exact-commit
+[source Actions39380022721](https://github.com/blkph0x/SDR_Town/actions/runs/39380022721)
+and [release Actions39380022533](https://github.com/blkph0x/SDR_Town/actions/runs/39380022533),
+including rebuilt-Qt checks. All24 local CTest suites pass. Anonymous public
+downloads pass hashes, embedded provenance, source/runtime inventory, control
+DLL parity and the signed experimental-channel update manifest. The downloaded
+application passes CLI startup, four GUI workspace checks and independent
+Inmarsat/Satcom/Aircraft session/API tests without hardware RX.
+
+Public installer, portable ZIP and control DLL are available with checksums
+and signed updater files. This release is marked Latest while retaining the
+experimental updater channel and label. No claim of live satellite reception
+or resolution of the earlier intermittent startup failure is made.
